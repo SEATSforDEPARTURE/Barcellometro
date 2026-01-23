@@ -47,10 +47,23 @@ async def _safe_defer(interaction: discord.Interaction, context: str) -> None:
 
 async def _safe_send(interaction: discord.Interaction, message: str) -> None:
     try:
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
+    except discord.HTTPException as exc:
+        if exc.code == 40060:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(message, ephemeral=True)
+            except discord.HTTPException:
+                log.warning(
+                    "interaction risposta già riconosciuta: impossibile inviare messaggio (id=%s)",
+                    interaction.id,
+                )
+            return
+        log.warning(
+            "interaction errore risposta (code=%s id=%s)",
+            exc.code,
+            interaction.id,
+        )
     except discord.NotFound:
         log.warning("interaction risposta scaduta: impossibile inviare messaggio (id=%s)", interaction.id)
 
@@ -337,6 +350,14 @@ class TextIngestCog(commands.Cog):
         self._last_message_at: dict[tuple[str, str, str], datetime] = {}
         self._message_counts: defaultdict[tuple[str, str], int] = defaultdict(int)
         self._check_task: asyncio.Task | None = None
+        self._ready_logged = False
+
+    def _start_periodic_checks(self) -> None:
+        if self._check_task is None or self._check_task.done():
+            log.info("periodic_check: avvio loop")
+            self._check_task = asyncio.create_task(self._run_periodic_checks())
+        else:
+            log.info("periodic_check: loop già attivo")
 
     async def _check_channel_enabled(self, guild_id: str, channel_id: str) -> TextIngestChannelConfig | None:
         session_factory = _get_session_factory(self.registry)
@@ -373,8 +394,10 @@ class TextIngestCog(commands.Cog):
                     config.backfill_days,
                 )
                 asyncio.create_task(_run_backfill(channel, session_factory, config.backfill_days))
-            if self._check_task is None or self._check_task.done():
-                self._check_task = asyncio.create_task(self._run_periodic_checks())
+            if not self._ready_logged:
+                log.info("on_ready: ingest_text pronto (bot=%s)", self.bot.user)
+                self._ready_logged = True
+            self._start_periodic_checks()
         except Exception:
             log.exception("on_ready: errore caricando config backfill")
             return
@@ -390,6 +413,7 @@ class TextIngestCog(commands.Cog):
                 with session_factory() as session:
                     stmt = select(TextIngestChannelConfig).where(TextIngestChannelConfig.enabled.is_(True))
                     configs = session.execute(stmt).scalars().all()
+                log.info("periodic_check: canali attivi=%s", len(configs))
                 for config in configs:
                     channel = self.bot.get_channel(int(config.channel_id))
                     if not isinstance(channel, discord.TextChannel):
@@ -534,4 +558,7 @@ def setup(bot: commands.Bot, registry):
     group = _get_group(bot)
     group.add_command(check)
     group.add_command(backfill)
-    bot.add_cog(TextIngestCog(bot, registry))
+    cog = TextIngestCog(bot, registry)
+    bot.add_cog(cog)
+    if bot.is_ready():
+        cog._start_periodic_checks()
