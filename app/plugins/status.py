@@ -67,7 +67,11 @@ class BarcellometroGroup(app_commands.Group):
     @app_commands.command(name="status", description="Stato generale o di un plugin specifico")
     @app_commands.describe(plugin="Nome modulo plugin (es: riassunto_dm). Lascia vuoto per status generale.")
     async def status(self, interaction: discord.Interaction, plugin: str | None = None):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True, thinking=True)
+        except discord.NotFound:
+            return
 
         db_health = self.registry.get("db_health")
         db_ok = False
