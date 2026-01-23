@@ -229,6 +229,12 @@ async def _run_backfill(channel: discord.abc.GuildChannel | None, session_factor
         log.warning("backfill: channel non valido o non testuale")
         return
     cutoff = datetime.now(tz=ROME_TZ) - timedelta(days=days)
+    log.info(
+        "backfill: start (guild=%s channel=%s cutoff=%s)",
+        channel.guild.id,
+        channel.id,
+        cutoff.isoformat(),
+    )
     try:
         with session_factory() as session:
             count = 0
@@ -236,6 +242,13 @@ async def _run_backfill(channel: discord.abc.GuildChannel | None, session_factor
                 _store_message(session, message)
                 count += 1
             session.commit()
+            if count == 0:
+                log.warning(
+                    "backfill: nessun messaggio trovato (guild=%s channel=%s cutoff=%s)",
+                    channel.guild.id,
+                    channel.id,
+                    cutoff.isoformat(),
+                )
             log.info(
                 "backfill: completato (guild=%s channel=%s count=%s cutoff=%s)",
                 channel.guild.id,
