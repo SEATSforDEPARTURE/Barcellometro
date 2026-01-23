@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from app.db.models.core import TextIngestChannelConfig, TextIngestMessage
 
 ROME_TZ = ZoneInfo("Europe/Rome")
+gging.getLogger("barcellometro.plugin.ingest_text")
 
 
 def get_manifest():
@@ -72,9 +74,15 @@ async def check(
     registry = _get_registry(interaction)
     session_factory = _get_session_factory(registry)
     if session_factory is None:
+        log.warning(
+            "check: db_session_factory mancante (guild=%s channel=%s)",
+            interaction.guild_id,
+            interaction.channel_id,
+        )
         await interaction.followup.send("❌ db_session_factory non disponibile.", ephemeral=True)
         return
     if interaction.guild_id is None:
+        log.warning("check: comando in DM non supportato (user=%s)", interaction.user.id)
         await interaction.followup.send("⚠️ Comando disponibile solo nei server.", ephemeral=True)
         return
 
@@ -109,6 +117,13 @@ async def check(
 
             config.updated_at = datetime.utcnow()
             session.commit()
+            log.info(
+                "check: config aggiornata (guild=%s channel=%s enabled=%s interval=%s)",
+                guild_id,
+                channel_id,
+                config.enabled,
+                config.check_interval_minutes,
+            )
 
             await interaction.followup.send(
                 "✅ Configurazione aggiornata:\n"
@@ -117,6 +132,7 @@ async def check(
                 ephemeral=True,
             )
     except Exception as e:
+        log.exception("check: errore aggiornando config (guild=%s channel=%s)", guild_id, channel_id)
         await interaction.followup.send(f"❌ Errore aggiornando config: {e}", ephemeral=True)
 
 
@@ -135,9 +151,15 @@ async def backfill(
     registry = _get_registry(interaction)
     session_factory = _get_session_factory(registry)
     if session_factory is None:
+        log.warning(
+            "backfill: db_session_factory mancante (guild=%s channel=%s)",
+            interaction.guild_id,
+            interaction.channel_id,
+        )
         await interaction.followup.send("❌ db_session_factory non disponibile.", ephemeral=True)
         return
     if interaction.guild_id is None:
+        log.warning("backfill: comando in DM non supportato (user=%s)", interaction.user.id)
         await interaction.followup.send("⚠️ Comando disponibile solo nei server.", ephemeral=True)
         return
 
@@ -172,6 +194,13 @@ async def backfill(
 
             config.updated_at = datetime.utcnow()
             session.commit()
+            log.info(
+                "backfill: config aggiornata (guild=%s channel=%s enabled=%s days=%s)",
+                guild_id,
+                channel_id,
+                config.backfill_enabled,
+                config.backfill_days,
+            )
 
             await interaction.followup.send(
                 "✅ Backfill aggiornato:\n"
@@ -181,23 +210,41 @@ async def backfill(
             )
 
             if config.backfill_enabled:
+                log.info(
+                    "backfill: avvio task (guild=%s channel=%s days=%s)",
+                    guild_id,
+                    channel_id,
+                    config.backfill_days,
+                )
                 asyncio.create_task(
                     _run_backfill(interaction.channel, session_factory, config.backfill_days)
                 )
     except Exception as e:
+        log.exception("backfill: errore aggiornando backfill (guild=%s channel=%s)", guild_id, channel_id)
         await interaction.followup.send(f"❌ Errore aggiornando backfill: {e}", ephemeral=True)
 
 
 async def _run_backfill(channel: discord.abc.GuildChannel | None, session_factory, days: int) -> None:
     if channel is None or not isinstance(channel, discord.TextChannel):
+        log.warning("backfill: channel non valido o non testuale")
         return
     cutoff = datetime.now(tz=ROME_TZ) - timedelta(days=days)
     try:
         with session_factory() as session:
+            count = 0
             async for message in channel.history(limit=1000, after=cutoff):
                 _store_message(session, message)
+                count += 1
             session.commit()
+            log.info(
+                "backfill: completato (guild=%s channel=%s count=%s cutoff=%s)",
+                channel.guild.id,
+                channel.id,
+                count,
+                cutoff.isoformat(),
+            )
     except Exception:
+        log.exception("backfill: errore durante la lettura/scrittura (channel=%s)", getattr(channel, "id", None))
         return
 
 
@@ -243,6 +290,7 @@ class TextIngestCog(commands.Cog):
     async def _check_channel_enabled(self, guild_id: str, channel_id: str) -> TextIngestChannelConfig | None:
         session_factory = _get_session_factory(self.registry)
         if session_factory is None:
+            log.warning("on_message: db_session_factory mancante")
             return None
         try:
             with session_factory() as session:
@@ -252,12 +300,14 @@ class TextIngestCog(commands.Cog):
                 )
                 return session.execute(stmt).scalar_one_or_none()
         except Exception:
+            log.exception("on_message: errore leggendo config (guild=%s channel=%s)", guild_id, channel_id)
             return None
 
     @commands.Cog.listener()
     async def on_ready(self):
         session_factory = _get_session_factory(self.registry)
         if session_factory is None:
+            log.warning("on_ready: db_session_factory mancante")
             return
         try:
             with session_factory() as session:
@@ -265,8 +315,15 @@ class TextIngestCog(commands.Cog):
                 configs = session.execute(stmt).scalars().all()
             for config in configs:
                 channel = self.bot.get_channel(int(config.channel_id))
+                log.info(
+                    "on_ready: backfill attivo (guild=%s channel=%s days=%s)",
+                    config.guild_id,
+                    config.channel_id,
+                    config.backfill_days,
+                )
                 asyncio.create_task(_run_backfill(channel, session_factory, config.backfill_days))
         except Exception:
+            log.exception("on_ready: errore caricando config backfill")
             return
 
     @commands.Cog.listener()
@@ -278,10 +335,16 @@ class TextIngestCog(commands.Cog):
 
         config = await self._check_channel_enabled(str(message.guild.id), str(message.channel.id))
         if not config or not config.enabled:
+            log.debug(
+                "on_message: ingest disattivato (guild=%s channel=%s)",
+                message.guild.id,
+                message.channel.id,
+            )
             return
 
         session_factory = _get_session_factory(self.registry)
         if session_factory is None:
+            log.warning("on_message: db_session_factory mancante")
             return
 
         key = (str(message.guild.id), str(message.channel.id), str(message.author.id))
@@ -298,7 +361,19 @@ class TextIngestCog(commands.Cog):
             with session_factory() as session:
                 _store_message(session, message, time_since_last=time_since_last, activity_score=activity_score)
                 session.commit()
+            log.info(
+                "on_message: salvato (guild=%s channel=%s author=%s)",
+                message.guild.id,
+                message.channel.id,
+                message.author.id,
+            )
         except Exception:
+            log.exception(
+                "on_message: errore salvataggio (guild=%s channel=%s author=%s)",
+                message.guild.id,
+                message.channel.id,
+                message.author.id,
+            )
             return
 
 
