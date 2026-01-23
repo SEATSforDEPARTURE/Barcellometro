@@ -70,7 +70,12 @@ async def check(
     state: str | None = None,
     minutes: int | None = None,
 ):
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
+    except discord.NotFound:
+        log.warning("check: interaction scaduta prima del defer (id=%s)", interaction.id)
+        return
     registry = _get_registry(interaction)
     session_factory = _get_session_factory(registry)
     if session_factory is None:
@@ -147,7 +152,12 @@ async def backfill(
     state: str | None = None,
     days: int | None = None,
 ):
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
+    except discord.NotFound:
+        log.warning("backfill: interaction scaduta prima del defer (id=%s)", interaction.id)
+        return
     registry = _get_registry(interaction)
     session_factory = _get_session_factory(registry)
     if session_factory is None:
@@ -239,8 +249,8 @@ async def _run_backfill(channel: discord.abc.GuildChannel | None, session_factor
         with session_factory() as session:
             count = 0
             async for message in channel.history(after=cutoff, oldest_first=False, limit=None):
-                _store_message(session, message)
-                count += 1
+                if _store_message(session, message):
+                    count += 1
             session.commit()
             if count == 0:
                 log.warning(
@@ -261,8 +271,17 @@ async def _run_backfill(channel: discord.abc.GuildChannel | None, session_factor
         return
 
 
-def _store_message(session, message: discord.Message, time_since_last: float | None = None,
-                   activity_score: float | None = None) -> None:
+def _store_message(
+    session,
+    message: discord.Message,
+    time_since_last: float | None = None,
+    activity_score: float | None = None,
+) -> bool:
+    existing = session.execute(
+        select(TextIngestMessage.id).where(TextIngestMessage.message_id == str(message.id))
+    ).scalar_one_or_none()
+    if existing is not None:
+        return False
     author = message.author
     nickname = getattr(author, "display_name", None) or getattr(author, "name", "unknown")
     roles = []
@@ -279,6 +298,7 @@ def _store_message(session, message: discord.Message, time_since_last: float | N
     entry = TextIngestMessage(
         guild_id=str(message.guild.id),
         channel_id=str(message.channel.id),
+        message_id=str(message.id),
         author_id=str(author.id),
         author_nickname=nickname,
         content=message.content,
@@ -291,6 +311,7 @@ def _store_message(session, message: discord.Message, time_since_last: float | N
         relationships_json=json.dumps(relationships),
     )
     session.add(entry)
+    return True
 
 
 class TextIngestCog(commands.Cog):
@@ -399,8 +420,8 @@ class TextIngestCog(commands.Cog):
             with session_factory() as session:
                 count = 0
                 async for message in channel.history(after=start_from, oldest_first=True, limit=None):
-                    _store_message(session, message)
-                    count += 1
+                    if _store_message(session, message):
+                        count += 1
                 if count:
                     session.commit()
                     log.info(
@@ -455,14 +476,26 @@ class TextIngestCog(commands.Cog):
 
         try:
             with session_factory() as session:
-                _store_message(session, message, time_since_last=time_since_last, activity_score=activity_score)
-                session.commit()
-            log.info(
+                if _store_message(
+                    session,
+                    message,
+                    time_since_last=time_since_last,
+                    activity_score=activity_score,
+                ):
+                    session.commit()
+                    log.info(
                 "on_message: salvato (guild=%s channel=%s author=%s)",
                 message.guild.id,
                 message.channel.id,
                 message.author.id,
-            )
+                    )
+                else:
+                    log.debug(
+                        "on_message: duplicato ignorato (guild=%s channel=%s message=%s)",
+                        message.guild.id,
+                        message.channel.id,
+                        message.id,
+                    )
         except Exception:
             log.exception(
                 "on_message: errore salvataggio (guild=%s channel=%s author=%s)",

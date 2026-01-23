@@ -29,6 +29,7 @@ class TextIngestMessage(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     guild_id: Mapped[str] = mapped_column(String(32), index=True)
     channel_id: Mapped[str] = mapped_column(String(32), index=True)
+    message_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     author_id: Mapped[str] = mapped_column(String(32), index=True)
     author_nickname: Mapped[str] = mapped_column(String(128))
     content: Mapped[str] = mapped_column(Text)
