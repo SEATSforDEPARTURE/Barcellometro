@@ -238,7 +238,7 @@ async def _run_backfill(channel: discord.abc.GuildChannel | None, session_factor
     try:
         with session_factory() as session:
             count = 0
-            async for message in channel.history(after=cutoff, oldest_first=False):
+            async for message in channel.history(after=cutoff, oldest_first=False, limit=None):
                 _store_message(session, message)
                 count += 1
             session.commit()
