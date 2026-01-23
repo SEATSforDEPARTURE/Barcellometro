@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.db.models.core import TextIngestChannelConfig, TextIngestMessage
 
 ROME_TZ = ZoneInfo("Europe/Rome")
-gging.getLogger("barcellometro.plugin.ingest_text")
+log = logging.getLogger("barcellometro.plugin.ingest_text")
 
 
 def get_manifest():
