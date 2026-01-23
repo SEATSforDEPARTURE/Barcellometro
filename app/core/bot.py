@@ -1,3 +1,4 @@
+import os
 from __future__ import annotations
 import logging
 import discord
@@ -40,6 +41,22 @@ class BarcellometroBot(commands.Bot):
 
         plugin_names = list(dict.fromkeys(["status", *self.settings.PLUGINS]))
         self.plugin_manifests = load_plugins(self, self.registry, plugin_names)
+        # --- PURGE COMANDI SLASH (solo se richiesto) ---
+        purge = os.getenv("PURGE_COMMANDS", "0") in ("1", "true", "True", "yes", "YES")
+        if purge:
+            log.warning("PURGE_COMMANDS attivo: pulizia comandi slash")
+
+            # Pulizia comandi GUILD (immediata)
+            if self.settings.GUILD_ID:
+                guild = discord.Object(id=self.settings.GUILD_ID)
+                self.tree.clear_commands(guild=guild)
+                await self.tree.sync(guild=guild)
+                log.warning("Comandi GUILD puliti (%s)", self.settings.GUILD_ID)
+
+            # Pulizia comandi GLOBALI (propagazione lenta)
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
+            log.warning("Comandi GLOBALI puliti")
 
         # Sync slash commands
         try:
