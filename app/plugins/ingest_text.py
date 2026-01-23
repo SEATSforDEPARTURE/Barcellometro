@@ -299,6 +299,7 @@ class TextIngestCog(commands.Cog):
         self.registry = registry
         self._last_message_at: dict[tuple[str, str, str], datetime] = {}
         self._message_counts: defaultdict[tuple[str, str], int] = defaultdict(int)
+        self._check_task: asyncio.Task | None = None
 
     async def _check_channel_enabled(self, guild_id: str, channel_id: str) -> TextIngestChannelConfig | None:
         session_factory = _get_session_factory(self.registry)
@@ -335,9 +336,91 @@ class TextIngestCog(commands.Cog):
                     config.backfill_days,
                 )
                 asyncio.create_task(_run_backfill(channel, session_factory, config.backfill_days))
+            if self._check_task is None or self._check_task.done():
+                self._check_task = asyncio.create_task(self._run_periodic_checks())
         except Exception:
             log.exception("on_ready: errore caricando config backfill")
             return
+
+    async def _run_periodic_checks(self) -> None:
+        while True:
+            session_factory = _get_session_factory(self.registry)
+            if session_factory is None:
+                log.warning("periodic_check: db_session_factory mancante")
+                await asyncio.sleep(60)
+                continue
+            try:
+                with session_factory() as session:
+                    stmt = select(TextIngestChannelConfig).where(TextIngestChannelConfig.enabled.is_(True))
+                    configs = session.execute(stmt).scalars().all()
+                for config in configs:
+                    channel = self.bot.get_channel(int(config.channel_id))
+                    if not isinstance(channel, discord.TextChannel):
+                        log.warning(
+                            "periodic_check: channel non valido (guild=%s channel=%s)",
+                            config.guild_id,
+                            config.channel_id,
+                        )
+                        continue
+                    await self._sync_recent_messages(channel, session_factory, config.check_interval_minutes)
+                sleep_for = min((c.check_interval_minutes for c in configs), default=10) * 60
+                await asyncio.sleep(max(sleep_for, 60))
+            except Exception:
+                log.exception("periodic_check: errore nel loop")
+                await asyncio.sleep(60)
+
+    async def _sync_recent_messages(self, channel: discord.TextChannel, session_factory, minutes: int) -> None:
+        cutoff = datetime.now(tz=ROME_TZ) - timedelta(minutes=minutes)
+        last_seen = None
+        try:
+            with session_factory() as session:
+                stmt = (
+                    select(TextIngestMessage.created_at)
+                    .where(TextIngestMessage.channel_id == str(channel.id))
+                    .order_by(TextIngestMessage.created_at.desc())
+                    .limit(1)
+                )
+                last_seen = session.execute(stmt).scalar_one_or_none()
+        except Exception:
+            log.exception(
+                "periodic_check: errore leggendo ultimo messaggio (guild=%s channel=%s)",
+                channel.guild.id,
+                channel.id,
+            )
+            return
+        start_from = last_seen if last_seen and last_seen > cutoff else cutoff
+        log.info(
+            "periodic_check: sync (guild=%s channel=%s from=%s)",
+            channel.guild.id,
+            channel.id,
+            start_from.isoformat(),
+        )
+        try:
+            with session_factory() as session:
+                count = 0
+                async for message in channel.history(after=start_from, oldest_first=True, limit=None):
+                    _store_message(session, message)
+                    count += 1
+                if count:
+                    session.commit()
+                    log.info(
+                        "periodic_check: salvati %s messaggi (guild=%s channel=%s)",
+                        count,
+                        channel.guild.id,
+                        channel.id,
+                    )
+                else:
+                    log.info(
+                        "periodic_check: nessun nuovo messaggio (guild=%s channel=%s)",
+                        channel.guild.id,
+                        channel.id,
+                    )
+        except Exception:
+            log.exception(
+                "periodic_check: errore sync (guild=%s channel=%s)",
+                channel.guild.id,
+                channel.id,
+            )
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
