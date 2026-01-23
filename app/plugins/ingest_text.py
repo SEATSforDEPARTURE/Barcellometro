@@ -263,9 +263,13 @@ async def backfill(
         await _safe_send(interaction, f"❌ Errore aggiornando backfill: {e}")
 
 
-async def _run_backfill(channel: discord.abc.GuildChannel | None, session_factory, days: int) -> None:
-    if channel is None or not isinstance(channel, discord.TextChannel):
-        log.warning("backfill: channel non valido o non testuale")
+async def _run_backfill(
+    channel: discord.abc.GuildChannel | None,
+    session_factory,
+    days: int,
+) -> None:
+    if channel is None or not isinstance(channel, (discord.TextChannel, discord.Thread)):
+        log.warning("backfill: channel non valido o non testuale (id=%s)", getattr(channel, "id", None))
         return
     cutoff = datetime.now(tz=ROME_TZ) - timedelta(days=days)
     log.info(
@@ -416,7 +420,7 @@ class TextIngestCog(commands.Cog):
                 log.info("periodic_check: canali attivi=%s", len(configs))
                 for config in configs:
                     channel = self.bot.get_channel(int(config.channel_id))
-                    if not isinstance(channel, discord.TextChannel):
+                    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
                         log.warning(
                             "periodic_check: channel non valido (guild=%s channel=%s)",
                             config.guild_id,
@@ -430,7 +434,12 @@ class TextIngestCog(commands.Cog):
                 log.exception("periodic_check: errore nel loop")
                 await asyncio.sleep(60)
 
-    async def _sync_recent_messages(self, channel: discord.TextChannel, session_factory, minutes: int) -> None:
+    async def _sync_recent_messages(
+        self,
+        channel: discord.TextChannel | discord.Thread,
+        session_factory,
+        minutes: int,
+    ) -> None:
         cutoff = datetime.now(tz=ROME_TZ) - timedelta(minutes=minutes)
         last_seen = None
         try:
@@ -499,6 +508,19 @@ class TextIngestCog(commands.Cog):
             return
 
         config = await self._check_channel_enabled(str(message.guild.id), str(message.channel.id))
+        if (
+            not config
+            and isinstance(message.channel, discord.Thread)
+            and message.channel.parent_id is not None
+        ):
+            config = await self._check_channel_enabled(str(message.guild.id), str(message.channel.parent_id))
+            if config:
+                log.info(
+                    "on_message: uso config parent (guild=%s thread=%s parent=%s)",
+                    message.guild.id,
+                    message.channel.id,
+                    message.channel.parent_id,
+                )
         if not config or not config.enabled:
             log.debug(
                 "on_message: ingest disattivato (guild=%s channel=%s)",
