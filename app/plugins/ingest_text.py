@@ -37,6 +37,32 @@ def _get_session_factory(registry):
     return registry.get("db_session_factory") if registry else None
 
 
+async def _safe_defer(interaction: discord.Interaction, context: str) -> None:
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
+    except discord.NotFound:
+        log.warning("%s: interaction scaduta prima del defer (id=%s)", context, interaction.id)
+
+
+async def _safe_send(interaction: discord.Interaction, message: str) -> None:
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.NotFound:
+        log.warning("interaction risposta scaduta: impossibile inviare messaggio (id=%s)", interaction.id)
+
+
+def _ensure_rome_tz(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=ROME_TZ)
+    return value.astimezone(ROME_TZ)
+
+
 def _get_or_create_config(session, guild_id: str, channel_id: str) -> TextIngestChannelConfig:
     stmt = select(TextIngestChannelConfig).where(
         (TextIngestChannelConfig.guild_id == guild_id)
@@ -70,12 +96,7 @@ async def check(
     state: str | None = None,
     minutes: int | None = None,
 ):
-    try:
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True, thinking=True)
-    except discord.NotFound:
-        log.warning("check: interaction scaduta prima del defer (id=%s)", interaction.id)
-        return
+    await _safe_defer(interaction, "check")
     registry = _get_registry(interaction)
     session_factory = _get_session_factory(registry)
     if session_factory is None:
@@ -84,11 +105,11 @@ async def check(
             interaction.guild_id,
             interaction.channel_id,
         )
-        await interaction.followup.send("❌ db_session_factory non disponibile.", ephemeral=True)
+        await _safe_send(interaction, "❌ db_session_factory non disponibile.")
         return
     if interaction.guild_id is None:
         log.warning("check: comando in DM non supportato (user=%s)", interaction.user.id)
-        await interaction.followup.send("⚠️ Comando disponibile solo nei server.", ephemeral=True)
+        await _safe_send(interaction, "⚠️ Comando disponibile solo nei server.")
         return
 
     channel_id = str(interaction.channel_id)
@@ -99,24 +120,24 @@ async def check(
             config = _get_or_create_config(session, guild_id, channel_id)
 
             if state is None and minutes is None:
-                await interaction.followup.send(
+                await _safe_send(
+                    interaction,
                     "ℹ️ Stato ingest per questo canale:\n"
                     f"• attivo: {'on' if config.enabled else 'off'}\n"
                     f"• intervallo controllo: {config.check_interval_minutes} minuti",
-                    ephemeral=True,
                 )
                 return
 
             if state is not None:
                 normalized = state.strip().lower()
                 if normalized not in {"on", "off"}:
-                    await interaction.followup.send("⚠️ Usa 'on' o 'off' come stato.", ephemeral=True)
+                    await _safe_send(interaction, "⚠️ Usa 'on' o 'off' come stato.")
                     return
                 config.enabled = normalized == "on"
 
             if minutes is not None:
                 if minutes <= 0:
-                    await interaction.followup.send("⚠️ I minuti devono essere > 0.", ephemeral=True)
+                    await _safe_send(interaction, "⚠️ I minuti devono essere > 0.")
                     return
                 config.check_interval_minutes = minutes
 
@@ -130,15 +151,15 @@ async def check(
                 config.check_interval_minutes,
             )
 
-            await interaction.followup.send(
+            await _safe_send(
+                interaction,
                 "✅ Configurazione aggiornata:\n"
                 f"• attivo: {'on' if config.enabled else 'off'}\n"
                 f"• intervallo controllo: {config.check_interval_minutes} minuti",
-                ephemeral=True,
             )
     except Exception as e:
         log.exception("check: errore aggiornando config (guild=%s channel=%s)", guild_id, channel_id)
-        await interaction.followup.send(f"❌ Errore aggiornando config: {e}", ephemeral=True)
+        await _safe_send(interaction, f"❌ Errore aggiornando config: {e}")
 
 
 @app_commands.command(name="backfill", description="Configura il recupero storico dei messaggi")
@@ -152,12 +173,7 @@ async def backfill(
     state: str | None = None,
     days: int | None = None,
 ):
-    try:
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True, thinking=True)
-    except discord.NotFound:
-        log.warning("backfill: interaction scaduta prima del defer (id=%s)", interaction.id)
-        return
+    await _safe_defer(interaction, "backfill")
     registry = _get_registry(interaction)
     session_factory = _get_session_factory(registry)
     if session_factory is None:
@@ -166,11 +182,11 @@ async def backfill(
             interaction.guild_id,
             interaction.channel_id,
         )
-        await interaction.followup.send("❌ db_session_factory non disponibile.", ephemeral=True)
+        await _safe_send(interaction, "❌ db_session_factory non disponibile.")
         return
     if interaction.guild_id is None:
         log.warning("backfill: comando in DM non supportato (user=%s)", interaction.user.id)
-        await interaction.followup.send("⚠️ Comando disponibile solo nei server.", ephemeral=True)
+        await _safe_send(interaction, "⚠️ Comando disponibile solo nei server.")
         return
 
     channel_id = str(interaction.channel_id)
@@ -181,24 +197,24 @@ async def backfill(
             config = _get_or_create_config(session, guild_id, channel_id)
 
             if state is None and days is None:
-                await interaction.followup.send(
+                await _safe_send(
+                    interaction,
                     "ℹ️ Stato backfill per questo canale:\n"
                     f"• attivo: {'on' if config.backfill_enabled else 'off'}\n"
                     f"• intervallo: {config.backfill_days} giorni",
-                    ephemeral=True,
                 )
                 return
 
             if state is not None:
                 normalized = state.strip().lower()
                 if normalized not in {"on", "off"}:
-                    await interaction.followup.send("⚠️ Usa 'on' o 'off' come stato.", ephemeral=True)
+                    await _safe_send(interaction, "⚠️ Usa 'on' o 'off' come stato.")
                     return
                 config.backfill_enabled = normalized == "on"
 
             if days is not None:
                 if days <= 0:
-                    await interaction.followup.send("⚠️ I giorni devono essere > 0.", ephemeral=True)
+                    await _safe_send(interaction, "⚠️ I giorni devono essere > 0.")
                     return
                 config.backfill_days = days
 
@@ -212,11 +228,11 @@ async def backfill(
                 config.backfill_days,
             )
 
-            await interaction.followup.send(
+            await _safe_send(
+                interaction,
                 "✅ Backfill aggiornato:\n"
                 f"• attivo: {'on' if config.backfill_enabled else 'off'}\n"
                 f"• intervallo: {config.backfill_days} giorni",
-                ephemeral=True,
             )
 
             if config.backfill_enabled:
@@ -231,7 +247,7 @@ async def backfill(
                 )
     except Exception as e:
         log.exception("backfill: errore aggiornando backfill (guild=%s channel=%s)", guild_id, channel_id)
-        await interaction.followup.send(f"❌ Errore aggiornando backfill: {e}", ephemeral=True)
+        await _safe_send(interaction, f"❌ Errore aggiornando backfill: {e}")
 
 
 async def _run_backfill(channel: discord.abc.GuildChannel | None, session_factory, days: int) -> None:
@@ -409,7 +425,15 @@ class TextIngestCog(commands.Cog):
                 channel.id,
             )
             return
-        start_from = last_seen if last_seen and last_seen > cutoff else cutoff
+        normalized_last_seen = _ensure_rome_tz(last_seen)
+        if last_seen and normalized_last_seen is None:
+            log.warning(
+                "periodic_check: ultimo messaggio senza timezone (guild=%s channel=%s raw=%s)",
+                channel.guild.id,
+                channel.id,
+                last_seen,
+            )
+        start_from = normalized_last_seen if normalized_last_seen and normalized_last_seen > cutoff else cutoff
         log.info(
             "periodic_check: sync (guild=%s channel=%s from=%s)",
             channel.guild.id,
@@ -484,10 +508,10 @@ class TextIngestCog(commands.Cog):
                 ):
                     session.commit()
                     log.info(
-                "on_message: salvato (guild=%s channel=%s author=%s)",
-                message.guild.id,
-                message.channel.id,
-                message.author.id,
+                        "on_message: salvato (guild=%s channel=%s author=%s)",
+                        message.guild.id,
+                        message.channel.id,
+                        message.author.id,
                     )
                 else:
                     log.debug(
