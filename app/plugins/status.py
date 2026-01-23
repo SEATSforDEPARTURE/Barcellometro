@@ -1,0 +1,95 @@
+from __future__ import annotations
+import time
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+START_TIME = time.time()
+
+def get_manifest():
+    return {
+        "name": "status",
+        "version": "0.1.0",
+        "description": "Diagnostica generale + status parametrico per plugin",
+        "services_required": ["settings", "db_health"],
+        "services_optional": [],
+        "tables_used": ["audit_log"],
+        # opzionale: "healthcheck": callable(registry)->dict
+    }
+
+class BarcellometroGroup(app_commands.Group):
+    def __init__(self, bot: commands.Bot, registry):
+        super().__init__(name="barcellometro", description="Comandi del Barcellometro")
+        self.bot = bot
+        self.registry = registry
+
+    @app_commands.command(name="status", description="Stato generale o di un plugin specifico")
+    @app_commands.describe(plugin="Nome modulo plugin (es: riassunto_dm). Lascia vuoto per status generale.")
+    async def status(self, interaction: discord.Interaction, plugin: str | None = None):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        settings = self.registry.require("settings")
+        db_health = self.registry.require("db_health")
+
+        ok, db_msg = db_health.ping()
+        uptime_s = int(time.time() - START_TIME)
+
+        loaded = getattr(self.bot, "plugin_manifests", {}) or {}
+        services = self.registry.list()
+
+        if not plugin:
+            lines = [
+                "🟢 **Barcellometro online**",
+                f"• Uptime: {uptime_s}s",
+                f"• DB: {'✅' if ok else '❌'} {db_msg}",
+                f"• Plugin caricati: {', '.join(sorted(loaded.keys())) if loaded else '(nessuno)'}",
+                f"• Servizi: {', '.join(services)}",
+            ]
+            errs = [k for k,v in loaded.items() if isinstance(v, dict) and v.get('error')]
+            if errs:
+                lines.append(f"• Plugin con errori: {', '.join(errs)}")
+            await interaction.followup.send("\n".join(lines), ephemeral=True)
+            return
+
+        key = plugin.strip().lower()
+        manifest = loaded.get(key)
+        if not manifest:
+            await interaction.followup.send(
+                f"⚠️ Plugin '{key}' non trovato tra i caricati.\n"
+                f"Caricati: {', '.join(sorted(loaded.keys())) if loaded else '(nessuno)'}",
+                ephemeral=True,
+            )
+            return
+
+        req = manifest.get("services_required", []) if isinstance(manifest, dict) else []
+        opt = manifest.get("services_optional", []) if isinstance(manifest, dict) else []
+        missing_req = [s for s in req if not self.registry.has(s)]
+        present_req = [s for s in req if self.registry.has(s)]
+        present_opt = [s for s in opt if self.registry.has(s)]
+        missing_opt = [s for s in opt if not self.registry.has(s)]
+
+        header = f"🔎 **Status plugin: {key}**"
+        meta = f"• Versione: {manifest.get('version','?')}\n• Descrizione: {manifest.get('description','')}"
+        load_state = "• Load: ✅ ok" if not manifest.get("error") else f"• Load: ❌ errore\n• Errore: {manifest.get('error')}"
+        deps = (
+            f"• Servizi richiesti OK: {', '.join(present_req) if present_req else '(nessuno)'}\n"
+            f"• Servizi richiesti MANCANTI: {', '.join(missing_req) if missing_req else '(nessuno)'}\n"
+            f"• Servizi opzionali OK: {', '.join(present_opt) if present_opt else '(nessuno)'}\n"
+            f"• Servizi opzionali mancanti: {', '.join(missing_opt) if missing_opt else '(nessuno)'}"
+        )
+
+        extra = ""
+        hc = manifest.get("healthcheck")
+        if callable(hc):
+            try:
+                res = hc(self.registry)
+                if isinstance(res, dict) and res:
+                    extra = "• Dettagli:\n" + "\n".join([f"  - {k}: {v}" for k,v in res.items()])
+            except Exception as e:
+                extra = f"• Healthcheck plugin: ❌ {e}"
+
+        msg = "\n".join([header, meta, load_state, deps, extra]).strip()
+        await interaction.followup.send(msg, ephemeral=True)
+
+def setup(bot: commands.Bot, registry):
+    bot.tree.add_command(BarcellometroGroup(bot, registry))

@@ -1,0 +1,21 @@
+[project]
+name = "barcellometro"
+version = "0.1.0"
+description = "Barcellometro - bot Discord modulare (core intoccabile + plugin)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "discord.py>=2.4.0",
+  "SQLAlchemy>=2.0.0",
+  "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+jobs = ["APScheduler>=3.10.0"]
+ai = ["openai>=1.0.0"]
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
