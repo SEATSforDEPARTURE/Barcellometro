@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from collections import defaultdict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -12,7 +10,8 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
-from app.db.models.core import TextIngestChannelConfig, TextIngestMessage
+from app.db.models.core import TextIngestChannelConfig
+from app.services.ingest import IngestEvent, IngestService
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 log = logging.getLogger("barcellometro.plugin.ingest_text")
@@ -24,8 +23,8 @@ def get_manifest():
         "version": "1.0.0",
         "description": "Ingest testuale: salvataggio messaggi e controlli per canale",
         "services_required": ["db_session_factory"],
-        "services_optional": [],
-        "tables_used": ["text_ingest_channel_config", "text_ingest_message"],
+        "services_optional": ["ingest_service"],
+        "tables_used": ["text_ingest_channel_config", "ingest_events"],
     }
 
 
@@ -35,6 +34,10 @@ def _get_registry(interaction: discord.Interaction):
 
 def _get_session_factory(registry):
     return registry.get("db_session_factory") if registry else None
+
+
+def _get_ingest_service(registry) -> IngestService | None:
+    return registry.get("ingest_service") if registry else None
 
 
 async def _safe_defer(interaction: discord.Interaction, context: str) -> None:
@@ -66,14 +69,6 @@ async def _safe_send(interaction: discord.Interaction, message: str) -> None:
         )
     except discord.NotFound:
         log.warning("interaction risposta scaduta: impossibile inviare messaggio (id=%s)", interaction.id)
-
-
-def _ensure_rome_tz(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=ROME_TZ)
-    return value.astimezone(ROME_TZ)
 
 
 def _get_or_create_config(session, guild_id: str, channel_id: str) -> TextIngestChannelConfig:
@@ -189,6 +184,7 @@ async def backfill(
     await _safe_defer(interaction, "backfill")
     registry = _get_registry(interaction)
     session_factory = _get_session_factory(registry)
+    ingest_service = _get_ingest_service(registry)
     if session_factory is None:
         log.warning(
             "backfill: db_session_factory mancante (guild=%s channel=%s)",
@@ -249,6 +245,10 @@ async def backfill(
             )
 
             if config.backfill_enabled:
+                if ingest_service is None:
+                    log.warning("backfill: ingest_service mancante (guild=%s channel=%s)", guild_id, channel_id)
+                    await _safe_send(interaction, "❌ ingest_service non disponibile.")
+                    return
                 log.info(
                     "backfill: avvio task (guild=%s channel=%s days=%s)",
                     guild_id,
@@ -256,7 +256,7 @@ async def backfill(
                     config.backfill_days,
                 )
                 asyncio.create_task(
-                    _run_backfill(interaction.channel, session_factory, config.backfill_days)
+                    _run_backfill(interaction.channel, ingest_service, config.backfill_days)
                 )
     except Exception as e:
         log.exception("backfill: errore aggiornando backfill (guild=%s channel=%s)", guild_id, channel_id)
@@ -265,7 +265,7 @@ async def backfill(
 
 async def _run_backfill(
     channel: discord.abc.GuildChannel | None,
-    session_factory,
+    ingest_service: IngestService,
     days: int,
 ) -> None:
     if channel is None or not isinstance(channel, (discord.TextChannel, discord.Thread)):
@@ -279,42 +279,33 @@ async def _run_backfill(
         cutoff.isoformat(),
     )
     try:
-        with session_factory() as session:
-            count = 0
-            async for message in channel.history(after=cutoff, oldest_first=False, limit=None):
-                if _store_message(session, message):
-                    count += 1
-            session.commit()
-            if count == 0:
-                log.warning(
-                    "backfill: nessun messaggio trovato (guild=%s channel=%s cutoff=%s)",
-                    channel.guild.id,
-                    channel.id,
-                    cutoff.isoformat(),
-                )
-            log.info(
-                "backfill: completato (guild=%s channel=%s count=%s cutoff=%s)",
+        count = 0
+        async for message in channel.history(after=cutoff, oldest_first=False, limit=None):
+            event = _message_to_event(message)
+            if event and await ingest_service.emit(event):
+                count += 1
+        if count == 0:
+            log.warning(
+                "backfill: nessun messaggio trovato (guild=%s channel=%s cutoff=%s)",
                 channel.guild.id,
                 channel.id,
-                count,
                 cutoff.isoformat(),
             )
+        log.info(
+            "backfill: completato (guild=%s channel=%s count=%s cutoff=%s)",
+            channel.guild.id,
+            channel.id,
+            count,
+            cutoff.isoformat(),
+        )
     except Exception:
         log.exception("backfill: errore durante la lettura/scrittura (channel=%s)", getattr(channel, "id", None))
         return
 
 
-def _store_message(
-    session,
-    message: discord.Message,
-    time_since_last: float | None = None,
-    activity_score: float | None = None,
-) -> bool:
-    existing = session.execute(
-        select(TextIngestMessage.id).where(TextIngestMessage.message_id == str(message.id))
-    ).scalar_one_or_none()
-    if existing is not None:
-        return False
+def _message_to_event(message: discord.Message) -> IngestEvent | None:
+    if message.guild is None:
+        return None
     author = message.author
     nickname = getattr(author, "display_name", None) or getattr(author, "name", "unknown")
     roles = []
@@ -328,31 +319,28 @@ def _store_message(
         else None,
     }
 
-    entry = TextIngestMessage(
+    metadata = {
+        "author_nickname": nickname,
+        "roles": roles,
+        "relationships": relationships,
+    }
+    return IngestEvent(
+        event_id=str(message.id),
+        source="discord",
+        event_type="message.create",
         guild_id=str(message.guild.id),
         channel_id=str(message.channel.id),
-        message_id=str(message.id),
         author_id=str(author.id),
-        author_nickname=nickname,
         content=message.content,
         created_at=message.created_at.astimezone(ROME_TZ),
-        roles_json=json.dumps(roles),
-        write_speed=None,
-        write_frequency=None,
-        time_since_last_message=time_since_last,
-        activity_score=activity_score,
-        relationships_json=json.dumps(relationships),
+        metadata=metadata,
     )
-    session.add(entry)
-    return True
 
 
 class TextIngestCog(commands.Cog):
     def __init__(self, bot: commands.Bot, registry):
         self.bot = bot
         self.registry = registry
-        self._last_message_at: dict[tuple[str, str, str], datetime] = {}
-        self._message_counts: defaultdict[tuple[str, str], int] = defaultdict(int)
         self._check_task: asyncio.Task | None = None
         self._ready_logged = False
 
@@ -389,6 +377,7 @@ class TextIngestCog(commands.Cog):
             with session_factory() as session:
                 stmt = select(TextIngestChannelConfig).where(TextIngestChannelConfig.backfill_enabled.is_(True))
                 configs = session.execute(stmt).scalars().all()
+            ingest_service = _get_ingest_service(self.registry)
             for config in configs:
                 channel = self.bot.get_channel(int(config.channel_id))
                 log.info(
@@ -397,7 +386,14 @@ class TextIngestCog(commands.Cog):
                     config.channel_id,
                     config.backfill_days,
                 )
-                asyncio.create_task(_run_backfill(channel, session_factory, config.backfill_days))
+                if ingest_service is None:
+                    log.warning(
+                        "on_ready: ingest_service mancante (guild=%s channel=%s)",
+                        config.guild_id,
+                        config.channel_id,
+                    )
+                    continue
+                asyncio.create_task(_run_backfill(channel, ingest_service, config.backfill_days))
             if not self._ready_logged:
                 log.info("on_ready: ingest_text pronto (bot=%s)", self.bot.user)
                 self._ready_logged = True
@@ -417,88 +413,19 @@ class TextIngestCog(commands.Cog):
                 with session_factory() as session:
                     stmt = select(TextIngestChannelConfig).where(TextIngestChannelConfig.enabled.is_(True))
                     configs = session.execute(stmt).scalars().all()
-                log.info("periodic_check: canali attivi=%s", len(configs))
-                for config in configs:
-                    channel = self.bot.get_channel(int(config.channel_id))
-                    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-                        log.warning(
-                            "periodic_check: channel non valido (guild=%s channel=%s)",
-                            config.guild_id,
-                            config.channel_id,
-                        )
-                        continue
-                    await self._sync_recent_messages(channel, session_factory, config.check_interval_minutes)
+                ingest_service = _get_ingest_service(self.registry)
+                stats = ingest_service.stats() if ingest_service else {}
+                log.info(
+                    "periodic_check: ok (canali_attivi=%s eventi=%s last_emit=%s)",
+                    len(configs),
+                    stats.get("count"),
+                    stats.get("last_emit_at"),
+                )
                 sleep_for = min((c.check_interval_minutes for c in configs), default=10) * 60
                 await asyncio.sleep(max(sleep_for, 60))
             except Exception:
                 log.exception("periodic_check: errore nel loop")
                 await asyncio.sleep(60)
-
-    async def _sync_recent_messages(
-        self,
-        channel: discord.TextChannel | discord.Thread,
-        session_factory,
-        minutes: int,
-    ) -> None:
-        cutoff = datetime.now(tz=ROME_TZ) - timedelta(minutes=minutes)
-        last_seen = None
-        try:
-            with session_factory() as session:
-                stmt = (
-                    select(TextIngestMessage.created_at)
-                    .where(TextIngestMessage.channel_id == str(channel.id))
-                    .order_by(TextIngestMessage.created_at.desc())
-                    .limit(1)
-                )
-                last_seen = session.execute(stmt).scalar_one_or_none()
-        except Exception:
-            log.exception(
-                "periodic_check: errore leggendo ultimo messaggio (guild=%s channel=%s)",
-                channel.guild.id,
-                channel.id,
-            )
-            return
-        normalized_last_seen = _ensure_rome_tz(last_seen)
-        if last_seen and normalized_last_seen is None:
-            log.warning(
-                "periodic_check: ultimo messaggio senza timezone (guild=%s channel=%s raw=%s)",
-                channel.guild.id,
-                channel.id,
-                last_seen,
-            )
-        start_from = normalized_last_seen if normalized_last_seen and normalized_last_seen > cutoff else cutoff
-        log.info(
-            "periodic_check: sync (guild=%s channel=%s from=%s)",
-            channel.guild.id,
-            channel.id,
-            start_from.isoformat(),
-        )
-        try:
-            with session_factory() as session:
-                count = 0
-                async for message in channel.history(after=start_from, oldest_first=True, limit=None):
-                    if _store_message(session, message):
-                        count += 1
-                if count:
-                    session.commit()
-                    log.info(
-                        "periodic_check: salvati %s messaggi (guild=%s channel=%s)",
-                        count,
-                        channel.guild.id,
-                        channel.id,
-                    )
-                else:
-                    log.info(
-                        "periodic_check: nessun nuovo messaggio (guild=%s channel=%s)",
-                        channel.guild.id,
-                        channel.id,
-                    )
-        except Exception:
-            log.exception(
-                "periodic_check: errore sync (guild=%s channel=%s)",
-                channel.guild.id,
-                channel.id,
-            )
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -529,43 +456,20 @@ class TextIngestCog(commands.Cog):
             )
             return
 
-        session_factory = _get_session_factory(self.registry)
-        if session_factory is None:
-            log.warning("on_message: db_session_factory mancante")
+        ingest_service = _get_ingest_service(self.registry)
+        if ingest_service is None:
+            log.warning("on_message: ingest_service mancante")
             return
 
-        key = (str(message.guild.id), str(message.channel.id), str(message.author.id))
-        now = message.created_at.astimezone(ROME_TZ)
-        last_at = self._last_message_at.get(key)
-        time_since_last = (now - last_at).total_seconds() if last_at else None
-        self._last_message_at[key] = now
-
-        author_key = (str(message.guild.id), str(message.author.id))
-        self._message_counts[author_key] += 1
-        activity_score = float(self._message_counts[author_key])
-
         try:
-            with session_factory() as session:
-                if _store_message(
-                    session,
-                    message,
-                    time_since_last=time_since_last,
-                    activity_score=activity_score,
-                ):
-                    session.commit()
-                    log.info(
-                        "on_message: salvato (guild=%s channel=%s author=%s)",
-                        message.guild.id,
-                        message.channel.id,
-                        message.author.id,
-                    )
-                else:
-                    log.debug(
-                        "on_message: duplicato ignorato (guild=%s channel=%s message=%s)",
-                        message.guild.id,
-                        message.channel.id,
-                        message.id,
-                    )
+            event = _message_to_event(message)
+            if event and await ingest_service.emit(event):
+                log.debug(
+                    "on_message: evento emesso (guild=%s channel=%s message=%s)",
+                    message.guild.id,
+                    message.channel.id,
+                    message.id,
+                )
         except Exception:
             log.exception(
                 "on_message: errore salvataggio (guild=%s channel=%s author=%s)",
@@ -580,6 +484,9 @@ def setup(bot: commands.Bot, registry):
     group = _get_group(bot)
     group.add_command(check)
     group.add_command(backfill)
+    settings = registry.get("settings")
+    if settings and not registry.get("ingest_service"):
+        registry.register("ingest_service", IngestService(settings.DB_URL))
     cog = TextIngestCog(bot, registry)
     bot.add_cog(cog)
     if bot.is_ready():
