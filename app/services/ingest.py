@@ -48,6 +48,7 @@ class IngestService:
         self._emit_count = 0
         self._last_emit_at: datetime | None = None
         self._last_error: str | None = None
+        self._disabled_logged = False
         self._lock = asyncio.Lock()
 
         if self._enabled:
@@ -92,6 +93,9 @@ class IngestService:
 
     async def emit(self, event: IngestEvent) -> bool:
         if not self._enabled:
+            if not self._disabled_logged:
+                log.warning("ingest: emit ignorato, service disabilitato (db_url=%s)", self.db_url)
+                self._disabled_logged = True
             return False
         async with self._lock:
             return await asyncio.to_thread(self._insert_event, event)

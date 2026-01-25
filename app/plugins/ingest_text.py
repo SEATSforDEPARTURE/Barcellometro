@@ -463,13 +463,21 @@ class TextIngestCog(commands.Cog):
 
         try:
             event = _message_to_event(message)
-            if event and await ingest_service.emit(event):
-                log.debug(
-                    "on_message: evento emesso (guild=%s channel=%s message=%s)",
-                    message.guild.id,
-                    message.channel.id,
-                    message.id,
-                )
+            if event:
+                if await ingest_service.emit(event):
+                    log.debug(
+                        "on_message: evento emesso (guild=%s channel=%s message=%s)",
+                        message.guild.id,
+                        message.channel.id,
+                        message.id,
+                    )
+                else:
+                    log.warning(
+                        "on_message: emit fallito (guild=%s channel=%s message=%s)",
+                        message.guild.id,
+                        message.channel.id,
+                        message.id,
+                    )
         except Exception:
             log.exception(
                 "on_message: errore salvataggio (guild=%s channel=%s author=%s)",
