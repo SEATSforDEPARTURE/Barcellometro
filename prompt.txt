@@ -1,0 +1,198 @@
+Crea da zero un bot Discord modulare in Python chiamato “Barcellometro”, con architettura future-proof basata su service registry + plugin loader.
+
+OBIETTIVO
+Registrare in SQLite tutte le informazioni utili sugli utenti e sulla chat (event-driven) SOLO nei canali abilitati, conservarle per un numero di giorni configurabile (retention), e fornire comandi di controllo/stato per verificare bot, servizi e plugin. Lo scopo è utilizzare questi dati per poi poterli usare con i vari servizi/plugin che li elaboreranno e li utilizzeranno in base alle esigenze.
+
+STACK OBBLIGATORIO
+- discord.py >= 2.3
+- Slash commands SOLO guild-based (NO comandi globali)
+- python-dotenv
+- SQLite (sqlite3 o aiosqlite)
+- Logging chiaro e non spam
+
+ARCHITETTURA NON NEGOZIABILE
+- app/core:
+  - config loader (.env)
+  - logging setup
+  - ServiceRegistry (register/get)
+  - PluginLoader
+  - create_bot() / entrypoint
+  - NESSUNA logica business
+- app/services:
+  - DatabaseService
+  - IngestService (platform-agnostic)
+  - RetentionService
+  - StatusService
+- app/plugins:
+  - Discord adapter (event listeners)
+  - Comandi barcellometro (check, status, retention)
+  - Plugin consumer di esempio
+
+INGEST EVENT-DRIVEN
+- I messaggi/eventi vengono salvati IMMEDIATAMENTE all’arrivo
+- Nessun polling per catturare messaggi
+- L’ingest deve funzionare SOLO se il canale è abilitato
+- Usa EventEnvelope normalizzato (no dipendenza diretta da discord.py nel service)
+
+ABILITAZIONE CANALI (FONDAMENTALE)
+- Il bot NON registra nulla di default
+- Un canale va abilitato manualmente tramite comando:
+
+  /barcellometro check on
+  /barcellometro check off
+
+- Lo stato di ogni canale (enabled/disabled) va salvato su DB (o config persistente)
+- Solo i canali con check=ON inviano eventi a IngestService
+
+COMANDI DI STATO (GUILD-BASED)
+1) Stato generale:
+   /status barcellometro
+   Deve mostrare:
+   - stato bot (online)
+   - db path
+   - retention_days
+   - numero canali abilitati
+   - conteggio record principali (users, messages/events)
+   - ultimo evento registrato (timestamp)
+
+2) Stato mirato:
+   /status barcellometro service:<nome_plugin_o_servizio>
+   Deve mostrare:
+   - plugin/servizio attivo o no
+   - stato interno (es. running, idle, error)
+   - metriche base (eventi processati, errori, ultimo run)
+
+COMANDI RETENTION
+- Comandi per modificare a runtime la retention:
+
+  /barcellometro retention get
+  /barcellometro retention set days:<int>
+
+- Il valore va salvato persistentemente
+- RetentionService deve usarlo senza restart
+
+RETENTION (N giorni)
+- Default: 30 giorni
+- Task periodico (es. ogni 6 ore):
+  - elimina messages/events più vecchi di retention_days
+- Logging chiaro: quante righe eliminate per tabella
+
+EVENTI DA REGISTRARE
+- message.create
+- message.edit
+- message.delete
+- reaction.add
+- reaction.remove
+- member.join
+- member.leave
+- member.update (ruoli, nickname)
+
+MODELLO EVENTO (EventEnvelope)
+- event_id (uuid)
+- event_type
+- platform ("discord")
+- ts (ISO datetime)
+- guild_id
+- channel_id
+- thread_id (opzionale)
+- author_id
+- content (se presente)
+- meta (JSON: mentions, reply_to, attachments, flags)
+- raw (JSON opzionale)
+
+DATABASE – SCHEMA COMPLETO
+
+1) users
+- user_id TEXT PRIMARY KEY
+- username TEXT
+- global_name TEXT
+- display_name TEXT
+- avatar_url TEXT
+- is_bot INTEGER
+- first_seen_ts TEXT
+- last_seen_ts TEXT
+- message_count INTEGER DEFAULT 0
+
+2) guild_memberships
+- guild_id TEXT
+- user_id TEXT
+- nickname TEXT
+- joined_at TEXT
+- last_seen_ts TEXT
+- PRIMARY KEY (guild_id, user_id)
+
+3) channels
+- channel_id TEXT PRIMARY KEY
+- guild_id TEXT
+- name TEXT
+- enabled INTEGER DEFAULT 0
+- type TEXT
+- category_id TEXT
+- is_nsfw INTEGER
+- slowmode_delay INTEGER
+
+4) messages
+- message_id TEXT PRIMARY KEY
+- guild_id TEXT
+- channel_id TEXT
+- author_id TEXT
+- ts TEXT
+- edited_ts TEXT
+- content TEXT
+- is_deleted INTEGER DEFAULT 0
+- reply_to_message_id TEXT
+- mentions_json TEXT
+- attachments_json TEXT
+- embeds_json TEXT
+
+5) reactions
+- message_id TEXT
+- user_id TEXT
+- emoji TEXT
+- ts TEXT
+
+6) events (audit/event sourcing)
+- id INTEGER PRIMARY KEY AUTOINCREMENT
+- ts TEXT
+- event_type TEXT
+- platform TEXT
+- guild_id TEXT
+- channel_id TEXT
+- actor_id TEXT
+- target_id TEXT
+- meta_json TEXT
+
+PLUGIN DISCORD ADAPTER
+- Listener per tutti gli eventi
+- Prima di chiamare ingest.emit(event):
+  - verifica che il channel_id sia enabled
+- Aggiorna last_seen_ts e message_count
+
+PLUGIN DI ESEMPIO (CONSUMER)
+- Registra hook su IngestService
+- Conta eventi per tipo
+- Espone stato via StatusService
+
+CONFIG (.env.example)
+- DISCORD_TOKEN=
+- GUILD_ID=
+- DB_PATH=bot.sqlite
+- DEFAULT_RETENTION_DAYS=30
+- IGNORE_BOTS=true
+
+REGOLE IMPORTANTI
+- Nessun comando globale
+- Commit DB garantito
+- CREATE TABLE IF NOT EXISTS all’avvio
+- Usa JSON per campi variabili
+- Non salvare dati non disponibili via API (email, IP, DM)
+
+OUTPUT
+- Codice completo e funzionante
+- requirements.txt
+- README con:
+  - setup
+  - run
+  - comandi disponibili
+  - come verificare DB
+- Apri PR con spiegazione chiara
