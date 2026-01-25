@@ -22,6 +22,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     intents.members = True
     intents.reactions = True
     intents.guilds = True
+    intents.guild_messages = True
+    intents.guild_reactions = True
 
     bot = commands.Bot(command_prefix="!", intents=intents)
     registry = ServiceRegistry()

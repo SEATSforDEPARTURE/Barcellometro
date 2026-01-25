@@ -31,6 +31,11 @@ cp .env.example .env
 python -m app.main
 ```
 
+## Note importanti
+
+- Il bot **non registra nulla di default**: abilita ogni canale con `/barcellometro check on` prima di inviare messaggi da tracciare.
+- Assicurati di attivare **Message Content Intent** e **Server Members Intent** nelle impostazioni del bot su Discord Developer Portal, altrimenti gli eventi messaggio e membro non arrivano.
+
 ## Comandi disponibili (solo guild)
 
 ### Abilitazione canali

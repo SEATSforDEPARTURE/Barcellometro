@@ -26,6 +26,7 @@ def setup(registry: ServiceRegistry) -> None:
     database = registry.get("database")
     ingest: IngestService = registry.get("ingest")
     config = registry.get("config")
+    warned_disabled_channels: set[str] = set()
 
     async def ensure_channel_record(channel: discord.abc.GuildChannel) -> bool:
         enabled = await database.is_channel_enabled(str(channel.id))
@@ -39,6 +40,14 @@ def setup(registry: ServiceRegistry) -> None:
             is_nsfw=_bool_int(getattr(channel, "is_nsfw", lambda: False)()),
             slowmode_delay=getattr(channel, "slowmode_delay", 0),
         )
+        if not enabled:
+            channel_id = str(channel.id)
+            if channel_id not in warned_disabled_channels:
+                warned_disabled_channels.add(channel_id)
+                logger.info(
+                    "Channel %s is disabled for ingestion. Enable with /barcellometro check on",
+                    channel_id,
+                )
         return enabled
 
     async def record_user(member: discord.abc.User, guild: Optional[discord.Guild], increment_message: bool, ts: str) -> None:
