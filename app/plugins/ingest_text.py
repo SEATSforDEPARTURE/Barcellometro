@@ -494,7 +494,8 @@ def setup(bot: commands.Bot, registry):
     group.add_command(backfill)
     settings = registry.get("settings")
     if settings and not registry.get("ingest_service"):
-        registry.register("ingest_service", IngestService(settings.DB_URL))
+        engine = registry.get("db_engine")
+        registry.register("ingest_service", IngestService(settings.DB_URL, engine=engine))
     cog = TextIngestCog(bot, registry)
     bot.add_cog(cog)
     if bot.is_ready():
