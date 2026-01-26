@@ -24,6 +24,7 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group = app_commands.Group(name="barcellometro", description="Controlli Barcellometro")
     role_group = app_commands.Group(name="role", description="Gestione permessi e limiti")
     status_group = app_commands.Group(name="status", description="Stato servizi")
+    barcellometro_group.add_command(role_group)
 
     async def check_permission(interaction: discord.Interaction, command_name: str) -> bool:
         guild = interaction.guild
@@ -182,7 +183,6 @@ def setup(registry: ServiceRegistry) -> None:
         await interaction.response.send_message(message, ephemeral=True)
 
     bot.tree.add_command(barcellometro_group, guild=guild)
-    barcellometro_group.add_command(role_group)
     bot.tree.add_command(status_group, guild=guild)
 
     @role_group.command(name="set-role", description="Imposta limiti per un ruolo su un comando")
