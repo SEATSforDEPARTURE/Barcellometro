@@ -108,26 +108,46 @@ class BackfillService:
                 except ValueError:
                     logger.warning("Invalid earliest event timestamp in database: %s", earliest_event_ts)
 
-            window_start = max(desired_start, last_event_dt) if last_event_dt else desired_start
-            window_end = now
+            windows: list[tuple[datetime, datetime]] = []
+            recent_start = max(desired_start, last_event_dt) if last_event_dt else desired_start
+            if recent_start < now:
+                windows.append((recent_start, now))
 
-            if window_start >= window_end and earliest_event_dt and earliest_event_dt > desired_start:
-                window_start = desired_start
-                window_end = min(earliest_event_dt, now)
+            if earliest_event_dt and earliest_event_dt > desired_start:
+                early_end = min(earliest_event_dt, recent_start)
+                if desired_start < early_end:
+                    windows.append((desired_start, early_end))
 
-            if window_start >= window_end:
+            if not windows:
                 logger.info("Backfill not needed (no gap detected)")
                 return BackfillResult(messages=0, events=0, channels=0, errors=0)
 
-            result = await self._handler(window_start, window_end)
+            total_messages = 0
+            total_events = 0
+            total_errors = 0
+            total_channels = 0
+            earliest_window_start = min(start for start, _ in windows)
+            latest_window_end = max(end for _, end in windows)
+            for start, end in windows:
+                result = await self._handler(start, end)
+                total_messages += result.messages
+                total_events += result.events
+                total_errors += result.errors
+                total_channels = max(total_channels, result.channels)
+
             self._metrics["last_run_ts"] = datetime.now(timezone.utc).isoformat()
-            self._metrics["last_start_ts"] = window_start.isoformat()
-            self._metrics["last_end_ts"] = window_end.isoformat()
-            self._metrics["messages"] = result.messages
-            self._metrics["events"] = result.events
-            self._metrics["channels"] = result.channels
-            self._metrics["errors"] = result.errors
-            return result
+            self._metrics["last_start_ts"] = earliest_window_start.isoformat()
+            self._metrics["last_end_ts"] = latest_window_end.isoformat()
+            self._metrics["messages"] = total_messages
+            self._metrics["events"] = total_events
+            self._metrics["channels"] = total_channels
+            self._metrics["errors"] = total_errors
+            return BackfillResult(
+                messages=total_messages,
+                events=total_events,
+                channels=total_channels,
+                errors=total_errors,
+            )
 
     def status(self) -> dict[str, Any]:
         return {

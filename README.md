@@ -52,8 +52,8 @@ python -m app.main
 - `/barcellometro backfill <giorni>` → aggiorna i giorni di backfill.
 
 Il backfill verifica il gap tra l'ultimo evento registrato e l'ora attuale e recupera i messaggi mancanti
-nei canali abilitati fino al limite di giorni configurato (default 30). Se non ci sono gap recenti,
-controlla anche la data del primo evento e colma eventuali buchi all'inizio della finestra. Se attivo,
+nei canali abilitati fino al limite di giorni configurato (default 30). Se il primo evento salvato è più
+recente dell'inizio finestra, aggiunge anche il backfill per la porzione iniziale mancante. Se attivo,
 parte automaticamente ad ogni riavvio del bot.
 
 ### Status
