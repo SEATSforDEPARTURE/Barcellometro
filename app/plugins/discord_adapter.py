@@ -132,6 +132,8 @@ def setup(registry: ServiceRegistry) -> None:
                         continue
                     if not message.guild:
                         continue
+                    if await database.message_exists(str(message.id)):
+                        continue
                     ts = message.created_at.replace(tzinfo=timezone.utc).isoformat()
                     await record_user(message.author, message.guild, True, ts)
                     reply_to = str(message.reference.message_id) if message.reference else None

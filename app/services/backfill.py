@@ -76,7 +76,7 @@ class BackfillService:
     async def is_enabled(self) -> bool:
         return self._enabled
 
-    async def run_once(self) -> BackfillResult:
+    async def run_once(self, force_full_window: bool = False) -> BackfillResult:
         async with self._lock:
             if not self._enabled:
                 logger.info("Backfill skipped because it is disabled")
@@ -109,14 +109,18 @@ class BackfillService:
                     logger.warning("Invalid earliest event timestamp in database: %s", earliest_event_ts)
 
             windows: list[tuple[datetime, datetime]] = []
-            recent_start = max(desired_start, last_event_dt) if last_event_dt else desired_start
-            if recent_start < now:
-                windows.append((recent_start, now))
+            if force_full_window:
+                if desired_start < now:
+                    windows.append((desired_start, now))
+            else:
+                recent_start = max(desired_start, last_event_dt) if last_event_dt else desired_start
+                if recent_start < now:
+                    windows.append((recent_start, now))
 
-            if earliest_event_dt and earliest_event_dt > desired_start:
-                early_end = min(earliest_event_dt, recent_start)
-                if desired_start < early_end:
-                    windows.append((desired_start, early_end))
+                if earliest_event_dt and earliest_event_dt > desired_start:
+                    early_end = min(earliest_event_dt, recent_start)
+                    if desired_start < early_end:
+                        windows.append((desired_start, early_end))
 
             if not windows:
                 logger.info("Backfill not needed (no gap detected)")

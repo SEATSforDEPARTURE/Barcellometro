@@ -97,7 +97,7 @@ def setup(registry: ServiceRegistry) -> None:
         if await backfill.is_enabled():
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True, thinking=True)
-            result = await backfill.run_once()
+            result = await backfill.run_once(force_full_window=True)
             await interaction.followup.send(
                 "Backfill completato. "
                 f"Messaggi: {result.messages}, Eventi: {result.events}, Canali: {result.channels}, Errori: {result.errors}.",

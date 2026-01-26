@@ -54,7 +54,8 @@ python -m app.main
 Il backfill verifica il gap tra l'ultimo evento registrato e l'ora attuale e recupera i messaggi mancanti
 nei canali abilitati fino al limite di giorni configurato (default 30). Se il primo evento salvato è più
 recente dell'inizio finestra, aggiunge anche il backfill per la porzione iniziale mancante. Se attivo,
-parte automaticamente ad ogni riavvio del bot.
+parte automaticamente ad ogni riavvio del bot. I comandi manuali forzano una scansione completa della
+finestra configurata in modo idempotente.
 
 ### Status
 - `/status barcellometro` → stato generale bot/DB.

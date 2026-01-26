@@ -178,6 +178,10 @@ class DatabaseService:
         row = await self.fetchone("SELECT ts FROM events ORDER BY ts ASC LIMIT 1")
         return row["ts"] if row else None
 
+    async def message_exists(self, message_id: str) -> bool:
+        row = await self.fetchone("SELECT 1 FROM messages WHERE message_id = ? LIMIT 1", (message_id,))
+        return row is not None
+
     async def upsert_user(self, user_id: str, username: str, global_name: Optional[str], display_name: str, avatar_url: Optional[str], is_bot: bool, ts: str, increment_message: bool) -> None:
         await self.execute(
             """
