@@ -61,6 +61,17 @@ finestra configurata in modo idempotente.
 - `/status barcellometro` → stato generale bot/DB.
 - `/status barcellometro service:<nome>` → stato servizio/plugin.
 
+### Policy ruoli/utenti
+- `/barcellometro role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
+- `/barcellometro role set-user user:<utente> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
+- `/barcellometro role clear-role role:<ruolo> command:<cmd>`
+- `/barcellometro role clear-user user:<utente> command:<cmd>`
+- `/barcellometro role show-role role:<ruolo>`
+- `/barcellometro role show-user user:<utente>`
+
+Se non esiste alcuna policy, i comandi sono accessibili solo agli admin. Le policy utente hanno priorità
+su quelle di ruolo. I limiti e cooldown vengono conteggiati e sono disponibili ai plugin che li richiedono.
+
 ## Verifica DB
 
 Esempi di query:
@@ -74,5 +85,5 @@ sqlite3 bot.sqlite "SELECT * FROM events ORDER BY ts DESC LIMIT 5;"
 ## Architettura
 
 - `app/core`: config, logging, ServiceRegistry, PluginLoader, entrypoint.
-- `app/services`: DatabaseService, IngestService, RetentionService, BackfillService, StatusService.
+- `app/services`: DatabaseService, IngestService, RetentionService, BackfillService, CommandGuardService, StatusService.
 - `app/plugins`: adapter Discord (eventi), comandi slash, consumer di esempio.

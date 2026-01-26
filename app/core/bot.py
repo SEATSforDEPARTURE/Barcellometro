@@ -11,6 +11,7 @@ from app.core.service_registry import ServiceRegistry
 from app.services.backfill import BackfillService
 from app.services.database import DatabaseService
 from app.services.ingest import IngestService
+from app.services.permissions import CommandGuardService
 from app.services.retention import RetentionService
 from app.services.status import StatusService
 
@@ -34,6 +35,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     status_service = StatusService(database_service)
     retention_service = RetentionService(database_service, config.default_retention_days)
     backfill_service = BackfillService(database_service, config.default_retention_days)
+    guard_service = CommandGuardService(database_service)
 
     registry.register("config", config)
     registry.register("bot", bot)
@@ -42,6 +44,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     registry.register("status", status_service)
     registry.register("retention", retention_service)
     registry.register("backfill", backfill_service)
+    registry.register("guard", guard_service)
 
     plugin_loader = PluginLoader(registry)
     plugin_loader.load(
@@ -57,6 +60,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     status_service.register_component("ingest", ingest_service)
     status_service.register_component("retention", retention_service)
     status_service.register_component("backfill", backfill_service)
+    status_service.register_component("guard", guard_service)
     status_service.register_component("plugins", plugin_loader)
 
     return bot, registry

@@ -98,6 +98,34 @@ class DatabaseService:
                 target_id TEXT,
                 meta_json TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS role_policies (
+                guild_id TEXT,
+                role_id TEXT,
+                command TEXT,
+                usage_limit INTEGER,
+                cooldown_seconds INTEGER,
+                PRIMARY KEY (guild_id, role_id, command)
+            );
+
+            CREATE TABLE IF NOT EXISTS user_policies (
+                guild_id TEXT,
+                user_id TEXT,
+                command TEXT,
+                usage_limit INTEGER,
+                cooldown_seconds INTEGER,
+                PRIMARY KEY (guild_id, user_id, command)
+            );
+
+            CREATE TABLE IF NOT EXISTS usage_counters (
+                guild_id TEXT,
+                user_id TEXT,
+                command TEXT,
+                window_date TEXT,
+                used_count INTEGER,
+                last_used_ts TEXT,
+                PRIMARY KEY (guild_id, user_id, command, window_date)
+            );
             """
         )
         await self._conn.commit()
@@ -181,6 +209,84 @@ class DatabaseService:
     async def message_exists(self, message_id: str) -> bool:
         row = await self.fetchone("SELECT 1 FROM messages WHERE message_id = ? LIMIT 1", (message_id,))
         return row is not None
+
+    async def upsert_role_policy(self, guild_id: str, role_id: str, command: str, usage_limit: Optional[int], cooldown_seconds: Optional[int]) -> None:
+        await self.execute(
+            """
+            INSERT INTO role_policies (guild_id, role_id, command, usage_limit, cooldown_seconds)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, role_id, command) DO UPDATE SET
+                usage_limit = excluded.usage_limit,
+                cooldown_seconds = excluded.cooldown_seconds
+            """,
+            (guild_id, role_id, command, usage_limit, cooldown_seconds),
+        )
+
+    async def upsert_user_policy(self, guild_id: str, user_id: str, command: str, usage_limit: Optional[int], cooldown_seconds: Optional[int]) -> None:
+        await self.execute(
+            """
+            INSERT INTO user_policies (guild_id, user_id, command, usage_limit, cooldown_seconds)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id, command) DO UPDATE SET
+                usage_limit = excluded.usage_limit,
+                cooldown_seconds = excluded.cooldown_seconds
+            """,
+            (guild_id, user_id, command, usage_limit, cooldown_seconds),
+        )
+
+    async def delete_role_policy(self, guild_id: str, role_id: str, command: str) -> None:
+        await self.execute(
+            "DELETE FROM role_policies WHERE guild_id = ? AND role_id = ? AND command = ?",
+            (guild_id, role_id, command),
+        )
+
+    async def delete_user_policy(self, guild_id: str, user_id: str, command: str) -> None:
+        await self.execute(
+            "DELETE FROM user_policies WHERE guild_id = ? AND user_id = ? AND command = ?",
+            (guild_id, user_id, command),
+        )
+
+    async def fetch_role_policies(self, guild_id: str, role_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT command, usage_limit, cooldown_seconds FROM role_policies WHERE guild_id = ? AND role_id = ?",
+            (guild_id, role_id),
+        )
+
+    async def fetch_user_policies(self, guild_id: str, user_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT command, usage_limit, cooldown_seconds FROM user_policies WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+
+    async def fetch_role_policy(self, guild_id: str, role_id: str, command: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            "SELECT usage_limit, cooldown_seconds FROM role_policies WHERE guild_id = ? AND role_id = ? AND command = ?",
+            (guild_id, role_id, command),
+        )
+
+    async def fetch_user_policy(self, guild_id: str, user_id: str, command: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            "SELECT usage_limit, cooldown_seconds FROM user_policies WHERE guild_id = ? AND user_id = ? AND command = ?",
+            (guild_id, user_id, command),
+        )
+
+    async def fetch_usage_counter(self, guild_id: str, user_id: str, command: str, window_date: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            "SELECT used_count, last_used_ts FROM usage_counters WHERE guild_id = ? AND user_id = ? AND command = ? AND window_date = ?",
+            (guild_id, user_id, command, window_date),
+        )
+
+    async def upsert_usage_counter(self, guild_id: str, user_id: str, command: str, window_date: str, used_count: int, last_used_ts: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO usage_counters (guild_id, user_id, command, window_date, used_count, last_used_ts)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id, command, window_date) DO UPDATE SET
+                used_count = excluded.used_count,
+                last_used_ts = excluded.last_used_ts
+            """,
+            (guild_id, user_id, command, window_date, used_count, last_used_ts),
+        )
 
     async def upsert_user(self, user_id: str, username: str, global_name: Optional[str], display_name: str, avatar_url: Optional[str], is_bot: bool, ts: str, increment_message: bool) -> None:
         await self.execute(
