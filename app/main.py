@@ -23,12 +23,15 @@ def main() -> None:
 
     database = registry.get("database")
     retention = registry.get("retention")
+    backfill = registry.get("backfill")
 
     async def runner() -> None:
         await database.connect()
         await database.initialize_schema()
         await retention.load_retention()
+        await backfill.load_settings()
         retention.start()
+        backfill.start()
         await bot.start(config.discord_token)
 
     try:

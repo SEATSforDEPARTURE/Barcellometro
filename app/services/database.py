@@ -161,6 +161,11 @@ class DatabaseService:
         row = await self.fetchone("SELECT COUNT(*) as count FROM channels WHERE enabled = 1")
         return int(row["count"]) if row else 0
 
+    async def fetch_enabled_channels(self) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT channel_id, guild_id, name, type FROM channels WHERE enabled = 1"
+        )
+
     async def count_table(self, table_name: str) -> int:
         row = await self.fetchone(f"SELECT COUNT(*) as count FROM {table_name}")
         return int(row["count"]) if row else 0

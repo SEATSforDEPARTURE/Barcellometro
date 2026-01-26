@@ -46,6 +46,15 @@ python -m app.main
 - `/barcellometro retention get` → mostra i giorni correnti.
 - `/barcellometro retention set days:<int>` → aggiorna la retention.
 
+### Backfill
+- `/barcellometro backfill on` → abilita il backfill e lo esegue subito.
+- `/barcellometro backfill off` → disabilita il backfill.
+- `/barcellometro backfill <giorni>` → aggiorna i giorni di backfill.
+
+Il backfill verifica il gap tra l'ultimo evento registrato e l'ora attuale e recupera i messaggi mancanti
+nei canali abilitati fino al limite di giorni configurato (default 30). Se attivo, parte automaticamente
+ad ogni riavvio del bot.
+
 ### Status
 - `/status barcellometro` → stato generale bot/DB.
 - `/status barcellometro service:<nome>` → stato servizio/plugin.
@@ -63,5 +72,5 @@ sqlite3 bot.sqlite "SELECT * FROM events ORDER BY ts DESC LIMIT 5;"
 ## Architettura
 
 - `app/core`: config, logging, ServiceRegistry, PluginLoader, entrypoint.
-- `app/services`: DatabaseService, IngestService, RetentionService, StatusService.
+- `app/services`: DatabaseService, IngestService, RetentionService, BackfillService, StatusService.
 - `app/plugins`: adapter Discord (eventi), comandi slash, consumer di esempio.

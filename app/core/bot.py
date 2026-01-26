@@ -8,6 +8,7 @@ from discord.ext import commands
 from app.core.config import AppConfig
 from app.core.plugin_loader import PluginLoader
 from app.core.service_registry import ServiceRegistry
+from app.services.backfill import BackfillService
 from app.services.database import DatabaseService
 from app.services.ingest import IngestService
 from app.services.retention import RetentionService
@@ -32,6 +33,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     ingest_service = IngestService(database_service)
     status_service = StatusService(database_service)
     retention_service = RetentionService(database_service, config.default_retention_days)
+    backfill_service = BackfillService(database_service, config.default_retention_days)
 
     registry.register("config", config)
     registry.register("bot", bot)
@@ -39,6 +41,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     registry.register("ingest", ingest_service)
     registry.register("status", status_service)
     registry.register("retention", retention_service)
+    registry.register("backfill", backfill_service)
 
     plugin_loader = PluginLoader(registry)
     plugin_loader.load(
@@ -53,6 +56,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     status_service.register_component("database", database_service)
     status_service.register_component("ingest", ingest_service)
     status_service.register_component("retention", retention_service)
+    status_service.register_component("backfill", backfill_service)
     status_service.register_component("plugins", plugin_loader)
 
     return bot, registry

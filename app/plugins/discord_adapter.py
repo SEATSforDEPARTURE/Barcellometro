@@ -8,6 +8,7 @@ from uuid import uuid4
 import discord
 
 from app.core.service_registry import ServiceRegistry
+from app.services.backfill import BackfillResult
 from app.services.ingest import EventEnvelope, IngestService
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ def setup(registry: ServiceRegistry) -> None:
     bot: discord.Client = registry.get("bot")
     database = registry.get("database")
     ingest: IngestService = registry.get("ingest")
+    backfill = registry.get("backfill")
     config = registry.get("config")
     warned_disabled_channels: set[str] = set()
 
@@ -85,12 +87,13 @@ def setup(registry: ServiceRegistry) -> None:
         content: Optional[str],
         meta: dict,
         raw: Optional[dict] = None,
+        ts: Optional[str] = None,
     ) -> None:
         envelope = EventEnvelope(
             event_id=str(uuid4()),
             event_type=event_type,
             platform="discord",
-            ts=_now_iso(),
+            ts=ts or _now_iso(),
             guild_id=guild_id,
             channel_id=channel_id,
             thread_id=None,
@@ -105,6 +108,68 @@ def setup(registry: ServiceRegistry) -> None:
         logger.info("Discord bot ready as %s", bot.user)
 
     bot.add_listener(handle_ready, "on_ready")
+
+    async def backfill_handler(start: datetime, end: datetime) -> BackfillResult:
+        await bot.wait_until_ready()
+        enabled_channels = await database.fetch_enabled_channels()
+        messages = 0
+        events = 0
+        errors = 0
+        for row in enabled_channels:
+            channel = bot.get_channel(int(row["channel_id"]))
+            if channel is None:
+                continue
+            if not isinstance(channel, discord.abc.Messageable):
+                continue
+            try:
+                async for message in channel.history(
+                    after=start,
+                    before=end,
+                    oldest_first=True,
+                    limit=None,
+                ):
+                    if message.author.bot and config.ignore_bots:
+                        continue
+                    if not message.guild:
+                        continue
+                    ts = message.created_at.replace(tzinfo=timezone.utc).isoformat()
+                    await record_user(message.author, message.guild, True, ts)
+                    reply_to = str(message.reference.message_id) if message.reference else None
+                    await database.insert_message(
+                        message_id=str(message.id),
+                        guild_id=str(message.guild.id),
+                        channel_id=str(message.channel.id),
+                        author_id=str(message.author.id),
+                        ts=ts,
+                        content=message.content,
+                        reply_to_message_id=reply_to,
+                        mentions=[str(user.id) for user in message.mentions],
+                        attachments=[{"id": str(att.id), "url": att.url, "filename": att.filename} for att in message.attachments],
+                        embeds=[embed.to_dict() for embed in message.embeds],
+                    )
+                    await emit_event(
+                        "message.create",
+                        guild_id=str(message.guild.id),
+                        channel_id=str(message.channel.id),
+                        author_id=str(message.author.id),
+                        content=message.content,
+                        meta={"message_id": str(message.id), "backfill": True},
+                        ts=ts,
+                    )
+                    messages += 1
+                    events += 1
+            except Exception:  # noqa: BLE001
+                logger.exception("Backfill failed for channel %s", row["channel_id"])
+                errors += 1
+
+        return BackfillResult(
+            messages=messages,
+            events=events,
+            channels=len(enabled_channels),
+            errors=errors,
+        )
+
+    backfill.register_handler(backfill_handler)
 
     @bot.event
     async def on_message(message: discord.Message) -> None:

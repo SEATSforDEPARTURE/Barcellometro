@@ -14,6 +14,7 @@ def setup(registry: ServiceRegistry) -> None:
     bot: discord.Client = registry.get("bot")
     database = registry.get("database")
     retention = registry.get("retention")
+    backfill = registry.get("backfill")
     status_service = registry.get("status")
     config = registry.get("config")
 
@@ -62,6 +63,43 @@ def setup(registry: ServiceRegistry) -> None:
             return
         await retention.set_retention_days(days)
         await interaction.response.send_message(f"Retention aggiornata a {days} giorni.", ephemeral=True)
+
+    @barcellometro_group.command(name="backfill", description="Gestisci il backfill dei dati")
+    @app_commands.describe(state="on/off", days="Numero di giorni di backfill")
+    @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
+    async def backfill_command(
+        interaction: discord.Interaction,
+        state: app_commands.Choice[str] | None = None,
+        days: int | None = None,
+    ) -> None:
+        if state is None and days is None:
+            current_days = await backfill.get_backfill_days()
+            enabled = await backfill.is_enabled()
+            await interaction.response.send_message(
+                f"Backfill {'attivo' if enabled else 'disattivato'} ({current_days} giorni).",
+                ephemeral=True,
+            )
+            return
+
+        if days is not None:
+            if days <= 0:
+                await interaction.response.send_message("Specifica un numero di giorni valido.", ephemeral=True)
+                return
+            await backfill.set_backfill_days(days)
+
+        if state is not None:
+            await backfill.set_enabled(state.value == "on")
+
+        if await backfill.is_enabled():
+            result = await backfill.run_once()
+            await interaction.response.send_message(
+                "Backfill completato. "
+                f"Messaggi: {result.messages}, Eventi: {result.events}, Canali: {result.channels}, Errori: {result.errors}.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message("Backfill disattivato.", ephemeral=True)
 
     @status_group.command(name="barcellometro", description="Stato generale o di un servizio/plugin")
     @app_commands.describe(service="Nome servizio o plugin")
