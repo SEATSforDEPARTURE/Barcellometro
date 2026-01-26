@@ -174,6 +174,10 @@ class DatabaseService:
         row = await self.fetchone("SELECT ts FROM events ORDER BY ts DESC LIMIT 1")
         return row["ts"] if row else None
 
+    async def earliest_event_ts(self) -> Optional[str]:
+        row = await self.fetchone("SELECT ts FROM events ORDER BY ts ASC LIMIT 1")
+        return row["ts"] if row else None
+
     async def upsert_user(self, user_id: str, username: str, global_name: Optional[str], display_name: str, avatar_url: Optional[str], is_bot: bool, ts: str, increment_message: bool) -> None:
         await self.execute(
             """

@@ -86,25 +86,43 @@ class BackfillService:
                 return BackfillResult(messages=0, events=0, channels=0, errors=0)
 
             now = datetime.now(timezone.utc)
-            window_start = now - timedelta(days=self._backfill_days)
+            desired_start = now - timedelta(days=self._backfill_days)
+
+            last_event_dt: Optional[datetime] = None
             last_event_ts = await self._database.latest_event_ts()
             if last_event_ts:
                 try:
                     last_event_dt = datetime.fromisoformat(last_event_ts)
                     if last_event_dt.tzinfo is None:
                         last_event_dt = last_event_dt.replace(tzinfo=timezone.utc)
-                    window_start = max(window_start, last_event_dt)
                 except ValueError:
                     logger.warning("Invalid last event timestamp in database: %s", last_event_ts)
 
-            if window_start >= now:
+            earliest_event_dt: Optional[datetime] = None
+            earliest_event_ts = await self._database.earliest_event_ts()
+            if earliest_event_ts:
+                try:
+                    earliest_event_dt = datetime.fromisoformat(earliest_event_ts)
+                    if earliest_event_dt.tzinfo is None:
+                        earliest_event_dt = earliest_event_dt.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    logger.warning("Invalid earliest event timestamp in database: %s", earliest_event_ts)
+
+            window_start = max(desired_start, last_event_dt) if last_event_dt else desired_start
+            window_end = now
+
+            if window_start >= window_end and earliest_event_dt and earliest_event_dt > desired_start:
+                window_start = desired_start
+                window_end = min(earliest_event_dt, now)
+
+            if window_start >= window_end:
                 logger.info("Backfill not needed (no gap detected)")
                 return BackfillResult(messages=0, events=0, channels=0, errors=0)
 
-            result = await self._handler(window_start, now)
+            result = await self._handler(window_start, window_end)
             self._metrics["last_run_ts"] = datetime.now(timezone.utc).isoformat()
             self._metrics["last_start_ts"] = window_start.isoformat()
-            self._metrics["last_end_ts"] = now.isoformat()
+            self._metrics["last_end_ts"] = window_end.isoformat()
             self._metrics["messages"] = result.messages
             self._metrics["events"] = result.events
             self._metrics["channels"] = result.channels
