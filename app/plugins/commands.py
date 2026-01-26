@@ -72,10 +72,14 @@ def setup(registry: ServiceRegistry) -> None:
         state: app_commands.Choice[str] | None = None,
         days: int | None = None,
     ) -> None:
+        if interaction.response.is_done():
+            responder = interaction.followup
+        else:
+            responder = interaction.response
         if state is None and days is None:
             current_days = await backfill.get_backfill_days()
             enabled = await backfill.is_enabled()
-            await interaction.response.send_message(
+            await responder.send_message(
                 f"Backfill {'attivo' if enabled else 'disattivato'} ({current_days} giorni).",
                 ephemeral=True,
             )
@@ -83,7 +87,7 @@ def setup(registry: ServiceRegistry) -> None:
 
         if days is not None:
             if days <= 0:
-                await interaction.response.send_message("Specifica un numero di giorni valido.", ephemeral=True)
+                await responder.send_message("Specifica un numero di giorni valido.", ephemeral=True)
                 return
             await backfill.set_backfill_days(days)
 
@@ -91,15 +95,17 @@ def setup(registry: ServiceRegistry) -> None:
             await backfill.set_enabled(state.value == "on")
 
         if await backfill.is_enabled():
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True, thinking=True)
             result = await backfill.run_once()
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Backfill completato. "
                 f"Messaggi: {result.messages}, Eventi: {result.events}, Canali: {result.channels}, Errori: {result.errors}.",
                 ephemeral=True,
             )
             return
 
-        await interaction.response.send_message("Backfill disattivato.", ephemeral=True)
+        await responder.send_message("Backfill disattivato.", ephemeral=True)
 
     @status_group.command(name="barcellometro", description="Stato generale o di un servizio/plugin")
     @app_commands.describe(service="Nome servizio o plugin")
