@@ -24,12 +24,14 @@ def main() -> None:
     database = registry.get("database")
     retention = registry.get("retention")
     backfill = registry.get("backfill")
+    ai_service = registry.get("ai")
 
     async def runner() -> None:
         await database.connect()
         await database.initialize_schema()
         await retention.load_retention()
         await backfill.load_settings()
+        await ai_service.load_settings()
         retention.start()
         backfill.start()
         await bot.start(config.discord_token)

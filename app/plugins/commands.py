@@ -17,6 +17,7 @@ def setup(registry: ServiceRegistry) -> None:
     backfill = registry.get("backfill")
     guard = registry.get("guard")
     status_service = registry.get("status")
+    ai_service = registry.get("ai")
     config = registry.get("config")
 
     guild = discord.Object(id=config.guild_id)
@@ -152,6 +153,19 @@ def setup(registry: ServiceRegistry) -> None:
             return
 
         await responder.send_message("Backfill disattivato.", ephemeral=True)
+
+    @barcellometro_group.command(name="ai", description="Abilita o disabilita il servizio AI")
+    @app_commands.describe(state="on/off")
+    @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
+    async def ai_command(interaction: discord.Interaction, state: app_commands.Choice[str]) -> None:
+        if not await check_permission(interaction, "barcellometro.ai"):
+            return
+        enabled = state.value == "on"
+        await ai_service.set_enabled(enabled)
+        await interaction.response.send_message(
+            f"AI {'abilitata' if enabled else 'disabilitata'}.",
+            ephemeral=True,
+        )
 
     @status_group.command(name="barcellometro", description="Stato generale o di un servizio/plugin")
     @app_commands.describe(service="Nome servizio o plugin")
