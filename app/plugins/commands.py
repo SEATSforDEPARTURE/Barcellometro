@@ -167,6 +167,28 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
+    @barcellometro_group.command(name="ai-model", description="Imposta il modello AI per un task")
+    @app_commands.describe(task="Task AI", model="Nome modello")
+    @app_commands.choices(
+        task=[
+            app_commands.Choice(name="summary", value="summary"),
+            app_commands.Choice(name="transcription", value="transcription"),
+            app_commands.Choice(name="translation", value="translation"),
+        ]
+    )
+    async def ai_model_command(
+        interaction: discord.Interaction,
+        task: app_commands.Choice[str],
+        model: str,
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.ai-model"):
+            return
+        await ai_service.set_model(task.value, model)
+        await interaction.response.send_message(
+            f"Modello per {task.value} aggiornato a {model}.",
+            ephemeral=True,
+        )
+
     @status_group.command(name="barcellometro", description="Stato generale o di un servizio/plugin")
     @app_commands.describe(service="Nome servizio o plugin")
     async def status_barcellometro(interaction: discord.Interaction, service: str | None = None) -> None:

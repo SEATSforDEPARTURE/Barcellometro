@@ -24,6 +24,7 @@ cp .env.example .env
 - `DEFAULT_RETENTION_DAYS`: giorni di retention iniziali.
 - `IGNORE_BOTS`: ignora messaggi bot.
 - `LOG_LEVEL`: livello di logging.
+- `OPENAI_API_KEY`: chiave API OpenAI (opzionale, solo per AI).
 
 ## Run
 
@@ -64,6 +65,7 @@ finestra configurata in modo idempotente.
 ### AI centrale
 - `/barcellometro ai on` → abilita il servizio AI.
 - `/barcellometro ai off` → disabilita il servizio AI.
+- `/barcellometro ai-model task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `transcription`, `translation`).
 
 ### Policy ruoli/utenti
 - `/barcellometro role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`

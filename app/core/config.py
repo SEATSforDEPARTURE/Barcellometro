@@ -14,6 +14,7 @@ class AppConfig:
     default_retention_days: int
     ignore_bots: bool
     log_level: str
+    openai_api_key: str
 
 
 def load_config() -> AppConfig:
@@ -28,6 +29,7 @@ def load_config() -> AppConfig:
     retention = int(os.getenv("DEFAULT_RETENTION_DAYS", "30"))
     ignore_bots = os.getenv("IGNORE_BOTS", "true").lower() in {"1", "true", "yes", "y"}
     log_level = os.getenv("LOG_LEVEL", "INFO")
+    openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     return AppConfig(
         discord_token=token,
         guild_id=guild_id,
@@ -35,4 +37,5 @@ def load_config() -> AppConfig:
         default_retention_days=retention,
         ignore_bots=ignore_bots,
         log_level=log_level,
+        openai_api_key=openai_api_key,
     )

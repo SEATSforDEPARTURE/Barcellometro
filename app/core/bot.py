@@ -37,7 +37,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     retention_service = RetentionService(database_service, config.default_retention_days)
     backfill_service = BackfillService(database_service, config.default_retention_days)
     guard_service = CommandGuardService(database_service)
-    ai_service = AiService(database_service)
+    ai_service = AiService(database_service, config.openai_api_key)
 
     registry.register("config", config)
     registry.register("bot", bot)
