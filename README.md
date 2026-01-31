@@ -25,6 +25,13 @@ cp .env.example .env
 - `IGNORE_BOTS`: ignora messaggi bot.
 - `LOG_LEVEL`: livello di logging.
 - `OPENAI_API_KEY`: chiave API OpenAI (opzionale, solo per AI).
+- `STT_LOCAL_MODEL`: modello locale (default `small`).
+- `STT_LOCAL_COMPUTE_TYPE`: compute type locale (`int8`, `int8_float16`, `float16`).
+- `STT_LOCAL_BEAM_SIZE`: beam size locale (default `1`).
+- `AUDIO_NOTES_MAX_MB`: dimensione massima audio (MB).
+- `AUDIO_NOTES_MAX_DURATION_S`: durata massima audio (secondi).
+- `AUDIO_NOTES_DISCORD_MAX_CHARS`: max caratteri per messaggio trascritto.
+- `AUDIO_NOTES_QUEUE_MAX`: massimo numero note vocali in coda.
 
 ## Run
 
@@ -36,6 +43,7 @@ python -m app.main
 
 - Il bot **non registra nulla di default**: abilita ogni canale con `/barcellometro check on` prima di inviare messaggi da tracciare.
 - Assicurati di attivare **Message Content Intent** e **Server Members Intent** nelle impostazioni del bot su Discord Developer Portal, altrimenti gli eventi messaggio e membro non arrivano.
+- Per la traduzione locale serve installare i modelli Argos Translate (lingua sorgente → italiano).
 
 ## Comandi disponibili (solo guild)
 
@@ -67,6 +75,25 @@ finestra configurata in modo idempotente.
 - `/barcellometro ai off` → disabilita il servizio AI.
 - `/barcellometro ai-model task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `transcription`, `translation`).
 
+### STT
+- `/barcellometro stt backend local|ai`
+- `/barcellometro stt model small|medium|large-v3`
+- `/barcellometro stt compute int8|int8_float16|float16`
+- `/barcellometro stt beam 1|3|5`
+- `/barcellometro stt language it|auto`
+
+### Translate
+- `/barcellometro translate backend local|ai`
+- `/barcellometro translate target it`
+
+### Audio notes
+- `/barcellometro audio_notes on`
+- `/barcellometro audio_notes off`
+- `/barcellometro audio_notes status`
+- `/barcellometro audio_notes limits max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
+
+Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH.
+
 ### Policy ruoli/utenti
 - `/barcellometro role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
 - `/barcellometro role set-user user:<utente> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
@@ -91,5 +118,5 @@ sqlite3 bot.sqlite "SELECT * FROM events ORDER BY ts DESC LIMIT 5;"
 ## Architettura
 
 - `app/core`: config, logging, ServiceRegistry, PluginLoader, entrypoint.
-- `app/services`: DatabaseService, IngestService, RetentionService, BackfillService, CommandGuardService, AiService, StatusService.
+- `app/services`: DatabaseService, IngestService, RetentionService, BackfillService, CommandGuardService, AiService, STT/Translate services, StatusService.
 - `app/plugins`: adapter Discord (eventi), comandi slash, consumer di esempio.

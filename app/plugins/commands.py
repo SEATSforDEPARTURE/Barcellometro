@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import discord
 from discord import app_commands
@@ -24,8 +25,14 @@ def setup(registry: ServiceRegistry) -> None:
 
     barcellometro_group = app_commands.Group(name="barcellometro", description="Controlli Barcellometro")
     role_group = app_commands.Group(name="role", description="Gestione permessi e limiti")
+    stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
+    translate_group = app_commands.Group(name="translate", description="Impostazioni traduzione")
+    audio_notes_group = app_commands.Group(name="audio_notes", description="Note vocali")
     status_group = app_commands.Group(name="status", description="Stato servizi")
     barcellometro_group.add_command(role_group)
+    barcellometro_group.add_command(stt_group)
+    barcellometro_group.add_command(translate_group)
+    barcellometro_group.add_command(audio_notes_group)
 
     async def check_permission(interaction: discord.Interaction, command_name: str) -> bool:
         guild = interaction.guild
@@ -63,6 +70,13 @@ def setup(registry: ServiceRegistry) -> None:
         else:
             await interaction.response.send_message("Solo admin.", ephemeral=ephemeral)
         return False
+
+    async def set_setting(key: str, value: str) -> None:
+        await database.set_setting(key, value)
+
+    async def get_setting(key: str, default: str) -> str:
+        stored = await database.get_setting(key)
+        return stored if stored is not None else default
 
     @barcellometro_group.command(name="check", description="Abilita o disabilita la raccolta eventi nel canale")
     @app_commands.describe(state="on/off")
@@ -188,6 +202,177 @@ def setup(registry: ServiceRegistry) -> None:
             f"Modello per {task.value} aggiornato a {model}.",
             ephemeral=True,
         )
+
+    @stt_group.command(name="backend", description="Imposta il backend STT")
+    @app_commands.choices(
+        backend=[
+            app_commands.Choice(name="local", value="local"),
+            app_commands.Choice(name="ai", value="ai"),
+        ]
+    )
+    async def stt_backend_command(
+        interaction: discord.Interaction,
+        backend: app_commands.Choice[str],
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.stt.backend"):
+            return
+        await set_setting("stt.backend", backend.value)
+        await interaction.response.send_message(f"Backend STT impostato su {backend.value}.", ephemeral=True)
+
+    @stt_group.command(name="model", description="Imposta il modello STT locale")
+    @app_commands.choices(
+        model=[
+            app_commands.Choice(name="small", value="small"),
+            app_commands.Choice(name="medium", value="medium"),
+            app_commands.Choice(name="large-v3", value="large-v3"),
+        ]
+    )
+    async def stt_model_command(
+        interaction: discord.Interaction,
+        model: app_commands.Choice[str],
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.stt.model"):
+            return
+        await set_setting("stt.local.model", model.value)
+        await interaction.response.send_message(f"Modello STT impostato su {model.value}.", ephemeral=True)
+
+    @stt_group.command(name="compute", description="Imposta il compute type STT locale")
+    @app_commands.choices(
+        compute=[
+            app_commands.Choice(name="int8", value="int8"),
+            app_commands.Choice(name="int8_float16", value="int8_float16"),
+            app_commands.Choice(name="float16", value="float16"),
+        ]
+    )
+    async def stt_compute_command(
+        interaction: discord.Interaction,
+        compute: app_commands.Choice[str],
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.stt.compute"):
+            return
+        await set_setting("stt.local.compute_type", compute.value)
+        await interaction.response.send_message(f"Compute STT impostato su {compute.value}.", ephemeral=True)
+
+    @stt_group.command(name="beam", description="Imposta il beam size STT locale")
+    @app_commands.choices(
+        beam=[
+            app_commands.Choice(name="1", value="1"),
+            app_commands.Choice(name="3", value="3"),
+            app_commands.Choice(name="5", value="5"),
+        ]
+    )
+    async def stt_beam_command(
+        interaction: discord.Interaction,
+        beam: app_commands.Choice[str],
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.stt.beam"):
+            return
+        await set_setting("stt.local.beam_size", beam.value)
+        await interaction.response.send_message(f"Beam STT impostato su {beam.value}.", ephemeral=True)
+
+    @stt_group.command(name="language", description="Imposta la lingua STT locale")
+    @app_commands.choices(
+        language=[
+            app_commands.Choice(name="it", value="it"),
+            app_commands.Choice(name="auto", value="auto"),
+        ]
+    )
+    async def stt_language_command(
+        interaction: discord.Interaction,
+        language: app_commands.Choice[str],
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.stt.language"):
+            return
+        await set_setting("stt.local.language_hint", language.value)
+        await interaction.response.send_message(f"Lingua STT impostata su {language.value}.", ephemeral=True)
+
+    @translate_group.command(name="backend", description="Imposta il backend di traduzione")
+    @app_commands.choices(
+        backend=[
+            app_commands.Choice(name="local", value="local"),
+            app_commands.Choice(name="ai", value="ai"),
+        ]
+    )
+    async def translate_backend_command(
+        interaction: discord.Interaction,
+        backend: app_commands.Choice[str],
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.translate.backend"):
+            return
+        await set_setting("translate.backend", backend.value)
+        await interaction.response.send_message(
+            f"Backend traduzione impostato su {backend.value}.",
+            ephemeral=True,
+        )
+
+    @translate_group.command(name="target", description="Imposta la lingua target")
+    @app_commands.choices(target=[app_commands.Choice(name="it", value="it")])
+    async def translate_target_command(
+        interaction: discord.Interaction,
+        target: app_commands.Choice[str],
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.translate.target"):
+            return
+        await set_setting("translate.target_lang", target.value)
+        await interaction.response.send_message(
+            f"Lingua target impostata su {target.value}.",
+            ephemeral=True,
+        )
+
+    @audio_notes_group.command(name="on", description="Abilita le note vocali")
+    async def audio_notes_on_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.audio_notes.on"):
+            return
+        await set_setting("audio_notes.enabled", "true")
+        await interaction.response.send_message("Note vocali abilitate.", ephemeral=True)
+
+    @audio_notes_group.command(name="off", description="Disabilita le note vocali")
+    async def audio_notes_off_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.audio_notes.off"):
+            return
+        await set_setting("audio_notes.enabled", "false")
+        await interaction.response.send_message("Note vocali disabilitate.", ephemeral=True)
+
+    @audio_notes_group.command(name="status", description="Mostra lo stato note vocali")
+    async def audio_notes_status_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.audio_notes.status"):
+            return
+        enabled = (await get_setting("audio_notes.enabled", "false")).lower() in {"1", "true", "yes", "y"}
+        max_mb = await get_setting("audio_notes.max_mb", os.getenv("AUDIO_NOTES_MAX_MB", "25"))
+        max_duration = await get_setting("audio_notes.max_duration_s", os.getenv("AUDIO_NOTES_MAX_DURATION_S", "180"))
+        max_chars = await get_setting("audio_notes.discord_max_chars", os.getenv("AUDIO_NOTES_DISCORD_MAX_CHARS", "1900"))
+        queue_max = await get_setting("audio_notes.queue_max", os.getenv("AUDIO_NOTES_QUEUE_MAX", "50"))
+        await interaction.response.send_message(
+            "Audio notes "
+            f"{'attivo' if enabled else 'disattivo'} | "
+            f"max_mb={max_mb}, max_duration_s={max_duration}, max_chars={max_chars}, queue_max={queue_max}",
+            ephemeral=True,
+        )
+
+    @audio_notes_group.command(name="limits", description="Imposta i limiti note vocali")
+    @app_commands.describe(
+        max_mb="Massimo MB",
+        max_duration_s="Durata massima in secondi",
+        discord_max_chars="Massimo caratteri per messaggio",
+        queue_max="Dimensione coda",
+    )
+    async def audio_notes_limits_command(
+        interaction: discord.Interaction,
+        max_mb: int,
+        max_duration_s: int,
+        discord_max_chars: int,
+        queue_max: int,
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.audio_notes.limits"):
+            return
+        if max_mb <= 0 or max_duration_s <= 0 or discord_max_chars <= 0 or queue_max <= 0:
+            await interaction.response.send_message("Specifica limiti validi (> 0).", ephemeral=True)
+            return
+        await set_setting("audio_notes.max_mb", str(max_mb))
+        await set_setting("audio_notes.max_duration_s", str(max_duration_s))
+        await set_setting("audio_notes.discord_max_chars", str(discord_max_chars))
+        await set_setting("audio_notes.queue_max", str(queue_max))
+        await interaction.response.send_message("Limiti note vocali aggiornati.", ephemeral=True)
 
     @status_group.command(name="barcellometro", description="Stato generale o di un servizio/plugin")
     @app_commands.describe(service="Nome servizio o plugin")

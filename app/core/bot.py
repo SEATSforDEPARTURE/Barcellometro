@@ -15,6 +15,10 @@ from app.services.ingest import IngestService
 from app.services.permissions import CommandGuardService
 from app.services.retention import RetentionService
 from app.services.status import StatusService
+from app.services.stt.ai_stt import AiSttService
+from app.services.stt.faster_whisper import FasterWhisperSttService
+from app.services.translate.ai_translate import AiTranslateService
+from app.services.translate.argos import ArgosTranslateService
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,10 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     backfill_service = BackfillService(database_service, config.default_retention_days)
     guard_service = CommandGuardService(database_service)
     ai_service = AiService(database_service, config.openai_api_key)
+    stt_local_service = FasterWhisperSttService(database_service)
+    stt_ai_service = AiSttService(database_service, ai_service)
+    translate_local_service = ArgosTranslateService()
+    translate_ai_service = AiTranslateService(ai_service)
 
     registry.register("config", config)
     registry.register("bot", bot)
@@ -48,6 +56,10 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     registry.register("backfill", backfill_service)
     registry.register("guard", guard_service)
     registry.register("ai", ai_service)
+    registry.register("stt.local", stt_local_service)
+    registry.register("stt.ai", stt_ai_service)
+    registry.register("translate.local", translate_local_service)
+    registry.register("translate.ai", translate_ai_service)
 
     plugin_loader = PluginLoader(registry)
     plugin_loader.load(
@@ -55,6 +67,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
             "app.plugins.discord_adapter",
             "app.plugins.commands",
             "app.plugins.example_consumer",
+            "app.plugins.audio_notes_transcribe",
         ]
     )
     registry.register("plugins", plugin_loader)
@@ -65,6 +78,10 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     status_service.register_component("backfill", backfill_service)
     status_service.register_component("guard", guard_service)
     status_service.register_component("ai", ai_service)
+    status_service.register_component("stt.local", stt_local_service)
+    status_service.register_component("stt.ai", stt_ai_service)
+    status_service.register_component("translate.local", translate_local_service)
+    status_service.register_component("translate.ai", translate_ai_service)
     status_service.register_component("plugins", plugin_loader)
 
     return bot, registry
