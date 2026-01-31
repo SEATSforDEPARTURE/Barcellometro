@@ -11,7 +11,6 @@ from typing import Any, Optional
 from uuid import uuid4
 
 import discord
-import imageio_ffmpeg
 
 from app.core.service_registry import ServiceRegistry
 
@@ -50,18 +49,11 @@ def _split_text(text: str, max_chars: int) -> list[str]:
 
 
 def _ffprobe_duration(path: str) -> Optional[int]:
-    ffprobe_path = shutil.which("ffprobe")
-    if ffprobe_path is None:
-        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-        if ffmpeg_path:
-            candidate = os.path.join(os.path.dirname(ffmpeg_path), "ffprobe")
-            if os.path.exists(candidate):
-                ffprobe_path = candidate
-    if ffprobe_path is None:
+    if shutil.which("ffprobe") is None:
         return None
     result = subprocess.run(
         [
-            ffprobe_path,
+            "ffprobe",
             "-v",
             "error",
             "-show_entries",
@@ -83,12 +75,11 @@ def _ffprobe_duration(path: str) -> Optional[int]:
 
 
 def _convert_to_wav(input_path: str, output_path: str) -> bool:
-    ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
-    if not ffmpeg_path:
+    if shutil.which("ffmpeg") is None:
         return False
     result = subprocess.run(
         [
-            ffmpeg_path,
+            "ffmpeg",
             "-y",
             "-i",
             input_path,
@@ -204,13 +195,9 @@ def setup(registry: ServiceRegistry) -> None:
                     translation_text = translation.text
                 except Exception:
                     logger.exception("Translation failed, falling back to local")
-                    try:
-                        translation = await translate_local.translate(transcript.text, target_lang)
-                        translate_used = "local"
-                        translation_text = translation.text
-                    except Exception:
-                        logger.exception("Local translation failed; skipping translation")
-                        translation_text = None
+                    translation = await translate_local.translate(transcript.text, target_lang)
+                    translate_used = "local"
+                    translation_text = translation.text
 
             output_parts = []
             if translation_text:
