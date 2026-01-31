@@ -1,0 +1,59 @@
+# === Python / Virtualenv ===
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+pip-wheel-metadata/
+.eggs/
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# === OS / Logs ===
+*.log
+logs/
+*.pid
+
+# === Secrets ===
+.env
+.env.*
+!*.example
+*.pem
+*.key
+*.crt
+
+# === Local DB / Artifacts ===
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-journal
+*.wal
+*.shm
+recordings/
+voice_chunks/
+exports/
+tmp/
+
+# === Node (se mai userai build tools) ===
+node_modules/
+
+# === Docker / Compose local overrides ===
+docker-compose.override.yml
