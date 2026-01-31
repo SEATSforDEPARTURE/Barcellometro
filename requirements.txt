@@ -1,0 +1,6 @@
+discord.py>=2.3
+python-dotenv>=1.0
+aiosqlite>=0.19
+openai>=1.0
+faster-whisper>=1.0
+argostranslate>=1.9
