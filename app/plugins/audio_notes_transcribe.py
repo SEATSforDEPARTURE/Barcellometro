@@ -11,6 +11,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 import discord
+import imageio_ffmpeg
 
 from app.core.service_registry import ServiceRegistry
 
@@ -48,12 +49,28 @@ def _split_text(text: str, max_chars: int) -> list[str]:
     return parts
 
 
+def _normalize_lang(value: str) -> str:
+    lowered = value.strip().lower()
+    if not lowered:
+        return "unknown"
+    if lowered in {"italian", "ita"}:
+        return "it"
+    return lowered.split("-")[0]
+
+
 def _ffprobe_duration(path: str) -> Optional[int]:
-    if shutil.which("ffprobe") is None:
+    ffprobe_path = shutil.which("ffprobe")
+    if ffprobe_path is None:
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        if ffmpeg_path:
+            candidate = os.path.join(os.path.dirname(ffmpeg_path), "ffprobe")
+            if os.path.exists(candidate):
+                ffprobe_path = candidate
+    if ffprobe_path is None:
         return None
     result = subprocess.run(
         [
-            "ffprobe",
+            ffprobe_path,
             "-v",
             "error",
             "-show_entries",
@@ -75,11 +92,12 @@ def _ffprobe_duration(path: str) -> Optional[int]:
 
 
 def _convert_to_wav(input_path: str, output_path: str) -> bool:
-    if shutil.which("ffmpeg") is None:
+    ffmpeg_path = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+    if not ffmpeg_path:
         return False
     result = subprocess.run(
         [
-            "ffmpeg",
+            ffmpeg_path,
             "-y",
             "-i",
             input_path,
@@ -184,7 +202,9 @@ def setup(registry: ServiceRegistry) -> None:
             target_lang = await _get_setting("translate.target_lang", "it")
             translate_backend = (await _get_setting("translate.backend", "local")).lower()
             translate_used = translate_backend
-            if transcript.language != target_lang:
+            detected_lang = _normalize_lang(transcript.language)
+            target_lang_norm = _normalize_lang(target_lang)
+            if detected_lang != target_lang_norm:
                 try:
                     if translate_backend == "ai":
                         translation = await translate_ai.translate(transcript.text, target_lang)
@@ -194,18 +214,15 @@ def setup(registry: ServiceRegistry) -> None:
                         translate_used = "local"
                     translation_text = translation.text
                 except Exception:
-                    logger.exception("Translation failed, falling back to local")
-                    translation = await translate_local.translate(transcript.text, target_lang)
-                    translate_used = "local"
-                    translation_text = translation.text
+                    logger.exception("Translation failed; skipping translation")
+                    translation_text = None
 
             output_parts = []
-            if translation_text:
-                output_parts.append("**Trascrizione originale**")
+            output_parts.append("**Trascrizione audio:**")
             output_parts.append(transcript.text)
             if translation_text:
                 output_parts.append("")
-                output_parts.append("**Traduzione IT**")
+                output_parts.append("**Traduzione in Italiano:**")
                 output_parts.append(translation_text)
             full_output = "\n".join(output_parts).strip()
 

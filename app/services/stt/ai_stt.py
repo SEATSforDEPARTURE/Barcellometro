@@ -32,9 +32,11 @@ class AiSttService:
                 language=language,
             )
 
+        detected_language = getattr(response, "language", None) or language or "auto"
+
         return TranscriptResult(
             text=response.text.strip(),
-            language=language or "auto",
+            language=detected_language,
             backend="ai",
             model=model,
         )

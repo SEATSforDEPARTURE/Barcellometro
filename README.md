@@ -92,7 +92,7 @@ finestra configurata in modo idempotente.
 - `/barcellometro audio_notes status`
 - `/barcellometro audio_notes limits max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
 
-Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH.
+Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa viene usato il binario fornito da `imageio-ffmpeg`).
 
 ### Policy ruoli/utenti
 - `/barcellometro role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
