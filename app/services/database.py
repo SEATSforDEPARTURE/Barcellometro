@@ -99,6 +99,18 @@ class DatabaseService:
                 meta_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS voice_sessions (
+                voice_session_id TEXT PRIMARY KEY,
+                guild_id TEXT,
+                voice_channel_id TEXT,
+                started_ts TEXT,
+                ended_ts TEXT NULL,
+                meta_json TEXT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_voice_sessions_channel
+            ON voice_sessions (guild_id, voice_channel_id, started_ts);
+
             CREATE TABLE IF NOT EXISTS role_policies (
                 guild_id TEXT,
                 role_id TEXT,
@@ -286,6 +298,33 @@ class DatabaseService:
                 last_used_ts = excluded.last_used_ts
             """,
             (guild_id, user_id, command, window_date, used_count, last_used_ts),
+        )
+
+    async def start_voice_session(self, voice_session_id: str, guild_id: str, voice_channel_id: str, started_ts: str, meta: dict[str, Any]) -> None:
+        await self.execute(
+            """
+            INSERT INTO voice_sessions (voice_session_id, guild_id, voice_channel_id, started_ts, ended_ts, meta_json)
+            VALUES (?, ?, ?, ?, NULL, ?)
+            """,
+            (voice_session_id, guild_id, voice_channel_id, started_ts, json.dumps(meta)),
+        )
+
+    async def end_voice_session(self, voice_session_id: str, ended_ts: str) -> None:
+        await self.execute(
+            "UPDATE voice_sessions SET ended_ts = ? WHERE voice_session_id = ?",
+            (ended_ts, voice_session_id),
+        )
+
+    async def get_active_voice_session(self, guild_id: str, voice_channel_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT voice_session_id, started_ts, meta_json
+            FROM voice_sessions
+            WHERE guild_id = ? AND voice_channel_id = ? AND ended_ts IS NULL
+            ORDER BY started_ts DESC
+            LIMIT 1
+            """,
+            (guild_id, voice_channel_id),
         )
 
     async def upsert_user(self, user_id: str, username: str, global_name: Optional[str], display_name: str, avatar_url: Optional[str], is_bot: bool, ts: str, increment_message: bool) -> None:

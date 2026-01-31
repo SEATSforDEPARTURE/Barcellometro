@@ -32,6 +32,16 @@ cp .env.example .env
 - `AUDIO_NOTES_MAX_DURATION_S`: durata massima audio (secondi).
 - `AUDIO_NOTES_DISCORD_MAX_CHARS`: max caratteri per messaggio trascritto.
 - `AUDIO_NOTES_QUEUE_MAX`: massimo numero note vocali in coda.
+- `VOICE_INGEST_ENABLED`: abilita ingest vocale (default false).
+- `VOICE_INGEST_DEFAULT_CHUNK_SECONDS`: durata chunk STT (secondi).
+- `VOICE_INGEST_MIN_CHARS`: minimo caratteri trascritti per salvare.
+- `VOICE_INGEST_MAX_QUEUE`: dimensione coda globale ingest.
+- `VOICE_INGEST_MAX_QUEUE_PER_USER`: max chunk in coda per utente.
+- `VOICE_INGEST_RATE_LIMIT_USER_PER_MIN`: rate limit chunk per utente/min.
+- `VOICE_INGEST_MAX_CONCURRENT_STT`: concorrenza STT.
+- `VOICE_INGEST_STT_TIMEOUT_SEC`: timeout STT (secondi).
+- `VOICE_INGEST_CIRCUIT_BREAKER_FAILS`: soglia errori STT.
+- `VOICE_INGEST_CIRCUIT_BREAKER_COOLDOWN_SEC`: cooldown breaker (secondi).
 
 ## Run
 
@@ -93,6 +103,12 @@ finestra configurata in modo idempotente.
 - `/barcellometro audio_notes limits max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
 
 Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa viene usato il binario fornito da `imageio-ffmpeg`).
+
+### Voice ingest
+- `/barcellometro voice_ingest on bot:<bot> [voice_channel] [text_channel]`
+- `/barcellometro voice_ingest off`
+- `/barcellometro voice_ingest join <voice_channel>`
+- `/barcellometro voice_ingest leave`
 
 ### Policy ruoli/utenti
 - `/barcellometro role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`

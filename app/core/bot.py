@@ -68,6 +68,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
             "app.plugins.commands",
             "app.plugins.example_consumer",
             "app.plugins.audio_notes_transcribe",
+            "app.plugins.voice_ingest",
         ]
     )
     registry.register("plugins", plugin_loader)

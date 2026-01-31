@@ -5,3 +5,4 @@ openai>=1.0
 faster-whisper>=1.0
 argostranslate>=1.9
 imageio-ffmpeg>=0.4.9
+discord-ext-voice-recv>=0.4.2

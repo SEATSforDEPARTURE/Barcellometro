@@ -182,9 +182,27 @@ def setup(registry: ServiceRegistry) -> None:
         enabled = await ensure_channel_record(message.channel)
         if not enabled:
             return
+        voice_meta: Optional[dict] = None
+        target_text_id = await database.get_setting("voice_ingest.target_text_channel_id")
+        target_voice_id = await database.get_setting("voice_ingest.target_voice_channel_id")
+        if target_text_id and target_voice_id and str(message.channel.id) == target_text_id:
+            session = await database.get_active_voice_session(str(message.guild.id), target_voice_id)
+            if session:
+                started_ts = datetime.fromisoformat(session["started_ts"])
+                if started_ts.tzinfo is None:
+                    started_ts = started_ts.replace(tzinfo=timezone.utc)
+                call_offset_ms = int((datetime.now(timezone.utc) - started_ts).total_seconds() * 1000)
+                voice_meta = {
+                    "voice_session_id": session["voice_session_id"],
+                    "voice_channel_id": target_voice_id,
+                    "call_offset_ms": call_offset_ms,
+                }
         ts = message.created_at.replace(tzinfo=timezone.utc).isoformat()
         await record_user(message.author, message.guild, True, ts)
         reply_to = str(message.reference.message_id) if message.reference else None
+        embeds = [embed.to_dict() for embed in message.embeds]
+        if voice_meta:
+            embeds.append({"voice_meta": voice_meta})
         await database.insert_message(
             message_id=str(message.id),
             guild_id=str(message.guild.id),
@@ -195,7 +213,7 @@ def setup(registry: ServiceRegistry) -> None:
             reply_to_message_id=reply_to,
             mentions=[str(user.id) for user in message.mentions],
             attachments=[{"id": str(att.id), "url": att.url, "filename": att.filename} for att in message.attachments],
-            embeds=[embed.to_dict() for embed in message.embeds],
+            embeds=embeds,
         )
         await emit_event(
             "message.create",
@@ -205,6 +223,15 @@ def setup(registry: ServiceRegistry) -> None:
             content=message.content,
             meta={"message_id": str(message.id)},
         )
+        if voice_meta:
+            await emit_event(
+                "chat.message",
+                guild_id=str(message.guild.id),
+                channel_id=str(message.channel.id),
+                author_id=str(message.author.id),
+                content=message.content,
+                meta={"message_id": str(message.id), **voice_meta},
+            )
 
     @bot.event
     async def on_message_edit(before: discord.Message, after: discord.Message) -> None:

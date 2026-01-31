@@ -19,6 +19,7 @@ def setup(registry: ServiceRegistry) -> None:
     guard = registry.get("guard")
     status_service = registry.get("status")
     ai_service = registry.get("ai")
+    voice_ingest = registry.get("voice_ingest") if registry.has("voice_ingest") else None
     config = registry.get("config")
 
     guild = discord.Object(id=config.guild_id)
@@ -28,11 +29,13 @@ def setup(registry: ServiceRegistry) -> None:
     stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
     translate_group = app_commands.Group(name="translate", description="Impostazioni traduzione")
     audio_notes_group = app_commands.Group(name="audio_notes", description="Note vocali")
+    voice_ingest_group = app_commands.Group(name="voice_ingest", description="Ingest da canale vocale")
     status_group = app_commands.Group(name="status", description="Stato servizi")
     barcellometro_group.add_command(role_group)
     barcellometro_group.add_command(stt_group)
     barcellometro_group.add_command(translate_group)
     barcellometro_group.add_command(audio_notes_group)
+    barcellometro_group.add_command(voice_ingest_group)
 
     async def check_permission(interaction: discord.Interaction, command_name: str) -> bool:
         guild = interaction.guild
@@ -373,6 +376,74 @@ def setup(registry: ServiceRegistry) -> None:
         await set_setting("audio_notes.discord_max_chars", str(discord_max_chars))
         await set_setting("audio_notes.queue_max", str(queue_max))
         await interaction.response.send_message("Limiti note vocali aggiornati.", ephemeral=True)
+
+    @voice_ingest_group.command(name="on", description="Abilita ingest vocale")
+    @app_commands.describe(bot="Bot worker", voice_channel="Canale vocale", text_channel="Canale testuale")
+    async def voice_ingest_on(
+        interaction: discord.Interaction,
+        bot: discord.User,
+        voice_channel: discord.VoiceChannel | None = None,
+        text_channel: discord.TextChannel | None = None,
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.voice_ingest.on"):
+            return
+        if not bot.bot:
+            await interaction.response.send_message("Seleziona un bot worker valido.", ephemeral=True)
+            return
+        resolved_voice = voice_channel
+        if resolved_voice is None and isinstance(interaction.user, discord.Member):
+            resolved_voice = interaction.user.voice.channel if interaction.user.voice else None
+        if resolved_voice is None:
+            await interaction.response.send_message("Specifica un canale vocale.", ephemeral=True)
+            return
+        resolved_text = text_channel or (interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None)
+        if resolved_text is None:
+            await interaction.response.send_message("Specifica un canale testuale.", ephemeral=True)
+            return
+        await set_setting("voice_ingest.enabled", "true")
+        await set_setting("voice_ingest.worker_bot_id", str(bot.id))
+        await set_setting("voice_ingest.auto_join", "true")
+        await set_setting("voice_ingest.target_voice_channel_id", str(resolved_voice.id))
+        await set_setting("voice_ingest.target_text_channel_id", str(resolved_text.id))
+        await interaction.response.send_message(
+            f"Ingest vocale abilitato su {resolved_voice.name}.",
+            ephemeral=True,
+        )
+        if voice_ingest and resolved_voice:
+            await voice_ingest.join(resolved_voice)
+
+    @voice_ingest_group.command(name="off", description="Disabilita ingest vocale")
+    async def voice_ingest_off(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.voice_ingest.off"):
+            return
+        await set_setting("voice_ingest.enabled", "false")
+        await interaction.response.send_message("Ingest vocale disabilitato.", ephemeral=True)
+        if voice_ingest:
+            await voice_ingest.leave()
+
+    @voice_ingest_group.command(name="join", description="Join manuale del canale vocale")
+    @app_commands.describe(voice_channel="Canale vocale")
+    async def voice_ingest_join(
+        interaction: discord.Interaction,
+        voice_channel: discord.VoiceChannel,
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.voice_ingest.join"):
+            return
+        await set_setting("voice_ingest.target_voice_channel_id", str(voice_channel.id))
+        await interaction.response.send_message(
+            f"Richiesto join su {voice_channel.name}.",
+            ephemeral=True,
+        )
+        if voice_ingest:
+            await voice_ingest.join(voice_channel)
+
+    @voice_ingest_group.command(name="leave", description="Leave manuale del canale vocale")
+    async def voice_ingest_leave(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.voice_ingest.leave"):
+            return
+        await interaction.response.send_message("Richiesto leave dal canale vocale.", ephemeral=True)
+        if voice_ingest:
+            await voice_ingest.leave()
 
     @status_group.command(name="barcellometro", description="Stato generale o di un servizio/plugin")
     @app_commands.describe(service="Nome servizio o plugin")
