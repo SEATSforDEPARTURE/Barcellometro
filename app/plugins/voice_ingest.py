@@ -70,32 +70,41 @@ def setup(registry: ServiceRegistry) -> None:
     breaker_until: Optional[float] = None
     leave_task: Optional[asyncio.Task[None]] = None
     current_voice_channel_id: Optional[int] = None
+    legacy_warned: set[str] = set()
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
 
     async def _get_setting(key: str, default: str) -> str:
-        stored = await database.get_setting(key)
-        return stored if stored is not None else default
+        if not bot.user:
+            return default
+        namespaced_key = f"voice_ingest.{bot.user.id}.{key}"
+        stored = await database.get_setting(namespaced_key)
+        if stored is not None:
+            return stored
+        legacy_key = f"voice_ingest.{key}"
+        legacy_value = await database.get_setting(legacy_key)
+        if legacy_value is not None:
+            if legacy_key not in legacy_warned:
+                logger.warning("Legacy setting %s detected; please migrate to %s.", legacy_key, namespaced_key)
+                legacy_warned.add(legacy_key)
+            return legacy_value
+        return default
 
     async def _enabled() -> bool:
-        return (await _get_setting("voice_ingest.enabled", os.getenv("VOICE_INGEST_ENABLED", "false"))).lower() in {
+        return (await _get_setting("enabled", os.getenv("VOICE_INGEST_ENABLED", "false"))).lower() in {
             "1",
             "true",
             "yes",
             "y",
         }
 
-    async def _is_worker() -> bool:
-        worker_id = await _get_setting("voice_ingest.worker_bot_id", "")
-        return worker_id and bot.user and str(bot.user.id) == worker_id
-
     async def _target_voice_channel_id() -> Optional[int]:
-        value = await _get_setting("voice_ingest.target_voice_channel_id", "")
+        value = await _get_setting("target_voice_channel_id", "")
         return int(value) if value else None
 
     async def _target_text_channel_id() -> Optional[int]:
-        value = await _get_setting("voice_ingest.target_text_channel_id", "")
+        value = await _get_setting("target_text_channel_id", "")
         return int(value) if value else None
 
     async def _start_session(guild_id: int, voice_channel_id: int) -> None:
@@ -328,17 +337,14 @@ def setup(registry: ServiceRegistry) -> None:
     async def _handle_voice_state(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
         if not await _enabled():
             return
-        if not await _is_worker():
-            logger.info("Voice ingest not configured for this bot")
-            return
         target_voice_id = await _target_voice_channel_id()
         if target_voice_id is None:
             return
         voice_channel = member.guild.get_channel(target_voice_id)
         if not isinstance(voice_channel, discord.VoiceChannel):
             return
-        auto_join = (await _get_setting("voice_ingest.auto_join", "true")).lower() in {"1", "true", "yes", "y"}
-        min_users = int(await _get_setting("voice_ingest.min_users_to_join", "1"))
+        auto_join = (await _get_setting("auto_join", "true")).lower() in {"1", "true", "yes", "y"}
+        min_users = int(await _get_setting("min_users_to_join", "1"))
         non_bot_members = [m for m in voice_channel.members if not m.bot]
         if auto_join and non_bot_members and len(non_bot_members) >= min_users:
             if not voice_client or not voice_client.is_connected():
@@ -350,18 +356,16 @@ def setup(registry: ServiceRegistry) -> None:
     async def _handle_join_command(channel: discord.VoiceChannel) -> None:
         if not await _enabled():
             return
-        if not await _is_worker():
-            return
         await _join_voice_channel(channel.guild, channel)
 
     async def _handle_leave_command() -> None:
         if not await _enabled():
             return
-        if not await _is_worker():
-            return
         await _leave_voice_channel()
 
     async def _handle_text_message(message: discord.Message) -> None:
+        if not await _enabled():
+            return
         if not message.guild:
             return
         target_text_id = await _target_text_channel_id()
