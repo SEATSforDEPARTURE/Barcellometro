@@ -74,6 +74,7 @@ def setup(registry: ServiceRegistry) -> None:
     current_voice_channel_id: Optional[int] = None
     legacy_warned: set[str] = set()
     join_locks: dict[int, asyncio.Lock] = {}
+    connecting_guilds: set[int] = set()
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
@@ -166,9 +167,13 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal voice_client
         lock = join_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
+            if guild.id in connecting_guilds:
+                logger.info("Voice ingest connect already in progress for guild %s", guild.id)
+                return
             existing = guild.voice_client
             if existing and existing.is_connected():
                 if existing.channel and existing.channel.id == channel.id:
+                    logger.info("Voice ingest already connected to channel %s", channel.id)
                     return
                 await existing.move_to(channel)
                 voice_client = existing
@@ -179,11 +184,15 @@ def setup(registry: ServiceRegistry) -> None:
             logger.warning("voice_recv not available; voice ingest disabled")
             return
         from discord.ext import voice_recv  # type: ignore
-
-        voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
-        await _start_session(guild.id, channel.id)
-        voice_client.listen(voice_recv.BasicSink(_on_voice_data))
-        logger.info("Voice ingest joined channel %s", channel.id)
+        connecting_guilds.add(guild.id)
+        try:
+            logger.info("Voice ingest connect start for channel %s", channel.id)
+            voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
+            await _start_session(guild.id, channel.id)
+            voice_client.listen(voice_recv.BasicSink(_on_voice_data))
+            logger.info("Voice ingest connect done for channel %s", channel.id)
+        finally:
+            connecting_guilds.discard(guild.id)
 
     async def _leave_voice_channel() -> None:
         nonlocal voice_client
