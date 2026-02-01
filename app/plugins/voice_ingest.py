@@ -5,6 +5,8 @@ import importlib.util
 import logging
 import os
 import tempfile
+import subprocess
+from pathlib import Path
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -71,6 +73,7 @@ def setup(registry: ServiceRegistry) -> None:
     leave_task: Optional[asyncio.Task[None]] = None
     current_voice_channel_id: Optional[int] = None
     legacy_warned: set[str] = set()
+    join_locks: dict[int, asyncio.Lock] = {}
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
@@ -161,8 +164,17 @@ def setup(registry: ServiceRegistry) -> None:
 
     async def _join_voice_channel(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
         nonlocal voice_client
-        if voice_client and voice_client.is_connected():
-            return
+        lock = join_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            existing = guild.voice_client
+            if existing and existing.is_connected():
+                if existing.channel and existing.channel.id == channel.id:
+                    return
+                await existing.move_to(channel)
+                voice_client = existing
+                await _start_session(guild.id, channel.id)
+                logger.info("Voice ingest moved to channel %s", channel.id)
+                return
         if not _spec_available():
             logger.warning("voice_recv not available; voice ingest disabled")
             return
@@ -296,8 +308,22 @@ def setup(registry: ServiceRegistry) -> None:
             try:
                 if breaker_until and time.time() < breaker_until:
                     continue
+                if not os.path.exists(job.audio_path):
+                    logger.warning("Voice ingest missing audio file %s; dropping.", job.audio_path)
+                    continue
+                if os.path.getsize(job.audio_path) <= 4096:
+                    logger.info("Voice ingest chunk too small; dropping.")
+                    continue
                 async with semaphore:
-                    transcript = await asyncio.wait_for(stt_local.transcribe(job.audio_path), timeout=timeout_sec)
+                    try:
+                        transcript = await asyncio.wait_for(stt_local.transcribe(job.audio_path), timeout=timeout_sec)
+                    except Exception:
+                        logger.exception("Voice ingest STT failed; retrying with ffmpeg")
+                        wav_path = _reencode_to_wav(job.audio_path)
+                        if wav_path is None:
+                            logger.error("Voice ingest fallback failed; dropping chunk.")
+                            continue
+                        transcript = await asyncio.wait_for(stt_local.transcribe(wav_path), timeout=timeout_sec)
                 text = transcript.text.strip()
                 if len(text) < min_chars:
                     continue
@@ -357,6 +383,47 @@ def setup(registry: ServiceRegistry) -> None:
                     breaker_until = time.time() + breaker_cooldown
             finally:
                 queue.task_done()
+
+    def _reencode_to_wav(path: str) -> Optional[str]:
+        try:
+            tmp_dir = os.path.join(tempfile.gettempdir(), "voice_ingest")
+            os.makedirs(tmp_dir, exist_ok=True)
+            wav_path = os.path.join(tmp_dir, f"{Path(path).stem}.wav")
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "s16le",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                    "-i",
+                    path,
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-c:a",
+                    "pcm_s16le",
+                    wav_path,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                logger.error("ffmpeg failed: %s", result.stderr.strip())
+                return None
+            if not os.path.exists(wav_path) or os.path.getsize(wav_path) <= 4096:
+                logger.error("ffmpeg output too small; dropping chunk.")
+                return None
+            logger.info("Voice ingest re-encoded chunk to %s", wav_path)
+            return wav_path
+        except Exception:
+            logger.exception("Voice ingest ffmpeg fallback failed")
+            return None
 
     async def _handle_voice_state(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
         if not await _enabled():
