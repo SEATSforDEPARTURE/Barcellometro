@@ -232,7 +232,19 @@ def setup(registry: ServiceRegistry) -> None:
             enqueued_at=now,
             session_id=active_session_id,
         )
-        asyncio.create_task(_enqueue(job))
+        loop = bot.loop
+        if loop is None or not loop.is_running():
+            logger.warning("Voice ingest loop not ready; dropping audio chunk.")
+            return
+        future = asyncio.run_coroutine_threadsafe(_enqueue(job), loop)
+        logger.debug("Voice ingest enqueued job for user %s", user.id)
+        def _log_enqueue_result(task_future: Any) -> None:
+            try:
+                task_future.result()
+                logger.debug("Voice ingest enqueue completed for user %s", user.id)
+            except Exception:
+                logger.exception("Voice ingest enqueue failed")
+        future.add_done_callback(_log_enqueue_result)
 
     def _save_chunk(data: bytes) -> str:
         tmp_dir = os.path.join(tempfile.gettempdir(), "voice_ingest")
