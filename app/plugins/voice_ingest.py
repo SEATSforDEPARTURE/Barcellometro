@@ -6,7 +6,7 @@ import logging
 import os
 import tempfile
 import subprocess
-from pathlib import Path
+import wave
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -312,8 +312,10 @@ def setup(registry: ServiceRegistry) -> None:
         breaker_limit = int(os.getenv("VOICE_INGEST_CIRCUIT_BREAKER_FAILS", "5"))
         breaker_cooldown = int(os.getenv("VOICE_INGEST_CIRCUIT_BREAKER_COOLDOWN_SEC", "120"))
         min_chars = int(os.getenv("VOICE_INGEST_MIN_CHARS", "3"))
+        ffmpeg_timeout = min(15, timeout_sec)
         while True:
             job = await queue.get()
+            wav_path: Optional[str] = None
             try:
                 if breaker_until and time.time() < breaker_until:
                     continue
@@ -323,24 +325,24 @@ def setup(registry: ServiceRegistry) -> None:
                 if os.path.getsize(job.audio_path) <= 4096:
                     logger.info("Voice ingest chunk too small; dropping.")
                     continue
+                normalized = await _normalize_audio(job.audio_path, ffmpeg_timeout)
+                if normalized is None:
+                    logger.error("Voice ingest normalization failed; dropping chunk.")
+                    continue
+                wav_path, duration = normalized
                 async with semaphore:
-                    try:
-                        transcript = await asyncio.wait_for(stt_local.transcribe(job.audio_path), timeout=timeout_sec)
-                    except Exception:
-                        logger.exception("Voice ingest STT failed; retrying with ffmpeg")
-                        wav_path = _reencode_to_wav(job.audio_path)
-                        if wav_path is None:
-                            logger.error("Voice ingest fallback failed; dropping chunk.")
-                            continue
-                        transcript = await asyncio.wait_for(stt_local.transcribe(wav_path), timeout=timeout_sec)
+                    duration_label = f"{duration:.2f}s" if duration is not None else "unknown"
+                    logger.info("Voice ingest STT starting on %s duration=%s", wav_path, duration_label)
+                    transcript = await asyncio.wait_for(stt_local.transcribe(wav_path), timeout=timeout_sec)
+                    logger.info("Voice ingest STT done job_id=%s chars=%s", job.session_id, len(transcript.text))
                 text = transcript.text.strip()
                 if len(text) < min_chars:
                     continue
-                normalized = _normalize_text(text)
+                normalized_text = _normalize_text(text)
                 cached = last_text_cache.get(job.user_id)
-                if cached and cached[0] == normalized and (time.time() - cached[1]) < 30:
+                if cached and cached[0] == normalized_text and (time.time() - cached[1]) < 30:
                     continue
-                last_text_cache[job.user_id] = (normalized, time.time())
+                last_text_cache[job.user_id] = (normalized_text, time.time())
                 call_offset_ms = int((datetime.now(timezone.utc) - active_session_started).total_seconds() * 1000)
                 message_id = str(uuid4())
                 await database.insert_message(
@@ -391,14 +393,18 @@ def setup(registry: ServiceRegistry) -> None:
                 if breaker_failures >= breaker_limit:
                     breaker_until = time.time() + breaker_cooldown
             finally:
+                _cleanup_file(job.audio_path)
+                if wav_path:
+                    _cleanup_file(wav_path)
                 queue.task_done()
 
-    def _reencode_to_wav(path: str) -> Optional[str]:
+    async def _normalize_audio(path: str, timeout_sec: int) -> Optional[tuple[str, Optional[float]]]:
         try:
             tmp_dir = os.path.join(tempfile.gettempdir(), "voice_ingest")
             os.makedirs(tmp_dir, exist_ok=True)
-            wav_path = os.path.join(tmp_dir, f"{Path(path).stem}.wav")
-            result = subprocess.run(
+            wav_path = os.path.join(tmp_dir, f"{uuid4()}.wav")
+            result = await asyncio.to_thread(
+                subprocess.run,
                 [
                     "ffmpeg",
                     "-y",
@@ -421,6 +427,7 @@ def setup(registry: ServiceRegistry) -> None:
                 check=False,
                 capture_output=True,
                 text=True,
+                timeout=timeout_sec,
             )
             if result.returncode != 0:
                 logger.error("ffmpeg failed: %s", result.stderr.strip())
@@ -428,11 +435,35 @@ def setup(registry: ServiceRegistry) -> None:
             if not os.path.exists(wav_path) or os.path.getsize(wav_path) <= 4096:
                 logger.error("ffmpeg output too small; dropping chunk.")
                 return None
-            logger.info("Voice ingest re-encoded chunk to %s", wav_path)
-            return wav_path
-        except Exception:
-            logger.exception("Voice ingest ffmpeg fallback failed")
+            logger.info("Voice ingest normalized audio with ffmpeg: %s -> %s", path, wav_path)
+            duration = _wav_duration(wav_path)
+            return wav_path, duration
+        except subprocess.TimeoutExpired:
+            logger.error("ffmpeg timed out after %ss for %s", timeout_sec, path)
             return None
+        except Exception:
+            logger.exception("Voice ingest ffmpeg normalization failed")
+            return None
+
+    def _wav_duration(path: str) -> Optional[float]:
+        try:
+            with wave.open(path, "rb") as handle:
+                frames = handle.getnframes()
+                rate = handle.getframerate()
+            if rate <= 0:
+                return None
+            return frames / float(rate)
+        except Exception:
+            logger.debug("Voice ingest could not read wav duration for %s", path)
+            return None
+
+    def _cleanup_file(path: str) -> None:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            return
+        except Exception:
+            logger.debug("Voice ingest failed to remove temp file %s", path)
 
     async def _handle_voice_state(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
         if not await _enabled():
