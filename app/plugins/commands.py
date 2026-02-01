@@ -81,6 +81,9 @@ def setup(registry: ServiceRegistry) -> None:
         stored = await database.get_setting(key)
         return stored if stored is not None else default
 
+    def voice_ingest_key(bot_id: int, key: str) -> str:
+        return f"voice_ingest.{bot_id}.{key}"
+
     @barcellometro_group.command(name="check", description="Abilita o disabilita la raccolta eventi nel canale")
     @app_commands.describe(state="on/off")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
@@ -378,17 +381,20 @@ def setup(registry: ServiceRegistry) -> None:
         await interaction.response.send_message("Limiti note vocali aggiornati.", ephemeral=True)
 
     @voice_ingest_group.command(name="on", description="Abilita ingest vocale")
-    @app_commands.describe(bot="Bot worker", voice_channel="Canale vocale", text_channel="Canale testuale")
+    @app_commands.describe(bot="Bot worker", voice_channel="Canale vocale", text_channel="Canale testuale (opzionale)")
     async def voice_ingest_on(
         interaction: discord.Interaction,
         bot: discord.User,
         voice_channel: discord.VoiceChannel | None = None,
-        text_channel: discord.TextChannel | None = None,
+        text_channel: discord.abc.GuildChannel | None = None,
     ) -> None:
         if not await check_permission(interaction, "barcellometro.voice_ingest.on"):
             return
         if not bot.bot:
             await interaction.response.send_message("Seleziona un bot worker valido.", ephemeral=True)
+            return
+        if bot.id is None:
+            await interaction.response.send_message("Bot worker non valido.", ephemeral=True)
             return
         resolved_voice = voice_channel
         if resolved_voice is None and isinstance(interaction.user, discord.Member):
@@ -396,29 +402,42 @@ def setup(registry: ServiceRegistry) -> None:
         if resolved_voice is None:
             await interaction.response.send_message("Specifica un canale vocale.", ephemeral=True)
             return
-        resolved_text = text_channel or (interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None)
-        if resolved_text is None:
-            await interaction.response.send_message("Specifica un canale testuale.", ephemeral=True)
+        if text_channel is not None and not hasattr(text_channel, "send"):
+            await interaction.response.send_message("Specifica un canale testuale valido.", ephemeral=True)
             return
-        await set_setting("voice_ingest.enabled", "true")
-        await set_setting("voice_ingest.worker_bot_id", str(bot.id))
-        await set_setting("voice_ingest.auto_join", "true")
-        await set_setting("voice_ingest.target_voice_channel_id", str(resolved_voice.id))
-        await set_setting("voice_ingest.target_text_channel_id", str(resolved_text.id))
+        resolved_text = text_channel
+        text_target_id = resolved_voice.id if resolved_text is None else resolved_text.id
+        await set_setting(voice_ingest_key(bot.id, "enabled"), "true")
+        await set_setting(voice_ingest_key(bot.id, "auto_join"), "true")
+        await set_setting(voice_ingest_key(bot.id, "target_voice_channel_id"), str(resolved_voice.id))
+        await set_setting(voice_ingest_key(bot.id, "target_text_channel_id"), str(text_target_id))
+        min_users_key = voice_ingest_key(bot.id, "min_users_to_join")
+        if await database.get_setting(min_users_key) is None:
+            await set_setting(min_users_key, "1")
+        if text_target_id == resolved_voice.id:
+            text_target_label = "chat del canale vocale"
+        elif isinstance(resolved_text, discord.TextChannel):
+            text_target_label = f"#{resolved_text.name}"
+        else:
+            text_target_label = f"channel {text_target_id}"
         await interaction.response.send_message(
-            f"Ingest vocale abilitato su {resolved_voice.name}.",
+            f"Ingest vocale abilitato su {resolved_voice.name} (text target: {text_target_label}).",
             ephemeral=True,
         )
-        if voice_ingest and resolved_voice:
+        if voice_ingest and resolved_voice and bot.user and bot.user.id == bot.id:
             await voice_ingest.join(resolved_voice)
 
     @voice_ingest_group.command(name="off", description="Disabilita ingest vocale")
-    async def voice_ingest_off(interaction: discord.Interaction) -> None:
+    @app_commands.describe(bot="Bot worker")
+    async def voice_ingest_off(interaction: discord.Interaction, bot: discord.User) -> None:
         if not await check_permission(interaction, "barcellometro.voice_ingest.off"):
             return
-        await set_setting("voice_ingest.enabled", "false")
+        if not bot.bot:
+            await interaction.response.send_message("Seleziona un bot worker valido.", ephemeral=True)
+            return
+        await set_setting(voice_ingest_key(bot.id, "enabled"), "false")
         await interaction.response.send_message("Ingest vocale disabilitato.", ephemeral=True)
-        if voice_ingest:
+        if voice_ingest and bot.user and bot.user.id == bot.id:
             await voice_ingest.leave()
 
     @voice_ingest_group.command(name="join", description="Join manuale del canale vocale")
@@ -429,7 +448,10 @@ def setup(registry: ServiceRegistry) -> None:
     ) -> None:
         if not await check_permission(interaction, "barcellometro.voice_ingest.join"):
             return
-        await set_setting("voice_ingest.target_voice_channel_id", str(voice_channel.id))
+        if not bot.user:
+            await interaction.response.send_message("Bot non pronto.", ephemeral=True)
+            return
+        await set_setting(voice_ingest_key(bot.user.id, "target_voice_channel_id"), str(voice_channel.id))
         await interaction.response.send_message(
             f"Richiesto join su {voice_channel.name}.",
             ephemeral=True,
