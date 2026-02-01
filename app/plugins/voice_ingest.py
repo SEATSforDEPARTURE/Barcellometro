@@ -194,14 +194,26 @@ def setup(registry: ServiceRegistry) -> None:
 
         leave_task = asyncio.create_task(_delayed_leave())
 
-    def _on_voice_data(user: discord.User, data: bytes) -> None:
+    def _on_voice_data(user: discord.User, data: Any) -> None:
         if active_session_id is None or active_session_started is None:
             return
         if current_voice_channel_id is None:
             return
+        pcm_bytes: Optional[bytes] = None
+        if isinstance(data, (bytes, bytearray)):
+            pcm_bytes = bytes(data)
+        else:
+            pcm_bytes = getattr(data, "pcm", None)
+            if pcm_bytes is None:
+                pcm_bytes = getattr(data, "audio", None)
+            if pcm_bytes is None:
+                pcm_bytes = getattr(data, "data", None)
+        if not isinstance(pcm_bytes, (bytes, bytearray)):
+            logger.warning("Voice ingest received unsupported audio payload: %s", type(data))
+            return
         now = time.time()
         buffer = audio_buffers.setdefault(user.id, bytearray())
-        buffer.extend(data)
+        buffer.extend(pcm_bytes)
         start_ts = audio_buffer_start.setdefault(user.id, now)
         chunk_seconds = int(os.getenv("VOICE_INGEST_DEFAULT_CHUNK_SECONDS", "10"))
         if now - start_ts < chunk_seconds:
