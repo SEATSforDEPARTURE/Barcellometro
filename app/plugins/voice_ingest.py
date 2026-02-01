@@ -378,7 +378,12 @@ def setup(registry: ServiceRegistry) -> None:
         if session is None:
             return
         started_ts = datetime.fromisoformat(session["started_ts"])
-        call_offset_ms = int((datetime.now(timezone.utc) - started_ts).total_seconds() * 1000)
+        if started_ts.tzinfo is None:
+            started_ts = started_ts.replace(tzinfo=timezone.utc)
+        message_ts = message.created_at
+        if message_ts.tzinfo is None:
+            message_ts = message_ts.replace(tzinfo=timezone.utc)
+        call_offset_ms = int((message_ts - started_ts).total_seconds() * 1000)
         embeds = message.embeds[0].to_dict() if message.embeds else {}
         embeds["voice_meta"] = {
             "voice_session_id": session["voice_session_id"],
