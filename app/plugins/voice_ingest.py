@@ -70,32 +70,41 @@ def setup(registry: ServiceRegistry) -> None:
     breaker_until: Optional[float] = None
     leave_task: Optional[asyncio.Task[None]] = None
     current_voice_channel_id: Optional[int] = None
+    legacy_warned: set[str] = set()
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
 
     async def _get_setting(key: str, default: str) -> str:
-        stored = await database.get_setting(key)
-        return stored if stored is not None else default
+        if not bot.user:
+            return default
+        namespaced_key = f"voice_ingest.{bot.user.id}.{key}"
+        stored = await database.get_setting(namespaced_key)
+        if stored is not None:
+            return stored
+        legacy_key = f"voice_ingest.{key}"
+        legacy_value = await database.get_setting(legacy_key)
+        if legacy_value is not None:
+            if legacy_key not in legacy_warned:
+                logger.warning("Legacy setting %s detected; please migrate to %s.", legacy_key, namespaced_key)
+                legacy_warned.add(legacy_key)
+            return legacy_value
+        return default
 
     async def _enabled() -> bool:
-        return (await _get_setting("voice_ingest.enabled", os.getenv("VOICE_INGEST_ENABLED", "false"))).lower() in {
+        return (await _get_setting("enabled", os.getenv("VOICE_INGEST_ENABLED", "false"))).lower() in {
             "1",
             "true",
             "yes",
             "y",
         }
 
-    async def _is_worker() -> bool:
-        worker_id = await _get_setting("voice_ingest.worker_bot_id", "")
-        return worker_id and bot.user and str(bot.user.id) == worker_id
-
     async def _target_voice_channel_id() -> Optional[int]:
-        value = await _get_setting("voice_ingest.target_voice_channel_id", "")
+        value = await _get_setting("target_voice_channel_id", "")
         return int(value) if value else None
 
     async def _target_text_channel_id() -> Optional[int]:
-        value = await _get_setting("voice_ingest.target_text_channel_id", "")
+        value = await _get_setting("target_text_channel_id", "")
         return int(value) if value else None
 
     async def _start_session(guild_id: int, voice_channel_id: int) -> None:
@@ -185,14 +194,26 @@ def setup(registry: ServiceRegistry) -> None:
 
         leave_task = asyncio.create_task(_delayed_leave())
 
-    def _on_voice_data(user: discord.User, data: bytes) -> None:
+    def _on_voice_data(user: discord.User, data: Any) -> None:
         if active_session_id is None or active_session_started is None:
             return
         if current_voice_channel_id is None:
             return
+        pcm_bytes: Optional[bytes] = None
+        if isinstance(data, (bytes, bytearray)):
+            pcm_bytes = bytes(data)
+        else:
+            pcm_bytes = getattr(data, "pcm", None)
+            if pcm_bytes is None:
+                pcm_bytes = getattr(data, "audio", None)
+            if pcm_bytes is None:
+                pcm_bytes = getattr(data, "data", None)
+        if not isinstance(pcm_bytes, (bytes, bytearray)):
+            logger.warning("Voice ingest received unsupported audio payload: %s", type(data))
+            return
         now = time.time()
         buffer = audio_buffers.setdefault(user.id, bytearray())
-        buffer.extend(data)
+        buffer.extend(pcm_bytes)
         start_ts = audio_buffer_start.setdefault(user.id, now)
         chunk_seconds = int(os.getenv("VOICE_INGEST_DEFAULT_CHUNK_SECONDS", "10"))
         if now - start_ts < chunk_seconds:
@@ -211,7 +232,19 @@ def setup(registry: ServiceRegistry) -> None:
             enqueued_at=now,
             session_id=active_session_id,
         )
-        asyncio.create_task(_enqueue(job))
+        loop = bot.loop
+        if loop is None or not loop.is_running():
+            logger.warning("Voice ingest loop not ready; dropping audio chunk.")
+            return
+        future = asyncio.run_coroutine_threadsafe(_enqueue(job), loop)
+        logger.debug("Voice ingest enqueued job for user %s", user.id)
+        def _log_enqueue_result(task_future: Any) -> None:
+            try:
+                task_future.result()
+                logger.debug("Voice ingest enqueue completed for user %s", user.id)
+            except Exception:
+                logger.exception("Voice ingest enqueue failed")
+        future.add_done_callback(_log_enqueue_result)
 
     def _save_chunk(data: bytes) -> str:
         tmp_dir = os.path.join(tempfile.gettempdir(), "voice_ingest")
@@ -328,17 +361,14 @@ def setup(registry: ServiceRegistry) -> None:
     async def _handle_voice_state(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
         if not await _enabled():
             return
-        if not await _is_worker():
-            logger.info("Voice ingest not configured for this bot")
-            return
         target_voice_id = await _target_voice_channel_id()
         if target_voice_id is None:
             return
         voice_channel = member.guild.get_channel(target_voice_id)
         if not isinstance(voice_channel, discord.VoiceChannel):
             return
-        auto_join = (await _get_setting("voice_ingest.auto_join", "true")).lower() in {"1", "true", "yes", "y"}
-        min_users = int(await _get_setting("voice_ingest.min_users_to_join", "1"))
+        auto_join = (await _get_setting("auto_join", "true")).lower() in {"1", "true", "yes", "y"}
+        min_users = int(await _get_setting("min_users_to_join", "1"))
         non_bot_members = [m for m in voice_channel.members if not m.bot]
         if auto_join and non_bot_members and len(non_bot_members) >= min_users:
             if not voice_client or not voice_client.is_connected():
@@ -350,18 +380,16 @@ def setup(registry: ServiceRegistry) -> None:
     async def _handle_join_command(channel: discord.VoiceChannel) -> None:
         if not await _enabled():
             return
-        if not await _is_worker():
-            return
         await _join_voice_channel(channel.guild, channel)
 
     async def _handle_leave_command() -> None:
         if not await _enabled():
             return
-        if not await _is_worker():
-            return
         await _leave_voice_channel()
 
     async def _handle_text_message(message: discord.Message) -> None:
+        if not await _enabled():
+            return
         if not message.guild:
             return
         target_text_id = await _target_text_channel_id()
@@ -374,7 +402,12 @@ def setup(registry: ServiceRegistry) -> None:
         if session is None:
             return
         started_ts = datetime.fromisoformat(session["started_ts"])
-        call_offset_ms = int((datetime.now(timezone.utc) - started_ts).total_seconds() * 1000)
+        if started_ts.tzinfo is None:
+            started_ts = started_ts.replace(tzinfo=timezone.utc)
+        message_ts = message.created_at
+        if message_ts.tzinfo is None:
+            message_ts = message_ts.replace(tzinfo=timezone.utc)
+        call_offset_ms = int((message_ts - started_ts).total_seconds() * 1000)
         embeds = message.embeds[0].to_dict() if message.embeds else {}
         embeds["voice_meta"] = {
             "voice_session_id": session["voice_session_id"],
