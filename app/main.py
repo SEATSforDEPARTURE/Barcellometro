@@ -22,18 +22,24 @@ def main() -> None:
     bot, registry = create_bot(config)
 
     database = registry.get("database")
-    retention = registry.get("retention")
-    backfill = registry.get("backfill")
-    ai_service = registry.get("ai")
+    instance_mode = (config.instance_mode or "main").strip().lower()
+    retention = None
+    backfill = None
+    ai_service = None
+    if instance_mode == "main":
+        retention = registry.get("retention")
+        backfill = registry.get("backfill")
+        ai_service = registry.get("ai")
 
     async def runner() -> None:
         await database.connect()
         await database.initialize_schema()
-        await retention.load_retention()
-        await backfill.load_settings()
-        await ai_service.load_settings()
-        retention.start()
-        backfill.start()
+        if instance_mode == "main":
+            await retention.load_retention()
+            await backfill.load_settings()
+            await ai_service.load_settings()
+            retention.start()
+            backfill.start()
         await bot.start(config.discord_token)
 
     try:
