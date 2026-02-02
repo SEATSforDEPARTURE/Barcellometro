@@ -31,6 +31,7 @@ def _normalize_text(text: str) -> str:
 
 @dataclass
 class _VoiceJob:
+    job_id: str
     user_id: int
     guild_id: int
     voice_channel_id: int
@@ -75,6 +76,7 @@ def setup(registry: ServiceRegistry) -> None:
     legacy_warned: set[str] = set()
     join_locks: dict[int, asyncio.Lock] = {}
     connecting_guilds: set[int] = set()
+    first_frame_logged: set[int] = set()
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
@@ -214,6 +216,12 @@ def setup(registry: ServiceRegistry) -> None:
             await _leave_voice_channel()
 
         leave_task = asyncio.create_task(_delayed_leave())
+        def _log_leave_result(task_future: Any) -> None:
+            try:
+                task_future.result()
+            except Exception:
+                logger.exception("Voice ingest delayed leave failed")
+        leave_task.add_done_callback(_log_leave_result)
 
     def _on_voice_data(user: discord.User, data: Any) -> None:
         if active_session_id is None or active_session_started is None:
@@ -234,6 +242,9 @@ def setup(registry: ServiceRegistry) -> None:
             return
         now = time.time()
         buffer = audio_buffers.setdefault(user.id, bytearray())
+        if user.id not in first_frame_logged:
+            first_frame_logged.add(user.id)
+            logger.info("Voice ingest first frame for user %s", user.id)
         buffer.extend(pcm_bytes)
         start_ts = audio_buffer_start.setdefault(user.id, now)
         chunk_seconds = int(os.getenv("VOICE_INGEST_DEFAULT_CHUNK_SECONDS", "10"))
@@ -244,7 +255,9 @@ def setup(registry: ServiceRegistry) -> None:
         buffer.clear()
         if _is_silent(chunk_data):
             return
+        job_id = str(uuid4())
         job = _VoiceJob(
+            job_id=job_id,
             user_id=user.id,
             guild_id=user.guild.id if isinstance(user, discord.Member) else 0,
             voice_channel_id=current_voice_channel_id,
@@ -257,12 +270,18 @@ def setup(registry: ServiceRegistry) -> None:
         if loop is None or not loop.is_running():
             logger.warning("Voice ingest loop not ready; dropping audio chunk.")
             return
+        logger.info(
+            "Voice ingest chunk finalized job_id=%s user_id=%s bytes=%s",
+            job_id,
+            user.id,
+            len(chunk_data),
+        )
         future = asyncio.run_coroutine_threadsafe(_enqueue(job), loop)
-        logger.debug("Voice ingest enqueued job for user %s", user.id)
+        logger.info("Voice ingest enqueued job_id=%s user_id=%s", job_id, user.id)
         def _log_enqueue_result(task_future: Any) -> None:
             try:
                 task_future.result()
-                logger.debug("Voice ingest enqueue completed for user %s", user.id)
+                logger.debug("Voice ingest enqueue completed for job_id=%s", job_id)
             except Exception:
                 logger.exception("Voice ingest enqueue failed")
         future.add_done_callback(_log_enqueue_result)
@@ -307,6 +326,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     async def _worker() -> None:
         nonlocal breaker_failures, breaker_until
+        logger.info("Voice ingest worker started")
         semaphore = asyncio.Semaphore(int(os.getenv("VOICE_INGEST_MAX_CONCURRENT_STT", "1")))
         timeout_sec = int(os.getenv("VOICE_INGEST_STT_TIMEOUT_SEC", "60"))
         breaker_limit = int(os.getenv("VOICE_INGEST_CIRCUIT_BREAKER_FAILS", "5"))
@@ -315,6 +335,7 @@ def setup(registry: ServiceRegistry) -> None:
         ffmpeg_timeout = min(15, timeout_sec)
         while True:
             job = await queue.get()
+            logger.debug("Voice ingest worker picked job_id=%s", job.job_id)
             wav_path: Optional[str] = None
             try:
                 if breaker_until and time.time() < breaker_until:
@@ -334,7 +355,7 @@ def setup(registry: ServiceRegistry) -> None:
                     duration_label = f"{duration:.2f}s" if duration is not None else "unknown"
                     logger.info("Voice ingest STT starting on %s duration=%s", wav_path, duration_label)
                     transcript = await asyncio.wait_for(stt_local.transcribe(wav_path), timeout=timeout_sec)
-                    logger.info("Voice ingest STT done job_id=%s chars=%s", job.session_id, len(transcript.text))
+                    logger.info("Voice ingest STT done job_id=%s chars=%s", job.job_id, len(transcript.text))
                 text = transcript.text.strip()
                 if len(text) < min_chars:
                     continue
@@ -543,6 +564,12 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal controller_registered
         if worker_task is None:
             worker_task = asyncio.create_task(_worker())
+            def _log_worker_result(task_future: Any) -> None:
+                try:
+                    task_future.result()
+                except Exception:
+                    logger.exception("Voice ingest worker task failed")
+            worker_task.add_done_callback(_log_worker_result)
         if not controller_registered:
             registry.register("voice_ingest", VoiceIngestController(_handle_join_command, _handle_leave_command))
             controller_registered = True

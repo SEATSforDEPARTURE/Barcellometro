@@ -35,6 +35,15 @@ def _parse_plugin_allowlist(raw: str) -> list[str]:
     return [entry.strip() for entry in raw.split(",") if entry.strip()]
 
 
+def normalize_instance_mode(raw: str | None) -> str:
+    value = (raw or "main").strip().lower()
+    if not value or value == "main":
+        return "main"
+    if value.startswith("worker"):
+        return "worker"
+    return value
+
+
 def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     intents = discord.Intents.default()
     intents.message_content = True
@@ -59,7 +68,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     translate_local_service = None
     translate_ai_service = None
 
-    instance_mode = (config.instance_mode or "main").strip().lower()
+    instance_mode = normalize_instance_mode(config.instance_mode)
+    logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
     if instance_mode not in {"main", "worker"}:
         logger.warning("Unknown INSTANCE_MODE=%s; defaulting to main.", config.instance_mode)
         instance_mode = "main"
@@ -93,9 +103,12 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     if allowlist_raw:
         allowlist = _parse_plugin_allowlist(allowlist_raw)
         logger.info("PLUGIN_ALLOWLIST active: %s", allowlist)
+        logger.info("Loading plugins: %s (strict=%s)", allowlist, False)
         plugin_loader.load(allowlist, strict=False)
     else:
+        logger.info("Loading plugins: %s (strict=%s)", DEFAULT_PLUGINS, True)
         plugin_loader.load(DEFAULT_PLUGINS, strict=True)
+    logger.info("Plugins loaded: %s", plugin_loader.loaded)
     registry.register("plugins", plugin_loader)
 
     if instance_mode == "main" and status_service is not None:

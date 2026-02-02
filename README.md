@@ -25,6 +25,8 @@ cp .env.example .env
 - `IGNORE_BOTS`: ignora messaggi bot.
 - `LOG_LEVEL`: livello di logging.
 - `OPENAI_API_KEY`: chiave API OpenAI (opzionale, solo per AI).
+- `INSTANCE_MODE`: modalità istanza (`main`, `worker`, `worker1`, `worker2`, ...).
+- `PLUGIN_ALLOWLIST`: lista plugin separata da virgole da caricare (opzionale).
 - `STT_LOCAL_MODEL`: modello locale (default `small`).
 - `STT_LOCAL_COMPUTE_TYPE`: compute type locale (`int8`, `int8_float16`, `float16`).
 - `STT_LOCAL_BEAM_SIZE`: beam size locale (default `1`).

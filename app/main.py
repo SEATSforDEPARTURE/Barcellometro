@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.core.bot import create_bot
+from app.core.bot import create_bot, normalize_instance_mode
 from app.core.config import load_config
 from app.core.logging_setup import setup_logging
 
@@ -22,7 +22,7 @@ def main() -> None:
     bot, registry = create_bot(config)
 
     database = registry.get("database")
-    instance_mode = (config.instance_mode or "main").strip().lower()
+    instance_mode = normalize_instance_mode(config.instance_mode)
     retention = None
     backfill = None
     ai_service = None
