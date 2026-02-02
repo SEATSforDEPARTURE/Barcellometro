@@ -183,20 +183,63 @@ def setup(registry: ServiceRegistry) -> None:
         if not enabled:
             return
         voice_meta: Optional[dict] = None
-        target_text_id = await database.get_setting("voice_ingest.target_text_channel_id")
-        target_voice_id = await database.get_setting("voice_ingest.target_voice_channel_id")
-        if target_text_id and target_voice_id and str(message.channel.id) == target_text_id:
+        message_channel_id = str(message.channel.id)
+        settings_rows = await database.fetchall("SELECT key, value FROM settings WHERE key LIKE 'voice_ingest.%'")
+        voice_configs: dict[str, dict[str, str]] = {}
+        legacy_settings: dict[str, str] = {}
+        for row in settings_rows:
+            key = row["key"]
+            parts = key.split(".")
+            if len(parts) == 3:
+                _, bot_id, setting_key = parts
+                voice_configs.setdefault(bot_id, {})[setting_key] = row["value"]
+            elif len(parts) == 2:
+                _, setting_key = parts
+                legacy_settings[setting_key] = row["value"]
+        for settings in voice_configs.values():
+            enabled_flag = settings.get("enabled", "").lower() in {"1", "true", "yes", "y"}
+            if not enabled_flag:
+                continue
+            target_text_id = settings.get("target_text_channel_id")
+            target_voice_id = settings.get("target_voice_channel_id")
+            if not target_text_id or not target_voice_id:
+                continue
+            if message_channel_id != target_text_id:
+                continue
             session = await database.get_active_voice_session(str(message.guild.id), target_voice_id)
             if session:
                 started_ts = datetime.fromisoformat(session["started_ts"])
                 if started_ts.tzinfo is None:
                     started_ts = started_ts.replace(tzinfo=timezone.utc)
-                call_offset_ms = int((datetime.now(timezone.utc) - started_ts).total_seconds() * 1000)
+                message_ts = message.created_at
+                if message_ts.tzinfo is None:
+                    message_ts = message_ts.replace(tzinfo=timezone.utc)
+                call_offset_ms = int((message_ts - started_ts).total_seconds() * 1000)
                 voice_meta = {
                     "voice_session_id": session["voice_session_id"],
                     "voice_channel_id": target_voice_id,
                     "call_offset_ms": call_offset_ms,
                 }
+                break
+        if voice_meta is None:
+            legacy_enabled = legacy_settings.get("enabled", "").lower() in {"1", "true", "yes", "y"}
+            target_text_id = legacy_settings.get("target_text_channel_id")
+            target_voice_id = legacy_settings.get("target_voice_channel_id")
+            if legacy_enabled and target_text_id and target_voice_id and message_channel_id == target_text_id:
+                session = await database.get_active_voice_session(str(message.guild.id), target_voice_id)
+                if session:
+                    started_ts = datetime.fromisoformat(session["started_ts"])
+                    if started_ts.tzinfo is None:
+                        started_ts = started_ts.replace(tzinfo=timezone.utc)
+                    message_ts = message.created_at
+                    if message_ts.tzinfo is None:
+                        message_ts = message_ts.replace(tzinfo=timezone.utc)
+                    call_offset_ms = int((message_ts - started_ts).total_seconds() * 1000)
+                    voice_meta = {
+                        "voice_session_id": session["voice_session_id"],
+                        "voice_channel_id": target_voice_id,
+                        "call_offset_ms": call_offset_ms,
+                    }
         ts = message.created_at.replace(tzinfo=timezone.utc).isoformat()
         await record_user(message.author, message.guild, True, ts)
         reply_to = str(message.reference.message_id) if message.reference else None
