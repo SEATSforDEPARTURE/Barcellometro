@@ -29,6 +29,19 @@ def _normalize_text(text: str) -> str:
     return " ".join(text.lower().strip().split())
 
 
+def _extract_pcm_bytes(payload: Any) -> Optional[bytes]:
+    if isinstance(payload, (bytes, bytearray)):
+        return bytes(payload)
+    pcm_bytes = getattr(payload, "pcm", None)
+    if pcm_bytes is None:
+        pcm_bytes = getattr(payload, "audio", None)
+    if pcm_bytes is None:
+        pcm_bytes = getattr(payload, "data", None)
+    if isinstance(pcm_bytes, (bytes, bytearray)):
+        return bytes(pcm_bytes)
+    return None
+
+
 @dataclass
 class _VoiceJob:
     job_id: str
@@ -39,6 +52,7 @@ class _VoiceJob:
     audio_path: str
     enqueued_at: float
     session_id: str
+    session_started_epoch: float
 
 
 class VoiceIngestController:
@@ -54,6 +68,9 @@ class VoiceIngestController:
 
 
 def setup(registry: ServiceRegistry) -> None:
+    logging.getLogger("discord.ext.voice_recv").setLevel(logging.WARNING)
+    logging.getLogger("discord.ext.voice_recv.gateway").setLevel(logging.WARNING)
+    logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)
     bot: discord.Client = registry.get("bot")
     database = registry.get("database")
     ingest: IngestService = registry.get("ingest")
@@ -73,13 +90,29 @@ def setup(registry: ServiceRegistry) -> None:
     breaker_until: Optional[float] = None
     leave_task: Optional[asyncio.Task[None]] = None
     current_voice_channel_id: Optional[int] = None
+    current_guild_id: Optional[int] = None
     legacy_warned: set[str] = set()
     join_locks: dict[int, asyncio.Lock] = {}
     connecting_guilds: set[int] = set()
     first_frame_logged: set[int] = set()
+    audio_buffers_by_user: dict[int, bytearray] = {}
+    audio_buffers_by_ssrc: dict[int, bytearray] = {}
+    audio_buffer_start_by_user: dict[int, float] = {}
+    audio_buffer_start_by_ssrc: dict[int, float] = {}
+    pending_by_user: dict[int, int] = {}
+    active_session_started_epoch: Optional[float] = None
+    last_log_ts: dict[str, float] = {}
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
+
+    def _throttled_log(key: str, level: int, message: str, every_sec: int = 30) -> None:
+        now = time.time()
+        last = last_log_ts.get(key, 0)
+        if now - last < every_sec:
+            return
+        last_log_ts[key] = now
+        logger.log(level, message)
 
     async def _get_setting(key: str, default: str) -> str:
         if not bot.user:
@@ -115,11 +148,14 @@ def setup(registry: ServiceRegistry) -> None:
 
     async def _start_session(guild_id: int, voice_channel_id: int) -> None:
         nonlocal active_session_id, active_session_started
+        nonlocal current_guild_id, active_session_started_epoch
         session_id = str(uuid4())
         active_session_id = session_id
         active_session_started = datetime.now(timezone.utc)
+        active_session_started_epoch = time.time()
         nonlocal current_voice_channel_id
         current_voice_channel_id = voice_channel_id
+        current_guild_id = guild_id
         await database.start_voice_session(
             voice_session_id=session_id,
             guild_id=str(guild_id),
@@ -143,7 +179,7 @@ def setup(registry: ServiceRegistry) -> None:
         )
 
     async def _end_session() -> None:
-        nonlocal active_session_id, active_session_started, current_voice_channel_id
+        nonlocal active_session_id, active_session_started, current_voice_channel_id, current_guild_id, active_session_started_epoch
         if not active_session_id:
             return
         await database.end_voice_session(active_session_id, _now_iso())
@@ -164,6 +200,8 @@ def setup(registry: ServiceRegistry) -> None:
         active_session_id = None
         active_session_started = None
         current_voice_channel_id = None
+        current_guild_id = None
+        active_session_started_epoch = None
 
     async def _join_voice_channel(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
         nonlocal voice_client
@@ -177,24 +215,25 @@ def setup(registry: ServiceRegistry) -> None:
                 if existing.channel and existing.channel.id == channel.id:
                     logger.info("Voice ingest already connected to channel %s", channel.id)
                     return
+                logger.info("Voice ingest moving to channel %s", channel.id)
                 await existing.move_to(channel)
                 voice_client = existing
                 await _start_session(guild.id, channel.id)
                 logger.info("Voice ingest moved to channel %s", channel.id)
                 return
-        if not _spec_available():
-            logger.warning("voice_recv not available; voice ingest disabled")
-            return
-        from discord.ext import voice_recv  # type: ignore
-        connecting_guilds.add(guild.id)
-        try:
-            logger.info("Voice ingest connect start for channel %s", channel.id)
-            voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
-            await _start_session(guild.id, channel.id)
-            voice_client.listen(voice_recv.BasicSink(_on_voice_data))
-            logger.info("Voice ingest connect done for channel %s", channel.id)
-        finally:
-            connecting_guilds.discard(guild.id)
+            if not _spec_available():
+                logger.warning("voice_recv not available; voice ingest disabled")
+                return
+            from discord.ext import voice_recv  # type: ignore
+            connecting_guilds.add(guild.id)
+            try:
+                logger.info("Voice ingest connect start for channel %s", channel.id)
+                voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
+                await _start_session(guild.id, channel.id)
+                voice_client.listen(voice_recv.BasicSink(_on_voice_data))
+                logger.info("Voice ingest connect done for channel %s", channel.id)
+            finally:
+                connecting_guilds.discard(guild.id)
 
     async def _leave_voice_channel() -> None:
         nonlocal voice_client
@@ -223,68 +262,94 @@ def setup(registry: ServiceRegistry) -> None:
                 logger.exception("Voice ingest delayed leave failed")
         leave_task.add_done_callback(_log_leave_result)
 
-    def _on_voice_data(user: discord.User, data: Any) -> None:
-        if active_session_id is None or active_session_started is None:
-            return
-        if current_voice_channel_id is None:
-            return
-        pcm_bytes: Optional[bytes] = None
-        if isinstance(data, (bytes, bytearray)):
-            pcm_bytes = bytes(data)
-        else:
-            pcm_bytes = getattr(data, "pcm", None)
+    def _on_voice_data(user: Optional[discord.User], data: Any) -> None:
+        try:
+            if active_session_id is None or active_session_started is None:
+                return
+            if current_voice_channel_id is None:
+                return
+            pcm_bytes = _extract_pcm_bytes(data)
             if pcm_bytes is None:
-                pcm_bytes = getattr(data, "audio", None)
-            if pcm_bytes is None:
-                pcm_bytes = getattr(data, "data", None)
-        if not isinstance(pcm_bytes, (bytes, bytearray)):
-            logger.warning("Voice ingest received unsupported audio payload: %s", type(data))
-            return
-        now = time.time()
-        buffer = audio_buffers.setdefault(user.id, bytearray())
-        if user.id not in first_frame_logged:
-            first_frame_logged.add(user.id)
-            logger.info("Voice ingest first frame for user %s", user.id)
-        buffer.extend(pcm_bytes)
-        start_ts = audio_buffer_start.setdefault(user.id, now)
-        chunk_seconds = int(os.getenv("VOICE_INGEST_DEFAULT_CHUNK_SECONDS", "10"))
-        if now - start_ts < chunk_seconds:
-            return
-        audio_buffer_start[user.id] = now
-        chunk_data = bytes(buffer)
-        buffer.clear()
-        if _is_silent(chunk_data):
-            return
-        job_id = str(uuid4())
-        job = _VoiceJob(
-            job_id=job_id,
-            user_id=user.id,
-            guild_id=user.guild.id if isinstance(user, discord.Member) else 0,
-            voice_channel_id=current_voice_channel_id,
-            chunk_seconds=chunk_seconds,
-            audio_path=_save_chunk(chunk_data),
-            enqueued_at=now,
-            session_id=active_session_id,
-        )
-        loop = bot.loop
-        if loop is None or not loop.is_running():
-            logger.warning("Voice ingest loop not ready; dropping audio chunk.")
-            return
-        logger.info(
-            "Voice ingest chunk finalized job_id=%s user_id=%s bytes=%s",
-            job_id,
-            user.id,
-            len(chunk_data),
-        )
-        future = asyncio.run_coroutine_threadsafe(_enqueue(job), loop)
-        logger.info("Voice ingest enqueued job_id=%s user_id=%s", job_id, user.id)
-        def _log_enqueue_result(task_future: Any) -> None:
-            try:
-                task_future.result()
-                logger.debug("Voice ingest enqueue completed for job_id=%s", job_id)
-            except Exception:
-                logger.exception("Voice ingest enqueue failed")
-        future.add_done_callback(_log_enqueue_result)
+                _throttled_log(
+                    "voice_ingest.bad_payload",
+                    logging.WARNING,
+                    f"Voice ingest received unsupported audio payload: {type(data)}",
+                )
+                return
+            now = time.time()
+            ssrc = getattr(data, "ssrc", None)
+            if user is None:
+                if ssrc is not None:
+                    ssrc_id = int(ssrc)
+                    buffer = audio_buffers_by_ssrc.setdefault(ssrc_id, bytearray())
+                    buffer.extend(pcm_bytes)
+                    audio_buffer_start_by_ssrc.setdefault(ssrc_id, now)
+                else:
+                    _throttled_log(
+                        "voice_ingest.unknown_user",
+                        logging.INFO,
+                        "Voice ingest received audio with unknown user/ssrc; dropping.",
+                    )
+                return
+            if ssrc is not None:
+                ssrc_id = int(ssrc)
+            else:
+                ssrc_id = None
+            if ssrc_id is not None and ssrc_id in audio_buffers_by_ssrc:
+                ssrc_buffer = audio_buffers_by_ssrc.pop(ssrc_id, bytearray())
+                if ssrc_buffer:
+                    audio_buffers_by_user.setdefault(user.id, bytearray()).extend(ssrc_buffer)
+                audio_buffer_start_by_ssrc.pop(ssrc_id, None)
+            buffer = audio_buffers_by_user.setdefault(user.id, bytearray())
+            if user.id not in first_frame_logged:
+                first_frame_logged.add(user.id)
+                logger.info("Voice ingest first frame for user %s", user.id)
+            buffer.extend(pcm_bytes)
+            start_ts = audio_buffer_start_by_user.setdefault(user.id, now)
+            chunk_seconds = int(os.getenv("VOICE_INGEST_DEFAULT_CHUNK_SECONDS", "10"))
+            if now - start_ts < chunk_seconds:
+                return
+            audio_buffer_start_by_user[user.id] = now
+            chunk_data = bytes(buffer)
+            buffer.clear()
+            if _is_silent(chunk_data):
+                return
+            job_id = str(uuid4())
+            guild_id = current_guild_id
+            if guild_id is None and voice_client and voice_client.guild:
+                guild_id = voice_client.guild.id
+            job = _VoiceJob(
+                job_id=job_id,
+                user_id=user.id,
+                guild_id=guild_id or 0,
+                voice_channel_id=current_voice_channel_id,
+                chunk_seconds=chunk_seconds,
+                audio_path=_save_chunk(chunk_data),
+                enqueued_at=now,
+                session_id=active_session_id,
+                session_started_epoch=active_session_started_epoch or now,
+            )
+            loop = bot.loop
+            if loop is None or not loop.is_running():
+                logger.warning("Voice ingest loop not ready; dropping audio chunk.")
+                return
+            logger.info(
+                "Voice ingest chunk finalized job_id=%s user_id=%s bytes=%s",
+                job_id,
+                user.id,
+                len(chunk_data),
+            )
+            future = asyncio.run_coroutine_threadsafe(_enqueue(job), loop)
+            logger.info("Voice ingest enqueued job_id=%s user_id=%s", job_id, user.id)
+            def _log_enqueue_result(task_future: Any) -> None:
+                try:
+                    task_future.result()
+                    logger.debug("Voice ingest enqueue completed for job_id=%s", job_id)
+                except Exception:
+                    logger.exception("Voice ingest enqueue failed")
+            future.add_done_callback(_log_enqueue_result)
+        except Exception:
+            logger.exception("Voice ingest _on_voice_data crashed")
 
     def _save_chunk(data: bytes) -> str:
         tmp_dir = os.path.join(tempfile.gettempdir(), "voice_ingest")
@@ -313,7 +378,7 @@ def setup(registry: ServiceRegistry) -> None:
         if queue.qsize() >= max_queue:
             logger.info("Voice ingest queue full; dropping chunk")
             return
-        if len([item for item in queue._queue if item.user_id == job.user_id]) >= max_per_user:
+        if pending_by_user.get(job.user_id, 0) >= max_per_user:
             return
         now = time.time()
         timestamps = [ts for ts in user_rate.get(job.user_id, []) if now - ts < 60]
@@ -322,6 +387,7 @@ def setup(registry: ServiceRegistry) -> None:
             return
         timestamps.append(now)
         user_rate[job.user_id] = timestamps
+        pending_by_user[job.user_id] = pending_by_user.get(job.user_id, 0) + 1
         await queue.put(job)
 
     async def _worker() -> None:
@@ -364,7 +430,7 @@ def setup(registry: ServiceRegistry) -> None:
                 if cached and cached[0] == normalized_text and (time.time() - cached[1]) < 30:
                     continue
                 last_text_cache[job.user_id] = (normalized_text, time.time())
-                call_offset_ms = int((datetime.now(timezone.utc) - active_session_started).total_seconds() * 1000)
+                call_offset_ms = int((job.enqueued_at - job.session_started_epoch) * 1000)
                 message_id = str(uuid4())
                 await database.insert_message(
                     message_id=message_id,
@@ -417,6 +483,7 @@ def setup(registry: ServiceRegistry) -> None:
                 _cleanup_file(job.audio_path)
                 if wav_path:
                     _cleanup_file(wav_path)
+                pending_by_user[job.user_id] = max(0, pending_by_user.get(job.user_id, 1) - 1)
                 queue.task_done()
 
     async def _normalize_audio(path: str, timeout_sec: int) -> Optional[tuple[str, Optional[float]]]:
