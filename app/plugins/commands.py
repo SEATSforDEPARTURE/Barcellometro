@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
+from uuid import uuid4
 
 import discord
 from discord import app_commands
 
 from app.core.service_registry import ServiceRegistry
+from app.services.ingest import EventEnvelope, IngestService
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,7 @@ def setup(registry: ServiceRegistry) -> None:
     status_service = registry.get("status")
     ai_service = registry.get("ai")
     voice_ingest = registry.get("voice_ingest") if registry.has("voice_ingest") else None
+    ingest: IngestService = registry.get("ingest")
     config = registry.get("config")
 
     guild = discord.Object(id=config.guild_id)
@@ -30,6 +34,7 @@ def setup(registry: ServiceRegistry) -> None:
     translate_group = app_commands.Group(name="translate", description="Impostazioni traduzione")
     audio_notes_group = app_commands.Group(name="audio_notes", description="Note vocali")
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Ingest da canale vocale")
+    privacy_group = app_commands.Group(name="privacy", description="Privacy per voice ingest")
     status_group = app_commands.Group(name="status", description="Stato servizi")
     barcellometro_group.add_command(role_group)
     barcellometro_group.add_command(stt_group)
@@ -80,6 +85,51 @@ def setup(registry: ServiceRegistry) -> None:
     async def get_setting(key: str, default: str) -> str:
         stored = await database.get_setting(key)
         return stored if stored is not None else default
+
+    def voice_ingest_key(bot_id: int, key: str) -> str:
+        return f"voice_ingest.{bot_id}.{key}"
+
+    async def resolve_voice_channel(
+        interaction: discord.Interaction,
+        voice_channel: discord.VoiceChannel | None,
+    ) -> discord.VoiceChannel | None:
+        if voice_channel is not None:
+            return voice_channel
+        if isinstance(interaction.user, discord.Member) and interaction.user.voice:
+            return interaction.user.voice.channel
+        return None
+
+    async def resolve_affected_bots(voice_channel: discord.VoiceChannel) -> list[int]:
+        bot_ids = {member.id for member in voice_channel.members if member.bot}
+        if not bot_ids:
+            bot_ids.update(
+                int(bot_id)
+                for bot_id in await database.find_voice_ingest_bots_for_voice_channel(str(voice_channel.id))
+                if bot_id.isdigit()
+            )
+        return sorted(bot_ids)
+
+    async def emit_privacy_event(
+        interaction: discord.Interaction,
+        event_type: str,
+        voice_channel: discord.VoiceChannel,
+        affected_bot_ids: list[int],
+    ) -> None:
+        ts = datetime.now(timezone.utc).isoformat()
+        await ingest.emit(
+            EventEnvelope(
+                event_id=str(uuid4()),
+                event_type=event_type,
+                platform="discord",
+                ts=ts,
+                guild_id=str(interaction.guild_id) if interaction.guild_id else None,
+                channel_id=str(voice_channel.id),
+                thread_id=None,
+                author_id=str(interaction.user.id),
+                content=None,
+                meta={"voice_channel_id": str(voice_channel.id), "affected_bot_ids": affected_bot_ids},
+            )
+        )
 
     @barcellometro_group.command(name="check", description="Abilita o disabilita la raccolta eventi nel canale")
     @app_commands.describe(state="on/off")
@@ -377,49 +427,108 @@ def setup(registry: ServiceRegistry) -> None:
         await set_setting("audio_notes.queue_max", str(queue_max))
         await interaction.response.send_message("Limiti note vocali aggiornati.", ephemeral=True)
 
-    @voice_ingest_group.command(name="on", description="Abilita ingest vocale")
-    @app_commands.describe(bot="Bot worker", voice_channel="Canale vocale", text_channel="Canale testuale")
-    async def voice_ingest_on(
+    @privacy_group.command(name="on", description="Attiva privacy (disconnette il bot dal vocale)")
+    @app_commands.describe(voice_channel="Canale vocale (opzionale)")
+    async def privacy_on(
         interaction: discord.Interaction,
-        bot: discord.User,
         voice_channel: discord.VoiceChannel | None = None,
-        text_channel: discord.TextChannel | None = None,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.voice_ingest.on"):
+        if not await check_permission(interaction, "barcellometro.privacy.on"):
             return
-        if not bot.bot:
-            await interaction.response.send_message("Seleziona un bot worker valido.", ephemeral=True)
-            return
-        resolved_voice = voice_channel
-        if resolved_voice is None and isinstance(interaction.user, discord.Member):
-            resolved_voice = interaction.user.voice.channel if interaction.user.voice else None
+        resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:
             await interaction.response.send_message("Specifica un canale vocale.", ephemeral=True)
             return
-        resolved_text = text_channel or (interaction.channel if isinstance(interaction.channel, discord.TextChannel) else None)
-        if resolved_text is None:
-            await interaction.response.send_message("Specifica un canale testuale.", ephemeral=True)
+        bot_ids = await resolve_affected_bots(resolved_voice)
+        if not bot_ids:
+            await interaction.response.send_message("Nessun bot configurato per questo canale vocale.", ephemeral=True)
             return
-        await set_setting("voice_ingest.enabled", "true")
-        await set_setting("voice_ingest.worker_bot_id", str(bot.id))
-        await set_setting("voice_ingest.auto_join", "true")
-        await set_setting("voice_ingest.target_voice_channel_id", str(resolved_voice.id))
-        await set_setting("voice_ingest.target_text_channel_id", str(resolved_text.id))
+        for bot_id in bot_ids:
+            await set_setting(voice_ingest_key(bot_id, "privacy_mode"), "true")
+            await set_setting(voice_ingest_key(bot_id, "auto_join"), "false")
+            await set_setting(voice_ingest_key(bot_id, "enabled"), "true")
+        await emit_privacy_event(interaction, "voice.privacy_on", resolved_voice, bot_ids)
+        if voice_ingest and bot.user and bot.user.id in bot_ids:
+            await voice_ingest.leave()
         await interaction.response.send_message(
-            f"Ingest vocale abilitato su {resolved_voice.name}.",
+            f"Privacy attivata per {resolved_voice.name}. Bot interessati: {len(bot_ids)}.",
             ephemeral=True,
         )
-        if voice_ingest and resolved_voice:
-            await voice_ingest.join(resolved_voice)
 
-    @voice_ingest_group.command(name="off", description="Disabilita ingest vocale")
-    async def voice_ingest_off(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.voice_ingest.off"):
+    @privacy_group.command(name="off", description="Disattiva privacy (riabilita auto-join)")
+    @app_commands.describe(voice_channel="Canale vocale (opzionale)")
+    async def privacy_off(
+        interaction: discord.Interaction,
+        voice_channel: discord.VoiceChannel | None = None,
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.privacy.off"):
             return
-        await set_setting("voice_ingest.enabled", "false")
-        await interaction.response.send_message("Ingest vocale disabilitato.", ephemeral=True)
-        if voice_ingest:
-            await voice_ingest.leave()
+        resolved_voice = await resolve_voice_channel(interaction, voice_channel)
+        if resolved_voice is None:
+            await interaction.response.send_message("Specifica un canale vocale.", ephemeral=True)
+            return
+        bot_ids = await resolve_affected_bots(resolved_voice)
+        if not bot_ids:
+            await interaction.response.send_message("Nessun bot configurato per questo canale vocale.", ephemeral=True)
+            return
+        for bot_id in bot_ids:
+            await set_setting(voice_ingest_key(bot_id, "privacy_mode"), "false")
+            await set_setting(voice_ingest_key(bot_id, "auto_join"), "true")
+            await set_setting(voice_ingest_key(bot_id, "enabled"), "true")
+        await emit_privacy_event(interaction, "voice.privacy_off", resolved_voice, bot_ids)
+        non_bot_members = [m for m in resolved_voice.members if not m.bot]
+        if voice_ingest and bot.user and bot.user.id in bot_ids and non_bot_members:
+            await voice_ingest.join(resolved_voice)
+        await interaction.response.send_message(
+            f"Privacy disattivata per {resolved_voice.name}. Bot interessati: {len(bot_ids)}.",
+            ephemeral=True,
+        )
+
+    @privacy_group.command(name="status", description="Mostra lo stato privacy")
+    @app_commands.describe(voice_channel="Canale vocale (opzionale)")
+    async def privacy_status(
+        interaction: discord.Interaction,
+        voice_channel: discord.VoiceChannel | None = None,
+    ) -> None:
+        if not await check_permission(interaction, "barcellometro.privacy.status"):
+            return
+        resolved_voice = await resolve_voice_channel(interaction, voice_channel)
+        if resolved_voice is None:
+            await interaction.response.send_message("Specifica un canale vocale.", ephemeral=True)
+            return
+        bot_ids = await resolve_affected_bots(resolved_voice)
+        if not bot_ids:
+            await interaction.response.send_message("Nessun bot configurato per questo canale vocale.", ephemeral=True)
+            return
+        states = []
+        for bot_id in bot_ids:
+            privacy_mode = (await get_setting(voice_ingest_key(bot_id, "privacy_mode"), "false")).lower() in {"1", "true", "yes", "y"}
+            auto_join = (await get_setting(voice_ingest_key(bot_id, "auto_join"), "true")).lower() in {"1", "true", "yes", "y"}
+            enabled = (await get_setting(voice_ingest_key(bot_id, "enabled"), "true")).lower() in {"1", "true", "yes", "y"}
+            states.append((bot_id, privacy_mode, auto_join, enabled))
+        privacy_values = {state[1] for state in states}
+        last_event = await database.get_last_privacy_event(str(resolved_voice.id))
+        last_change = "N/A"
+        if last_event:
+            actor = f"<@{last_event['actor_id']}>" if last_event.get("actor_id") else "sconosciuto"
+            last_change = f"{last_event['event_type']} alle {last_event['ts']} da {actor}"
+        if len(privacy_values) == 1:
+            status = "ON" if True in privacy_values else "OFF"
+            message = (
+                f"Privacy {status} su {resolved_voice.name}. Bot: {len(bot_ids)}. "
+                f"Ultimo cambio: {last_change}"
+            )
+        else:
+            lines = [
+                f"Bot {bot_id}: privacy={'ON' if privacy else 'OFF'}, auto_join={auto_join}, enabled={enabled}"
+                for bot_id, privacy, auto_join, enabled in states
+            ]
+            message = (
+                f"Privacy su {resolved_voice.name} (stati misti):\n"
+                + "\n".join(lines)
+                + f"\nUltimo cambio: {last_change}"
+            )
+        await interaction.response.send_message(message, ephemeral=True)
 
     @voice_ingest_group.command(name="join", description="Join manuale del canale vocale")
     @app_commands.describe(voice_channel="Canale vocale")
@@ -429,7 +538,10 @@ def setup(registry: ServiceRegistry) -> None:
     ) -> None:
         if not await check_permission(interaction, "barcellometro.voice_ingest.join"):
             return
-        await set_setting("voice_ingest.target_voice_channel_id", str(voice_channel.id))
+        if not bot.user:
+            await interaction.response.send_message("Bot non pronto.", ephemeral=True)
+            return
+        await set_setting(voice_ingest_key(bot.user.id, "target_voice_channel_id"), str(voice_channel.id))
         await interaction.response.send_message(
             f"Richiesto join su {voice_channel.name}.",
             ephemeral=True,
@@ -476,6 +588,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     bot.tree.add_command(barcellometro_group, guild=guild)
     bot.tree.add_command(status_group, guild=guild)
+    bot.tree.add_command(privacy_group, guild=guild)
 
     @role_group.command(name="set-role", description="Imposta limiti per un ruolo su un comando")
     @app_commands.describe(role="Ruolo", command="Nome comando", usage_limit="Limite utilizzi (vuoto = illimitato)", cooldown_seconds="Cooldown in secondi")
