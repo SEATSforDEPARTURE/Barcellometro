@@ -107,10 +107,11 @@ finestra configurata in modo idempotente.
 Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa viene usato il binario fornito da `imageio-ffmpeg`).
 
 ### Voice ingest
-- `/barcellometro voice_ingest on bot:<bot> [voice_channel] [text_channel]` (default: chat del canale vocale)
-- `/barcellometro voice_ingest off bot:<bot>`
 - `/barcellometro voice_ingest join <voice_channel>`
 - `/barcellometro voice_ingest leave`
+- `/privacy on [voice_channel]`
+- `/privacy off [voice_channel]`
+- `/privacy status [voice_channel]`
 
 ### Policy ruoli/utenti
 - `/barcellometro role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`

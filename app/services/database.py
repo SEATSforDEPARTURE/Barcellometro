@@ -421,6 +421,35 @@ class DatabaseService:
             (ts, event_type, platform, guild_id, channel_id, actor_id, target_id, json.dumps(meta)),
         )
 
+    async def find_voice_ingest_bots_for_voice_channel(self, voice_channel_id: str) -> list[str]:
+        rows = await self.fetchall(
+            "SELECT key FROM settings WHERE key LIKE 'voice_ingest.%' AND key LIKE '%.target_voice_channel_id' AND value = ?",
+            (voice_channel_id,),
+        )
+        bot_ids: set[str] = set()
+        for row in rows:
+            key = row["key"]
+            parts = key.split(".")
+            if len(parts) == 3:
+                _, bot_id, _ = parts
+                bot_ids.add(bot_id)
+        return sorted(bot_ids)
+
+    async def get_last_privacy_event(self, voice_channel_id: str) -> Optional[dict[str, Any]]:
+        row = await self.fetchone(
+            "SELECT ts, event_type, actor_id, meta_json FROM events WHERE channel_id = ? AND event_type IN (?, ?) ORDER BY ts DESC LIMIT 1",
+            (voice_channel_id, "voice.privacy_on", "voice.privacy_off"),
+        )
+        if row is None:
+            return None
+        meta = json.loads(row["meta_json"]) if row["meta_json"] else {}
+        return {
+            "ts": row["ts"],
+            "event_type": row["event_type"],
+            "actor_id": row["actor_id"],
+            "meta": meta,
+        }
+
     async def prune_messages(self, cutoff_ts: str) -> int:
         assert self._conn is not None
         cursor = await self._conn.execute("DELETE FROM messages WHERE ts < ?", (cutoff_ts,))

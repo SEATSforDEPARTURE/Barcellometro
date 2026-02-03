@@ -79,13 +79,12 @@ def setup(registry: ServiceRegistry) -> None:
 
     queue: asyncio.Queue[_VoiceJob] = asyncio.Queue()
     worker_task: Optional[asyncio.Task[None]] = None
+    enforcer_task: Optional[asyncio.Task[None]] = None
     voice_client: Optional[discord.VoiceClient] = None
     active_session_id: Optional[str] = None
     active_session_started: Optional[datetime] = None
     last_text_cache: dict[int, tuple[str, float]] = {}
     user_rate: dict[int, list[float]] = {}
-    audio_buffers: dict[int, bytearray] = {}
-    audio_buffer_start: dict[int, float] = {}
     breaker_failures = 0
     breaker_until: Optional[float] = None
     leave_task: Optional[asyncio.Task[None]] = None
@@ -137,6 +136,12 @@ def setup(registry: ServiceRegistry) -> None:
             "yes",
             "y",
         }
+
+    async def _privacy_mode() -> bool:
+        return (await _get_setting("privacy_mode", "false")).lower() in {"1", "true", "yes", "y"}
+
+    async def _auto_join() -> bool:
+        return (await _get_setting("auto_join", "true")).lower() in {"1", "true", "yes", "y"}
 
     async def _target_voice_channel_id() -> Optional[int]:
         value = await _get_setting("target_voice_channel_id", "")
@@ -553,8 +558,40 @@ def setup(registry: ServiceRegistry) -> None:
         except Exception:
             logger.debug("Voice ingest failed to remove temp file %s", path)
 
+    async def _enforce_privacy() -> None:
+        logger.info("Voice ingest privacy enforcer started")
+        while True:
+            try:
+                target_voice_id = await _target_voice_channel_id()
+                if target_voice_id is None:
+                    await asyncio.sleep(5)
+                    continue
+                channel = bot.get_channel(target_voice_id)
+                if not isinstance(channel, discord.VoiceChannel):
+                    await asyncio.sleep(5)
+                    continue
+                privacy = await _privacy_mode()
+                if privacy:
+                    if voice_client and voice_client.is_connected():
+                        logger.info("Voice ingest privacy enabled; leaving channel %s", channel.id)
+                        await _leave_voice_channel()
+                else:
+                    enabled = await _enabled()
+                    auto_join = await _auto_join()
+                    if enabled and auto_join:
+                        non_bot_members = [m for m in channel.members if not m.bot]
+                        if non_bot_members and (not voice_client or not voice_client.is_connected()):
+                            logger.info("Voice ingest privacy off; auto-joining channel %s", channel.id)
+                            await _join_voice_channel(channel.guild, channel)
+                await asyncio.sleep(5)
+            except Exception:
+                logger.exception("Voice ingest privacy enforcer failed")
+                await asyncio.sleep(5)
+
     async def _handle_voice_state(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
         if not await _enabled():
+            return
+        if await _privacy_mode():
             return
         target_voice_id = await _target_voice_channel_id()
         if target_voice_id is None:
@@ -562,7 +599,7 @@ def setup(registry: ServiceRegistry) -> None:
         voice_channel = member.guild.get_channel(target_voice_id)
         if not isinstance(voice_channel, discord.VoiceChannel):
             return
-        auto_join = (await _get_setting("auto_join", "true")).lower() in {"1", "true", "yes", "y"}
+        auto_join = await _auto_join()
         min_users = int(await _get_setting("min_users_to_join", "1"))
         non_bot_members = [m for m in voice_channel.members if not m.bot]
         if auto_join and non_bot_members and len(non_bot_members) >= min_users:
@@ -575,11 +612,11 @@ def setup(registry: ServiceRegistry) -> None:
     async def _handle_join_command(channel: discord.VoiceChannel) -> None:
         if not await _enabled():
             return
+        if await _privacy_mode():
+            return
         await _join_voice_channel(channel.guild, channel)
 
     async def _handle_leave_command() -> None:
-        if not await _enabled():
-            return
         await _leave_voice_channel()
 
     async def _handle_text_message(message: discord.Message) -> None:
@@ -629,6 +666,7 @@ def setup(registry: ServiceRegistry) -> None:
     async def handle_ready() -> None:
         nonlocal worker_task
         nonlocal controller_registered
+        nonlocal enforcer_task
         if worker_task is None:
             worker_task = asyncio.create_task(_worker())
             def _log_worker_result(task_future: Any) -> None:
@@ -637,6 +675,14 @@ def setup(registry: ServiceRegistry) -> None:
                 except Exception:
                     logger.exception("Voice ingest worker task failed")
             worker_task.add_done_callback(_log_worker_result)
+        if enforcer_task is None:
+            enforcer_task = asyncio.create_task(_enforce_privacy())
+            def _log_enforcer_result(task_future: Any) -> None:
+                try:
+                    task_future.result()
+                except Exception:
+                    logger.exception("Voice ingest privacy enforcer task failed")
+            enforcer_task.add_done_callback(_log_enforcer_result)
         if not controller_registered:
             registry.register("voice_ingest", VoiceIngestController(_handle_join_command, _handle_leave_command))
             controller_registered = True
