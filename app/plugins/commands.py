@@ -9,6 +9,7 @@ import discord
 from discord import app_commands
 
 from app.core.service_registry import ServiceRegistry
+from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope, IngestService
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 def setup(registry: ServiceRegistry) -> None:
     bot: discord.Client = registry.get("bot")
     database = registry.get("database")
+    entitlements = EntitlementsService(database)
+    registry.register("entitlements", entitlements)
     retention = registry.get("retention")
     backfill = registry.get("backfill")
     guard = registry.get("guard")
