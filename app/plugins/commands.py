@@ -139,7 +139,41 @@ def setup(registry: ServiceRegistry) -> None:
                             return parsed if isinstance(parsed, dict) else None
                         except json.JSONDecodeError:
                             return None
+        start_obj = raw.find("{")
+        end_obj = raw.rfind("}")
+        if start_obj != -1 and end_obj != -1 and end_obj > start_obj:
+            candidate = raw[start_obj : end_obj + 1]
+            try:
+                parsed = json.loads(candidate)
+                return parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                return None
         return None
+
+    async def _call_openai_json(
+        client: Any,
+        model: str,
+        input_payload: list[dict[str, str]],
+    ) -> tuple[dict[str, Any] | None, str]:
+        try:
+            response = await client.responses.create(
+                model=model,
+                response_format={"type": "json_object"},
+                input=input_payload,
+            )
+            logger.info("OpenAI response_format supported")
+        except TypeError as exc:
+            if "response_format" not in str(exc):
+                raise
+            logger.warning("OpenAI response_format unsupported; falling back")
+            response = await client.responses.create(
+                model=model,
+                input=input_payload,
+            )
+        logger.info("OpenAI response received")
+        ai_text = _extract_ai_text(response)
+        payload = _parse_json_safe(ai_text)
+        return payload, ai_text
 
     def voice_ingest_key(bot_id: int, key: str) -> str:
         return f"voice_ingest.{bot_id}.{key}"
@@ -742,33 +776,28 @@ def setup(registry: ServiceRegistry) -> None:
                         model = ai_service.get_model("summary")
                         if client and model:
                             try:
-                                response = await client.responses.create(
-                                    model=model,
-                                    response_format={"type": "json_object"},
-                                    input=[
-                                        {
-                                            "role": "system",
-                                            "content": (
-                                                "Riscrivi i testi forniti in italiano, tono neutro e conciso. "
-                                                "Non includere nomi utenti o attribuzioni personali. "
-                                                "Non aggiungere dettagli non presenti. "
-                                                "Restituisci solo JSON con chiavi: motivation, trend, advice."
-                                            ),
-                                        },
-                                        {
-                                            "role": "user",
-                                            "content": json.dumps(
-                                                {"motivation": reasons_text, "trend": trend_text, "advice": advice_text},
-                                                ensure_ascii=False,
-                                            ),
-                                        },
+                                system_prompt = (
+                                    "Riscrivi i testi forniti in italiano, tono neutro e conciso. "
+                                    "Non includere nomi utenti o attribuzioni personali. "
+                                    "Non aggiungere dettagli non presenti. "
+                                    "Restituisci solo JSON con chiavi: motivation, trend, advice. "
+                                    "Return ONLY valid JSON. No markdown, no prose, no explanations. "
+                                    'Esempio: {"motivation":"...","trend":"...","advice":"..."}'
+                                )
+                                user_payload = json.dumps(
+                                    {"motivation": reasons_text, "trend": trend_text, "advice": advice_text},
+                                    ensure_ascii=False,
+                                )
+                                ai_payload, ai_text = await _call_openai_json(
+                                    client,
+                                    model,
+                                    [
+                                        {"role": "system", "content": system_prompt},
+                                        {"role": "user", "content": user_payload},
                                     ],
                                 )
-                                logger.info("OpenAI response received")
-                                ai_text = _extract_ai_text(response)
                                 if not ai_text:
                                     logger.warning("OpenAI output empty")
-                                ai_payload = _parse_json_safe(ai_text)
                                 if ai_payload is None:
                                     snippet = ai_text[:200]
                                     logger.warning("OpenAI output not JSON: %s", snippet)
