@@ -101,6 +101,8 @@ def setup(registry: ServiceRegistry) -> None:
     pending_by_user: dict[int, int] = {}
     active_session_started_epoch: Optional[float] = None
     last_log_ts: dict[str, float] = {}
+    opus_corrupted_count = 0
+    opus_guard_installed = False
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
@@ -112,6 +114,68 @@ def setup(registry: ServiceRegistry) -> None:
             return
         last_log_ts[key] = now
         logger.log(level, message)
+
+    def _log_opus_corruption(count: int, error: Optional[Exception] = None) -> None:
+        suffix = f": {error!r}" if error is not None else ""
+        _throttled_log(
+            "voice_ingest.opus_corrupted",
+            logging.WARNING,
+            f"Opus corrupted stream ignored (count={count}){suffix}",
+            every_sec=10,
+        )
+
+    def _increment_opus_corrupted(error: Optional[Exception] = None) -> None:
+        nonlocal opus_corrupted_count
+        opus_corrupted_count += 1
+        _log_opus_corruption(opus_corrupted_count, error)
+
+    def _install_opus_guard() -> None:
+        nonlocal opus_guard_installed
+        if opus_guard_installed:
+            return
+        try:
+            from discord.opus import OpusError
+            from discord.ext.voice_recv import opus as vr_opus  # type: ignore
+        except Exception:
+            logger.debug("voice_recv opus module not available; skipping Opus guard")
+            return
+        decoder = getattr(vr_opus, "OpusDecoder", None)
+        if decoder is None or not hasattr(decoder, "_decode_packet"):
+            logger.debug("voice_recv OpusDecoder missing _decode_packet; skipping Opus guard")
+            return
+        original = decoder._decode_packet
+        if getattr(original, "_barcello_guard", False):
+            opus_guard_installed = True
+            return
+
+        def wrapped(self: Any, packet: Any) -> Any:
+            try:
+                return original(self, packet)
+            except OpusError as exc:
+                _increment_opus_corrupted(exc)
+                return packet, b""
+
+        setattr(wrapped, "_barcello_guard", True)
+        decoder._decode_packet = wrapped
+        opus_guard_installed = True
+        logger.info("Installed OpusError guard for voice_recv decoder")
+
+    class SafeSink:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+        def write(self, user: Optional[discord.User], data: Any) -> None:
+            try:
+                self._inner.write(user, data)
+            except Exception as exc:
+                try:
+                    from discord.opus import OpusError
+                except Exception:
+                    OpusError = None  # type: ignore[assignment]
+                if OpusError is not None and isinstance(exc, OpusError):
+                    _increment_opus_corrupted(exc)
+                    return
+                logger.exception("Voice ingest sink write failed")
 
     async def _get_setting(key: str, default: str) -> str:
         if not bot.user:
@@ -230,12 +294,14 @@ def setup(registry: ServiceRegistry) -> None:
                 logger.warning("voice_recv not available; voice ingest disabled")
                 return
             from discord.ext import voice_recv  # type: ignore
+            _install_opus_guard()
             connecting_guilds.add(guild.id)
             try:
                 logger.info("Voice ingest connect start for channel %s", channel.id)
                 voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
                 await _start_session(guild.id, channel.id)
-                voice_client.listen(voice_recv.BasicSink(_on_voice_data))
+                base_sink = voice_recv.BasicSink(_on_voice_data)
+                voice_client.listen(SafeSink(base_sink))
                 logger.info("Voice ingest connect done for channel %s", channel.id)
             finally:
                 connecting_guilds.discard(guild.id)
