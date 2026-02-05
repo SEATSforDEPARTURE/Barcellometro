@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from app.core.bot import create_bot, normalize_instance_mode
 from app.core.config import load_config
 from app.core.logging_setup import setup_logging
+from app.services.config_overrides import ConfigOverridesService
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,10 @@ def main() -> None:
     async def runner() -> None:
         await database.connect()
         await database.initialize_schema()
+        config_overrides = ConfigOverridesService(database)
+        await config_overrides.apply_overrides_once()
+        if os.getenv("ENTITLEMENTS_CONFIG_RELOAD", "").lower() in {"1", "true", "yes", "y"}:
+            asyncio.create_task(config_overrides.watch_for_changes())
         if instance_mode == "main":
             await retention.load_retention()
             await backfill.load_settings()
