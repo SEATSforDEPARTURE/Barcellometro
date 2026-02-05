@@ -20,6 +20,59 @@ from app.services.ingest import EventEnvelope, IngestService
 
 logger = logging.getLogger(__name__)
 
+_OPUS_GUARD_INSTALLED = False
+_OPUS_GUARD_CORRUPTED_COUNT = 0
+_OPUS_GUARD_THROTTLED_LOG: Optional[Callable[[int], None]] = None
+
+
+def _increment_opus_corruption() -> None:
+    global _OPUS_GUARD_CORRUPTED_COUNT
+    _OPUS_GUARD_CORRUPTED_COUNT += 1
+    if _OPUS_GUARD_THROTTLED_LOG is not None:
+        _OPUS_GUARD_THROTTLED_LOG(_OPUS_GUARD_CORRUPTED_COUNT)
+
+
+def _install_opus_decode_guard() -> None:
+    global _OPUS_GUARD_INSTALLED
+    if _OPUS_GUARD_INSTALLED:
+        return
+    try:
+        from discord.opus import OpusError
+        from discord.ext.voice_recv import opus as vr_opus  # type: ignore
+    except Exception:
+        return
+
+    decoder = getattr(vr_opus, "OpusDecoder", None)
+    if decoder is None:
+        return
+
+    target_name = None
+    if hasattr(decoder, "_decode_packet"):
+        target_name = "_decode_packet"
+    elif hasattr(decoder, "_process_packet"):
+        target_name = "_process_packet"
+    if target_name is None:
+        return
+
+    original = getattr(decoder, target_name)
+    if getattr(original, "_barcello_guard", False):
+        _OPUS_GUARD_INSTALLED = True
+        return
+
+    def _wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return original(self, *args, **kwargs)
+        except OpusError:
+            _increment_opus_corruption()
+            if target_name == "_decode_packet":
+                packet = args[0] if args else None
+                return packet, b""
+            return None
+
+    setattr(_wrapped, "_barcello_guard", True)
+    setattr(decoder, target_name, _wrapped)
+    _OPUS_GUARD_INSTALLED = True
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
