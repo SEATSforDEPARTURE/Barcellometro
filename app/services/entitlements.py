@@ -102,8 +102,50 @@ class EntitlementsService:
         policies = await self._get_json_setting("entitlements.policies", DEFAULT_POLICIES)
         features = policies.get("features", {}) if isinstance(policies, dict) else {}
         feature_policy = features.get(feature, {}) if isinstance(features, dict) else {}
-        allowed_profiles = feature_policy.get("allowed_profiles", [])
+        allowed_profiles = feature_policy.get("allowed_profiles")
+        if not isinstance(allowed_profiles, list):
+            logger.debug("Feature %s not configured; default allow.", feature)
+            return True
         return profile in allowed_profiles
+
+    async def get_command_profile_config(self, member: Any, command: str) -> dict[str, Any]:
+        profile = await self.resolve_profile(member)
+        policies = await self._get_json_setting("entitlements.policies", DEFAULT_POLICIES)
+        commands = policies.get("commands", {}) if isinstance(policies, dict) else {}
+        command_policy = commands.get(command, {}) if isinstance(commands, dict) else {}
+        profiles = command_policy.get("profiles", {}) if isinstance(command_policy, dict) else {}
+        raw_profile = profiles.get(profile)
+        if raw_profile is None:
+            raw_profile = profiles.get("base")
+        if not isinstance(raw_profile, dict):
+            raw_profile = {}
+
+        output_raw = raw_profile.get("output", {}) if isinstance(raw_profile.get("output"), dict) else {}
+        messages_raw = raw_profile.get("messages", {}) if isinstance(raw_profile.get("messages"), dict) else {}
+        capabilities_raw = raw_profile.get("capabilities", [])
+        capabilities = capabilities_raw if isinstance(capabilities_raw, list) else []
+
+        output_defaults = {
+            "show_score": True,
+            "show_motivation": False,
+            "show_trend": False,
+            "show_advice": False,
+            "show_mod_metrics": False,
+        }
+        output = {key: bool(output_raw.get(key, default)) for key, default in output_defaults.items()}
+
+        messages: dict[str, Any] = {}
+        if "dm_text" in messages_raw:
+            messages["dm_text"] = messages_raw.get("dm_text")
+        if "footer_text" in messages_raw:
+            messages["footer_text"] = messages_raw.get("footer_text")
+
+        return {
+            "allowed": bool(raw_profile.get("allowed", True)),
+            "output": output,
+            "capabilities": capabilities,
+            "messages": messages,
+        }
 
     async def _get_command_policy(self, command: str) -> dict[str, Any]:
         policies = await self._get_json_setting("entitlements.policies", DEFAULT_POLICIES)
