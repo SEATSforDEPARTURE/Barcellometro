@@ -20,6 +20,59 @@ from app.services.ingest import EventEnvelope, IngestService
 
 logger = logging.getLogger(__name__)
 
+_OPUS_GUARD_INSTALLED = False
+_OPUS_GUARD_CORRUPTED_COUNT = 0
+_OPUS_GUARD_THROTTLED_LOG: Optional[Callable[[int], None]] = None
+
+
+def _increment_opus_corruption() -> None:
+    global _OPUS_GUARD_CORRUPTED_COUNT
+    _OPUS_GUARD_CORRUPTED_COUNT += 1
+    if _OPUS_GUARD_THROTTLED_LOG is not None:
+        _OPUS_GUARD_THROTTLED_LOG(_OPUS_GUARD_CORRUPTED_COUNT)
+
+
+def _install_opus_decode_guard() -> None:
+    global _OPUS_GUARD_INSTALLED
+    if _OPUS_GUARD_INSTALLED:
+        return
+    try:
+        from discord.opus import OpusError
+        from discord.ext.voice_recv import opus as vr_opus  # type: ignore
+    except Exception:
+        return
+
+    decoder = getattr(vr_opus, "OpusDecoder", None)
+    if decoder is None:
+        return
+
+    target_name = None
+    if hasattr(decoder, "_decode_packet"):
+        target_name = "_decode_packet"
+    elif hasattr(decoder, "_process_packet"):
+        target_name = "_process_packet"
+    if target_name is None:
+        return
+
+    original = getattr(decoder, target_name)
+    if getattr(original, "_barcello_guard", False):
+        _OPUS_GUARD_INSTALLED = True
+        return
+
+    def _wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return original(self, *args, **kwargs)
+        except OpusError:
+            _increment_opus_corruption()
+            if target_name == "_decode_packet":
+                packet = args[0] if args else None
+                return packet, b""
+            return None
+
+    setattr(_wrapped, "_barcello_guard", True)
+    setattr(decoder, target_name, _wrapped)
+    _OPUS_GUARD_INSTALLED = True
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -112,6 +165,36 @@ def setup(registry: ServiceRegistry) -> None:
             return
         last_log_ts[key] = now
         logger.log(level, message)
+
+    def _log_opus_corruption(count: int) -> None:
+        _throttled_log(
+            "voice_ingest.opus_corrupted",
+            logging.WARNING,
+            f"Voice ingest dropped corrupted Opus frame (count={count}).",
+            every_sec=10,
+        )
+
+    def _install_opus_decode_guard_once() -> None:
+        global _OPUS_GUARD_THROTTLED_LOG
+        _OPUS_GUARD_THROTTLED_LOG = _log_opus_corruption
+        _install_opus_decode_guard()
+
+    class SafeSink:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+        def write(self, user: Optional[discord.User], data: Any) -> None:
+            try:
+                self._inner.write(user, data)
+            except Exception as exc:
+                try:
+                    from discord.opus import OpusError
+                except Exception:
+                    OpusError = None  # type: ignore[assignment]
+                if OpusError is not None and isinstance(exc, OpusError):
+                    _increment_opus_corruption()
+                    return
+                logger.exception("Voice ingest sink write failed")
 
     async def _get_setting(key: str, default: str) -> str:
         if not bot.user:
@@ -230,12 +313,14 @@ def setup(registry: ServiceRegistry) -> None:
                 logger.warning("voice_recv not available; voice ingest disabled")
                 return
             from discord.ext import voice_recv  # type: ignore
+            _install_opus_decode_guard_once()
             connecting_guilds.add(guild.id)
             try:
                 logger.info("Voice ingest connect start for channel %s", channel.id)
                 voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
                 await _start_session(guild.id, channel.id)
-                voice_client.listen(voice_recv.BasicSink(_on_voice_data))
+                base_sink = voice_recv.BasicSink(_on_voice_data)
+                voice_client.listen(SafeSink(base_sink))
                 logger.info("Voice ingest connect done for channel %s", channel.id)
             finally:
                 connecting_guilds.discard(guild.id)
