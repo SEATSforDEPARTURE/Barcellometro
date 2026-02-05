@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import discord
@@ -99,6 +100,46 @@ def setup(registry: ServiceRegistry) -> None:
             await interaction.followup.send(message, ephemeral=ephemeral)
         else:
             await interaction.response.send_message(message, ephemeral=ephemeral)
+
+    def _extract_ai_text(response: Any) -> str:
+        output_text = getattr(response, "output_text", "") or ""
+        if output_text:
+            return output_text
+        chunks: list[str] = []
+        for item in getattr(response, "output", []) or []:
+            for content in getattr(item, "content", []) or []:
+                text = getattr(content, "text", None)
+                if not text and getattr(content, "type", None) in {"output_text", "text"}:
+                    text = getattr(content, "text", "")
+                if text:
+                    chunks.append(text)
+        return "\n".join(chunks).strip()
+
+    def _parse_json_safe(text: str) -> dict[str, Any] | None:
+        if not text:
+            return None
+        raw = text.strip()
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            pass
+        if "```" in raw:
+            start = raw.find("```")
+            if start != -1:
+                fence_lang_end = raw.find("\n", start + 3)
+                if fence_lang_end != -1:
+                    end = raw.find("```", fence_lang_end + 1)
+                    if end != -1:
+                        fenced = raw[fence_lang_end:end].strip()
+                        try:
+                            parsed = json.loads(fenced)
+                            return parsed if isinstance(parsed, dict) else None
+                        except json.JSONDecodeError:
+                            return None
+        return None
 
     def voice_ingest_key(bot_id: int, key: str) -> str:
         return f"voice_ingest.{bot_id}.{key}"
@@ -630,125 +671,150 @@ def setup(registry: ServiceRegistry) -> None:
     @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
     @app_commands.describe(window_minutes="Finestra in minuti")
     async def barcello_command(interaction: discord.Interaction, window_minutes: int | None = None) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True, thinking=True)
+                logger.info("barcello: deferred")
+            except Exception:
+                logger.exception("barcello: failed to defer")
         if interaction.guild_id is None or interaction.channel_id is None:
             await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.")
             return
 
-        entitlements_service: EntitlementsService = registry.get("entitlements")
-        config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
-        profile = await entitlements_service.resolve_profile(interaction.user)
+        try:
+            entitlements_service: EntitlementsService = registry.get("entitlements")
+            config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
+            profile = await entitlements_service.resolve_profile(interaction.user)
 
-        async def try_send_dm(content: str) -> bool:
-            try:
-                await interaction.user.send(content)
-                return True
-            except discord.Forbidden:
-                return False
+            async def try_send_dm(content: str) -> bool:
+                try:
+                    await interaction.user.send(content)
+                    return True
+                except discord.Forbidden:
+                    return False
 
-        if not config["allowed"]:
-            dm_text = config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
-            if await try_send_dm(dm_text):
-                await send_ephemeral(interaction, "Ti ho inviato un DM")
-            else:
-                await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
-            return
+            if not config["allowed"]:
+                dm_text = config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
+                if await try_send_dm(dm_text):
+                    await send_ephemeral(interaction, "Ti ho inviato un DM")
+                else:
+                    await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
+                return
 
-        if not await check_permission(interaction, "barcello"):
-            return
+            if not await check_permission(interaction, "barcello"):
+                return
 
-        if window_minutes is None:
-            raw_default = await get_setting("barcello.default_window_minutes", "30")
-            try:
-                window_minutes = int(raw_default)
-            except ValueError:
+            if window_minutes is None:
+                raw_default = await get_setting("barcello.default_window_minutes", "30")
+                try:
+                    window_minutes = int(raw_default)
+                except ValueError:
+                    window_minutes = 30
+            if window_minutes <= 0:
                 window_minutes = 30
-        if window_minutes <= 0:
-            window_minutes = 30
 
-        result = await barcello.compute_channel(
-            str(interaction.guild_id),
-            str(interaction.channel_id),
-            window_minutes,
-        )
-
-        reasons_lines = [f"- {reason['label']} ({reason['summary']})" for reason in result.reasons]
-        reasons_text = "\n".join(reasons_lines) if reasons_lines else "Nessun segnale critico rilevato."
-        trend_text = ""
-        if result.trend:
-            direction = result.trend.get("direction", "stable")
-            delta = result.trend.get("delta", 0)
-            trend_label = {"stable": "stabile", "improving": "in miglioramento", "worsening": "in peggioramento"}.get(
-                direction,
-                direction,
+            result = await barcello.compute_channel(
+                str(interaction.guild_id),
+                str(interaction.channel_id),
+                window_minutes,
             )
-            trend_text = f"Trend {trend_label} (Δ {delta:+d})."
-        advice_text = "\n".join(f"- {item}" for item in (result.advice or []))
 
-        if "analysis.ai_preferred" in (config.get("capabilities") or []):
-            if registry.has("ai"):
-                ai_enabled = await entitlements_service.is_feature_allowed(interaction.user, "ai")
-                ai_service_enabled = ai_service.is_enabled() if ai_service else False
-                if ai_enabled and ai_service_enabled and ai_service:
-                    client = ai_service.client()
-                    model = ai_service.get_model("summary")
-                    if client and model:
-                        try:
-                            response = await client.responses.create(
-                                model=model,
-                                input=[
-                                    {
-                                        "role": "system",
-                                        "content": (
-                                            "Riscrivi i testi forniti in italiano, tono neutro e conciso. "
-                                            "Non includere nomi utenti o attribuzioni personali. "
-                                            "Non aggiungere dettagli non presenti. "
-                                            "Restituisci solo JSON con chiavi: motivation, trend, advice."
-                                        ),
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": json.dumps(
-                                            {"motivation": reasons_text, "trend": trend_text, "advice": advice_text},
-                                            ensure_ascii=False,
-                                        ),
-                                    },
-                                ],
-                            )
-                            ai_payload = json.loads(response.output_text.strip())
-                            reasons_text = ai_payload.get("motivation", reasons_text) or reasons_text
-                            trend_text = ai_payload.get("trend", trend_text) or trend_text
-                            advice_text = ai_payload.get("advice", advice_text) or advice_text
-                        except Exception:  # noqa: BLE001
-                            logger.exception("AI barcello enrichment failed")
+            reasons_lines = [f"- {reason['label']} ({reason['summary']})" for reason in result.reasons]
+            reasons_text = "\n".join(reasons_lines) if reasons_lines else "Nessun segnale critico rilevato."
+            trend_text = ""
+            if result.trend:
+                direction = result.trend.get("direction", "stable")
+                delta = result.trend.get("delta", 0)
+                trend_label = {"stable": "stabile", "improving": "in miglioramento", "worsening": "in peggioramento"}.get(
+                    direction,
+                    direction,
+                )
+                trend_text = f"Trend {trend_label} (Δ {delta:+d})."
+            advice_text = "\n".join(f"- {item}" for item in (result.advice or []))
+            ai_note = ""
 
-        lines: list[str] = []
-        output_flags = config.get("output", {})
-        if output_flags.get("show_score"):
-            lines.append(f"Score: {result.score}/100")
-            lines.append(f"Colore: {result.color}")
-            lines.append(f"Finestra: {window_minutes} min")
-        if output_flags.get("show_motivation"):
-            lines.append("Motivazioni:")
-            lines.append(reasons_text)
-        if output_flags.get("show_trend") and trend_text:
-            lines.append(trend_text)
-        if output_flags.get("show_advice") and advice_text:
-            lines.append("Consigli:")
-            lines.append(advice_text)
-        if output_flags.get("show_mod_metrics") and profile == "mod":
-            lines.append("Metriche aggregate:")
-            metrics_lines = [f"- {key}: {value}" for key, value in result.metrics.items()]
-            lines.extend(metrics_lines or ["- Nessuna metrica disponibile."])
+            if "analysis.ai_preferred" in (config.get("capabilities") or []):
+                if registry.has("ai"):
+                    ai_enabled = await entitlements_service.is_feature_allowed(interaction.user, "ai")
+                    ai_service_enabled = ai_service.is_enabled() if ai_service else False
+                    if ai_enabled and ai_service_enabled and ai_service:
+                        client = ai_service.client()
+                        model = ai_service.get_model("summary")
+                        if client and model:
+                            try:
+                                response = await client.responses.create(
+                                    model=model,
+                                    response_format={"type": "json_object"},
+                                    input=[
+                                        {
+                                            "role": "system",
+                                            "content": (
+                                                "Riscrivi i testi forniti in italiano, tono neutro e conciso. "
+                                                "Non includere nomi utenti o attribuzioni personali. "
+                                                "Non aggiungere dettagli non presenti. "
+                                                "Restituisci solo JSON con chiavi: motivation, trend, advice."
+                                            ),
+                                        },
+                                        {
+                                            "role": "user",
+                                            "content": json.dumps(
+                                                {"motivation": reasons_text, "trend": trend_text, "advice": advice_text},
+                                                ensure_ascii=False,
+                                            ),
+                                        },
+                                    ],
+                                )
+                                logger.info("OpenAI response received")
+                                ai_text = _extract_ai_text(response)
+                                if not ai_text:
+                                    logger.warning("OpenAI output empty")
+                                ai_payload = _parse_json_safe(ai_text)
+                                if ai_payload is None:
+                                    snippet = ai_text[:200]
+                                    logger.warning("OpenAI output not JSON: %s", snippet)
+                                    ai_note = "AI non disponibile."
+                                else:
+                                    logger.info("AI JSON parsed ok")
+                                    reasons_text = ai_payload.get("motivation", reasons_text) or reasons_text
+                                    trend_text = ai_payload.get("trend", trend_text) or trend_text
+                                    advice_text = ai_payload.get("advice", advice_text) or advice_text
+                            except Exception:  # noqa: BLE001
+                                logger.exception("AI barcello enrichment failed")
+                                ai_note = "AI non disponibile."
 
-        footer_text = config.get("messages", {}).get("footer_text")
-        if footer_text:
-            lines.append(footer_text)
+            lines: list[str] = []
+            output_flags = config.get("output", {})
+            if output_flags.get("show_score"):
+                lines.append(f"Score: {result.score}/100")
+                lines.append(f"Colore: {result.color}")
+                lines.append(f"Finestra: {window_minutes} min")
+            if output_flags.get("show_motivation"):
+                lines.append("Motivazioni:")
+                lines.append(reasons_text)
+            if output_flags.get("show_trend") and trend_text:
+                lines.append(trend_text)
+            if output_flags.get("show_advice") and advice_text:
+                lines.append("Consigli:")
+                lines.append(advice_text)
+            if output_flags.get("show_mod_metrics") and profile == "mod":
+                lines.append("Metriche aggregate:")
+                metrics_lines = [f"- {key}: {value}" for key, value in result.metrics.items()]
+                lines.extend(metrics_lines or ["- Nessuna metrica disponibile."])
+            if ai_note:
+                lines.append(ai_note)
 
-        dm_content = "\n".join(lines).strip() or "Nessun dato disponibile."
-        if await try_send_dm(dm_content):
-            await send_ephemeral(interaction, "Ti ho inviato un DM")
-        else:
-            await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
+            footer_text = config.get("messages", {}).get("footer_text")
+            if footer_text:
+                lines.append(footer_text)
+
+            dm_content = "\n".join(lines).strip() or "Nessun dato disponibile."
+            if await try_send_dm(dm_content):
+                await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
+            else:
+                await interaction.followup.send("Apri i DM per ricevere la risposta", ephemeral=True)
+        except Exception:
+            logger.exception("barcello: unexpected error")
+            await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
 
     bot.tree.add_command(barcellometro_group, guild=guild)
     bot.tree.add_command(status_group, guild=guild)
