@@ -101,6 +101,106 @@ def setup(registry: ServiceRegistry) -> None:
         else:
             await interaction.response.send_message(message, ephemeral=ephemeral)
 
+    def _render_health_bar(percent: int) -> str:
+        percent = max(0, min(100, percent))
+        filled = int(round(percent / 10))
+        empty = max(0, 10 - filled)
+        return f"{'█' * filled}{'░' * empty}"
+
+    def _format_metrics(metrics: dict[str, Any]) -> str:
+        keys = [
+            "message_count",
+            "window_minutes",
+            "msg_per_min",
+            "caps_ratio",
+            "negativity_hits",
+            "mention_count",
+            "mention_per_min",
+            "reply_war",
+        ]
+        lines = [f"{key}: {metrics.get(key)}" for key in keys]
+        return "```\n" + "\n".join(lines) + "\n```"
+
+    def _build_barcello_embed(
+        *,
+        result: BarcelloResult,
+        output_flags: dict[str, Any],
+        profile: str,
+        window_minutes: int,
+        reasons_text: str,
+        trend_text: str,
+        advice_text: str,
+        ai_note: str,
+    ) -> discord.Embed:
+        color_label = (result.color or "nero").lower()
+        color_map = {
+            "verde": (0x2ECC71, "🟢", "verde"),
+            "giallo": (0xF1C40F, "🟡", "giallo"),
+            "rosso": (0xE74C3C, "🔴", "rosso"),
+            "nero": (0x2C2F33, "⚫", "nero"),
+        }
+        embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
+
+        context_label = "(testo)"
+        description_lines = [
+            f"🧭 FINESTRA TEMPORALE: ultimi {window_minutes} minuti",
+            f"🚨 ALLERTA: {emoji} {label}",
+        ]
+        embed = discord.Embed(
+            title=f"Barcellometro {context_label}",
+            description="\n".join(description_lines),
+            color=embed_color,
+        )
+
+        if output_flags.get("show_score"):
+            percent = int(round((result.score / 100) * 100))
+            bar = _render_health_bar(percent)
+            embed.add_field(
+                name="❤️ PUNTI SALUTE BARCELLO",
+                value=f"{result.score}/100  ({percent}%)\n{bar}",
+                inline=False,
+            )
+
+        if output_flags.get("show_motivation") and reasons_text:
+            embed.add_field(name="🔥 Motivazioni", value=reasons_text, inline=False)
+
+        if output_flags.get("show_trend") and trend_text:
+            embed.add_field(name="📈 Trend", value=trend_text, inline=False)
+
+        if output_flags.get("show_advice") and advice_text:
+            embed.add_field(name="💡 Consigli", value=advice_text, inline=False)
+
+        if profile in {"role1", "role2", "role3"}:
+            highlights = "\n".join(reasons_text.split("\n")[:3]) if reasons_text else "Nessun momento saliente."
+            embed.add_field(name="⭐ Momenti salienti", value=highlights, inline=False)
+
+        if profile == "mod":
+            embed.add_field(
+                name="🛡️ Dinamiche / Chi vs Chi",
+                value="Dati aggregati non disponibili.",
+                inline=False,
+            )
+            embed.add_field(
+                name="🛡️ Chi calma le acque",
+                value="Dati aggregati non disponibili.",
+                inline=False,
+            )
+            embed.add_field(
+                name="🛡️ Note operative",
+                value="Nessuna nota operativa disponibile.",
+                inline=False,
+            )
+
+        if output_flags.get("show_mod_metrics") and profile == "mod":
+            embed.add_field(name="🧮 Metriche aggregate", value=_format_metrics(result.metrics), inline=False)
+
+        if ai_note:
+            embed.add_field(name="ℹ️ Nota", value=ai_note, inline=False)
+
+        footer = f"Barcellometro • UTC: {result.window_start_ts} → {result.window_end_ts}"
+        embed.set_footer(text=footer)
+        return embed
+
     def _extract_ai_text(response: Any) -> str:
         output_text = getattr(response, "output_text", "") or ""
         if output_text:
@@ -720,9 +820,12 @@ def setup(registry: ServiceRegistry) -> None:
             config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
             profile = await entitlements_service.resolve_profile(interaction.user)
 
-            async def try_send_dm(content: str) -> bool:
+            async def try_send_dm(content: str | None = None, *, embed: discord.Embed | None = None) -> bool:
                 try:
-                    await interaction.user.send(content)
+                    if embed is not None:
+                        await interaction.user.send(embed=embed)
+                    else:
+                        await interaction.user.send(content or "")
                     return True
                 except discord.Forbidden:
                     return False
@@ -753,7 +856,7 @@ def setup(registry: ServiceRegistry) -> None:
                 window_minutes,
             )
 
-            reasons_lines = [f"- {reason['label']} ({reason['summary']})" for reason in result.reasons]
+            reasons_lines = [f"- {reason['label']} ({reason['summary']})" for reason in result.reasons][:5]
             reasons_text = "\n".join(reasons_lines) if reasons_lines else "Nessun segnale critico rilevato."
             trend_text = ""
             if result.trend:
@@ -801,7 +904,7 @@ def setup(registry: ServiceRegistry) -> None:
                                 if ai_payload is None:
                                     snippet = ai_text[:200]
                                     logger.warning("OpenAI output not JSON: %s", snippet)
-                                    ai_note = "AI non disponibile."
+                                    ai_note = "AI non disponibile: report base."
                                 else:
                                     logger.info("AI JSON parsed ok")
                                     reasons_text = ai_payload.get("motivation", reasons_text) or reasons_text
@@ -809,35 +912,24 @@ def setup(registry: ServiceRegistry) -> None:
                                     advice_text = ai_payload.get("advice", advice_text) or advice_text
                             except Exception:  # noqa: BLE001
                                 logger.exception("AI barcello enrichment failed")
-                                ai_note = "AI non disponibile."
+                                ai_note = "AI non disponibile: report base."
 
-            lines: list[str] = []
             output_flags = config.get("output", {})
-            if output_flags.get("show_score"):
-                lines.append(f"Score: {result.score}/100")
-                lines.append(f"Colore: {result.color}")
-                lines.append(f"Finestra: {window_minutes} min")
-            if output_flags.get("show_motivation"):
-                lines.append("Motivazioni:")
-                lines.append(reasons_text)
-            if output_flags.get("show_trend") and trend_text:
-                lines.append(trend_text)
-            if output_flags.get("show_advice") and advice_text:
-                lines.append("Consigli:")
-                lines.append(advice_text)
-            if output_flags.get("show_mod_metrics") and profile == "mod":
-                lines.append("Metriche aggregate:")
-                metrics_lines = [f"- {key}: {value}" for key, value in result.metrics.items()]
-                lines.extend(metrics_lines or ["- Nessuna metrica disponibile."])
-            if ai_note:
-                lines.append(ai_note)
-
+            embed = _build_barcello_embed(
+                result=result,
+                output_flags=output_flags,
+                profile=profile,
+                window_minutes=window_minutes,
+                reasons_text=reasons_text,
+                trend_text=trend_text,
+                advice_text=advice_text,
+                ai_note=ai_note,
+            )
             footer_text = config.get("messages", {}).get("footer_text")
             if footer_text:
-                lines.append(footer_text)
+                embed.add_field(name="📌 Nota", value=footer_text, inline=False)
 
-            dm_content = "\n".join(lines).strip() or "Nessun dato disponibile."
-            if await try_send_dm(dm_content):
+            if await try_send_dm(embed=embed):
                 await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
             else:
                 await interaction.followup.send("Apri i DM per ricevere la risposta", ephemeral=True)
