@@ -138,6 +138,18 @@ class DatabaseService:
                 last_used_ts TEXT,
                 PRIMARY KEY (guild_id, user_id, command, window_date)
             );
+
+            CREATE TABLE IF NOT EXISTS barcello_snapshots (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                window_minutes INTEGER NOT NULL,
+                window_end_ts TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                reasons_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                computed_ts TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, window_minutes, window_end_ts)
+            );
             """
         )
         await self._conn.commit()
@@ -200,6 +212,111 @@ class DatabaseService:
     async def count_enabled_channels(self) -> int:
         row = await self.fetchone("SELECT COUNT(*) as count FROM channels WHERE enabled = 1")
         return int(row["count"]) if row else 0
+
+    async def get_barcello_snapshot(
+        self,
+        guild_id: str,
+        channel_id: str,
+        window_minutes: int,
+        window_end_ts: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM barcello_snapshots
+            WHERE guild_id = ? AND channel_id = ? AND window_minutes = ? AND window_end_ts = ?
+            """,
+            (guild_id, channel_id, window_minutes, window_end_ts),
+        )
+
+    async def get_barcello_snapshot_before(
+        self,
+        guild_id: str,
+        channel_id: str,
+        window_minutes: int,
+        window_end_ts: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM barcello_snapshots
+            WHERE guild_id = ? AND channel_id = ? AND window_minutes = ? AND window_end_ts < ?
+            ORDER BY window_end_ts DESC
+            LIMIT 1
+            """,
+            (guild_id, channel_id, window_minutes, window_end_ts),
+        )
+
+    async def put_barcello_snapshot(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        window_minutes: int,
+        window_end_ts: str,
+        score: int,
+        reasons_json: str,
+        metrics_json: str,
+        computed_ts: str,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO barcello_snapshots (
+                guild_id, channel_id, window_minutes, window_end_ts,
+                score, reasons_json, metrics_json, computed_ts
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, window_minutes, window_end_ts) DO UPDATE SET
+                score = excluded.score,
+                reasons_json = excluded.reasons_json,
+                metrics_json = excluded.metrics_json,
+                computed_ts = excluded.computed_ts
+            """,
+            (
+                guild_id,
+                channel_id,
+                window_minutes,
+                window_end_ts,
+                score,
+                reasons_json,
+                metrics_json,
+                computed_ts,
+            ),
+        )
+
+    async def fetch_messages_in_range(
+        self,
+        *,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+        limit: int = 1000,
+    ) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT * FROM messages
+            WHERE channel_id = ? AND ts >= ? AND ts <= ?
+            ORDER BY ts ASC
+            LIMIT ?
+            """,
+            (channel_id, start_ts, end_ts, limit),
+        )
+
+    async def fetch_events_in_range(
+        self,
+        *,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+        limit: int = 1000,
+    ) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT * FROM events
+            WHERE channel_id = ? AND ts >= ? AND ts <= ?
+            ORDER BY ts ASC
+            LIMIT ?
+            """,
+            (channel_id, start_ts, end_ts, limit),
+        )
 
     async def fetch_enabled_channels(self) -> list[aiosqlite.Row]:
         return await self.fetchall(
