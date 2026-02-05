@@ -102,7 +102,10 @@ class EntitlementsService:
         policies = await self._get_json_setting("entitlements.policies", DEFAULT_POLICIES)
         features = policies.get("features", {}) if isinstance(policies, dict) else {}
         feature_policy = features.get(feature, {}) if isinstance(features, dict) else {}
-        allowed_profiles = feature_policy.get("allowed_profiles", [])
+        allowed_profiles = feature_policy.get("allowed_profiles")
+        if not isinstance(allowed_profiles, list):
+            logger.debug("Feature %s not configured; default allow.", feature)
+            return True
         return profile in allowed_profiles
 
     async def get_command_profile_config(self, member: Any, command: str) -> dict[str, Any]:

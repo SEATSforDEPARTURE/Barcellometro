@@ -1,0 +1,13 @@
+{
+  "mod": { "role_ids": [] },
+  "entitlements": {
+    "profile_map": {
+      "profiles": { "base": { "priority": 0 }, "mod": { "priority": 100 } },
+      "role_to_profile": {}
+    },
+    "policies": {
+      "commands": {},
+      "features": { "ai": { "allowed_profiles": [] } }
+    }
+  }
+}
