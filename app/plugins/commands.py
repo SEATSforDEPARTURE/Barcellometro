@@ -1,22 +1,245 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import discord
 from discord import app_commands
 
 from app.core.service_registry import ServiceRegistry
+from app.services.barcello import BarcelloService
+from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope, IngestService
 
 logger = logging.getLogger(__name__)
+
+BARCELLO_DENY_DM_TEXT = "Serve almeno PLUS per usare /barcello."
+
+
+async def _send_ephemeral(interaction: discord.Interaction, message: str) -> None:
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+def _format_window_label(window_minutes: int, result: Any) -> str:
+    return f"Finestra: {window_minutes} min ({result.window_start_ts} → {result.window_end_ts})"
+
+
+def _format_reasons(reasons: list[dict[str, Any]]) -> list[str]:
+    lines = []
+    for reason in reasons:
+        label = reason.get("label", "Motivo")
+        summary = reason.get("summary")
+        if summary:
+            lines.append(f"- {label}: {summary}")
+        else:
+            lines.append(f"- {label}")
+    return lines
+
+
+def _format_trend(trend: dict[str, Any]) -> str:
+    direction = trend.get("direction", "stable")
+    delta = trend.get("delta", 0)
+    return f"Trend: {direction} ({delta:+d})"
+
+
+def _format_metrics(metrics: dict[str, Any]) -> list[str]:
+    lines = []
+    for key, value in metrics.items():
+        lines.append(f"- {key}: {value}")
+    return lines
+
+
+def _compose_barcello_dm_content(
+    result: Any,
+    *,
+    output: dict[str, bool],
+    profile: str,
+    footer_text: str | None,
+    ai_text: dict[str, Any] | None = None,
+    window_minutes: int,
+) -> str:
+    lines: list[str] = []
+    if output.get("show_score", True):
+        lines.append(f"Barcello: {result.score}/100 ({result.color})")
+        lines.append(_format_window_label(window_minutes, result))
+
+    if output.get("show_motivation"):
+        lines.append("")
+        lines.append("Motivazioni:")
+        if ai_text and ai_text.get("motivation"):
+            lines.extend(f"- {item}" for item in ai_text["motivation"])
+        else:
+            lines.extend(_format_reasons(result.reasons))
+
+    if output.get("show_trend") and result.trend:
+        lines.append("")
+        if ai_text and ai_text.get("trend"):
+            lines.append(f"Trend: {ai_text['trend']}")
+        else:
+            lines.append(_format_trend(result.trend))
+
+    if output.get("show_advice") and result.advice:
+        lines.append("")
+        lines.append("Consigli:")
+        if ai_text and ai_text.get("advice"):
+            lines.extend(f"- {item}" for item in ai_text["advice"])
+        else:
+            lines.extend(f"- {item}" for item in result.advice)
+
+    if output.get("show_mod_metrics") and profile == "mod":
+        lines.append("")
+        lines.append("Metriche:")
+        lines.extend(_format_metrics(result.metrics))
+
+    if footer_text:
+        lines.append("")
+        lines.append(footer_text)
+
+    return "\n".join(lines).strip()
+
+
+async def _maybe_generate_ai_text(ai_service: Any, result: Any) -> dict[str, Any] | None:
+    if ai_service is None or not ai_service.is_enabled():
+        return None
+    client = ai_service.client()
+    if client is None:
+        return None
+    model = ai_service.get_model("summary") or "gpt-4o-mini"
+    prompt = (
+        "Sei un assistente che riassume lo stato del canale in modo neutro e non attribuibile. "
+        "NON includere nomi o identificativi utente. "
+        "Restituisci JSON con chiavi motivation (lista), trend (stringa breve), advice (lista). "
+        "Usa testo in italiano.\n\n"
+        f"Score: {result.score}\n"
+        f"Color: {result.color}\n"
+        f"Reasons: {json.dumps(result.reasons, ensure_ascii=False)}\n"
+        f"Trend: {json.dumps(result.trend, ensure_ascii=False)}\n"
+        f"Advice: {json.dumps(result.advice, ensure_ascii=False)}\n"
+        f"Metrics: {json.dumps(result.metrics, ensure_ascii=False)}\n"
+    )
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        content = response.choices[0].message.content if response.choices else None
+        if not content:
+            return None
+        parsed = json.loads(content)
+        if not isinstance(parsed, dict):
+            return None
+        motivation = parsed.get("motivation")
+        advice = parsed.get("advice")
+        trend = parsed.get("trend")
+        if not isinstance(motivation, list):
+            motivation = None
+        if not isinstance(advice, list):
+            advice = None
+        if not isinstance(trend, str):
+            trend = None
+        return {"motivation": motivation, "advice": advice, "trend": trend}
+    except Exception:
+        logger.exception("AI enhancement failed for barcello")
+        return None
+
+
+async def _resolve_barcello_window_minutes(database: Any) -> int:
+    stored = await database.get_setting("barcello.default_window_minutes")
+    if stored:
+        try:
+            return max(1, int(stored))
+        except ValueError:
+            logger.warning("Invalid barcello.default_window_minutes setting: %s", stored)
+    return 30
+
+
+async def _send_barcello_dm(interaction: discord.Interaction, dm_text: str) -> None:
+    try:
+        await interaction.user.send(dm_text)
+    except discord.Forbidden:
+        await _send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
+        return
+    await _send_ephemeral(interaction, "Ti ho inviato un DM")
+
+
+async def _handle_barcello_command(
+    interaction: discord.Interaction,
+    *,
+    barcello: Any,
+    entitlements: Any,
+    ai_service: Any,
+    database: Any,
+    check_permission: Any,
+    window_minutes: int | None,
+) -> None:
+    # entitlements.policies -> commands -> barcello -> profiles -> <profile>
+    # Example:
+    # {
+    #   "commands": {
+    #     "barcello": {
+    #       "profiles": {
+    #         "base": {"allowed": false, "messages": {"dm_text": "Serve PLUS."}},
+    #         "role1": {"allowed": true, "output": {"show_score": true, "show_motivation": true}},
+    #         "role2": {"allowed": true, "output": {"show_trend": true}, "capabilities": ["analysis.ai_preferred"]},
+    #         "mod": {"allowed": true, "output": {"show_mod_metrics": true}}
+    #       }
+    #     }
+    #   }
+    # }
+    config = await entitlements.get_command_profile_config(interaction.user, "barcello")
+    if not config.get("allowed", True):
+        dm_text = config.get("messages", {}).get("dm_text") or BARCELLO_DENY_DM_TEXT
+        await _send_barcello_dm(interaction, dm_text)
+        return
+
+    if not await check_permission(interaction, "barcello"):
+        return
+
+    if window_minutes is None or window_minutes <= 0:
+        window_minutes = await _resolve_barcello_window_minutes(database)
+
+    result = await barcello.compute_channel(
+        str(interaction.guild_id),
+        str(interaction.channel_id),
+        window_minutes,
+    )
+
+    capabilities = config.get("capabilities", [])
+    ai_text = None
+    if "analysis.ai_preferred" in capabilities:
+        feature_allowed = await entitlements.is_feature_allowed(interaction.user, "ai")
+        if feature_allowed:
+            ai_text = await _maybe_generate_ai_text(ai_service, result)
+
+    profile = await entitlements.resolve_profile(interaction.user)
+    output = config.get("output", {})
+    footer_text = config.get("messages", {}).get("footer_text")
+    dm_text = _compose_barcello_dm_content(
+        result,
+        output=output,
+        profile=profile,
+        footer_text=footer_text,
+        ai_text=ai_text,
+        window_minutes=window_minutes,
+    )
+    await _send_barcello_dm(interaction, dm_text)
 
 
 def setup(registry: ServiceRegistry) -> None:
     bot: discord.Client = registry.get("bot")
     database = registry.get("database")
+    entitlements = EntitlementsService(database)
+    registry.register("entitlements", entitlements)
+    barcello = BarcelloService(database)
+    registry.register("barcello", barcello)
     retention = registry.get("retention")
     backfill = registry.get("backfill")
     guard = registry.get("guard")
@@ -220,6 +443,22 @@ def setup(registry: ServiceRegistry) -> None:
             return
 
         await responder.send_message("Backfill disattivato.", ephemeral=True)
+
+    @barcellometro_group.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
+    @app_commands.describe(window_minutes="Finestra temporale in minuti (opzionale)")
+    async def barcello_command(
+        interaction: discord.Interaction,
+        window_minutes: int | None = None,
+    ) -> None:
+        await _handle_barcello_command(
+            interaction,
+            barcello=barcello,
+            entitlements=entitlements,
+            ai_service=ai_service,
+            database=database,
+            check_permission=check_permission,
+            window_minutes=window_minutes,
+        )
 
     @barcellometro_group.command(name="ai", description="Abilita o disabilita il servizio AI")
     @app_commands.describe(state="on/off")
