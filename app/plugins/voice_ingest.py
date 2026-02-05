@@ -156,6 +156,7 @@ def setup(registry: ServiceRegistry) -> None:
     last_log_ts: dict[str, float] = {}
     opus_corrupted_count = 0
     opus_guard_installed = False
+    opus_decode_guard_installed = False
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
@@ -212,6 +213,35 @@ def setup(registry: ServiceRegistry) -> None:
         decoder._decode_packet = wrapped
         opus_guard_installed = True
         logger.info("Installed OpusError guard for voice_recv decoder")
+
+    def _install_discord_opus_decode_guard() -> None:
+        nonlocal opus_decode_guard_installed
+        if opus_decode_guard_installed:
+            return
+        try:
+            import discord.opus as d_opus
+            from discord.opus import OpusError
+        except Exception:
+            logger.debug("discord.opus not available; skipping global opus decode guard")
+            return
+        original = d_opus.Decoder.decode
+        if getattr(original, "_barcello_guard", False):
+            opus_decode_guard_installed = True
+            return
+
+        def wrapped(self: Any, data: Any, *, fec: bool = False) -> bytes:
+            try:
+                return original(self, data, fec=fec)
+            except OpusError as exc:
+                _increment_opus_corrupted(exc)
+                frame_size = getattr(self, "_frame_size", 960)
+                channels = getattr(self, "_channels", 2)
+                return b"\x00" * (frame_size * channels * 2)
+
+        setattr(wrapped, "_barcello_guard", True)
+        d_opus.Decoder.decode = wrapped
+        opus_decode_guard_installed = True
+        logger.info("Installed GLOBAL OpusError guard on discord.opus.Decoder.decode")
 
     try:
         from discord.ext.voice_recv import AudioSink as _AudioSink  # type: ignore
@@ -365,6 +395,7 @@ def setup(registry: ServiceRegistry) -> None:
                 return
             from discord.ext import voice_recv  # type: ignore
             _install_opus_guard()
+            _install_discord_opus_decode_guard()
             connecting_guilds.add(guild.id)
             try:
                 logger.info("Voice ingest connect start for channel %s", channel.id)
