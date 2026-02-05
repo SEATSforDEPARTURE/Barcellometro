@@ -213,9 +213,18 @@ def setup(registry: ServiceRegistry) -> None:
         opus_guard_installed = True
         logger.info("Installed OpusError guard for voice_recv decoder")
 
-    class SafeSink:
+    try:
+        from discord.ext.voice_recv import AudioSink as _AudioSink  # type: ignore
+    except Exception:
+        _AudioSink = object  # type: ignore
+
+    class SafeSink(_AudioSink):
         def __init__(self, inner: Any) -> None:
             self._inner = inner
+
+        def wants_opus(self) -> bool:
+            wants = getattr(self._inner, "wants_opus", None)
+            return bool(wants()) if callable(wants) else False
 
         def write(self, user: Optional[discord.User], data: Any) -> None:
             try:
@@ -229,6 +238,14 @@ def setup(registry: ServiceRegistry) -> None:
                     _increment_opus_corrupted(exc)
                     return
                 logger.exception("Voice ingest sink write failed")
+
+        def cleanup(self) -> None:
+            cleanup = getattr(self._inner, "cleanup", None)
+            if callable(cleanup):
+                try:
+                    cleanup()
+                except Exception:
+                    return
 
     async def _get_setting(key: str, default: str) -> str:
         if not bot.user:
