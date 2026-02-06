@@ -197,6 +197,7 @@ def setup(registry: ServiceRegistry) -> None:
         return _parse_hex_color(stored) or default_color
 
     async def _get_tier_label(profile: str) -> str:
+        # Optional manual override for tier labels if you want a name different from the Discord role.
         stored = await get_setting(f"barcello.tier_label.{profile}", "")
         if stored:
             return stored
@@ -209,6 +210,21 @@ def setup(registry: ServiceRegistry) -> None:
             "admin": "Admin",
         }
         return defaults.get(profile, "Utente")
+
+    async def _resolve_tier_display_name(
+        *,
+        profile: str,
+        winner_role_id: str | None,
+        guild: discord.Guild | None,
+    ) -> str:
+        if profile in {"mod", "admin"}:
+            return await _get_tier_label(profile)
+        if winner_role_id and guild:
+            role = guild.get_role(int(winner_role_id))
+            if role:
+                logger.info("barcello: resolved tier role name=%s (id=%s)", role.name, winner_role_id)
+                return role.name
+        return await _get_tier_label(profile)
 
     def _bullet_list(lines: list[str]) -> str:
         cleaned: list[str] = []
@@ -318,7 +334,7 @@ def setup(registry: ServiceRegistry) -> None:
         result: BarcelloResult,
         output_flags: dict[str, Any],
         profile: str,
-        tier_label: str,
+        tier_display_name: str,
         embed_color: int,
         reasons_text: str,
         trend_text: str,
@@ -326,7 +342,7 @@ def setup(registry: ServiceRegistry) -> None:
         mod_advice: list[str],
         ai_note: str,
     ) -> discord.Embed:
-        embed = discord.Embed(title=f"🧾 **DETTAGLI BARCELLO — {tier_label}**", color=embed_color)
+        embed = discord.Embed(title=f"🧾 **DETTAGLI BARCELLO — {tier_display_name}**", color=embed_color)
         if output_flags.get("show_motivation") and reasons_text:
             _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
         if output_flags.get("show_trend") and (result.trend or trend_text):
@@ -979,7 +995,7 @@ def setup(registry: ServiceRegistry) -> None:
         try:
             entitlements_service: EntitlementsService = registry.get("entitlements")
             config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
-            profile = await entitlements_service.resolve_profile(interaction.user)
+            profile, winner_role_id = await entitlements_service.resolve_profile_with_role_id(interaction.user)
 
             async def try_send_dm(
                 content: str | None = None,
@@ -1120,12 +1136,16 @@ def setup(registry: ServiceRegistry) -> None:
                 window_minutes=window_minutes,
             )
             details_color = await _get_details_embed_color(profile)
-            tier_label = await _get_tier_label(profile)
+            tier_display_name = await _resolve_tier_display_name(
+                profile=profile,
+                winner_role_id=winner_role_id,
+                guild=interaction.guild,
+            )
             details_embed = _build_barcello_details_embed(
                 result=result,
                 output_flags=output_flags,
                 profile=profile,
-                tier_label=tier_label,
+                tier_display_name=tier_display_name,
                 embed_color=details_color,
                 reasons_text=reasons_text,
                 trend_text=trend_text,

@@ -43,13 +43,20 @@ class EntitlementsService:
         self._database = database
 
     async def resolve_profile(self, member: Any) -> str:
+        profile, _ = await self.resolve_profile_with_role_id(member)
+        return profile
+
+    async def resolve_profile_with_role_id(self, member: Any) -> tuple[str, str | None]:
         if bool(getattr(getattr(member, "guild_permissions", None), "administrator", False)):
-            return "mod"
+            logger.info("resolve_profile_with_role_id: admin perms => mod")
+            return "mod", None
 
         mod_role_ids = await self._get_json_setting("mod.role_ids", [])
         role_ids = [str(getattr(role, "id", "")) for role in getattr(member, "roles", [])]
-        if any(role_id in {str(role_id) for role_id in mod_role_ids} for role_id in role_ids):
-            return "mod"
+        for role_id in role_ids:
+            if role_id in {str(role_id) for role_id in mod_role_ids}:
+                logger.info("resolve_profile_with_role_id: mod role match => mod (%s)", role_id)
+                return "mod", role_id
 
         profile_map = await self._get_json_setting("entitlements.profile_map", DEFAULT_PROFILE_MAP)
         profiles = profile_map.get("profiles", {}) if isinstance(profile_map, dict) else {}
@@ -57,6 +64,7 @@ class EntitlementsService:
 
         best_profile = "base"
         best_priority = profiles.get("base", {}).get("priority", 0)
+        winner_role_id: str | None = None
         for role_id in role_ids:
             profile = role_to_profile.get(role_id)
             if profile is None:
@@ -67,7 +75,13 @@ class EntitlementsService:
             if priority > best_priority:
                 best_profile = profile
                 best_priority = priority
-        return best_profile
+                winner_role_id = role_id
+        logger.info(
+            "resolve_profile_with_role_id: selected profile=%s winner_role_id=%s",
+            best_profile,
+            winner_role_id,
+        )
+        return best_profile, winner_role_id
 
     async def get_detail_level(self, member: Any, command: str) -> str:
         profile = await self.resolve_profile(member)
