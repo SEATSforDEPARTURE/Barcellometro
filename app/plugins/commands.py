@@ -157,6 +157,14 @@ def setup(registry: ServiceRegistry) -> None:
     def _with_spacing(text: str) -> str:
         return f"{text}\n\n\n"
 
+    def _add_spacer(embed: discord.Embed) -> None:
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
+
+    def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
+        if embed.fields:
+            _add_spacer(embed)
+        embed.add_field(name=name, value=value, inline=False)
+
     def _build_barcello_embed(
         *,
         result: BarcelloResult,
@@ -194,18 +202,18 @@ def setup(registry: ServiceRegistry) -> None:
 
         if output_flags.get("show_score"):
             bar = _render_health_bar(result.score, emoji)
-            embed.add_field(
+            _add_section(
+                embed,
                 name="🫀 **PUNTI SALUTE**",
                 value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
-                inline=False,
             )
 
         if output_flags.get("show_motivation") and reasons_text:
-            embed.add_field(name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text), inline=False)
+            _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
 
         if output_flags.get("show_trend") and result.trend:
             trend_value, _ = _trend_display(result.trend)
-            embed.add_field(name="📈 **TREND**", value=_with_spacing(trend_value), inline=False)
+            _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
 
         if profile in {"role3", "mod"}:
             advice_lines = [line for line in advice_text.split("\n") if line.strip()]
@@ -217,33 +225,21 @@ def setup(registry: ServiceRegistry) -> None:
                     advice_lines = ["- Se scrivi, usa tono neutro e fai domande aperte."]
                 else:
                     advice_lines = ["- Evita interventi diretti: favorisci de-escalation o pausa."]
-            embed.add_field(
+            _add_section(
+                embed,
                 name="🧠 **CONSIGLI PERSONALIZZATI**",
                 value=_with_spacing("\n".join(advice_lines[:3])),
-                inline=False,
             )
 
         if profile == "mod":
-            embed.add_field(
-                name="🧩 **DINAMICHE / CHI VS CHI**",
-                value=_with_spacing("(nessuna)"),
-                inline=False,
-            )
-            embed.add_field(
-                name="🧊 **CHI CALMA LE ACQUE**",
-                value=_with_spacing("(nessuno)"),
-                inline=False,
-            )
+            _add_section(embed, name="🧩 **DINAMICHE / CHI VS CHI**", value=_with_spacing("(nessuna)"))
+            _add_section(embed, name="🧊 **CHI CALMA LE ACQUE**", value=_with_spacing("(nessuno)"))
 
         if output_flags.get("show_mod_metrics") and profile == "mod":
-            embed.add_field(
-                name="🧮 **METRICHE AGGREGATE**",
-                value=_with_spacing(_format_metrics(result.metrics)),
-                inline=False,
-            )
+            _add_section(embed, name="🧮 **METRICHE AGGREGATE**", value=_with_spacing(_format_metrics(result.metrics)))
 
         if ai_note:
-            embed.add_field(name="ℹ️ **NOTA**", value=_with_spacing(ai_note), inline=False)
+            _add_section(embed, name="ℹ️ **NOTA**", value=_with_spacing(ai_note))
 
         notes_by_profile = {
             "base": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
@@ -255,8 +251,8 @@ def setup(registry: ServiceRegistry) -> None:
         if profile != "role3":
             note_value = notes_by_profile.get(profile, "")
             if note_value:
-                embed.add_field(name="📌 **NOTE**", value=_with_spacing(note_value), inline=False)
-        embed.set_footer(text="SEATSforDEPARTURE")
+                _add_section(embed, name="📌 **NOTE**", value=_with_spacing(note_value))
+        embed.set_footer(text="Barcellometro")
         return embed
 
     def _extract_ai_text(response: Any) -> str:
