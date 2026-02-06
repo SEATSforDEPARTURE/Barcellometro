@@ -54,6 +54,15 @@ class BarcelloService:
             "last_score_by_channel": {},
         }
 
+    def _mget(self, message: Any, key: str, default: Any = None) -> Any:
+        try:
+            return message[key]
+        except Exception:
+            try:
+                return message.get(key, default)
+            except Exception:
+                return default
+
     async def compute_channel(
         self,
         guild_id: str,
@@ -233,25 +242,26 @@ class BarcelloService:
         timestamps: list[datetime] = []
 
         for message in messages:
-            content = (message["content"] or "").strip()
+            content = (self._mget(message, "content", "") or "").strip()
             total_letters += sum(1 for ch in content if ch.isalpha())
             uppercase_letters += sum(1 for ch in content if ch.isalpha() and ch.isupper())
             content_lower = content.lower()
             negativity_hits += sum(content_lower.count(keyword) for keyword in NEGATIVE_KEYWORDS)
 
-            mentions_raw = message.get("mentions_json")
+            mentions_raw = self._mget(message, "mentions_json")
             if mentions_raw:
                 try:
                     mentions = json.loads(mentions_raw)
                     if isinstance(mentions, list):
                         mention_count += len(mentions)
                 except json.JSONDecodeError:
+                    logger.debug("Invalid mentions JSON in message payload")
                     mention_count += content.count("<@")
             else:
                 mention_count += content.count("<@")
 
-            authors.append(message.get("author_id") or "unknown")
-            timestamps.append(self._parse_ts(message.get("ts")))
+            authors.append(self._mget(message, "author_id") or "unknown")
+            timestamps.append(self._parse_ts(self._mget(message, "ts")))
 
         duration_minutes = max(window_minutes, 1)
         msg_per_min = message_count / duration_minutes if duration_minutes else 0
