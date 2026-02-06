@@ -155,7 +155,7 @@ def setup(registry: ServiceRegistry) -> None:
         return "```\n" + "\n".join(lines) + "\n```"
 
     def _with_spacing(text: str) -> str:
-        return f"{text}\n"
+        return f"\n{text}\n\n"
 
     def _build_barcello_embed(
         *,
@@ -193,7 +193,7 @@ def setup(registry: ServiceRegistry) -> None:
         if output_flags.get("show_score"):
             bar = _render_health_bar(result.score, emoji)
             embed.add_field(
-                name="🫀 **PUNTI SALUTE BARCELLO**",
+                name="🫀 **PUNTI SALUTE**",
                 value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
                 inline=False,
             )
