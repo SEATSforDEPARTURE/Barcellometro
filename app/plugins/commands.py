@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import discord
@@ -91,6 +93,242 @@ def setup(registry: ServiceRegistry) -> None:
     async def get_setting(key: str, default: str) -> str:
         stored = await database.get_setting(key)
         return stored if stored is not None else default
+
+    async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
+        ephemeral = interaction.guild_id is not None
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=ephemeral)
+        else:
+            await interaction.response.send_message(message, ephemeral=ephemeral)
+
+    def _render_health_bar(score: int, color_emoji: str) -> str:
+        score = max(0, min(100, score))
+        filled = int(round(score / 10))
+        empty = max(0, 10 - filled)
+        return f"{color_emoji * filled}{'⚪' * empty}"
+
+    def _health_description(score: int) -> str:
+        if score >= 90:
+            return "Ottima! 😄 Il clima è disteso, positivo e molto ricettivo."
+        if score >= 75:
+            return "Molto buona. 😊 La conversazione scorre senza attriti."
+        if score >= 60:
+            return "Buona. 😃 Il clima è stabile, con lievi variazioni."
+        if score >= 45:
+            return "Discreta. 🤔 Clima gestibile ma con primi segnali di tensione."
+        if score >= 30:
+            return "Delicata. 😬 Il clima richiede cautela."
+        return "Critica. 🚨 Situazione tesa e facilmente infiammabile."
+
+    def _alert_message(score: int) -> str:
+        if score >= 60:
+            return "È un buon momento per scrivere e partecipare 💬"
+        if score >= 45:
+            return "Meglio fare attenzione ⚠️ Mantieni un tono neutro."
+        if score >= 30:
+            return "Situazione delicata 🟠 Meglio osservare."
+        return "Alta tensione 🔴 È consigliato non intervenire ora."
+
+    def _trend_display(trend: dict[str, Any]) -> tuple[str, str]:
+        direction = trend.get("direction", "stable")
+        delta = trend.get("delta", 0)
+        mapping = {
+            "improving": ("IN MIGLIORAMENTO", "😄"),
+            "stable": ("STABILE", "😐"),
+            "worsening": ("IN PEGGIORAMENTO", "😟"),
+        }
+        label, emoji = mapping.get(direction, ("STABILE", "😐"))
+        return f"**{label}** {emoji}  *(Δ {delta})*", label
+
+    def _format_metrics(metrics: dict[str, Any]) -> str:
+        keys = [
+            "message_count",
+            "window_minutes",
+            "msg_per_min",
+            "caps_ratio",
+            "negativity_hits",
+            "mention_count",
+            "mention_per_min",
+            "reply_war",
+        ]
+        lines = [f"{key}: {metrics.get(key)}" for key in keys]
+        return "```\n" + "\n".join(lines) + "\n```"
+
+    def _with_spacing(text: str) -> str:
+        return f"{text}\n\n\n"
+
+    def _add_spacer(embed: discord.Embed) -> None:
+        embed.add_field(name="\u200b", value="\u200b", inline=False)
+
+    def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
+        if embed.fields:
+            _add_spacer(embed)
+        embed.add_field(name=name, value=value, inline=False)
+
+    def _build_barcello_embed(
+        *,
+        result: BarcelloResult,
+        output_flags: dict[str, Any],
+        profile: str,
+        channel_name: str,
+        window_minutes: int,
+        reasons_text: str,
+        trend_text: str,
+        advice_text: str,
+        ai_note: str,
+    ) -> discord.Embed:
+        color_label = (result.color or "nero").lower()
+        color_map = {
+            "verde": (0x2ECC71, "🟢", "verde"),
+            "giallo": (0xF1C40F, "🟡", "giallo"),
+            "rosso": (0xE74C3C, "🔴", "rosso"),
+            "nero": (0x2C2F33, "⚫", "nero"),
+        }
+        embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
+
+        title_channel = channel_name or "canale"
+        description_lines = [
+            f"🕒 **Ultimi {window_minutes} minuti**",
+            "",
+            "",
+            "",
+            f"{emoji} **ALLERTA {label.upper()}**",
+            f"*{_alert_message(result.score)}*",
+        ]
+        embed = discord.Embed(
+            title=f"🫛 **STATO BARCELLO “{title_channel}”**",
+            description="\n".join(description_lines),
+            color=embed_color,
+        )
+
+        if output_flags.get("show_score"):
+            bar = _render_health_bar(result.score, emoji)
+            _add_section(
+                embed,
+                name="🫀 **PUNTI SALUTE**",
+                value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
+            )
+
+        if output_flags.get("show_motivation") and reasons_text:
+            _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
+
+        if output_flags.get("show_trend") and result.trend:
+            trend_value, _ = _trend_display(result.trend)
+            _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
+
+        if profile in {"role3", "mod"}:
+            advice_lines = [line for line in advice_text.split("\n") if line.strip()]
+            if not advice_lines:
+                color_key = label
+                if color_key == "verde":
+                    advice_lines = ["- Coinvolgi i nuovi: fai una domanda leggera."]
+                elif color_key == "giallo":
+                    advice_lines = ["- Se scrivi, usa tono neutro e fai domande aperte."]
+                else:
+                    advice_lines = ["- Evita interventi diretti: favorisci de-escalation o pausa."]
+            _add_section(
+                embed,
+                name="🧠 **CONSIGLI PERSONALIZZATI**",
+                value=_with_spacing("\n".join(advice_lines[:3])),
+            )
+
+        if profile == "mod":
+            _add_section(embed, name="🧩 **DINAMICHE / CHI VS CHI**", value=_with_spacing("(nessuna)"))
+            _add_section(embed, name="🧊 **CHI CALMA LE ACQUE**", value=_with_spacing("(nessuno)"))
+
+        if output_flags.get("show_mod_metrics") and profile == "mod":
+            _add_section(embed, name="🧮 **METRICHE AGGREGATE**", value=_with_spacing(_format_metrics(result.metrics)))
+
+        if ai_note:
+            _add_section(embed, name="ℹ️ **NOTA**", value=_with_spacing(ai_note))
+
+        notes_by_profile = {
+            "base": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
+            "role1": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
+            "role2": "*Per i consigli personalizzati passa al livello successivo! 🧠*",
+            "role3": "*Hai sbloccato i consigli personalizzati ✨*",
+            "mod": "*Report completo per moderazione.*",
+        }
+        if profile != "role3":
+            note_value = notes_by_profile.get(profile, "")
+            if note_value:
+                _add_section(embed, name="📌 **NOTE**", value=_with_spacing(note_value))
+        embed.set_footer(text="Barcellometro")
+        return embed
+
+    def _extract_ai_text(response: Any) -> str:
+        output_text = getattr(response, "output_text", "") or ""
+        if output_text:
+            return output_text
+        chunks: list[str] = []
+        for item in getattr(response, "output", []) or []:
+            for content in getattr(item, "content", []) or []:
+                text = getattr(content, "text", None)
+                if not text and getattr(content, "type", None) in {"output_text", "text"}:
+                    text = getattr(content, "text", "")
+                if text:
+                    chunks.append(text)
+        return "\n".join(chunks).strip()
+
+    def _parse_json_safe(text: str) -> dict[str, Any] | None:
+        if not text:
+            return None
+        raw = text.strip()
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            pass
+        if "```" in raw:
+            start = raw.find("```")
+            if start != -1:
+                fence_lang_end = raw.find("\n", start + 3)
+                if fence_lang_end != -1:
+                    end = raw.find("```", fence_lang_end + 1)
+                    if end != -1:
+                        fenced = raw[fence_lang_end:end].strip()
+                        try:
+                            parsed = json.loads(fenced)
+                            return parsed if isinstance(parsed, dict) else None
+                        except json.JSONDecodeError:
+                            return None
+        start_obj = raw.find("{")
+        end_obj = raw.rfind("}")
+        if start_obj != -1 and end_obj != -1 and end_obj > start_obj:
+            candidate = raw[start_obj : end_obj + 1]
+            try:
+                parsed = json.loads(candidate)
+                return parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                return None
+        return None
+
+    async def _call_openai_json(
+        client: Any,
+        model: str,
+        input_payload: list[dict[str, str]],
+    ) -> tuple[dict[str, Any] | None, str]:
+        try:
+            response = await client.responses.create(
+                model=model,
+                response_format={"type": "json_object"},
+                input=input_payload,
+            )
+            logger.info("OpenAI response_format supported")
+        except TypeError as exc:
+            if "response_format" not in str(exc):
+                raise
+            logger.warning("OpenAI response_format unsupported; falling back")
+            response = await client.responses.create(
+                model=model,
+                input=input_payload,
+            )
+        logger.info("OpenAI response received")
+        ai_text = _extract_ai_text(response)
+        payload = _parse_json_safe(ai_text)
+        return payload, ai_text
 
     def voice_ingest_key(bot_id: int, key: str) -> str:
         return f"voice_ingest.{bot_id}.{key}"
@@ -592,9 +830,173 @@ def setup(registry: ServiceRegistry) -> None:
         )
         await interaction.response.send_message(message, ephemeral=True)
 
+    # Settings JSON for /barcello (entitlements.policies):
+    # {
+    #   "commands": {
+    #     "barcello": {
+    #       "profiles": {
+    #         "<profile>": {
+    #           "allowed": true,
+    #           "output": {
+    #             "show_score": true,
+    #             "show_motivation": true,
+    #             "show_trend": true,
+    #             "show_advice": true,
+    #             "show_mod_metrics": false
+    #           },
+    #           "capabilities": ["analysis.ai_preferred"],
+    #           "messages": {
+    #             "dm_text": "Serve PLUS.",
+    #             "footer_text": "Passa a PRO per il trend."
+    #           }
+    #         }
+    #       }
+    #     }
+    #   },
+    #   "features": {
+    #     "ai": { "allowed_profiles": ["role2", "role3", "mod"] }
+    #   }
+    # }
+    @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
+    @app_commands.describe(window_minutes="Finestra in minuti")
+    async def barcello_command(interaction: discord.Interaction, window_minutes: int | None = None) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True, thinking=True)
+                logger.info("barcello: deferred")
+            except Exception:
+                logger.exception("barcello: failed to defer")
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.")
+            return
+
+        try:
+            entitlements_service: EntitlementsService = registry.get("entitlements")
+            config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
+            profile = await entitlements_service.resolve_profile(interaction.user)
+
+            async def try_send_dm(content: str | None = None, *, embed: discord.Embed | None = None) -> bool:
+                try:
+                    if embed is not None:
+                        await interaction.user.send(embed=embed)
+                    else:
+                        await interaction.user.send(content or "")
+                    return True
+                except discord.Forbidden:
+                    return False
+
+            if not config["allowed"]:
+                dm_text = config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
+                if await try_send_dm(dm_text):
+                    await send_ephemeral(interaction, "Ti ho inviato un DM")
+                else:
+                    await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
+                return
+
+            if not await check_permission(interaction, "barcello"):
+                return
+
+            if window_minutes is None:
+                raw_default = await get_setting("barcello.default_window_minutes", "30")
+                try:
+                    window_minutes = int(raw_default)
+                except ValueError:
+                    window_minutes = 30
+            if window_minutes <= 0:
+                window_minutes = 30
+
+            result = await barcello.compute_channel(
+                str(interaction.guild_id),
+                str(interaction.channel_id),
+                window_minutes,
+            )
+
+            reasons_lines = [f"- {reason['label']} ({reason['summary']})" for reason in result.reasons][:4]
+            reasons_text = "\n".join(reasons_lines) if reasons_lines else "- (nessuna)"
+            trend_text = ""
+            if result.trend:
+                direction = result.trend.get("direction", "stable")
+                delta = result.trend.get("delta", 0)
+                trend_label = {"stable": "stabile", "improving": "in miglioramento", "worsening": "in peggioramento"}.get(
+                    direction,
+                    direction,
+                )
+                trend_text = f"Trend {trend_label} (Δ {delta:+d})."
+            advice_text = "\n".join(f"- {item}" for item in (result.advice or []))
+            ai_note = ""
+
+            if "analysis.ai_preferred" in (config.get("capabilities") or []):
+                if registry.has("ai"):
+                    ai_enabled = await entitlements_service.is_feature_allowed(interaction.user, "ai")
+                    ai_service_enabled = ai_service.is_enabled() if ai_service else False
+                    if ai_enabled and ai_service_enabled and ai_service:
+                        client = ai_service.client()
+                        model = ai_service.get_model("summary")
+                        if client and model:
+                            try:
+                                system_prompt = (
+                                    "Riscrivi i testi forniti in italiano, tono neutro e conciso. "
+                                    "Non includere nomi utenti o attribuzioni personali. "
+                                    "Non aggiungere dettagli non presenti. "
+                                    "Restituisci solo JSON con chiavi: motivation, trend, advice. "
+                                    "Return ONLY valid JSON. No markdown, no prose, no explanations. "
+                                    'Esempio: {"motivation":"...","trend":"...","advice":"..."}'
+                                )
+                                user_payload = json.dumps(
+                                    {"motivation": reasons_text, "trend": trend_text, "advice": advice_text},
+                                    ensure_ascii=False,
+                                )
+                                ai_payload, ai_text = await _call_openai_json(
+                                    client,
+                                    model,
+                                    [
+                                        {"role": "system", "content": system_prompt},
+                                        {"role": "user", "content": user_payload},
+                                    ],
+                                )
+                                if not ai_text:
+                                    logger.warning("OpenAI output empty")
+                                if ai_payload is None:
+                                    snippet = ai_text[:200]
+                                    logger.warning("OpenAI output not JSON: %s", snippet)
+                                    ai_note = "AI non disponibile: report base."
+                                else:
+                                    logger.info("AI JSON parsed ok")
+                                    reasons_text = ai_payload.get("motivation", reasons_text) or reasons_text
+                                    trend_text = ai_payload.get("trend", trend_text) or trend_text
+                                    advice_text = ai_payload.get("advice", advice_text) or advice_text
+                            except Exception:  # noqa: BLE001
+                                logger.exception("AI barcello enrichment failed")
+                                ai_note = "AI non disponibile: report base."
+
+            output_flags = config.get("output", {})
+            embed = _build_barcello_embed(
+                result=result,
+                output_flags=output_flags,
+                profile=profile,
+                channel_name=getattr(interaction.channel, "name", ""),
+                window_minutes=window_minutes,
+                reasons_text=reasons_text,
+                trend_text=trend_text,
+                advice_text=advice_text,
+                ai_note=ai_note,
+            )
+
+            if await try_send_dm(embed=embed):
+                await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
+            else:
+                await interaction.followup.send(
+                    "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
+                    ephemeral=True,
+                )
+        except Exception:
+            logger.exception("barcello: unexpected error")
+            await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
+
     bot.tree.add_command(barcellometro_group, guild=guild)
     bot.tree.add_command(status_group, guild=guild)
     bot.tree.add_command(privacy_group, guild=guild)
+    bot.tree.add_command(barcello_command, guild=guild)
 
     @role_group.command(name="set-role", description="Imposta limiti per un ruolo su un comando")
     @app_commands.describe(role="Ruolo", command="Nome comando", usage_limit="Limite utilizzi (vuoto = illimitato)", cooldown_seconds="Cooldown in secondi")
