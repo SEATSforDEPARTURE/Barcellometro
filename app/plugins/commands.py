@@ -889,9 +889,9 @@ def setup(registry: ServiceRegistry) -> None:
             if not config["allowed"]:
                 dm_text = config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
                 if await try_send_dm(dm_text):
-                    await send_ephemeral(interaction, "Ti ho inviato un DM")
+                    await send_ephemeral(interaction, "📥 Ti ho inviato un DM, amo! 💋")
                 else:
-                    await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
+                    await send_ephemeral(interaction, "📥 Hai un messaggio privato, amo! 💋a")
                 return
 
             if not await check_permission(interaction, "barcello"):
@@ -984,10 +984,10 @@ def setup(registry: ServiceRegistry) -> None:
             )
 
             if await try_send_dm(embed=embed):
-                await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
+                await interaction.followup.send("📥 Ti ho inviato un DM, amo! 💋", ephemeral=True)
             else:
                 await interaction.followup.send(
-                    "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
+                    "Non riesco a inviarti DM, amo! 😮‍💨 (privacy). Abilita i messaggi privati dal server.",
                     ephemeral=True,
                 )
         except Exception:
