@@ -154,6 +154,9 @@ def setup(registry: ServiceRegistry) -> None:
         lines = [f"{key}: {metrics.get(key)}" for key in keys]
         return "```\n" + "\n".join(lines) + "\n```"
 
+    def _with_spacing(text: str) -> str:
+        return f"{text}\n"
+
     def _build_barcello_embed(
         *,
         result: BarcelloResult,
@@ -177,12 +180,12 @@ def setup(registry: ServiceRegistry) -> None:
 
         title_channel = channel_name or "canale"
         description_lines = [
-            f"🧭 **FINESTRA TEMPORALE:** ultimi {window_minutes} minuti",
+            f"🕒 **Ultimi {window_minutes} minuti**",
             f"{emoji} **ALLERTA {label.upper()}**",
             f"*{_alert_message(result.score)}*",
         ]
         embed = discord.Embed(
-            title=f"🫛 STATO BARCELLO DEL “{title_channel}”",
+            title=f"🫛 **STATO BARCELLO “{title_channel}”**",
             description="\n".join(description_lines),
             color=embed_color,
         )
@@ -191,16 +194,16 @@ def setup(registry: ServiceRegistry) -> None:
             bar = _render_health_bar(result.score, emoji)
             embed.add_field(
                 name="🫀 **PUNTI SALUTE BARCELLO**",
-                value=f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*",
+                value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
                 inline=False,
             )
 
         if output_flags.get("show_motivation") and reasons_text:
-            embed.add_field(name="🔥 **MOTIVAZIONI**", value=reasons_text, inline=False)
+            embed.add_field(name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text), inline=False)
 
         if output_flags.get("show_trend") and result.trend:
             trend_value, _ = _trend_display(result.trend)
-            embed.add_field(name="📈 **TREND**", value=trend_value, inline=False)
+            embed.add_field(name="📈 **TREND**", value=_with_spacing(trend_value), inline=False)
 
         if profile in {"role3", "mod"}:
             advice_lines = [line for line in advice_text.split("\n") if line.strip()]
@@ -214,31 +217,31 @@ def setup(registry: ServiceRegistry) -> None:
                     advice_lines = ["- Evita interventi diretti: favorisci de-escalation o pausa."]
             embed.add_field(
                 name="🧠 **CONSIGLI PERSONALIZZATI**",
-                value="\n".join(advice_lines[:3]),
+                value=_with_spacing("\n".join(advice_lines[:3])),
                 inline=False,
             )
-
-        if profile in {"role2", "role3", "mod"}:
-            highlights = "\n".join(reasons_text.split("\n")[:3]) if reasons_text else "Nessun momento saliente."
-            embed.add_field(name="⭐ **MOMENTI SALIENTI**", value=highlights, inline=False)
 
         if profile == "mod":
             embed.add_field(
                 name="🧩 **DINAMICHE / CHI VS CHI**",
-                value="(nessuna)",
+                value=_with_spacing("(nessuna)"),
                 inline=False,
             )
             embed.add_field(
                 name="🧊 **CHI CALMA LE ACQUE**",
-                value="(nessuno)",
+                value=_with_spacing("(nessuno)"),
                 inline=False,
             )
 
         if output_flags.get("show_mod_metrics") and profile == "mod":
-            embed.add_field(name="🧮 **METRICHE AGGREGATE**", value=_format_metrics(result.metrics), inline=False)
+            embed.add_field(
+                name="🧮 **METRICHE AGGREGATE**",
+                value=_with_spacing(_format_metrics(result.metrics)),
+                inline=False,
+            )
 
         if ai_note:
-            embed.add_field(name="ℹ️ **NOTA**", value=ai_note, inline=False)
+            embed.add_field(name="ℹ️ **NOTA**", value=_with_spacing(ai_note), inline=False)
 
         notes_by_profile = {
             "base": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
@@ -247,7 +250,10 @@ def setup(registry: ServiceRegistry) -> None:
             "role3": "*Hai sbloccato i consigli personalizzati ✨*",
             "mod": "*Report completo per moderazione.*",
         }
-        embed.add_field(name="📌 **NOTE**", value=notes_by_profile.get(profile, ""), inline=False)
+        if profile != "role3":
+            note_value = notes_by_profile.get(profile, "")
+            if note_value:
+                embed.add_field(name="📌 **NOTE**", value=_with_spacing(note_value), inline=False)
         embed.set_footer(text="Barcellometro")
         return embed
 
