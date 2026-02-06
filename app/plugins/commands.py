@@ -155,22 +155,91 @@ def setup(registry: ServiceRegistry) -> None:
         return "```\n" + "\n".join(lines) + "\n```"
 
     def _with_spacing(text: str) -> str:
-        return f"{text}\n\u200b"
+        return text
 
     def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
         embed.add_field(name=name, value=value, inline=False)
 
-    def _build_barcello_embed(
+    def _parse_hex_color(raw: str | None) -> int | None:
+        if not raw:
+            return None
+        value = raw.strip().lower()
+        if value.startswith("#"):
+            value = value[1:]
+        if value.startswith("0x"):
+            value = value[2:]
+        try:
+            return int(value, 16)
+        except ValueError:
+            return None
+
+    async def _get_details_embed_color(profile: str) -> int:
+        default_color = 0x95A5A6
+        mod_color = 0x5865F2
+        admin_color = 0x9B59B6
+        if profile == "admin":
+            stored = await get_setting("barcello.details_color_admin", "")
+            return _parse_hex_color(stored) or admin_color
+        if profile == "mod":
+            stored = await get_setting("barcello.details_color_mod", "")
+            return _parse_hex_color(stored) or mod_color
+        stored = await get_setting("barcello.details_color_default", "")
+        return _parse_hex_color(stored) or default_color
+
+    def _bullet_list(lines: list[str]) -> str:
+        cleaned: list[str] = []
+        for line in lines:
+            text = line.strip()
+            if not text:
+                continue
+            if len(text) > 120:
+                text = f"{text[:117]}..."
+            cleaned.append(text)
+        return "\n".join(f"• {line}" for line in cleaned)
+
+    def _fallback_personal_advice(color_label: str) -> list[str]:
+        if color_label == "verde":
+            return [
+                "Coinvolgi i nuovi: fai una domanda leggera.",
+                "Mantieni il ritmo: alterna messaggi brevi e chiari.",
+                "Rinforza i contributi positivi con un semplice 👍.",
+            ]
+        if color_label == "giallo":
+            return [
+                "Usa un tono neutro e fai domande aperte.",
+                "Evita ironie: meglio chiarezza e messaggi brevi.",
+                "Se serve, sposta un tema caldo in privato.",
+            ]
+        return [
+            "Evita interventi diretti: favorisci de-escalation o pausa.",
+            "Se scrivi, resta neutro e invita al rispetto reciproco.",
+            "Rimanda i temi caldi a un momento più tranquillo.",
+        ]
+
+    def _fallback_mod_advice(color_label: str) -> list[str]:
+        if color_label == "verde":
+            return [
+                "Monitora senza intervenire: lascia spazio alla conversazione.",
+                "Premia i toni costruttivi con una reazione rapida.",
+                "Se emergono tensioni, suggerisci un cambio di topic leggero.",
+            ]
+        if color_label == "giallo":
+            return [
+                "Intervieni presto con un richiamo soft sui toni.",
+                "Invita a chiarire in privato i punti più spinosi.",
+                "Riduci il rumore: chiedi messaggi sintetici.",
+            ]
+        return [
+            "Valuta un intervento pubblico di de-escalation.",
+            "Se necessario, sposta la discussione su un topic neutro.",
+            "Monitora utenti/coppie ricorrenti e intervieni in privato.",
+        ]
+
+    def _build_barcello_public_embed(
         *,
         result: BarcelloResult,
-        output_flags: dict[str, Any],
-        profile: str,
         channel_name: str,
         window_minutes: int,
-        reasons_text: str,
-        trend_text: str,
-        advice_text: str,
-        ai_note: str,
     ) -> discord.Embed:
         color_label = (result.color or "nero").lower()
         color_map = {
@@ -180,7 +249,6 @@ def setup(registry: ServiceRegistry) -> None:
             "nero": (0x2C2F33, "⚫", "nero"),
         }
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
-
         title_channel = channel_name or "canale"
         description_lines = [
             f"🕒 **Ultimi {window_minutes} minuti**",
@@ -193,48 +261,48 @@ def setup(registry: ServiceRegistry) -> None:
             description="\n".join(description_lines),
             color=embed_color,
         )
+        bar = _render_health_bar(result.score, emoji)
+        _add_section(
+            embed,
+            name="🫀 **PUNTI SALUTE**",
+            value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
+        )
+        embed.set_footer(text="Barcellometro")
+        return embed
 
-        if output_flags.get("show_score"):
-            bar = _render_health_bar(result.score, emoji)
-            _add_section(
-                embed,
-                name="🫀 **PUNTI SALUTE**",
-                value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
-            )
-
+    def _build_barcello_details_embed(
+        *,
+        result: BarcelloResult,
+        output_flags: dict[str, Any],
+        profile: str,
+        embed_color: int,
+        reasons_text: str,
+        trend_text: str,
+        personal_advice: list[str],
+        mod_advice: list[str],
+        ai_note: str,
+    ) -> discord.Embed:
+        embed = discord.Embed(title="🧾 **DETTAGLI BARCELLO**", color=embed_color)
         if output_flags.get("show_motivation") and reasons_text:
             _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
-
-        if output_flags.get("show_trend") and result.trend:
-            trend_value, _ = _trend_display(result.trend)
+        if output_flags.get("show_trend") and (result.trend or trend_text):
+            if trend_text:
+                trend_value = trend_text
+            else:
+                trend_value, _ = _trend_display(result.trend)
             _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
-
-        if profile in {"role3", "mod"}:
-            advice_lines = [line for line in advice_text.split("\n") if line.strip()]
-            if not advice_lines:
-                color_key = label
-                if color_key == "verde":
-                    advice_lines = ["- Coinvolgi i nuovi: fai una domanda leggera."]
-                elif color_key == "giallo":
-                    advice_lines = ["- Se scrivi, usa tono neutro e fai domande aperte."]
-                else:
-                    advice_lines = ["- Evita interventi diretti: favorisci de-escalation o pausa."]
-            _add_section(
-                embed,
-                name="🧠 **CONSIGLI PERSONALIZZATI**",
-                value=_with_spacing("\n".join(advice_lines[:3])),
-            )
-
-        if profile == "mod":
-            _add_section(embed, name="🧩 **DINAMICHE / CHI VS CHI**", value=_with_spacing("(nessuna)"))
-            _add_section(embed, name="🧊 **CHI CALMA LE ACQUE**", value=_with_spacing("(nessuno)"))
-
+        if output_flags.get("show_advice"):
+            advice_lines = personal_advice[:5]
+            if advice_lines:
+                _add_section(embed, name="🧠 **CONSIGLI PERSONALIZZATI**", value=_bullet_list(advice_lines))
+        if profile == "mod" and output_flags.get("show_advice"):
+            mod_lines = mod_advice[:5]
+            if mod_lines:
+                _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
         if output_flags.get("show_mod_metrics") and profile == "mod":
             _add_section(embed, name="🧮 **METRICHE AGGREGATE**", value=_with_spacing(_format_metrics(result.metrics)))
-
         if ai_note:
             _add_section(embed, name="ℹ️ **NOTA**", value=_with_spacing(ai_note))
-
         notes_by_profile = {
             "base": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
             "role1": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
@@ -851,6 +919,7 @@ def setup(registry: ServiceRegistry) -> None:
     #   }
     # }
     @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
+    @app_commands.rename(window_minutes="minuti")
     @app_commands.describe(window_minutes="Finestra in minuti")
     async def barcello_command(interaction: discord.Interaction, window_minutes: int | None = None) -> None:
         if not interaction.response.is_done():
@@ -868,9 +937,16 @@ def setup(registry: ServiceRegistry) -> None:
             config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
             profile = await entitlements_service.resolve_profile(interaction.user)
 
-            async def try_send_dm(content: str | None = None, *, embed: discord.Embed | None = None) -> bool:
+            async def try_send_dm(
+                content: str | None = None,
+                *,
+                embed: discord.Embed | None = None,
+                embeds: list[discord.Embed] | None = None,
+            ) -> bool:
                 try:
-                    if embed is not None:
+                    if embeds is not None:
+                        await interaction.user.send(embeds=embeds)
+                    elif embed is not None:
                         await interaction.user.send(embed=embed)
                     else:
                         await interaction.user.send(content or "")
@@ -881,9 +957,9 @@ def setup(registry: ServiceRegistry) -> None:
             if not config["allowed"]:
                 dm_text = config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
                 if await try_send_dm(dm_text):
-                    await send_ephemeral(interaction, "📥 Ti ho inviato un DM, amo! 💋")
+                    await send_ephemeral(interaction, "Ti ho inviato un DM")
                 else:
-                    await send_ephemeral(interaction, "📥 Hai un messaggio privato, amo! 💋a")
+                    await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
                 return
 
             if not await check_permission(interaction, "barcello"):
@@ -915,7 +991,13 @@ def setup(registry: ServiceRegistry) -> None:
                     direction,
                 )
                 trend_text = f"Trend {trend_label} (Δ {delta:+d})."
-            advice_text = "\n".join(f"- {item}" for item in (result.advice or []))
+            advice_candidates = [item.strip() for item in (result.advice or []) if str(item).strip()]
+            color_label = (result.color or "nero").lower()
+            fallback_personal = _fallback_personal_advice(color_label)
+            personal_advice = advice_candidates or fallback_personal
+            if len(personal_advice) < 3:
+                personal_advice = (personal_advice + fallback_personal)[:3]
+            mod_advice = _fallback_mod_advice(color_label)
             ai_note = ""
 
             if "analysis.ai_preferred" in (config.get("capabilities") or []):
@@ -928,15 +1010,32 @@ def setup(registry: ServiceRegistry) -> None:
                         if client and model:
                             try:
                                 system_prompt = (
-                                    "Riscrivi i testi forniti in italiano, tono neutro e conciso. "
-                                    "Non includere nomi utenti o attribuzioni personali. "
+                                    "Scrivi in italiano, tono pratico e calmo (Criceto Mannaro ma non cringe). "
+                                    "Non includere nomi utenti, dati sensibili o accuse. "
                                     "Non aggiungere dettagli non presenti. "
-                                    "Restituisci solo JSON con chiavi: motivation, trend, advice. "
-                                    "Return ONLY valid JSON. No markdown, no prose, no explanations. "
-                                    'Esempio: {"motivation":"...","trend":"...","advice":"..."}'
+                                    "Restituisci SOLO JSON con chiavi: motivation, trend, "
+                                    "personal_advice_bullets, mod_advice_bullets. "
+                                    "Le liste devono avere 3-5 elementi, massimo 120 caratteri ciascuno. "
+                                    "Return ONLY valid JSON. No markdown, no prose."
                                 )
+                                metrics = result.metrics or {}
                                 user_payload = json.dumps(
-                                    {"motivation": reasons_text, "trend": trend_text, "advice": advice_text},
+                                    {
+                                        "channel": getattr(interaction.channel, "name", ""),
+                                        "window_minutes": window_minutes,
+                                        "score": result.score,
+                                        "color": result.color,
+                                        "trend": result.trend,
+                                        "motivations": result.reasons,
+                                        "metrics": {
+                                            "msg_per_min": metrics.get("msg_per_min"),
+                                            "caps_ratio": metrics.get("caps_ratio"),
+                                            "mention_per_min": metrics.get("mention_per_min"),
+                                            "negativity_hits": metrics.get("negativity_hits"),
+                                            "reply_war": metrics.get("reply_war"),
+                                        },
+                                        "wants_mod_advice": profile == "mod",
+                                    },
                                     ensure_ascii=False,
                                 )
                                 ai_payload, ai_text = await _call_openai_json(
@@ -957,29 +1056,44 @@ def setup(registry: ServiceRegistry) -> None:
                                     logger.info("AI JSON parsed ok")
                                     reasons_text = ai_payload.get("motivation", reasons_text) or reasons_text
                                     trend_text = ai_payload.get("trend", trend_text) or trend_text
-                                    advice_text = ai_payload.get("advice", advice_text) or advice_text
+                                    ai_personal = ai_payload.get("personal_advice_bullets")
+                                    ai_mod = ai_payload.get("mod_advice_bullets")
+                                    if isinstance(ai_personal, list):
+                                        personal_advice = [str(item).strip() for item in ai_personal if str(item).strip()]
+                                    if isinstance(ai_mod, list):
+                                        mod_advice = [str(item).strip() for item in ai_mod if str(item).strip()]
+                                    if len(personal_advice) < 3:
+                                        personal_advice = (personal_advice + fallback_personal)[:3]
+                                    if len(mod_advice) < 3:
+                                        mod_advice = (mod_advice + _fallback_mod_advice(color_label))[:3]
                             except Exception:  # noqa: BLE001
                                 logger.exception("AI barcello enrichment failed")
                                 ai_note = "AI non disponibile: report base."
 
             output_flags = config.get("output", {})
-            embed = _build_barcello_embed(
+            public_embed = _build_barcello_public_embed(
+                result=result,
+                channel_name=getattr(interaction.channel, "name", ""),
+                window_minutes=window_minutes,
+            )
+            details_color = await _get_details_embed_color(profile)
+            details_embed = _build_barcello_details_embed(
                 result=result,
                 output_flags=output_flags,
                 profile=profile,
-                channel_name=getattr(interaction.channel, "name", ""),
-                window_minutes=window_minutes,
+                embed_color=details_color,
                 reasons_text=reasons_text,
                 trend_text=trend_text,
-                advice_text=advice_text,
+                personal_advice=personal_advice,
+                mod_advice=mod_advice,
                 ai_note=ai_note,
             )
 
-            if await try_send_dm(embed=embed):
-                await interaction.followup.send("📥 Ti ho inviato un DM, amo! 💋", ephemeral=True)
+            if await try_send_dm(embeds=[public_embed, details_embed]):
+                await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
             else:
                 await interaction.followup.send(
-                    "Non riesco a inviarti DM, amo! 😮‍💨 (privacy). Abilita i messaggi privati dal server.",
+                    "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
                     ephemeral=True,
                 )
         except Exception:
