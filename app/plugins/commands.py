@@ -155,14 +155,9 @@ def setup(registry: ServiceRegistry) -> None:
         return "```\n" + "\n".join(lines) + "\n```"
 
     def _with_spacing(text: str) -> str:
-        return f"{text}\n\n\n"
-
-    def _add_spacer(embed: discord.Embed) -> None:
-        embed.add_field(name="\u200b", value="\u200b", inline=False)
+        return f"{text}\n\u200b"
 
     def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
-        if embed.fields:
-            _add_spacer(embed)
         embed.add_field(name=name, value=value, inline=False)
 
     def _build_barcello_embed(
@@ -189,7 +184,6 @@ def setup(registry: ServiceRegistry) -> None:
         title_channel = channel_name or "canale"
         description_lines = [
             f"🕒 **Ultimi {window_minutes} minuti**",
-            "",
             "",
             f"{emoji} **ALLERTA {label.upper()}**",
             f"*{_alert_message(result.score)}*",
