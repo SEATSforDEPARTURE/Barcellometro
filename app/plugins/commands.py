@@ -120,7 +120,17 @@ def setup(registry: ServiceRegistry) -> None:
             return "Delicata. 😬 Il clima richiede cautela."
         return "Critica. 🚨 Situazione tesa e facilmente infiammabile."
 
-    def _alert_message(score: int) -> str:
+    def _alert_message(score: int, color_label: str | None = None) -> str:
+        if color_label:
+            normalized = color_label.lower()
+            if normalized == "verde":
+                return "È un buon momento per scrivere e partecipare 💬"
+            if normalized == "giallo":
+                return "Clima un po’ teso: scrivi con calma e chiarisci se serve 🙂"
+            if normalized == "rosso":
+                return "Tensione alta: evita provocazioni e abbassa i toni 🧯"
+            if normalized == "nero":
+                return "Situazione critica: meglio fermarsi e moderare subito 🚨"
         if score >= 60:
             return "È un buon momento per scrivere e partecipare 💬"
         if score >= 45:
@@ -186,6 +196,20 @@ def setup(registry: ServiceRegistry) -> None:
         stored = await get_setting("barcello.details_color_default", "")
         return _parse_hex_color(stored) or default_color
 
+    async def _get_tier_label(profile: str) -> str:
+        stored = await get_setting(f"barcello.tier_label.{profile}", "")
+        if stored:
+            return stored
+        defaults = {
+            "base": "Utente",
+            "role1": "Utente",
+            "role2": "Utente",
+            "role3": "Utente",
+            "mod": "Mod",
+            "admin": "Admin",
+        }
+        return defaults.get(profile, "Utente")
+
     def _bullet_list(lines: list[str]) -> str:
         cleaned: list[str] = []
         for line in lines:
@@ -196,6 +220,25 @@ def setup(registry: ServiceRegistry) -> None:
                 text = f"{text[:117]}..."
             cleaned.append(text)
         return "\n".join(f"• {line}" for line in cleaned)
+
+    def _format_motivations(reasons: list[dict[str, Any]]) -> str:
+        lines = [f"{reason['label']} ({reason['summary']})" for reason in reasons][:4]
+        if not lines:
+            return "• (nessuna)"
+        return _bullet_list(lines)
+
+    def _normalize_bullets(text: str) -> str:
+        lines: list[str] = []
+        for line in text.splitlines():
+            cleaned = line.strip()
+            if not cleaned:
+                continue
+            cleaned = cleaned.lstrip("-• ").strip()
+            if cleaned:
+                lines.append(cleaned)
+        if not lines:
+            return "• (nessuna)"
+        return _bullet_list(lines)
 
     def _fallback_personal_advice(color_label: str) -> list[str]:
         if color_label == "verde":
@@ -254,7 +297,7 @@ def setup(registry: ServiceRegistry) -> None:
             f"🕒 **Ultimi {window_minutes} minuti**",
             "",
             f"{emoji} **ALLERTA {label.upper()}**",
-            f"*{_alert_message(result.score)}*",
+            f"*{_alert_message(result.score, label)}*",
         ]
         embed = discord.Embed(
             title=f"🫛 **STATO BARCELLO “{title_channel}”**",
@@ -275,6 +318,7 @@ def setup(registry: ServiceRegistry) -> None:
         result: BarcelloResult,
         output_flags: dict[str, Any],
         profile: str,
+        tier_label: str,
         embed_color: int,
         reasons_text: str,
         trend_text: str,
@@ -282,7 +326,7 @@ def setup(registry: ServiceRegistry) -> None:
         mod_advice: list[str],
         ai_note: str,
     ) -> discord.Embed:
-        embed = discord.Embed(title="🧾 **DETTAGLI BARCELLO**", color=embed_color)
+        embed = discord.Embed(title=f"🧾 **DETTAGLI BARCELLO — {tier_label}**", color=embed_color)
         if output_flags.get("show_motivation") and reasons_text:
             _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
         if output_flags.get("show_trend") and (result.trend or trend_text):
@@ -980,8 +1024,7 @@ def setup(registry: ServiceRegistry) -> None:
                 window_minutes,
             )
 
-            reasons_lines = [f"- {reason['label']} ({reason['summary']})" for reason in result.reasons][:4]
-            reasons_text = "\n".join(reasons_lines) if reasons_lines else "- (nessuna)"
+            reasons_text = _format_motivations(result.reasons)
             trend_text = ""
             if result.trend:
                 direction = result.trend.get("direction", "stable")
@@ -1054,7 +1097,7 @@ def setup(registry: ServiceRegistry) -> None:
                                     ai_note = "AI non disponibile: report base."
                                 else:
                                     logger.info("AI JSON parsed ok")
-                                    reasons_text = ai_payload.get("motivation", reasons_text) or reasons_text
+                                    reasons_text = _normalize_bullets(ai_payload.get("motivation", reasons_text) or reasons_text)
                                     trend_text = ai_payload.get("trend", trend_text) or trend_text
                                     ai_personal = ai_payload.get("personal_advice_bullets")
                                     ai_mod = ai_payload.get("mod_advice_bullets")
@@ -1077,10 +1120,12 @@ def setup(registry: ServiceRegistry) -> None:
                 window_minutes=window_minutes,
             )
             details_color = await _get_details_embed_color(profile)
+            tier_label = await _get_tier_label(profile)
             details_embed = _build_barcello_details_embed(
                 result=result,
                 output_flags=output_flags,
                 profile=profile,
+                tier_label=tier_label,
                 embed_color=details_color,
                 reasons_text=reasons_text,
                 trend_text=trend_text,
