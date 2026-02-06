@@ -101,11 +101,44 @@ def setup(registry: ServiceRegistry) -> None:
         else:
             await interaction.response.send_message(message, ephemeral=ephemeral)
 
-    def _render_health_bar(percent: int) -> str:
-        percent = max(0, min(100, percent))
-        filled = int(round(percent / 10))
+    def _render_health_bar(score: int, color_emoji: str) -> str:
+        score = max(0, min(100, score))
+        filled = int(round(score / 10))
         empty = max(0, 10 - filled)
-        return f"{'█' * filled}{'░' * empty}"
+        return f"{color_emoji * filled}{'⚪' * empty}"
+
+    def _health_description(score: int) -> str:
+        if score >= 90:
+            return "Ottima! 😄 Il clima è disteso, positivo e molto ricettivo."
+        if score >= 75:
+            return "Molto buona. 😊 La conversazione scorre senza attriti."
+        if score >= 60:
+            return "Buona. 😃 Il clima è stabile, con lievi variazioni."
+        if score >= 45:
+            return "Discreta. 🤔 Clima gestibile ma con primi segnali di tensione."
+        if score >= 30:
+            return "Delicata. 😬 Il clima richiede cautela."
+        return "Critica. 🚨 Situazione tesa e facilmente infiammabile."
+
+    def _alert_message(score: int) -> str:
+        if score >= 60:
+            return "È un buon momento per scrivere e partecipare 💬"
+        if score >= 45:
+            return "Meglio fare attenzione ⚠️ Mantieni un tono neutro."
+        if score >= 30:
+            return "Situazione delicata 🟠 Meglio osservare."
+        return "Alta tensione 🔴 È consigliato non intervenire ora."
+
+    def _trend_display(trend: dict[str, Any]) -> tuple[str, str]:
+        direction = trend.get("direction", "stable")
+        delta = trend.get("delta", 0)
+        mapping = {
+            "improving": ("IN MIGLIORAMENTO", "😄"),
+            "stable": ("STABILE", "😐"),
+            "worsening": ("IN PEGGIORAMENTO", "😟"),
+        }
+        label, emoji = mapping.get(direction, ("STABILE", "😐"))
+        return f"**{label}** {emoji}  *(Δ {delta})*", label
 
     def _format_metrics(metrics: dict[str, Any]) -> str:
         keys = [
@@ -126,6 +159,7 @@ def setup(registry: ServiceRegistry) -> None:
         result: BarcelloResult,
         output_flags: dict[str, Any],
         profile: str,
+        channel_name: str,
         window_minutes: int,
         reasons_text: str,
         trend_text: str,
@@ -141,64 +175,80 @@ def setup(registry: ServiceRegistry) -> None:
         }
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
 
-        context_label = "(testo)"
+        title_channel = channel_name or "canale"
         description_lines = [
-            f"🧭 FINESTRA TEMPORALE: ultimi {window_minutes} minuti",
-            f"🚨 ALLERTA: {emoji} {label}",
+            f"🧭 **FINESTRA TEMPORALE:** ultimi {window_minutes} minuti",
+            f"{emoji} **ALLERTA {label.upper()}**",
+            f"*{_alert_message(result.score)}*",
         ]
         embed = discord.Embed(
-            title=f"Barcellometro {context_label}",
+            title=f"🫛 STATO BARCELLO DEL “{title_channel}”",
             description="\n".join(description_lines),
             color=embed_color,
         )
 
         if output_flags.get("show_score"):
-            percent = int(round((result.score / 100) * 100))
-            bar = _render_health_bar(percent)
+            bar = _render_health_bar(result.score, emoji)
             embed.add_field(
-                name="❤️ PUNTI SALUTE BARCELLO",
-                value=f"{result.score}/100  ({percent}%)\n{bar}",
+                name="🫀 **PUNTI SALUTE BARCELLO**",
+                value=f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*",
                 inline=False,
             )
 
         if output_flags.get("show_motivation") and reasons_text:
-            embed.add_field(name="🔥 Motivazioni", value=reasons_text, inline=False)
+            embed.add_field(name="🔥 **MOTIVAZIONI**", value=reasons_text, inline=False)
 
-        if output_flags.get("show_trend") and trend_text:
-            embed.add_field(name="📈 Trend", value=trend_text, inline=False)
+        if output_flags.get("show_trend") and result.trend:
+            trend_value, _ = _trend_display(result.trend)
+            embed.add_field(name="📈 **TREND**", value=trend_value, inline=False)
 
-        if output_flags.get("show_advice") and advice_text:
-            embed.add_field(name="💡 Consigli", value=advice_text, inline=False)
+        if profile in {"role3", "mod"}:
+            advice_lines = [line for line in advice_text.split("\n") if line.strip()]
+            if not advice_lines:
+                color_key = label
+                if color_key == "verde":
+                    advice_lines = ["- Coinvolgi i nuovi: fai una domanda leggera."]
+                elif color_key == "giallo":
+                    advice_lines = ["- Se scrivi, usa tono neutro e fai domande aperte."]
+                else:
+                    advice_lines = ["- Evita interventi diretti: favorisci de-escalation o pausa."]
+            embed.add_field(
+                name="🧠 **CONSIGLI PERSONALIZZATI**",
+                value="\n".join(advice_lines[:3]),
+                inline=False,
+            )
 
-        if profile in {"role1", "role2", "role3"}:
+        if profile in {"role2", "role3", "mod"}:
             highlights = "\n".join(reasons_text.split("\n")[:3]) if reasons_text else "Nessun momento saliente."
-            embed.add_field(name="⭐ Momenti salienti", value=highlights, inline=False)
+            embed.add_field(name="⭐ **MOMENTI SALIENTI**", value=highlights, inline=False)
 
         if profile == "mod":
             embed.add_field(
-                name="🛡️ Dinamiche / Chi vs Chi",
-                value="Dati aggregati non disponibili.",
+                name="🧩 **DINAMICHE / CHI VS CHI**",
+                value="(nessuna)",
                 inline=False,
             )
             embed.add_field(
-                name="🛡️ Chi calma le acque",
-                value="Dati aggregati non disponibili.",
-                inline=False,
-            )
-            embed.add_field(
-                name="🛡️ Note operative",
-                value="Nessuna nota operativa disponibile.",
+                name="🧊 **CHI CALMA LE ACQUE**",
+                value="(nessuno)",
                 inline=False,
             )
 
         if output_flags.get("show_mod_metrics") and profile == "mod":
-            embed.add_field(name="🧮 Metriche aggregate", value=_format_metrics(result.metrics), inline=False)
+            embed.add_field(name="🧮 **METRICHE AGGREGATE**", value=_format_metrics(result.metrics), inline=False)
 
         if ai_note:
-            embed.add_field(name="ℹ️ Nota", value=ai_note, inline=False)
+            embed.add_field(name="ℹ️ **NOTA**", value=ai_note, inline=False)
 
-        footer = f"Barcellometro • UTC: {result.window_start_ts} → {result.window_end_ts}"
-        embed.set_footer(text=footer)
+        notes_by_profile = {
+            "base": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
+            "role1": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
+            "role2": "*Per i consigli personalizzati passa al livello successivo! 🧠*",
+            "role3": "*Hai sbloccato i consigli personalizzati ✨*",
+            "mod": "*Report completo per moderazione.*",
+        }
+        embed.add_field(name="📌 **NOTE**", value=notes_by_profile.get(profile, ""), inline=False)
+        embed.set_footer(text="Barcellometro")
         return embed
 
     def _extract_ai_text(response: Any) -> str:
@@ -856,8 +906,8 @@ def setup(registry: ServiceRegistry) -> None:
                 window_minutes,
             )
 
-            reasons_lines = [f"- {reason['label']} ({reason['summary']})" for reason in result.reasons][:5]
-            reasons_text = "\n".join(reasons_lines) if reasons_lines else "Nessun segnale critico rilevato."
+            reasons_lines = [f"- {reason['label']} ({reason['summary']})" for reason in result.reasons][:4]
+            reasons_text = "\n".join(reasons_lines) if reasons_lines else "- (nessuna)"
             trend_text = ""
             if result.trend:
                 direction = result.trend.get("direction", "stable")
@@ -919,20 +969,21 @@ def setup(registry: ServiceRegistry) -> None:
                 result=result,
                 output_flags=output_flags,
                 profile=profile,
+                channel_name=getattr(interaction.channel, "name", ""),
                 window_minutes=window_minutes,
                 reasons_text=reasons_text,
                 trend_text=trend_text,
                 advice_text=advice_text,
                 ai_note=ai_note,
             )
-            footer_text = config.get("messages", {}).get("footer_text")
-            if footer_text:
-                embed.add_field(name="📌 Nota", value=footer_text, inline=False)
 
             if await try_send_dm(embed=embed):
                 await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
             else:
-                await interaction.followup.send("Apri i DM per ricevere la risposta", ephemeral=True)
+                await interaction.followup.send(
+                    "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
+                    ephemeral=True,
+                )
         except Exception:
             logger.exception("barcello: unexpected error")
             await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
