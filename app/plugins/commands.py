@@ -155,7 +155,7 @@ def setup(registry: ServiceRegistry) -> None:
         return "```\n" + "\n".join(lines) + "\n```"
 
     def _with_spacing(text: str) -> str:
-        return f"\n{text}\n\n"
+        return f"{text}\n\n\n"
 
     def _build_barcello_embed(
         *,
@@ -181,6 +181,8 @@ def setup(registry: ServiceRegistry) -> None:
         title_channel = channel_name or "canale"
         description_lines = [
             f"🕒 **Ultimi {window_minutes} minuti**",
+            "",
+            "",
             f"{emoji} **ALLERTA {label.upper()}**",
             f"*{_alert_message(result.score)}*",
         ]
@@ -254,7 +256,7 @@ def setup(registry: ServiceRegistry) -> None:
             note_value = notes_by_profile.get(profile, "")
             if note_value:
                 embed.add_field(name="📌 **NOTE**", value=_with_spacing(note_value), inline=False)
-        embed.set_footer(text="Barcellometro")
+        embed.set_footer(text="SEATSforDEPARTURE")
         return embed
 
     def _extract_ai_text(response: Any) -> str:
