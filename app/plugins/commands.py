@@ -302,6 +302,16 @@ def setup(registry: ServiceRegistry) -> None:
             return "• (nessuna)"
         return _bullet_list(lines)
 
+    def _normalize_bullet_lines(raw: Any) -> list[str]:
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            return [str(item).strip() for item in raw if str(item).strip()]
+        if isinstance(raw, str):
+            return [line.strip() for line in raw.splitlines() if line.strip()]
+        value = str(raw).strip()
+        return [value] if value else []
+
     def _fallback_personal_advice(color_label: str) -> list[str]:
         if color_label == "verde":
             return [
@@ -1836,14 +1846,8 @@ def setup(registry: ServiceRegistry) -> None:
                                     if pair_mode and pair_mode_profile == "role3":
                                         ai_advice = ai_payload.get("pair_advice_bullets")
                                         ai_affinity = ai_payload.get("affinity_bullets")
-                                        if isinstance(ai_advice, list):
-                                            personal_advice = [
-                                                str(item).strip() for item in ai_advice if str(item).strip()
-                                            ]
-                                        if isinstance(ai_affinity, list):
-                                            affinity_bullets = [
-                                                str(item).strip() for item in ai_affinity if str(item).strip()
-                                            ]
+                                        personal_advice = _normalize_bullet_lines(ai_advice)
+                                        affinity_bullets = _normalize_bullet_lines(ai_affinity)
                                         fallback_personal = _fallback_pair_personal_advice(result.metrics)
                                         if len(personal_advice) < 3:
                                             personal_advice = (personal_advice + fallback_personal)[:3]
@@ -1852,12 +1856,8 @@ def setup(registry: ServiceRegistry) -> None:
                                     elif pair_mode and pair_mode_profile == "mod":
                                         ai_mod = ai_payload.get("mod_advice_bullets")
                                         ai_contacts = ai_payload.get("contact_points_bullets")
-                                        if isinstance(ai_mod, list):
-                                            mod_advice = [str(item).strip() for item in ai_mod if str(item).strip()]
-                                        if isinstance(ai_contacts, list):
-                                            contact_points_bullets = [
-                                                str(item).strip() for item in ai_contacts if str(item).strip()
-                                            ]
+                                        mod_advice = _normalize_bullet_lines(ai_mod)
+                                        contact_points_bullets = _normalize_bullet_lines(ai_contacts)
                                         if len(mod_advice) < 4:
                                             mod_advice = (_fallback_pair_mod_advice(result.metrics) + mod_advice)[:4]
                                         if len(contact_points_bullets) < 3:
@@ -1867,12 +1867,8 @@ def setup(registry: ServiceRegistry) -> None:
                                     else:
                                         ai_personal = ai_payload.get("personal_advice_bullets")
                                         ai_mod = ai_payload.get("mod_advice_bullets")
-                                        if isinstance(ai_personal, list):
-                                            personal_advice = [
-                                                str(item).strip() for item in ai_personal if str(item).strip()
-                                            ]
-                                        if isinstance(ai_mod, list):
-                                            mod_advice = [str(item).strip() for item in ai_mod if str(item).strip()]
+                                        personal_advice = _normalize_bullet_lines(ai_personal)
+                                        mod_advice = _normalize_bullet_lines(ai_mod)
                                         fallback_personal = _fallback_personal_advice(color_label)
                                         if len(personal_advice) < 3:
                                             personal_advice = (personal_advice + fallback_personal)[:3]
@@ -1896,6 +1892,7 @@ def setup(registry: ServiceRegistry) -> None:
                                         "cache_hit": cache_hit,
                                         "model": model,
                                         "fallback_reason": "exception",
+                                        "exception": f"{exc.__class__.__name__}: {exc}",
                                     },
                                 )
                                 ai_debug_line = f"🔎 AI: OFF (fallback=exception)"
