@@ -1374,8 +1374,8 @@ def setup(registry: ServiceRegistry) -> None:
             logger.exception("barcello: unexpected error")
             await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
 
-    @app_commands.command(name="barcello-calibrate", description="Calibra automaticamente i pesi del barcello")
-    async def barcello_calibrate(interaction: discord.Interaction) -> None:
+    @barcellometro_group.command(name="calibrate", description="Calibra automaticamente i pesi del barcello")
+    async def barcellometro_calibrate(interaction: discord.Interaction) -> None:
         entitlements_service: EntitlementsService = registry.get("entitlements")
         profile, _ = await entitlements_service.resolve_profile_with_role_id(interaction.user)
         if profile != "mod":
@@ -1394,7 +1394,6 @@ def setup(registry: ServiceRegistry) -> None:
     bot.tree.add_command(status_group, guild=guild)
     bot.tree.add_command(privacy_group, guild=guild)
     bot.tree.add_command(barcello_command, guild=guild)
-    bot.tree.add_command(barcello_calibrate, guild=guild)
 
     @role_group.command(name="set-role", description="Imposta limiti per un ruolo su un comando")
     @app_commands.describe(role="Ruolo", command="Nome comando", usage_limit="Limite utilizzi (vuoto = illimitato)", cooldown_seconds="Cooldown in secondi")
