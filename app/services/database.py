@@ -339,6 +339,32 @@ class DatabaseService:
             (f"-{days} days",),
         )
 
+    async def fetch_barcello_feedback(self, *, time_from: str, time_to: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT *
+            FROM barcello_feedback
+            WHERE created_at >= ? AND created_at <= ?
+            ORDER BY created_at DESC
+            """,
+            (time_from, time_to),
+        )
+
+    async def get_barcello_snapshot_by_end(
+        self,
+        *,
+        channel_id: str,
+        window_minutes: int,
+        window_end_ts: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM barcello_snapshots
+            WHERE channel_id = ? AND window_minutes = ? AND window_end_ts = ?
+            """,
+            (channel_id, window_minutes, window_end_ts),
+        )
+
     async def fetch_messages_in_range(
         self,
         *,

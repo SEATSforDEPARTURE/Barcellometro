@@ -46,6 +46,17 @@ def main() -> None:
             await ai_service.load_settings()
             retention.start()
             backfill.start()
+            calibration = registry.get("barcello_calibration") if registry.has("barcello_calibration") else None
+            if calibration:
+                async def _calibration_loop() -> None:
+                    while True:
+                        try:
+                            await calibration.run_calibration(days=14, min_samples=20)
+                        except Exception:
+                            logger.exception("Calibration loop failed")
+                        await asyncio.sleep(60 * 60 * 24)
+
+                asyncio.create_task(_calibration_loop())
         await bot.start(config.discord_token)
 
     try:

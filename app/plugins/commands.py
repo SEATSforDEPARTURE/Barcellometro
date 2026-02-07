@@ -12,6 +12,7 @@ from discord import app_commands
 
 from app.core.service_registry import ServiceRegistry
 from app.services.barcello import BarcelloService
+from app.services.barcello_calibration import BarcelloCalibrationService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope, IngestService
 
@@ -25,6 +26,8 @@ def setup(registry: ServiceRegistry) -> None:
     registry.register("entitlements", entitlements)
     barcello = BarcelloService(database)
     registry.register("barcello", barcello)
+    barcello_calibration = BarcelloCalibrationService(database)
+    registry.register("barcello_calibration", barcello_calibration)
     retention = registry.get("retention")
     backfill = registry.get("backfill")
     guard = registry.get("guard")
@@ -1371,10 +1374,27 @@ def setup(registry: ServiceRegistry) -> None:
             logger.exception("barcello: unexpected error")
             await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
 
+    @app_commands.command(name="barcello-calibrate", description="Calibra automaticamente i pesi del barcello")
+    async def barcello_calibrate(interaction: discord.Interaction) -> None:
+        entitlements_service: EntitlementsService = registry.get("entitlements")
+        profile, _ = await entitlements_service.resolve_profile_with_role_id(interaction.user)
+        if profile != "mod":
+            await interaction.response.send_message("Feedback riservato ai mod.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        calibration_service: BarcelloCalibrationService = registry.get("barcello_calibration")
+        result = await calibration_service.run_calibration(days=14, min_samples=20)
+        if result.get("updated"):
+            message = f"Calibrazione aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
+        else:
+            message = f"Calibrazione non aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
+        await interaction.followup.send(message, ephemeral=True)
+
     bot.tree.add_command(barcellometro_group, guild=guild)
     bot.tree.add_command(status_group, guild=guild)
     bot.tree.add_command(privacy_group, guild=guild)
     bot.tree.add_command(barcello_command, guild=guild)
+    bot.tree.add_command(barcello_calibrate, guild=guild)
 
     @role_group.command(name="set-role", description="Imposta limiti per un ruolo su un comando")
     @app_commands.describe(role="Ruolo", command="Nome comando", usage_limit="Limite utilizzi (vuoto = illimitato)", cooldown_seconds="Cooldown in secondi")

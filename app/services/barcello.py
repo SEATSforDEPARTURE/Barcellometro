@@ -43,7 +43,22 @@ DEFAULT_SCORE_WEIGHTS = {
     "burst_ratio": {"threshold": 2.5, "penalty": 8, "max_threshold": 4.0, "max_penalty": 12},
     "contrast_per_msg": {"threshold": 0.25, "penalty": 6},
     "challenge_per_msg": {"threshold": 0.08, "penalty": 6},
-    "mitigation": {"msg_rate": 0.2, "caps": 0.3},
+}
+
+DEFAULT_WEIGHT_MULTIPLIERS = {
+    "msg_rate": 1.0,
+    "caps": 1.0,
+    "mentions": 1.0,
+    "negativity": 1.0,
+    "top3": 1.0,
+    "burst": 1.0,
+    "contrast": 1.0,
+    "challenge": 1.0,
+}
+
+DEFAULT_MITIGATION_FACTORS = {
+    "msg_rate_factor": 0.8,
+    "caps_factor": 0.7,
 }
 
 
@@ -116,8 +131,8 @@ class BarcelloService:
         )
 
         metrics = self._compute_metrics(messages, window_minutes)
-        weights = await self._get_score_weights()
-        reasons, score = self._score_from_metrics(metrics, weights)
+        score_config = await self._get_score_config()
+        reasons, score = self._score_from_metrics(metrics, score_config)
         color = await self.get_color(score)
 
         trend = await self._compute_trend(guild_id, channel_id, window_minutes, window_end_ts, score)
@@ -184,22 +199,41 @@ class BarcelloService:
                 logger.warning("Invalid JSON in setting barcello.color_ranges")
         return DEFAULT_COLOR_RANGES
 
-    async def _get_score_weights(self) -> dict[str, Any]:
+    async def _get_score_config(self) -> dict[str, Any]:
         raw = await self._database.get_setting("barcello.weights_json")
+        base = {
+            "rules": DEFAULT_SCORE_WEIGHTS,
+            "weights": DEFAULT_WEIGHT_MULTIPLIERS,
+            "mitigation": DEFAULT_MITIGATION_FACTORS,
+        }
         if raw:
             try:
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict):
-                    merged = dict(DEFAULT_SCORE_WEIGHTS)
-                    for key, value in parsed.items():
-                        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-                            merged[key] = {**merged.get(key, {}), **value}
-                        else:
-                            merged[key] = value
-                    return merged
+                    rules = dict(DEFAULT_SCORE_WEIGHTS)
+                    weights = dict(DEFAULT_WEIGHT_MULTIPLIERS)
+                    mitigation = dict(DEFAULT_MITIGATION_FACTORS)
+                    if "weights" in parsed or "mitigation" in parsed or "rules" in parsed:
+                        if isinstance(parsed.get("rules"), dict):
+                            for key, value in parsed["rules"].items():
+                                if isinstance(value, dict) and isinstance(rules.get(key), dict):
+                                    rules[key] = {**rules.get(key, {}), **value}
+                                else:
+                                    rules[key] = value
+                        if isinstance(parsed.get("weights"), dict):
+                            weights.update(parsed.get("weights", {}))
+                        if isinstance(parsed.get("mitigation"), dict):
+                            mitigation.update(parsed.get("mitigation", {}))
+                    else:
+                        for key, value in parsed.items():
+                            if isinstance(value, dict) and isinstance(rules.get(key), dict):
+                                rules[key] = {**rules.get(key, {}), **value}
+                            else:
+                                rules[key] = value
+                    return {"rules": rules, "weights": weights, "mitigation": mitigation}
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON in setting barcello.weights_json")
-        return DEFAULT_SCORE_WEIGHTS
+        return base
 
     async def _compute_trend(
         self,
@@ -385,7 +419,7 @@ class BarcelloService:
             "sarcasm_marker_hits_raw": sarcasm_marker_hits,
         }
 
-    def _score_from_metrics(self, metrics: dict[str, Any], weights: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    def _score_from_metrics(self, metrics: dict[str, Any], score_config: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
         penalties: list[dict[str, Any]] = []
         msg_per_min = metrics["msg_per_min"]
         caps_ratio = metrics["caps_ratio"]
@@ -401,19 +435,23 @@ class BarcelloService:
         passive_ratio = metrics.get("passive_aggressive_emoji_ratio", 0)
         sarcasm_hits_raw = metrics.get("sarcasm_marker_hits_raw", 0)
 
-        msg_cfg = weights["msg_rate"]
-        caps_cfg = weights["caps"]
-        negativity_cfg = weights["negativity"]
-        mention_cfg = weights["mentions"]
-        reply_cfg = weights["reply_war"]
-        top1_cfg = weights["top1_author_share"]
-        top3_cfg = weights["top3_author_share"]
-        burst_cfg = weights["burst_ratio"]
-        contrast_cfg = weights["contrast_per_msg"]
-        challenge_cfg = weights["challenge_per_msg"]
-        mitigation_cfg = weights["mitigation"]
+        rules = score_config["rules"]
+        weights = score_config["weights"]
+        mitigation_cfg = score_config["mitigation"]
+
+        msg_cfg = rules["msg_rate"]
+        caps_cfg = rules["caps"]
+        negativity_cfg = rules["negativity"]
+        mention_cfg = rules["mentions"]
+        reply_cfg = rules["reply_war"]
+        top1_cfg = rules["top1_author_share"]
+        top3_cfg = rules["top3_author_share"]
+        burst_cfg = rules["burst_ratio"]
+        contrast_cfg = rules["contrast_per_msg"]
+        challenge_cfg = rules["challenge_per_msg"]
 
         msg_penalty = min(max(msg_per_min - msg_cfg["threshold"], 0) * msg_cfg["scale"], msg_cfg["cap"])
+        msg_penalty *= float(weights.get("msg_rate", 1.0))
         if msg_penalty:
             penalties.append(
                 {
@@ -425,6 +463,7 @@ class BarcelloService:
             )
 
         caps_penalty = min(max(caps_ratio - caps_cfg["threshold"], 0) * caps_cfg["scale"], caps_cfg["cap"])
+        caps_penalty *= float(weights.get("caps", 1.0))
         if caps_penalty:
             penalties.append(
                 {
@@ -436,6 +475,7 @@ class BarcelloService:
             )
 
         negativity_penalty = min(negativity_hits * negativity_cfg["per_hit"], negativity_cfg["cap"])
+        negativity_penalty *= float(weights.get("negativity", 1.0))
         if negativity_penalty:
             penalties.append(
                 {
@@ -450,6 +490,7 @@ class BarcelloService:
             max(mention_per_min - mention_cfg["threshold"], 0) * mention_cfg["scale"],
             mention_cfg["cap"],
         )
+        mention_penalty *= float(weights.get("mentions", 1.0))
         if mention_penalty:
             penalties.append(
                 {
@@ -472,21 +513,23 @@ class BarcelloService:
             )
 
         if top1_author_share > top1_cfg["threshold"]:
+            top1_weight = float(weights.get("top3", 1.0))
             penalties.append(
                 {
                     "key": "top1_author_share",
                     "label": "Concentrazione su un autore",
-                    "weight": top1_cfg["penalty"],
+                    "weight": int(round(top1_cfg["penalty"] * top1_weight)),
                     "summary": f"{top1_author_share:.2f} top1",
                 }
             )
 
         if top3_author_share > top3_cfg["threshold"]:
+            top3_weight = float(weights.get("top3", 1.0))
             penalties.append(
                 {
                     "key": "top3_author_share",
                     "label": "Concentrazione su pochi autori",
-                    "weight": top3_cfg["penalty"],
+                    "weight": int(round(top3_cfg["penalty"] * top3_weight)),
                     "summary": f"{top3_author_share:.2f} top3",
                 }
             )
@@ -495,6 +538,7 @@ class BarcelloService:
             burst_penalty = burst_cfg["penalty"]
             if burst_ratio > burst_cfg.get("max_threshold", burst_cfg["threshold"]):
                 burst_penalty = burst_cfg.get("max_penalty", burst_penalty)
+            burst_penalty = int(round(burst_penalty * float(weights.get("burst", 1.0))))
             penalties.append(
                 {
                     "key": "burst_ratio",
@@ -505,21 +549,23 @@ class BarcelloService:
             )
 
         if contrast_per_msg > contrast_cfg["threshold"]:
+            contrast_penalty = int(round(contrast_cfg["penalty"] * float(weights.get("contrast", 1.0))))
             penalties.append(
                 {
                     "key": "contrast_per_msg",
                     "label": "Frizione lessicale",
-                    "weight": contrast_cfg["penalty"],
+                    "weight": contrast_penalty,
                     "summary": f"{contrast_per_msg:.2f} per msg",
                 }
             )
 
         if challenge_per_msg > challenge_cfg["threshold"]:
+            challenge_penalty = int(round(challenge_cfg["penalty"] * float(weights.get("challenge", 1.0))))
             penalties.append(
                 {
                     "key": "challenge_per_msg",
                     "label": "Domande sfidanti",
-                    "weight": challenge_cfg["penalty"],
+                    "weight": challenge_penalty,
                     "summary": f"{challenge_per_msg:.2f} per msg",
                 }
             )
@@ -530,8 +576,8 @@ class BarcelloService:
             and negativity_hits == 0
         )
         if is_playful:
-            msg_penalty *= 1 - mitigation_cfg["msg_rate"]
-            caps_penalty *= 1 - mitigation_cfg["caps"]
+            msg_penalty *= float(mitigation_cfg.get("msg_rate_factor", 0.8))
+            caps_penalty *= float(mitigation_cfg.get("caps_factor", 0.7))
             for item in penalties:
                 if item["key"] == "density":
                     item["weight"] = int(round(msg_penalty))
