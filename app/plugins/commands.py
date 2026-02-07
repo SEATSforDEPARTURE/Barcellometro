@@ -173,6 +173,13 @@ def setup(registry: ServiceRegistry) -> None:
             "playful_emoji_ratio",
             "passive_aggressive_emoji_ratio",
             "sarcasm_marker_hits",
+            "msg_count_user_a",
+            "msg_count_user_b",
+            "balance_ratio",
+            "mentions_a_to_b",
+            "mentions_b_to_a",
+            "avg_msg_len_a",
+            "avg_msg_len_b",
         ]
         lines = [f"{key}: {metrics.get(key)}" for key in keys]
         return "```\n" + "\n".join(lines) + "\n```"
@@ -307,11 +314,115 @@ def setup(registry: ServiceRegistry) -> None:
             "Monitora utenti/coppie ricorrenti e intervieni in privato.",
         ]
 
+    def _resolve_display_name(member: discord.Member) -> str:
+        return (
+            getattr(member, "display_name", None)
+            or getattr(member, "global_name", None)
+            or getattr(member, "name", None)
+            or "Utente"
+        )
+
+    def _fallback_pair_personal_advice(metrics: dict[str, Any]) -> list[str]:
+        advice: list[str] = []
+        balance_ratio = float(metrics.get("balance_ratio") or 0)
+        mentions_total = int(metrics.get("mentions_a_to_b") or 0) + int(metrics.get("mentions_b_to_a") or 0)
+        caps_ratio = float(metrics.get("caps_ratio") or 0)
+        negativity_hits = int(metrics.get("negativity_hits") or 0)
+        reply_war = bool(metrics.get("reply_war"))
+
+        if balance_ratio and balance_ratio < 0.6:
+            advice.append("Bilancia i turni: lascia spazio all’altra persona prima di rispondere.")
+        if mentions_total >= 3:
+            advice.append("Usa le menzioni solo per chiarire, non per accelerare il confronto.")
+        if caps_ratio > 0.3:
+            advice.append("Riduci le MAIUSCOLE: aiutano a evitare fraintendimenti sul tono.")
+        if negativity_hits > 0:
+            advice.append("Mantieni un tono neutro e riformula quando il clima si irrigidisce.")
+        if reply_war:
+            advice.append("Se la discussione accelera, proponi una pausa breve o sposta il tema.")
+        if not advice:
+            advice = [
+                "Fai domande di chiarimento prima di rispondere di pancia.",
+                "Sintetizza i punti chiave per evitare malintesi.",
+                "Conferma i punti su cui siete già d’accordo.",
+            ]
+        return advice[:5]
+
+    def _fallback_pair_affinity(metrics: dict[str, Any]) -> list[str]:
+        affinity: list[str] = []
+        balance_ratio = float(metrics.get("balance_ratio") or 0)
+        avg_len_a = float(metrics.get("avg_msg_len_a") or 0)
+        avg_len_b = float(metrics.get("avg_msg_len_b") or 0)
+        mentions_total = int(metrics.get("mentions_a_to_b") or 0) + int(metrics.get("mentions_b_to_a") or 0)
+        negativity_hits = int(metrics.get("negativity_hits") or 0)
+        reply_war = bool(metrics.get("reply_war"))
+
+        if balance_ratio >= 0.8:
+            affinity.append("Scambio abbastanza bilanciato: potete coordinare i turni con facilità.")
+        if avg_len_a and avg_len_b and abs(avg_len_a - avg_len_b) <= 25:
+            affinity.append("Stile di messaggi simile (lunghezze comparabili): facilita la sintonia.")
+        if mentions_total > 0:
+            affinity.append("Le menzioni reciproche indicano disponibilità a chiarire.")
+        if not reply_war and negativity_hits == 0:
+            affinity.append("Tono generalmente controllato: terreno comune per conversazioni calme.")
+        if not affinity:
+            affinity = [
+                "C’è spazio per stabilire un ritmo condiviso.",
+                "Punti di contatto: chiarezza e sintesi nei messaggi.",
+                "Funziona bene quando vi date il tempo di rispondere.",
+            ]
+        return affinity[:5]
+
+    def _fallback_pair_mod_advice(metrics: dict[str, Any]) -> list[str]:
+        advice: list[str] = []
+        balance_ratio = float(metrics.get("balance_ratio") or 0)
+        mentions_total = int(metrics.get("mentions_a_to_b") or 0) + int(metrics.get("mentions_b_to_a") or 0)
+        caps_ratio = float(metrics.get("caps_ratio") or 0)
+        negativity_hits = int(metrics.get("negativity_hits") or 0)
+        reply_war = bool(metrics.get("reply_war"))
+
+        if balance_ratio and balance_ratio < 0.6:
+            advice.append("Invita al turn-taking: chiedi risposte più distanziate tra loro.")
+        if mentions_total >= 3:
+            advice.append("Riduci i callout: chiedi di limitare le menzioni dirette.")
+        if caps_ratio > 0.3 or negativity_hits > 0:
+            advice.append("Richiama i toni: suggerisci riformulazioni più neutrali.")
+        if reply_war:
+            advice.append("Applica un cooldown leggero o separa la discussione in thread.")
+        advice.append("Se serve, proponi chiarimenti guidati in privato con punti specifici.")
+        advice.append("Monitora il canale per evitare escalation improvvise.")
+        return advice[:6]
+
+    def _fallback_pair_contact_points(metrics: dict[str, Any]) -> list[str]:
+        contacts: list[str] = []
+        balance_ratio = float(metrics.get("balance_ratio") or 0)
+        avg_len_a = float(metrics.get("avg_msg_len_a") or 0)
+        avg_len_b = float(metrics.get("avg_msg_len_b") or 0)
+        mentions_total = int(metrics.get("mentions_a_to_b") or 0) + int(metrics.get("mentions_b_to_a") or 0)
+        reply_war = bool(metrics.get("reply_war"))
+
+        if balance_ratio >= 0.75:
+            contacts.append("Scambio equilibrato: utile per richieste di chiarimento reciproco.")
+        if avg_len_a and avg_len_b and abs(avg_len_a - avg_len_b) <= 25:
+            contacts.append("Stile comunicativo simile: incoraggia sintesi e turni alternati.")
+        if mentions_total > 0:
+            contacts.append("Disponibilità a citarsi: sfruttabile per accordi rapidi.")
+        if not reply_war:
+            contacts.append("Meno escalation: terreno adatto a mediazione leggera.")
+        if not contacts:
+            contacts = [
+                "Preferenza per messaggi chiari e diretti.",
+                "Disponibilità a rispondere se sollecitati con calma.",
+                "Meglio con istruzioni brevi e neutrali.",
+            ]
+        return contacts[:5]
+
     def _build_barcello_public_embed(
         *,
         result: BarcelloResult,
         channel_name: str,
         window_minutes: int,
+        title_override: str | None = None,
     ) -> discord.Embed:
         color_label = (result.color or "nero").lower()
         color_map = {
@@ -322,6 +433,7 @@ def setup(registry: ServiceRegistry) -> None:
         }
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
         title_channel = channel_name or "canale"
+        title = title_override or f"🫛 **STATO BARCELLO “{title_channel}”**"
         description_lines = [
             f"🕒 **Ultimi {window_minutes} minuti**",
             "",
@@ -329,7 +441,7 @@ def setup(registry: ServiceRegistry) -> None:
             f"*{_alert_message(result.score, label)}*",
         ]
         embed = discord.Embed(
-            title=f"🫛 **STATO BARCELLO “{title_channel}”**",
+            title=title,
             description="\n".join(description_lines),
             color=embed_color,
         )
@@ -353,6 +465,10 @@ def setup(registry: ServiceRegistry) -> None:
         trend_text: str,
         personal_advice: list[str],
         mod_advice: list[str],
+        affinity_bullets: list[str] | None = None,
+        contact_points_bullets: list[str] | None = None,
+        pair_mode: bool = False,
+        pair_mode_profile: str | None = None,
         ai_note: str,
     ) -> discord.Embed:
         embed = discord.Embed(title=f"🧾 **DETTAGLI BARCELLO — {tier_display_name}**", color=embed_color)
@@ -365,13 +481,28 @@ def setup(registry: ServiceRegistry) -> None:
                 trend_value, _ = _trend_display(result.trend)
             _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
         if output_flags.get("show_advice"):
-            advice_lines = personal_advice[:5]
-            if advice_lines:
-                _add_section(embed, name="🧠 **CONSIGLI PERSONALIZZATI**", value=_bullet_list(advice_lines))
-        if profile == "mod" and output_flags.get("show_advice"):
-            mod_lines = mod_advice[:5]
-            if mod_lines:
-                _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
+            if pair_mode and pair_mode_profile == "role3":
+                advice_lines = personal_advice[:5]
+                if advice_lines:
+                    _add_section(embed, name="🧠 **COME ANDARE D’ACCORDO**", value=_bullet_list(advice_lines))
+                affinity_lines = (affinity_bullets or [])[:5]
+                if affinity_lines:
+                    _add_section(embed, name="💞 **AFFINITÀ**", value=_bullet_list(affinity_lines))
+            elif pair_mode and pair_mode_profile == "mod":
+                mod_lines = mod_advice[:6]
+                if mod_lines:
+                    _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
+                contact_lines = (contact_points_bullets or [])[:5]
+                if contact_lines:
+                    _add_section(embed, name="🤝 **PUNTI DI CONTATTO**", value=_bullet_list(contact_lines))
+            else:
+                advice_lines = personal_advice[:5]
+                if advice_lines:
+                    _add_section(embed, name="🧠 **CONSIGLI PERSONALIZZATI**", value=_bullet_list(advice_lines))
+                if profile == "mod":
+                    mod_lines = mod_advice[:5]
+                    if mod_lines:
+                        _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
         if output_flags.get("show_mod_metrics") and profile == "mod":
             _add_section(embed, name="🧮 **METRICHE AGGREGATE**", value=_with_spacing(_format_metrics(result.metrics)))
         if ai_note:
@@ -1177,8 +1308,17 @@ def setup(registry: ServiceRegistry) -> None:
     # }
     @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
     @app_commands.rename(window_minutes="minuti")
-    @app_commands.describe(window_minutes="Finestra in minuti")
-    async def barcello_command(interaction: discord.Interaction, window_minutes: int | None = None) -> None:
+    @app_commands.describe(
+        user1="Utente 1 (opzionale)",
+        user2="Utente 2 (opzionale)",
+        window_minutes="Finestra in minuti",
+    )
+    async def barcello_command(
+        interaction: discord.Interaction,
+        user1: discord.Member | None = None,
+        user2: discord.Member | None = None,
+        window_minutes: int | None = None,
+    ) -> None:
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1191,7 +1331,7 @@ def setup(registry: ServiceRegistry) -> None:
 
         try:
             entitlements_service: EntitlementsService = registry.get("entitlements")
-            config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
+            command_config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
             profile, winner_role_id = await entitlements_service.resolve_profile_with_role_id(interaction.user)
 
             async def try_send_dm(
@@ -1212,8 +1352,8 @@ def setup(registry: ServiceRegistry) -> None:
                 except discord.Forbidden:
                     return False
 
-            if not config["allowed"]:
-                dm_text = config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
+            if not command_config["allowed"]:
+                dm_text = command_config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
                 if await try_send_dm(dm_text):
                     await send_ephemeral(interaction, "Ti ho inviato un DM")
                 else:
@@ -1232,11 +1372,55 @@ def setup(registry: ServiceRegistry) -> None:
             if window_minutes <= 0:
                 window_minutes = 30
 
-            result = await barcello.compute_channel(
-                str(interaction.guild_id),
-                str(interaction.channel_id),
-                window_minutes,
-            )
+            if user2 is not None and user1 is None:
+                await send_ephemeral(interaction, "Specifica il primo utente.")
+                return
+            if user1 is not None and user2 is not None and user1.id == user2.id:
+                await send_ephemeral(interaction, "Seleziona due utenti diversi.")
+                return
+            if config.ignore_bots:
+                if (user1 and user1.bot) or (user2 and user2.bot):
+                    await send_ephemeral(interaction, "Non posso usare bot per il barcello.")
+                    return
+
+            pair_mode = user1 is not None
+            pair_mode_profile: str | None = None
+            pair_user_a: discord.Member | None = None
+            pair_user_b: discord.Member | None = None
+
+            if pair_mode:
+                if user2 is not None:
+                    if profile != "mod":
+                        await send_ephemeral(interaction, "Solo i mod possono usare due utenti.")
+                        return
+                    pair_mode_profile = "mod"
+                    pair_user_a = user1
+                    pair_user_b = user2
+                else:
+                    if profile not in {"role3", "mod"}:
+                        await send_ephemeral(interaction, "Solo ruolo 3 o mod possono usare questo comando.")
+                        return
+                    pair_mode_profile = "role3"
+                    pair_user_a = interaction.user if isinstance(interaction.user, discord.Member) else None
+                    pair_user_b = user1
+                if pair_user_a is None or pair_user_b is None:
+                    await send_ephemeral(interaction, "Utenti non validi.")
+                    return
+
+            if pair_mode:
+                result = await barcello.compute_pair(
+                    str(interaction.guild_id),
+                    str(interaction.channel_id),
+                    str(pair_user_a.id),
+                    str(pair_user_b.id),
+                    window_minutes,
+                )
+            else:
+                result = await barcello.compute_channel(
+                    str(interaction.guild_id),
+                    str(interaction.channel_id),
+                    window_minutes,
+                )
 
             reasons_text = _format_motivations(result.reasons)
             trend_text = ""
@@ -1250,14 +1434,28 @@ def setup(registry: ServiceRegistry) -> None:
                 trend_text = f"Trend {trend_label} (Δ {delta:+d})."
             advice_candidates = [item.strip() for item in (result.advice or []) if str(item).strip()]
             color_label = (result.color or "nero").lower()
-            fallback_personal = _fallback_personal_advice(color_label)
-            personal_advice = advice_candidates or fallback_personal
-            if len(personal_advice) < 3:
-                personal_advice = (personal_advice + fallback_personal)[:3]
-            mod_advice = _fallback_mod_advice(color_label)
+            affinity_bullets: list[str] = []
+            contact_points_bullets: list[str] = []
+            if pair_mode and pair_mode_profile == "role3":
+                fallback_personal = _fallback_pair_personal_advice(result.metrics)
+                affinity_bullets = _fallback_pair_affinity(result.metrics)
+                personal_advice = advice_candidates or fallback_personal
+                if len(personal_advice) < 3:
+                    personal_advice = (personal_advice + fallback_personal)[:3]
+                mod_advice = _fallback_mod_advice(color_label)
+            elif pair_mode and pair_mode_profile == "mod":
+                personal_advice = advice_candidates or []
+                mod_advice = _fallback_pair_mod_advice(result.metrics)
+                contact_points_bullets = _fallback_pair_contact_points(result.metrics)
+            else:
+                fallback_personal = _fallback_personal_advice(color_label)
+                personal_advice = advice_candidates or fallback_personal
+                if len(personal_advice) < 3:
+                    personal_advice = (personal_advice + fallback_personal)[:3]
+                mod_advice = _fallback_mod_advice(color_label)
             ai_note = ""
 
-            if "analysis.ai_preferred" in (config.get("capabilities") or []):
+            if "analysis.ai_preferred" in (command_config.get("capabilities") or []):
                 if registry.has("ai"):
                     ai_enabled = await entitlements_service.is_feature_allowed(interaction.user, "ai")
                     ai_service_enabled = ai_service.is_enabled() if ai_service else False
@@ -1266,35 +1464,117 @@ def setup(registry: ServiceRegistry) -> None:
                         model = ai_service.get_model("summary")
                         if client and model:
                             try:
-                                system_prompt = (
-                                    "Scrivi in italiano, tono pratico e calmo (Criceto Mannaro ma non cringe). "
-                                    "Non includere nomi utenti, dati sensibili o accuse. "
-                                    "Non aggiungere dettagli non presenti. "
-                                    "Restituisci SOLO JSON con chiavi: motivation, trend, "
-                                    "personal_advice_bullets, mod_advice_bullets. "
-                                    "Le liste devono avere 3-5 elementi, massimo 120 caratteri ciascuno. "
-                                    "Return ONLY valid JSON. No markdown, no prose."
-                                )
                                 metrics = result.metrics or {}
-                                user_payload = json.dumps(
-                                    {
-                                        "channel": getattr(interaction.channel, "name", ""),
-                                        "window_minutes": window_minutes,
-                                        "score": result.score,
-                                        "color": result.color,
-                                        "trend": result.trend,
-                                        "motivations": result.reasons,
-                                        "metrics": {
-                                            "msg_per_min": metrics.get("msg_per_min"),
-                                            "caps_ratio": metrics.get("caps_ratio"),
-                                            "mention_per_min": metrics.get("mention_per_min"),
-                                            "negativity_hits": metrics.get("negativity_hits"),
-                                            "reply_war": metrics.get("reply_war"),
+                                if pair_mode and pair_mode_profile == "role3":
+                                    system_prompt = (
+                                        "Scrivi in italiano, tono pratico e calmo. "
+                                        "Non includere nomi utenti, dati sensibili o accuse. "
+                                        "Non aggiungere dettagli non presenti. "
+                                        "Restituisci SOLO JSON con chiavi: motivation, trend, "
+                                        "pair_advice_bullets, affinity_bullets. "
+                                        "Le liste devono avere 3-5 elementi, massimo 120 caratteri ciascuno. "
+                                        "Return ONLY valid JSON. No markdown, no prose."
+                                    )
+                                    user_payload = json.dumps(
+                                        {
+                                            "context": "pair_mode_role3",
+                                            "window_minutes": window_minutes,
+                                            "score": result.score,
+                                            "color": result.color,
+                                            "trend": result.trend,
+                                            "motivations": result.reasons,
+                                            "pair_metrics": {
+                                                "msg_count_user_a": metrics.get("msg_count_user_a"),
+                                                "msg_count_user_b": metrics.get("msg_count_user_b"),
+                                                "balance_ratio": metrics.get("balance_ratio"),
+                                                "mentions_a_to_b": metrics.get("mentions_a_to_b"),
+                                                "mentions_b_to_a": metrics.get("mentions_b_to_a"),
+                                                "caps_ratio": metrics.get("caps_ratio"),
+                                                "negativity_hits": metrics.get("negativity_hits"),
+                                                "reply_war": metrics.get("reply_war"),
+                                                "avg_msg_len_a": metrics.get("avg_msg_len_a"),
+                                                "avg_msg_len_b": metrics.get("avg_msg_len_b"),
+                                            },
+                                            "signals": {
+                                                "escalation": metrics.get("reply_war"),
+                                                "imbalance": metrics.get("balance_ratio"),
+                                                "tone_caps": metrics.get("caps_ratio"),
+                                                "tone_negativity": metrics.get("negativity_hits"),
+                                            },
+                                            "behavior_profiles": None,
                                         },
-                                        "wants_mod_advice": profile == "mod",
-                                    },
-                                    ensure_ascii=False,
-                                )
+                                        ensure_ascii=False,
+                                    )
+                                elif pair_mode and pair_mode_profile == "mod":
+                                    system_prompt = (
+                                        "Scrivi in italiano, tono pratico e neutro da playbook mod. "
+                                        "Non includere nomi utenti, dati sensibili o accuse. "
+                                        "Non aggiungere dettagli non presenti. "
+                                        "Restituisci SOLO JSON con chiavi: motivation, trend, "
+                                        "mod_advice_bullets, contact_points_bullets. "
+                                        "mod_advice_bullets deve avere 4-6 elementi; "
+                                        "contact_points_bullets 3-5 elementi; massimo 120 caratteri ciascuno. "
+                                        "Return ONLY valid JSON. No markdown, no prose."
+                                    )
+                                    user_payload = json.dumps(
+                                        {
+                                            "context": "pair_mode_mod",
+                                            "window_minutes": window_minutes,
+                                            "score": result.score,
+                                            "color": result.color,
+                                            "trend": result.trend,
+                                            "motivations": result.reasons,
+                                            "pair_metrics": {
+                                                "msg_count_user_a": metrics.get("msg_count_user_a"),
+                                                "msg_count_user_b": metrics.get("msg_count_user_b"),
+                                                "balance_ratio": metrics.get("balance_ratio"),
+                                                "mentions_a_to_b": metrics.get("mentions_a_to_b"),
+                                                "mentions_b_to_a": metrics.get("mentions_b_to_a"),
+                                                "caps_ratio": metrics.get("caps_ratio"),
+                                                "negativity_hits": metrics.get("negativity_hits"),
+                                                "reply_war": metrics.get("reply_war"),
+                                                "avg_msg_len_a": metrics.get("avg_msg_len_a"),
+                                                "avg_msg_len_b": metrics.get("avg_msg_len_b"),
+                                            },
+                                            "signals": {
+                                                "escalation": metrics.get("reply_war"),
+                                                "imbalance": metrics.get("balance_ratio"),
+                                                "tone_caps": metrics.get("caps_ratio"),
+                                                "tone_negativity": metrics.get("negativity_hits"),
+                                            },
+                                            "behavior_profiles": None,
+                                        },
+                                        ensure_ascii=False,
+                                    )
+                                else:
+                                    system_prompt = (
+                                        "Scrivi in italiano, tono pratico e calmo (Criceto Mannaro ma non cringe). "
+                                        "Non includere nomi utenti, dati sensibili o accuse. "
+                                        "Non aggiungere dettagli non presenti. "
+                                        "Restituisci SOLO JSON con chiavi: motivation, trend, "
+                                        "personal_advice_bullets, mod_advice_bullets. "
+                                        "Le liste devono avere 3-5 elementi, massimo 120 caratteri ciascuno. "
+                                        "Return ONLY valid JSON. No markdown, no prose."
+                                    )
+                                    user_payload = json.dumps(
+                                        {
+                                            "channel": getattr(interaction.channel, "name", ""),
+                                            "window_minutes": window_minutes,
+                                            "score": result.score,
+                                            "color": result.color,
+                                            "trend": result.trend,
+                                            "motivations": result.reasons,
+                                            "metrics": {
+                                                "msg_per_min": metrics.get("msg_per_min"),
+                                                "caps_ratio": metrics.get("caps_ratio"),
+                                                "mention_per_min": metrics.get("mention_per_min"),
+                                                "negativity_hits": metrics.get("negativity_hits"),
+                                                "reply_war": metrics.get("reply_war"),
+                                            },
+                                            "wants_mod_advice": profile == "mod",
+                                        },
+                                        ensure_ascii=False,
+                                    )
                                 ai_payload, ai_text = await _call_openai_json(
                                     client,
                                     model,
@@ -1313,25 +1593,69 @@ def setup(registry: ServiceRegistry) -> None:
                                     logger.info("AI JSON parsed ok")
                                     reasons_text = _normalize_bullets(ai_payload.get("motivation", reasons_text) or reasons_text)
                                     trend_text = ai_payload.get("trend", trend_text) or trend_text
-                                    ai_personal = ai_payload.get("personal_advice_bullets")
-                                    ai_mod = ai_payload.get("mod_advice_bullets")
-                                    if isinstance(ai_personal, list):
-                                        personal_advice = [str(item).strip() for item in ai_personal if str(item).strip()]
-                                    if isinstance(ai_mod, list):
-                                        mod_advice = [str(item).strip() for item in ai_mod if str(item).strip()]
-                                    if len(personal_advice) < 3:
-                                        personal_advice = (personal_advice + fallback_personal)[:3]
-                                    if len(mod_advice) < 3:
-                                        mod_advice = (mod_advice + _fallback_mod_advice(color_label))[:3]
+                                    if pair_mode and pair_mode_profile == "role3":
+                                        ai_advice = ai_payload.get("pair_advice_bullets")
+                                        ai_affinity = ai_payload.get("affinity_bullets")
+                                        if isinstance(ai_advice, list):
+                                            personal_advice = [
+                                                str(item).strip() for item in ai_advice if str(item).strip()
+                                            ]
+                                        if isinstance(ai_affinity, list):
+                                            affinity_bullets = [
+                                                str(item).strip() for item in ai_affinity if str(item).strip()
+                                            ]
+                                        fallback_personal = _fallback_pair_personal_advice(result.metrics)
+                                        if len(personal_advice) < 3:
+                                            personal_advice = (personal_advice + fallback_personal)[:3]
+                                        if len(affinity_bullets) < 3:
+                                            affinity_bullets = (_fallback_pair_affinity(result.metrics) + affinity_bullets)[:3]
+                                    elif pair_mode and pair_mode_profile == "mod":
+                                        ai_mod = ai_payload.get("mod_advice_bullets")
+                                        ai_contacts = ai_payload.get("contact_points_bullets")
+                                        if isinstance(ai_mod, list):
+                                            mod_advice = [str(item).strip() for item in ai_mod if str(item).strip()]
+                                        if isinstance(ai_contacts, list):
+                                            contact_points_bullets = [
+                                                str(item).strip() for item in ai_contacts if str(item).strip()
+                                            ]
+                                        if len(mod_advice) < 4:
+                                            mod_advice = (_fallback_pair_mod_advice(result.metrics) + mod_advice)[:4]
+                                        if len(contact_points_bullets) < 3:
+                                            contact_points_bullets = (
+                                                _fallback_pair_contact_points(result.metrics) + contact_points_bullets
+                                            )[:3]
+                                    else:
+                                        ai_personal = ai_payload.get("personal_advice_bullets")
+                                        ai_mod = ai_payload.get("mod_advice_bullets")
+                                        if isinstance(ai_personal, list):
+                                            personal_advice = [
+                                                str(item).strip() for item in ai_personal if str(item).strip()
+                                            ]
+                                        if isinstance(ai_mod, list):
+                                            mod_advice = [str(item).strip() for item in ai_mod if str(item).strip()]
+                                        fallback_personal = _fallback_personal_advice(color_label)
+                                        if len(personal_advice) < 3:
+                                            personal_advice = (personal_advice + fallback_personal)[:3]
+                                        if len(mod_advice) < 3:
+                                            mod_advice = (mod_advice + _fallback_mod_advice(color_label))[:3]
                             except Exception:  # noqa: BLE001
                                 logger.exception("AI barcello enrichment failed")
                                 ai_note = "AI non disponibile: report base."
 
-            output_flags = config.get("output", {})
+            output_flags = command_config.get("output", {})
+            title_override = None
+            if pair_mode and pair_mode_profile == "role3" and pair_user_b is not None:
+                other_name = _resolve_display_name(pair_user_b)
+                title_override = f"🫛 **STATO BARCELLO CON {other_name}**"
+            elif pair_mode and pair_mode_profile == "mod" and pair_user_a is not None and pair_user_b is not None:
+                name_a = _resolve_display_name(pair_user_a)
+                name_b = _resolve_display_name(pair_user_b)
+                title_override = f"🫛 **STATO BARCELLO TRA {name_a} E {name_b}**"
             public_embed = _build_barcello_public_embed(
                 result=result,
                 channel_name=getattr(interaction.channel, "name", ""),
                 window_minutes=window_minutes,
+                title_override=title_override,
             )
             details_color = await _get_details_embed_color(profile)
             tier_display_name = await _resolve_tier_display_name(
@@ -1349,6 +1673,10 @@ def setup(registry: ServiceRegistry) -> None:
                 trend_text=trend_text,
                 personal_advice=personal_advice,
                 mod_advice=mod_advice,
+                affinity_bullets=affinity_bullets,
+                contact_points_bullets=contact_points_bullets,
+                pair_mode=pair_mode,
+                pair_mode_profile=pair_mode_profile,
                 ai_note=ai_note,
             )
             feedback_view = None
