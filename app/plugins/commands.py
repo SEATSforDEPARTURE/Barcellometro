@@ -39,7 +39,12 @@ def setup(registry: ServiceRegistry) -> None:
 
     guild = discord.Object(id=config.guild_id)
 
-    barcellometro_group = app_commands.Group(name="barcellometro", description="Controlli Barcellometro")
+    barcellometro_group = app_commands.Group(
+        name="barcellometro",
+        description="Controlli Barcellometro",
+        default_member_permissions=discord.Permissions(administrator=True),
+        dm_permission=False,
+    )
     role_group = app_commands.Group(name="role", description="Gestione permessi e limiti")
     stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
     translate_group = app_commands.Group(name="translate", description="Impostazioni traduzione")
