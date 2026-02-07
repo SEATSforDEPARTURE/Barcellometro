@@ -318,6 +318,16 @@ def setup(registry: ServiceRegistry) -> None:
             return "• (nessuna)"
         return _bullet_list(lines)
 
+    def _normalize_bullet_lines(raw: Any) -> list[str]:
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            return [str(item).strip() for item in raw if str(item).strip()]
+        if isinstance(raw, str):
+            return [line.strip() for line in raw.splitlines() if line.strip()]
+        value = str(raw).strip()
+        return [value] if value else []
+
     def _fallback_personal_advice(color_label: str) -> list[str]:
         if color_label == "verde":
             return [
