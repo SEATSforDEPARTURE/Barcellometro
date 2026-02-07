@@ -271,6 +271,22 @@ def setup(registry: ServiceRegistry) -> None:
             cleaned.append(text)
         return cleaned
 
+    def normalize_bullets(raw: Any) -> list[str]:
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            return [str(item).strip() for item in raw if str(item).strip()]
+        if isinstance(raw, str):
+            return [line.strip() for line in raw.splitlines() if line.strip()]
+        value = str(raw).strip()
+        return [value] if value else []
+
+    def clean_bullets(lines: list[str] | None) -> list[str]:
+        return _clean_bullets(lines)
+
+    def should_show_section(lines: list[str] | None) -> bool:
+        return len(clean_bullets(normalize_bullets(lines))) > 0
+
     def _is_effectively_empty_section(lines: list[str] | None) -> bool:
         return len(_clean_bullets(lines)) == 0
 
@@ -557,26 +573,26 @@ def setup(registry: ServiceRegistry) -> None:
             _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
         if output_flags.get("show_advice"):
             if pair_mode and pair_mode_profile == "role3":
-                advice_lines = _clean_bullets(personal_advice)[:5]
-                if not _is_effectively_empty_section(advice_lines):
+                advice_lines = clean_bullets(personal_advice)[:5]
+                if should_show_section(advice_lines):
                     _add_section(embed, name="🧠 **COME ANDARE D’ACCORDO**", value=_bullet_list(advice_lines))
-                affinity_lines = _clean_bullets(affinity_bullets)[:5]
-                if not _is_effectively_empty_section(affinity_lines):
+                affinity_lines = clean_bullets(affinity_bullets)[:5]
+                if should_show_section(affinity_lines):
                     _add_section(embed, name="💞 **AFFINITÀ**", value=_bullet_list(affinity_lines))
             elif pair_mode and pair_mode_profile == "mod":
-                mod_lines = _clean_bullets(mod_advice)[:6]
-                if not _is_effectively_empty_section(mod_lines):
+                mod_lines = clean_bullets(mod_advice)[:6]
+                if should_show_section(mod_lines):
                     _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
-                contact_lines = _clean_bullets(contact_points_bullets)[:5]
-                if not _is_effectively_empty_section(contact_lines):
+                contact_lines = clean_bullets(contact_points_bullets)[:5]
+                if should_show_section(contact_lines):
                     _add_section(embed, name="🤝 **PUNTI DI CONTATTO**", value=_bullet_list(contact_lines))
             else:
-                advice_lines = _clean_bullets(personal_advice)[:5]
-                if not _is_effectively_empty_section(advice_lines):
+                advice_lines = clean_bullets(personal_advice)[:5]
+                if should_show_section(advice_lines):
                     _add_section(embed, name="🧠 **CONSIGLI PERSONALIZZATI**", value=_bullet_list(advice_lines))
                 if profile == "mod":
-                    mod_lines = _clean_bullets(mod_advice)[:5]
-                    if not _is_effectively_empty_section(mod_lines):
+                    mod_lines = clean_bullets(mod_advice)[:5]
+                    if should_show_section(mod_lines):
                         _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
         if output_flags.get("show_mod_metrics") and profile == "mod":
             _add_section(embed, name="🧮 **METRICHE AGGREGATE**", value=_with_spacing(_format_metrics(result.metrics)))
@@ -1846,8 +1862,8 @@ def setup(registry: ServiceRegistry) -> None:
                                     if pair_mode and pair_mode_profile == "role3":
                                         ai_advice = ai_payload.get("pair_advice_bullets")
                                         ai_affinity = ai_payload.get("affinity_bullets")
-                                        personal_advice = _normalize_bullet_lines(ai_advice)
-                                        affinity_bullets = _normalize_bullet_lines(ai_affinity)
+                                        personal_advice = clean_bullets(normalize_bullets(ai_advice))
+                                        affinity_bullets = clean_bullets(normalize_bullets(ai_affinity))
                                         fallback_personal = _fallback_pair_personal_advice(result.metrics)
                                         if len(personal_advice) < 3:
                                             personal_advice = (personal_advice + fallback_personal)[:3]
@@ -1856,8 +1872,8 @@ def setup(registry: ServiceRegistry) -> None:
                                     elif pair_mode and pair_mode_profile == "mod":
                                         ai_mod = ai_payload.get("mod_advice_bullets")
                                         ai_contacts = ai_payload.get("contact_points_bullets")
-                                        mod_advice = _normalize_bullet_lines(ai_mod)
-                                        contact_points_bullets = _normalize_bullet_lines(ai_contacts)
+                                        mod_advice = clean_bullets(normalize_bullets(ai_mod))
+                                        contact_points_bullets = clean_bullets(normalize_bullets(ai_contacts))
                                         if len(mod_advice) < 4:
                                             mod_advice = (_fallback_pair_mod_advice(result.metrics) + mod_advice)[:4]
                                         if len(contact_points_bullets) < 3:
@@ -1867,8 +1883,8 @@ def setup(registry: ServiceRegistry) -> None:
                                     else:
                                         ai_personal = ai_payload.get("personal_advice_bullets")
                                         ai_mod = ai_payload.get("mod_advice_bullets")
-                                        personal_advice = _normalize_bullet_lines(ai_personal)
-                                        mod_advice = _normalize_bullet_lines(ai_mod)
+                                        personal_advice = clean_bullets(normalize_bullets(ai_personal))
+                                        mod_advice = clean_bullets(normalize_bullets(ai_mod))
                                         fallback_personal = _fallback_personal_advice(color_label)
                                         if len(personal_advice) < 3:
                                             personal_advice = (personal_advice + fallback_personal)[:3]
