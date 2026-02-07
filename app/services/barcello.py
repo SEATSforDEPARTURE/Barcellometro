@@ -109,6 +109,7 @@ class BarcelloService:
         cached = self._cache.get(cache_key)
         if cached and cached[0] > now_epoch:
             self._metrics["cache_hit"] += 1
+            cached[1].metrics["cache_hit"] = True
             return cached[1]
 
         snapshot = await self._database.get_barcello_snapshot(
@@ -132,6 +133,7 @@ class BarcelloService:
         )
 
         metrics = self._compute_metrics(messages, window_minutes)
+        metrics["cache_hit"] = False
         score_config = await self._get_score_config()
         reasons, score = self._score_from_metrics(metrics, score_config)
         color = await self.get_color(score)
@@ -200,6 +202,7 @@ class BarcelloService:
         ]
 
         metrics = self._compute_metrics(pair_messages, window_minutes)
+        metrics["cache_hit"] = False
         pair_metrics = self._compute_pair_metrics(pair_messages, user_a_key, user_b_key)
         metrics.update(pair_metrics)
         score_config = await self._get_score_config()
@@ -336,6 +339,7 @@ class BarcelloService:
         window_start_ts = (end_dt - timedelta(minutes=window_minutes)).isoformat()
         reasons = json.loads(snapshot["reasons_json"])
         metrics = json.loads(snapshot["metrics_json"])
+        metrics["cache_hit"] = False
         score = int(snapshot["score"])
         color = await self.get_color(score)
         trend = await self._compute_trend(

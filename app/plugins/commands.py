@@ -257,6 +257,32 @@ def setup(registry: ServiceRegistry) -> None:
             cleaned.append(text)
         return "\n".join(f"• {line}" for line in cleaned)
 
+    def _clean_bullets(lines: list[str] | None) -> list[str]:
+        if not lines:
+            return []
+        cleaned: list[str] = []
+        for line in lines:
+            text = str(line).strip()
+            if not text:
+                continue
+            normalized = text.lstrip("-• ").strip().lower()
+            if normalized in {"(nessuna)", "nessuna", "• (nessuna)", "• nessuna"}:
+                continue
+            cleaned.append(text)
+        return cleaned
+
+    def _is_effectively_empty_section(lines: list[str] | None) -> bool:
+        return len(_clean_bullets(lines)) == 0
+
+    def _is_effectively_empty_text(text: str | None) -> bool:
+        if not text:
+            return True
+        stripped = text.strip()
+        if not stripped:
+            return True
+        normalized = stripped.lstrip("-• ").strip().lower()
+        return normalized in {"(nessuna)", "nessuna", "• (nessuna)", "• nessuna"}
+
     def _format_motivations(reasons: list[dict[str, Any]]) -> str:
         lines = [f"{reason['label']} ({reason['summary']})" for reason in reasons][:4]
         if not lines:
@@ -321,6 +347,21 @@ def setup(registry: ServiceRegistry) -> None:
             or getattr(member, "name", None)
             or "Utente"
         )
+
+    MIN_MSG_TOTAL_CHANNEL = 8
+    MIN_MSG_TOTAL_PAIR = 6
+    MIN_MSG_EACH_PAIR = 2
+
+    def _apply_output_caps(output_flags: dict[str, Any], insufficient_data: bool) -> dict[str, Any]:
+        if not insufficient_data:
+            return dict(output_flags)
+        return {
+            "show_score": True,
+            "show_motivation": False,
+            "show_trend": False,
+            "show_advice": True,
+            "show_mod_metrics": False,
+        }
 
     def _fallback_pair_personal_advice(metrics: dict[str, Any]) -> list[str]:
         advice: list[str] = []
@@ -454,6 +495,25 @@ def setup(registry: ServiceRegistry) -> None:
         embed.set_footer(text="Barcellometro")
         return embed
 
+    def _build_barcello_no_data_embed(
+        *,
+        title: str,
+        window_minutes: int,
+    ) -> discord.Embed:
+        description_lines = [
+            f"🕒 **Ultimi {window_minutes} minuti**",
+            "",
+            "Nessun messaggio nella finestra temporale selezionata.",
+            "Prova ad aumentare i minuti della finestra.",
+        ]
+        embed = discord.Embed(
+            title=title,
+            description="\n".join(description_lines),
+            color=0x95A5A6,
+        )
+        embed.set_footer(text="Barcellometro")
+        return embed
+
     def _build_barcello_details_embed(
         *,
         result: BarcelloResult,
@@ -469,44 +529,51 @@ def setup(registry: ServiceRegistry) -> None:
         contact_points_bullets: list[str] | None = None,
         pair_mode: bool = False,
         pair_mode_profile: str | None = None,
+        warning_text: str | None = None,
+        ai_debug_line: str | None = None,
         ai_note: str,
     ) -> discord.Embed:
         embed = discord.Embed(title=f"🧾 **DETTAGLI BARCELLO — {tier_display_name}**", color=embed_color)
+        if warning_text and not _is_effectively_empty_text(warning_text):
+            _add_section(embed, name="⚠️ **CAMPIONE PICCOLO**", value=_with_spacing(warning_text))
         if output_flags.get("show_motivation") and reasons_text:
-            _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
+            if not _is_effectively_empty_text(reasons_text):
+                _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
         if output_flags.get("show_trend") and (result.trend or trend_text):
-            if trend_text:
+            if trend_text and not _is_effectively_empty_text(trend_text):
                 trend_value = trend_text
             else:
                 trend_value, _ = _trend_display(result.trend)
             _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
         if output_flags.get("show_advice"):
             if pair_mode and pair_mode_profile == "role3":
-                advice_lines = personal_advice[:5]
-                if advice_lines:
+                advice_lines = _clean_bullets(personal_advice)[:5]
+                if not _is_effectively_empty_section(advice_lines):
                     _add_section(embed, name="🧠 **COME ANDARE D’ACCORDO**", value=_bullet_list(advice_lines))
-                affinity_lines = (affinity_bullets or [])[:5]
-                if affinity_lines:
+                affinity_lines = _clean_bullets(affinity_bullets)[:5]
+                if not _is_effectively_empty_section(affinity_lines):
                     _add_section(embed, name="💞 **AFFINITÀ**", value=_bullet_list(affinity_lines))
             elif pair_mode and pair_mode_profile == "mod":
-                mod_lines = mod_advice[:6]
-                if mod_lines:
+                mod_lines = _clean_bullets(mod_advice)[:6]
+                if not _is_effectively_empty_section(mod_lines):
                     _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
-                contact_lines = (contact_points_bullets or [])[:5]
-                if contact_lines:
+                contact_lines = _clean_bullets(contact_points_bullets)[:5]
+                if not _is_effectively_empty_section(contact_lines):
                     _add_section(embed, name="🤝 **PUNTI DI CONTATTO**", value=_bullet_list(contact_lines))
             else:
-                advice_lines = personal_advice[:5]
-                if advice_lines:
+                advice_lines = _clean_bullets(personal_advice)[:5]
+                if not _is_effectively_empty_section(advice_lines):
                     _add_section(embed, name="🧠 **CONSIGLI PERSONALIZZATI**", value=_bullet_list(advice_lines))
                 if profile == "mod":
-                    mod_lines = mod_advice[:5]
-                    if mod_lines:
+                    mod_lines = _clean_bullets(mod_advice)[:5]
+                    if not _is_effectively_empty_section(mod_lines):
                         _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
         if output_flags.get("show_mod_metrics") and profile == "mod":
             _add_section(embed, name="🧮 **METRICHE AGGREGATE**", value=_with_spacing(_format_metrics(result.metrics)))
         if ai_note:
             _add_section(embed, name="ℹ️ **NOTA**", value=_with_spacing(ai_note))
+        if ai_debug_line and (profile == "mod" or os.getenv("DEBUG", "").lower() in {"1", "true", "yes", "y"}):
+            _add_section(embed, name="🔎 **AI**", value=_with_spacing(ai_debug_line))
         notes_by_profile = {
             "base": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
             "role1": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
@@ -1422,6 +1489,73 @@ def setup(registry: ServiceRegistry) -> None:
                     window_minutes,
                 )
 
+            def log_ai_event(tag: str, payload: dict[str, Any]) -> None:
+                logger.info("%s barcello %s", tag, json.dumps(payload, ensure_ascii=False))
+
+            mode_label = "pair" if pair_mode else "channel"
+            msg_count_total = int(result.metrics.get("message_count") or 0)
+            msg_count_a = int(result.metrics.get("msg_count_user_a") or 0)
+            msg_count_b = int(result.metrics.get("msg_count_user_b") or 0)
+            cache_hit = bool(result.metrics.get("cache_hit")) if isinstance(result.metrics, dict) else False
+
+            if msg_count_total == 0:
+                title_override = None
+                if pair_mode and pair_mode_profile == "role3" and pair_user_b is not None:
+                    other_name = _resolve_display_name(pair_user_b)
+                    title_override = f"🫛 **STATO BARCELLO CON {other_name}**"
+                elif pair_mode and pair_mode_profile == "mod" and pair_user_a is not None and pair_user_b is not None:
+                    name_a = _resolve_display_name(pair_user_a)
+                    name_b = _resolve_display_name(pair_user_b)
+                    title_override = f"🫛 **STATO BARCELLO TRA {name_a} E {name_b}**"
+                title = title_override or f"🫛 **STATO BARCELLO “{getattr(interaction.channel, 'name', 'canale')}”**"
+                log_ai_event(
+                    "AI_FALLBACK",
+                    {
+                        "guild_id": interaction.guild_id,
+                        "channel_id": interaction.channel_id,
+                        "profile": profile,
+                        "mode": mode_label,
+                        "window_minutes": window_minutes,
+                        "msg_count": msg_count_total,
+                        "ai_allowed": False,
+                        "reason": "no_data",
+                        "ai_key_present": bool(config.openai_api_key),
+                        "cache_hit": cache_hit,
+                        "model": None,
+                        "fallback_reason": "no_data",
+                    },
+                )
+                no_data_embed = _build_barcello_no_data_embed(title=title, window_minutes=window_minutes)
+                if await try_send_dm(embed=no_data_embed):
+                    await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
+                else:
+                    await interaction.followup.send(
+                        "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
+                        ephemeral=True,
+                    )
+                return
+
+            insufficient_data = (
+                msg_count_total > 0
+                and (
+                    (mode_label == "channel" and msg_count_total < MIN_MSG_TOTAL_CHANNEL)
+                    or (
+                        mode_label == "pair"
+                        and (
+                            msg_count_total < MIN_MSG_TOTAL_PAIR
+                            or msg_count_a < MIN_MSG_EACH_PAIR
+                            or msg_count_b < MIN_MSG_EACH_PAIR
+                        )
+                    )
+                )
+            )
+            warning_text = ""
+            if insufficient_data:
+                warning_text = (
+                    f"⚠️ Campione piccolo: {msg_count_total} messaggi negli ultimi "
+                    f"{window_minutes} min. Affidabilità: bassa."
+                )
+
             reasons_text = _format_motivations(result.reasons)
             trend_text = ""
             if result.trend:
@@ -1436,7 +1570,17 @@ def setup(registry: ServiceRegistry) -> None:
             color_label = (result.color or "nero").lower()
             affinity_bullets: list[str] = []
             contact_points_bullets: list[str] = []
-            if pair_mode and pair_mode_profile == "role3":
+            if insufficient_data:
+                personal_advice = [
+                    "Aspetta risposte complete prima di replicare.",
+                    "Mantieni un tono neutro e messaggi chiari.",
+                ]
+                mod_advice = []
+                affinity_bullets = []
+                contact_points_bullets = []
+                reasons_text = ""
+                trend_text = ""
+            elif pair_mode and pair_mode_profile == "role3":
                 fallback_personal = _fallback_pair_personal_advice(result.metrics)
                 affinity_bullets = _fallback_pair_affinity(result.metrics)
                 personal_advice = advice_candidates or fallback_personal
@@ -1454,8 +1598,50 @@ def setup(registry: ServiceRegistry) -> None:
                     personal_advice = (personal_advice + fallback_personal)[:3]
                 mod_advice = _fallback_mod_advice(color_label)
             ai_note = ""
+            ai_debug_line = None
 
-            if "analysis.ai_preferred" in (command_config.get("capabilities") or []):
+            ai_key_present = bool(config.openai_api_key)
+            ai_allowed = False
+            ai_reason = ""
+            if insufficient_data:
+                ai_reason = "insufficient_data"
+            elif "analysis.ai_preferred" not in (command_config.get("capabilities") or []):
+                ai_reason = "disabled_by_entitlements"
+            elif not registry.has("ai"):
+                ai_reason = "missing_key"
+            else:
+                ai_enabled = await entitlements_service.is_feature_allowed(interaction.user, "ai")
+                ai_service_enabled = ai_service.is_enabled() if ai_service else False
+                ai_reason = "" if ai_enabled and ai_service_enabled else "disabled_by_entitlements"
+            if not ai_reason:
+                model_name = ai_service.get_model("summary") if ai_service else None
+                client_ready = ai_service.client() if ai_service else None
+                if not ai_key_present or not model_name or not client_ready:
+                    ai_reason = "missing_key"
+            if not ai_reason and ai_key_present:
+                ai_allowed = True
+            if not ai_allowed:
+                fallback_reason = ai_reason or "missing_key"
+                log_ai_event(
+                    "AI_FALLBACK",
+                    {
+                        "guild_id": interaction.guild_id,
+                        "channel_id": interaction.channel_id,
+                        "profile": profile,
+                        "mode": mode_label,
+                        "window_minutes": window_minutes,
+                        "msg_count": msg_count_total,
+                        "ai_allowed": False,
+                        "reason": fallback_reason,
+                        "ai_key_present": ai_key_present,
+                        "cache_hit": cache_hit,
+                        "model": None,
+                        "fallback_reason": fallback_reason,
+                    },
+                )
+                ai_debug_line = f"🔎 AI: OFF (fallback={fallback_reason})"
+
+            if ai_allowed:
                 if registry.has("ai"):
                     ai_enabled = await entitlements_service.is_feature_allowed(interaction.user, "ai")
                     ai_service_enabled = ai_service.is_enabled() if ai_service else False
@@ -1464,6 +1650,23 @@ def setup(registry: ServiceRegistry) -> None:
                         model = ai_service.get_model("summary")
                         if client and model:
                             try:
+                                log_ai_event(
+                                    "AI_REQUEST",
+                                    {
+                                        "guild_id": interaction.guild_id,
+                                        "channel_id": interaction.channel_id,
+                                        "profile": profile,
+                                        "mode": mode_label,
+                                        "window_minutes": window_minutes,
+                                        "msg_count": msg_count_total,
+                                        "ai_allowed": True,
+                                        "reason": None,
+                                        "ai_key_present": ai_key_present,
+                                        "cache_hit": cache_hit,
+                                        "model": model,
+                                    },
+                                )
+                                start_ts = datetime.now(timezone.utc)
                                 metrics = result.metrics or {}
                                 if pair_mode and pair_mode_profile == "role3":
                                     system_prompt = (
@@ -1583,12 +1786,49 @@ def setup(registry: ServiceRegistry) -> None:
                                         {"role": "user", "content": user_payload},
                                     ],
                                 )
+                                latency_ms = int((datetime.now(timezone.utc) - start_ts).total_seconds() * 1000)
+                                log_ai_event(
+                                    "AI_RESPONSE",
+                                    {
+                                        "guild_id": interaction.guild_id,
+                                        "channel_id": interaction.channel_id,
+                                        "profile": profile,
+                                        "mode": mode_label,
+                                        "window_minutes": window_minutes,
+                                        "msg_count": msg_count_total,
+                                        "ai_allowed": True,
+                                        "reason": None,
+                                        "ai_key_present": ai_key_present,
+                                        "cache_hit": cache_hit,
+                                        "model": model,
+                                        "latency_ms": latency_ms,
+                                    },
+                                )
+                                ai_debug_line = f"🔎 AI: ON (model={model})"
                                 if not ai_text:
                                     logger.warning("OpenAI output empty")
                                 if ai_payload is None:
                                     snippet = ai_text[:200]
                                     logger.warning("OpenAI output not JSON: %s", snippet)
                                     ai_note = "AI non disponibile: report base."
+                                    log_ai_event(
+                                        "AI_FALLBACK",
+                                        {
+                                            "guild_id": interaction.guild_id,
+                                            "channel_id": interaction.channel_id,
+                                            "profile": profile,
+                                            "mode": mode_label,
+                                            "window_minutes": window_minutes,
+                                            "msg_count": msg_count_total,
+                                            "ai_allowed": False,
+                                            "reason": "invalid_json",
+                                            "ai_key_present": ai_key_present,
+                                            "cache_hit": cache_hit,
+                                            "model": model,
+                                            "fallback_reason": "invalid_json",
+                                        },
+                                    )
+                                    ai_debug_line = "🔎 AI: OFF (fallback=invalid_json)"
                                 else:
                                     logger.info("AI JSON parsed ok")
                                     reasons_text = _normalize_bullets(ai_payload.get("motivation", reasons_text) or reasons_text)
@@ -1638,11 +1878,29 @@ def setup(registry: ServiceRegistry) -> None:
                                             personal_advice = (personal_advice + fallback_personal)[:3]
                                         if len(mod_advice) < 3:
                                             mod_advice = (mod_advice + _fallback_mod_advice(color_label))[:3]
-                            except Exception:  # noqa: BLE001
+                            except Exception as exc:  # noqa: BLE001
                                 logger.exception("AI barcello enrichment failed")
                                 ai_note = "AI non disponibile: report base."
+                                log_ai_event(
+                                    "AI_FALLBACK",
+                                    {
+                                        "guild_id": interaction.guild_id,
+                                        "channel_id": interaction.channel_id,
+                                        "profile": profile,
+                                        "mode": mode_label,
+                                        "window_minutes": window_minutes,
+                                        "msg_count": msg_count_total,
+                                        "ai_allowed": False,
+                                        "reason": "exception",
+                                        "ai_key_present": ai_key_present,
+                                        "cache_hit": cache_hit,
+                                        "model": model,
+                                        "fallback_reason": "exception",
+                                    },
+                                )
+                                ai_debug_line = f"🔎 AI: OFF (fallback=exception)"
 
-            output_flags = command_config.get("output", {})
+            output_flags = _apply_output_caps(command_config.get("output", {}), insufficient_data)
             title_override = None
             if pair_mode and pair_mode_profile == "role3" and pair_user_b is not None:
                 other_name = _resolve_display_name(pair_user_b)
@@ -1675,8 +1933,10 @@ def setup(registry: ServiceRegistry) -> None:
                 mod_advice=mod_advice,
                 affinity_bullets=affinity_bullets,
                 contact_points_bullets=contact_points_bullets,
-                pair_mode=pair_mode,
-                pair_mode_profile=pair_mode_profile,
+                pair_mode=pair_mode and not insufficient_data,
+                pair_mode_profile=pair_mode_profile if not insufficient_data else None,
+                warning_text=warning_text,
+                ai_debug_line=ai_debug_line,
                 ai_note=ai_note,
             )
             feedback_view = None
