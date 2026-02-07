@@ -160,6 +160,16 @@ def setup(registry: ServiceRegistry) -> None:
             "mention_count",
             "mention_per_min",
             "reply_war",
+            "top1_author_share",
+            "top3_author_share",
+            "max_msgs_per_minute",
+            "std_msgs_per_minute",
+            "burst_ratio",
+            "contrast_per_msg",
+            "challenge_per_msg",
+            "playful_emoji_ratio",
+            "passive_aggressive_emoji_ratio",
+            "sarcasm_marker_hits",
         ]
         lines = [f"{key}: {metrics.get(key)}" for key in keys]
         return "```\n" + "\n".join(lines) + "\n```"
@@ -376,6 +386,190 @@ def setup(registry: ServiceRegistry) -> None:
                 _add_section(embed, name="📌 **NOTE**", value=_with_spacing(note_value))
         embed.set_footer(text="Barcellometro")
         return embed
+
+    class _BarcelloFeedbackView(discord.ui.View):
+        def __init__(
+            self,
+            *,
+            database: Any,
+            owner_id: int,
+            channel_id: str,
+            snapshot_id: str,
+            score_pred: int,
+            profile: str | None,
+        ) -> None:
+            super().__init__(timeout=600)
+            self._database = database
+            self._owner_id = owner_id
+            self._channel_id = channel_id
+            self._snapshot_id = snapshot_id
+            self._score_pred = score_pred
+            self._profile = profile
+
+        async def _ensure_owner(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != self._owner_id:
+                await interaction.response.send_message("Feedback riservato ai mod.", ephemeral=True)
+                return False
+            return True
+
+        async def _store_feedback(
+            self,
+            *,
+            verdict: str,
+            reason: str | None,
+            delta_target: int | None,
+        ) -> None:
+            try:
+                await self._database.insert_barcello_feedback(
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    channel_id=self._channel_id,
+                    snapshot_id=self._snapshot_id,
+                    rater_user_id=str(self._owner_id),
+                    verdict=verdict,
+                    reason=reason,
+                    delta_target=delta_target,
+                    score_pred=self._score_pred,
+                    profile=self._profile,
+                )
+            except Exception:
+                logger.exception("Failed to store barcello feedback")
+
+        async def _finalize(self, interaction: discord.Interaction) -> None:
+            for item in self.children:
+                item.disabled = True
+            await interaction.response.edit_message(
+                content="Feedback registrato ✅",
+                embeds=interaction.message.embeds,
+                view=self,
+            )
+
+        @discord.ui.button(label="✅ Accurato", style=discord.ButtonStyle.success)
+        async def accurate(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+            if not await self._ensure_owner(interaction):
+                return
+            await self._store_feedback(verdict="accurate", reason=None, delta_target=None)
+            await self._finalize(interaction)
+
+        @discord.ui.button(label="❌ Inaccurato", style=discord.ButtonStyle.danger)
+        async def inaccurate(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+            if not await self._ensure_owner(interaction):
+                return
+            view = _BarcelloFeedbackSelectView(
+                database=self._database,
+                owner_id=self._owner_id,
+                channel_id=self._channel_id,
+                snapshot_id=self._snapshot_id,
+                score_pred=self._score_pred,
+                profile=self._profile,
+            )
+            await interaction.response.edit_message(
+                content="Seleziona motivo e correzione punteggio.",
+                embeds=interaction.message.embeds,
+                view=view,
+            )
+
+    class _BarcelloFeedbackSelectView(discord.ui.View):
+        def __init__(
+            self,
+            *,
+            database: Any,
+            owner_id: int,
+            channel_id: str,
+            snapshot_id: str,
+            score_pred: int,
+            profile: str | None,
+        ) -> None:
+            super().__init__(timeout=600)
+            self._database = database
+            self._owner_id = owner_id
+            self._channel_id = channel_id
+            self._snapshot_id = snapshot_id
+            self._score_pred = score_pred
+            self._profile = profile
+            self._reason: str | None = None
+            self._delta_target: int | None = None
+
+            self.reason_select = discord.ui.Select(
+                placeholder="Motivo",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(label="Sarcasmo/ironia scambiato per tensione", value="sarcasmo"),
+                    discord.SelectOption(label="Tensione fredda non rilevata", value="tensione_fredda"),
+                    discord.SelectOption(label="Duello tra pochi utenti", value="duello_pochi"),
+                    discord.SelectOption(label="Picco momentaneo", value="picco_momentaneo"),
+                    discord.SelectOption(label="Altro", value="altro"),
+                ],
+            )
+            self.reason_select.callback = self._on_reason_select
+            self.add_item(self.reason_select)
+
+            self.delta_select = discord.ui.Select(
+                placeholder="Correzione punteggio",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(label="Troppo severo → +10", value="10"),
+                    discord.SelectOption(label="Troppo severo → +20", value="20"),
+                    discord.SelectOption(label="Troppo severo → +30", value="30"),
+                    discord.SelectOption(label="Troppo permissivo → -10", value="-10"),
+                    discord.SelectOption(label="Troppo permissivo → -20", value="-20"),
+                    discord.SelectOption(label="Troppo permissivo → -30", value="-30"),
+                ],
+            )
+            self.delta_select.callback = self._on_delta_select
+            self.add_item(self.delta_select)
+
+        async def _ensure_owner(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != self._owner_id:
+                await interaction.response.send_message("Feedback riservato ai mod.", ephemeral=True)
+                return False
+            return True
+
+        async def _on_reason_select(self, interaction: discord.Interaction) -> None:
+            if not await self._ensure_owner(interaction):
+                return
+            self._reason = self.reason_select.values[0]
+            await interaction.response.defer()
+
+        async def _on_delta_select(self, interaction: discord.Interaction) -> None:
+            if not await self._ensure_owner(interaction):
+                return
+            value = self.delta_select.values[0]
+            try:
+                self._delta_target = int(value)
+            except ValueError:
+                self._delta_target = None
+            await interaction.response.defer()
+
+        @discord.ui.button(label="Invia feedback", style=discord.ButtonStyle.primary)
+        async def submit(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+            if not await self._ensure_owner(interaction):
+                return
+            if not self._reason or self._delta_target is None:
+                await interaction.response.send_message("Seleziona motivo e correzione.", ephemeral=True)
+                return
+            try:
+                await self._database.insert_barcello_feedback(
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    channel_id=self._channel_id,
+                    snapshot_id=self._snapshot_id,
+                    rater_user_id=str(self._owner_id),
+                    verdict="inaccurate",
+                    reason=self._reason,
+                    delta_target=self._delta_target,
+                    score_pred=self._score_pred,
+                    profile=self._profile,
+                )
+            except Exception:
+                logger.exception("Failed to store barcello feedback")
+            for item in self.children:
+                item.disabled = True
+            await interaction.response.edit_message(
+                content="Feedback registrato ✅",
+                embeds=interaction.message.embeds,
+                view=self,
+            )
 
     def _extract_ai_text(response: Any) -> str:
         output_text = getattr(response, "output_text", "") or ""
@@ -1002,12 +1196,13 @@ def setup(registry: ServiceRegistry) -> None:
                 *,
                 embed: discord.Embed | None = None,
                 embeds: list[discord.Embed] | None = None,
+                view: discord.ui.View | None = None,
             ) -> bool:
                 try:
                     if embeds is not None:
-                        await interaction.user.send(embeds=embeds)
+                        await interaction.user.send(embeds=embeds, view=view)
                     elif embed is not None:
-                        await interaction.user.send(embed=embed)
+                        await interaction.user.send(embed=embed, view=view)
                     else:
                         await interaction.user.send(content or "")
                     return True
@@ -1153,8 +1348,19 @@ def setup(registry: ServiceRegistry) -> None:
                 mod_advice=mod_advice,
                 ai_note=ai_note,
             )
+            feedback_view = None
+            if profile == "mod":
+                snapshot_id = f"{interaction.channel_id}:{result.window_start_ts}:{result.window_end_ts}"
+                feedback_view = _BarcelloFeedbackView(
+                    database=database,
+                    owner_id=interaction.user.id,
+                    channel_id=str(interaction.channel_id),
+                    snapshot_id=snapshot_id,
+                    score_pred=result.score,
+                    profile=profile,
+                )
 
-            if await try_send_dm(embeds=[public_embed, details_embed]):
+            if await try_send_dm(embeds=[public_embed, details_embed], view=feedback_view):
                 await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
             else:
                 await interaction.followup.send(
