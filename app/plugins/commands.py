@@ -652,11 +652,8 @@ def setup(registry: ServiceRegistry) -> None:
         if output_flags.get("show_motivation") and reasons_text:
             if not _is_effectively_empty_text(reasons_text):
                 _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
-        if output_flags.get("show_trend") and (result.trend or trend_text):
-            if trend_text and not _is_effectively_empty_text(trend_text):
-                trend_value = trend_text
-            else:
-                trend_value, _ = _trend_display(result.trend)
+        if output_flags.get("show_trend"):
+            trend_value = trend_text if trend_text else _render_trend(*_normalize_trend(result.trend))
             if trend_reason and not _is_effectively_empty_text(trend_reason):
                 trend_value = f"{trend_value}\n{trend_reason}"
             _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
@@ -1682,7 +1679,7 @@ def setup(registry: ServiceRegistry) -> None:
 
             reasons_text = _bullets_to_text(_format_motivations(result.reasons))
             trend_direction, trend_delta = _normalize_trend(result.trend)
-            trend_text = _render_trend(trend_direction, trend_delta) if result.trend else ""
+            trend_text = _render_trend(trend_direction, trend_delta)
             trend_reason = _build_trend_reason(result.reasons, trend_direction) if result.trend else ""
             advice_candidates = [item.strip() for item in (result.advice or []) if str(item).strip()]
             color_label = (result.color or "nero").lower()
