@@ -150,6 +150,19 @@ class DatabaseService:
                 computed_ts TEXT NOT NULL,
                 PRIMARY KEY (guild_id, channel_id, window_minutes, window_end_ts)
             );
+
+            CREATE TABLE IF NOT EXISTS barcello_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                snapshot_id TEXT NOT NULL,
+                rater_user_id TEXT NOT NULL,
+                verdict TEXT NOT NULL CHECK(verdict IN ('accurate', 'inaccurate')),
+                reason TEXT NULL,
+                delta_target INTEGER NULL,
+                score_pred INTEGER NOT NULL,
+                profile TEXT NULL
+            );
             """
         )
         await self._conn.commit()
@@ -280,6 +293,76 @@ class DatabaseService:
                 metrics_json,
                 computed_ts,
             ),
+        )
+
+    async def insert_barcello_feedback(
+        self,
+        *,
+        created_at: str,
+        channel_id: str,
+        snapshot_id: str,
+        rater_user_id: str,
+        verdict: str,
+        reason: Optional[str],
+        delta_target: Optional[int],
+        score_pred: int,
+        profile: Optional[str],
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO barcello_feedback (
+                created_at, channel_id, snapshot_id, rater_user_id, verdict, reason, delta_target, score_pred, profile
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                created_at,
+                channel_id,
+                snapshot_id,
+                rater_user_id,
+                verdict,
+                reason,
+                delta_target,
+                score_pred,
+                profile,
+            ),
+        )
+
+    async def list_barcello_feedback(self, days: int = 30) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT *
+            FROM barcello_feedback
+            WHERE created_at >= datetime('now', ?)
+            ORDER BY created_at DESC
+            """,
+            (f"-{days} days",),
+        )
+
+    async def fetch_barcello_feedback(self, *, time_from: str, time_to: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT *
+            FROM barcello_feedback
+            WHERE created_at >= ? AND created_at <= ?
+            ORDER BY created_at DESC
+            """,
+            (time_from, time_to),
+        )
+
+    async def get_barcello_snapshot_by_end(
+        self,
+        *,
+        channel_id: str,
+        window_minutes: int,
+        window_end_ts: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM barcello_snapshots
+            WHERE channel_id = ? AND window_minutes = ? AND window_end_ts = ?
+            """,
+            (channel_id, window_minutes, window_end_ts),
         )
 
     async def fetch_messages_in_range(
