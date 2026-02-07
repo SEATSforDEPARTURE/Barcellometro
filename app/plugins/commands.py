@@ -300,17 +300,119 @@ def setup(registry: ServiceRegistry) -> None:
         normalized = stripped.lstrip("-• ").strip().lower()
         return normalized in {"(nessuna)", "nessuna", "• (nessuna)", "• nessuna"}
 
-    def _format_motivations(reasons: list[dict[str, Any]]) -> str:
-        lines = [f"{reason['label']} ({reason['summary']})" for reason in reasons][:4]
-        if not lines:
-            return "• (nessuna)"
-        return _bullet_list(lines)
-
-    def _bullets_to_text(lines: list[str]) -> str:
+    def _format_bullets(lines: list[str]) -> str:
         cleaned = clean_bullets(lines)
         if not cleaned:
             return ""
-        return _bullet_list(cleaned)
+        formatted: list[str] = []
+        for line in cleaned:
+            text = line.strip()
+            if text.startswith(("- ", "* ")):
+                text = text[2:].strip()
+            if text.startswith("•"):
+                text = text.lstrip("•").strip()
+            if text.startswith("•"):
+                text = text.lstrip("•").strip()
+            if text.startswith("• •"):
+                text = text.replace("• •", "•", 1).strip()
+            if len(text) > 120:
+                text = f"{text[:117]}..."
+            formatted.append(f"• {text}")
+        return "\n".join(formatted)
+
+    def _normalize_trend(trend_value: Any) -> tuple[str | None, int | None]:
+        if isinstance(trend_value, dict):
+            direction = trend_value.get("direction")
+            delta_raw = trend_value.get("delta")
+            try:
+                delta = int(delta_raw) if delta_raw is not None else None
+            except (TypeError, ValueError):
+                delta = None
+            return str(direction) if direction else None, delta
+        if isinstance(trend_value, str):
+            value = trend_value.strip().lower()
+            mapping = {
+                "stable": "stable",
+                "stabile": "stable",
+                "improving": "improving",
+                "miglioramento": "improving",
+                "in miglioramento": "improving",
+                "worsening": "worsening",
+                "peggioramento": "worsening",
+                "in peggioramento": "worsening",
+            }
+            return mapping.get(value, None), None
+        return None, None
+
+    def _render_trend(direction: str | None, delta: int | None) -> str:
+        if direction == "improving":
+            base = "In miglioramento."
+        elif direction == "worsening":
+            base = "In peggioramento."
+        else:
+            base = "Stabile."
+        if delta is None:
+            return base
+        return f"{base} (Δ {delta:+d})."
+
+    def _build_trend_reason(reasons: list[dict[str, Any]], direction: str | None) -> str:
+        if not reasons:
+            return "Perché: il tono resta abbastanza uniforme e senza scosse."
+        key = str(reasons[0].get("key", "")).lower()
+        label = str(reasons[0].get("label", "")).lower()
+        if "reply_war" in key or "botta" in label:
+            return "Perché: si è innescata una botta e risposta che scalda il clima."
+        if "burst" in key or "densit" in label:
+            return "Perché: tanti messaggi tutti insieme fanno salire la tensione."
+        if "top1" in key or "top3" in key or "concentrazione" in label:
+            return "Perché: si parla in pochi e ci si punzecchia più facilmente."
+        if "challenge" in key or "domande" in label:
+            return "Perché: ci sono domande un po’ sfidanti che accendono il tono."
+        if "contrast" in key or "frizione" in label:
+            return "Perché: si percepisce attrito nelle parole e rischio fraintendimenti."
+        if "caps" in key or "maiuscole" in label:
+            return "Perché: il tono sembra acceso e serve più calma."
+        if "negativity" in key or "negativi" in label:
+            return "Perché: il tono è pungente e ci si risponde di pancia."
+        if "mentions" in key or "menzion" in label:
+            return "Perché: troppe chiamate dirette alzano la tensione."
+        if direction == "improving":
+            return "Perché: il tono sta diventando più morbido."
+        if direction == "worsening":
+            return "Perché: il tono si sta irrigidendo."
+        return "Perché: il clima resta simile senza scossoni."
+
+    def _format_motivations(reasons: list[dict[str, Any]]) -> list[str]:
+        lines: list[str] = []
+        for reason in reasons:
+            key = str(reason.get("key", "")).lower()
+            label = str(reason.get("label", "")).lower()
+            if "reply_war" in key or "botta" in label:
+                lines.append("Botta e risposta che rimbalza: serve una pausa.")
+            elif "burst" in key or "densit" in label:
+                lines.append("Tanti messaggi tutti insieme: il clima si scalda in fretta.")
+            elif "top1" in key or "top3" in key or "concentrazione" in label:
+                lines.append("Si parla in pochi: quando sono sempre gli stessi, si rischia di pungersi.")
+            elif "challenge" in key or "domande" in label:
+                lines.append("Ci sono domande un po’ sfidanti: meglio chiarire con calma.")
+            elif "contrast" in key or "frizione" in label:
+                lines.append("Si percepisce attrito nelle parole: rischio fraintendimenti.")
+            elif "caps" in key or "maiuscole" in label:
+                lines.append("Il tono sembra acceso: meglio abbassare i toni.")
+            elif "negativity" in key or "negativi" in label:
+                lines.append("Il tono è pungente: serve più gentilezza.")
+            elif "mentions" in key or "menzion" in label:
+                lines.append("Troppe chiamate dirette: meglio chiarire senza puntare il dito.")
+            else:
+                lines.append("Si percepisce tensione diffusa: serve calma e ascolto.")
+        unique_lines: list[str] = []
+        for line in lines:
+            if line not in unique_lines:
+                unique_lines.append(line)
+        return unique_lines[:4]
+
+    def _bullets_to_text(lines: list[str]) -> str:
+        return _format_bullets(lines)
 
     def _fallback_personal_advice(color_label: str) -> list[str]:
         if color_label == "verde":
@@ -533,6 +635,7 @@ def setup(registry: ServiceRegistry) -> None:
         embed_color: int,
         reasons_text: str,
         trend_text: str,
+        trend_reason: str | None = None,
         personal_advice: list[str],
         mod_advice: list[str],
         affinity_bullets: list[str] | None = None,
@@ -554,30 +657,32 @@ def setup(registry: ServiceRegistry) -> None:
                 trend_value = trend_text
             else:
                 trend_value, _ = _trend_display(result.trend)
+            if trend_reason and not _is_effectively_empty_text(trend_reason):
+                trend_value = f"{trend_value}\n{trend_reason}"
             _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
         if output_flags.get("show_advice"):
             if pair_mode and pair_mode_profile == "role3":
                 advice_lines = clean_bullets(personal_advice)[:5]
                 if should_show_section(advice_lines):
-                    _add_section(embed, name="🧠 **COME ANDARE D’ACCORDO**", value=_bullet_list(advice_lines))
+                    _add_section(embed, name="🧠 **COME ANDARE D’ACCORDO**", value=_format_bullets(advice_lines))
                 affinity_lines = clean_bullets(affinity_bullets)[:5]
                 if should_show_section(affinity_lines):
-                    _add_section(embed, name="💞 **AFFINITÀ**", value=_bullet_list(affinity_lines))
+                    _add_section(embed, name="💞 **AFFINITÀ**", value=_format_bullets(affinity_lines))
             elif pair_mode and pair_mode_profile == "mod":
                 mod_lines = clean_bullets(mod_advice)[:6]
                 if should_show_section(mod_lines):
-                    _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
+                    _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_format_bullets(mod_lines))
                 contact_lines = clean_bullets(contact_points_bullets)[:5]
                 if should_show_section(contact_lines):
-                    _add_section(embed, name="🤝 **PUNTI DI CONTATTO**", value=_bullet_list(contact_lines))
+                    _add_section(embed, name="🤝 **PUNTI DI CONTATTO**", value=_format_bullets(contact_lines))
             else:
                 advice_lines = clean_bullets(personal_advice)[:5]
                 if should_show_section(advice_lines):
-                    _add_section(embed, name="🧠 **CONSIGLI PERSONALIZZATI**", value=_bullet_list(advice_lines))
+                    _add_section(embed, name="🧠 **CONSIGLI PERSONALIZZATI**", value=_format_bullets(advice_lines))
                 if profile == "mod":
                     mod_lines = clean_bullets(mod_advice)[:5]
                     if should_show_section(mod_lines):
-                        _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_bullet_list(mod_lines))
+                        _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_format_bullets(mod_lines))
         if output_flags.get("show_mod_metrics") and profile == "mod":
             _add_section(embed, name="🧮 **METRICHE AGGREGATE**", value=_with_spacing(_format_metrics(result.metrics)))
         if ai_note:
@@ -1575,17 +1680,10 @@ def setup(registry: ServiceRegistry) -> None:
                     f"{window_minutes} min. Affidabilità: bassa."
                 )
 
-            reasons_text = _format_motivations(result.reasons)
-            reasons_text = _bullets_to_text(normalize_bullets(reasons_text))
-            trend_text = ""
-            if result.trend:
-                direction = result.trend.get("direction", "stable")
-                delta = result.trend.get("delta", 0)
-                trend_label = {"stable": "stabile", "improving": "in miglioramento", "worsening": "in peggioramento"}.get(
-                    direction,
-                    direction,
-                )
-                trend_text = f"Trend {trend_label} (Δ {delta:+d})."
+            reasons_text = _bullets_to_text(_format_motivations(result.reasons))
+            trend_direction, trend_delta = _normalize_trend(result.trend)
+            trend_text = _render_trend(trend_direction, trend_delta) if result.trend else ""
+            trend_reason = _build_trend_reason(result.reasons, trend_direction) if result.trend else ""
             advice_candidates = [item.strip() for item in (result.advice or []) if str(item).strip()]
             color_label = (result.color or "nero").lower()
             affinity_bullets: list[str] = []
@@ -1600,6 +1698,7 @@ def setup(registry: ServiceRegistry) -> None:
                 contact_points_bullets = []
                 reasons_text = ""
                 trend_text = ""
+                trend_reason = ""
             elif pair_mode and pair_mode_profile == "role3":
                 fallback_personal = _fallback_pair_personal_advice(result.metrics)
                 affinity_bullets = _fallback_pair_affinity(result.metrics)
@@ -1690,10 +1789,13 @@ def setup(registry: ServiceRegistry) -> None:
                                 metrics = result.metrics or {}
                                 if pair_mode and pair_mode_profile == "role3":
                                     system_prompt = (
-                                        "Scrivi in italiano, tono pratico e calmo. "
+                                        "Scrivi in italiano, tono cricetoso, semplice e pratico. "
                                         "Non includere nomi utenti, dati sensibili o accuse. "
+                                        "Non usare numeri, percentuali o metriche (es. ratio, top3). "
                                         "Non aggiungere dettagli non presenti. "
-                                        "Restituisci SOLO JSON con chiavi: motivation, trend, "
+                                        "Motivation e bullets devono parlare di segnali percepibili "
+                                        "(botta e risposta, tono pungente, poca ascolto, clima che si scalda). "
+                                        "Restituisci SOLO JSON con chiavi: motivation, trend_reason, "
                                         "pair_advice_bullets, affinity_bullets. "
                                         "Le liste devono avere 3-5 elementi, massimo 120 caratteri ciascuno. "
                                         "Return ONLY valid JSON. No markdown, no prose."
@@ -1730,10 +1832,13 @@ def setup(registry: ServiceRegistry) -> None:
                                     )
                                 elif pair_mode and pair_mode_profile == "mod":
                                     system_prompt = (
-                                        "Scrivi in italiano, tono pratico e neutro da playbook mod. "
+                                        "Scrivi in italiano, tono cricetoso, pratico e neutro da playbook mod. "
                                         "Non includere nomi utenti, dati sensibili o accuse. "
+                                        "Non usare numeri, percentuali o metriche (es. ratio, top3). "
                                         "Non aggiungere dettagli non presenti. "
-                                        "Restituisci SOLO JSON con chiavi: motivation, trend, "
+                                        "Motivation e bullets devono parlare di segnali percepibili "
+                                        "(botta e risposta, tono pungente, poca ascolto, clima che si scalda). "
+                                        "Restituisci SOLO JSON con chiavi: motivation, trend_reason, "
                                         "mod_advice_bullets, contact_points_bullets. "
                                         "mod_advice_bullets deve avere 4-6 elementi; "
                                         "contact_points_bullets 3-5 elementi; massimo 120 caratteri ciascuno. "
@@ -1771,10 +1876,13 @@ def setup(registry: ServiceRegistry) -> None:
                                     )
                                 else:
                                     system_prompt = (
-                                        "Scrivi in italiano, tono pratico e calmo (Criceto Mannaro ma non cringe). "
+                                        "Scrivi in italiano, tono cricetoso, semplice e pratico. "
                                         "Non includere nomi utenti, dati sensibili o accuse. "
+                                        "Non usare numeri, percentuali o metriche (es. ratio, top3). "
                                         "Non aggiungere dettagli non presenti. "
-                                        "Restituisci SOLO JSON con chiavi: motivation, trend, "
+                                        "Motivation e bullets devono parlare di segnali percepibili "
+                                        "(botta e risposta, tono pungente, poca ascolto, clima che si scalda). "
+                                        "Restituisci SOLO JSON con chiavi: motivation, trend_reason, "
                                         "personal_advice_bullets, mod_advice_bullets. "
                                         "Le liste devono avere 3-5 elementi, massimo 120 caratteri ciascuno. "
                                         "Return ONLY valid JSON. No markdown, no prose."
@@ -1854,9 +1962,9 @@ def setup(registry: ServiceRegistry) -> None:
                                     motivation_lines = normalize_bullets(ai_payload.get("motivation"))
                                     if motivation_lines:
                                         reasons_text = _bullets_to_text(motivation_lines)
-                                    trend_lines = normalize_bullets(ai_payload.get("trend"))
-                                    if trend_lines:
-                                        trend_text = " ".join(clean_bullets(trend_lines))
+                                    ai_trend_reason = normalize_bullets(ai_payload.get("trend_reason"))
+                                    if ai_trend_reason:
+                                        trend_reason = "Perché: " + " ".join(clean_bullets(ai_trend_reason))
                                     if pair_mode and pair_mode_profile == "role3":
                                         ai_advice = ai_payload.get("pair_advice_bullets")
                                         ai_affinity = ai_payload.get("affinity_bullets")
@@ -1940,6 +2048,7 @@ def setup(registry: ServiceRegistry) -> None:
                 embed_color=details_color,
                 reasons_text=reasons_text,
                 trend_text=trend_text,
+                trend_reason=trend_reason,
                 personal_advice=personal_advice,
                 mod_advice=mod_advice,
                 affinity_bullets=affinity_bullets,
