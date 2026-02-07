@@ -42,7 +42,6 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group = app_commands.Group(
         name="barcellometro",
         description="Controlli Barcellometro",
-        default_member_permissions=discord.Permissions(administrator=True),
         dm_permission=False,
     )
     role_group = app_commands.Group(name="role", description="Gestione permessi e limiti")
@@ -52,6 +51,8 @@ def setup(registry: ServiceRegistry) -> None:
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Ingest da canale vocale")
     privacy_group = app_commands.Group(name="privacy", description="Privacy per voice ingest")
     status_group = app_commands.Group(name="status", description="Stato servizi")
+
+    ADMIN_ONLY = discord.Permissions(administrator=True)
     barcellometro_group.add_command(role_group)
     barcellometro_group.add_command(stt_group)
     barcellometro_group.add_command(translate_group)
@@ -698,7 +699,11 @@ def setup(registry: ServiceRegistry) -> None:
             )
         )
 
-    @barcellometro_group.command(name="check", description="Abilita o disabilita la raccolta eventi nel canale")
+    @barcellometro_group.command(
+        name="check",
+        description="Abilita o disabilita la raccolta eventi nel canale",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(state="on/off")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
     async def check_command(interaction: discord.Interaction, state: app_commands.Choice[str]) -> None:
@@ -723,7 +728,11 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
-    @barcellometro_group.command(name="retention", description="Gestisci la retention dei dati")
+    @barcellometro_group.command(
+        name="retention",
+        description="Gestisci la retention dei dati",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(action="get/set", days="Numero di giorni di retention")
     @app_commands.choices(action=[app_commands.Choice(name="get", value="get"), app_commands.Choice(name="set", value="set")])
     async def retention_command(
@@ -743,7 +752,11 @@ def setup(registry: ServiceRegistry) -> None:
         await retention.set_retention_days(days)
         await interaction.response.send_message(f"Retention aggiornata a {days} giorni.", ephemeral=True)
 
-    @barcellometro_group.command(name="backfill", description="Gestisci il backfill dei dati")
+    @barcellometro_group.command(
+        name="backfill",
+        description="Gestisci il backfill dei dati",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(state="on/off", days="Numero di giorni di backfill")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
     async def backfill_command(
@@ -788,7 +801,11 @@ def setup(registry: ServiceRegistry) -> None:
 
         await responder.send_message("Backfill disattivato.", ephemeral=True)
 
-    @barcellometro_group.command(name="ai", description="Abilita o disabilita il servizio AI")
+    @barcellometro_group.command(
+        name="ai",
+        description="Abilita o disabilita il servizio AI",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(state="on/off")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
     async def ai_command(interaction: discord.Interaction, state: app_commands.Choice[str]) -> None:
@@ -801,7 +818,11 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
-    @barcellometro_group.command(name="ai-model", description="Imposta il modello AI per un task")
+    @barcellometro_group.command(
+        name="ai-model",
+        description="Imposta il modello AI per un task",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(task="Task AI", model="Nome modello")
     @app_commands.choices(
         task=[
@@ -823,7 +844,11 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
-    @stt_group.command(name="backend", description="Imposta il backend STT")
+    @stt_group.command(
+        name="backend",
+        description="Imposta il backend STT",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.choices(
         backend=[
             app_commands.Choice(name="local", value="local"),
@@ -839,7 +864,11 @@ def setup(registry: ServiceRegistry) -> None:
         await set_setting("stt.backend", backend.value)
         await interaction.response.send_message(f"Backend STT impostato su {backend.value}.", ephemeral=True)
 
-    @stt_group.command(name="model", description="Imposta il modello STT locale")
+    @stt_group.command(
+        name="model",
+        description="Imposta il modello STT locale",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.choices(
         model=[
             app_commands.Choice(name="small", value="small"),
@@ -856,7 +885,11 @@ def setup(registry: ServiceRegistry) -> None:
         await set_setting("stt.local.model", model.value)
         await interaction.response.send_message(f"Modello STT impostato su {model.value}.", ephemeral=True)
 
-    @stt_group.command(name="compute", description="Imposta il compute type STT locale")
+    @stt_group.command(
+        name="compute",
+        description="Imposta il compute type STT locale",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.choices(
         compute=[
             app_commands.Choice(name="int8", value="int8"),
@@ -873,7 +906,11 @@ def setup(registry: ServiceRegistry) -> None:
         await set_setting("stt.local.compute_type", compute.value)
         await interaction.response.send_message(f"Compute STT impostato su {compute.value}.", ephemeral=True)
 
-    @stt_group.command(name="beam", description="Imposta il beam size STT locale")
+    @stt_group.command(
+        name="beam",
+        description="Imposta il beam size STT locale",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.choices(
         beam=[
             app_commands.Choice(name="1", value="1"),
@@ -890,7 +927,11 @@ def setup(registry: ServiceRegistry) -> None:
         await set_setting("stt.local.beam_size", beam.value)
         await interaction.response.send_message(f"Beam STT impostato su {beam.value}.", ephemeral=True)
 
-    @stt_group.command(name="language", description="Imposta la lingua STT locale")
+    @stt_group.command(
+        name="language",
+        description="Imposta la lingua STT locale",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.choices(
         language=[
             app_commands.Choice(name="it", value="it"),
@@ -906,7 +947,11 @@ def setup(registry: ServiceRegistry) -> None:
         await set_setting("stt.local.language_hint", language.value)
         await interaction.response.send_message(f"Lingua STT impostata su {language.value}.", ephemeral=True)
 
-    @translate_group.command(name="backend", description="Imposta il backend di traduzione")
+    @translate_group.command(
+        name="backend",
+        description="Imposta il backend di traduzione",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.choices(
         backend=[
             app_commands.Choice(name="local", value="local"),
@@ -925,7 +970,11 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
-    @translate_group.command(name="target", description="Imposta la lingua target")
+    @translate_group.command(
+        name="target",
+        description="Imposta la lingua target",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.choices(target=[app_commands.Choice(name="it", value="it")])
     async def translate_target_command(
         interaction: discord.Interaction,
@@ -939,21 +988,33 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
-    @audio_notes_group.command(name="on", description="Abilita le note vocali")
+    @audio_notes_group.command(
+        name="on",
+        description="Abilita le note vocali",
+        default_member_permissions=ADMIN_ONLY,
+    )
     async def audio_notes_on_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.audio_notes.on"):
             return
         await set_setting("audio_notes.enabled", "true")
         await interaction.response.send_message("Note vocali abilitate.", ephemeral=True)
 
-    @audio_notes_group.command(name="off", description="Disabilita le note vocali")
+    @audio_notes_group.command(
+        name="off",
+        description="Disabilita le note vocali",
+        default_member_permissions=ADMIN_ONLY,
+    )
     async def audio_notes_off_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.audio_notes.off"):
             return
         await set_setting("audio_notes.enabled", "false")
         await interaction.response.send_message("Note vocali disabilitate.", ephemeral=True)
 
-    @audio_notes_group.command(name="status", description="Mostra lo stato note vocali")
+    @audio_notes_group.command(
+        name="status",
+        description="Mostra lo stato note vocali",
+        default_member_permissions=ADMIN_ONLY,
+    )
     async def audio_notes_status_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.audio_notes.status"):
             return
@@ -969,7 +1030,11 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
-    @audio_notes_group.command(name="limits", description="Imposta i limiti note vocali")
+    @audio_notes_group.command(
+        name="limits",
+        description="Imposta i limiti note vocali",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(
         max_mb="Massimo MB",
         max_duration_s="Durata massima in secondi",
@@ -994,7 +1059,11 @@ def setup(registry: ServiceRegistry) -> None:
         await set_setting("audio_notes.queue_max", str(queue_max))
         await interaction.response.send_message("Limiti note vocali aggiornati.", ephemeral=True)
 
-    @privacy_group.command(name="on", description="Attiva privacy (disconnette il bot dal vocale)")
+    @privacy_group.command(
+        name="on",
+        description="Attiva privacy (disconnette il bot dal vocale)",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(voice_channel="Canale vocale (opzionale)")
     async def privacy_on(
         interaction: discord.Interaction,
@@ -1022,7 +1091,11 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
-    @privacy_group.command(name="off", description="Disattiva privacy (riabilita auto-join)")
+    @privacy_group.command(
+        name="off",
+        description="Disattiva privacy (riabilita auto-join)",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(voice_channel="Canale vocale (opzionale)")
     async def privacy_off(
         interaction: discord.Interaction,
@@ -1051,7 +1124,11 @@ def setup(registry: ServiceRegistry) -> None:
             ephemeral=True,
         )
 
-    @privacy_group.command(name="status", description="Mostra lo stato privacy")
+    @privacy_group.command(
+        name="status",
+        description="Mostra lo stato privacy",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(voice_channel="Canale vocale (opzionale)")
     async def privacy_status(
         interaction: discord.Interaction,
@@ -1097,7 +1174,11 @@ def setup(registry: ServiceRegistry) -> None:
             )
         await interaction.response.send_message(message, ephemeral=True)
 
-    @voice_ingest_group.command(name="join", description="Join manuale del canale vocale")
+    @voice_ingest_group.command(
+        name="join",
+        description="Join manuale del canale vocale",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(voice_channel="Canale vocale")
     async def voice_ingest_join(
         interaction: discord.Interaction,
@@ -1116,7 +1197,11 @@ def setup(registry: ServiceRegistry) -> None:
         if voice_ingest:
             await voice_ingest.join(voice_channel)
 
-    @voice_ingest_group.command(name="leave", description="Leave manuale del canale vocale")
+    @voice_ingest_group.command(
+        name="leave",
+        description="Leave manuale del canale vocale",
+        default_member_permissions=ADMIN_ONLY,
+    )
     async def voice_ingest_leave(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.voice_ingest.leave"):
             return
@@ -1379,7 +1464,11 @@ def setup(registry: ServiceRegistry) -> None:
             logger.exception("barcello: unexpected error")
             await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
 
-    @barcellometro_group.command(name="calibrate", description="Calibra automaticamente i pesi del barcello")
+    @barcellometro_group.command(
+        name="calibrate",
+        description="Calibra automaticamente i pesi del barcello",
+        default_member_permissions=ADMIN_ONLY,
+    )
     async def barcellometro_calibrate(interaction: discord.Interaction) -> None:
         entitlements_service: EntitlementsService = registry.get("entitlements")
         profile, _ = await entitlements_service.resolve_profile_with_role_id(interaction.user)
@@ -1400,7 +1489,11 @@ def setup(registry: ServiceRegistry) -> None:
     bot.tree.add_command(privacy_group, guild=guild)
     bot.tree.add_command(barcello_command, guild=guild)
 
-    @role_group.command(name="set-role", description="Imposta limiti per un ruolo su un comando")
+    @role_group.command(
+        name="set-role",
+        description="Imposta limiti per un ruolo su un comando",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(role="Ruolo", command="Nome comando", usage_limit="Limite utilizzi (vuoto = illimitato)", cooldown_seconds="Cooldown in secondi")
     async def role_set_command(
         interaction: discord.Interaction,
@@ -1426,7 +1519,11 @@ def setup(registry: ServiceRegistry) -> None:
         )
         await interaction.response.send_message("Policy ruolo aggiornata.", ephemeral=True)
 
-    @role_group.command(name="set-user", description="Imposta limiti per un utente su un comando")
+    @role_group.command(
+        name="set-user",
+        description="Imposta limiti per un utente su un comando",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(user="Utente", command="Nome comando", usage_limit="Limite utilizzi (vuoto = illimitato)", cooldown_seconds="Cooldown in secondi")
     async def user_set_command(
         interaction: discord.Interaction,
@@ -1452,7 +1549,11 @@ def setup(registry: ServiceRegistry) -> None:
         )
         await interaction.response.send_message("Policy utente aggiornata.", ephemeral=True)
 
-    @role_group.command(name="clear-role", description="Rimuove la policy di un ruolo")
+    @role_group.command(
+        name="clear-role",
+        description="Rimuove la policy di un ruolo",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(role="Ruolo", command="Nome comando")
     async def role_clear_command(
         interaction: discord.Interaction,
@@ -1468,7 +1569,11 @@ def setup(registry: ServiceRegistry) -> None:
         )
         await interaction.response.send_message("Policy ruolo rimossa.", ephemeral=True)
 
-    @role_group.command(name="clear-user", description="Rimuove la policy di un utente")
+    @role_group.command(
+        name="clear-user",
+        description="Rimuove la policy di un utente",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(user="Utente", command="Nome comando")
     async def user_clear_command(
         interaction: discord.Interaction,
@@ -1484,7 +1589,11 @@ def setup(registry: ServiceRegistry) -> None:
         )
         await interaction.response.send_message("Policy utente rimossa.", ephemeral=True)
 
-    @role_group.command(name="show-role", description="Mostra le policy di un ruolo")
+    @role_group.command(
+        name="show-role",
+        description="Mostra le policy di un ruolo",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(role="Ruolo")
     async def role_show_command(interaction: discord.Interaction, role: discord.Role) -> None:
         if not await ensure_admin(interaction):
@@ -1500,7 +1609,11 @@ def setup(registry: ServiceRegistry) -> None:
             lines.append(f"{row['command']}: limit={limit} cooldown={cooldown}")
         await interaction.response.send_message("\\n".join(lines), ephemeral=True)
 
-    @role_group.command(name="show-user", description="Mostra le policy di un utente")
+    @role_group.command(
+        name="show-user",
+        description="Mostra le policy di un utente",
+        default_member_permissions=ADMIN_ONLY,
+    )
     @app_commands.describe(user="Utente")
     async def user_show_command(interaction: discord.Interaction, user: discord.User) -> None:
         if not await ensure_admin(interaction):
