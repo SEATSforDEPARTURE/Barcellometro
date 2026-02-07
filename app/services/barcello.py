@@ -83,6 +83,7 @@ class BarcelloService:
             "cache_hit": 0,
             "last_compute_ts": None,
             "last_score_by_channel": {},
+            "last_score_by_pair": {},
         }
 
     def _mget(self, message: Any, key: str, default: Any = None) -> Any:
@@ -169,6 +170,62 @@ class BarcelloService:
 
         self._cache_result(cache_key, result)
         return result
+
+    async def compute_pair(
+        self,
+        guild_id: str,
+        channel_id: str,
+        user_a_id: str,
+        user_b_id: str,
+        window_minutes: int,
+        now_ts: Optional[str] = None,
+    ) -> BarcelloResult:
+        end_dt = self._parse_ts(now_ts) if now_ts else datetime.now(timezone.utc)
+        window_end_ts = end_dt.isoformat()
+        window_start_dt = end_dt - timedelta(minutes=window_minutes)
+        window_start_ts = window_start_dt.isoformat()
+        messages = await self._database.fetch_messages_in_range(
+            channel_id=channel_id,
+            start_ts=window_start_ts,
+            end_ts=window_end_ts,
+            limit=2000,
+        )
+
+        user_a_key = str(user_a_id)
+        user_b_key = str(user_b_id)
+        pair_messages = [
+            message
+            for message in messages
+            if (self._mget(message, "author_id") or "") in {user_a_key, user_b_key}
+        ]
+
+        metrics = self._compute_metrics(pair_messages, window_minutes)
+        pair_metrics = self._compute_pair_metrics(pair_messages, user_a_key, user_b_key)
+        metrics.update(pair_metrics)
+        score_config = await self._get_score_config()
+        reasons, score = self._score_from_metrics(metrics, score_config)
+        color = await self.get_color(score)
+
+        pair_key = ":".join(sorted([user_a_key, user_b_key]))
+        last_scores = self._metrics["last_score_by_pair"]
+        previous_score = last_scores.get(pair_key)
+        trend = self._build_trend(score, previous_score) if previous_score is not None else None
+        last_scores[pair_key] = score
+        if len(last_scores) > 50:
+            last_scores.pop(next(iter(last_scores)))
+
+        advice = self._build_advice(metrics, score)
+
+        return BarcelloResult(
+            score=score,
+            color=color,
+            window_start_ts=window_start_ts,
+            window_end_ts=window_end_ts,
+            reasons=reasons,
+            metrics=metrics,
+            trend=trend,
+            advice=advice,
+        )
 
     async def get_color(self, score: int) -> str:
         ranges = await self._get_color_ranges()
@@ -417,6 +474,64 @@ class BarcelloService:
             "passive_aggressive_emoji_ratio": round(passive_aggressive_emoji_ratio, 3),
             "sarcasm_marker_hits": round(sarcasm_marker_hits_per_msg, 3),
             "sarcasm_marker_hits_raw": sarcasm_marker_hits,
+        }
+
+    def _compute_pair_metrics(
+        self,
+        messages: list[Any],
+        user_a_id: str,
+        user_b_id: str,
+    ) -> dict[str, Any]:
+        msg_count_user_a = 0
+        msg_count_user_b = 0
+        mentions_a_to_b = 0
+        mentions_b_to_a = 0
+        total_len_a = 0
+        total_len_b = 0
+
+        for message in messages:
+            author_id = self._mget(message, "author_id") or ""
+            content = (self._mget(message, "content", "") or "").strip()
+            mentions_raw = self._mget(message, "mentions_json")
+            mentions_list: list[str] = []
+            if mentions_raw:
+                try:
+                    parsed = json.loads(mentions_raw)
+                    if isinstance(parsed, list):
+                        mentions_list = [str(item) for item in parsed]
+                except json.JSONDecodeError:
+                    mentions_list = []
+
+            if author_id == user_a_id:
+                msg_count_user_a += 1
+                total_len_a += len(content)
+                if mentions_list:
+                    mentions_a_to_b += mentions_list.count(user_b_id)
+                else:
+                    mentions_a_to_b += content.count(f"<@{user_b_id}>")
+            elif author_id == user_b_id:
+                msg_count_user_b += 1
+                total_len_b += len(content)
+                if mentions_list:
+                    mentions_b_to_a += mentions_list.count(user_a_id)
+                else:
+                    mentions_b_to_a += content.count(f"<@{user_a_id}>")
+
+        max_msgs = max(msg_count_user_a, msg_count_user_b)
+        min_msgs = min(msg_count_user_a, msg_count_user_b)
+        balance_ratio = round((min_msgs / max_msgs), 3) if max_msgs else 0.0
+
+        avg_msg_len_a = round(total_len_a / msg_count_user_a, 1) if msg_count_user_a else 0.0
+        avg_msg_len_b = round(total_len_b / msg_count_user_b, 1) if msg_count_user_b else 0.0
+
+        return {
+            "msg_count_user_a": msg_count_user_a,
+            "msg_count_user_b": msg_count_user_b,
+            "balance_ratio": balance_ratio,
+            "mentions_a_to_b": mentions_a_to_b,
+            "mentions_b_to_a": mentions_b_to_a,
+            "avg_msg_len_a": avg_msg_len_a,
+            "avg_msg_len_b": avg_msg_len_b,
         }
 
     def _score_from_metrics(self, metrics: dict[str, Any], score_config: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
