@@ -36,6 +36,7 @@ def setup(registry: ServiceRegistry) -> None:
     voice_ingest = registry.get("voice_ingest") if registry.has("voice_ingest") else None
     ingest: IngestService = registry.get("ingest")
     config = registry.get("config")
+    response_format_supported: bool | None = None
 
     guild = discord.Object(id=config.guild_id)
 
@@ -310,16 +311,6 @@ def setup(registry: ServiceRegistry) -> None:
         if not cleaned:
             return ""
         return _bullet_list(cleaned)
-
-    def _normalize_bullet_lines(raw: Any) -> list[str]:
-        if raw is None:
-            return []
-        if isinstance(raw, list):
-            return [str(item).strip() for item in raw if str(item).strip()]
-        if isinstance(raw, str):
-            return [line.strip() for line in raw.splitlines() if line.strip()]
-        value = str(raw).strip()
-        return [value] if value else []
 
     def _fallback_personal_advice(color_label: str) -> list[str]:
         if color_label == "verde":
@@ -845,17 +836,26 @@ def setup(registry: ServiceRegistry) -> None:
         model: str,
         input_payload: list[dict[str, str]],
     ) -> tuple[dict[str, Any] | None, str]:
+        nonlocal response_format_supported
         try:
-            response = await client.responses.create(
-                model=model,
-                response_format={"type": "json_object"},
-                input=input_payload,
-            )
-            logger.info("OpenAI response_format supported")
+            if response_format_supported is False:
+                response = await client.responses.create(
+                    model=model,
+                    input=input_payload,
+                )
+            else:
+                response = await client.responses.create(
+                    model=model,
+                    response_format={"type": "json_object"},
+                    input=input_payload,
+                )
+                response_format_supported = True
         except TypeError as exc:
             if "response_format" not in str(exc):
                 raise
-            logger.warning("OpenAI response_format unsupported; falling back")
+            if response_format_supported is not False:
+                logger.info("OpenAI response_format unsupported; using JSON-in-text mode")
+            response_format_supported = False
             response = await client.responses.create(
                 model=model,
                 input=input_payload,
