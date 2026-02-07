@@ -275,7 +275,7 @@ def setup(registry: ServiceRegistry) -> None:
         if raw is None:
             return []
         if isinstance(raw, list):
-            return [str(item).strip() for item in raw if str(item).strip()]
+            return [str(item).strip() for item in raw if item is not None and str(item).strip()]
         if isinstance(raw, str):
             return [line.strip() for line in raw.splitlines() if line.strip()]
         value = str(raw).strip()
@@ -305,18 +305,11 @@ def setup(registry: ServiceRegistry) -> None:
             return "• (nessuna)"
         return _bullet_list(lines)
 
-    def _normalize_bullets(text: str) -> str:
-        lines: list[str] = []
-        for line in text.splitlines():
-            cleaned = line.strip()
-            if not cleaned:
-                continue
-            cleaned = cleaned.lstrip("-• ").strip()
-            if cleaned:
-                lines.append(cleaned)
-        if not lines:
-            return "• (nessuna)"
-        return _bullet_list(lines)
+    def _bullets_to_text(lines: list[str]) -> str:
+        cleaned = clean_bullets(lines)
+        if not cleaned:
+            return ""
+        return _bullet_list(cleaned)
 
     def _normalize_bullet_lines(raw: Any) -> list[str]:
         if raw is None:
@@ -1583,6 +1576,7 @@ def setup(registry: ServiceRegistry) -> None:
                 )
 
             reasons_text = _format_motivations(result.reasons)
+            reasons_text = _bullets_to_text(normalize_bullets(reasons_text))
             trend_text = ""
             if result.trend:
                 direction = result.trend.get("direction", "stable")
@@ -1857,8 +1851,12 @@ def setup(registry: ServiceRegistry) -> None:
                                     ai_debug_line = "🔎 AI: OFF (fallback=invalid_json)"
                                 else:
                                     logger.info("AI JSON parsed ok")
-                                    reasons_text = _normalize_bullets(ai_payload.get("motivation", reasons_text) or reasons_text)
-                                    trend_text = ai_payload.get("trend", trend_text) or trend_text
+                                    motivation_lines = normalize_bullets(ai_payload.get("motivation"))
+                                    if motivation_lines:
+                                        reasons_text = _bullets_to_text(motivation_lines)
+                                    trend_lines = normalize_bullets(ai_payload.get("trend"))
+                                    if trend_lines:
+                                        trend_text = " ".join(clean_bullets(trend_lines))
                                     if pair_mode and pair_mode_profile == "role3":
                                         ai_advice = ai_payload.get("pair_advice_bullets")
                                         ai_affinity = ai_payload.get("affinity_bullets")
@@ -1902,7 +1900,7 @@ def setup(registry: ServiceRegistry) -> None:
                                         "mode": mode_label,
                                         "window_minutes": window_minutes,
                                         "msg_count": msg_count_total,
-                                        "ai_allowed": False,
+                                        "ai_allowed": True,
                                         "reason": "exception",
                                         "ai_key_present": ai_key_present,
                                         "cache_hit": cache_hit,
