@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -30,6 +32,35 @@ NEGATIVE_KEYWORDS = [
     "tossico",
 ]
 
+DEFAULT_SCORE_WEIGHTS = {
+    "msg_rate": {"threshold": 5, "scale": 2, "cap": 30},
+    "caps": {"threshold": 0.3, "scale": 50, "cap": 20},
+    "negativity": {"per_hit": 5, "cap": 25},
+    "mentions": {"threshold": 1, "scale": 5, "cap": 20},
+    "reply_war": {"penalty": 15},
+    "top1_author_share": {"threshold": 0.4, "penalty": 8},
+    "top3_author_share": {"threshold": 0.75, "penalty": 10},
+    "burst_ratio": {"threshold": 2.5, "penalty": 8, "max_threshold": 4.0, "max_penalty": 12},
+    "contrast_per_msg": {"threshold": 0.25, "penalty": 6},
+    "challenge_per_msg": {"threshold": 0.08, "penalty": 6},
+}
+
+DEFAULT_WEIGHT_MULTIPLIERS = {
+    "msg_rate": 1.0,
+    "caps": 1.0,
+    "mentions": 1.0,
+    "negativity": 1.0,
+    "top3": 1.0,
+    "burst": 1.0,
+    "contrast": 1.0,
+    "challenge": 1.0,
+}
+
+DEFAULT_MITIGATION_FACTORS = {
+    "msg_rate_factor": 0.8,
+    "caps_factor": 0.7,
+}
+
 
 @dataclass(frozen=True)
 class BarcelloResult:
@@ -53,6 +84,15 @@ class BarcelloService:
             "last_compute_ts": None,
             "last_score_by_channel": {},
         }
+
+    def _mget(self, message: Any, key: str, default: Any = None) -> Any:
+        try:
+            return message[key]
+        except Exception:
+            try:
+                return message.get(key, default)
+            except Exception:
+                return default
 
     async def compute_channel(
         self,
@@ -91,7 +131,8 @@ class BarcelloService:
         )
 
         metrics = self._compute_metrics(messages, window_minutes)
-        reasons, score = self._score_from_metrics(metrics)
+        score_config = await self._get_score_config()
+        reasons, score = self._score_from_metrics(metrics, score_config)
         color = await self.get_color(score)
 
         trend = await self._compute_trend(guild_id, channel_id, window_minutes, window_end_ts, score)
@@ -157,6 +198,42 @@ class BarcelloService:
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON in setting barcello.color_ranges")
         return DEFAULT_COLOR_RANGES
+
+    async def _get_score_config(self) -> dict[str, Any]:
+        raw = await self._database.get_setting("barcello.weights_json")
+        base = {
+            "rules": DEFAULT_SCORE_WEIGHTS,
+            "weights": DEFAULT_WEIGHT_MULTIPLIERS,
+            "mitigation": DEFAULT_MITIGATION_FACTORS,
+        }
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    rules = dict(DEFAULT_SCORE_WEIGHTS)
+                    weights = dict(DEFAULT_WEIGHT_MULTIPLIERS)
+                    mitigation = dict(DEFAULT_MITIGATION_FACTORS)
+                    if "weights" in parsed or "mitigation" in parsed or "rules" in parsed:
+                        if isinstance(parsed.get("rules"), dict):
+                            for key, value in parsed["rules"].items():
+                                if isinstance(value, dict) and isinstance(rules.get(key), dict):
+                                    rules[key] = {**rules.get(key, {}), **value}
+                                else:
+                                    rules[key] = value
+                        if isinstance(parsed.get("weights"), dict):
+                            weights.update(parsed.get("weights", {}))
+                        if isinstance(parsed.get("mitigation"), dict):
+                            mitigation.update(parsed.get("mitigation", {}))
+                    else:
+                        for key, value in parsed.items():
+                            if isinstance(value, dict) and isinstance(rules.get(key), dict):
+                                rules[key] = {**rules.get(key, {}), **value}
+                            else:
+                                rules[key] = value
+                    return {"rules": rules, "weights": weights, "mitigation": mitigation}
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON in setting barcello.weights_json")
+        return base
 
     async def _compute_trend(
         self,
@@ -231,27 +308,57 @@ class BarcelloService:
         mention_count = 0
         authors: list[str] = []
         timestamps: list[datetime] = []
+        contrast_hits = 0
+        challenge_hits = 0
+        playful_hits = 0
+        passive_aggressive_hits = 0
+        sarcasm_marker_hits = 0
+
+        contrast_patterns = [
+            r"\bma\b",
+            r"\bper[òo]\b",
+            r"\bcomunque\b",
+            r"\bno\b",
+            r"in realt[àa]",
+        ]
+        contrast_regex = re.compile("|".join(contrast_patterns))
+        challenge_regex = re.compile(r"\b(perch[eéè]|perché)\b")
+        playful_emojis = ["😂", "🤣", "😅", "😆", "😊", "😜", "😝", "😹", "😸", "😺", "😻", "🤪", "😉"]
+        passive_aggressive_emojis = ["🙃", "😒", "😤", "😏", "😑", "😐", "🙄", "😬", "😶‍🌫️"]
+        sarcasm_markers = ["/s", "ironia", "sarcasmo", "scherzo", "scherzavo"]
 
         for message in messages:
-            content = (message["content"] or "").strip()
+            content = (self._mget(message, "content", "") or "").strip()
             total_letters += sum(1 for ch in content if ch.isalpha())
             uppercase_letters += sum(1 for ch in content if ch.isalpha() and ch.isupper())
             content_lower = content.lower()
             negativity_hits += sum(content_lower.count(keyword) for keyword in NEGATIVE_KEYWORDS)
+            contrast_hits += len(contrast_regex.findall(content_lower))
+            if "?" in content_lower:
+                if "??" in content_lower:
+                    challenge_hits += content_lower.count("??")
+                if "tu" in content_lower:
+                    challenge_hits += 1
+                if challenge_regex.search(content_lower):
+                    challenge_hits += 1
+            sarcasm_marker_hits += sum(content_lower.count(marker) for marker in sarcasm_markers)
+            playful_hits += sum(content.count(emoji) for emoji in playful_emojis)
+            passive_aggressive_hits += sum(content.count(emoji) for emoji in passive_aggressive_emojis)
 
-            mentions_raw = message.get("mentions_json")
+            mentions_raw = self._mget(message, "mentions_json")
             if mentions_raw:
                 try:
                     mentions = json.loads(mentions_raw)
                     if isinstance(mentions, list):
                         mention_count += len(mentions)
                 except json.JSONDecodeError:
+                    logger.debug("Invalid mentions JSON in message payload")
                     mention_count += content.count("<@")
             else:
                 mention_count += content.count("<@")
 
-            authors.append(message.get("author_id") or "unknown")
-            timestamps.append(self._parse_ts(message.get("ts")))
+            authors.append(self._mget(message, "author_id") or "unknown")
+            timestamps.append(self._parse_ts(self._mget(message, "ts")))
 
         duration_minutes = max(window_minutes, 1)
         msg_per_min = message_count / duration_minutes if duration_minutes else 0
@@ -259,6 +366,36 @@ class BarcelloService:
         mention_per_min = mention_count / duration_minutes if duration_minutes else 0
 
         reply_war = self._detect_reply_war(authors, timestamps)
+        author_counts: dict[str, int] = {}
+        for author in authors:
+            author_counts[author] = author_counts.get(author, 0) + 1
+        top_counts = sorted(author_counts.values(), reverse=True)
+        top1_author_share = (top_counts[0] / message_count) if message_count and top_counts else 0
+        top3_author_share = (sum(top_counts[:3]) / message_count) if message_count and top_counts else 0
+
+        max_msgs_per_minute = 0
+        std_msgs_per_minute = 0.0
+        burst_ratio = 0.0
+        if timestamps:
+            end_dt = max(timestamps)
+            start_dt = end_dt - timedelta(minutes=duration_minutes)
+            buckets = [0 for _ in range(duration_minutes)]
+            for ts in timestamps:
+                index = int((ts - start_dt).total_seconds() // 60)
+                if 0 <= index < duration_minutes:
+                    buckets[index] += 1
+            max_msgs_per_minute = max(buckets) if buckets else 0
+            mean_msgs = msg_per_min
+            if buckets:
+                std_msgs_per_minute = statistics.pstdev(buckets)
+            if mean_msgs > 0:
+                burst_ratio = max_msgs_per_minute / mean_msgs
+
+        contrast_per_msg = contrast_hits / message_count if message_count else 0
+        challenge_per_msg = challenge_hits / message_count if message_count else 0
+        playful_emoji_ratio = playful_hits / message_count if message_count else 0
+        passive_aggressive_emoji_ratio = passive_aggressive_hits / message_count if message_count else 0
+        sarcasm_marker_hits_per_msg = sarcasm_marker_hits / message_count if message_count else 0
 
         return {
             "message_count": message_count,
@@ -269,17 +406,52 @@ class BarcelloService:
             "mention_count": mention_count,
             "mention_per_min": round(mention_per_min, 2),
             "reply_war": reply_war,
+            "top1_author_share": round(top1_author_share, 3),
+            "top3_author_share": round(top3_author_share, 3),
+            "max_msgs_per_minute": max_msgs_per_minute,
+            "std_msgs_per_minute": round(std_msgs_per_minute, 2),
+            "burst_ratio": round(burst_ratio, 2),
+            "contrast_per_msg": round(contrast_per_msg, 3),
+            "challenge_per_msg": round(challenge_per_msg, 3),
+            "playful_emoji_ratio": round(playful_emoji_ratio, 3),
+            "passive_aggressive_emoji_ratio": round(passive_aggressive_emoji_ratio, 3),
+            "sarcasm_marker_hits": round(sarcasm_marker_hits_per_msg, 3),
+            "sarcasm_marker_hits_raw": sarcasm_marker_hits,
         }
 
-    def _score_from_metrics(self, metrics: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    def _score_from_metrics(self, metrics: dict[str, Any], score_config: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
         penalties: list[dict[str, Any]] = []
         msg_per_min = metrics["msg_per_min"]
         caps_ratio = metrics["caps_ratio"]
         negativity_hits = metrics["negativity_hits"]
         mention_per_min = metrics["mention_per_min"]
         reply_war = metrics["reply_war"]
+        top1_author_share = metrics.get("top1_author_share", 0)
+        top3_author_share = metrics.get("top3_author_share", 0)
+        burst_ratio = metrics.get("burst_ratio", 0)
+        contrast_per_msg = metrics.get("contrast_per_msg", 0)
+        challenge_per_msg = metrics.get("challenge_per_msg", 0)
+        playful_ratio = metrics.get("playful_emoji_ratio", 0)
+        passive_ratio = metrics.get("passive_aggressive_emoji_ratio", 0)
+        sarcasm_hits_raw = metrics.get("sarcasm_marker_hits_raw", 0)
 
-        msg_penalty = min(max(msg_per_min - 5, 0) * 2, 30)
+        rules = score_config["rules"]
+        weights = score_config["weights"]
+        mitigation_cfg = score_config["mitigation"]
+
+        msg_cfg = rules["msg_rate"]
+        caps_cfg = rules["caps"]
+        negativity_cfg = rules["negativity"]
+        mention_cfg = rules["mentions"]
+        reply_cfg = rules["reply_war"]
+        top1_cfg = rules["top1_author_share"]
+        top3_cfg = rules["top3_author_share"]
+        burst_cfg = rules["burst_ratio"]
+        contrast_cfg = rules["contrast_per_msg"]
+        challenge_cfg = rules["challenge_per_msg"]
+
+        msg_penalty = min(max(msg_per_min - msg_cfg["threshold"], 0) * msg_cfg["scale"], msg_cfg["cap"])
+        msg_penalty *= float(weights.get("msg_rate", 1.0))
         if msg_penalty:
             penalties.append(
                 {
@@ -290,7 +462,8 @@ class BarcelloService:
                 }
             )
 
-        caps_penalty = min(max(caps_ratio - 0.3, 0) * 50, 20)
+        caps_penalty = min(max(caps_ratio - caps_cfg["threshold"], 0) * caps_cfg["scale"], caps_cfg["cap"])
+        caps_penalty *= float(weights.get("caps", 1.0))
         if caps_penalty:
             penalties.append(
                 {
@@ -301,7 +474,8 @@ class BarcelloService:
                 }
             )
 
-        negativity_penalty = min(negativity_hits * 5, 25)
+        negativity_penalty = min(negativity_hits * negativity_cfg["per_hit"], negativity_cfg["cap"])
+        negativity_penalty *= float(weights.get("negativity", 1.0))
         if negativity_penalty:
             penalties.append(
                 {
@@ -312,7 +486,11 @@ class BarcelloService:
                 }
             )
 
-        mention_penalty = min(max(mention_per_min - 1, 0) * 5, 20)
+        mention_penalty = min(
+            max(mention_per_min - mention_cfg["threshold"], 0) * mention_cfg["scale"],
+            mention_cfg["cap"],
+        )
+        mention_penalty *= float(weights.get("mentions", 1.0))
         if mention_penalty:
             penalties.append(
                 {
@@ -323,7 +501,7 @@ class BarcelloService:
                 }
             )
 
-        reply_war_penalty = 15 if reply_war else 0
+        reply_war_penalty = reply_cfg["penalty"] if reply_war else 0
         if reply_war_penalty:
             penalties.append(
                 {
@@ -333,6 +511,78 @@ class BarcelloService:
                     "summary": "concentrato tra pochi utenti",
                 }
             )
+
+        if top1_author_share > top1_cfg["threshold"]:
+            top1_weight = float(weights.get("top3", 1.0))
+            penalties.append(
+                {
+                    "key": "top1_author_share",
+                    "label": "Concentrazione su un autore",
+                    "weight": int(round(top1_cfg["penalty"] * top1_weight)),
+                    "summary": f"{top1_author_share:.2f} top1",
+                }
+            )
+
+        if top3_author_share > top3_cfg["threshold"]:
+            top3_weight = float(weights.get("top3", 1.0))
+            penalties.append(
+                {
+                    "key": "top3_author_share",
+                    "label": "Concentrazione su pochi autori",
+                    "weight": int(round(top3_cfg["penalty"] * top3_weight)),
+                    "summary": f"{top3_author_share:.2f} top3",
+                }
+            )
+
+        if burst_ratio > burst_cfg["threshold"]:
+            burst_penalty = burst_cfg["penalty"]
+            if burst_ratio > burst_cfg.get("max_threshold", burst_cfg["threshold"]):
+                burst_penalty = burst_cfg.get("max_penalty", burst_penalty)
+            burst_penalty = int(round(burst_penalty * float(weights.get("burst", 1.0))))
+            penalties.append(
+                {
+                    "key": "burst_ratio",
+                    "label": "Burst di messaggi",
+                    "weight": burst_penalty,
+                    "summary": f"ratio {burst_ratio:.2f}",
+                }
+            )
+
+        if contrast_per_msg > contrast_cfg["threshold"]:
+            contrast_penalty = int(round(contrast_cfg["penalty"] * float(weights.get("contrast", 1.0))))
+            penalties.append(
+                {
+                    "key": "contrast_per_msg",
+                    "label": "Frizione lessicale",
+                    "weight": contrast_penalty,
+                    "summary": f"{contrast_per_msg:.2f} per msg",
+                }
+            )
+
+        if challenge_per_msg > challenge_cfg["threshold"]:
+            challenge_penalty = int(round(challenge_cfg["penalty"] * float(weights.get("challenge", 1.0))))
+            penalties.append(
+                {
+                    "key": "challenge_per_msg",
+                    "label": "Domande sfidanti",
+                    "weight": challenge_penalty,
+                    "summary": f"{challenge_per_msg:.2f} per msg",
+                }
+            )
+
+        is_playful = (
+            (playful_ratio >= 0.65 or sarcasm_hits_raw >= 3)
+            and passive_ratio <= 0.35
+            and negativity_hits == 0
+        )
+        if is_playful:
+            msg_penalty *= float(mitigation_cfg.get("msg_rate_factor", 0.8))
+            caps_penalty *= float(mitigation_cfg.get("caps_factor", 0.7))
+            for item in penalties:
+                if item["key"] == "density":
+                    item["weight"] = int(round(msg_penalty))
+                if item["key"] == "caps":
+                    item["weight"] = int(round(caps_penalty))
 
         penalties.sort(key=lambda item: item["weight"], reverse=True)
         total_penalty = sum(item["weight"] for item in penalties)
