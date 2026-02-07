@@ -42,7 +42,6 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group = app_commands.Group(
         name="barcellometro",
         description="Controlli Barcellometro",
-        dm_permission=False,
     )
     role_group = app_commands.Group(name="role", description="Gestione permessi e limiti")
     stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
