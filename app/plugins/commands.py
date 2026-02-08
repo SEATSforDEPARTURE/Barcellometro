@@ -291,6 +291,48 @@ def setup(registry: ServiceRegistry) -> None:
             field_name = name if idx == 0 else f"{name} (cont.)"
             embed.add_field(name=field_name, value=chunk, inline=False)
 
+    def _clone_embed_shell(source: discord.Embed, *, title: str | None = None) -> discord.Embed:
+        new_embed = discord.Embed(
+            title=title if title is not None else source.title,
+            description=source.description,
+            color=source.color,
+        )
+        if source.footer:
+            new_embed.set_footer(text=source.footer.text or "")
+        if source.author:
+            new_embed.set_author(name=source.author.name or "")
+        return new_embed
+
+    def _split_embed_fields(embed: discord.Embed, *, max_chars: int) -> list[discord.Embed]:
+        if _estimate_embed_size(embed) < max_chars and len(embed.fields) <= 25:
+            return [embed]
+        output: list[discord.Embed] = []
+        current = _clone_embed_shell(embed)
+        for field in embed.fields:
+            chunks = _split_field_chunks(field.value or "", 1024)
+            for idx, chunk in enumerate(chunks):
+                field_name = field.name if idx == 0 else f"{field.name} (cont.)"
+                candidate = _clone_embed_shell(current)
+                for existing in current.fields:
+                    candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
+                candidate.add_field(name=field_name, value=chunk, inline=False)
+                if _estimate_embed_size(candidate) >= max_chars or len(candidate.fields) > 25:
+                    if current.fields:
+                        output.append(current)
+                        current = _clone_embed_shell(embed)
+                    current.add_field(name=field_name, value=chunk, inline=False)
+                else:
+                    current = candidate
+        if current.fields:
+            output.append(current)
+        return output
+
+    def _ensure_embed_limits(embeds: list[discord.Embed], *, max_chars: int) -> list[discord.Embed]:
+        output: list[discord.Embed] = []
+        for embed in embeds:
+            output.extend(_split_embed_fields(embed, max_chars=max_chars))
+        return output
+
     def _parse_hex_color(raw: str | None) -> int | None:
         if not raw:
             return None
@@ -991,11 +1033,15 @@ def setup(registry: ServiceRegistry) -> None:
         )
         return f"{time_link} — {prefix} {name} — {impact.reason}"
 
+    MAX_EMBED_CHARS = 5800
+    RETRY_EMBED_CHARS = 5200
+
     def _estimate_embed_size(embed: discord.Embed) -> int:
         total = len(embed.title or "") + len(embed.description or "")
         for field in embed.fields:
             total += len(field.name or "") + len(field.value or "")
         total += len(embed.footer.text or "") if embed.footer else 0
+        total += len(embed.author.name or "") if embed.author else 0
         return total
 
     class _BarcelloFeedbackView(discord.ui.View):
@@ -2174,31 +2220,40 @@ def setup(registry: ServiceRegistry) -> None:
             embed_color = details_color
             embeds: list[discord.Embed] = []
 
-            def build_embed(title_suffix: str, items: list[tuple[str, str, int]]) -> discord.Embed:
+            def build_embed_shell(title_suffix: str) -> discord.Embed:
                 title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label}{title_suffix}"
                 embed = discord.Embed(title=title, color=embed_color)
-                for name, value, _group in items:
-                    _add_section(embed, name=name, value=_with_spacing(value))
                 embed.set_footer(text="Barcellometro")
                 return embed
 
             def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
-                target_max = 5800
-                chunks: list[list[tuple[str, str, int]]] = []
-                current: list[tuple[str, str, int]] = []
-                for section in section_list:
-                    candidate = current + [section]
-                    candidate_embed = build_embed("", candidate)
-                    if current and (
-                        _estimate_embed_size(candidate_embed) > target_max or len(candidate_embed.fields) > 24
-                    ):
-                        chunks.append(current)
-                        current = [section]
+                target_max = MAX_EMBED_CHARS
+                chunks: list[discord.Embed] = []
+                current = build_embed_shell("")
+
+                def add_field(field_name: str, field_value: str) -> None:
+                    nonlocal current
+                    candidate = _clone_embed_shell(current)
+                    for existing in current.fields:
+                        candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
+                    candidate.add_field(name=field_name, value=field_value, inline=False)
+                    if _estimate_embed_size(candidate) >= target_max or len(candidate.fields) > 25:
+                        if current.fields:
+                            chunks.append(current)
+                        current = build_embed_shell("")
+                        current.add_field(name=field_name, value=field_value, inline=False)
                     else:
                         current = candidate
-                if current:
+
+                for name, value, _group in section_list:
+                    chunks_list = _split_field_chunks(_with_spacing(value), 1024)
+                    for idx, chunk in enumerate(chunks_list):
+                        field_name = name if idx == 0 else f"{name} (cont.)"
+                        add_field(field_name, chunk)
+
+                if current.fields:
                     chunks.append(current)
-                return [build_embed("", chunk) for chunk in chunks]
+                return chunks
 
             if len(groups) <= 1:
                 embeds = chunk_sections(sections)
@@ -2207,6 +2262,10 @@ def setup(registry: ServiceRegistry) -> None:
                     group_sections = [item for item in sections if item[2] == group]
                     if group_sections:
                         embeds.extend(chunk_sections(group_sections))
+
+            embeds = _ensure_embed_limits(embeds, max_chars=MAX_EMBED_CHARS)
+            if any(_estimate_embed_size(embed) >= 6000 for embed in embeds):
+                embeds = _ensure_embed_limits(embeds, max_chars=5600)
 
             total = max(len(embeds), 1)
             for idx, embed in enumerate(embeds, start=1):
@@ -2233,16 +2292,46 @@ def setup(registry: ServiceRegistry) -> None:
             try:
                 await interaction.user.send(embeds=[status_embed, *embeds])
                 return True
-            except (discord.Forbidden, discord.HTTPException):
+            except discord.Forbidden:
                 return False
+            except discord.HTTPException as exc:
+                if getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc):
+                    logger.warning("riassunto: embed oversize in DM, retrying with smaller chunks")
+                    retry_embeds = _ensure_embed_limits(embeds, max_chars=RETRY_EMBED_CHARS)
+                    try:
+                        await interaction.user.send(embeds=[status_embed])
+                        if retry_embeds:
+                            await interaction.user.send(embeds=retry_embeds)
+                        return True
+                    except (discord.Forbidden, discord.HTTPException):
+                        return False
+                return False
+
+        async def send_followup_with_retry(
+            *,
+            content: str,
+            status: discord.Embed,
+            detail_embeds: list[discord.Embed],
+        ) -> None:
+            try:
+                await interaction.followup.send(content=content, embeds=[status, *detail_embeds], ephemeral=True)
+            except discord.HTTPException as exc:
+                if getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc):
+                    logger.warning("riassunto: embed oversize in followup, retrying with smaller chunks")
+                    retry_embeds = _ensure_embed_limits(detail_embeds, max_chars=RETRY_EMBED_CHARS)
+                    await interaction.followup.send(content=content, embeds=[status], ephemeral=True)
+                    if retry_embeds:
+                        await interaction.followup.send(embeds=retry_embeds, ephemeral=True)
+                else:
+                    raise
 
         if await try_send_dm():
             await interaction.followup.send("✅ Ti ho inviato il riassunto in DM.", ephemeral=True)
         else:
-            await interaction.followup.send(
+            await send_followup_with_retry(
                 content="⚠️ Non posso inviarti DM, quindi ti mostro il riassunto qui in modalità privata.",
-                embeds=[status_embed, *embeds],
-                ephemeral=True,
+                status=status_embed,
+                detail_embeds=embeds,
             )
 
     @riassunto_group.command(name="ultimi", description="Riassunto degli ultimi N minuti/ore/giorni/settimane")
