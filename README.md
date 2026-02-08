@@ -113,6 +113,31 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/privacy off [voice_channel]`
 - `/privacy status [voice_channel]`
 
+### Riassunto
+- `/riassunto ultimi <quantità> <minuti|ore|giorni|settimane>`
+- `/riassunto oggi`
+- `/riassunto ieri`
+- `/riassunto range da:<DD/MM/YYYY HH:MM> a:<DD/MM/YYYY HH:MM>`
+
+#### Configurazione `/riassunto`
+Il comando legge il JSON da `summary.config` (settings). Esempio di default:
+
+```json
+{
+  "tiers": {
+    "role1": { "label": "PLUS", "sections": ["themes", "moments", "notes"] },
+    "role2": { "label": "PRO", "sections": ["themes", "moments", "quotes", "notes"] },
+    "role3": { "label": "PRO MAX", "sections": ["themes", "moments", "quotes", "dynamics"] },
+    "mod": { "label": "MOD", "sections": ["themes", "moments", "quotes", "dynamics", "impact", "advice", "metrics", "ai"] }
+  },
+  "ai_enabled_tiers": ["role2", "role3", "mod"],
+  "fallback_local": true,
+  "evidence_mode": { "links_off": 2, "links_on": 4, "mod_explain_links": 3 },
+  "include_names_when_score": { "default": "green_only", "mod": "always" },
+  "max_messages": 600
+}
+```
+
 ### Policy ruoli/utenti
 - `/barcellometro role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
 - `/barcellometro role set-user user:<utente> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
