@@ -193,9 +193,9 @@ def setup(registry: ServiceRegistry) -> None:
     def _with_spacing(text: str) -> str:
         return text
 
-        def _split_field_chunks(value: str, max_len: int = 1024) -> list[str]:
-            if len(value) <= max_len:
-                return [value]
+    def _split_field_chunks(value: str, max_len: int = 1024) -> list[str]:
+        if len(value) <= max_len:
+            return [value]
 
         def split_plain(text: str, limit: int) -> list[str]:
             lines = text.splitlines() or [text]
@@ -233,13 +233,13 @@ def setup(registry: ServiceRegistry) -> None:
             return [f"{prefix}{chunk}{suffix}" for chunk in inner_chunks]
         return split_plain(value, max_len)
 
-        def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
-            chunks = _split_field_chunks(value, 1024)
-            available = 25 - len(embed.fields)
-            if available <= 0:
-                return
-            if len(chunks) > available:
-                chunks = chunks[:available]
+    def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
+        chunks = _split_field_chunks(value, 1024)
+        available = 25 - len(embed.fields)
+        if available <= 0:
+            return
+        if len(chunks) > available:
+            chunks = chunks[:available]
         for idx, chunk in enumerate(chunks):
             field_name = name if idx == 0 else f"{name} (cont.)"
             embed.add_field(name=field_name, value=chunk, inline=False)
