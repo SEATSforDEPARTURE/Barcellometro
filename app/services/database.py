@@ -401,6 +401,61 @@ class DatabaseService:
             (channel_id, start_ts, end_ts, limit),
         )
 
+    async def fetch_latest_message_in_range(
+        self,
+        *,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT ts, message_id
+            FROM messages
+            WHERE channel_id = ? AND ts >= ? AND ts <= ?
+            ORDER BY ts DESC
+            LIMIT 1
+            """,
+            (channel_id, start_ts, end_ts),
+        )
+
+    async def fetch_voice_sessions_in_range(
+        self,
+        *,
+        guild_id: str,
+        voice_channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT voice_session_id, started_ts, ended_ts, meta_json
+            FROM voice_sessions
+            WHERE guild_id = ? AND voice_channel_id = ?
+              AND started_ts <= ?
+              AND (ended_ts IS NULL OR ended_ts >= ?)
+            ORDER BY started_ts ASC
+            """,
+            (guild_id, voice_channel_id, end_ts, start_ts),
+        )
+
+    async def fetch_last_privacy_event_before(
+        self,
+        *,
+        channel_id: str,
+        ts: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT ts, event_type, actor_id, meta_json
+            FROM events
+            WHERE channel_id = ? AND ts <= ? AND event_type IN (?, ?)
+            ORDER BY ts DESC
+            LIMIT 1
+            """,
+            (channel_id, ts, "voice.privacy_on", "voice.privacy_off"),
+        )
+
     async def fetch_enabled_channels(self) -> list[aiosqlite.Row]:
         return await self.fetchall(
             "SELECT channel_id, guild_id, name, type FROM channels WHERE enabled = 1"
