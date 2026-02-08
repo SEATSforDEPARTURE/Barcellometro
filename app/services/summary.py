@@ -124,6 +124,28 @@ ITALIAN_STOPWORDS = {
     "alle",
 }
 
+NOISE_KEYWORDS = {
+    "ciao",
+    "buongiorno",
+    "buonasera",
+    "buonanotte",
+    "ok",
+    "okay",
+    "aha",
+    "ahah",
+    "ahahah",
+    "lol",
+    "pls",
+    "plz",
+    "thanks",
+    "grazie",
+    "thx",
+    "perfetto",
+    "bene",
+    "ottimo",
+    "bravo",
+}
+
 POSITIVE_KEYWORDS = {
     "grazie",
     "ottimo",
@@ -258,11 +280,12 @@ class SummaryService:
                         include_names=include_names,
                         tier=tier,
                         barcello_metrics=barcello_metrics,
+                        config=config,
                     )
                     if ai_payload:
                         self._sanitize_ai_payload(ai_payload, messages)
                     if ai_payload:
-                        summary = self._merge_ai_summary(local_summary, ai_payload, include_names)
+                        summary = self._merge_ai_summary(local_summary, ai_payload, include_names, config=config, tier=tier)
                         ai_status.update({"enabled": True, "reason": "ok"})
                     else:
                         ai_status.update({"enabled": False, "fallback": True, "reason": "invalid_json"})
@@ -274,6 +297,41 @@ class SummaryService:
         expires = now_epoch + self._cache_ttl
         self._cache[cache_key] = (expires, summary, max_message_ts)
         return summary
+
+    async def build_period_description(
+        self,
+        *,
+        tier: str,
+        period_prefix: str,
+        score: int,
+        color: str,
+        metrics: dict[str, Any],
+        trend: dict[str, Any] | None,
+        ai_allowed: bool,
+        config: dict[str, Any],
+    ) -> str | None:
+        ai_enabled_tiers = set(config.get("ai_enabled_tiers", []) or [])
+        use_ai = ai_allowed and tier in ai_enabled_tiers and self._ai_service is not None
+        if not use_ai:
+            return None
+        model = self._ai_service.get_model("summary") if self._ai_service else None
+        client = self._ai_service.client() if self._ai_service else None
+        if not model or not client:
+            return None
+        try:
+            text = await self._call_ai_period_description(
+                client=client,
+                model=model,
+                period_prefix=period_prefix,
+                score=score,
+                color=color,
+                metrics=metrics,
+                trend=trend,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Summary AI period description failed")
+            return None
+        return _trim_period_description(text, period_prefix)
 
     def _build_local_summary(
         self,
@@ -311,6 +369,7 @@ class SummaryService:
         include_names: bool,
         tier: str,
         barcello_metrics: dict[str, Any],
+        config: dict[str, Any],
     ) -> dict[str, Any] | None:
         snippet = [
             {
@@ -320,12 +379,19 @@ class SummaryService:
             }
             for msg in messages[:80]
         ]
+        moments_target = _tier_limit(config, tier, "moments", 5)
+        quotes_target = _tier_limit(config, tier, "quotes", 3)
+        dynamics_target = _tier_limit(config, tier, "dynamics", 2)
         system_prompt = (
             "Scrivi in italiano e restituisci SOLO JSON valido. "
             "Non inventare dettagli. "
             "Se include_names=false NON includere nomi persone, usa 'un utente'. "
             "TEMI devono essere solo keyword brevi (no nomi). "
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
+            "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
+            "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
+            "I momenti devono contenere message_ids con almeno un riferimento valido. "
+            "dynamics devono essere descrizioni astratte, senza copiare testo. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
             "moments: oggetti con 'ts','text','message_ids' (almeno un message_id di riferimento). "
             "quotes: oggetti con 'ts','text','message_ids'. "
@@ -337,6 +403,9 @@ class SummaryService:
             {
                 "tier": tier,
                 "include_names": include_names,
+                "moments_target_count": moments_target,
+                "quotes_target_count": quotes_target,
+                "dynamics_target_count": dynamics_target,
                 "metrics": barcello_metrics,
                 "messages": snippet,
             },
@@ -377,11 +446,62 @@ class SummaryService:
         text = _extract_ai_text(response)
         return _parse_json_safe(text)
 
+    async def _call_ai_period_description(
+        self,
+        *,
+        client: Any,
+        model: str,
+        period_prefix: str,
+        score: int,
+        color: str,
+        metrics: dict[str, Any],
+        trend: dict[str, Any] | None,
+    ) -> str:
+        emoji_map = {"verde": "🙂", "giallo": "😐", "rosso": "😟", "nero": "😨"}
+        color_label = (color or "nero").lower()
+        emoji = emoji_map.get(color_label, "😨")
+        compact_metrics = {
+            "msg_per_min": metrics.get("msg_per_min"),
+            "reply_war": metrics.get("reply_war"),
+            "top1_author_share": metrics.get("top1_author_share"),
+            "negativity_hits": metrics.get("negativity_hits"),
+            "mentions_per_msg": metrics.get("mentions_per_msg"),
+            "burst_ratio": metrics.get("burst_ratio"),
+        }
+        system_prompt = (
+            "Scrivi in italiano. Restituisci una sola frase (max 120 caratteri), senza elenco puntato. "
+            "Non copiare testo da messaggi. "
+            "Inizia con il prefisso fornito e continua con 'il barcello è stato ...'. "
+            "Inserisci una sola emoji coerente con il colore fornito."
+        )
+        user_payload = json.dumps(
+            {
+                "period_prefix": period_prefix,
+                "score": score,
+                "color": color_label,
+                "emoji": emoji,
+                "trend": trend,
+                "metrics": compact_metrics,
+            },
+            ensure_ascii=False,
+        )
+        response = await client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_payload},
+            ],
+        )
+        return _extract_ai_text(response)
+
     def _merge_ai_summary(
         self,
         local_summary: SummaryResult,
         ai_payload: dict[str, Any],
         include_names: bool,
+        *,
+        config: dict[str, Any],
+        tier: str,
     ) -> SummaryResult:
         def _normalize_items(raw: Any, *, is_quote: bool = False) -> list[SummaryItem | SummaryQuote]:
             if not isinstance(raw, list):
@@ -423,14 +543,34 @@ class SummaryService:
         advice = [str(item).strip() for item in (ai_payload.get("advice") or []) if str(item).strip()]
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
         invigorate = _normalize_impacts(ai_payload.get("invigorate_list"))
+        moment_limit = _tier_limit(config, tier, "moments", 5)
+        quote_limit = _tier_limit(config, tier, "quotes", 3)
+        dynamic_limit = _tier_limit(config, tier, "dynamics", 2)
         if not themes:
             themes = local_summary.themes
         if not moments:
             moments = local_summary.moments
+        if len(moments) < moment_limit:
+            existing_text = {item.text for item in moments}
+            for item in local_summary.moments:
+                if item.text in existing_text:
+                    continue
+                moments.append(item)
+                existing_text.add(item.text)
+                if len(moments) >= moment_limit:
+                    break
+            if len(moments) < moment_limit:
+                logger.warning("Summary AI returned %s moments; expected %s", len(moments), moment_limit)
+        if len(moments) > moment_limit:
+            moments = moments[:moment_limit]
         if not quotes:
             quotes = local_summary.quotes
+        if len(quotes) > quote_limit:
+            quotes = quotes[:quote_limit]
         if not dynamics:
             dynamics = local_summary.dynamics
+        if len(dynamics) > dynamic_limit:
+            dynamics = dynamics[:dynamic_limit]
         if not advice:
             advice = local_summary.advice
         if not degrade:
@@ -545,36 +685,33 @@ class SummaryService:
 
     def _extract_moments(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[SummaryItem]:
         limit = _tier_limit(config, tier, "moments", 5)
-        clusters: dict[str, list[dict[str, Any]]] = {}
-        for msg in messages:
-            content = (msg.get("content") or "").strip()
-            if not content:
-                continue
-            key = _cluster_key(content)
-            clusters.setdefault(key, []).append(msg)
-
+        segments = _segment_messages(messages)
+        if not segments:
+            return []
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for segment in segments:
+            score = (
+                segment["message_count"]
+                + segment["author_count"] * 2
+                + segment["mentions"]
+                + segment["burstiness"]
+            )
+            scored.append((score, segment))
+        top_segments = [segment for _, segment in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]]
+        top_segments.sort(key=lambda segment: segment["start_ts"] or "")
         items: list[SummaryItem] = []
-        for key, bucket in clusters.items():
-            if not bucket:
-                continue
-            bucket_sorted = sorted(bucket, key=lambda item: item.get("ts") or "")
-            representative = bucket_sorted[len(bucket_sorted) // 2]
-            message_ids = [str(item.get("message_id")) for item in bucket_sorted if item.get("message_id")]
-            primary_id = str(representative.get("message_id")) if representative.get("message_id") else None
-            if primary_id:
-                message_ids = [primary_id] + [mid for mid in message_ids if mid != primary_id]
-            event_text = _summarize_event_from_cluster(key, bucket_sorted)
+        for segment in top_segments:
+            text = _build_segment_summary(segment)
+            message_ids = segment["message_ids"]
             items.append(
                 SummaryItem(
-                    ts=representative.get("ts") or None,
-                    text=event_text,
-                    author_id=None,
+                    ts=segment["representative_ts"],
+                    text=text,
+                    author_id=segment.get("top_author_id"),
                     message_ids=message_ids[:3],
-                    cluster_key=key,
+                    cluster_key=segment.get("cluster_key"),
                 )
             )
-
-        items = sorted(items, key=lambda item: item.ts or "", reverse=False)[:limit]
         return items
 
     def _extract_quotes(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[SummaryQuote]:
@@ -608,6 +745,7 @@ class SummaryService:
         limit = _tier_limit(config, tier, "dynamics", 3)
         dynamics: list[SummaryItem] = []
         primary_id = _pick_message_id(messages)
+        top_author = _pick_top_author_id(messages)
         reply_war = bool(barcello_metrics.get("reply_war"))
         top_author_share = float(barcello_metrics.get("top1_author_share") or 0)
         negativity_hits = int(barcello_metrics.get("negativity_hits") or 0)
@@ -616,7 +754,7 @@ class SummaryService:
                 SummaryItem(
                     ts=_pick_ts(messages),
                     text="Botta e risposta fitto, ritmo acceso.",
-                    author_id=None,
+                    author_id=top_author,
                     message_ids=[primary_id] if primary_id else [],
                 )
             )
@@ -625,7 +763,7 @@ class SummaryService:
                 SummaryItem(
                     ts=_pick_ts(messages),
                     text="Conversazione concentrata su pochi utenti.",
-                    author_id=None,
+                    author_id=top_author,
                     message_ids=[primary_id] if primary_id else [],
                 )
             )
@@ -634,7 +772,7 @@ class SummaryService:
                 SummaryItem(
                     ts=_pick_ts(messages),
                     text="Toni pungenti o negativi compaiono nella finestra.",
-                    author_id=None,
+                    author_id=top_author,
                     message_ids=[primary_id] if primary_id else [],
                 )
             )
@@ -643,7 +781,7 @@ class SummaryService:
                 SummaryItem(
                     ts=_pick_ts(messages),
                     text="Dinamica complessivamente lineare.",
-                    author_id=None,
+                    author_id=top_author,
                     message_ids=[primary_id] if primary_id else [],
                 )
             )
@@ -716,31 +854,9 @@ def _extract_keywords(text: str) -> Iterable[str]:
     return [word for word in words if len(word) >= 3]
 
 
-def _cluster_key(text: str) -> str:
-    keywords = _extract_keywords(text)
-    if not keywords:
-        return "misc"
-    return "_".join(sorted(set(keywords))[:3])
-
-
 def _shorten(text: str, limit: int = 140) -> str:
     cleaned = " ".join(text.split())
     return cleaned
-
-
-def _summarize_event_from_cluster(cluster_key: str, bucket: list[dict[str, Any]]) -> str:
-    keywords = [part for part in cluster_key.split("_") if part]
-    topic = ", ".join(keywords[:3]) if keywords else "un tema"
-    tone = "si accende" if _cluster_has_negative(bucket) else "resta controllato"
-    return f"Si discute di {topic}; il tono {tone} e poi rientra."
-
-
-def _cluster_has_negative(bucket: list[dict[str, Any]]) -> bool:
-    for msg in bucket:
-        content = (msg.get("content") or "").lower()
-        if any(word in content for word in NEGATIVE_KEYWORDS):
-            return True
-    return False
 
 
 def _pick_ts(messages: list[dict[str, Any]]) -> Optional[str]:
@@ -757,6 +873,231 @@ def _pick_message_id(messages: list[dict[str, Any]]) -> Optional[str]:
     return None
 
 
+def _pick_top_author_id(messages: list[dict[str, Any]]) -> Optional[str]:
+    counts: dict[str, int] = {}
+    for msg in messages:
+        author_id = str(msg.get("author_id") or "")
+        if not author_id:
+            continue
+        counts[author_id] = counts.get(author_id, 0) + 1
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda item: item[1])[0]
+
+
+def _parse_ts(value: str | None) -> Optional[datetime]:
+    if not value:
+        return None
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _clean_text(text: str) -> str:
+    cleaned = re.sub(r"https?://\S+", " ", text)
+    cleaned = re.sub(r"<@!?\\d+>", " ", cleaned)
+    cleaned = re.sub(r"<#\\d+>", " ", cleaned)
+    cleaned = re.sub(r"<@&\\d+>", " ", cleaned)
+    cleaned = re.sub(r"`{1,3}.*?`{1,3}", " ", cleaned)
+    cleaned = re.sub(r"\\s+", " ", cleaned)
+    return cleaned.strip().lower()
+
+
+def _extract_segment_keywords(text: str) -> list[str]:
+    keywords = []
+    for word in _extract_keywords(text):
+        if word in ITALIAN_STOPWORDS:
+            continue
+        keywords.append(word)
+    return keywords
+
+
+def _rank_keywords(words: list[str]) -> list[str]:
+    counts: dict[str, float] = {}
+    for word in words:
+        weight = 0.2 if word in NOISE_KEYWORDS else 1.0
+        counts[word] = counts.get(word, 0.0) + weight
+    if not counts:
+        return []
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    keywords = [word for word, _ in ranked if word]
+    filtered = [word for word in keywords if word not in NOISE_KEYWORDS]
+    return filtered[:3] if filtered else keywords[:3]
+
+
+def _segment_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for msg in messages:
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        ts = _parse_ts(msg.get("ts"))
+        if ts is None:
+            continue
+        cleaned = _clean_text(content)
+        keywords = _extract_segment_keywords(cleaned)
+        enriched.append(
+            {
+                "message_id": msg.get("message_id"),
+                "author_id": msg.get("author_id"),
+                "ts": ts,
+                "content": content,
+                "cleaned": cleaned,
+                "keywords": keywords,
+            }
+        )
+    if not enriched:
+        return []
+    enriched.sort(key=lambda item: item["ts"])
+    segments: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for msg in enriched:
+        if current is None:
+            current = _start_segment(msg)
+            continue
+        gap_minutes = (msg["ts"] - current["last_ts"]).total_seconds() / 60
+        overlap = _keyword_overlap(current["keyword_set"], set(msg["keywords"]))
+        if gap_minutes > 7 or (gap_minutes > 3 and overlap < 0.2):
+            segments.append(_finalize_segment(current))
+            current = _start_segment(msg)
+        else:
+            _add_to_segment(current, msg)
+    if current is not None:
+        segments.append(_finalize_segment(current))
+    return segments
+
+
+def _start_segment(msg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "start_ts": msg["ts"],
+        "last_ts": msg["ts"],
+        "message_count": 1,
+        "authors": {str(msg.get("author_id") or ""): 1} if msg.get("author_id") else {},
+        "keyword_counts": {word: 1 for word in msg["keywords"]},
+        "keyword_set": set(msg["keywords"]),
+        "mentions": _count_mentions(msg["content"]),
+        "questions": msg["content"].count("?"),
+        "negativity_hits": _count_keywords(msg["cleaned"], NEGATIVE_KEYWORDS),
+        "positive_hits": _count_keywords(msg["cleaned"], POSITIVE_KEYWORDS),
+        "message_ids": [str(msg.get("message_id"))] if msg.get("message_id") else [],
+        "representative": msg,
+        "representative_score": _reference_score(msg),
+    }
+
+
+def _add_to_segment(segment: dict[str, Any], msg: dict[str, Any]) -> None:
+    segment["last_ts"] = msg["ts"]
+    segment["message_count"] += 1
+    author_id = str(msg.get("author_id") or "")
+    if author_id:
+        segment["authors"][author_id] = segment["authors"].get(author_id, 0) + 1
+    for word in msg["keywords"]:
+        segment["keyword_counts"][word] = segment["keyword_counts"].get(word, 0) + 1
+    segment["keyword_set"].update(msg["keywords"])
+    segment["mentions"] += _count_mentions(msg["content"])
+    segment["questions"] += msg["content"].count("?")
+    segment["negativity_hits"] += _count_keywords(msg["cleaned"], NEGATIVE_KEYWORDS)
+    segment["positive_hits"] += _count_keywords(msg["cleaned"], POSITIVE_KEYWORDS)
+    if msg.get("message_id"):
+        segment["message_ids"].append(str(msg.get("message_id")))
+    ref_score = _reference_score(msg)
+    if ref_score > segment["representative_score"]:
+        segment["representative"] = msg
+        segment["representative_score"] = ref_score
+
+
+def _finalize_segment(segment: dict[str, Any]) -> dict[str, Any]:
+    duration_minutes = max(1.0, (segment["last_ts"] - segment["start_ts"]).total_seconds() / 60)
+    burstiness = segment["message_count"] / duration_minutes
+    top_author_id = None
+    if segment["authors"]:
+        top_author_id = max(segment["authors"].items(), key=lambda item: item[1])[0]
+    top_keywords = _rank_keywords(_expand_keywords(segment["keyword_counts"]))
+    cluster_key = "_".join(top_keywords) if top_keywords else "misc"
+    return {
+        "start_ts": segment["start_ts"].isoformat(),
+        "end_ts": segment["last_ts"].isoformat(),
+        "message_count": segment["message_count"],
+        "author_count": len(segment["authors"]),
+        "mentions": segment["mentions"],
+        "burstiness": burstiness,
+        "keywords": top_keywords,
+        "questions": segment["questions"],
+        "negativity_hits": segment["negativity_hits"],
+        "positive_hits": segment["positive_hits"],
+        "message_ids": segment["message_ids"],
+        "representative_ts": segment["representative"]["ts"].isoformat(),
+        "top_author_id": top_author_id,
+        "cluster_key": cluster_key,
+    }
+
+
+def _expand_keywords(counts: dict[str, int]) -> list[str]:
+    output: list[str] = []
+    for word, count in counts.items():
+        output.extend([word] * count)
+    return output
+
+
+def _keyword_overlap(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    union = a | b
+    if not union:
+        return 0.0
+    return len(a & b) / len(union)
+
+
+def _reference_score(msg: dict[str, Any]) -> float:
+    return _count_mentions(msg["content"]) + len(msg["content"]) / 80
+
+
+def _count_mentions(text: str) -> int:
+    return len(re.findall(r"<@!?\\d+>", text))
+
+
+def _count_keywords(text: str, keywords: Iterable[str]) -> int:
+    return sum(text.count(word) for word in keywords)
+
+
+def _build_segment_summary(segment: dict[str, Any]) -> str:
+    keywords = segment.get("keywords") or []
+    topic = " / ".join(keywords) if keywords else "diversi temi"
+    action = _segment_action(segment)
+    templates = [
+        "Si parla di {topic}; {action}.",
+        "Focus su {topic}, con {action}.",
+        "Nel periodo spiccano {topic}: {action}.",
+        "Discussione su {topic} con {action}.",
+    ]
+    selector = sum(ord(char) for char in topic) % len(templates)
+    template = templates[selector]
+    return template.format(topic=topic, action=action)
+
+
+def _segment_action(segment: dict[str, Any]) -> str:
+    if segment.get("negativity_hits", 0) > 0:
+        return "emergono frizioni e richieste di chiarimento"
+    if segment.get("positive_hits", 0) > 0:
+        return "tono collaborativo con supporto reciproco"
+    if segment.get("questions", 0) > 1:
+        return "si chiariscono dubbi e si allineano le posizioni"
+    if _keywords_match(segment.get("keywords") or [], {"orari", "ora", "meeting", "call", "programma", "agenda"}):
+        return "ci si coordina su tempi e organizzazione"
+    return "scambio di aggiornamenti e punti di vista"
+
+
+def _keywords_match(keywords: list[str], targets: set[str]) -> bool:
+    return any(word in targets for word in keywords)
+
+
 def _extract_ai_text(response: Any) -> str:
     output_text = getattr(response, "output_text", "") or ""
     if output_text:
@@ -770,6 +1111,29 @@ def _extract_ai_text(response: Any) -> str:
             if text:
                 chunks.append(text)
     return "\n".join(chunks).strip()
+
+
+def _trim_period_description(text: str | None, period_prefix: str) -> str | None:
+    if not text:
+        return None
+    line = text.strip().splitlines()[0].strip()
+    if not line:
+        return None
+    lower_line = line.lower()
+    lower_prefix = period_prefix.lower()
+    if "il barcello" not in lower_line:
+        if lower_line.startswith(lower_prefix):
+            line = line[len(period_prefix) :].lstrip(" ,:-")
+        line = f"{period_prefix} il barcello è stato {line}"
+    elif not lower_line.startswith(lower_prefix):
+        line = f"{period_prefix} {line}"
+    line = line.strip()
+    if len(line) > 120:
+        trimmed = line[:120]
+        if " " in trimmed:
+            trimmed = trimmed.rsplit(" ", 1)[0]
+        line = trimmed.rstrip(".") + "."
+    return line
 
 
 def _parse_json_safe(text: str) -> dict[str, Any] | None:

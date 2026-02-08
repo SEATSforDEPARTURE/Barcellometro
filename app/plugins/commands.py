@@ -129,6 +129,52 @@ def setup(registry: ServiceRegistry) -> None:
             return "Delicata. 😬 Il clima richiede cautela."
         return "Critica. 🚨 Situazione tesa e facilmente infiammabile."
 
+    def _build_period_prefix(
+        period_label: str,
+        *,
+        start_dt: datetime,
+        end_dt: datetime,
+        start_ts: str,
+        end_ts: str,
+    ) -> str:
+        if period_label == "ieri":
+            return "Ieri"
+        if period_label == "oggi":
+            return "Oggi"
+        if period_label == "ultimi":
+            delta = end_dt - start_dt
+            if delta.days >= 7:
+                weeks = max(1, int(round(delta.days / 7)))
+                unit = "settimane" if weeks > 1 else "settimana"
+                return f"Negli ultimi {weeks} {unit}"
+            if delta.days >= 1:
+                days = max(1, delta.days)
+                unit = "giorni" if days > 1 else "giorno"
+                return f"Negli ultimi {days} {unit}"
+            hours = max(1, int(delta.total_seconds() // 3600))
+            if hours >= 1:
+                unit = "ore" if hours > 1 else "ora"
+                return f"Negli ultimi {hours} {unit}"
+            minutes = max(1, int(delta.total_seconds() // 60))
+            unit = "minuti" if minutes > 1 else "minuto"
+            return f"Negli ultimi {minutes} {unit}"
+        if period_label == "range":
+            start_label = _format_italian_ts(start_ts)
+            end_label = _format_italian_ts(end_ts)
+            return f"Tra {start_label} e {end_label}"
+        return "Nel periodo indicato"
+
+    def _local_period_description(prefix: str, color_label: str) -> str:
+        color = (color_label or "nero").lower()
+        mapping = {
+            "verde": ("sano", "🙂"),
+            "giallo": ("delicato", "😐"),
+            "rosso": ("teso", "😟"),
+            "nero": ("critico", "😨"),
+        }
+        adjective, emoji = mapping.get(color, ("critico", "😨"))
+        return f"{prefix} il barcello è stato {adjective} {emoji}."
+
     def _alert_message(score: int, color_label: str | None = None) -> str:
         if color_label:
             normalized = color_label.lower()
@@ -557,6 +603,7 @@ def setup(registry: ServiceRegistry) -> None:
         result: BarcelloResult,
         channel_label: str,
         period_label: str,
+        period_description: str,
     ) -> discord.Embed:
         color_label = (result.color or "nero").lower()
         color_map = {
@@ -576,14 +623,6 @@ def setup(registry: ServiceRegistry) -> None:
             range_prefix = "Oggi "
         window_label = f"🕒 **{range_prefix}{window_start} → {window_end}**"
         alert_line = f"**{emoji} ALLERTA {label.upper()}**"
-        health_note = _health_description(result.score)
-        period_intro = {
-            "oggi": "Oggi il barcello è",
-            "ieri": "Ieri il barcello è stato",
-            "ultimi": "In questo arco temporale il barcello è stato",
-            "range": "Nel periodo indicato il barcello è stato",
-        }.get(period_label, "Nel periodo indicato il barcello è stato")
-        period_text = f"{period_intro}: {health_note}"
         description_lines = [
             window_label,
             "",
@@ -598,7 +637,7 @@ def setup(registry: ServiceRegistry) -> None:
         _add_section(
             embed,
             name="🫀 PUNTI SALUTE",
-            value=_with_spacing(f"{bar} ({result.score}/100)\n{period_text}"),
+            value=_with_spacing(f"{bar} ({result.score}/100)\n{period_description}"),
         )
         return embed
 
@@ -902,16 +941,21 @@ def setup(registry: ServiceRegistry) -> None:
         dynamic: SummaryItem,
         guild_id: int,
         channel_id: int,
+        include_names: bool,
+        display_name: str | None,
         link_limit: int,
         primary_id: str | None,
     ) -> str:
+        text = dynamic.text
+        if include_names and display_name:
+            text = f"{display_name}: {text}"
         time_link = _format_summary_time_link(
             dynamic.ts,
             primary_id,
             guild_id=guild_id,
             channel_id=channel_id,
         )
-        return f"{time_link} — {dynamic.text}"
+        return f"{time_link} — {text}"
 
     def _format_summary_impact_line(
         *,
@@ -1751,17 +1795,21 @@ def setup(registry: ServiceRegistry) -> None:
             start_dt_utc.isoformat(),
             end_dt_utc.isoformat(),
         )
-        status_embed = _build_riassunto_status_embed(
-            result=barcello_result,
-            channel_label=channel_label,
-            period_label=period_label,
-        )
 
         include_names = False
         if profile == "mod":
             include_names = True
         else:
             include_names = (barcello_result.color or "").lower() == "verde"
+
+        period_prefix = _build_period_prefix(
+            period_label,
+            start_dt=start_dt_utc,
+            end_dt=end_dt_utc,
+            start_ts=barcello_result.window_start_ts,
+            end_ts=barcello_result.window_end_ts,
+        )
+        period_description = _local_period_description(period_prefix, barcello_result.color)
 
         max_messages = int(summary_config.get("max_messages", 600))
         messages_rows = await database.fetch_messages_in_range(
@@ -1872,6 +1920,27 @@ def setup(registry: ServiceRegistry) -> None:
             else:
                 ai_reason = "disabled_by_entitlements"
 
+        if profile in {"role2", "role3", "mod"}:
+            ai_description = await summary_service.build_period_description(
+                tier=profile,
+                period_prefix=period_prefix,
+                score=barcello_result.score,
+                color=barcello_result.color,
+                metrics=metrics,
+                trend=barcello_result.trend,
+                ai_allowed=ai_allowed,
+                config=summary_config,
+            )
+            if ai_description:
+                period_description = ai_description
+
+        status_embed = _build_riassunto_status_embed(
+            result=barcello_result,
+            channel_label=channel_label,
+            period_label=period_label,
+            period_description=period_description,
+        )
+
         summary = await summary_service.build_summary(
             guild_id=str(interaction.guild_id),
             channel_id=str(interaction.channel_id),
@@ -1977,6 +2046,8 @@ def setup(registry: ServiceRegistry) -> None:
                     dynamic=dynamic,
                     guild_id=interaction.guild_id,
                     channel_id=interaction.channel_id,
+                    include_names=include_names,
+                    display_name=name_map.get(dynamic.author_id or ""),
                     link_limit=1,
                     primary_id=dynamic_primary.get(id(dynamic)),
                 )
