@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
 import discord
@@ -565,7 +565,7 @@ def setup(registry: ServiceRegistry) -> None:
         *,
         result: BarcelloResult,
         channel_label: str,
-        channel_is_voice: bool,
+        period_label: str,
     ) -> discord.Embed:
         color_label = (result.color or "nero").lower()
         color_map = {
@@ -575,16 +575,23 @@ def setup(registry: ServiceRegistry) -> None:
             "nero": (0x2C2F33, "⚫", "nero"),
         }
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
-        channel_prefix = "🎙️" if channel_is_voice else "📌"
-        title = f"🫛 STATO BARCELLO “{channel_prefix} / {channel_label}”"
+        title = f"🫛 STATO BARCELLO “{channel_label}”"
         window_start = _format_italian_ts(result.window_start_ts)
         window_end = _format_italian_ts(result.window_end_ts)
-        window_label = f"🕒 {window_start} → {window_end}"
+        window_label = f"**{window_start} → {window_end}**"
+        alert_line = f"**{emoji} ALLERTA {label.upper()}**"
+        health_note = _health_description(result.score)
+        period_intro = {
+            "oggi": "Oggi il barcello è",
+            "ieri": "Ieri il barcello è stato",
+            "ultimi": "In questo arco temporale il barcello è stato",
+            "range": "Nel periodo indicato il barcello è stato",
+        }.get(period_label, "Nel periodo indicato il barcello è stato")
+        period_text = f"{period_intro}: {health_note}"
         description_lines = [
             window_label,
             "",
-            f"{emoji} ALLERTA {label.upper()}",
-            _alert_message(result.score, label),
+            alert_line,
         ]
         embed = discord.Embed(
             title=title,
@@ -595,7 +602,7 @@ def setup(registry: ServiceRegistry) -> None:
         _add_section(
             embed,
             name="🫀 PUNTI SALUTE",
-            value=_with_spacing(f"{bar} ({result.score}/100)\n{_health_description(result.score)}"),
+            value=_with_spacing(f"{bar} ({result.score}/100)\n{period_text}"),
         )
         return embed
 
@@ -839,15 +846,19 @@ def setup(registry: ServiceRegistry) -> None:
         embed.set_footer(text="Barcellometro")
         return embed
 
-    def _format_summary_links(message_ids: list[str], guild_id: int, channel_id: int, limit: int) -> str:
-        links = [
-            f"[msg]({_jump_link(guild_id, channel_id, message_id)})"
-            for message_id in message_ids
-            if message_id
-        ][:limit]
-        if not links:
-            return ""
-        return " " + " ".join(links)
+    def _format_summary_time_link(
+        ts: str | None,
+        message_id: str | None,
+        *,
+        guild_id: int,
+        channel_id: int,
+        placeholder: str = "--:--",
+    ) -> str:
+        time_label = _format_italian_time(ts) or placeholder
+        if message_id:
+            jump = _jump_link(guild_id, channel_id, message_id)
+            return f"**[{time_label}]({jump})**"
+        return f"**{time_label}**"
 
     def _format_summary_moment_line(
         *,
@@ -858,12 +869,17 @@ def setup(registry: ServiceRegistry) -> None:
         display_name: str | None,
         link_limit: int,
     ) -> str:
-        timestamp = _format_italian_time(moment.ts)
         text = moment.text
         if include_names and display_name:
             text = f"{display_name}: {text}"
-        prefix = f"{timestamp} — " if timestamp else ""
-        return f"{prefix}{text}{_format_summary_links(moment.message_ids, guild_id, channel_id, link_limit)}"
+        primary_id = moment.message_ids[0] if moment.message_ids else None
+        time_link = _format_summary_time_link(
+            moment.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {text}"
 
     def _format_summary_quote_line(
         *,
@@ -874,11 +890,16 @@ def setup(registry: ServiceRegistry) -> None:
         display_name: str | None,
         link_limit: int,
     ) -> str:
-        timestamp = _format_italian_time(quote.ts)
         speaker = display_name if include_names and display_name else "un utente"
         text = f"“{quote.text}” — {speaker}"
-        prefix = f"{timestamp} — " if timestamp else ""
-        return f"{prefix}{text}{_format_summary_links(quote.message_ids, guild_id, channel_id, link_limit)}"
+        primary_id = quote.message_ids[0] if quote.message_ids else None
+        time_link = _format_summary_time_link(
+            quote.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {text}"
 
     def _format_summary_dynamics_line(
         *,
@@ -887,9 +908,14 @@ def setup(registry: ServiceRegistry) -> None:
         channel_id: int,
         link_limit: int,
     ) -> str:
-        timestamp = _format_italian_time(dynamic.ts)
-        prefix = f"{timestamp} — " if timestamp else ""
-        return f"{prefix}{dynamic.text}{_format_summary_links(dynamic.message_ids, guild_id, channel_id, link_limit)}"
+        primary_id = dynamic.message_ids[0] if dynamic.message_ids else None
+        time_link = _format_summary_time_link(
+            dynamic.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {dynamic.text}"
 
     def _format_summary_impact_line(
         *,
@@ -900,11 +926,14 @@ def setup(registry: ServiceRegistry) -> None:
         link_limit: int,
         prefix: str,
     ) -> str:
-        timestamp = _format_italian_time(impact.ts)
         name = display_name or "utente"
-        link = _format_summary_links([impact.message_id or ""], guild_id, channel_id, link_limit)
-        time_suffix = f" ({timestamp})" if timestamp else ""
-        return f"{prefix} {name} — {impact.reason}{time_suffix}{link}"
+        time_link = _format_summary_time_link(
+            impact.ts,
+            impact.message_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {prefix} {name} — {impact.reason}"
 
     def _estimate_embed_size(embed: discord.Embed) -> int:
         total = len(embed.title or "") + len(embed.description or "")
@@ -913,90 +942,6 @@ def setup(registry: ServiceRegistry) -> None:
         total += len(embed.footer.text or "") if embed.footer else 0
         return total
 
-    class _RiassuntoView(discord.ui.View):
-        def __init__(
-            self,
-            *,
-            owner_id: int,
-            build_embeds: Callable[[bool], list[discord.Embed]],
-            page: int,
-            evidence_mode: bool,
-            report_id: str,
-            tier: str,
-            voice_context: bool,
-        ) -> None:
-            super().__init__(timeout=600)
-            self._owner_id = owner_id
-            self._build_embeds = build_embeds
-            self._page = page
-            self._evidence_mode = evidence_mode
-            self._report_id = report_id
-            self._tier = tier
-            self._voice_context = voice_context
-            self._prev_button = discord.ui.Button(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
-            self._next_button = discord.ui.Button(label="Next ➡️", style=discord.ButtonStyle.secondary)
-            self._evidence_button = discord.ui.Button(label=self._evidence_label(), style=discord.ButtonStyle.primary)
-            self._prev_button.callback = self._on_prev  # type: ignore[assignment]
-            self._next_button.callback = self._on_next  # type: ignore[assignment]
-            self._evidence_button.callback = self._on_evidence  # type: ignore[assignment]
-            self.add_item(self._prev_button)
-            self.add_item(self._evidence_button)
-            self.add_item(self._next_button)
-            self._refresh_buttons()
-
-        def _evidence_label(self) -> str:
-            return f"Evidence: {'ON' if self._evidence_mode else 'OFF'}"
-
-        def _refresh_buttons(self) -> None:
-            embeds = self._build_embeds(self._evidence_mode)
-            total_pages = len(embeds)
-            self._prev_button.disabled = self._page <= 0
-            self._next_button.disabled = self._page >= total_pages - 1
-            voice_flag = "voice" if self._voice_context else "text"
-            self._prev_button.custom_id = (
-                f"riassunto:prev:{self._report_id}:{self._page}:{int(self._evidence_mode)}:{self._tier}:{voice_flag}"
-            )
-            self._next_button.custom_id = (
-                f"riassunto:next:{self._report_id}:{self._page}:{int(self._evidence_mode)}:{self._tier}:{voice_flag}"
-            )
-            self._evidence_button.custom_id = (
-                f"riassunto:evidence:{self._report_id}:{self._page}:{int(self._evidence_mode)}:{self._tier}:{voice_flag}"
-            )
-            self._evidence_button.label = self._evidence_label()
-
-        async def _ensure_owner(self, interaction: discord.Interaction) -> bool:
-            if interaction.user.id != self._owner_id:
-                await interaction.response.send_message(
-                    "Solo chi ha richiesto il riassunto può usare i bottoni.",
-                    ephemeral=True,
-                )
-                return False
-            return True
-
-        async def _on_prev(self, interaction: discord.Interaction) -> None:
-            if not await self._ensure_owner(interaction):
-                return
-            self._page = max(0, self._page - 1)
-            self._refresh_buttons()
-            embeds = self._build_embeds(self._evidence_mode)
-            await interaction.response.edit_message(embeds=[embeds[self._page]], view=self)
-
-        async def _on_next(self, interaction: discord.Interaction) -> None:
-            if not await self._ensure_owner(interaction):
-                return
-            embeds = self._build_embeds(self._evidence_mode)
-            self._page = min(len(embeds) - 1, self._page + 1)
-            self._refresh_buttons()
-            await interaction.response.edit_message(embeds=[embeds[self._page]], view=self)
-
-        async def _on_evidence(self, interaction: discord.Interaction) -> None:
-            if not await self._ensure_owner(interaction):
-                return
-            self._evidence_mode = not self._evidence_mode
-            self._page = 0
-            self._refresh_buttons()
-            embeds = self._build_embeds(self._evidence_mode)
-            await interaction.response.edit_message(embeds=[embeds[self._page]], view=self)
     class _BarcelloFeedbackView(discord.ui.View):
         def __init__(
             self,
@@ -1769,6 +1714,7 @@ def setup(registry: ServiceRegistry) -> None:
         *,
         start_dt: datetime,
         end_dt: datetime,
+        period_label: str,
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.")
@@ -1811,7 +1757,7 @@ def setup(registry: ServiceRegistry) -> None:
         status_embed = _build_riassunto_status_embed(
             result=barcello_result,
             channel_label=channel_label,
-            channel_is_voice=channel_is_voice,
+            period_label=period_label,
         )
 
         include_names = False
@@ -1961,10 +1907,7 @@ def setup(registry: ServiceRegistry) -> None:
 
         details_color = await _get_details_embed_color(profile)
 
-        def build_embeds(evidence_mode: bool) -> list[discord.Embed]:
-            evidence_cfg = summary_config.get("evidence_mode", {})
-            link_limit = int(evidence_cfg.get("links_on" if evidence_mode else "links_off", 2))
-            explain_limit = int(evidence_cfg.get("mod_explain_links", 3))
+        def build_embeds() -> list[discord.Embed]:
             sections_map: dict[str, list[tuple[str, str, int]]] = {}
 
             themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
@@ -1977,7 +1920,7 @@ def setup(registry: ServiceRegistry) -> None:
                     channel_id=interaction.channel_id,
                     include_names=include_names,
                     display_name=name_map.get(moment.author_id or ""),
-                    link_limit=link_limit,
+                    link_limit=1,
                 )
                 for moment in summary.moments
             ]
@@ -1994,7 +1937,7 @@ def setup(registry: ServiceRegistry) -> None:
                     channel_id=interaction.channel_id,
                     include_names=include_names,
                     display_name=name_map.get(quote.author_id or ""),
-                    link_limit=link_limit,
+                    link_limit=1,
                 )
                 for quote in summary.quotes
             ]
@@ -2006,7 +1949,7 @@ def setup(registry: ServiceRegistry) -> None:
                     dynamic=dynamic,
                     guild_id=interaction.guild_id,
                     channel_id=interaction.channel_id,
-                    link_limit=link_limit,
+                    link_limit=1,
                 )
                 for dynamic in summary.dynamics
             ]
@@ -2021,18 +1964,9 @@ def setup(registry: ServiceRegistry) -> None:
                         guild_id=interaction.guild_id,
                         channel_id=interaction.channel_id,
                         display_name=name_map.get(impact.author_id or ""),
-                        link_limit=link_limit,
+                        link_limit=1,
                         prefix="🔥",
                     )
-                    if evidence_mode:
-                        why_links = _format_summary_links(
-                            [impact.message_id or ""],
-                            interaction.guild_id,
-                            interaction.channel_id,
-                            explain_limit,
-                        )
-                        if why_links:
-                            line = f"{line}\nPerché:{why_links}"
                     degrade_lines.append(line)
                 invigorate_lines = []
                 for impact in summary.invigorate:
@@ -2041,18 +1975,9 @@ def setup(registry: ServiceRegistry) -> None:
                         guild_id=interaction.guild_id,
                         channel_id=interaction.channel_id,
                         display_name=name_map.get(impact.author_id or ""),
-                        link_limit=link_limit,
+                        link_limit=1,
                         prefix="🌿",
                     )
-                    if evidence_mode:
-                        why_links = _format_summary_links(
-                            [impact.message_id or ""],
-                            interaction.guild_id,
-                            interaction.channel_id,
-                            explain_limit,
-                        )
-                        if why_links:
-                            line = f"{line}\nPerché:{why_links}"
                     invigorate_lines.append(line)
                 impact_sections: list[tuple[str, str, int]] = []
                 if degrade_lines:
@@ -2121,45 +2046,38 @@ def setup(registry: ServiceRegistry) -> None:
                 embed.set_footer(text="Barcellometro")
                 return embed
 
-            def build_chunked(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
-                for size in (4, 2, 1):
-                    chunked = [section_list[i : i + size] for i in range(0, len(section_list), size)]
-                    candidate = [build_embed("", chunk) for chunk in chunked]
-                    if all(
-                        _estimate_embed_size(embed) <= 5500 and len(embed.fields) <= 24
-                        for embed in candidate
+            def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
+                chunks: list[list[tuple[str, str, int]]] = []
+                current: list[tuple[str, str, int]] = []
+                for section in section_list:
+                    candidate = current + [section]
+                    candidate_embed = build_embed("", candidate)
+                    if current and (
+                        _estimate_embed_size(candidate_embed) > 5500 or len(candidate_embed.fields) > 24
                     ):
-                        return candidate
-                return [build_embed("", section_list)]
+                        chunks.append(current)
+                        current = [section]
+                    else:
+                        current = candidate
+                if current:
+                    chunks.append(current)
+                return [build_embed("", chunk) for chunk in chunks]
 
             if len(groups) <= 1:
-                embed = build_embed("", sections)
-                if _estimate_embed_size(embed) <= 5500 and len(embed.fields) <= 24:
-                    return [embed]
-                embeds = build_chunked(sections)
+                embeds = chunk_sections(sections)
             else:
                 for group in groups:
                     group_sections = [item for item in sections if item[2] == group]
                     if group_sections:
-                        embeds.extend(build_chunked(group_sections))
+                        embeds.extend(chunk_sections(group_sections))
 
-            if len(embeds) > 1:
-                total = len(embeds)
-                for idx, embed in enumerate(embeds, start=1):
-                    embed.title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label} (Pag {idx}/{total})"
+            total = max(len(embeds), 1)
+            for idx, embed in enumerate(embeds, start=1):
+                embed.title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label} (Pag {idx}/{total})"
             return embeds
 
-        embeds = build_embeds(False)
+        embeds = build_embeds()
         report_id = str(uuid4())
-        view = _RiassuntoView(
-            owner_id=interaction.user.id,
-            build_embeds=build_embeds,
-            page=0,
-            evidence_mode=False,
-            report_id=report_id,
-            tier=profile,
-            voice_context=channel_is_voice,
-        )
 
         logger.info(
             "riassunto: report id=%s user=%s channel=%s range=%s-%s tier=%s ai=%s cache=%s voice=%s",
@@ -2176,7 +2094,7 @@ def setup(registry: ServiceRegistry) -> None:
 
         async def try_send_dm() -> bool:
             try:
-                await interaction.user.send(embeds=[status_embed, embeds[0]], view=view)
+                await interaction.user.send(embeds=[status_embed, *embeds])
                 return True
             except (discord.Forbidden, discord.HTTPException):
                 return False
@@ -2215,20 +2133,20 @@ def setup(registry: ServiceRegistry) -> None:
             "settimane": timedelta(weeks=quantita),
         }
         start_dt = now - delta_map.get(unita.value, timedelta(minutes=quantita))
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now)
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now, period_label="ultimi")
 
     @riassunto_group.command(name="oggi", description="Riassunto della giornata di oggi")
     async def riassunto_oggi(interaction: discord.Interaction) -> None:
         now = datetime.now(ROME_TZ)
         start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now)
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now, period_label="oggi")
 
     @riassunto_group.command(name="ieri", description="Riassunto della giornata di ieri")
     async def riassunto_ieri(interaction: discord.Interaction) -> None:
         now = datetime.now(ROME_TZ)
         end_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
         start_dt = end_dt - timedelta(days=1)
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt)
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="ieri")
 
     @riassunto_group.command(name="range", description="Riassunto di un range custom (data+ora italiane)")
     @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)")
@@ -2238,7 +2156,7 @@ def setup(registry: ServiceRegistry) -> None:
         if not start_dt or not end_dt:
             await send_ephemeral(interaction, "Formato data/ora non valido. Usa DD/MM/YYYY HH:MM.")
             return
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt)
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="range")
 
     # Settings JSON for /barcello (entitlements.policies):
     # {

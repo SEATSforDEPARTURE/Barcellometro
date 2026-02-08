@@ -325,8 +325,9 @@ class SummaryService:
             "Non inventare dettagli. "
             "Se include_names=false NON includere nomi persone, usa 'un utente'. "
             "TEMI devono essere solo keyword brevi (no nomi). "
+            "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
-            "moments: oggetti con 'ts','text','message_ids'. "
+            "moments: oggetti con 'ts','text','message_ids' (almeno un message_id di riferimento). "
             "quotes: oggetti con 'ts','text','message_ids'. "
             "dynamics: oggetti con 'ts','text','message_ids'. "
             "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
@@ -488,6 +489,10 @@ class SummaryService:
                 if not isinstance(item, dict):
                     continue
                 message_ids = [str(mid) for mid in (item.get("message_ids") or []) if str(mid)]
+                if not message_ids and item.get("primary_ref"):
+                    message_ids = [str(item.get("primary_ref"))]
+                if not message_ids and item.get("refs"):
+                    message_ids = [str(mid) for mid in (item.get("refs") or []) if str(mid)]
                 ts = normalize_ts(item.get("ts"), message_ids)
                 text = truncate(item.get("text"), text_limit)
                 if not text:
@@ -546,27 +551,33 @@ class SummaryService:
 
     def _extract_moments(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[SummaryItem]:
         limit = _tier_limit(config, tier, "moments", 5)
-        clusters: dict[str, int] = {}
-        items: list[SummaryItem] = []
-        for msg in sorted(messages, key=lambda item: len(item.get("content") or ""), reverse=True):
+        clusters: dict[str, list[dict[str, Any]]] = {}
+        for msg in messages:
             content = (msg.get("content") or "").strip()
             if not content:
                 continue
-            cluster_key = _cluster_key(content)
-            if clusters.get(cluster_key, 0) >= 2:
+            key = _cluster_key(content)
+            clusters.setdefault(key, []).append(msg)
+
+        items: list[SummaryItem] = []
+        for key, bucket in clusters.items():
+            if not bucket:
                 continue
-            clusters[cluster_key] = clusters.get(cluster_key, 0) + 1
+            bucket_sorted = sorted(bucket, key=lambda item: item.get("ts") or "")
+            representative = bucket_sorted[len(bucket_sorted) // 2]
+            message_ids = [str(item.get("message_id")) for item in bucket_sorted if item.get("message_id")]
+            event_text = _summarize_event_from_cluster(key, bucket_sorted)
             items.append(
                 SummaryItem(
-                    ts=msg.get("ts") or None,
-                    text=_shorten(content),
-                    author_id=msg.get("author_id"),
-                    message_ids=[str(msg.get("message_id"))] if msg.get("message_id") else [],
-                    cluster_key=cluster_key,
+                    ts=representative.get("ts") or None,
+                    text=event_text,
+                    author_id=None,
+                    message_ids=message_ids[:3],
+                    cluster_key=key,
                 )
             )
-            if len(items) >= limit:
-                break
+
+        items = sorted(items, key=lambda item: item.ts or "", reverse=False)[:limit]
         return items
 
     def _extract_quotes(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[SummaryQuote]:
@@ -697,6 +708,21 @@ def _shorten(text: str, limit: int = 140) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 3] + "..."
+
+
+def _summarize_event_from_cluster(cluster_key: str, bucket: list[dict[str, Any]]) -> str:
+    keywords = [part for part in cluster_key.split("_") if part]
+    topic = ", ".join(keywords[:3]) if keywords else "un tema"
+    tone = "si accende" if _cluster_has_negative(bucket) else "resta controllato"
+    return f"Si discute di {topic}; il tono {tone} e poi rientra."
+
+
+def _cluster_has_negative(bucket: list[dict[str, Any]]) -> bool:
+    for msg in bucket:
+        content = (msg.get("content") or "").lower()
+        if any(word in content for word in NEGATIVE_KEYWORDS):
+            return True
+    return False
 
 
 def _pick_ts(messages: list[dict[str, Any]]) -> Optional[str]:
