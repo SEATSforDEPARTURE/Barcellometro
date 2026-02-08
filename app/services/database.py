@@ -481,7 +481,7 @@ class DatabaseService:
     ) -> Optional[aiosqlite.Row]:
         return await self.fetchone(
             """
-            SELECT message_id, author_id, content
+            SELECT message_id, author_id, content, ts
             FROM messages
             WHERE channel_id = ? AND message_id = ?
             LIMIT 1

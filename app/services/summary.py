@@ -412,10 +412,11 @@ class SummaryService:
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
             "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
             "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
+            "Momenti: stile narrativo e descrittivo, frasi complete; niente template tipo 'Si discute di'. "
             "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
             "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
             "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
-            "dynamics devono essere descrizioni astratte, senza copiare testo. "
+            "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
             "moments: oggetti con 'ts','text','primary_ref','refs','actor'. "
             "quotes: oggetti con 'ts','text','primary_ref','refs','actor'. "
@@ -610,6 +611,7 @@ class SummaryService:
             )
         if len(moments) > moment_limit:
             moments = moments[:moment_limit]
+        moments = _sort_moments_chronologically(moments)
         if not quotes:
             quotes = _sanitize_summary_items(local_summary.quotes)
         if len(quotes) < quote_limit:
@@ -793,6 +795,13 @@ class SummaryService:
                 ts = normalize_ts(item.get("ts"), candidates, fallback_ts)
                 if primary_ref and not ts:
                     ts = message_ts_map.get(primary_ref)
+                if primary_ref and not ts:
+                    record = await self._database.fetch_message_by_id(
+                        channel_id=channel_id,
+                        message_id=primary_ref,
+                    )
+                    if record and record.get("ts"):
+                        ts = _normalize_ts_value(record["ts"])
                 text = str(item.get("text") or "").strip()
                 if not text:
                     continue
@@ -1203,6 +1212,14 @@ def _dedupe_summary_items(
     return output
 
 
+def _sort_moments_chronologically(items: list[SummaryItem]) -> list[SummaryItem]:
+    def sort_key(item: SummaryItem) -> tuple[bool, str]:
+        ts = item.ts or ""
+        return (not bool(ts), ts)
+
+    return sorted(items, key=sort_key)
+
+
 def _extract_segment_keywords(text: str) -> list[str]:
     keywords = []
     for word in _extract_keywords(text):
@@ -1365,9 +1382,9 @@ def _build_segment_summary(segment: dict[str, Any]) -> str:
     topic = " / ".join(keywords) if keywords else "diversi temi"
     action = _segment_action(segment)
     templates = [
-        "Si parla di {topic}; {action}.",
-        "Focus su {topic}, con {action}.",
-        "Discussione su {topic} con {action}.",
+        "La conversazione tocca {topic}, mentre {action}.",
+        "Il dialogo si muove su {topic}, con {action}.",
+        "Si apre un confronto su {topic}: {action}.",
     ]
     selector = sum(ord(char) for char in topic) % len(templates)
     template = templates[selector]
