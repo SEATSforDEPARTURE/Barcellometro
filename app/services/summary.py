@@ -167,6 +167,8 @@ class SummaryItem:
     author_id: Optional[str]
     message_ids: list[str] = field(default_factory=list)
     cluster_key: Optional[str] = None
+    actor_display: Optional[str] = None
+    actors_display: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -175,6 +177,7 @@ class SummaryQuote:
     text: str
     author_id: Optional[str]
     message_ids: list[str] = field(default_factory=list)
+    actor_display: Optional[str] = None
 
 
 @dataclass
@@ -283,7 +286,14 @@ class SummaryService:
                         config=config,
                     )
                     if ai_payload:
-                        self._sanitize_ai_payload(ai_payload, messages)
+                        await self._sanitize_ai_payload(
+                            ai_payload,
+                            messages,
+                            include_names=include_names,
+                            channel_id=channel_id,
+                            start_ts=start_ts,
+                            end_ts=end_ts,
+                        )
                     if ai_payload:
                         summary = self._merge_ai_summary(local_summary, ai_payload, include_names, config=config, tier=tier)
                         ai_status.update({"enabled": True, "reason": "ok"})
@@ -348,6 +358,15 @@ class SummaryService:
         dynamics = self._extract_dynamics(barcello_metrics, messages, config, tier)
         degrade, invigorate = self._extract_impact(messages, config, tier)
         advice = self._build_mod_advice(barcello_metrics)
+        moments = _sanitize_summary_items(moments, drop_templates=False)
+        quotes = _sanitize_summary_items(quotes, drop_templates=False)
+        dynamics = _sanitize_summary_items(dynamics, drop_templates=False)
+        cleaned_advice: list[str] = []
+        for item in advice:
+            sanitized = _sanitize_bullet_text(item)
+            if sanitized:
+                cleaned_advice.append(sanitized)
+        advice = cleaned_advice
         return SummaryResult(
             themes=themes,
             moments=moments,
@@ -386,16 +405,21 @@ class SummaryService:
             "Scrivi in italiano e restituisci SOLO JSON valido. "
             "Non inventare dettagli. "
             "Se include_names=false NON includere nomi persone, usa 'un utente'. "
+            "Se include_names=true, ogni momento, frase iconica e dinamica deve includere i nomi reali degli attori "
+            "(actor/actors) e non usare placeholder come 'un utente'. "
+            "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
             "TEMI devono essere solo keyword brevi (no nomi). "
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
             "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
             "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
-            "I momenti devono contenere message_ids con almeno un riferimento valido. "
+            "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
+            "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
+            "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
             "dynamics devono essere descrizioni astratte, senza copiare testo. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
-            "moments: oggetti con 'ts','text','message_ids' (almeno un message_id di riferimento). "
-            "quotes: oggetti con 'ts','text','message_ids'. "
-            "dynamics: oggetti con 'ts','text','message_ids'. "
+            "moments: oggetti con 'ts','text','primary_ref','refs','actor'. "
+            "quotes: oggetti con 'ts','text','primary_ref','refs','actor'. "
+            "dynamics: oggetti con 'ts','text','primary_ref','refs','actors'. "
             "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
             "advice: lista stringhe brevi."
         )
@@ -516,6 +540,15 @@ class SummaryService:
                     continue
                 message_ids = [str(mid) for mid in (item.get("message_ids") or []) if str(mid)]
                 author_id = str(item.get("author_id") or "") or None
+                actor_display = None
+                actors_display: list[str] = []
+                if include_names:
+                    actor_display = str(item.get("actor") or item.get("actor_display") or "").strip() or None
+                    actors_display = [
+                        str(name).strip()
+                        for name in (item.get("actors") or item.get("actors_display") or [])
+                        if str(name).strip()
+                    ]
                 if is_quote:
                     output.append(
                         SummaryQuote(
@@ -523,6 +556,7 @@ class SummaryService:
                             text=text,
                             author_id=author_id,
                             message_ids=message_ids,
+                            actor_display=actor_display,
                         )
                     )
                 else:
@@ -532,13 +566,15 @@ class SummaryService:
                             text=text,
                             author_id=author_id,
                             message_ids=message_ids,
+                            actor_display=actor_display,
+                            actors_display=actors_display,
                         )
                     )
             return output
 
         themes = [str(item).strip() for item in (ai_payload.get("themes") or []) if str(item).strip()]
         moments = _normalize_items(ai_payload.get("moments"))
-        quotes = _normalize_items(ai_payload.get("quotes"), is_quote=True)
+        quotes = _normalize_items(ai_payload.get("quotes") or ai_payload.get("iconic_quotes"), is_quote=True)
         dynamics = _normalize_items(ai_payload.get("dynamics"))
         advice = [str(item).strip() for item in (ai_payload.get("advice") or []) if str(item).strip()]
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
@@ -548,27 +584,42 @@ class SummaryService:
         dynamic_limit = _tier_limit(config, tier, "dynamics", 2)
         if not themes:
             themes = local_summary.themes
+        moments = _sanitize_summary_items(moments)
+        quotes = _sanitize_summary_items(quotes)
+        dynamics = _sanitize_summary_items(dynamics)
+        cleaned_advice: list[str] = []
+        for item in advice:
+            sanitized = _sanitize_bullet_text(item)
+            if sanitized:
+                cleaned_advice.append(sanitized)
+        advice = cleaned_advice
         if not moments:
-            moments = local_summary.moments
+            moments = _sanitize_summary_items(local_summary.moments)
+        moments_missing_before = max(0, moment_limit - len(moments))
         if len(moments) < moment_limit:
-            existing_text = {item.text for item in moments}
-            for item in local_summary.moments:
-                if item.text in existing_text:
-                    continue
-                moments.append(item)
-                existing_text.add(item.text)
-                if len(moments) >= moment_limit:
-                    break
+            moments = _dedupe_summary_items(moments, local_summary.moments, limit=moment_limit)
             if len(moments) < moment_limit:
                 logger.warning("Summary AI returned %s moments; expected %s", len(moments), moment_limit)
+        moments_missing_after = max(0, moment_limit - len(moments))
+        if moments_missing_before > 0:
+            logger.info(
+                "Summary AI moments fill: missing_before=%s missing_after=%s filled=%s",
+                moments_missing_before,
+                moments_missing_after,
+                moments_missing_before - moments_missing_after,
+            )
         if len(moments) > moment_limit:
             moments = moments[:moment_limit]
         if not quotes:
-            quotes = local_summary.quotes
+            quotes = _sanitize_summary_items(local_summary.quotes)
+        if len(quotes) < quote_limit:
+            quotes = _dedupe_summary_items(quotes, local_summary.quotes, limit=quote_limit)
         if len(quotes) > quote_limit:
             quotes = quotes[:quote_limit]
         if not dynamics:
-            dynamics = local_summary.dynamics
+            dynamics = _sanitize_summary_items(local_summary.dynamics)
+        if len(dynamics) < dynamic_limit:
+            dynamics = _dedupe_summary_items(dynamics, local_summary.dynamics, limit=dynamic_limit)
         if len(dynamics) > dynamic_limit:
             dynamics = dynamics[:dynamic_limit]
         if not advice:
@@ -589,32 +640,104 @@ class SummaryService:
             ai_status=local_summary.ai_status,
         )
 
-    def _sanitize_ai_payload(self, payload: dict[str, Any], messages: list[dict[str, Any]]) -> None:
-        message_ts_map = {
-            str(msg.get("message_id")): msg.get("ts")
-            for msg in messages
-            if msg.get("message_id") and msg.get("ts")
-        }
-        logged_invalid = False
+    async def _sanitize_ai_payload(
+        self,
+        payload: dict[str, Any],
+        messages: list[dict[str, Any]],
+        *,
+        include_names: bool,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> None:
+        message_records: list[tuple[datetime, str, Optional[str]]] = []
+        message_ts_map: dict[str, str] = {}
+        message_author_map: dict[str, Optional[str]] = {}
+        for msg in messages:
+            message_id = str(msg.get("message_id") or "")
+            if not _is_valid_snowflake(message_id):
+                continue
+            ts_value = _normalize_ts_value(msg.get("ts"))
+            parsed_ts = _parse_ts(ts_value) if ts_value else None
+            if parsed_ts is None:
+                continue
+            author_id = str(msg.get("author_id") or "") or None
+            message_records.append((parsed_ts, message_id, author_id))
+            message_ts_map[message_id] = ts_value
+            message_author_map[message_id] = author_id
+        message_records.sort(key=lambda item: item[0])
+        logged_invalid_ts = False
+        invalid_primary_ref_count = 0
+        invalid_ref_not_in_channel_count = 0
+        fallback_nearest_applied_count = 0
+        final_items_with_no_ref_count = 0
+        invalid_ref_format_count = 0
+        ref_cache: dict[str, bool] = {}
+        range_start = _normalize_ts_value(start_ts)
+        range_end = _normalize_ts_value(end_ts)
 
-        def normalize_ts(value: Any, message_ids: list[str]) -> Optional[str]:
-            nonlocal logged_invalid
+        def normalize_ts(value: Any, message_ids: list[str], fallback_ts: Optional[str]) -> Optional[str]:
+            nonlocal logged_invalid_ts
             ts = _normalize_ts_value(value)
             if ts:
                 return ts
             for message_id in message_ids:
                 candidate = _normalize_ts_value(message_ts_map.get(message_id))
                 if candidate:
-                    if not logged_invalid:
+                    if not logged_invalid_ts:
                         logger.debug("Summary AI sanitized invalid ts")
-                        logged_invalid = True
+                        logged_invalid_ts = True
                     return candidate
-            if not logged_invalid and value:
+            if fallback_ts:
+                if not logged_invalid_ts and value:
+                    logger.debug("Summary AI sanitized invalid ts")
+                    logged_invalid_ts = True
+                return fallback_ts
+            if not logged_invalid_ts and value:
                 logger.debug("Summary AI sanitized invalid ts")
-                logged_invalid = True
+                logged_invalid_ts = True
             return None
 
-        def sanitize_items(key: str) -> None:
+        async def ref_exists(ref: str) -> bool:
+            if ref in ref_cache:
+                return ref_cache[ref]
+            exists = await self._database.message_exists_in_channel(channel_id=channel_id, message_id=ref)
+            ref_cache[ref] = exists
+            return exists
+
+        async def normalize_refs(raw_refs: Any) -> list[str]:
+            nonlocal invalid_ref_not_in_channel_count, invalid_ref_format_count
+            refs: list[str] = []
+            if isinstance(raw_refs, str):
+                raw_refs = [raw_refs]
+            for ref in raw_refs or []:
+                ref_str = str(ref)
+                if not ref_str:
+                    continue
+                if not _is_valid_snowflake(ref_str):
+                    invalid_ref_format_count += 1
+                    continue
+                if await ref_exists(ref_str):
+                    refs.append(ref_str)
+                else:
+                    invalid_ref_not_in_channel_count += 1
+            return refs
+
+        def pick_nearest_record(target_ts: Optional[datetime]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+            if not message_records:
+                return None, None, None
+            if target_ts is None:
+                mid = len(message_records) // 2
+                picked = message_records[mid]
+                return picked[1], picked[0].isoformat(), picked[2]
+            closest = min(message_records, key=lambda item: abs((item[0] - target_ts).total_seconds()))
+            return closest[1], closest[0].isoformat(), closest[2]
+
+        async def sanitize_items(key: str) -> None:
+            nonlocal invalid_primary_ref_count
+            nonlocal invalid_ref_not_in_channel_count
+            nonlocal fallback_nearest_applied_count
+            nonlocal final_items_with_no_ref_count
             raw_items = payload.get(key)
             if not isinstance(raw_items, list):
                 return
@@ -622,26 +745,87 @@ class SummaryService:
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
-                message_ids = [str(mid) for mid in (item.get("message_ids") or []) if str(mid)]
-                if not message_ids and item.get("primary_ref"):
-                    message_ids = [str(item.get("primary_ref"))]
-                if not message_ids and item.get("refs"):
-                    message_ids = [str(mid) for mid in (item.get("refs") or []) if str(mid)]
-                ts = normalize_ts(item.get("ts"), message_ids)
+                primary_ref_raw = str(item.get("primary_ref") or "").strip()
+                primary_ref = None
+                if primary_ref_raw:
+                    if not _is_valid_snowflake(primary_ref_raw):
+                        invalid_primary_ref_count += 1
+                    elif await ref_exists(primary_ref_raw):
+                        primary_ref = primary_ref_raw
+                    else:
+                        invalid_ref_not_in_channel_count += 1
+                refs = await normalize_refs(item.get("refs"))
+                message_ids = await normalize_refs(item.get("message_ids"))
+                candidates = [ref for ref in [primary_ref] + refs + message_ids if ref]
+                primary_ref = candidates[0] if candidates else None
+                parsed_ts = _parse_ts(_normalize_ts_value(item.get("ts")))
+                nearest_id, nearest_ts, _nearest_author = pick_nearest_record(parsed_ts)
+                fallback_ts = nearest_ts
+                if primary_ref is None:
+                    if refs:
+                        primary_ref = refs[0]
+                    elif parsed_ts and range_start and range_end:
+                        nearest = await self._database.fetch_nearest_message_id_in_range(
+                            channel_id=channel_id,
+                            start_ts=range_start,
+                            end_ts=range_end,
+                            ts=parsed_ts.isoformat(),
+                        )
+                        if nearest:
+                            primary_ref = nearest
+                            fallback_nearest_applied_count += 1
+                    elif range_start and range_end:
+                        start_dt = _parse_ts(range_start)
+                        end_dt = _parse_ts(range_end)
+                        if start_dt and end_dt:
+                            midpoint = start_dt + (end_dt - start_dt) / 2
+                            nearest = await self._database.fetch_nearest_message_id_in_range(
+                                channel_id=channel_id,
+                                start_ts=range_start,
+                                end_ts=range_end,
+                                ts=midpoint.isoformat(),
+                            )
+                            if nearest:
+                                primary_ref = nearest
+                                fallback_nearest_applied_count += 1
+                if primary_ref:
+                    candidates = [primary_ref] + [ref for ref in refs if ref != primary_ref]
+                ts = normalize_ts(item.get("ts"), candidates, fallback_ts)
+                if primary_ref and not ts:
+                    ts = message_ts_map.get(primary_ref)
                 text = str(item.get("text") or "").strip()
                 if not text:
                     continue
+                author_id = str(item.get("author_id") or "") or None
+                if not author_id and primary_ref:
+                    author_id = message_author_map.get(primary_ref)
+                actor = str(item.get("actor") or item.get("actor_display") or "").strip() or None
+                actors = [
+                    str(name).strip()
+                    for name in (item.get("actors") or item.get("actors_display") or [])
+                    if str(name).strip()
+                ]
+                if not include_names:
+                    actor = None
+                    actors = []
+                if primary_ref is None:
+                    final_items_with_no_ref_count += 1
                 sanitized.append(
                     {
                         "ts": ts,
                         "text": text,
-                        "author_id": item.get("author_id"),
-                        "message_ids": message_ids,
+                        "author_id": author_id,
+                        "message_ids": candidates,
+                        "actor": actor,
+                        "actors": actors,
                     }
                 )
             payload[key] = sanitized
 
-        def sanitize_impacts(key: str) -> None:
+        async def sanitize_impacts(key: str) -> None:
+            nonlocal invalid_ref_not_in_channel_count
+            nonlocal invalid_ref_format_count
+            nonlocal final_items_with_no_ref_count
             raw_items = payload.get(key)
             if not isinstance(raw_items, list):
                 return
@@ -649,11 +833,23 @@ class SummaryService:
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
-                message_id = str(item.get("message_id") or "") or None
-                ts = normalize_ts(item.get("ts"), [message_id] if message_id else [])
+                message_id_raw = str(item.get("message_id") or "").strip()
+                message_id = None
+                if message_id_raw:
+                    if not _is_valid_snowflake(message_id_raw):
+                        invalid_ref_format_count += 1
+                    elif await ref_exists(message_id_raw):
+                        message_id = message_id_raw
+                    else:
+                        invalid_ref_not_in_channel_count += 1
+                ts = normalize_ts(item.get("ts"), [message_id] if message_id else [], None)
+                if message_id and not ts:
+                    ts = message_ts_map.get(message_id)
                 reason = str(item.get("reason") or "").strip()
                 if not reason:
                     continue
+                if message_id is None:
+                    final_items_with_no_ref_count += 1
                 sanitized.append(
                     {
                         "author_id": item.get("author_id"),
@@ -664,11 +860,21 @@ class SummaryService:
                 )
             payload[key] = sanitized
 
-        sanitize_items("moments")
-        sanitize_items("quotes")
-        sanitize_items("dynamics")
-        sanitize_impacts("degrade_list")
-        sanitize_impacts("invigorate_list")
+        await sanitize_items("moments")
+        await sanitize_items("quotes")
+        await sanitize_items("iconic_quotes")
+        await sanitize_items("dynamics")
+        await sanitize_impacts("degrade_list")
+        await sanitize_impacts("invigorate_list")
+        logger.info(
+            "Summary AI ref diagnostics: invalid_primary_ref=%s invalid_ref_format=%s invalid_ref_not_in_channel=%s "
+            "fallback_nearest_applied=%s items_no_ref=%s",
+            invalid_primary_ref_count,
+            invalid_ref_format_count,
+            invalid_ref_not_in_channel_count,
+            fallback_nearest_applied_count,
+            final_items_with_no_ref_count,
+        )
 
     def _extract_themes(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[str]:
         counts: dict[str, int] = {}
@@ -697,7 +903,25 @@ class SummaryService:
                 + segment["burstiness"]
             )
             scored.append((score, segment))
-        top_segments = [segment for _, segment in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]]
+        ranked_segments = [segment for _, segment in sorted(scored, key=lambda item: item[0], reverse=True)]
+        top_segments: list[dict[str, Any]] = []
+        seen_clusters: set[str] = set()
+        for segment in ranked_segments:
+            if len(top_segments) >= limit:
+                break
+            cluster_key = str(segment.get("cluster_key") or "")
+            if cluster_key and cluster_key in seen_clusters:
+                continue
+            top_segments.append(segment)
+            if cluster_key:
+                seen_clusters.add(cluster_key)
+        if len(top_segments) < limit:
+            for segment in ranked_segments:
+                if len(top_segments) >= limit:
+                    break
+                if segment in top_segments:
+                    continue
+                top_segments.append(segment)
         top_segments.sort(key=lambda segment: segment["start_ts"] or "")
         items: list[SummaryItem] = []
         for segment in top_segments:
@@ -859,6 +1083,12 @@ def _shorten(text: str, limit: int = 140) -> str:
     return cleaned
 
 
+def _is_valid_snowflake(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(re.fullmatch(r"\\d{17,20}", str(value)))
+
+
 def _pick_ts(messages: list[dict[str, Any]]) -> Optional[str]:
     if not messages:
         return None
@@ -908,6 +1138,69 @@ def _clean_text(text: str) -> str:
     cleaned = re.sub(r"`{1,3}.*?`{1,3}", " ", cleaned)
     cleaned = re.sub(r"\\s+", " ", cleaned)
     return cleaned.strip().lower()
+
+
+def _sanitize_bullet_text(text: str) -> str:
+    cleaned = " ".join(text.split())
+    cleaned = re.sub(r"\\btutti+i\\b", "tutti", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\\bbuongiornoo+\\b", "buongiorno", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def _is_template_bullet(text: str) -> bool:
+    return "nel periodo spiccano" in text.lower()
+
+
+def _sanitize_summary_items(
+    items: list[SummaryItem] | list[SummaryQuote],
+    *,
+    drop_templates: bool = True,
+) -> list[SummaryItem] | list[SummaryQuote]:
+    sanitized: list[Any] = []
+    for item in items:
+        text = _sanitize_bullet_text(item.text)
+        if not text:
+            continue
+        if drop_templates and _is_template_bullet(text):
+            continue
+        item.text = text
+        sanitized.append(item)
+    return sanitized
+
+
+def _dedupe_summary_items(
+    primary: list[SummaryItem] | list[SummaryQuote],
+    fallback: list[SummaryItem] | list[SummaryQuote],
+    *,
+    limit: int,
+) -> list[SummaryItem] | list[SummaryQuote]:
+    output: list[Any] = []
+    seen_text: set[str] = set()
+    seen_keywords: list[set[str]] = []
+    seen_message_ids: set[str] = set()
+
+    def add_item(item: Any) -> None:
+        text = item.text
+        if text in seen_text:
+            return
+        message_ids = {str(mid) for mid in (getattr(item, "message_ids", []) or []) if str(mid)}
+        if message_ids and seen_message_ids.intersection(message_ids):
+            return
+        keywords = set(_extract_keywords(_clean_text(text)))
+        if keywords:
+            for existing in seen_keywords:
+                if _keyword_overlap(existing, keywords) >= 0.6:
+                    return
+            seen_keywords.append(keywords)
+        seen_text.add(text)
+        seen_message_ids.update(message_ids)
+        output.append(item)
+
+    for item in list(primary) + list(fallback):
+        if len(output) >= limit:
+            break
+        add_item(item)
+    return output
 
 
 def _extract_segment_keywords(text: str) -> list[str]:
@@ -1074,7 +1367,6 @@ def _build_segment_summary(segment: dict[str, Any]) -> str:
     templates = [
         "Si parla di {topic}; {action}.",
         "Focus su {topic}, con {action}.",
-        "Nel periodo spiccano {topic}: {action}.",
         "Discussione su {topic} con {action}.",
     ]
     selector = sum(ord(char) for char in topic) % len(templates)
