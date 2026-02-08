@@ -19,8 +19,8 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "sections": ["themes", "moments", "notes"],
             "limits": {
                 "themes": 6,
-                "moments": 5,
-                "quotes": 4,
+                "moments": 6,
+                "quotes": 3,
                 "dynamics": 2,
             },
         },
@@ -29,8 +29,8 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "sections": ["themes", "moments", "quotes", "notes"],
             "limits": {
                 "themes": 6,
-                "moments": 10,
-                "quotes": 6,
+                "moments": 12,
+                "quotes": 3,
                 "dynamics": 3,
             },
         },
@@ -40,7 +40,7 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "limits": {
                 "themes": 8,
                 "moments": 12,
-                "quotes": 8,
+                "quotes": 3,
                 "dynamics": 4,
             },
         },
@@ -59,7 +59,7 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "limits": {
                 "themes": 10,
                 "moments": 15,
-                "quotes": 10,
+                "quotes": 3,
                 "dynamics": 5,
                 "impact": 3,
             },
@@ -474,13 +474,7 @@ class SummaryService:
                 logged_invalid = True
             return None
 
-        def truncate(text: Any, limit: int) -> str:
-            raw = str(text or "").strip()
-            if len(raw) <= limit:
-                return raw
-            return raw[: limit - 3] + "..."
-
-        def sanitize_items(key: str, text_limit: int) -> None:
+        def sanitize_items(key: str) -> None:
             raw_items = payload.get(key)
             if not isinstance(raw_items, list):
                 return
@@ -494,7 +488,7 @@ class SummaryService:
                 if not message_ids and item.get("refs"):
                     message_ids = [str(mid) for mid in (item.get("refs") or []) if str(mid)]
                 ts = normalize_ts(item.get("ts"), message_ids)
-                text = truncate(item.get("text"), text_limit)
+                text = str(item.get("text") or "").strip()
                 if not text:
                     continue
                 sanitized.append(
@@ -507,7 +501,7 @@ class SummaryService:
                 )
             payload[key] = sanitized
 
-        def sanitize_impacts(key: str, reason_limit: int) -> None:
+        def sanitize_impacts(key: str) -> None:
             raw_items = payload.get(key)
             if not isinstance(raw_items, list):
                 return
@@ -517,7 +511,7 @@ class SummaryService:
                     continue
                 message_id = str(item.get("message_id") or "") or None
                 ts = normalize_ts(item.get("ts"), [message_id] if message_id else [])
-                reason = truncate(item.get("reason"), reason_limit)
+                reason = str(item.get("reason") or "").strip()
                 if not reason:
                     continue
                 sanitized.append(
@@ -530,11 +524,11 @@ class SummaryService:
                 )
             payload[key] = sanitized
 
-        sanitize_items("moments", 280)
-        sanitize_items("quotes", 280)
-        sanitize_items("dynamics", 220)
-        sanitize_impacts("degrade_list", 220)
-        sanitize_impacts("invigorate_list", 220)
+        sanitize_items("moments")
+        sanitize_items("quotes")
+        sanitize_items("dynamics")
+        sanitize_impacts("degrade_list")
+        sanitize_impacts("invigorate_list")
 
     def _extract_themes(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[str]:
         counts: dict[str, int] = {}
@@ -566,6 +560,9 @@ class SummaryService:
             bucket_sorted = sorted(bucket, key=lambda item: item.get("ts") or "")
             representative = bucket_sorted[len(bucket_sorted) // 2]
             message_ids = [str(item.get("message_id")) for item in bucket_sorted if item.get("message_id")]
+            primary_id = str(representative.get("message_id")) if representative.get("message_id") else None
+            if primary_id:
+                message_ids = [primary_id] + [mid for mid in message_ids if mid != primary_id]
             event_text = _summarize_event_from_cluster(key, bucket_sorted)
             items.append(
                 SummaryItem(
@@ -610,23 +607,46 @@ class SummaryService:
     ) -> list[SummaryItem]:
         limit = _tier_limit(config, tier, "dynamics", 3)
         dynamics: list[SummaryItem] = []
+        primary_id = _pick_message_id(messages)
         reply_war = bool(barcello_metrics.get("reply_war"))
         top_author_share = float(barcello_metrics.get("top1_author_share") or 0)
         negativity_hits = int(barcello_metrics.get("negativity_hits") or 0)
         if reply_war:
             dynamics.append(
-                SummaryItem(ts=_pick_ts(messages), text="Botta e risposta fitto, ritmo acceso.", author_id=None)
+                SummaryItem(
+                    ts=_pick_ts(messages),
+                    text="Botta e risposta fitto, ritmo acceso.",
+                    author_id=None,
+                    message_ids=[primary_id] if primary_id else [],
+                )
             )
         if top_author_share > 0.4:
             dynamics.append(
-                SummaryItem(ts=_pick_ts(messages), text="Conversazione concentrata su pochi utenti.", author_id=None)
+                SummaryItem(
+                    ts=_pick_ts(messages),
+                    text="Conversazione concentrata su pochi utenti.",
+                    author_id=None,
+                    message_ids=[primary_id] if primary_id else [],
+                )
             )
         if negativity_hits > 0:
             dynamics.append(
-                SummaryItem(ts=_pick_ts(messages), text="Toni pungenti o negativi compaiono nella finestra.", author_id=None)
+                SummaryItem(
+                    ts=_pick_ts(messages),
+                    text="Toni pungenti o negativi compaiono nella finestra.",
+                    author_id=None,
+                    message_ids=[primary_id] if primary_id else [],
+                )
             )
         if not dynamics:
-            dynamics.append(SummaryItem(ts=_pick_ts(messages), text="Dinamica complessivamente lineare.", author_id=None))
+            dynamics.append(
+                SummaryItem(
+                    ts=_pick_ts(messages),
+                    text="Dinamica complessivamente lineare.",
+                    author_id=None,
+                    message_ids=[primary_id] if primary_id else [],
+                )
+            )
         return dynamics[:limit]
 
     def _extract_impact(
@@ -705,9 +725,7 @@ def _cluster_key(text: str) -> str:
 
 def _shorten(text: str, limit: int = 140) -> str:
     cleaned = " ".join(text.split())
-    if len(cleaned) <= limit:
-        return cleaned
-    return cleaned[: limit - 3] + "..."
+    return cleaned
 
 
 def _summarize_event_from_cluster(cluster_key: str, bucket: list[dict[str, Any]]) -> str:
@@ -729,6 +747,14 @@ def _pick_ts(messages: list[dict[str, Any]]) -> Optional[str]:
     if not messages:
         return None
     return messages[0].get("ts") or None
+
+
+def _pick_message_id(messages: list[dict[str, Any]]) -> Optional[str]:
+    for msg in messages:
+        message_id = msg.get("message_id")
+        if message_id:
+            return str(message_id)
+    return None
 
 
 def _extract_ai_text(response: Any) -> str:

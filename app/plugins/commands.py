@@ -193,9 +193,9 @@ def setup(registry: ServiceRegistry) -> None:
     def _with_spacing(text: str) -> str:
         return text
 
-    def _split_field_chunks(value: str, max_len: int = 1024) -> list[str]:
-        if len(value) <= max_len:
-            return [value]
+        def _split_field_chunks(value: str, max_len: int = 1024) -> list[str]:
+            if len(value) <= max_len:
+                return [value]
 
         def split_plain(text: str, limit: int) -> list[str]:
             lines = text.splitlines() or [text]
@@ -233,18 +233,13 @@ def setup(registry: ServiceRegistry) -> None:
             return [f"{prefix}{chunk}{suffix}" for chunk in inner_chunks]
         return split_plain(value, max_len)
 
-    def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
-        chunks = _split_field_chunks(value, 1024)
-        available = 25 - len(embed.fields)
-        if available <= 0:
-            return
-        if len(chunks) > available:
-            suffix = "... (tagliato)"
-            chunks = chunks[:available]
-            last = chunks[-1]
-            if len(last) + len(suffix) > 1024:
-                last = last[: 1024 - len(suffix)]
-            chunks[-1] = f"{last}{suffix}"
+        def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
+            chunks = _split_field_chunks(value, 1024)
+            available = 25 - len(embed.fields)
+            if available <= 0:
+                return
+            if len(chunks) > available:
+                chunks = chunks[:available]
         for idx, chunk in enumerate(chunks):
             field_name = name if idx == 0 else f"{name} (cont.)"
             embed.add_field(name=field_name, value=chunk, inline=False)
@@ -311,8 +306,6 @@ def setup(registry: ServiceRegistry) -> None:
             text = line.strip()
             if not text:
                 continue
-            if len(text) > 120:
-                text = f"{text[:117]}..."
             cleaned.append(text)
         return "\n".join(f"• {line}" for line in cleaned)
 
@@ -373,8 +366,6 @@ def setup(registry: ServiceRegistry) -> None:
                 text = text.lstrip("•").strip()
             if text.startswith("• •"):
                 text = text.replace("• •", "•", 1).strip()
-            if len(text) > 120:
-                text = f"{text[:117]}..."
             formatted.append(f"• {text}")
         return "\n".join(formatted)
 
@@ -578,7 +569,12 @@ def setup(registry: ServiceRegistry) -> None:
         title = f"🫛 STATO BARCELLO “{channel_label}”"
         window_start = _format_italian_ts(result.window_start_ts)
         window_end = _format_italian_ts(result.window_end_ts)
-        window_label = f"**{window_start} → {window_end}**"
+        range_prefix = ""
+        if period_label == "ieri":
+            range_prefix = "Ieri "
+        elif period_label == "oggi":
+            range_prefix = "Oggi "
+        window_label = f"🕒 **{range_prefix}{window_start} → {window_end}**"
         alert_line = f"**{emoji} ALLERTA {label.upper()}**"
         health_note = _health_description(result.score)
         period_intro = {
@@ -868,11 +864,11 @@ def setup(registry: ServiceRegistry) -> None:
         include_names: bool,
         display_name: str | None,
         link_limit: int,
+        primary_id: str | None,
     ) -> str:
         text = moment.text
         if include_names and display_name:
             text = f"{display_name}: {text}"
-        primary_id = moment.message_ids[0] if moment.message_ids else None
         time_link = _format_summary_time_link(
             moment.ts,
             primary_id,
@@ -889,10 +885,10 @@ def setup(registry: ServiceRegistry) -> None:
         include_names: bool,
         display_name: str | None,
         link_limit: int,
+        primary_id: str | None,
     ) -> str:
         speaker = display_name if include_names and display_name else "un utente"
         text = f"“{quote.text}” — {speaker}"
-        primary_id = quote.message_ids[0] if quote.message_ids else None
         time_link = _format_summary_time_link(
             quote.ts,
             primary_id,
@@ -907,8 +903,8 @@ def setup(registry: ServiceRegistry) -> None:
         guild_id: int,
         channel_id: int,
         link_limit: int,
+        primary_id: str | None,
     ) -> str:
-        primary_id = dynamic.message_ids[0] if dynamic.message_ids else None
         time_link = _format_summary_time_link(
             dynamic.ts,
             primary_id,
@@ -925,11 +921,12 @@ def setup(registry: ServiceRegistry) -> None:
         display_name: str | None,
         link_limit: int,
         prefix: str,
+        primary_id: str | None,
     ) -> str:
         name = display_name or "utente"
         time_link = _format_summary_time_link(
             impact.ts,
-            impact.message_id,
+            primary_id,
             guild_id=guild_id,
             channel_id=channel_id,
         )
@@ -1907,6 +1904,35 @@ def setup(registry: ServiceRegistry) -> None:
 
         details_color = await _get_details_embed_color(profile)
 
+        async def resolve_primary_ref(ts: str | None, message_ids: list[str]) -> str | None:
+            for mid in message_ids:
+                if str(mid).isdigit():
+                    return str(mid)
+            parsed = _parse_iso_ts(ts)
+            if parsed is None:
+                return None
+            return await database.fetch_nearest_message_id(
+                channel_id=str(interaction.channel_id),
+                ts=parsed.isoformat(),
+            )
+
+        moment_primary: dict[int, str | None] = {}
+        for moment in summary.moments:
+            moment_primary[id(moment)] = await resolve_primary_ref(moment.ts, moment.message_ids)
+
+        quote_primary: dict[int, str | None] = {}
+        for quote in summary.quotes:
+            quote_primary[id(quote)] = await resolve_primary_ref(quote.ts, quote.message_ids)
+
+        dynamic_primary: dict[int, str | None] = {}
+        for dynamic in summary.dynamics:
+            dynamic_primary[id(dynamic)] = await resolve_primary_ref(dynamic.ts, dynamic.message_ids)
+
+        impact_primary: dict[int, str | None] = {}
+        for impact in summary.degrade + summary.invigorate:
+            candidate_ids = [impact.message_id] if impact.message_id else []
+            impact_primary[id(impact)] = await resolve_primary_ref(impact.ts, candidate_ids)
+
         def build_embeds() -> list[discord.Embed]:
             sections_map: dict[str, list[tuple[str, str, int]]] = {}
 
@@ -1921,6 +1947,7 @@ def setup(registry: ServiceRegistry) -> None:
                     include_names=include_names,
                     display_name=name_map.get(moment.author_id or ""),
                     link_limit=1,
+                    primary_id=moment_primary.get(id(moment)),
                 )
                 for moment in summary.moments
             ]
@@ -1938,6 +1965,7 @@ def setup(registry: ServiceRegistry) -> None:
                     include_names=include_names,
                     display_name=name_map.get(quote.author_id or ""),
                     link_limit=1,
+                    primary_id=quote_primary.get(id(quote)),
                 )
                 for quote in summary.quotes
             ]
@@ -1950,6 +1978,7 @@ def setup(registry: ServiceRegistry) -> None:
                     guild_id=interaction.guild_id,
                     channel_id=interaction.channel_id,
                     link_limit=1,
+                    primary_id=dynamic_primary.get(id(dynamic)),
                 )
                 for dynamic in summary.dynamics
             ]
@@ -1966,6 +1995,7 @@ def setup(registry: ServiceRegistry) -> None:
                         display_name=name_map.get(impact.author_id or ""),
                         link_limit=1,
                         prefix="🔥",
+                        primary_id=impact_primary.get(id(impact)),
                     )
                     degrade_lines.append(line)
                 invigorate_lines = []
@@ -1977,6 +2007,7 @@ def setup(registry: ServiceRegistry) -> None:
                         display_name=name_map.get(impact.author_id or ""),
                         link_limit=1,
                         prefix="🌿",
+                        primary_id=impact_primary.get(id(impact)),
                     )
                     invigorate_lines.append(line)
                 impact_sections: list[tuple[str, str, int]] = []
@@ -2047,13 +2078,14 @@ def setup(registry: ServiceRegistry) -> None:
                 return embed
 
             def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
+                target_max = 5800
                 chunks: list[list[tuple[str, str, int]]] = []
                 current: list[tuple[str, str, int]] = []
                 for section in section_list:
                     candidate = current + [section]
                     candidate_embed = build_embed("", candidate)
                     if current and (
-                        _estimate_embed_size(candidate_embed) > 5500 or len(candidate_embed.fields) > 24
+                        _estimate_embed_size(candidate_embed) > target_max or len(candidate_embed.fields) > 24
                     ):
                         chunks.append(current)
                         current = [section]
