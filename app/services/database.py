@@ -439,6 +439,40 @@ class DatabaseService:
             return row["message_id"]
         return None
 
+    async def fetch_nearest_message_id_in_range(
+        self,
+        *,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+        ts: str,
+    ) -> Optional[str]:
+        row = await self.fetchone(
+            """
+            SELECT message_id
+            FROM messages
+            WHERE channel_id = ? AND ts >= ? AND ts <= ?
+            ORDER BY ABS(strftime('%s', ts) - strftime('%s', ?)) ASC
+            LIMIT 1
+            """,
+            (channel_id, start_ts, end_ts, ts),
+        )
+        if row:
+            return row["message_id"]
+        return None
+
+    async def message_exists_in_channel(self, *, channel_id: str, message_id: str) -> bool:
+        row = await self.fetchone(
+            """
+            SELECT 1
+            FROM messages
+            WHERE channel_id = ? AND message_id = ?
+            LIMIT 1
+            """,
+            (channel_id, message_id),
+        )
+        return row is not None
+
     async def fetch_voice_sessions_in_range(
         self,
         *,

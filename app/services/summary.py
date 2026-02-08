@@ -286,7 +286,14 @@ class SummaryService:
                         config=config,
                     )
                     if ai_payload:
-                        self._sanitize_ai_payload(ai_payload, messages, include_names=include_names)
+                        await self._sanitize_ai_payload(
+                            ai_payload,
+                            messages,
+                            include_names=include_names,
+                            channel_id=channel_id,
+                            start_ts=start_ts,
+                            end_ts=end_ts,
+                        )
                     if ai_payload:
                         summary = self._merge_ai_summary(local_summary, ai_payload, include_names, config=config, tier=tier)
                         ai_status.update({"enabled": True, "reason": "ok"})
@@ -406,6 +413,8 @@ class SummaryService:
             "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
             "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
             "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
+            "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
+            "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
             "dynamics devono essere descrizioni astratte, senza copiare testo. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
             "moments: oggetti con 'ts','text','primary_ref','refs','actor'. "
@@ -586,10 +595,19 @@ class SummaryService:
         advice = cleaned_advice
         if not moments:
             moments = _sanitize_summary_items(local_summary.moments)
+        moments_missing_before = max(0, moment_limit - len(moments))
         if len(moments) < moment_limit:
             moments = _dedupe_summary_items(moments, local_summary.moments, limit=moment_limit)
             if len(moments) < moment_limit:
                 logger.warning("Summary AI returned %s moments; expected %s", len(moments), moment_limit)
+        moments_missing_after = max(0, moment_limit - len(moments))
+        if moments_missing_before > 0:
+            logger.info(
+                "Summary AI moments fill: missing_before=%s missing_after=%s filled=%s",
+                moments_missing_before,
+                moments_missing_after,
+                moments_missing_before - moments_missing_after,
+            )
         if len(moments) > moment_limit:
             moments = moments[:moment_limit]
         if not quotes:
@@ -622,12 +640,15 @@ class SummaryService:
             ai_status=local_summary.ai_status,
         )
 
-    def _sanitize_ai_payload(
+    async def _sanitize_ai_payload(
         self,
         payload: dict[str, Any],
         messages: list[dict[str, Any]],
         *,
         include_names: bool,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
     ) -> None:
         message_records: list[tuple[datetime, str, Optional[str]]] = []
         message_ts_map: dict[str, str] = {}
@@ -646,7 +667,14 @@ class SummaryService:
             message_author_map[message_id] = author_id
         message_records.sort(key=lambda item: item[0])
         logged_invalid_ts = False
-        logged_invalid_refs = False
+        invalid_primary_ref_count = 0
+        invalid_ref_not_in_channel_count = 0
+        fallback_nearest_applied_count = 0
+        final_items_with_no_ref_count = 0
+        invalid_ref_format_count = 0
+        ref_cache: dict[str, bool] = {}
+        range_start = _normalize_ts_value(start_ts)
+        range_end = _normalize_ts_value(end_ts)
 
         def normalize_ts(value: Any, message_ids: list[str], fallback_ts: Optional[str]) -> Optional[str]:
             nonlocal logged_invalid_ts
@@ -670,17 +698,29 @@ class SummaryService:
                 logged_invalid_ts = True
             return None
 
-        def normalize_refs(raw_refs: Any) -> list[str]:
-            nonlocal logged_invalid_refs
+        async def ref_exists(ref: str) -> bool:
+            if ref in ref_cache:
+                return ref_cache[ref]
+            exists = await self._database.message_exists_in_channel(channel_id=channel_id, message_id=ref)
+            ref_cache[ref] = exists
+            return exists
+
+        async def normalize_refs(raw_refs: Any) -> list[str]:
+            nonlocal invalid_ref_not_in_channel_count, invalid_ref_format_count
             refs: list[str] = []
             if isinstance(raw_refs, str):
                 raw_refs = [raw_refs]
             for ref in raw_refs or []:
                 ref_str = str(ref)
-                if _is_valid_snowflake(ref_str):
+                if not ref_str:
+                    continue
+                if not _is_valid_snowflake(ref_str):
+                    invalid_ref_format_count += 1
+                    continue
+                if await ref_exists(ref_str):
                     refs.append(ref_str)
-                elif ref_str:
-                    logged_invalid_refs = True
+                else:
+                    invalid_ref_not_in_channel_count += 1
             return refs
 
         def pick_nearest_record(target_ts: Optional[datetime]) -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -693,8 +733,11 @@ class SummaryService:
             closest = min(message_records, key=lambda item: abs((item[0] - target_ts).total_seconds()))
             return closest[1], closest[0].isoformat(), closest[2]
 
-        def sanitize_items(key: str) -> None:
-            nonlocal logged_invalid_refs
+        async def sanitize_items(key: str) -> None:
+            nonlocal invalid_primary_ref_count
+            nonlocal invalid_ref_not_in_channel_count
+            nonlocal fallback_nearest_applied_count
+            nonlocal final_items_with_no_ref_count
             raw_items = payload.get(key)
             if not isinstance(raw_items, list):
                 return
@@ -703,19 +746,50 @@ class SummaryService:
                 if not isinstance(item, dict):
                     continue
                 primary_ref_raw = str(item.get("primary_ref") or "").strip()
-                primary_ref = primary_ref_raw if _is_valid_snowflake(primary_ref_raw) else None
-                if primary_ref_raw and primary_ref is None:
-                    logged_invalid_refs = True
-                refs = normalize_refs(item.get("refs"))
-                message_ids = normalize_refs(item.get("message_ids"))
+                primary_ref = None
+                if primary_ref_raw:
+                    if not _is_valid_snowflake(primary_ref_raw):
+                        invalid_primary_ref_count += 1
+                    elif await ref_exists(primary_ref_raw):
+                        primary_ref = primary_ref_raw
+                    else:
+                        invalid_ref_not_in_channel_count += 1
+                refs = await normalize_refs(item.get("refs"))
+                message_ids = await normalize_refs(item.get("message_ids"))
                 candidates = [ref for ref in [primary_ref] + refs + message_ids if ref]
                 primary_ref = candidates[0] if candidates else None
                 parsed_ts = _parse_ts(_normalize_ts_value(item.get("ts")))
-                nearest_id, nearest_ts, nearest_author = pick_nearest_record(parsed_ts)
-                if primary_ref is None and nearest_id:
-                    primary_ref = nearest_id
-                    candidates = [primary_ref]
+                nearest_id, nearest_ts, _nearest_author = pick_nearest_record(parsed_ts)
                 fallback_ts = nearest_ts
+                if primary_ref is None:
+                    if refs:
+                        primary_ref = refs[0]
+                    elif parsed_ts and range_start and range_end:
+                        nearest = await self._database.fetch_nearest_message_id_in_range(
+                            channel_id=channel_id,
+                            start_ts=range_start,
+                            end_ts=range_end,
+                            ts=parsed_ts.isoformat(),
+                        )
+                        if nearest:
+                            primary_ref = nearest
+                            fallback_nearest_applied_count += 1
+                    elif range_start and range_end:
+                        start_dt = _parse_ts(range_start)
+                        end_dt = _parse_ts(range_end)
+                        if start_dt and end_dt:
+                            midpoint = start_dt + (end_dt - start_dt) / 2
+                            nearest = await self._database.fetch_nearest_message_id_in_range(
+                                channel_id=channel_id,
+                                start_ts=range_start,
+                                end_ts=range_end,
+                                ts=midpoint.isoformat(),
+                            )
+                            if nearest:
+                                primary_ref = nearest
+                                fallback_nearest_applied_count += 1
+                if primary_ref:
+                    candidates = [primary_ref] + [ref for ref in refs if ref != primary_ref]
                 ts = normalize_ts(item.get("ts"), candidates, fallback_ts)
                 if primary_ref and not ts:
                     ts = message_ts_map.get(primary_ref)
@@ -734,6 +808,8 @@ class SummaryService:
                 if not include_names:
                     actor = None
                     actors = []
+                if primary_ref is None:
+                    final_items_with_no_ref_count += 1
                 sanitized.append(
                     {
                         "ts": ts,
@@ -746,8 +822,10 @@ class SummaryService:
                 )
             payload[key] = sanitized
 
-        def sanitize_impacts(key: str) -> None:
-            nonlocal logged_invalid_refs
+        async def sanitize_impacts(key: str) -> None:
+            nonlocal invalid_ref_not_in_channel_count
+            nonlocal invalid_ref_format_count
+            nonlocal final_items_with_no_ref_count
             raw_items = payload.get(key)
             if not isinstance(raw_items, list):
                 return
@@ -756,15 +834,22 @@ class SummaryService:
                 if not isinstance(item, dict):
                     continue
                 message_id_raw = str(item.get("message_id") or "").strip()
-                message_id = message_id_raw if _is_valid_snowflake(message_id_raw) else None
-                if message_id_raw and message_id is None:
-                    logged_invalid_refs = True
+                message_id = None
+                if message_id_raw:
+                    if not _is_valid_snowflake(message_id_raw):
+                        invalid_ref_format_count += 1
+                    elif await ref_exists(message_id_raw):
+                        message_id = message_id_raw
+                    else:
+                        invalid_ref_not_in_channel_count += 1
                 ts = normalize_ts(item.get("ts"), [message_id] if message_id else [], None)
                 if message_id and not ts:
                     ts = message_ts_map.get(message_id)
                 reason = str(item.get("reason") or "").strip()
                 if not reason:
                     continue
+                if message_id is None:
+                    final_items_with_no_ref_count += 1
                 sanitized.append(
                     {
                         "author_id": item.get("author_id"),
@@ -775,14 +860,21 @@ class SummaryService:
                 )
             payload[key] = sanitized
 
-        sanitize_items("moments")
-        sanitize_items("quotes")
-        sanitize_items("iconic_quotes")
-        sanitize_items("dynamics")
-        sanitize_impacts("degrade_list")
-        sanitize_impacts("invigorate_list")
-        if logged_invalid_refs:
-            logger.warning("Summary AI provided invalid refs; sanitized output")
+        await sanitize_items("moments")
+        await sanitize_items("quotes")
+        await sanitize_items("iconic_quotes")
+        await sanitize_items("dynamics")
+        await sanitize_impacts("degrade_list")
+        await sanitize_impacts("invigorate_list")
+        logger.info(
+            "Summary AI ref diagnostics: invalid_primary_ref=%s invalid_ref_format=%s invalid_ref_not_in_channel=%s "
+            "fallback_nearest_applied=%s items_no_ref=%s",
+            invalid_primary_ref_count,
+            invalid_ref_format_count,
+            invalid_ref_not_in_channel_count,
+            fallback_nearest_applied_count,
+            final_items_with_no_ref_count,
+        )
 
     def _extract_themes(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[str]:
         counts: dict[str, int] = {}
@@ -1085,10 +1177,14 @@ def _dedupe_summary_items(
     output: list[Any] = []
     seen_text: set[str] = set()
     seen_keywords: list[set[str]] = []
+    seen_message_ids: set[str] = set()
 
     def add_item(item: Any) -> None:
         text = item.text
         if text in seen_text:
+            return
+        message_ids = {str(mid) for mid in (getattr(item, "message_ids", []) or []) if str(mid)}
+        if message_ids and seen_message_ids.intersection(message_ids):
             return
         keywords = set(_extract_keywords(_clean_text(text)))
         if keywords:
@@ -1097,6 +1193,7 @@ def _dedupe_summary_items(
                     return
             seen_keywords.append(keywords)
         seen_text.add(text)
+        seen_message_ids.update(message_ids)
         output.append(item)
 
     for item in list(primary) + list(fallback):

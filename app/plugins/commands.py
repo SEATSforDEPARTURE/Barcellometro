@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -1987,16 +1988,35 @@ def setup(registry: ServiceRegistry) -> None:
 
         details_color = await _get_details_embed_color(profile)
 
+        def is_valid_snowflake(value: str) -> bool:
+            return bool(re.fullmatch(r"\d{17,20}", value))
+
         async def resolve_primary_ref(ts: str | None, message_ids: list[str]) -> str | None:
             for mid in message_ids:
-                if str(mid).isdigit():
-                    return str(mid)
+                mid_str = str(mid)
+                if not is_valid_snowflake(mid_str):
+                    continue
+                if await database.message_exists_in_channel(
+                    channel_id=str(interaction.channel_id),
+                    message_id=mid_str,
+                ):
+                    return mid_str
             parsed = _parse_iso_ts(ts)
-            if parsed is None:
-                return None
-            return await database.fetch_nearest_message_id(
+            start_ts = start_dt_utc.isoformat()
+            end_ts = end_dt_utc.isoformat()
+            if parsed is not None:
+                return await database.fetch_nearest_message_id_in_range(
+                    channel_id=str(interaction.channel_id),
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                    ts=parsed.isoformat(),
+                )
+            midpoint = start_dt_utc + (end_dt_utc - start_dt_utc) / 2
+            return await database.fetch_nearest_message_id_in_range(
                 channel_id=str(interaction.channel_id),
-                ts=parsed.isoformat(),
+                start_ts=start_ts,
+                end_ts=end_ts,
+                ts=midpoint.isoformat(),
             )
 
         moment_primary: dict[int, str | None] = {}
