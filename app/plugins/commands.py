@@ -850,12 +850,18 @@ def setup(registry: ServiceRegistry) -> None:
             build_embeds: Callable[[bool], list[discord.Embed]],
             page: int,
             evidence_mode: bool,
+            report_id: str,
+            tier: str,
+            voice_context: bool,
         ) -> None:
             super().__init__(timeout=600)
             self._owner_id = owner_id
             self._build_embeds = build_embeds
             self._page = page
             self._evidence_mode = evidence_mode
+            self._report_id = report_id
+            self._tier = tier
+            self._voice_context = voice_context
             self._prev_button = discord.ui.Button(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
             self._next_button = discord.ui.Button(label="Next ➡️", style=discord.ButtonStyle.secondary)
             self._evidence_button = discord.ui.Button(label=self._evidence_label(), style=discord.ButtonStyle.primary)
@@ -875,9 +881,16 @@ def setup(registry: ServiceRegistry) -> None:
             total_pages = len(embeds)
             self._prev_button.disabled = self._page <= 0
             self._next_button.disabled = self._page >= total_pages - 1
-            self._prev_button.custom_id = f"riassunto:prev:{self._page}:{int(self._evidence_mode)}"
-            self._next_button.custom_id = f"riassunto:next:{self._page}:{int(self._evidence_mode)}"
-            self._evidence_button.custom_id = f"riassunto:evidence:{self._page}:{int(self._evidence_mode)}"
+            voice_flag = "voice" if self._voice_context else "text"
+            self._prev_button.custom_id = (
+                f"riassunto:prev:{self._report_id}:{self._page}:{int(self._evidence_mode)}:{self._tier}:{voice_flag}"
+            )
+            self._next_button.custom_id = (
+                f"riassunto:next:{self._report_id}:{self._page}:{int(self._evidence_mode)}:{self._tier}:{voice_flag}"
+            )
+            self._evidence_button.custom_id = (
+                f"riassunto:evidence:{self._report_id}:{self._page}:{int(self._evidence_mode)}:{self._tier}:{voice_flag}"
+            )
             self._evidence_button.label = self._evidence_label()
 
         async def _ensure_owner(self, interaction: discord.Interaction) -> bool:
@@ -1692,7 +1705,7 @@ def setup(registry: ServiceRegistry) -> None:
         if not await check_permission(interaction, "riassunto"):
             return
         if not interaction.response.is_done():
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(ephemeral=True, thinking=True)
 
         command_config = await entitlements.get_command_profile_config(interaction.user, "riassunto")
         profile, winner_role_id = await entitlements.resolve_profile_with_role_id(interaction.user)
@@ -2056,15 +2069,20 @@ def setup(registry: ServiceRegistry) -> None:
             return embeds
 
         embeds = build_embeds(False)
+        report_id = str(uuid4())
         view = _RiassuntoView(
             owner_id=interaction.user.id,
             build_embeds=build_embeds,
             page=0,
             evidence_mode=False,
+            report_id=report_id,
+            tier=profile,
+            voice_context=channel_is_voice,
         )
 
         logger.info(
-            "riassunto: report user=%s channel=%s range=%s-%s tier=%s ai=%s cache=%s voice=%s",
+            "riassunto: report id=%s user=%s channel=%s range=%s-%s tier=%s ai=%s cache=%s voice=%s",
+            report_id,
             interaction.user.id,
             interaction.channel_id,
             start_dt_utc.isoformat(),
@@ -2075,7 +2093,20 @@ def setup(registry: ServiceRegistry) -> None:
             channel_is_voice,
         )
 
-        await interaction.followup.send(embeds=[status_embed, embeds[0]], view=view)
+        async def try_send_dm() -> bool:
+            try:
+                await interaction.user.send(embeds=[status_embed, embeds[0]], view=view)
+                return True
+            except (discord.Forbidden, discord.HTTPException):
+                return False
+
+        if await try_send_dm():
+            await interaction.followup.send("✅ Ti ho inviato il riassunto in DM.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                "❌ Non posso inviarti DM. Abilita i messaggi diretti da questo server e riprova.",
+                ephemeral=True,
+            )
 
     @riassunto_group.command(name="ultimi", description="Riassunto degli ultimi N minuti/ore/giorni/settimane")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo")
