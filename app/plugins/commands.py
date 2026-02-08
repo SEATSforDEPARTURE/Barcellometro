@@ -950,11 +950,11 @@ def setup(registry: ServiceRegistry) -> None:
     ) -> str:
         text = moment.text
         if include_names:
-            name = display_name or moment.actor_display
+            name = display_name
+            if name and name.lower() in {"un utente", "utente", "unknown"}:
+                name = None
             if name:
                 text = f"{name}: {text}"
-            else:
-                text = f"(nome non disponibile): {text}"
         time_link = _format_summary_time_link(
             moment.ts,
             primary_id,
@@ -966,53 +966,58 @@ def setup(registry: ServiceRegistry) -> None:
     def _format_summary_quote_line(
         *,
         quote: SummaryQuote,
-        guild_id: int,
-        channel_id: int,
-        include_names: bool,
         display_name: str | None,
-        link_limit: int,
-        primary_id: str | None,
+        message_link: str | None,
+        text_override: str | None,
     ) -> str:
-        if include_names:
-            speaker = display_name or quote.actor_display or "(nome non disponibile)"
+        text = text_override or quote.text
+        if display_name and display_name.lower() in {"un utente", "utente", "unknown"}:
+            display_name = None
+        if display_name:
+            speaker = display_name
+        elif message_link:
+            speaker = message_link
         else:
-            speaker = "un utente"
-        text = f"“{quote.text}” — {speaker}"
-        time_link = _format_summary_time_link(
-            quote.ts,
-            primary_id,
-            guild_id=guild_id,
-            channel_id=channel_id,
-        )
-        return f"{time_link} — {text}"
+            speaker = ""
+        return f"“{text}” — {speaker}".rstrip(" —")
 
     def _format_summary_dynamics_line(
         *,
         dynamic: SummaryItem,
-        guild_id: int,
-        channel_id: int,
         include_names: bool,
-        display_name: str | None,
-        link_limit: int,
-        primary_id: str | None,
+        display_names: list[str],
+        message_links: list[str],
     ) -> str:
         text = dynamic.text
-        if include_names:
-            if dynamic.actors_display:
-                names = ", ".join(dynamic.actors_display)
-            else:
-                names = display_name or dynamic.actor_display
-            if names:
-                text = f"{names}: {text}"
-            else:
-                text = f"(nome non disponibile): {text}"
-        time_link = _format_summary_time_link(
-            dynamic.ts,
-            primary_id,
-            guild_id=guild_id,
-            channel_id=channel_id,
-        )
-        return f"{time_link} — {text}"
+        suffix = ""
+        if message_links:
+            suffix = " " + " ".join(message_links)
+        if include_names and display_names:
+            clean_names = [
+                name for name in display_names if name.lower() not in {"un utente", "utente", "unknown"}
+            ]
+            if clean_names:
+                suffix += f" (coinvolti: {', '.join(clean_names)})"
+        return f"{text}{suffix}"
+
+    def _format_message_link(*, guild_id: int, channel_id: int, message_id: str | None) -> str | None:
+        if not message_id:
+            return None
+        jump = _jump_link(guild_id, channel_id, message_id)
+        return f"[msg]({jump})"
+
+    def _select_quote_text(content: str, max_len: int = 220) -> str:
+        cleaned = " ".join((content or "").split())
+        if not cleaned:
+            return ""
+        sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+        candidates = [sentence for sentence in sentences if sentence]
+        if not candidates:
+            return cleaned
+        within_limit = [sentence for sentence in candidates if len(sentence) <= max_len]
+        if within_limit:
+            return min(within_limit, key=len)
+        return min(candidates, key=len)
 
     def _format_summary_impact_line(
         *,
@@ -2065,6 +2070,41 @@ def setup(registry: ServiceRegistry) -> None:
                 ts=midpoint.isoformat(),
             )
 
+        message_cache: dict[str, dict[str, Any]] = {}
+
+        async def fetch_message_record(message_id: str) -> dict[str, Any] | None:
+            if message_id in message_cache:
+                return message_cache[message_id]
+            row = await database.fetch_message_by_id(
+                channel_id=str(interaction.channel_id),
+                message_id=message_id,
+            )
+            if row:
+                record = {"author_id": row["author_id"], "content": row["content"]}
+                message_cache[message_id] = record
+                return record
+            return None
+
+        async def resolve_author_display(message_id: str | None) -> str | None:
+            if not message_id or interaction.guild is None:
+                return None
+            record = await fetch_message_record(message_id)
+            if not record:
+                return None
+            author_id = record.get("author_id")
+            if not author_id:
+                return None
+            display_name = await database.fetch_user_display_name(
+                guild_id=str(interaction.guild_id),
+                user_id=str(author_id),
+            )
+            if display_name:
+                return display_name
+            member = interaction.guild.get_member(int(author_id))
+            if member:
+                return _resolve_display_name(member)
+            return None
+
         moment_primary: dict[int, str | None] = {}
         for moment in summary.moments:
             moment_primary[id(moment)] = await resolve_primary_ref(moment.ts, moment.message_ids)
@@ -2082,6 +2122,54 @@ def setup(registry: ServiceRegistry) -> None:
             candidate_ids = [impact.message_id] if impact.message_id else []
             impact_primary[id(impact)] = await resolve_primary_ref(impact.ts, candidate_ids)
 
+        moment_display: dict[int, str | None] = {}
+        for moment in summary.moments:
+            moment_display[id(moment)] = await resolve_author_display(moment_primary.get(id(moment)))
+
+        quote_display: dict[int, str | None] = {}
+        quote_texts: dict[int, str] = {}
+        for quote in summary.quotes:
+            primary_id = quote_primary.get(id(quote))
+            quote_display[id(quote)] = await resolve_author_display(primary_id)
+            if primary_id:
+                record = await fetch_message_record(primary_id)
+                if record and record.get("content"):
+                    quote_texts[id(quote)] = _select_quote_text(record["content"])
+
+        dynamic_names: dict[int, list[str]] = {}
+        dynamic_links: dict[int, list[str]] = {}
+        for dynamic in summary.dynamics:
+            refs = [str(mid) for mid in (dynamic.message_ids or []) if str(mid)]
+            valid_refs: list[str] = []
+            for ref in refs:
+                if not is_valid_snowflake(ref):
+                    continue
+                if await database.message_exists_in_channel(
+                    channel_id=str(interaction.channel_id),
+                    message_id=ref,
+                ):
+                    valid_refs.append(ref)
+            if not valid_refs:
+                primary_id = dynamic_primary.get(id(dynamic))
+                if primary_id:
+                    valid_refs = [primary_id]
+            links = [
+                _format_message_link(
+                    guild_id=interaction.guild_id,
+                    channel_id=interaction.channel_id,
+                    message_id=ref,
+                )
+                for ref in valid_refs
+            ]
+            dynamic_links[id(dynamic)] = [link for link in links if link]
+            if include_names:
+                names: list[str] = []
+                for ref in valid_refs[:3]:
+                    name = await resolve_author_display(ref)
+                    if name and name not in names:
+                        names.append(name)
+                dynamic_names[id(dynamic)] = names
+
         def build_embeds() -> list[discord.Embed]:
             sections_map: dict[str, list[tuple[str, str, int]]] = {}
 
@@ -2094,7 +2182,7 @@ def setup(registry: ServiceRegistry) -> None:
                     guild_id=interaction.guild_id,
                     channel_id=interaction.channel_id,
                     include_names=include_names,
-                    display_name=name_map.get(moment.author_id or ""),
+                    display_name=moment_display.get(id(moment)),
                     link_limit=1,
                     primary_id=moment_primary.get(id(moment)),
                 )
@@ -2109,12 +2197,13 @@ def setup(registry: ServiceRegistry) -> None:
             quote_lines = [
                 _format_summary_quote_line(
                     quote=quote,
-                    guild_id=interaction.guild_id,
-                    channel_id=interaction.channel_id,
-                    include_names=include_names,
-                    display_name=name_map.get(quote.author_id or ""),
-                    link_limit=1,
-                    primary_id=quote_primary.get(id(quote)),
+                    display_name=quote_display.get(id(quote)),
+                    message_link=_format_message_link(
+                        guild_id=interaction.guild_id,
+                        channel_id=interaction.channel_id,
+                        message_id=quote_primary.get(id(quote)),
+                    ),
+                    text_override=quote_texts.get(id(quote)),
                 )
                 for quote in summary.quotes
             ]
@@ -2124,12 +2213,9 @@ def setup(registry: ServiceRegistry) -> None:
             dynamic_lines = [
                 _format_summary_dynamics_line(
                     dynamic=dynamic,
-                    guild_id=interaction.guild_id,
-                    channel_id=interaction.channel_id,
                     include_names=include_names,
-                    display_name=name_map.get(dynamic.author_id or ""),
-                    link_limit=1,
-                    primary_id=dynamic_primary.get(id(dynamic)),
+                    display_names=dynamic_names.get(id(dynamic), []),
+                    message_links=dynamic_links.get(id(dynamic), []),
                 )
                 for dynamic in summary.dynamics
             ]

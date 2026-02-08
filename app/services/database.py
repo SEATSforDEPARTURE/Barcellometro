@@ -473,6 +473,43 @@ class DatabaseService:
         )
         return row is not None
 
+    async def fetch_message_by_id(
+        self,
+        *,
+        channel_id: str,
+        message_id: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT message_id, author_id, content
+            FROM messages
+            WHERE channel_id = ? AND message_id = ?
+            LIMIT 1
+            """,
+            (channel_id, message_id),
+        )
+
+    async def fetch_user_display_name(self, *, guild_id: str, user_id: str) -> Optional[str]:
+        row = await self.fetchone(
+            """
+            SELECT gm.nickname, u.display_name, u.global_name, u.username
+            FROM users u
+            LEFT JOIN guild_memberships gm
+                ON gm.user_id = u.user_id AND gm.guild_id = ?
+            WHERE u.user_id = ?
+            LIMIT 1
+            """,
+            (guild_id, user_id),
+        )
+        if not row:
+            return None
+        return (
+            row["nickname"]
+            or row["display_name"]
+            or row["global_name"]
+            or row["username"]
+        )
+
     async def fetch_voice_sessions_in_range(
         self,
         *,
