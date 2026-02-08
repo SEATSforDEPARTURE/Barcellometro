@@ -2220,7 +2220,8 @@ def setup(registry: ServiceRegistry) -> None:
             await interaction.followup.send("✅ Ti ho inviato il riassunto in DM.", ephemeral=True)
         else:
             await interaction.followup.send(
-                "❌ Non posso inviarti DM. Abilita i messaggi diretti da questo server e riprova.",
+                content="⚠️ Non posso inviarti DM, quindi ti mostro il riassunto qui in modalità privata.",
+                embeds=[status_embed, *embeds],
                 ephemeral=True,
             )
 
