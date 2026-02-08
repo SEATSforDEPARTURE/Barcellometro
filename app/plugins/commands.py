@@ -906,8 +906,12 @@ def setup(registry: ServiceRegistry) -> None:
         primary_id: str | None,
     ) -> str:
         text = moment.text
-        if include_names and display_name:
-            text = f"{display_name}: {text}"
+        if include_names:
+            name = display_name or moment.actor_display
+            if name:
+                text = f"{name}: {text}"
+            else:
+                text = f"(nome non disponibile): {text}"
         time_link = _format_summary_time_link(
             moment.ts,
             primary_id,
@@ -926,7 +930,10 @@ def setup(registry: ServiceRegistry) -> None:
         link_limit: int,
         primary_id: str | None,
     ) -> str:
-        speaker = display_name if include_names and display_name else "un utente"
+        if include_names:
+            speaker = display_name or quote.actor_display or "(nome non disponibile)"
+        else:
+            speaker = "un utente"
         text = f"“{quote.text}” — {speaker}"
         time_link = _format_summary_time_link(
             quote.ts,
@@ -947,8 +954,15 @@ def setup(registry: ServiceRegistry) -> None:
         primary_id: str | None,
     ) -> str:
         text = dynamic.text
-        if include_names and display_name:
-            text = f"{display_name}: {text}"
+        if include_names:
+            if dynamic.actors_display:
+                names = ", ".join(dynamic.actors_display)
+            else:
+                names = display_name or dynamic.actor_display
+            if names:
+                text = f"{names}: {text}"
+            else:
+                text = f"(nome non disponibile): {text}"
         time_link = _format_summary_time_link(
             dynamic.ts,
             primary_id,
@@ -2206,7 +2220,8 @@ def setup(registry: ServiceRegistry) -> None:
             await interaction.followup.send("✅ Ti ho inviato il riassunto in DM.", ephemeral=True)
         else:
             await interaction.followup.send(
-                "❌ Non posso inviarti DM. Abilita i messaggi diretti da questo server e riprova.",
+                content="⚠️ Non posso inviarti DM, quindi ti mostro il riassunto qui in modalità privata.",
+                embeds=[status_embed, *embeds],
                 ephemeral=True,
             )
 
