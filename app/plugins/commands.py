@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from app.services.barcello import BarcelloService
 from app.services.barcello_calibration import BarcelloCalibrationService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope, IngestService
+from app.services.summary import SummaryImpact, SummaryItem, SummaryQuote, SummaryService
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,8 @@ def setup(registry: ServiceRegistry) -> None:
     registry.register("barcello", barcello)
     barcello_calibration = BarcelloCalibrationService(database)
     registry.register("barcello_calibration", barcello_calibration)
+    summary_service = SummaryService(database, ai_service=registry.get("ai") if registry.has("ai") else None)
+    registry.register("summary", summary_service)
     retention = registry.get("retention")
     backfill = registry.get("backfill")
     guard = registry.get("guard")
@@ -48,6 +52,7 @@ def setup(registry: ServiceRegistry) -> None:
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Ingest da canale vocale")
     privacy_group = app_commands.Group(name="privacy", description="Privacy per voice ingest")
     status_group = app_commands.Group(name="status", description="Stato servizi")
+    riassunto_group = app_commands.Group(name="riassunto", description="Riassunto conversazione")
     barcellometro_group.add_command(role_group)
     barcellometro_group.add_command(stt_group)
     barcellometro_group.add_command(translate_group)
@@ -124,6 +129,52 @@ def setup(registry: ServiceRegistry) -> None:
             return "Delicata. 😬 Il clima richiede cautela."
         return "Critica. 🚨 Situazione tesa e facilmente infiammabile."
 
+    def _build_period_prefix(
+        period_label: str,
+        *,
+        start_dt: datetime,
+        end_dt: datetime,
+        start_ts: str,
+        end_ts: str,
+    ) -> str:
+        if period_label == "ieri":
+            return "Ieri"
+        if period_label == "oggi":
+            return "Oggi"
+        if period_label == "ultimi":
+            delta = end_dt - start_dt
+            if delta.days >= 7:
+                weeks = max(1, int(round(delta.days / 7)))
+                unit = "settimane" if weeks > 1 else "settimana"
+                return f"Negli ultimi {weeks} {unit}"
+            if delta.days >= 1:
+                days = max(1, delta.days)
+                unit = "giorni" if days > 1 else "giorno"
+                return f"Negli ultimi {days} {unit}"
+            hours = max(1, int(delta.total_seconds() // 3600))
+            if hours >= 1:
+                unit = "ore" if hours > 1 else "ora"
+                return f"Negli ultimi {hours} {unit}"
+            minutes = max(1, int(delta.total_seconds() // 60))
+            unit = "minuti" if minutes > 1 else "minuto"
+            return f"Negli ultimi {minutes} {unit}"
+        if period_label == "range":
+            start_label = _format_italian_ts(start_ts)
+            end_label = _format_italian_ts(end_ts)
+            return f"Tra {start_label} e {end_label}"
+        return "Nel periodo indicato"
+
+    def _local_period_description(prefix: str, color_label: str) -> str:
+        color = (color_label or "nero").lower()
+        mapping = {
+            "verde": ("sano", "🙂"),
+            "giallo": ("delicato", "😐"),
+            "rosso": ("teso", "😟"),
+            "nero": ("critico", "😨"),
+        }
+        adjective, emoji = mapping.get(color, ("critico", "😨"))
+        return f"{prefix} il barcello è stato {adjective} {emoji}."
+
     def _alert_message(score: int, color_label: str | None = None) -> str:
         if color_label:
             normalized = color_label.lower()
@@ -188,8 +239,56 @@ def setup(registry: ServiceRegistry) -> None:
     def _with_spacing(text: str) -> str:
         return text
 
+    def _split_field_chunks(value: str, max_len: int = 1024) -> list[str]:
+        if len(value) <= max_len:
+            return [value]
+
+        def split_plain(text: str, limit: int) -> list[str]:
+            lines = text.splitlines() or [text]
+            chunks: list[str] = []
+            current = ""
+            for line in lines:
+                candidate = f"{current}\n{line}" if current else line
+                if len(candidate) <= limit:
+                    current = candidate
+                    continue
+                if current:
+                    chunks.append(current)
+                    current = ""
+                while len(line) > limit:
+                    chunks.append(line[:limit])
+                    line = line[limit:]
+                current = line
+            if current:
+                chunks.append(current)
+            return chunks
+
+        stripped = value.strip()
+        if stripped.startswith("```"):
+            inner = stripped[3:]
+            if inner.startswith("\n"):
+                inner = inner[1:]
+            if inner.endswith("```"):
+                inner = inner[:-3]
+            if inner.endswith("\n"):
+                inner = inner[:-1]
+            prefix = "```\n"
+            suffix = "\n```"
+            inner_limit = max_len - len(prefix) - len(suffix)
+            inner_chunks = split_plain(inner, inner_limit)
+            return [f"{prefix}{chunk}{suffix}" for chunk in inner_chunks]
+        return split_plain(value, max_len)
+
     def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
-        embed.add_field(name=name, value=value, inline=False)
+        chunks = _split_field_chunks(value, 1024)
+        available = 25 - len(embed.fields)
+        if available <= 0:
+            return
+        if len(chunks) > available:
+            chunks = chunks[:available]
+        for idx, chunk in enumerate(chunks):
+            field_name = name if idx == 0 else f"{name} (cont.)"
+            embed.add_field(name=field_name, value=chunk, inline=False)
 
     def _parse_hex_color(raw: str | None) -> int | None:
         if not raw:
@@ -253,8 +352,6 @@ def setup(registry: ServiceRegistry) -> None:
             text = line.strip()
             if not text:
                 continue
-            if len(text) > 120:
-                text = f"{text[:117]}..."
             cleaned.append(text)
         return "\n".join(f"• {line}" for line in cleaned)
 
@@ -315,8 +412,6 @@ def setup(registry: ServiceRegistry) -> None:
                 text = text.lstrip("•").strip()
             if text.startswith("• •"):
                 text = text.replace("• •", "•", 1).strip()
-            if len(text) > 120:
-                text = f"{text[:117]}..."
             formatted.append(f"• {text}")
         return "\n".join(formatted)
 
@@ -459,6 +554,92 @@ def setup(registry: ServiceRegistry) -> None:
             or getattr(member, "name", None)
             or "Utente"
         )
+
+    ROME_TZ = ZoneInfo("Europe/Rome")
+
+    def _parse_iso_ts(ts: str | None) -> datetime | None:
+        if not ts or not str(ts).strip():
+            return None
+        raw = str(ts).strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    def _format_italian_ts(ts: str | None) -> str:
+        parsed = _parse_iso_ts(ts)
+        if parsed is None:
+            return ""
+        local = parsed.astimezone(ROME_TZ)
+        return local.strftime("%d/%m/%Y %H:%M")
+
+    def _format_italian_time(ts: str | None) -> str:
+        parsed = _parse_iso_ts(ts)
+        if parsed is None:
+            return ""
+        local = parsed.astimezone(ROME_TZ)
+        return local.strftime("%H:%M")
+
+    def _parse_italian_datetime(value: str) -> datetime | None:
+        raw = value.strip()
+        for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S"):
+            try:
+                parsed = datetime.strptime(raw, fmt)
+                return parsed.replace(tzinfo=ROME_TZ)
+            except ValueError:
+                continue
+        return None
+
+    def _jump_link(guild_id: int, channel_id: int, message_id: str) -> str:
+        return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
+
+    def _build_riassunto_status_embed(
+        *,
+        result: BarcelloResult,
+        channel_label: str,
+        period_label: str,
+        period_description: str,
+    ) -> discord.Embed:
+        color_label = (result.color or "nero").lower()
+        color_map = {
+            "verde": (0x2ECC71, "🟢", "verde"),
+            "giallo": (0xF1C40F, "🟡", "giallo"),
+            "rosso": (0xE74C3C, "🔴", "rosso"),
+            "nero": (0x2C2F33, "⚫", "nero"),
+        }
+        embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
+        title = f"🫛 STATO BARCELLO “{channel_label}”"
+        window_start = _format_italian_ts(result.window_start_ts)
+        window_end = _format_italian_ts(result.window_end_ts)
+        range_prefix = ""
+        if period_label == "ieri":
+            range_prefix = "Ieri "
+        elif period_label == "oggi":
+            range_prefix = "Oggi "
+        window_label = f"🕒 **{range_prefix}{window_start} → {window_end}**"
+        alert_line = f"**{emoji} ALLERTA {label.upper()}**"
+        description_lines = [
+            window_label,
+            "",
+            alert_line,
+        ]
+        embed = discord.Embed(
+            title=title,
+            description="\n".join(description_lines),
+            color=embed_color,
+        )
+        bar = _render_health_bar(result.score, emoji)
+        _add_section(
+            embed,
+            name="🫀 PUNTI SALUTE",
+            value=_with_spacing(f"{bar} ({result.score}/100)\n{period_description}"),
+        )
+        return embed
 
     MIN_MSG_TOTAL_CHANNEL = 8
     MIN_MSG_TOTAL_PAIR = 6
@@ -699,6 +880,108 @@ def setup(registry: ServiceRegistry) -> None:
                 _add_section(embed, name="📌 **NOTE**", value=_with_spacing(note_value))
         embed.set_footer(text="Barcellometro")
         return embed
+
+    def _format_summary_time_link(
+        ts: str | None,
+        message_id: str | None,
+        *,
+        guild_id: int,
+        channel_id: int,
+        placeholder: str = "--:--",
+    ) -> str:
+        time_label = _format_italian_time(ts) or placeholder
+        if message_id:
+            jump = _jump_link(guild_id, channel_id, message_id)
+            return f"**[{time_label}]({jump})**"
+        return f"**{time_label}**"
+
+    def _format_summary_moment_line(
+        *,
+        moment: SummaryItem,
+        guild_id: int,
+        channel_id: int,
+        include_names: bool,
+        display_name: str | None,
+        link_limit: int,
+        primary_id: str | None,
+    ) -> str:
+        text = moment.text
+        if include_names and display_name:
+            text = f"{display_name}: {text}"
+        time_link = _format_summary_time_link(
+            moment.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {text}"
+
+    def _format_summary_quote_line(
+        *,
+        quote: SummaryQuote,
+        guild_id: int,
+        channel_id: int,
+        include_names: bool,
+        display_name: str | None,
+        link_limit: int,
+        primary_id: str | None,
+    ) -> str:
+        speaker = display_name if include_names and display_name else "un utente"
+        text = f"“{quote.text}” — {speaker}"
+        time_link = _format_summary_time_link(
+            quote.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {text}"
+
+    def _format_summary_dynamics_line(
+        *,
+        dynamic: SummaryItem,
+        guild_id: int,
+        channel_id: int,
+        include_names: bool,
+        display_name: str | None,
+        link_limit: int,
+        primary_id: str | None,
+    ) -> str:
+        text = dynamic.text
+        if include_names and display_name:
+            text = f"{display_name}: {text}"
+        time_link = _format_summary_time_link(
+            dynamic.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {text}"
+
+    def _format_summary_impact_line(
+        *,
+        impact: SummaryImpact,
+        guild_id: int,
+        channel_id: int,
+        display_name: str | None,
+        link_limit: int,
+        prefix: str,
+        primary_id: str | None,
+    ) -> str:
+        name = display_name or "utente"
+        time_link = _format_summary_time_link(
+            impact.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {prefix} {name} — {impact.reason}"
+
+    def _estimate_embed_size(embed: discord.Embed) -> int:
+        total = len(embed.title or "") + len(embed.description or "")
+        for field in embed.fields:
+            total += len(field.name or "") + len(field.value or "")
+        total += len(embed.footer.text or "") if embed.footer else 0
+        return total
 
     class _BarcelloFeedbackView(discord.ui.View):
         def __init__(
@@ -1467,6 +1750,517 @@ def setup(registry: ServiceRegistry) -> None:
         )
         await interaction.response.send_message(message, ephemeral=True)
 
+    async def _run_riassunto(
+        interaction: discord.Interaction,
+        *,
+        start_dt: datetime,
+        end_dt: datetime,
+        period_label: str,
+    ) -> None:
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.")
+            return
+        if not await check_permission(interaction, "riassunto"):
+            return
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
+        command_config = await entitlements.get_command_profile_config(interaction.user, "riassunto")
+        profile, winner_role_id = await entitlements.resolve_profile_with_role_id(interaction.user)
+        if not command_config["allowed"]:
+            dm_text = command_config["messages"].get("dm_text", "Serve almeno PLUS per usare /riassunto.")
+            await send_ephemeral(interaction, dm_text)
+            return
+
+        summary_config = await summary_service.get_config()
+        tier_config = summary_config.get("tiers", {}).get(profile, summary_config.get("tiers", {}).get("role1", {}))
+        tier_label = tier_config.get("label", "PLUS")
+
+        start_dt_utc = start_dt.astimezone(timezone.utc)
+        end_dt_utc = end_dt.astimezone(timezone.utc)
+        if end_dt_utc < start_dt_utc:
+            start_dt_utc, end_dt_utc = end_dt_utc, start_dt_utc
+
+        channel = interaction.channel
+        if channel is None or not isinstance(channel, discord.abc.GuildChannel):
+            await send_ephemeral(interaction, "Canale non valido.")
+            return
+
+        channel_is_voice = isinstance(channel, (discord.VoiceChannel, discord.StageChannel))
+        channel_label = getattr(channel, "name", "canale")
+
+        barcello_result = await barcello.compute_channel_range(
+            str(interaction.guild_id),
+            str(interaction.channel_id),
+            start_dt_utc.isoformat(),
+            end_dt_utc.isoformat(),
+        )
+
+        include_names = False
+        if profile == "mod":
+            include_names = True
+        else:
+            include_names = (barcello_result.color or "").lower() == "verde"
+
+        period_prefix = _build_period_prefix(
+            period_label,
+            start_dt=start_dt_utc,
+            end_dt=end_dt_utc,
+            start_ts=barcello_result.window_start_ts,
+            end_ts=barcello_result.window_end_ts,
+        )
+        period_description = _local_period_description(period_prefix, barcello_result.color)
+
+        max_messages = int(summary_config.get("max_messages", 600))
+        messages_rows = await database.fetch_messages_in_range(
+            channel_id=str(interaction.channel_id),
+            start_ts=start_dt_utc.isoformat(),
+            end_ts=end_dt_utc.isoformat(),
+            limit=max_messages,
+        )
+        latest_row = await database.fetch_latest_message_in_range(
+            channel_id=str(interaction.channel_id),
+            start_ts=start_dt_utc.isoformat(),
+            end_ts=end_dt_utc.isoformat(),
+        )
+        max_message_ts = latest_row["ts"] if latest_row else None
+
+        messages: list[dict[str, Any]] = []
+        voice_segments = 0
+        for row in messages_rows:
+            embeds_raw = row["embeds_json"] if "embeds_json" in row.keys() else None
+            embeds = json.loads(embeds_raw) if embeds_raw else []
+            if any(isinstance(embed, dict) and embed.get("source") == "voice_ingest_stt" for embed in embeds):
+                voice_segments += 1
+            messages.append(
+                {
+                    "message_id": row["message_id"],
+                    "author_id": row["author_id"],
+                    "ts": row["ts"],
+                    "content": row["content"],
+                    "embeds": embeds,
+                }
+            )
+
+        voice_lines: list[str] = []
+        privacy_gaps: list[tuple[datetime, datetime]] = []
+        voice_minutes = 0
+        voice_sessions = 0
+        if channel_is_voice:
+            sessions = await database.fetch_voice_sessions_in_range(
+                guild_id=str(interaction.guild_id),
+                voice_channel_id=str(interaction.channel_id),
+                start_ts=start_dt_utc.isoformat(),
+                end_ts=end_dt_utc.isoformat(),
+            )
+            voice_sessions = len(sessions)
+            for idx, session in enumerate(sessions, start=1):
+                started = _parse_iso_ts(session["started_ts"])
+                ended_raw = session["ended_ts"]
+                if ended_raw:
+                    ended = _parse_iso_ts(ended_raw)
+                    duration = int((ended - started).total_seconds() / 60)
+                    label = f"CHIAMATA {idx}: {duration}m" if voice_sessions > 1 else f"CHIAMATA: {duration}m"
+                    voice_lines.append(label)
+                    overlap_start = max(start_dt_utc, started)
+                    overlap_end = min(end_dt_utc, ended)
+                    if overlap_end > overlap_start:
+                        voice_minutes += int((overlap_end - overlap_start).total_seconds() / 60)
+                else:
+                    label = f"CHIAMATA {idx}: chiamata in corso" if voice_sessions > 1 else "CHIAMATA: chiamata in corso"
+                    voice_lines.append(label)
+                    overlap_start = max(start_dt_utc, started)
+                    overlap_end = end_dt_utc
+                    if overlap_end > overlap_start:
+                        voice_minutes += int((overlap_end - overlap_start).total_seconds() / 60)
+
+            last_privacy = await database.fetch_last_privacy_event_before(
+                channel_id=str(interaction.channel_id),
+                ts=start_dt_utc.isoformat(),
+            )
+            privacy_on = False
+            if last_privacy is not None:
+                privacy_on = last_privacy["event_type"] == "voice.privacy_on"
+            privacy_events = await database.fetch_events_in_range(
+                channel_id=str(interaction.channel_id),
+                start_ts=start_dt_utc.isoformat(),
+                end_ts=end_dt_utc.isoformat(),
+                limit=200,
+            )
+            gap_start: datetime | None = start_dt_utc if privacy_on else None
+            for event in privacy_events:
+                if event["event_type"] not in {"voice.privacy_on", "voice.privacy_off"}:
+                    continue
+                event_ts = _parse_iso_ts(event["ts"])
+                if event["event_type"] == "voice.privacy_on" and gap_start is None:
+                    gap_start = event_ts
+                if event["event_type"] == "voice.privacy_off" and gap_start is not None:
+                    privacy_gaps.append((gap_start, event_ts))
+                    gap_start = None
+            if gap_start is not None:
+                privacy_gaps.append((gap_start, end_dt_utc))
+
+        metrics = dict(barcello_result.metrics or {})
+        metrics.update(
+            {
+                "voice_minutes": voice_minutes,
+                "voice_sessions": voice_sessions,
+                "voice_segments": voice_segments,
+            }
+        )
+
+        ai_allowed = False
+        ai_reason = "disabled"
+        if profile in {"role2", "role3", "mod"}:
+            ai_enabled = await entitlements.is_feature_allowed(interaction.user, "ai")
+            ai_service_enabled = ai_service.is_enabled() if ai_service else False
+            if ai_enabled and ai_service_enabled:
+                ai_allowed = True
+                ai_reason = "ok"
+            else:
+                ai_reason = "disabled_by_entitlements"
+
+        if profile in {"role2", "role3", "mod"}:
+            ai_description = await summary_service.build_period_description(
+                tier=profile,
+                period_prefix=period_prefix,
+                score=barcello_result.score,
+                color=barcello_result.color,
+                metrics=metrics,
+                trend=barcello_result.trend,
+                ai_allowed=ai_allowed,
+                config=summary_config,
+            )
+            if ai_description:
+                period_description = ai_description
+
+        status_embed = _build_riassunto_status_embed(
+            result=barcello_result,
+            channel_label=channel_label,
+            period_label=period_label,
+            period_description=period_description,
+        )
+
+        summary = await summary_service.build_summary(
+            guild_id=str(interaction.guild_id),
+            channel_id=str(interaction.channel_id),
+            start_ts=start_dt_utc.isoformat(),
+            end_ts=end_dt_utc.isoformat(),
+            tier=profile,
+            include_names=include_names,
+            ai_allowed=ai_allowed,
+            evidence_mode=False,
+            voice_context=channel_is_voice,
+            config=summary_config,
+            barcello_metrics=metrics,
+            max_message_ts=max_message_ts,
+            messages=messages,
+        )
+
+        name_map: dict[str, str] = {}
+        if interaction.guild:
+            for message in messages:
+                author_id = message.get("author_id")
+                if not author_id or author_id in name_map:
+                    continue
+                member = interaction.guild.get_member(int(author_id))
+                if member:
+                    name_map[author_id] = _resolve_display_name(member)
+
+        if name_map:
+            lower_names = {name.lower() for name in name_map.values()}
+            summary.themes = [theme for theme in summary.themes if theme.lower() not in lower_names]
+
+        details_color = await _get_details_embed_color(profile)
+
+        async def resolve_primary_ref(ts: str | None, message_ids: list[str]) -> str | None:
+            for mid in message_ids:
+                if str(mid).isdigit():
+                    return str(mid)
+            parsed = _parse_iso_ts(ts)
+            if parsed is None:
+                return None
+            return await database.fetch_nearest_message_id(
+                channel_id=str(interaction.channel_id),
+                ts=parsed.isoformat(),
+            )
+
+        moment_primary: dict[int, str | None] = {}
+        for moment in summary.moments:
+            moment_primary[id(moment)] = await resolve_primary_ref(moment.ts, moment.message_ids)
+
+        quote_primary: dict[int, str | None] = {}
+        for quote in summary.quotes:
+            quote_primary[id(quote)] = await resolve_primary_ref(quote.ts, quote.message_ids)
+
+        dynamic_primary: dict[int, str | None] = {}
+        for dynamic in summary.dynamics:
+            dynamic_primary[id(dynamic)] = await resolve_primary_ref(dynamic.ts, dynamic.message_ids)
+
+        impact_primary: dict[int, str | None] = {}
+        for impact in summary.degrade + summary.invigorate:
+            candidate_ids = [impact.message_id] if impact.message_id else []
+            impact_primary[id(impact)] = await resolve_primary_ref(impact.ts, candidate_ids)
+
+        def build_embeds() -> list[discord.Embed]:
+            sections_map: dict[str, list[tuple[str, str, int]]] = {}
+
+            themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
+            sections_map["themes"] = [("🏷️ TEMI", themes_value, 1)]
+
+            moment_lines = [
+                _format_summary_moment_line(
+                    moment=moment,
+                    guild_id=interaction.guild_id,
+                    channel_id=interaction.channel_id,
+                    include_names=include_names,
+                    display_name=name_map.get(moment.author_id or ""),
+                    link_limit=1,
+                    primary_id=moment_primary.get(id(moment)),
+                )
+                for moment in summary.moments
+            ]
+            if moment_lines:
+                sections_map["moments"] = [("📌 MOMENTI SALIENTI", _format_bullets(moment_lines), 1)]
+
+            if channel_is_voice and voice_lines:
+                sections_map["voice"] = [("🎙️ CHIAMATA", "\n".join(voice_lines), 1)]
+
+            quote_lines = [
+                _format_summary_quote_line(
+                    quote=quote,
+                    guild_id=interaction.guild_id,
+                    channel_id=interaction.channel_id,
+                    include_names=include_names,
+                    display_name=name_map.get(quote.author_id or ""),
+                    link_limit=1,
+                    primary_id=quote_primary.get(id(quote)),
+                )
+                for quote in summary.quotes
+            ]
+            if quote_lines and profile in {"role2", "role3", "mod"}:
+                sections_map["quotes"] = [("💬 FRASI ICONICHE", _format_bullets(quote_lines), 2)]
+
+            dynamic_lines = [
+                _format_summary_dynamics_line(
+                    dynamic=dynamic,
+                    guild_id=interaction.guild_id,
+                    channel_id=interaction.channel_id,
+                    include_names=include_names,
+                    display_name=name_map.get(dynamic.author_id or ""),
+                    link_limit=1,
+                    primary_id=dynamic_primary.get(id(dynamic)),
+                )
+                for dynamic in summary.dynamics
+            ]
+            if dynamic_lines and profile in {"role3", "mod"}:
+                sections_map["dynamics"] = [("🧠 DINAMICHE INTERESSANTI", _format_bullets(dynamic_lines), 2)]
+
+            if profile == "mod":
+                degrade_lines = []
+                for impact in summary.degrade:
+                    line = _format_summary_impact_line(
+                        impact=impact,
+                        guild_id=interaction.guild_id,
+                        channel_id=interaction.channel_id,
+                        display_name=name_map.get(impact.author_id or ""),
+                        link_limit=1,
+                        prefix="🔥",
+                        primary_id=impact_primary.get(id(impact)),
+                    )
+                    degrade_lines.append(line)
+                invigorate_lines = []
+                for impact in summary.invigorate:
+                    line = _format_summary_impact_line(
+                        impact=impact,
+                        guild_id=interaction.guild_id,
+                        channel_id=interaction.channel_id,
+                        display_name=name_map.get(impact.author_id or ""),
+                        link_limit=1,
+                        prefix="🌿",
+                        primary_id=impact_primary.get(id(impact)),
+                    )
+                    invigorate_lines.append(line)
+                impact_sections: list[tuple[str, str, int]] = []
+                if degrade_lines:
+                    impact_sections.append(("🔥 CHI DEGRADA", _format_bullets(degrade_lines), 3))
+                if invigorate_lines:
+                    impact_sections.append(("🌿 CHI RINVIGORISCE", _format_bullets(invigorate_lines), 3))
+                if impact_sections:
+                    sections_map["impact"] = impact_sections
+
+                advice_lines = summary.advice
+                if advice_lines:
+                    sections_map["advice"] = [("🧭 CONSIGLI PERSONALIZZATI", _format_bullets(advice_lines), 3)]
+
+                sections_map["metrics"] = [("🧱 METRICHE AGGREGATE", _with_spacing(_format_metrics(metrics)), 3)]
+
+                ai_note = summary.ai_status
+                if ai_note.get("enabled"):
+                    ai_line = f"AI: ON ({ai_note.get('model')})"
+                else:
+                    fallback = "fallback locale attivo" if ai_note.get("fallback") or not ai_allowed else ""
+                    ai_line = f"AI: OFF" + (f" — {fallback}" if fallback else "")
+                sections_map["ai"] = [("🤖 AI", ai_line, 3)]
+
+            if profile == "role1":
+                sections_map["notes"] = [
+                    (
+                        "📝 NOTE",
+                        "Per un riassunto più approfondito e per vedere anche FRASI ICONICHE e le DINAMICHE, fai upgrade ai piani superiori.",
+                        1,
+                    )
+                ]
+            if profile == "role2":
+                sections_map["notes"] = [
+                    (
+                        "📝 NOTE",
+                        "Per vedere anche le DINAMICHE fai upgrade al piano PRO MAX.",
+                        2,
+                    )
+                ]
+
+            if privacy_gaps:
+                lines = [
+                    f"⚠️ PRIVACY NOTE: buchi rilevati dalle {_format_italian_time(start.isoformat())} alle {_format_italian_time(end.isoformat())}."
+                    for start, end in privacy_gaps
+                ]
+                sections_map["privacy"] = [("⚠️ PRIVACY NOTE", "\n".join(lines), 3)]
+
+            section_order = tier_config.get("sections") or list(sections_map.keys())
+            sections: list[tuple[str, str, int]] = []
+            for section_id in section_order:
+                if section_id in sections_map:
+                    sections.extend(sections_map[section_id])
+            for extra_id in ("voice", "privacy"):
+                if extra_id in sections_map and extra_id not in section_order:
+                    sections.extend(sections_map[extra_id])
+
+            groups = sorted({group for _, _, group in sections})
+            embed_color = details_color
+            embeds: list[discord.Embed] = []
+
+            def build_embed(title_suffix: str, items: list[tuple[str, str, int]]) -> discord.Embed:
+                title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label}{title_suffix}"
+                embed = discord.Embed(title=title, color=embed_color)
+                for name, value, _group in items:
+                    _add_section(embed, name=name, value=_with_spacing(value))
+                embed.set_footer(text="Barcellometro")
+                return embed
+
+            def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
+                target_max = 5800
+                chunks: list[list[tuple[str, str, int]]] = []
+                current: list[tuple[str, str, int]] = []
+                for section in section_list:
+                    candidate = current + [section]
+                    candidate_embed = build_embed("", candidate)
+                    if current and (
+                        _estimate_embed_size(candidate_embed) > target_max or len(candidate_embed.fields) > 24
+                    ):
+                        chunks.append(current)
+                        current = [section]
+                    else:
+                        current = candidate
+                if current:
+                    chunks.append(current)
+                return [build_embed("", chunk) for chunk in chunks]
+
+            if len(groups) <= 1:
+                embeds = chunk_sections(sections)
+            else:
+                for group in groups:
+                    group_sections = [item for item in sections if item[2] == group]
+                    if group_sections:
+                        embeds.extend(chunk_sections(group_sections))
+
+            total = max(len(embeds), 1)
+            for idx, embed in enumerate(embeds, start=1):
+                embed.title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label} (Pag {idx}/{total})"
+            return embeds
+
+        embeds = build_embeds()
+        report_id = str(uuid4())
+
+        logger.info(
+            "riassunto: report id=%s user=%s channel=%s range=%s-%s tier=%s ai=%s cache=%s voice=%s",
+            report_id,
+            interaction.user.id,
+            interaction.channel_id,
+            start_dt_utc.isoformat(),
+            end_dt_utc.isoformat(),
+            tier_label,
+            ai_reason,
+            summary.cache_hit,
+            channel_is_voice,
+        )
+
+        async def try_send_dm() -> bool:
+            try:
+                await interaction.user.send(embeds=[status_embed, *embeds])
+                return True
+            except (discord.Forbidden, discord.HTTPException):
+                return False
+
+        if await try_send_dm():
+            await interaction.followup.send("✅ Ti ho inviato il riassunto in DM.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                "❌ Non posso inviarti DM. Abilita i messaggi diretti da questo server e riprova.",
+                ephemeral=True,
+            )
+
+    @riassunto_group.command(name="ultimi", description="Riassunto degli ultimi N minuti/ore/giorni/settimane")
+    @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo")
+    @app_commands.choices(
+        unita=[
+            app_commands.Choice(name="minuti", value="minuti"),
+            app_commands.Choice(name="ore", value="ore"),
+            app_commands.Choice(name="giorni", value="giorni"),
+            app_commands.Choice(name="settimane", value="settimane"),
+        ]
+    )
+    async def riassunto_ultimi(
+        interaction: discord.Interaction,
+        quantita: int,
+        unita: app_commands.Choice[str],
+    ) -> None:
+        if quantita <= 0:
+            await send_ephemeral(interaction, "Specifica una quantità valida.")
+            return
+        now = datetime.now(ROME_TZ)
+        delta_map = {
+            "minuti": timedelta(minutes=quantita),
+            "ore": timedelta(hours=quantita),
+            "giorni": timedelta(days=quantita),
+            "settimane": timedelta(weeks=quantita),
+        }
+        start_dt = now - delta_map.get(unita.value, timedelta(minutes=quantita))
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now, period_label="ultimi")
+
+    @riassunto_group.command(name="oggi", description="Riassunto della giornata di oggi")
+    async def riassunto_oggi(interaction: discord.Interaction) -> None:
+        now = datetime.now(ROME_TZ)
+        start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now, period_label="oggi")
+
+    @riassunto_group.command(name="ieri", description="Riassunto della giornata di ieri")
+    async def riassunto_ieri(interaction: discord.Interaction) -> None:
+        now = datetime.now(ROME_TZ)
+        end_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_dt = end_dt - timedelta(days=1)
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="ieri")
+
+    @riassunto_group.command(name="range", description="Riassunto di un range custom (data+ora italiane)")
+    @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)")
+    async def riassunto_range(interaction: discord.Interaction, da: str, a: str) -> None:
+        start_dt = _parse_italian_datetime(da)
+        end_dt = _parse_italian_datetime(a)
+        if not start_dt or not end_dt:
+            await send_ephemeral(interaction, "Formato data/ora non valido. Usa DD/MM/YYYY HH:MM.")
+            return
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="range")
+
     # Settings JSON for /barcello (entitlements.policies):
     # {
     #   "commands": {
@@ -2096,6 +2890,7 @@ def setup(registry: ServiceRegistry) -> None:
         await interaction.followup.send(message, ephemeral=True)
 
     bot.tree.add_command(barcellometro_group, guild=guild)
+    bot.tree.add_command(riassunto_group, guild=guild)
     bot.tree.add_command(status_group, guild=guild)
     bot.tree.add_command(privacy_group, guild=guild)
     bot.tree.add_command(barcello_command, guild=guild)
