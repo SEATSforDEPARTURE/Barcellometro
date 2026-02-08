@@ -230,6 +230,43 @@ class BarcelloService:
             advice=advice,
         )
 
+    async def compute_channel_range(
+        self,
+        guild_id: str,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> BarcelloResult:
+        start_dt = self._parse_ts(start_ts)
+        end_dt = self._parse_ts(end_ts)
+        if end_dt < start_dt:
+            start_dt, end_dt = end_dt, start_dt
+        window_start_ts = start_dt.isoformat()
+        window_end_ts = end_dt.isoformat()
+        window_minutes = max(1, int((end_dt - start_dt).total_seconds() / 60))
+        messages = await self._database.fetch_messages_in_range(
+            channel_id=channel_id,
+            start_ts=window_start_ts,
+            end_ts=window_end_ts,
+            limit=2000,
+        )
+        metrics = self._compute_metrics(messages, window_minutes)
+        metrics["cache_hit"] = False
+        score_config = await self._get_score_config()
+        reasons, score = self._score_from_metrics(metrics, score_config)
+        color = await self.get_color(score)
+        advice = self._build_advice(metrics, score)
+        return BarcelloResult(
+            score=score,
+            color=color,
+            window_start_ts=window_start_ts,
+            window_end_ts=window_end_ts,
+            reasons=reasons,
+            metrics=metrics,
+            trend=None,
+            advice=advice,
+        )
+
     async def get_color(self, score: int) -> str:
         ranges = await self._get_color_ranges()
         for color_range in ranges:
