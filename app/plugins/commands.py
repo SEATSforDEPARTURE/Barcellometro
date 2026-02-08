@@ -520,19 +520,31 @@ def setup(registry: ServiceRegistry) -> None:
 
     ROME_TZ = ZoneInfo("Europe/Rome")
 
-    def _parse_iso_ts(ts: str) -> datetime:
-        parsed = datetime.fromisoformat(ts)
+    def _parse_iso_ts(ts: str | None) -> datetime | None:
+        if not ts or not str(ts).strip():
+            return None
+        raw = str(ts).strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed
 
-    def _format_italian_ts(ts: str) -> str:
+    def _format_italian_ts(ts: str | None) -> str:
         parsed = _parse_iso_ts(ts)
+        if parsed is None:
+            return ""
         local = parsed.astimezone(ROME_TZ)
         return local.strftime("%d/%m/%Y %H:%M")
 
-    def _format_italian_time(ts: str) -> str:
+    def _format_italian_time(ts: str | None) -> str:
         parsed = _parse_iso_ts(ts)
+        if parsed is None:
+            return ""
         local = parsed.astimezone(ROME_TZ)
         return local.strftime("%H:%M")
 
@@ -565,7 +577,9 @@ def setup(registry: ServiceRegistry) -> None:
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
         channel_prefix = "🎙️" if channel_is_voice else "📌"
         title = f"🫛 STATO BARCELLO “{channel_prefix} / {channel_label}”"
-        window_label = f"🕒 {_format_italian_ts(result.window_start_ts)} → {_format_italian_ts(result.window_end_ts)}"
+        window_start = _format_italian_ts(result.window_start_ts)
+        window_end = _format_italian_ts(result.window_end_ts)
+        window_label = f"🕒 {window_start} → {window_end}"
         description_lines = [
             window_label,
             "",
@@ -848,7 +862,8 @@ def setup(registry: ServiceRegistry) -> None:
         text = moment.text
         if include_names and display_name:
             text = f"{display_name}: {text}"
-        return f"{timestamp} — {text}{_format_summary_links(moment.message_ids, guild_id, channel_id, link_limit)}"
+        prefix = f"{timestamp} — " if timestamp else ""
+        return f"{prefix}{text}{_format_summary_links(moment.message_ids, guild_id, channel_id, link_limit)}"
 
     def _format_summary_quote_line(
         *,
@@ -862,7 +877,8 @@ def setup(registry: ServiceRegistry) -> None:
         timestamp = _format_italian_time(quote.ts)
         speaker = display_name if include_names and display_name else "un utente"
         text = f"“{quote.text}” — {speaker}"
-        return f"{timestamp} — {text}{_format_summary_links(quote.message_ids, guild_id, channel_id, link_limit)}"
+        prefix = f"{timestamp} — " if timestamp else ""
+        return f"{prefix}{text}{_format_summary_links(quote.message_ids, guild_id, channel_id, link_limit)}"
 
     def _format_summary_dynamics_line(
         *,
@@ -872,7 +888,8 @@ def setup(registry: ServiceRegistry) -> None:
         link_limit: int,
     ) -> str:
         timestamp = _format_italian_time(dynamic.ts)
-        return f"{timestamp} — {dynamic.text}{_format_summary_links(dynamic.message_ids, guild_id, channel_id, link_limit)}"
+        prefix = f"{timestamp} — " if timestamp else ""
+        return f"{prefix}{dynamic.text}{_format_summary_links(dynamic.message_ids, guild_id, channel_id, link_limit)}"
 
     def _format_summary_impact_line(
         *,
@@ -886,7 +903,8 @@ def setup(registry: ServiceRegistry) -> None:
         timestamp = _format_italian_time(impact.ts)
         name = display_name or "utente"
         link = _format_summary_links([impact.message_id or ""], guild_id, channel_id, link_limit)
-        return f"{prefix} {name} — {impact.reason} ({timestamp}){link}"
+        time_suffix = f" ({timestamp})" if timestamp else ""
+        return f"{prefix} {name} — {impact.reason}{time_suffix}{link}"
 
     def _estimate_embed_size(embed: discord.Embed) -> int:
         total = len(embed.title or "") + len(embed.description or "")

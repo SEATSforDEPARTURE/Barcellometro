@@ -140,7 +140,7 @@ POSITIVE_KEYWORDS = {
 
 @dataclass
 class SummaryItem:
-    ts: str
+    ts: Optional[str]
     text: str
     author_id: Optional[str]
     message_ids: list[str] = field(default_factory=list)
@@ -149,7 +149,7 @@ class SummaryItem:
 
 @dataclass
 class SummaryQuote:
-    ts: str
+    ts: Optional[str]
     text: str
     author_id: Optional[str]
     message_ids: list[str] = field(default_factory=list)
@@ -159,7 +159,7 @@ class SummaryQuote:
 class SummaryImpact:
     author_id: Optional[str]
     reason: str
-    ts: str
+    ts: Optional[str]
     message_id: Optional[str]
 
 
@@ -259,6 +259,8 @@ class SummaryService:
                         tier=tier,
                         barcello_metrics=barcello_metrics,
                     )
+                    if ai_payload:
+                        self._sanitize_ai_payload(ai_payload, messages)
                     if ai_payload:
                         summary = self._merge_ai_summary(local_summary, ai_payload, include_names)
                         ai_status.update({"enabled": True, "reason": "ok"})
@@ -387,16 +389,30 @@ class SummaryService:
             for item in raw:
                 if not isinstance(item, dict):
                     continue
-                ts = str(item.get("ts") or "")
+                ts = item.get("ts")
                 text = str(item.get("text") or "").strip()
-                if not ts or not text:
+                if not text:
                     continue
                 message_ids = [str(mid) for mid in (item.get("message_ids") or []) if str(mid)]
                 author_id = str(item.get("author_id") or "") or None
                 if is_quote:
-                    output.append(SummaryQuote(ts=ts, text=text, author_id=author_id, message_ids=message_ids))
+                    output.append(
+                        SummaryQuote(
+                            ts=_normalize_ts_value(ts),
+                            text=text,
+                            author_id=author_id,
+                            message_ids=message_ids,
+                        )
+                    )
                 else:
-                    output.append(SummaryItem(ts=ts, text=text, author_id=author_id, message_ids=message_ids))
+                    output.append(
+                        SummaryItem(
+                            ts=_normalize_ts_value(ts),
+                            text=text,
+                            author_id=author_id,
+                            message_ids=message_ids,
+                        )
+                    )
             return output
 
         themes = [str(item).strip() for item in (ai_payload.get("themes") or []) if str(item).strip()]
@@ -432,6 +448,89 @@ class SummaryService:
             ai_status=local_summary.ai_status,
         )
 
+    def _sanitize_ai_payload(self, payload: dict[str, Any], messages: list[dict[str, Any]]) -> None:
+        message_ts_map = {
+            str(msg.get("message_id")): msg.get("ts")
+            for msg in messages
+            if msg.get("message_id") and msg.get("ts")
+        }
+        logged_invalid = False
+
+        def normalize_ts(value: Any, message_ids: list[str]) -> Optional[str]:
+            nonlocal logged_invalid
+            ts = _normalize_ts_value(value)
+            if ts:
+                return ts
+            for message_id in message_ids:
+                candidate = _normalize_ts_value(message_ts_map.get(message_id))
+                if candidate:
+                    if not logged_invalid:
+                        logger.debug("Summary AI sanitized invalid ts")
+                        logged_invalid = True
+                    return candidate
+            if not logged_invalid and value:
+                logger.debug("Summary AI sanitized invalid ts")
+                logged_invalid = True
+            return None
+
+        def truncate(text: Any, limit: int) -> str:
+            raw = str(text or "").strip()
+            if len(raw) <= limit:
+                return raw
+            return raw[: limit - 3] + "..."
+
+        def sanitize_items(key: str, text_limit: int) -> None:
+            raw_items = payload.get(key)
+            if not isinstance(raw_items, list):
+                return
+            sanitized: list[dict[str, Any]] = []
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                message_ids = [str(mid) for mid in (item.get("message_ids") or []) if str(mid)]
+                ts = normalize_ts(item.get("ts"), message_ids)
+                text = truncate(item.get("text"), text_limit)
+                if not text:
+                    continue
+                sanitized.append(
+                    {
+                        "ts": ts,
+                        "text": text,
+                        "author_id": item.get("author_id"),
+                        "message_ids": message_ids,
+                    }
+                )
+            payload[key] = sanitized
+
+        def sanitize_impacts(key: str, reason_limit: int) -> None:
+            raw_items = payload.get(key)
+            if not isinstance(raw_items, list):
+                return
+            sanitized: list[dict[str, Any]] = []
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                message_id = str(item.get("message_id") or "") or None
+                ts = normalize_ts(item.get("ts"), [message_id] if message_id else [])
+                reason = truncate(item.get("reason"), reason_limit)
+                if not reason:
+                    continue
+                sanitized.append(
+                    {
+                        "author_id": item.get("author_id"),
+                        "reason": reason,
+                        "ts": ts,
+                        "message_id": message_id,
+                    }
+                )
+            payload[key] = sanitized
+
+        sanitize_items("moments", 280)
+        sanitize_items("quotes", 280)
+        sanitize_items("dynamics", 220)
+        sanitize_impacts("degrade_list", 220)
+        sanitize_impacts("invigorate_list", 220)
+
     def _extract_themes(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[str]:
         counts: dict[str, int] = {}
         for msg in messages:
@@ -459,7 +558,7 @@ class SummaryService:
             clusters[cluster_key] = clusters.get(cluster_key, 0) + 1
             items.append(
                 SummaryItem(
-                    ts=msg.get("ts") or "",
+                    ts=msg.get("ts") or None,
                     text=_shorten(content),
                     author_id=msg.get("author_id"),
                     message_ids=[str(msg.get("message_id"))] if msg.get("message_id") else [],
@@ -483,7 +582,7 @@ class SummaryService:
         for msg in candidates[:limit]:
             output.append(
                 SummaryQuote(
-                    ts=msg.get("ts") or "",
+                    ts=msg.get("ts") or None,
                     text=_shorten(msg.get("content") or ""),
                     author_id=msg.get("author_id"),
                     message_ids=[str(msg.get("message_id"))] if msg.get("message_id") else [],
@@ -504,7 +603,9 @@ class SummaryService:
         top_author_share = float(barcello_metrics.get("top1_author_share") or 0)
         negativity_hits = int(barcello_metrics.get("negativity_hits") or 0)
         if reply_war:
-            dynamics.append(SummaryItem(ts=_pick_ts(messages), text="Botta e risposta fitto, ritmo acceso.", author_id=None))
+            dynamics.append(
+                SummaryItem(ts=_pick_ts(messages), text="Botta e risposta fitto, ritmo acceso.", author_id=None)
+            )
         if top_author_share > 0.4:
             dynamics.append(
                 SummaryItem(ts=_pick_ts(messages), text="Conversazione concentrata su pochi utenti.", author_id=None)
@@ -548,7 +649,7 @@ class SummaryService:
                 SummaryImpact(
                     author_id=author_id,
                     reason="Toni pungenti o callout frequenti.",
-                    ts=msg.get("ts") or "",
+                    ts=msg.get("ts") or None,
                     message_id=str(msg.get("message_id")) if msg.get("message_id") else None,
                 )
             )
@@ -560,7 +661,7 @@ class SummaryService:
                 SummaryImpact(
                     author_id=author_id,
                     reason="Messaggi positivi e distensivi.",
-                    ts=msg.get("ts") or "",
+                    ts=msg.get("ts") or None,
                     message_id=str(msg.get("message_id")) if msg.get("message_id") else None,
                 )
             )
@@ -598,10 +699,10 @@ def _shorten(text: str, limit: int = 140) -> str:
     return cleaned[: limit - 3] + "..."
 
 
-def _pick_ts(messages: list[dict[str, Any]]) -> str:
+def _pick_ts(messages: list[dict[str, Any]]) -> Optional[str]:
     if not messages:
-        return ""
-    return messages[0].get("ts") or ""
+        return None
+    return messages[0].get("ts") or None
 
 
 def _extract_ai_text(response: Any) -> str:
@@ -664,12 +765,29 @@ def _normalize_impacts(raw: Any) -> list[SummaryImpact]:
             continue
         author_id = str(item.get("author_id") or "") or None
         reason = str(item.get("reason") or "").strip()
-        ts = str(item.get("ts") or "")
+        ts = _normalize_ts_value(item.get("ts"))
         message_id = str(item.get("message_id") or "") or None
-        if not reason or not ts:
+        if not reason:
             continue
         output.append(SummaryImpact(author_id=author_id, reason=reason, ts=ts, message_id=message_id))
     return output
+
+
+def _normalize_ts_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.isoformat()
 
 
 def _merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
