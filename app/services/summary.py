@@ -183,6 +183,7 @@ class SummaryService:
         self._ai_service = ai_service
         self._cache_ttl = cache_ttl_seconds
         self._cache: dict[tuple[str, str, str, str, str, bool, bool], tuple[float, SummaryResult, str | None]] = {}
+        self._response_format_supported: bool | None = None
 
     async def get_config(self) -> dict[str, Any]:
         raw = await self._database.get_setting("summary.config")
@@ -338,14 +339,38 @@ class SummaryService:
             },
             ensure_ascii=False,
         )
-        response = await client.responses.create(
-            model=model,
-            response_format={"type": "json_object"},
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_payload},
-            ],
-        )
+        if self._response_format_supported is False:
+            response = await client.responses.create(
+                model=model,
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_payload},
+                ],
+            )
+        else:
+            try:
+                response = await client.responses.create(
+                    model=model,
+                    response_format={"type": "json_object"},
+                    input=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_payload},
+                    ],
+                )
+                self._response_format_supported = True
+            except TypeError as exc:
+                if "response_format" not in str(exc):
+                    raise
+                if self._response_format_supported is not False:
+                    logger.info("Summary AI response_format unsupported; using JSON-in-text mode")
+                self._response_format_supported = False
+                response = await client.responses.create(
+                    model=model,
+                    input=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_payload},
+                    ],
+                )
         text = _extract_ai_text(response)
         return _parse_json_safe(text)
 

@@ -193,8 +193,61 @@ def setup(registry: ServiceRegistry) -> None:
     def _with_spacing(text: str) -> str:
         return text
 
+    def _split_field_chunks(value: str, max_len: int = 1024) -> list[str]:
+        if len(value) <= max_len:
+            return [value]
+
+        def split_plain(text: str, limit: int) -> list[str]:
+            lines = text.splitlines() or [text]
+            chunks: list[str] = []
+            current = ""
+            for line in lines:
+                candidate = f"{current}\n{line}" if current else line
+                if len(candidate) <= limit:
+                    current = candidate
+                    continue
+                if current:
+                    chunks.append(current)
+                    current = ""
+                while len(line) > limit:
+                    chunks.append(line[:limit])
+                    line = line[limit:]
+                current = line
+            if current:
+                chunks.append(current)
+            return chunks
+
+        stripped = value.strip()
+        if stripped.startswith("```"):
+            inner = stripped[3:]
+            if inner.startswith("\n"):
+                inner = inner[1:]
+            if inner.endswith("```"):
+                inner = inner[:-3]
+            if inner.endswith("\n"):
+                inner = inner[:-1]
+            prefix = "```\n"
+            suffix = "\n```"
+            inner_limit = max_len - len(prefix) - len(suffix)
+            inner_chunks = split_plain(inner, inner_limit)
+            return [f"{prefix}{chunk}{suffix}" for chunk in inner_chunks]
+        return split_plain(value, max_len)
+
     def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
-        embed.add_field(name=name, value=value, inline=False)
+        chunks = _split_field_chunks(value, 1024)
+        available = 25 - len(embed.fields)
+        if available <= 0:
+            return
+        if len(chunks) > available:
+            suffix = "... (tagliato)"
+            chunks = chunks[:available]
+            last = chunks[-1]
+            if len(last) + len(suffix) > 1024:
+                last = last[: 1024 - len(suffix)]
+            chunks[-1] = f"{last}{suffix}"
+        for idx, chunk in enumerate(chunks):
+            field_name = name if idx == 0 else f"{name} (cont.)"
+            embed.add_field(name=field_name, value=chunk, inline=False)
 
     def _parse_hex_color(raw: str | None) -> int | None:
         if not raw:
@@ -2050,17 +2103,27 @@ def setup(registry: ServiceRegistry) -> None:
                 embed.set_footer(text="Barcellometro")
                 return embed
 
+            def build_chunked(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
+                for size in (4, 2, 1):
+                    chunked = [section_list[i : i + size] for i in range(0, len(section_list), size)]
+                    candidate = [build_embed("", chunk) for chunk in chunked]
+                    if all(
+                        _estimate_embed_size(embed) <= 5500 and len(embed.fields) <= 24
+                        for embed in candidate
+                    ):
+                        return candidate
+                return [build_embed("", section_list)]
+
             if len(groups) <= 1:
                 embed = build_embed("", sections)
                 if _estimate_embed_size(embed) <= 5500 and len(embed.fields) <= 24:
                     return [embed]
-                chunked = [sections[i : i + 4] for i in range(0, len(sections), 4)]
-                embeds = [build_embed("", chunk) for chunk in chunked]
+                embeds = build_chunked(sections)
             else:
                 for group in groups:
                     group_sections = [item for item in sections if item[2] == group]
                     if group_sections:
-                        embeds.append(build_embed("", group_sections))
+                        embeds.extend(build_chunked(group_sections))
 
             if len(embeds) > 1:
                 total = len(embeds)
