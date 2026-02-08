@@ -19,7 +19,7 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "sections": ["themes", "moments", "notes"],
             "limits": {
                 "themes": 6,
-                "moments": 6,
+                "moments": 5,
                 "quotes": 3,
                 "dynamics": 2,
             },
@@ -29,7 +29,7 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "sections": ["themes", "moments", "quotes", "notes"],
             "limits": {
                 "themes": 6,
-                "moments": 12,
+                "moments": 10,
                 "quotes": 3,
                 "dynamics": 3,
             },
@@ -39,7 +39,7 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "sections": ["themes", "moments", "quotes", "dynamics"],
             "limits": {
                 "themes": 8,
-                "moments": 12,
+                "moments": 15,
                 "quotes": 3,
                 "dynamics": 4,
             },
