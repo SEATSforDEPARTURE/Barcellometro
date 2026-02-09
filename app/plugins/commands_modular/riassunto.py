@@ -435,11 +435,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             end_dt_utc.isoformat(),
         )
 
-        include_names = False
-        if profile == "mod":
-            include_names = True
-        else:
-            include_names = (barcello_result.color or "").lower() == "verde"
+        include_names = (barcello_result.color or "").lower() == "verde"
 
         period_prefix = _build_period_prefix(
             period_label,
@@ -464,29 +460,37 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         )
         max_message_ts = latest_row["ts"] if latest_row else None
 
-        messages: list[dict[str, Any]] = []
+        timeline_entries: list[dict[str, Any]] = []
         voice_segments = 0
         for row in messages_rows:
             embeds_raw = row["embeds_json"] if "embeds_json" in row.keys() else None
             embeds = json.loads(embeds_raw) if embeds_raw else []
             if any(isinstance(embed, dict) and embed.get("source") == "voice_ingest_stt" for embed in embeds):
                 voice_segments += 1
-            messages.append(
+            ts_parsed = _parse_iso_ts(row["ts"])
+            if not ts_parsed:
+                continue
+            timeline_entries.append(
                 {
+                    "ts": ts_parsed,
+                    "kind": "chat",
+                    "in_call": False,
+                    "actor_id": row["author_id"],
+                    "text": row["content"],
                     "message_id": row["message_id"],
-                    "author_id": row["author_id"],
-                    "ts": row["ts"],
-                    "content": row["content"],
-                    "embeds": embeds,
-                    "meta": {"in_call": False, "source": "chat"},
+                    "meta": {"kind": "chat"},
                 }
             )
 
         voice_minutes = 0
         voice_sessions = 0
         voice_transcripts = 0
+        voice_presence = 0
+        privacy_entries = 0
+        call_entries = 0
         voice_session_ranges: list[tuple[datetime, datetime]] = []
-        forced_moments: list[SummaryItem] = []
+        privacy_moments: list[SummaryItem] = []
+        supplemental_moments: list[SummaryItem] = []
         if channel_is_voice:
             sessions = await ctx.database.fetch_voice_sessions_in_range(
                 guild_id=str(interaction.guild_id),
@@ -496,33 +500,35 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             )
             voice_sessions = len(sessions)
 
-            def _describe_duration(started: datetime, ended: datetime) -> str:
-                seconds = max(0, int((ended - started).total_seconds()))
-                minutes = max(1, int(seconds / 60))
+            def _describe_duration(seconds: float) -> str:
+                minutes = max(1, int(round(seconds / 60)))
                 hours = minutes // 60
                 if hours >= 1:
-                    rem = minutes % 60
-                    if rem:
-                        return f"{hours}h {rem}m"
-                    return f"{hours}h"
-                return f"{minutes}m"
+                    remainder = minutes % 60
+                    if remainder:
+                        return f"~{hours}h {remainder}m"
+                    return f"~{hours}h"
+                return f"~{minutes}m"
 
-            def _describe_call_start(started: datetime, ended: datetime | None) -> str:
-                if ended:
-                    return f"Parte una chiamata di circa {_describe_duration(started, ended)} che sposta il ritmo sul vocale."
-                return "Parte una chiamata che prosegue oltre il periodo considerato."
-
-            def _describe_call_end(started: datetime, ended: datetime | None) -> str:
-                if ended:
-                    return f"La chiamata si chiude dopo {_describe_duration(started, ended)} di confronto."
-                return "Verso la fine del periodo la chiamata risulta ancora in corso."
-
-            def _describe_privacy_gap(started: datetime, ended: datetime | None, actor_name: str | None) -> str:
-                actor_label = f" da {actor_name}" if actor_name else ""
-                if ended:
-                    end_label = _format_italian_time(ended.isoformat())
-                    return f"Modalità privacy attiva{actor_label}: tratto di chiamata non trascritto fino alle {end_label}."
-                return f"Modalità privacy attiva{actor_label}: tratto di chiamata non trascritto fino a fine periodo."
+            def _append_event(
+                ts_value: datetime,
+                text: str,
+                *,
+                kind: str,
+                in_call: bool = True,
+                actor_id: str | None = None,
+            ) -> None:
+                timeline_entries.append(
+                    {
+                        "ts": ts_value,
+                        "kind": kind,
+                        "in_call": in_call,
+                        "actor_id": actor_id,
+                        "text": text,
+                        "message_id": None,
+                        "meta": {"kind": kind},
+                    }
+                )
 
             session_lookup: dict[str, dict[str, Any]] = {}
             for session in sessions:
@@ -537,34 +543,52 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 if overlap_end > overlap_start:
                     voice_minutes += int((overlap_end - overlap_start).total_seconds() / 60)
                 voice_session_ranges.append((started, ended or end_dt_utc))
-                forced_moments.append(
+                overlap_seconds = max(0.0, (overlap_end - overlap_start).total_seconds())
+                overlap_label = _describe_duration(overlap_seconds) if overlap_seconds else "~1m"
+                if start_dt_utc <= started <= end_dt_utc:
+                    text = f"Parte una chiamata ({overlap_label}) che sposta il ritmo sul vocale."
+                    ts_value = started
+                else:
+                    text = f"Chiamata già in corso all'inizio del periodo ({overlap_label})."
+                    ts_value = start_dt_utc
+                supplemental_moments.append(
                     SummaryItem(
-                        ts=started.isoformat(),
-                        text=_describe_call_start(started, ended),
+                        ts=ts_value.isoformat(),
+                        text=text,
                         author_id=None,
                         message_ids=[],
                         in_call=True,
                     )
                 )
-                forced_moments.append(
-                    SummaryItem(
-                        ts=(ended or end_dt_utc).isoformat(),
-                        text=_describe_call_end(started, ended),
-                        author_id=None,
-                        message_ids=[],
-                        in_call=True,
+                _append_event(ts_value, text, kind="call")
+                call_entries += 1
+                if ended and start_dt_utc <= ended <= end_dt_utc:
+                    end_text = f"Termina la chiamata dopo {overlap_label} di confronto."
+                    supplemental_moments.append(
+                        SummaryItem(
+                            ts=ended.isoformat(),
+                            text=end_text,
+                            author_id=None,
+                            message_ids=[],
+                            in_call=True,
+                        )
                     )
-                )
+                    _append_event(ended, end_text, kind="call")
+                    call_entries += 1
+                if not ended or ended > end_dt_utc:
+                    continue_text = f"La chiamata prosegue oltre il periodo ({overlap_label})."
+                    supplemental_moments.append(
+                        SummaryItem(
+                            ts=end_dt_utc.isoformat(),
+                            text=continue_text,
+                            author_id=None,
+                            message_ids=[],
+                            in_call=True,
+                        )
+                    )
+                    _append_event(end_dt_utc, continue_text, kind="call")
+                    call_entries += 1
 
-            last_privacy = await ctx.database.fetch_last_privacy_event_before(
-                channel_id=str(interaction.channel_id),
-                ts=start_dt_utc.isoformat(),
-            )
-            privacy_on = False
-            privacy_actor: str | None = None
-            if last_privacy is not None:
-                privacy_on = last_privacy["event_type"] == "voice.privacy_on"
-                privacy_actor = str(last_privacy["actor_id"] or "") or None
             privacy_events = await ctx.database.fetch_events_in_range(
                 channel_id=str(interaction.channel_id),
                 start_ts=start_dt_utc.isoformat(),
@@ -585,50 +609,165 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 except json.JSONDecodeError:
                     return {}
 
-            gap_start: datetime | None = start_dt_utc if privacy_on else None
-            gap_actor: str | None = privacy_actor
+            name_cache: dict[str, str | None] = {}
+
+            async def _resolve_name(user_id: str | None) -> str | None:
+                if not user_id or not include_names:
+                    return None
+                if user_id in name_cache:
+                    return name_cache[user_id]
+                display = await ctx.database.fetch_user_display_name(
+                    guild_id=str(interaction.guild_id),
+                    user_id=str(user_id),
+                )
+                if not display and interaction.guild:
+                    member = interaction.guild.get_member(int(user_id))
+                    if member:
+                        display = _resolve_display_name(member)
+                name_cache[user_id] = display
+                return display
+
+            presence_events: list[dict[str, Any]] = []
+            privacy_sequence: list[dict[str, Any]] = []
             for event in privacy_events:
                 event_type = event["event_type"]
                 event_ts = _parse_iso_ts(event["ts"])
                 if not event_ts:
                     continue
+                if event_type in {"voice.join", "voice.leave"}:
+                    presence_events.append(
+                        {
+                            "ts": event_ts,
+                            "type": event_type,
+                            "actor_id": str(event["actor_id"] or "") or None,
+                        }
+                    )
+                    continue
+                if event_type in {"voice.privacy_on", "voice.privacy_off"}:
+                    privacy_sequence.append(
+                        {
+                            "ts": event_ts,
+                            "type": event_type,
+                            "actor_id": str(event["actor_id"] or "") or None,
+                        }
+                    )
+
+            privacy_sequence.sort(key=lambda item: item["ts"])
+            last_privacy = await ctx.database.fetch_last_privacy_event_before(
+                channel_id=str(interaction.channel_id),
+                ts=start_dt_utc.isoformat(),
+            )
+            privacy_on = False
+            if last_privacy is not None:
+                privacy_on = last_privacy["event_type"] == "voice.privacy_on"
+            gap_start = start_dt_utc if privacy_on else None
+            for item in privacy_sequence:
+                event_ts = item["ts"]
+                event_type = item["type"]
                 if event_type == "voice.privacy_on" and gap_start is None:
                     gap_start = event_ts
-                    gap_actor = str(event["actor_id"] or "") or None
                 if event_type == "voice.privacy_off" and gap_start is not None:
-                    actor_name = None
-                    if include_names and gap_actor:
-                        actor_name = await ctx.database.fetch_user_display_name(
-                            guild_id=str(interaction.guild_id),
-                            user_id=str(gap_actor),
-                        )
-                    forced_moments.append(
+                    end_label = _format_italian_time(event_ts.isoformat())
+                    gap_text = f"Modalità privacy attiva: tratto di chiamata non trascritto fino alle {end_label}."
+                    privacy_moments.append(
                         SummaryItem(
                             ts=gap_start.isoformat(),
-                            text=_describe_privacy_gap(gap_start, event_ts, actor_name),
-                            author_id=gap_actor,
+                            text=gap_text,
+                            author_id=item["actor_id"],
                             message_ids=[],
                             in_call=True,
                         )
                     )
-                    gap_start = None
-                    gap_actor = None
-            if gap_start is not None:
-                actor_name = None
-                if include_names and gap_actor:
-                    actor_name = await ctx.database.fetch_user_display_name(
-                        guild_id=str(interaction.guild_id),
-                        user_id=str(gap_actor),
+                    _append_event(gap_start, gap_text, kind="privacy")
+                    privacy_entries += 1
+                    off_text = "Modalità privacy disattivata: riprende la trascrizione."
+                    supplemental_moments.append(
+                        SummaryItem(
+                            ts=event_ts.isoformat(),
+                            text=off_text,
+                            author_id=item["actor_id"],
+                            message_ids=[],
+                            in_call=True,
+                        )
                     )
-                forced_moments.append(
+                    _append_event(event_ts, off_text, kind="privacy")
+                    privacy_entries += 1
+                    gap_start = None
+                elif event_type == "voice.privacy_off":
+                    off_text = "Modalità privacy disattivata: riprende la trascrizione."
+                    supplemental_moments.append(
+                        SummaryItem(
+                            ts=event_ts.isoformat(),
+                            text=off_text,
+                            author_id=item["actor_id"],
+                            message_ids=[],
+                            in_call=True,
+                        )
+                    )
+                    _append_event(event_ts, off_text, kind="privacy")
+                    privacy_entries += 1
+            if gap_start is not None:
+                gap_text = "Modalità privacy attiva: tratto di chiamata non trascritto fino a fine periodo."
+                privacy_moments.append(
                     SummaryItem(
                         ts=gap_start.isoformat(),
-                        text=_describe_privacy_gap(gap_start, None, actor_name),
-                        author_id=gap_actor,
+                        text=gap_text,
+                        author_id=None,
                         message_ids=[],
                         in_call=True,
                     )
                 )
+                _append_event(gap_start, gap_text, kind="privacy")
+                privacy_entries += 1
+
+            presence_events.sort(key=lambda item: item["ts"])
+            grouped: list[list[dict[str, Any]]] = []
+            if presence_events:
+                current_group = [presence_events[0]]
+                group_start = presence_events[0]["ts"]
+                for event in presence_events[1:]:
+                    if event["ts"] - group_start <= timedelta(minutes=10):
+                        current_group.append(event)
+                    else:
+                        grouped.append(current_group)
+                        current_group = [event]
+                        group_start = event["ts"]
+                grouped.append(current_group)
+
+            for group in grouped:
+                if len(group) > 3:
+                    join_count = sum(1 for item in group if item["type"] == "voice.join")
+                    leave_count = sum(1 for item in group if item["type"] == "voice.leave")
+                    start_label = _format_italian_time(group[0]["ts"].isoformat())
+                    end_label = _format_italian_time(group[-1]["ts"].isoformat())
+                    text = f"Tra {start_label} e {end_label} entrano {join_count} persone ed escono {leave_count}."
+                    supplemental_moments.append(
+                        SummaryItem(
+                            ts=group[0]["ts"].isoformat(),
+                            text=text,
+                            author_id=None,
+                            message_ids=[],
+                            in_call=True,
+                        )
+                    )
+                    _append_event(group[0]["ts"], text, kind="presence")
+                    voice_presence += len(group)
+                    continue
+                for item in group:
+                    actor_label = await _resolve_name(item["actor_id"]) or "Una persona"
+                    verb = "entra" if item["type"] == "voice.join" else "esce"
+                    text = f"{actor_label} {verb} in chiamata."
+                    supplemental_moments.append(
+                        SummaryItem(
+                            ts=item["ts"].isoformat(),
+                            text=text,
+                            author_id=item["actor_id"],
+                            message_ids=[],
+                            in_call=True,
+                        )
+                    )
+                    _append_event(item["ts"], text, kind="presence", actor_id=item["actor_id"])
+                    voice_presence += 1
 
             for event in privacy_events:
                 if event["event_type"] != "voice.transcript":
@@ -655,42 +794,43 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 content = str(content or "").strip()
                 if not content:
                     continue
-                messages.append(
+                timeline_entries.append(
                     {
+                        "ts": ts_real,
+                        "kind": "transcript",
+                        "in_call": True,
+                        "actor_id": event["actor_id"],
+                        "text": content,
                         "message_id": meta.get("message_id"),
-                        "author_id": event["actor_id"],
-                        "ts": ts_real.isoformat(),
-                        "content": content,
                         "meta": {
-                            "in_call": True,
-                            "source": "voice_transcript",
+                            "kind": "transcript",
                             "voice_session_id": session_id,
                         },
                     }
                 )
                 voice_transcripts += 1
 
-            for moment in forced_moments:
-                if not moment.ts or not moment.text:
-                    continue
-                messages.append(
-                    {
-                        "message_id": None,
-                        "author_id": moment.author_id,
-                        "ts": moment.ts,
-                        "content": moment.text,
-                        "meta": {"in_call": True, "source": "voice_event"},
-                    }
-                )
-
             logger.info(
-                "riassunto: voice_context_merge sessions=%s transcripts=%s forced_moments=%s",
+                "riassunto: voice_context_merge sessions=%s transcripts=%s presence=%s privacy=%s call=%s",
                 voice_sessions,
                 voice_transcripts,
-                len(forced_moments),
+                voice_presence,
+                privacy_entries,
+                call_entries,
             )
 
-        messages.sort(key=lambda msg: msg.get("ts") or "")
+        timeline_entries.sort(key=lambda item: item["ts"])
+        messages = [
+            {
+                "message_id": entry["message_id"],
+                "author_id": entry["actor_id"],
+                "ts": entry["ts"].isoformat(),
+                "content": entry["text"],
+                "meta": {"in_call": entry["in_call"], "kind": entry["kind"]},
+            }
+            for entry in timeline_entries
+            if entry.get("text")
+        ]
 
         metrics = dict(barcello_result.metrics or {})
         metrics.update(
@@ -772,13 +912,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             messages=messages,
         )
 
-        if channel_is_voice and forced_moments:
+        if channel_is_voice and (privacy_moments or supplemental_moments):
             existing_texts = {moment.text.lower() for moment in summary.moments}
-            filtered_forced = [
-                moment for moment in forced_moments if moment.text and moment.text.lower() not in existing_texts
-            ]
+            filtered_privacy: list[SummaryItem] = []
+            filtered_supplemental: list[SummaryItem] = []
+            for moment in privacy_moments:
+                if moment.text and moment.text.lower() not in existing_texts:
+                    filtered_privacy.append(moment)
+                    existing_texts.add(moment.text.lower())
+            for moment in supplemental_moments:
+                if moment.text and moment.text.lower() not in existing_texts:
+                    filtered_supplemental.append(moment)
+                    existing_texts.add(moment.text.lower())
             combined = sorted(
-                summary.moments + filtered_forced,
+                summary.moments + filtered_supplemental + filtered_privacy,
                 key=lambda item: (not bool(item.ts), item.ts or ""),
             )
             moment_limit = tier_config.get("limits", {}).get("moments", 10)
@@ -786,10 +933,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 moment_limit = int(moment_limit)
             except (TypeError, ValueError):
                 moment_limit = 10
-            forced_set = {id(item) for item in filtered_forced}
+            privacy_set = {id(item) for item in filtered_privacy}
             while len(combined) > moment_limit:
                 idx = next(
-                    (i for i in range(len(combined) - 1, -1, -1) if id(combined[i]) not in forced_set),
+                    (i for i in range(len(combined) - 1, -1, -1) if id(combined[i]) not in privacy_set),
                     None,
                 )
                 if idx is None:

@@ -452,6 +452,10 @@ class SummaryService:
                 "ts": msg.get("ts"),
                 "author_id": msg.get("author_id"),
                 "content": msg.get("content"),
+                "meta": {
+                    "kind": (msg.get("meta") or {}).get("kind"),
+                    "in_call": (msg.get("meta") or {}).get("in_call"),
+                },
             }
             for msg in messages[:80]
         ]
@@ -465,6 +469,7 @@ class SummaryService:
             "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
             "TEMI devono essere solo keyword brevi (no nomi). "
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
+            "Non inventare eventi di chiamata: usa solo quelli presenti nella timeline (kind: call/privacy/presence). "
             "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
             "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
             "Momenti: stile narrativo e descrittivo, frasi complete; niente template tipo 'Si discute di'. "
