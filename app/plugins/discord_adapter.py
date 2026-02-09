@@ -149,6 +149,11 @@ def setup(registry: ServiceRegistry) -> None:
                         attachments=[{"id": str(att.id), "url": att.url, "filename": att.filename} for att in message.attachments],
                         embeds=[embed.to_dict() for embed in message.embeds],
                     )
+                    await database.upsert_channel_activity(
+                        guild_id=str(message.guild.id),
+                        channel_id=str(message.channel.id),
+                        last_message_at=ts,
+                    )
                     await emit_event(
                         "message.create",
                         guild_id=str(message.guild.id),
@@ -257,6 +262,11 @@ def setup(registry: ServiceRegistry) -> None:
             mentions=[str(user.id) for user in message.mentions],
             attachments=[{"id": str(att.id), "url": att.url, "filename": att.filename} for att in message.attachments],
             embeds=embeds,
+        )
+        await database.upsert_channel_activity(
+            guild_id=str(message.guild.id),
+            channel_id=str(message.channel.id),
+            last_message_at=ts,
         )
         await emit_event(
             "message.create",
