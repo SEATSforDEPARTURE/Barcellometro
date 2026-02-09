@@ -20,6 +20,7 @@ MOOD_CHOICES = [
     app_commands.Choice(name="GREEN_ONLY", value="GREEN_ONLY"),
     app_commands.Choice(name="YELLOW_ONLY", value="YELLOW_ONLY"),
     app_commands.Choice(name="RED_ONLY", value="RED_ONLY"),
+    app_commands.Choice(name="BLACK_ONLY", value="BLACK_ONLY"),
 ]
 
 
@@ -35,6 +36,26 @@ def _truncate(text: str, limit: int = 100) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+
+def validate_campaign_texts(
+    *,
+    testo: Optional[str],
+    testo_verde: Optional[str],
+    testo_giallo: Optional[str],
+    testo_rosso: Optional[str],
+    testo_nero: Optional[str],
+    mood_mode: str,
+) -> Optional[str]:
+    values = [testo, testo_verde, testo_giallo, testo_rosso, testo_nero]
+    if not any(value for value in values):
+        return (
+            "Devi inserire almeno `testo` (fallback) oppure una variante tra "
+            "`testo_verde`, `testo_giallo`, `testo_rosso`, `testo_nero`."
+        )
+    if mood_mode == "IGNORE_BARCELLO" and not testo:
+        return "Con mood_mode=IGNORE_BARCELLO devi valorizzare `testo`."
+    return None
 
 
 def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -146,10 +167,11 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="aggiungi", description="Aggiungi una nuova campagna custom")
     @app_commands.describe(
-        testo="Testo del messaggio",
+        testo="Fallback (usato se manca la variante o se IGNORE_BARCELLO)",
         testo_verde="Testo per mood verde",
         testo_giallo="Testo per mood giallo",
         testo_rosso="Testo per mood rosso",
+        testo_nero="Testo per Barcello ⚫",
         mood_mode="Modalità barcello",
         ogni_minuti="Intervallo in minuti",
         ora_inizio="Ora di inizio (HH:MM, Europe/Rome)",
@@ -159,12 +181,13 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @app_commands.choices(mood_mode=MOOD_CHOICES)
     async def messaggi_aggiungi(
         interaction: discord.Interaction,
-        testo: str,
+        testo: Optional[str] = None,
         ogni_minuti: int,
         ora_inizio: str,
         testo_verde: Optional[str] = None,
         testo_giallo: Optional[str] = None,
         testo_rosso: Optional[str] = None,
+        testo_nero: Optional[str] = None,
         mood_mode: Optional[app_commands.Choice[str]] = None,
         jitter_sec: Optional[int] = 0,
         solo_se_inattivo_min: Optional[int] = 0,
@@ -187,6 +210,19 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         except ValueError as exc:
             await interaction.response.send_message(f"Errore ora_inizio: {exc}", ephemeral=True)
             return
+        resolved_mood_mode = mood_mode.value if mood_mode else "AUTO"
+        validation_error = validate_campaign_texts(
+            testo=testo,
+            testo_verde=testo_verde,
+            testo_giallo=testo_giallo,
+            testo_rosso=testo_rosso,
+            testo_nero=testo_nero,
+            mood_mode=resolved_mood_mode,
+        )
+        if validation_error:
+            await interaction.response.send_message(validation_error, ephemeral=True)
+            return
+
         campaign_id = await ctx.database.create_message_campaign(
             guild_id=str(interaction.guild_id),
             campaign_type="CUSTOM",
@@ -195,12 +231,13 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             text_green=testo_verde,
             text_yellow=testo_giallo,
             text_red=testo_rosso,
+            text_black=testo_nero,
             enabled=True,
             start_time_local=ora_inizio,
             interval_minutes=ogni_minuti,
             jitter_seconds=jitter_sec,
             only_if_idle_minutes=solo_se_inattivo_min,
-            mood_mode=mood_mode.value if mood_mode else "AUTO",
+            mood_mode=resolved_mood_mode,
             next_run_at=next_run.isoformat(),
             created_by=str(interaction.user.id),
         )
@@ -223,13 +260,12 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         lines = []
         for row in campaigns:
             variants = []
-            if row["text_green"]:
-                variants.append("G")
-            if row["text_yellow"]:
-                variants.append("Y")
-            if row["text_red"]:
-                variants.append("R")
-            variant_str = "".join(variants) if variants else "-"
+            variants.append(f"V{'✅' if row['text'] else '—'}")
+            variants.append(f"G{'✅' if row['text_green'] else '—'}")
+            variants.append(f"Y{'✅' if row['text_yellow'] else '—'}")
+            variants.append(f"R{'✅' if row['text_red'] else '—'}")
+            variants.append(f"N{'✅' if row['text_black'] else '—'}")
+            variant_str = " ".join(variants)
             lines.append(
                 " | ".join(
                     [
@@ -243,7 +279,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
                         f"var {variant_str}",
                         f"last {row['last_sent_at'] or '-'}",
                         f"next {row['next_run_at']}",
-                        _truncate(row["text"] or ""),
+                        f"base: {_truncate(row['text'] or '')}" if row["text"] else "base: —",
                     ]
                 )
             )

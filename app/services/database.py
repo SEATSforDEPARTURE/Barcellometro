@@ -184,6 +184,7 @@ class DatabaseService:
                 text_green TEXT NULL,
                 text_yellow TEXT NULL,
                 text_red TEXT NULL,
+                text_black TEXT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 start_time_local TEXT NOT NULL,
                 interval_minutes INTEGER NOT NULL,
@@ -239,6 +240,7 @@ class DatabaseService:
             "text_green": "TEXT NULL",
             "text_yellow": "TEXT NULL",
             "text_red": "TEXT NULL",
+            "text_black": "TEXT NULL",
             "mood_mode": "TEXT NOT NULL DEFAULT 'AUTO'",
         }
         for name, col_def in missing.items():
@@ -922,6 +924,7 @@ class DatabaseService:
         text_green: Optional[str],
         text_yellow: Optional[str],
         text_red: Optional[str],
+        text_black: Optional[str],
         enabled: bool,
         start_time_local: str,
         interval_minutes: int,
@@ -936,11 +939,11 @@ class DatabaseService:
         cursor = await self._conn.execute(
             """
             INSERT INTO message_campaigns (
-                guild_id, type, name, text, text_green, text_yellow, text_red, enabled, start_time_local, interval_minutes,
+                guild_id, type, name, text, text_green, text_yellow, text_red, text_black, enabled, start_time_local, interval_minutes,
                 jitter_seconds, only_if_idle_minutes, mood_mode, last_sent_at, next_run_at, created_by,
                 created_at, updated_at, deleted_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
             """,
             (
                 guild_id,
@@ -950,6 +953,7 @@ class DatabaseService:
                 text_green,
                 text_yellow,
                 text_red,
+                text_black,
                 1 if enabled else 0,
                 start_time_local,
                 interval_minutes,

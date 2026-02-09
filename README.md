@@ -123,9 +123,9 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/barcellometro messaggi on` → abilita invii automatici nel canale corrente.
 - `/barcellometro messaggi off` → disabilita nel canale corrente.
 - `/barcellometro messaggi status` → stato canale + conteggio campagne.
-- `/barcellometro messaggi aggiungi testo:"..." ogni_minuti:<int> ora_inizio:"HH:MM" [testo_verde:"..."] [testo_giallo:"..."] [testo_rosso:"..."] [mood_mode:<AUTO|IGNORE_BARCELLO|GREEN_ONLY|YELLOW_ONLY|RED_ONLY>] [jitter_sec:<int>] [solo_se_inattivo_min:<int>]`
-- `/barcellometro messaggi quiet status|on|off|set start:"HH:MM" end:"HH:MM"` → gestione quiet hours.
-- `/barcellometro messaggi cap status|on|off|set n:<int>` → gestione cap giornaliero.
+- `/barcellometro messaggi aggiungi testo:"..." ogni_minuti:<int> ora_inizio:"HH:MM" [testo_verde:"..."] [testo_giallo:"..."] [testo_rosso:"..."] [testo_nero:"..."] [mood_mode:<AUTO|IGNORE_BARCELLO|GREEN_ONLY|YELLOW_ONLY|RED_ONLY|BLACK_ONLY>] [jitter_sec:<int>] [solo_se_inattivo_min:<int>]`
+- `/barcellometro messaggi quiet_status|quiet_on|quiet_off|quiet_set start:"HH:MM" end:"HH:MM"` → gestione quiet hours.
+- `/barcellometro messaggi cap_status|cap_on|cap_off|cap_set n:<int>` → gestione cap giornaliero.
 - `/barcellometro messaggi lista` → elenco campagne con ID reali.
 - `/barcellometro messaggi cancella id:<int>` → soft delete.
 - `/barcellometro messaggi pausa id:<int>` → disabilita.

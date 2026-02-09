@@ -11,6 +11,7 @@ from app.services.message_scheduler import (
     should_skip_for_daily_cap,
     should_skip_for_idle,
 )
+from app.plugins.commands_modular.messaggi import validate_campaign_texts
 
 
 def test_next_run_calculation() -> None:
@@ -77,6 +78,7 @@ def test_barcello_text_selection() -> None:
         text_green=None,
         text_yellow=None,
         text_red="red",
+        text_black="black",
         barcello_color="RED",
     )
     assert text == "red"
@@ -88,6 +90,7 @@ def test_barcello_text_selection() -> None:
         text_green=None,
         text_yellow=None,
         text_red=None,
+        text_black="black",
         barcello_color="RED",
     )
     assert text == "base"
@@ -99,10 +102,55 @@ def test_barcello_text_selection() -> None:
         text_green=None,
         text_yellow=None,
         text_red=None,
+        text_black=None,
         barcello_color="GREEN",
     )
     assert text == "base"
     assert reason == "barcello_red"
+
+    text, reason = select_text_for_mood(
+        mood_mode="AUTO",
+        base_text=None,
+        text_green=None,
+        text_yellow=None,
+        text_red=None,
+        text_black="black",
+        barcello_color="BLACK",
+    )
+    assert text == "black"
+    assert reason == "barcello_black"
+
+
+def test_validate_campaign_texts() -> None:
+    error = validate_campaign_texts(
+        testo=None,
+        testo_verde=None,
+        testo_giallo=None,
+        testo_rosso=None,
+        testo_nero=None,
+        mood_mode="AUTO",
+    )
+    assert error is not None
+
+    error = validate_campaign_texts(
+        testo=None,
+        testo_verde="ciao",
+        testo_giallo=None,
+        testo_rosso=None,
+        testo_nero=None,
+        mood_mode="AUTO",
+    )
+    assert error is None
+
+    error = validate_campaign_texts(
+        testo=None,
+        testo_verde=None,
+        testo_giallo=None,
+        testo_rosso=None,
+        testo_nero="ciao",
+        mood_mode="IGNORE_BARCELLO",
+    )
+    assert error is not None
 
 
 def test_db_crud_campaigns() -> None:
@@ -122,6 +170,7 @@ def test_db_crud_campaigns() -> None:
             text_green=None,
             text_yellow=None,
             text_red=None,
+            text_black=None,
             enabled=True,
             start_time_local="10:00",
             interval_minutes=60,

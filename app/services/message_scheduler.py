@@ -10,9 +10,9 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from app.services.barcello import BarcelloService
 from app.services.community_insights import CommunityInsightsService
 from app.services.database import DatabaseService
-from app.services.barcello import BarcelloService
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,7 @@ def select_text_for_mood(
     text_green: Optional[str],
     text_yellow: Optional[str],
     text_red: Optional[str],
+    text_black: Optional[str],
     barcello_color: Optional[str],
 ) -> tuple[Optional[str], Optional[str]]:
     if mood_mode == "IGNORE_BARCELLO":
@@ -128,12 +129,16 @@ def select_text_for_mood(
         return text_yellow or base_text, "barcello_yellow"
     if mood_mode == "RED_ONLY":
         return text_red or base_text, "barcello_red"
+    if mood_mode == "BLACK_ONLY":
+        return text_black or base_text, "barcello_black"
     if barcello_color == "GREEN":
         return text_green or base_text, "barcello_green"
     if barcello_color == "YELLOW":
         return text_yellow or base_text, "barcello_yellow"
     if barcello_color == "RED":
         return text_red or base_text, "barcello_red"
+    if barcello_color == "BLACK":
+        return text_black or base_text, "barcello_black"
     return base_text, "barcello_unavailable"
 
 
@@ -176,7 +181,7 @@ class MessageSchedulerService:
         self._community_insights = community_insights
         self._barcello_service = barcello_service
         self._task: Optional[asyncio.Task[None]] = None
-        self._barcello_cache: dict[tuple[str, str], tuple[datetime, str]] = {}
+        self._barcello_cache: dict[str, tuple[datetime, str]] = {}
         self._metrics = {
             "last_tick_ts": None,
             "errors": 0,
@@ -366,15 +371,18 @@ class MessageSchedulerService:
             return text, "barcello_unavailable" if text else None
 
         mood_mode = str(campaign.get("mood_mode") or "AUTO")
-        barcello_color = await self._get_barcello_color(guild_id, channel_id)
+        barcello_color, barcello_reason = await self._get_barcello_color(guild_id, channel_id)
         text, reason = select_text_for_mood(
             mood_mode=mood_mode,
             base_text=campaign.get("text"),
             text_green=campaign.get("text_green"),
             text_yellow=campaign.get("text_yellow"),
             text_red=campaign.get("text_red"),
+            text_black=campaign.get("text_black"),
             barcello_color=barcello_color,
         )
+        if barcello_reason:
+            return text, barcello_reason
         return text, reason
 
     async def _get_quiet_settings(self) -> QuietSettings:
@@ -407,22 +415,21 @@ class MessageSchedulerService:
             return default
         return stored
 
-    async def _get_barcello_color(self, guild_id: str, channel_id: str) -> Optional[str]:
+    async def _get_barcello_color(self, guild_id: str, channel_id: str) -> tuple[str, Optional[str]]:
         if self._barcello_service is None:
-            return None
-        cache_key = (guild_id, channel_id)
-        cached = self._barcello_cache.get(cache_key)
+            return "BLACK", "barcello_unavailable"
+        cached = self._barcello_cache.get(guild_id)
         now = datetime.now(timezone.utc)
         if cached and cached[0] > now:
-            return cached[1]
+            return cached[1], None
         try:
-            result = await self._barcello_service.compute_channel(guild_id, channel_id, window_minutes=120)
+            color = await self._barcello_service.get_current_color(guild_id, channel_id=channel_id, window_minutes=180)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to compute barcello color for %s:%s", guild_id, channel_id)
-            return None
-        color = str(result.color).upper()
-        self._barcello_cache[cache_key] = (now + timedelta(seconds=BARCELLO_CACHE_TTL_SECONDS), color)
-        return color
+            return "BLACK", "barcello_unavailable"
+        color = str(color).upper()
+        self._barcello_cache[guild_id] = (now + timedelta(seconds=BARCELLO_CACHE_TTL_SECONDS), color)
+        return color, None
 
     async def _get_ai_message(self, guild_id: str) -> Optional[str]:
         if self._community_insights is None:
