@@ -22,6 +22,9 @@ from app.services.summary import SummaryImpact, SummaryItem, SummaryQuote, Summa
 
 logger = logging.getLogger(__name__)
 
+MAX_EMBED_CHARS: int = 5800
+RETRY_MAX_EMBED_CHARS: int = 5200
+
 
 def setup(registry: ServiceRegistry) -> None:
     bot: discord.Client = registry.get("bot")
@@ -368,8 +371,10 @@ def setup(registry: ServiceRegistry) -> None:
     def normalize_embeds_for_discord(
         embeds: list[discord.Embed],
         *,
-        max_chars: int = MAX_EMBED_CHARS,
+        max_chars: int | None = None,
     ) -> list[discord.Embed]:
+        if max_chars is None:
+            max_chars = MAX_EMBED_CHARS
         normalized = _ensure_embed_limits(embeds, max_chars=max_chars)
         if any(_estimate_embed_size(embed) >= 6000 for embed in normalized):
             normalized = _ensure_embed_limits(normalized, max_chars=min(max_chars, 5600))
@@ -1086,9 +1091,6 @@ def setup(registry: ServiceRegistry) -> None:
         if display_name:
             return f"{time_link} — {prefix} {display_name} — {impact.reason}"
         return f"{time_link} — {prefix} {impact.reason}"
-
-    MAX_EMBED_CHARS = 5800
-    RETRY_EMBED_CHARS = 5200
 
     def _estimate_embed_size(embed: discord.Embed) -> int:
         total = len(embed.title or "") + len(embed.description or "")
@@ -2424,7 +2426,7 @@ def setup(registry: ServiceRegistry) -> None:
             except discord.HTTPException as exc:
                 if getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc):
                     logger.warning("riassunto: embed oversize in DM, retrying with smaller chunks")
-                    retry_embeds = normalize_embeds_for_discord(embeds, max_chars=RETRY_EMBED_CHARS)
+                    retry_embeds = normalize_embeds_for_discord(embeds, max_chars=RETRY_MAX_EMBED_CHARS)
                     try:
                         metrics_file = build_metrics_attachment()
                         files = [metrics_file] if metrics_file else None
@@ -2459,7 +2461,7 @@ def setup(registry: ServiceRegistry) -> None:
             except discord.HTTPException as exc:
                 if getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc):
                     logger.warning("riassunto: embed oversize in followup, retrying with smaller chunks")
-                    retry_embeds = normalize_embeds_for_discord(detail_embeds, max_chars=RETRY_EMBED_CHARS)
+                    retry_embeds = normalize_embeds_for_discord(detail_embeds, max_chars=RETRY_MAX_EMBED_CHARS)
                     metrics_file = build_metrics_attachment()
                     files = [metrics_file] if metrics_file else None
                     await interaction.followup.send(
