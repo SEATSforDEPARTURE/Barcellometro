@@ -23,7 +23,18 @@ QUIET_DEFAULT_END = "08:30"
 QUIET_DEFAULT_ENABLED = True
 CAP_DEFAULT = 6
 CAP_DEFAULT_ENABLED = True
-BARCELLO_CACHE_TTL_SECONDS = 300
+BARCELLO_CACHE_TTL_SECONDS = 60
+
+BARCELLO_COLOR_MAP = {
+    "GREEN": "GREEN",
+    "YELLOW": "YELLOW",
+    "RED": "RED",
+    "BLACK": "BLACK",
+    "🟢": "GREEN",
+    "🟡": "YELLOW",
+    "🔴": "RED",
+    "⚫": "BLACK",
+}
 
 
 def _parse_local_time(value: str) -> time:
@@ -120,26 +131,26 @@ def select_text_for_mood(
     text_red: Optional[str],
     text_black: Optional[str],
     barcello_color: Optional[str],
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str], str]:
     if mood_mode == "IGNORE_BARCELLO":
-        return base_text, None
+        return base_text, None, "base"
     if mood_mode == "GREEN_ONLY":
-        return text_green or base_text, "barcello_green"
+        return text_green or base_text, "barcello_green", "green" if text_green else "base"
     if mood_mode == "YELLOW_ONLY":
-        return text_yellow or base_text, "barcello_yellow"
+        return text_yellow or base_text, "barcello_yellow", "yellow" if text_yellow else "base"
     if mood_mode == "RED_ONLY":
-        return text_red or base_text, "barcello_red"
+        return text_red or base_text, "barcello_red", "red" if text_red else "base"
     if mood_mode == "BLACK_ONLY":
-        return text_black or base_text, "barcello_black"
+        return text_black or base_text, "barcello_black", "black" if text_black else "base"
     if barcello_color == "GREEN":
-        return text_green or base_text, "barcello_green"
+        return text_green or base_text, "barcello_green", "green" if text_green else "base"
     if barcello_color == "YELLOW":
-        return text_yellow or base_text, "barcello_yellow"
+        return text_yellow or base_text, "barcello_yellow", "yellow" if text_yellow else "base"
     if barcello_color == "RED":
-        return text_red or base_text, "barcello_red"
+        return text_red or base_text, "barcello_red", "red" if text_red else "base"
     if barcello_color == "BLACK":
-        return text_black or base_text, "barcello_black"
-    return base_text, "barcello_unavailable"
+        return text_black or base_text, "barcello_black", "black" if text_black else "base"
+    return base_text, "barcello_unavailable", "base"
 
 
 def _parse_iso(value: object) -> Optional[datetime]:
@@ -181,7 +192,7 @@ class MessageSchedulerService:
         self._community_insights = community_insights
         self._barcello_service = barcello_service
         self._task: Optional[asyncio.Task[None]] = None
-        self._barcello_cache: dict[str, tuple[datetime, str]] = {}
+        self._barcello_cache: dict[str, tuple[datetime, str, Optional[int]]] = {}
         self._metrics = {
             "last_tick_ts": None,
             "errors": 0,
@@ -261,7 +272,17 @@ class MessageSchedulerService:
                 )
                 continue
 
-            resolved_text, send_reason = await self._resolve_campaign_text(campaign, guild_id, channel_id)
+            resolved_text, send_reason, debug_payload = await self._resolve_campaign_text(campaign, guild_id, channel_id)
+            logger.info(
+                "Campaign selection guild=%s campaign=%s mode=%s color=%s score=%s source=%s cache=%s",
+                guild_id,
+                campaign_id,
+                debug_payload["mood_mode"],
+                debug_payload["barcello_color"],
+                debug_payload["barcello_score"],
+                debug_payload["selected_source"],
+                debug_payload["cache_status"],
+            )
             if not resolved_text:
                 await self._database.insert_send_log(
                     campaign_id=campaign_id,
@@ -364,15 +385,21 @@ class MessageSchedulerService:
         campaign: dict[str, object],
         guild_id: str,
         channel_id: str,
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> tuple[Optional[str], Optional[str], dict[str, object]]:
         campaign_type = str(campaign["type"])
         if campaign_type == "AI_INSIGHTS":
             text = await self._get_ai_message(guild_id)
-            return text, "barcello_unavailable" if text else None
+            return text, "barcello_unavailable" if text else None, {
+                "mood_mode": "AI_INSIGHTS",
+                "barcello_color": "BLACK",
+                "barcello_score": None,
+                "selected_source": "base",
+                "cache_status": "n/a",
+            }
 
         mood_mode = str(campaign.get("mood_mode") or "AUTO")
-        barcello_color, barcello_reason = await self._get_barcello_color(guild_id, channel_id)
-        text, reason = select_text_for_mood(
+        barcello_color, barcello_score, cache_status, barcello_reason = await self._get_barcello_color(guild_id, channel_id)
+        text, reason, selected_source = select_text_for_mood(
             mood_mode=mood_mode,
             base_text=campaign.get("text"),
             text_green=campaign.get("text_green"),
@@ -381,9 +408,29 @@ class MessageSchedulerService:
             text_black=campaign.get("text_black"),
             barcello_color=barcello_color,
         )
+        if mood_mode == "AUTO" and barcello_color == "BLACK" and not text:
+            return None, "no_text_for_mode", {
+                "mood_mode": mood_mode,
+                "barcello_color": barcello_color,
+                "barcello_score": barcello_score,
+                "selected_source": selected_source,
+                "cache_status": cache_status,
+            }
         if barcello_reason:
-            return text, barcello_reason
-        return text, reason
+            return text, barcello_reason, {
+                "mood_mode": mood_mode,
+                "barcello_color": barcello_color,
+                "barcello_score": barcello_score,
+                "selected_source": selected_source,
+                "cache_status": cache_status,
+            }
+        return text, reason, {
+            "mood_mode": mood_mode,
+            "barcello_color": barcello_color,
+            "barcello_score": barcello_score,
+            "selected_source": selected_source,
+            "cache_status": cache_status,
+        }
 
     async def _get_quiet_settings(self) -> QuietSettings:
         enabled_raw = await self._get_setting_with_default("messages_quiet_enabled", "1" if QUIET_DEFAULT_ENABLED else "0")
@@ -415,21 +462,22 @@ class MessageSchedulerService:
             return default
         return stored
 
-    async def _get_barcello_color(self, guild_id: str, channel_id: str) -> tuple[str, Optional[str]]:
+    async def _get_barcello_color(self, guild_id: str, channel_id: str) -> tuple[str, Optional[int], str, Optional[str]]:
         if self._barcello_service is None:
-            return "BLACK", "barcello_unavailable"
+            return "BLACK", None, "disabled", "barcello_unavailable"
         cached = self._barcello_cache.get(guild_id)
         now = datetime.now(timezone.utc)
         if cached and cached[0] > now:
-            return cached[1], None
+            return cached[1], cached[2], "hit", None
         try:
-            color = await self._barcello_service.get_current_color(guild_id, channel_id=channel_id, window_minutes=180)
+            status = await self._barcello_service.get_current_status(guild_id, channel_id=channel_id, window_minutes=180)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to compute barcello color for %s:%s", guild_id, channel_id)
-            return "BLACK", "barcello_unavailable"
-        color = str(color).upper()
-        self._barcello_cache[guild_id] = (now + timedelta(seconds=BARCELLO_CACHE_TTL_SECONDS), color)
-        return color, None
+            return "BLACK", None, "error", "barcello_unavailable"
+        normalized = BARCELLO_COLOR_MAP.get(str(status["color"]).upper(), "BLACK")
+        score = status.get("score")
+        self._barcello_cache[guild_id] = (now + timedelta(seconds=BARCELLO_CACHE_TTL_SECONDS), normalized, score)
+        return normalized, score, "miss", None
 
     async def _get_ai_message(self, guild_id: str) -> Optional[str]:
         if self._community_insights is None:

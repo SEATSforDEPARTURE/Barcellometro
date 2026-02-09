@@ -72,7 +72,7 @@ def test_round_robin_selection() -> None:
 
 
 def test_barcello_text_selection() -> None:
-    text, reason = select_text_for_mood(
+    text, reason, _ = select_text_for_mood(
         mood_mode="AUTO",
         base_text="base",
         text_green=None,
@@ -84,7 +84,7 @@ def test_barcello_text_selection() -> None:
     assert text == "red"
     assert reason == "barcello_red"
 
-    text, reason = select_text_for_mood(
+    text, reason, _ = select_text_for_mood(
         mood_mode="AUTO",
         base_text="base",
         text_green=None,
@@ -96,7 +96,7 @@ def test_barcello_text_selection() -> None:
     assert text == "base"
     assert reason == "barcello_red"
 
-    text, reason = select_text_for_mood(
+    text, reason, _ = select_text_for_mood(
         mood_mode="RED_ONLY",
         base_text="base",
         text_green=None,
@@ -108,7 +108,7 @@ def test_barcello_text_selection() -> None:
     assert text == "base"
     assert reason == "barcello_red"
 
-    text, reason = select_text_for_mood(
+    text, reason, _ = select_text_for_mood(
         mood_mode="AUTO",
         base_text=None,
         text_green=None,
