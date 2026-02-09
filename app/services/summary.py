@@ -406,9 +406,7 @@ class SummaryService:
         system_prompt = (
             "Scrivi in italiano e restituisci SOLO JSON valido. "
             "Non inventare dettagli. "
-            "Se include_names=false NON includere nomi persone, usa 'un utente'. "
-            "Se include_names=true, ogni momento, frase iconica e dinamica deve includere i nomi reali degli attori "
-            "(actor/actors) e non usare placeholder come 'un utente'. "
+            "NON includere mai nomi di persone. "
             "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
             "TEMI devono essere solo keyword brevi (no nomi). "
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
@@ -420,9 +418,9 @@ class SummaryService:
             "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
             "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
-            "moments: oggetti con 'ts','text','primary_ref','refs','actor'. "
-            "quotes: oggetti con 'ts','text','primary_ref','refs','actor'. "
-            "dynamics: oggetti con 'ts','text','primary_ref','refs','actors'. "
+            "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
+            "quotes: oggetti con 'ts','quote_text','primary_ref','refs'. "
+            "dynamics: oggetti con 'ts','dynamic_text','optional_ref','refs'. "
             "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
             "advice: lista stringhe brevi."
         )
@@ -530,7 +528,12 @@ class SummaryService:
         config: dict[str, Any],
         tier: str,
     ) -> SummaryResult:
-        def _normalize_items(raw: Any, *, is_quote: bool = False) -> list[SummaryItem | SummaryQuote]:
+        def _normalize_items(
+            raw: Any,
+            *,
+            is_quote: bool = False,
+            is_dynamic: bool = False,
+        ) -> list[SummaryItem | SummaryQuote]:
             if not isinstance(raw, list):
                 return []
             output: list[SummaryItem | SummaryQuote] = []
@@ -538,20 +541,16 @@ class SummaryService:
                 if not isinstance(item, dict):
                     continue
                 ts = item.get("ts")
-                text = str(item.get("text") or "").strip()
+                if is_quote:
+                    text = str(item.get("quote_text") or item.get("text") or "").strip()
+                elif is_dynamic:
+                    text = str(item.get("dynamic_text") or item.get("text") or "").strip()
+                else:
+                    text = str(item.get("summary_text") or item.get("text") or "").strip()
                 if not text:
                     continue
                 message_ids = [str(mid) for mid in (item.get("message_ids") or []) if str(mid)]
                 author_id = str(item.get("author_id") or "") or None
-                actor_display = None
-                actors_display: list[str] = []
-                if include_names:
-                    actor_display = str(item.get("actor") or item.get("actor_display") or "").strip() or None
-                    actors_display = [
-                        str(name).strip()
-                        for name in (item.get("actors") or item.get("actors_display") or [])
-                        if str(name).strip()
-                    ]
                 if is_quote:
                     output.append(
                         SummaryQuote(
@@ -559,7 +558,7 @@ class SummaryService:
                             text=text,
                             author_id=author_id,
                             message_ids=message_ids,
-                            actor_display=actor_display,
+                            actor_display=None,
                         )
                     )
                 else:
@@ -569,8 +568,8 @@ class SummaryService:
                             text=text,
                             author_id=author_id,
                             message_ids=message_ids,
-                            actor_display=actor_display,
-                            actors_display=actors_display,
+                            actor_display=None,
+                            actors_display=[],
                         )
                     )
             return output
@@ -578,7 +577,7 @@ class SummaryService:
         themes = [str(item).strip() for item in (ai_payload.get("themes") or []) if str(item).strip()]
         moments = _normalize_items(ai_payload.get("moments"))
         quotes = _normalize_items(ai_payload.get("quotes") or ai_payload.get("iconic_quotes"), is_quote=True)
-        dynamics = _normalize_items(ai_payload.get("dynamics"))
+        dynamics = _normalize_items(ai_payload.get("dynamics"), is_dynamic=True)
         advice = [str(item).strip() for item in (ai_payload.get("advice") or []) if str(item).strip()]
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
         invigorate = _normalize_impacts(ai_payload.get("invigorate_list"))
@@ -753,7 +752,10 @@ class SummaryService:
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
-                primary_ref_raw = str(item.get("primary_ref") or "").strip()
+                if key == "dynamics":
+                    primary_ref_raw = str(item.get("optional_ref") or item.get("primary_ref") or "").strip()
+                else:
+                    primary_ref_raw = str(item.get("primary_ref") or "").strip()
                 primary_ref = None
                 if primary_ref_raw:
                     if not _is_valid_snowflake(primary_ref_raw):
@@ -808,21 +810,17 @@ class SummaryService:
                     )
                     if record and record.get("ts"):
                         ts = _normalize_ts_value(record["ts"])
-                text = str(item.get("text") or "").strip()
+                if key == "moments":
+                    text = str(item.get("summary_text") or item.get("text") or "").strip()
+                elif key == "quotes":
+                    text = str(item.get("quote_text") or item.get("text") or "").strip()
+                else:
+                    text = str(item.get("dynamic_text") or item.get("text") or "").strip()
                 if not text:
                     continue
                 author_id = str(item.get("author_id") or "") or None
                 if not author_id and primary_ref:
                     author_id = message_author_map.get(primary_ref)
-                actor = str(item.get("actor") or item.get("actor_display") or "").strip() or None
-                actors = [
-                    str(name).strip()
-                    for name in (item.get("actors") or item.get("actors_display") or [])
-                    if str(name).strip()
-                ]
-                if not include_names:
-                    actor = None
-                    actors = []
                 if primary_ref is None:
                     final_items_with_no_ref_count += 1
                 sanitized.append(
@@ -831,8 +829,6 @@ class SummaryService:
                         "text": text,
                         "author_id": author_id,
                         "message_ids": candidates,
-                        "actor": actor,
-                        "actors": actors,
                     }
                 )
             payload[key] = sanitized

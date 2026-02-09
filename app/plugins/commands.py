@@ -703,7 +703,7 @@ def setup(registry: ServiceRegistry) -> None:
             "nero": (0x2C2F33, "⚫", "nero"),
         }
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
-        title = f"🫛 STATO BARCELLO “{channel_label}”"
+        title = f"🫛 RESOCONTO BARCELLO “{channel_label}”"
         window_start = _format_italian_ts(result.window_start_ts)
         window_end = _format_italian_ts(result.window_end_ts)
         range_prefix = ""
@@ -1001,7 +1001,13 @@ def setup(registry: ServiceRegistry) -> None:
             if name and name.lower() in {"un utente", "utente", "unknown"}:
                 name = None
             if name:
-                text = f"{text} ({name})"
+                placeholders = {"un utente", "una persona", "un membro", "qualcuno", "una persona"}
+                lowered = text.lower()
+                if any(token in lowered for token in placeholders):
+                    for token in placeholders:
+                        if token in lowered:
+                            text = re.sub(re.escape(token), name, text, count=1, flags=re.IGNORECASE)
+                            break
         time_link = _format_summary_time_link(
             moment.ts,
             primary_id,
@@ -1050,7 +1056,7 @@ def setup(registry: ServiceRegistry) -> None:
                 name for name in display_names if name.lower() not in {"un utente", "utente", "unknown"}
             ]
             if clean_names:
-                suffix += f" (coinvolti: {', '.join(clean_names)})"
+                suffix = f" — Coinvolti: {', '.join(clean_names)}"
         time_link = _format_summary_time_link(
             dynamic.ts,
             primary_id,
@@ -2136,7 +2142,7 @@ def setup(registry: ServiceRegistry) -> None:
                 return record
             return None
 
-        async def resolve_author_display(message_id: str | None) -> str | None:
+        async def resolve_author_display_name(message_id: str | None) -> str | None:
             if not message_id or interaction.guild is None:
                 return None
             record = await fetch_message_record(message_id)
@@ -2175,13 +2181,13 @@ def setup(registry: ServiceRegistry) -> None:
 
         moment_display: dict[int, str | None] = {}
         for moment in summary.moments:
-            moment_display[id(moment)] = await resolve_author_display(moment_primary.get(id(moment)))
+            moment_display[id(moment)] = await resolve_author_display_name(moment_primary.get(id(moment)))
 
         quote_display: dict[int, str | None] = {}
         quote_texts: dict[int, str] = {}
         for quote in summary.quotes:
             primary_id = quote_primary.get(id(quote))
-            quote_display[id(quote)] = await resolve_author_display(primary_id)
+            quote_display[id(quote)] = await resolve_author_display_name(primary_id)
             if primary_id:
                 record = await fetch_message_record(primary_id)
                 if record and record.get("content"):
@@ -2206,7 +2212,7 @@ def setup(registry: ServiceRegistry) -> None:
             if include_names:
                 names: list[str] = []
                 for ref in valid_refs[:3]:
-                    name = await resolve_author_display(ref)
+                    name = await resolve_author_display_name(ref)
                     if name and name not in names:
                         names.append(name)
                 dynamic_names[id(dynamic)] = names
@@ -2222,6 +2228,7 @@ def setup(registry: ServiceRegistry) -> None:
             themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
             sections_map["themes"] = [("🏷️ TEMI", themes_value, 1)]
 
+            moment_header = "📌 MOMENTI SALIENTI"
             moment_lines = [
                 _format_summary_moment_line(
                     moment=moment,
@@ -2235,7 +2242,8 @@ def setup(registry: ServiceRegistry) -> None:
                 for moment in summary.moments
             ]
             if moment_lines:
-                sections_map["moments"] = [("📌 MOMENTI SALIENTI", _format_bullets(moment_lines), 1)]
+                moment_lines = moment_lines[:10]
+                sections_map["moments"] = [(moment_header, _format_bullets(moment_lines), 1)]
 
             if channel_is_voice and voice_lines:
                 sections_map["voice"] = [("🎙️ CHIAMATA", "\n".join(voice_lines), 1)]
@@ -2348,6 +2356,25 @@ def setup(registry: ServiceRegistry) -> None:
                 chunks: list[discord.Embed] = []
                 current = build_embed_shell("")
 
+                def fit_moment_value(field_name: str, current_embed: discord.Embed) -> str:
+                    nonlocal moment_lines
+                    lines = list(moment_lines)
+                    value = _format_bullets(lines)
+                    while lines and len(value) > 1024:
+                        lines = lines[:-1]
+                        value = _format_bullets(lines)
+                    while lines:
+                        candidate = _clone_embed_shell(current_embed)
+                        for existing in current_embed.fields:
+                            candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
+                        candidate.add_field(name=field_name, value=value, inline=False)
+                        if _estimate_embed_size(candidate) < target_max and len(candidate.fields) <= 25:
+                            break
+                        lines = lines[:-1]
+                        value = _format_bullets(lines)
+                    moment_lines = lines
+                    return value
+
                 def add_field(field_name: str, field_value: str) -> None:
                     nonlocal current
                     candidate = _clone_embed_shell(current)
@@ -2363,6 +2390,11 @@ def setup(registry: ServiceRegistry) -> None:
                         current = candidate
 
                 for name, value, _group in section_list:
+                    if name == moment_header:
+                        moment_value = fit_moment_value(name, current)
+                        if moment_value:
+                            add_field(name, _with_spacing(moment_value))
+                        continue
                     chunks_list = _split_field_chunks(_with_spacing(value), 1024)
                     for idx, chunk in enumerate(chunks_list):
                         field_name = name if idx == 0 else f"{name} (cont.)"
