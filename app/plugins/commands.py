@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -20,6 +21,9 @@ from app.services.ingest import EventEnvelope, IngestService
 from app.services.summary import SummaryImpact, SummaryItem, SummaryQuote, SummaryService
 
 logger = logging.getLogger(__name__)
+
+MAX_EMBED_CHARS: int = 5800
+RETRY_MAX_EMBED_CHARS: int = 5200
 
 
 def setup(registry: ServiceRegistry) -> None:
@@ -237,6 +241,37 @@ def setup(registry: ServiceRegistry) -> None:
         lines = [f"{key}: {metrics.get(key)}" for key in keys]
         return "```\n" + "\n".join(lines) + "\n```"
 
+    def _build_metrics_report(metrics: dict[str, Any]) -> str:
+        keys = [
+            "message_count",
+            "window_minutes",
+            "msg_per_min",
+            "caps_ratio",
+            "negativity_hits",
+            "mention_count",
+            "mention_per_min",
+            "reply_war",
+            "top1_author_share",
+            "top3_author_share",
+            "max_msgs_per_minute",
+            "std_msgs_per_minute",
+            "burst_ratio",
+            "contrast_per_msg",
+            "challenge_per_msg",
+            "playful_emoji_ratio",
+            "passive_aggressive_emoji_ratio",
+            "sarcasm_marker_hits",
+            "msg_count_user_a",
+            "msg_count_user_b",
+            "balance_ratio",
+            "mentions_a_to_b",
+            "mentions_b_to_a",
+            "avg_msg_len_a",
+            "avg_msg_len_b",
+        ]
+        lines = [f"{key}: {metrics.get(key)}" for key in keys]
+        return "\n".join(lines)
+
     def _with_spacing(text: str) -> str:
         return text
 
@@ -332,6 +367,18 @@ def setup(registry: ServiceRegistry) -> None:
         for embed in embeds:
             output.extend(_split_embed_fields(embed, max_chars=max_chars))
         return output
+
+    def normalize_embeds_for_discord(
+        embeds: list[discord.Embed],
+        *,
+        max_chars: int | None = None,
+    ) -> list[discord.Embed]:
+        if max_chars is None:
+            max_chars = MAX_EMBED_CHARS
+        normalized = _ensure_embed_limits(embeds, max_chars=max_chars)
+        if any(_estimate_embed_size(embed) >= 6000 for embed in normalized):
+            normalized = _ensure_embed_limits(normalized, max_chars=min(max_chars, 5600))
+        return normalized
 
     def _parse_hex_color(raw: str | None) -> int | None:
         if not raw:
@@ -656,7 +703,7 @@ def setup(registry: ServiceRegistry) -> None:
             "nero": (0x2C2F33, "⚫", "nero"),
         }
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
-        title = f"🫛 STATO BARCELLO “{channel_label}”"
+        title = f"🫛 RESOCONTO BARCELLO “{channel_label}”"
         window_start = _format_italian_ts(result.window_start_ts)
         window_end = _format_italian_ts(result.window_end_ts)
         range_prefix = ""
@@ -954,7 +1001,13 @@ def setup(registry: ServiceRegistry) -> None:
             if name and name.lower() in {"un utente", "utente", "unknown"}:
                 name = None
             if name:
-                text = f"{name}: {text}"
+                placeholders = {"un utente", "una persona", "un membro", "qualcuno", "una persona"}
+                lowered = text.lower()
+                if any(token in lowered for token in placeholders):
+                    for token in placeholders:
+                        if token in lowered:
+                            text = re.sub(re.escape(token), name, text, count=1, flags=re.IGNORECASE)
+                            break
         time_link = _format_summary_time_link(
             moment.ts,
             primary_id,
@@ -966,45 +1019,51 @@ def setup(registry: ServiceRegistry) -> None:
     def _format_summary_quote_line(
         *,
         quote: SummaryQuote,
+        guild_id: int,
+        channel_id: int,
+        primary_id: str | None,
         display_name: str | None,
-        message_link: str | None,
         text_override: str | None,
     ) -> str:
         text = text_override or quote.text
         if display_name and display_name.lower() in {"un utente", "utente", "unknown"}:
             display_name = None
-        if display_name:
-            speaker = display_name
-        elif message_link:
-            speaker = message_link
-        else:
-            speaker = ""
-        return f"“{text}” — {speaker}".rstrip(" —")
+        speaker = display_name or ""
+        time_link = _format_summary_time_link(
+            quote.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        line = f"{time_link} — “{text}”"
+        if speaker:
+            line += f" — {speaker}"
+        return line
 
     def _format_summary_dynamics_line(
         *,
         dynamic: SummaryItem,
+        guild_id: int,
+        channel_id: int,
+        primary_id: str | None,
         include_names: bool,
         display_names: list[str],
-        message_links: list[str],
     ) -> str:
         text = dynamic.text
         suffix = ""
-        if message_links:
-            suffix = " " + " ".join(message_links)
         if include_names and display_names:
             clean_names = [
                 name for name in display_names if name.lower() not in {"un utente", "utente", "unknown"}
             ]
             if clean_names:
-                suffix += f" (coinvolti: {', '.join(clean_names)})"
-        return f"{text}{suffix}"
-
-    def _format_message_link(*, guild_id: int, channel_id: int, message_id: str | None) -> str | None:
-        if not message_id:
-            return None
-        jump = _jump_link(guild_id, channel_id, message_id)
-        return f"[msg]({jump})"
+                suffix = f" — Coinvolti: {', '.join(clean_names)}"
+        time_link = _format_summary_time_link(
+            dynamic.ts,
+            primary_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        return f"{time_link} — {text}{suffix}"
 
     def _select_quote_text(content: str, max_len: int = 220) -> str:
         cleaned = " ".join((content or "").split())
@@ -1029,17 +1088,15 @@ def setup(registry: ServiceRegistry) -> None:
         prefix: str,
         primary_id: str | None,
     ) -> str:
-        name = display_name or "utente"
         time_link = _format_summary_time_link(
             impact.ts,
             primary_id,
             guild_id=guild_id,
             channel_id=channel_id,
         )
-        return f"{time_link} — {prefix} {name} — {impact.reason}"
-
-    MAX_EMBED_CHARS = 5800
-    RETRY_EMBED_CHARS = 5200
+        if display_name:
+            return f"{time_link} — {prefix} {display_name} — {impact.reason}"
+        return f"{time_link} — {prefix} {impact.reason}"
 
     def _estimate_embed_size(embed: discord.Embed) -> int:
         total = len(embed.title or "") + len(embed.description or "")
@@ -2085,7 +2142,7 @@ def setup(registry: ServiceRegistry) -> None:
                 return record
             return None
 
-        async def resolve_author_display(message_id: str | None) -> str | None:
+        async def resolve_author_display_name(message_id: str | None) -> str | None:
             if not message_id or interaction.guild is None:
                 return None
             record = await fetch_message_record(message_id)
@@ -2124,20 +2181,19 @@ def setup(registry: ServiceRegistry) -> None:
 
         moment_display: dict[int, str | None] = {}
         for moment in summary.moments:
-            moment_display[id(moment)] = await resolve_author_display(moment_primary.get(id(moment)))
+            moment_display[id(moment)] = await resolve_author_display_name(moment_primary.get(id(moment)))
 
         quote_display: dict[int, str | None] = {}
         quote_texts: dict[int, str] = {}
         for quote in summary.quotes:
             primary_id = quote_primary.get(id(quote))
-            quote_display[id(quote)] = await resolve_author_display(primary_id)
+            quote_display[id(quote)] = await resolve_author_display_name(primary_id)
             if primary_id:
                 record = await fetch_message_record(primary_id)
                 if record and record.get("content"):
                     quote_texts[id(quote)] = _select_quote_text(record["content"])
 
         dynamic_names: dict[int, list[str]] = {}
-        dynamic_links: dict[int, list[str]] = {}
         for dynamic in summary.dynamics:
             refs = [str(mid) for mid in (dynamic.message_ids or []) if str(mid)]
             valid_refs: list[str] = []
@@ -2153,22 +2209,18 @@ def setup(registry: ServiceRegistry) -> None:
                 primary_id = dynamic_primary.get(id(dynamic))
                 if primary_id:
                     valid_refs = [primary_id]
-            links = [
-                _format_message_link(
-                    guild_id=interaction.guild_id,
-                    channel_id=interaction.channel_id,
-                    message_id=ref,
-                )
-                for ref in valid_refs
-            ]
-            dynamic_links[id(dynamic)] = [link for link in links if link]
             if include_names:
                 names: list[str] = []
                 for ref in valid_refs[:3]:
-                    name = await resolve_author_display(ref)
+                    name = await resolve_author_display_name(ref)
                     if name and name not in names:
                         names.append(name)
                 dynamic_names[id(dynamic)] = names
+
+        report_id = str(uuid4())
+        metrics_report: str | None = None
+        if profile == "mod":
+            metrics_report = _build_metrics_report(metrics)
 
         def build_embeds() -> list[discord.Embed]:
             sections_map: dict[str, list[tuple[str, str, int]]] = {}
@@ -2176,6 +2228,7 @@ def setup(registry: ServiceRegistry) -> None:
             themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
             sections_map["themes"] = [("🏷️ TEMI", themes_value, 1)]
 
+            moment_header = "📌 MOMENTI SALIENTI"
             moment_lines = [
                 _format_summary_moment_line(
                     moment=moment,
@@ -2189,7 +2242,8 @@ def setup(registry: ServiceRegistry) -> None:
                 for moment in summary.moments
             ]
             if moment_lines:
-                sections_map["moments"] = [("📌 MOMENTI SALIENTI", _format_bullets(moment_lines), 1)]
+                moment_lines = moment_lines[:10]
+                sections_map["moments"] = [(moment_header, _format_bullets(moment_lines), 1)]
 
             if channel_is_voice and voice_lines:
                 sections_map["voice"] = [("🎙️ CHIAMATA", "\n".join(voice_lines), 1)]
@@ -2197,12 +2251,10 @@ def setup(registry: ServiceRegistry) -> None:
             quote_lines = [
                 _format_summary_quote_line(
                     quote=quote,
+                    guild_id=interaction.guild_id,
+                    channel_id=interaction.channel_id,
+                    primary_id=quote_primary.get(id(quote)),
                     display_name=quote_display.get(id(quote)),
-                    message_link=_format_message_link(
-                        guild_id=interaction.guild_id,
-                        channel_id=interaction.channel_id,
-                        message_id=quote_primary.get(id(quote)),
-                    ),
                     text_override=quote_texts.get(id(quote)),
                 )
                 for quote in summary.quotes
@@ -2213,9 +2265,11 @@ def setup(registry: ServiceRegistry) -> None:
             dynamic_lines = [
                 _format_summary_dynamics_line(
                     dynamic=dynamic,
+                    guild_id=interaction.guild_id,
+                    channel_id=interaction.channel_id,
+                    primary_id=dynamic_primary.get(id(dynamic)),
                     include_names=include_names,
                     display_names=dynamic_names.get(id(dynamic), []),
-                    message_links=dynamic_links.get(id(dynamic), []),
                 )
                 for dynamic in summary.dynamics
             ]
@@ -2259,7 +2313,9 @@ def setup(registry: ServiceRegistry) -> None:
                 if advice_lines:
                     sections_map["advice"] = [("🧭 CONSIGLI PERSONALIZZATI", _format_bullets(advice_lines), 3)]
 
-                sections_map["metrics"] = [("🧱 METRICHE AGGREGATE", _with_spacing(_format_metrics(metrics)), 3)]
+                sections_map["metrics"] = [
+                    ("🧱 METRICHE AGGREGATE", _with_spacing("Dettagli completi nel file allegato."), 3)
+                ]
 
                 ai_note = summary.ai_status
                 if ai_note.get("enabled"):
@@ -2268,23 +2324,6 @@ def setup(registry: ServiceRegistry) -> None:
                     fallback = "fallback locale attivo" if ai_note.get("fallback") or not ai_allowed else ""
                     ai_line = f"AI: OFF" + (f" — {fallback}" if fallback else "")
                 sections_map["ai"] = [("🤖 AI", ai_line, 3)]
-
-            if profile == "role1":
-                sections_map["notes"] = [
-                    (
-                        "📝 NOTE",
-                        "Per un riassunto più approfondito e per vedere anche FRASI ICONICHE e le DINAMICHE, fai upgrade ai piani superiori.",
-                        1,
-                    )
-                ]
-            if profile == "role2":
-                sections_map["notes"] = [
-                    (
-                        "📝 NOTE",
-                        "Per vedere anche le DINAMICHE fai upgrade al piano PRO MAX.",
-                        2,
-                    )
-                ]
 
             if privacy_gaps:
                 lines = [
@@ -2317,6 +2356,25 @@ def setup(registry: ServiceRegistry) -> None:
                 chunks: list[discord.Embed] = []
                 current = build_embed_shell("")
 
+                def fit_moment_value(field_name: str, current_embed: discord.Embed) -> str:
+                    nonlocal moment_lines
+                    lines = list(moment_lines)
+                    value = _format_bullets(lines)
+                    while lines and len(value) > 1024:
+                        lines = lines[:-1]
+                        value = _format_bullets(lines)
+                    while lines:
+                        candidate = _clone_embed_shell(current_embed)
+                        for existing in current_embed.fields:
+                            candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
+                        candidate.add_field(name=field_name, value=value, inline=False)
+                        if _estimate_embed_size(candidate) < target_max and len(candidate.fields) <= 25:
+                            break
+                        lines = lines[:-1]
+                        value = _format_bullets(lines)
+                    moment_lines = lines
+                    return value
+
                 def add_field(field_name: str, field_value: str) -> None:
                     nonlocal current
                     candidate = _clone_embed_shell(current)
@@ -2332,6 +2390,11 @@ def setup(registry: ServiceRegistry) -> None:
                         current = candidate
 
                 for name, value, _group in section_list:
+                    if name == moment_header:
+                        moment_value = fit_moment_value(name, current)
+                        if moment_value:
+                            add_field(name, _with_spacing(moment_value))
+                        continue
                     chunks_list = _split_field_chunks(_with_spacing(value), 1024)
                     for idx, chunk in enumerate(chunks_list):
                         field_name = name if idx == 0 else f"{name} (cont.)"
@@ -2359,7 +2422,6 @@ def setup(registry: ServiceRegistry) -> None:
             return embeds
 
         embeds = build_embeds()
-        report_id = str(uuid4())
 
         logger.info(
             "riassunto: report id=%s user=%s channel=%s range=%s-%s tier=%s ai=%s cache=%s voice=%s",
@@ -2374,18 +2436,36 @@ def setup(registry: ServiceRegistry) -> None:
             channel_is_voice,
         )
 
+        def build_metrics_attachment() -> discord.File | None:
+            if not metrics_report:
+                return None
+            buffer = io.BytesIO(metrics_report.encode("utf-8"))
+            return discord.File(buffer, filename=f"metriche-riassunto-{report_id}.txt")
+
         async def try_send_dm() -> bool:
             try:
-                await interaction.user.send(embeds=[status_embed, *embeds])
+                normalized_status = normalize_embeds_for_discord([status_embed])
+                normalized_details = normalize_embeds_for_discord(embeds)
+                metrics_file = build_metrics_attachment()
+                files = [metrics_file] if metrics_file else None
+                await interaction.user.send(
+                    embeds=[*normalized_status, *normalized_details],
+                    files=files,
+                )
                 return True
             except discord.Forbidden:
                 return False
             except discord.HTTPException as exc:
                 if getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc):
                     logger.warning("riassunto: embed oversize in DM, retrying with smaller chunks")
-                    retry_embeds = _ensure_embed_limits(embeds, max_chars=RETRY_EMBED_CHARS)
+                    retry_embeds = normalize_embeds_for_discord(embeds, max_chars=RETRY_MAX_EMBED_CHARS)
                     try:
-                        await interaction.user.send(embeds=[status_embed])
+                        metrics_file = build_metrics_attachment()
+                        files = [metrics_file] if metrics_file else None
+                        await interaction.user.send(
+                            embeds=normalize_embeds_for_discord([status_embed]),
+                            files=files,
+                        )
                         if retry_embeds:
                             await interaction.user.send(embeds=retry_embeds)
                         return True
@@ -2400,12 +2480,28 @@ def setup(registry: ServiceRegistry) -> None:
             detail_embeds: list[discord.Embed],
         ) -> None:
             try:
-                await interaction.followup.send(content=content, embeds=[status, *detail_embeds], ephemeral=True)
+                normalized_status = normalize_embeds_for_discord([status])
+                normalized_details = normalize_embeds_for_discord(detail_embeds)
+                metrics_file = build_metrics_attachment()
+                files = [metrics_file] if metrics_file else None
+                await interaction.followup.send(
+                    content=content,
+                    embeds=[*normalized_status, *normalized_details],
+                    files=files,
+                    ephemeral=True,
+                )
             except discord.HTTPException as exc:
                 if getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc):
                     logger.warning("riassunto: embed oversize in followup, retrying with smaller chunks")
-                    retry_embeds = _ensure_embed_limits(detail_embeds, max_chars=RETRY_EMBED_CHARS)
-                    await interaction.followup.send(content=content, embeds=[status], ephemeral=True)
+                    retry_embeds = normalize_embeds_for_discord(detail_embeds, max_chars=RETRY_MAX_EMBED_CHARS)
+                    metrics_file = build_metrics_attachment()
+                    files = [metrics_file] if metrics_file else None
+                    await interaction.followup.send(
+                        content=content,
+                        embeds=normalize_embeds_for_discord([status]),
+                        files=files,
+                        ephemeral=True,
+                    )
                     if retry_embeds:
                         await interaction.followup.send(embeds=retry_embeds, ephemeral=True)
                 else:

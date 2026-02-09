@@ -16,17 +16,17 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
     "tiers": {
         "role1": {
             "label": "PLUS",
-            "sections": ["themes", "moments", "notes"],
+            "sections": ["themes", "moments"],
             "limits": {
                 "themes": 6,
-                "moments": 5,
+                "moments": 10,
                 "quotes": 3,
-                "dynamics": 2,
+                "dynamics": 3,
             },
         },
         "role2": {
             "label": "PRO",
-            "sections": ["themes", "moments", "quotes", "notes"],
+            "sections": ["themes", "moments", "quotes"],
             "limits": {
                 "themes": 6,
                 "moments": 10,
@@ -39,9 +39,9 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "sections": ["themes", "moments", "quotes", "dynamics"],
             "limits": {
                 "themes": 8,
-                "moments": 15,
+                "moments": 10,
                 "quotes": 3,
-                "dynamics": 4,
+                "dynamics": 3,
             },
         },
         "mod": {
@@ -58,14 +58,13 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             ],
             "limits": {
                 "themes": 10,
-                "moments": 15,
+                "moments": 10,
                 "quotes": 3,
-                "dynamics": 5,
+                "dynamics": 3,
                 "impact": 3,
             },
         },
     },
-    "ai_enabled_tiers": ["role2", "role3", "mod"],
     "fallback_local": True,
     "evidence_mode": {
         "links_off": 2,
@@ -256,8 +255,7 @@ class SummaryService:
             tier=tier,
         )
 
-        ai_enabled_tiers = set(config.get("ai_enabled_tiers", []) or [])
-        use_ai = ai_allowed and tier in ai_enabled_tiers and self._ai_service is not None
+        use_ai = ai_allowed and self._ai_service is not None
 
         summary = local_summary
         ai_status: dict[str, Any] = {
@@ -320,8 +318,7 @@ class SummaryService:
         ai_allowed: bool,
         config: dict[str, Any],
     ) -> str | None:
-        ai_enabled_tiers = set(config.get("ai_enabled_tiers", []) or [])
-        use_ai = ai_allowed and tier in ai_enabled_tiers and self._ai_service is not None
+        use_ai = ai_allowed and self._ai_service is not None
         if not use_ai:
             return None
         model = self._ai_service.get_model("summary") if self._ai_service else None
@@ -361,6 +358,11 @@ class SummaryService:
         moments = _sanitize_summary_items(moments, drop_templates=False)
         quotes = _sanitize_summary_items(quotes, drop_templates=False)
         dynamics = _sanitize_summary_items(dynamics, drop_templates=False)
+        moments = _sort_moments_chronologically(moments)
+        quotes = _sort_quotes_chronologically(quotes)
+        dynamics = _sort_moments_chronologically(dynamics)
+        degrade = _sort_impacts_chronologically(degrade)
+        invigorate = _sort_impacts_chronologically(invigorate)
         cleaned_advice: list[str] = []
         for item in advice:
             sanitized = _sanitize_bullet_text(item)
@@ -404,9 +406,7 @@ class SummaryService:
         system_prompt = (
             "Scrivi in italiano e restituisci SOLO JSON valido. "
             "Non inventare dettagli. "
-            "Se include_names=false NON includere nomi persone, usa 'un utente'. "
-            "Se include_names=true, ogni momento, frase iconica e dinamica deve includere i nomi reali degli attori "
-            "(actor/actors) e non usare placeholder come 'un utente'. "
+            "NON includere mai nomi di persone. "
             "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
             "TEMI devono essere solo keyword brevi (no nomi). "
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
@@ -418,9 +418,9 @@ class SummaryService:
             "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
             "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
-            "moments: oggetti con 'ts','text','primary_ref','refs','actor'. "
-            "quotes: oggetti con 'ts','text','primary_ref','refs','actor'. "
-            "dynamics: oggetti con 'ts','text','primary_ref','refs','actors'. "
+            "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
+            "quotes: oggetti con 'ts','quote_text','primary_ref','refs'. "
+            "dynamics: oggetti con 'ts','dynamic_text','optional_ref','refs'. "
             "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
             "advice: lista stringhe brevi."
         )
@@ -528,7 +528,12 @@ class SummaryService:
         config: dict[str, Any],
         tier: str,
     ) -> SummaryResult:
-        def _normalize_items(raw: Any, *, is_quote: bool = False) -> list[SummaryItem | SummaryQuote]:
+        def _normalize_items(
+            raw: Any,
+            *,
+            is_quote: bool = False,
+            is_dynamic: bool = False,
+        ) -> list[SummaryItem | SummaryQuote]:
             if not isinstance(raw, list):
                 return []
             output: list[SummaryItem | SummaryQuote] = []
@@ -536,20 +541,16 @@ class SummaryService:
                 if not isinstance(item, dict):
                     continue
                 ts = item.get("ts")
-                text = str(item.get("text") or "").strip()
+                if is_quote:
+                    text = str(item.get("quote_text") or item.get("text") or "").strip()
+                elif is_dynamic:
+                    text = str(item.get("dynamic_text") or item.get("text") or "").strip()
+                else:
+                    text = str(item.get("summary_text") or item.get("text") or "").strip()
                 if not text:
                     continue
                 message_ids = [str(mid) for mid in (item.get("message_ids") or []) if str(mid)]
                 author_id = str(item.get("author_id") or "") or None
-                actor_display = None
-                actors_display: list[str] = []
-                if include_names:
-                    actor_display = str(item.get("actor") or item.get("actor_display") or "").strip() or None
-                    actors_display = [
-                        str(name).strip()
-                        for name in (item.get("actors") or item.get("actors_display") or [])
-                        if str(name).strip()
-                    ]
                 if is_quote:
                     output.append(
                         SummaryQuote(
@@ -557,7 +558,7 @@ class SummaryService:
                             text=text,
                             author_id=author_id,
                             message_ids=message_ids,
-                            actor_display=actor_display,
+                            actor_display=None,
                         )
                     )
                 else:
@@ -567,8 +568,8 @@ class SummaryService:
                             text=text,
                             author_id=author_id,
                             message_ids=message_ids,
-                            actor_display=actor_display,
-                            actors_display=actors_display,
+                            actor_display=None,
+                            actors_display=[],
                         )
                     )
             return output
@@ -576,7 +577,7 @@ class SummaryService:
         themes = [str(item).strip() for item in (ai_payload.get("themes") or []) if str(item).strip()]
         moments = _normalize_items(ai_payload.get("moments"))
         quotes = _normalize_items(ai_payload.get("quotes") or ai_payload.get("iconic_quotes"), is_quote=True)
-        dynamics = _normalize_items(ai_payload.get("dynamics"))
+        dynamics = _normalize_items(ai_payload.get("dynamics"), is_dynamic=True)
         advice = [str(item).strip() for item in (ai_payload.get("advice") or []) if str(item).strip()]
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
         invigorate = _normalize_impacts(ai_payload.get("invigorate_list"))
@@ -624,6 +625,10 @@ class SummaryService:
             dynamics = _dedupe_summary_items(dynamics, local_summary.dynamics, limit=dynamic_limit)
         if len(dynamics) > dynamic_limit:
             dynamics = dynamics[:dynamic_limit]
+        quotes = _sort_quotes_chronologically(quotes)
+        dynamics = _sort_moments_chronologically(dynamics)
+        degrade = _sort_impacts_chronologically(degrade)
+        invigorate = _sort_impacts_chronologically(invigorate)
         if not advice:
             advice = local_summary.advice
         if not degrade:
@@ -747,7 +752,10 @@ class SummaryService:
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
-                primary_ref_raw = str(item.get("primary_ref") or "").strip()
+                if key == "dynamics":
+                    primary_ref_raw = str(item.get("optional_ref") or item.get("primary_ref") or "").strip()
+                else:
+                    primary_ref_raw = str(item.get("primary_ref") or "").strip()
                 primary_ref = None
                 if primary_ref_raw:
                     if not _is_valid_snowflake(primary_ref_raw):
@@ -802,21 +810,17 @@ class SummaryService:
                     )
                     if record and record.get("ts"):
                         ts = _normalize_ts_value(record["ts"])
-                text = str(item.get("text") or "").strip()
+                if key == "moments":
+                    text = str(item.get("summary_text") or item.get("text") or "").strip()
+                elif key == "quotes":
+                    text = str(item.get("quote_text") or item.get("text") or "").strip()
+                else:
+                    text = str(item.get("dynamic_text") or item.get("text") or "").strip()
                 if not text:
                     continue
                 author_id = str(item.get("author_id") or "") or None
                 if not author_id and primary_ref:
                     author_id = message_author_map.get(primary_ref)
-                actor = str(item.get("actor") or item.get("actor_display") or "").strip() or None
-                actors = [
-                    str(name).strip()
-                    for name in (item.get("actors") or item.get("actors_display") or [])
-                    if str(name).strip()
-                ]
-                if not include_names:
-                    actor = None
-                    actors = []
                 if primary_ref is None:
                     final_items_with_no_ref_count += 1
                 sanitized.append(
@@ -825,8 +829,6 @@ class SummaryService:
                         "text": text,
                         "author_id": author_id,
                         "message_ids": candidates,
-                        "actor": actor,
-                        "actors": actors,
                     }
                 )
             payload[key] = sanitized
@@ -1214,6 +1216,22 @@ def _dedupe_summary_items(
 
 def _sort_moments_chronologically(items: list[SummaryItem]) -> list[SummaryItem]:
     def sort_key(item: SummaryItem) -> tuple[bool, str]:
+        ts = item.ts or ""
+        return (not bool(ts), ts)
+
+    return sorted(items, key=sort_key)
+
+
+def _sort_quotes_chronologically(items: list[SummaryQuote]) -> list[SummaryQuote]:
+    def sort_key(item: SummaryQuote) -> tuple[bool, str]:
+        ts = item.ts or ""
+        return (not bool(ts), ts)
+
+    return sorted(items, key=sort_key)
+
+
+def _sort_impacts_chronologically(items: list[SummaryImpact]) -> list[SummaryImpact]:
+    def sort_key(item: SummaryImpact) -> tuple[bool, str]:
         ts = item.ts or ""
         return (not bool(ts), ts)
 
