@@ -206,8 +206,44 @@ class SummaryService:
         self._database = database
         self._ai_service = ai_service
         self._cache_ttl = cache_ttl_seconds
-        self._cache: dict[tuple[str, str, str, str, str, bool, bool], tuple[float, SummaryResult, str | None]] = {}
+        self._cache: dict[
+            tuple[str, str, str, str, str, bool, bool, bool, str | None],
+            tuple[float, SummaryResult, str | None],
+        ] = {}
         self._response_format_supported: bool | None = None
+
+    def build_cache_key(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+        tier: str,
+        evidence_mode: bool,
+        voice_context: bool,
+        ai_allowed: bool,
+        model_name: str | None,
+    ) -> tuple[str, str, str, str, str, bool, bool, bool, str | None]:
+        return (
+            guild_id,
+            channel_id,
+            start_ts,
+            end_ts,
+            tier,
+            evidence_mode,
+            voice_context,
+            ai_allowed,
+            model_name,
+        )
+
+    def peek_cache(self, cache_key: tuple[str, ...], max_message_ts: Optional[str]) -> bool:
+        now_epoch = datetime.now(timezone.utc).timestamp()
+        cached = self._cache.get(cache_key)
+        if cached and cached[0] > now_epoch:
+            if max_message_ts and cached[2] and max_message_ts <= cached[2]:
+                return True
+        return False
 
     async def get_config(self) -> dict[str, Any]:
         raw = await self._database.get_setting("summary.config")
@@ -239,7 +275,18 @@ class SummaryService:
         max_message_ts: Optional[str],
         messages: list[dict[str, Any]],
     ) -> SummaryResult:
-        cache_key = (guild_id, channel_id, start_ts, end_ts, tier, evidence_mode, voice_context)
+        model_name = self._ai_service.get_model("summary") if self._ai_service else None
+        cache_key = self.build_cache_key(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            tier=tier,
+            evidence_mode=evidence_mode,
+            voice_context=voice_context,
+            ai_allowed=ai_allowed,
+            model_name=model_name,
+        )
         now_epoch = datetime.now(timezone.utc).timestamp()
         cached = self._cache.get(cache_key)
         if cached and cached[0] > now_epoch:
@@ -265,15 +312,17 @@ class SummaryService:
             "fallback": False,
             "reason": "disabled",
         }
+        ai_called = False
         if use_ai:
             ai_status.update({"enabled": True, "provider": "openai"})
-            model = self._ai_service.get_model("summary") if self._ai_service else None
+            model = model_name
             client = self._ai_service.client() if self._ai_service else None
             ai_status["model"] = model
             if not model or not client:
                 ai_status.update({"enabled": False, "fallback": True, "reason": "missing_key"})
             else:
                 try:
+                    ai_called = True
                     ai_payload = await self._call_ai(
                         client=client,
                         model=model,
@@ -302,6 +351,10 @@ class SummaryService:
                     ai_status.update({"enabled": False, "fallback": True, "reason": f"exception:{exc.__class__.__name__}"})
 
         summary.ai_status = ai_status
+        if ai_called:
+            logger.info("summary: ai_called=true fallback_reason=%s", ai_status.get("reason"))
+        else:
+            logger.info("summary: ai_called=false fallback_reason=%s", ai_status.get("reason"))
         expires = now_epoch + self._cache_ttl
         self._cache[cache_key] = (expires, summary, max_message_ts)
         return summary
@@ -355,7 +408,7 @@ class SummaryService:
         dynamics = self._extract_dynamics(barcello_metrics, messages, config, tier)
         degrade, invigorate = self._extract_impact(messages, config, tier)
         advice = self._build_mod_advice(barcello_metrics)
-        moments = _sanitize_summary_items(moments, drop_templates=False)
+        moments = _sanitize_summary_items(moments, drop_templates=False, drop_slash_tokens=True)
         quotes = _sanitize_summary_items(quotes, drop_templates=False)
         dynamics = _sanitize_summary_items(dynamics, drop_templates=False)
         moments = _sort_moments_chronologically(moments)
@@ -574,7 +627,8 @@ class SummaryService:
                     )
             return output
 
-        themes = [str(item).strip() for item in (ai_payload.get("themes") or []) if str(item).strip()]
+        theme_limit = _tier_limit(config, tier, "themes", 6)
+        themes = _sanitize_themes(ai_payload.get("themes") or [], limit=theme_limit)
         moments = _normalize_items(ai_payload.get("moments"))
         quotes = _normalize_items(ai_payload.get("quotes") or ai_payload.get("iconic_quotes"), is_quote=True)
         dynamics = _normalize_items(ai_payload.get("dynamics"), is_dynamic=True)
@@ -586,7 +640,7 @@ class SummaryService:
         dynamic_limit = _tier_limit(config, tier, "dynamics", 2)
         if not themes:
             themes = local_summary.themes
-        moments = _sanitize_summary_items(moments)
+        moments = _sanitize_summary_items(moments, drop_slash_tokens=True)
         quotes = _sanitize_summary_items(quotes)
         dynamics = _sanitize_summary_items(dynamics)
         cleaned_advice: list[str] = []
@@ -597,6 +651,7 @@ class SummaryService:
         advice = cleaned_advice
         if not moments:
             moments = _sanitize_summary_items(local_summary.moments)
+        moments = _filter_invalid_moments(moments)
         moments_missing_before = max(0, moment_limit - len(moments))
         if len(moments) < moment_limit:
             moments = _dedupe_summary_items(moments, local_summary.moments, limit=moment_limit)
@@ -894,57 +949,30 @@ class SummaryService:
             for word in _extract_keywords(content):
                 if word in ITALIAN_STOPWORDS:
                     continue
+                if _is_theme_noise(word):
+                    continue
                 counts[word] = counts.get(word, 0) + 1
         ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
         limit = _tier_limit(config, tier, "themes", 6)
-        themes = [word for word, _ in ranked[:limit]]
-        return themes
+        themes = [word for word, _ in ranked]
+        return _trim_theme_list(themes, limit)
 
     def _extract_moments(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[SummaryItem]:
         limit = _tier_limit(config, tier, "moments", 5)
-        segments = _segment_messages(messages)
-        if not segments:
+        buckets = _bucket_messages_by_time(messages, limit)
+        if not buckets:
             return []
-        scored: list[tuple[float, dict[str, Any]]] = []
-        for segment in segments:
-            score = (
-                segment["message_count"]
-                + segment["author_count"] * 2
-                + segment["mentions"]
-                + segment["burstiness"]
-            )
-            scored.append((score, segment))
-        ranked_segments = [segment for _, segment in sorted(scored, key=lambda item: item[0], reverse=True)]
-        top_segments: list[dict[str, Any]] = []
-        seen_clusters: set[str] = set()
-        for segment in ranked_segments:
-            if len(top_segments) >= limit:
-                break
-            cluster_key = str(segment.get("cluster_key") or "")
-            if cluster_key and cluster_key in seen_clusters:
-                continue
-            top_segments.append(segment)
-            if cluster_key:
-                seen_clusters.add(cluster_key)
-        if len(top_segments) < limit:
-            for segment in ranked_segments:
-                if len(top_segments) >= limit:
-                    break
-                if segment in top_segments:
-                    continue
-                top_segments.append(segment)
-        top_segments.sort(key=lambda segment: segment["start_ts"] or "")
         items: list[SummaryItem] = []
-        for segment in top_segments:
-            text = _build_segment_summary(segment)
-            message_ids = segment["message_ids"]
+        for idx, bucket in enumerate(buckets):
+            text = _build_bucket_summary(bucket, idx, len(buckets))
+            message_ids = bucket["message_ids"]
             items.append(
                 SummaryItem(
-                    ts=segment["representative_ts"],
+                    ts=bucket["representative_ts"],
                     text=text,
-                    author_id=segment.get("top_author_id"),
+                    author_id=bucket.get("top_author_id"),
                     message_ids=message_ids[:3],
-                    cluster_key=segment.get("cluster_key"),
+                    cluster_key=bucket.get("cluster_key"),
                 )
             )
         return items
@@ -1166,6 +1194,7 @@ def _sanitize_summary_items(
     items: list[SummaryItem] | list[SummaryQuote],
     *,
     drop_templates: bool = True,
+    drop_slash_tokens: bool = False,
 ) -> list[SummaryItem] | list[SummaryQuote]:
     sanitized: list[Any] = []
     for item in items:
@@ -1173,6 +1202,8 @@ def _sanitize_summary_items(
         if not text:
             continue
         if drop_templates and _is_template_bullet(text):
+            continue
+        if drop_slash_tokens and _looks_like_slash_tokens(text):
             continue
         item.text = text
         sanitized.append(item)
@@ -1397,11 +1428,11 @@ def _count_keywords(text: str, keywords: Iterable[str]) -> int:
 
 def _build_segment_summary(segment: dict[str, Any]) -> str:
     keywords = segment.get("keywords") or []
-    topic = " / ".join(keywords) if keywords else "diversi temi"
+    topic = ", ".join(keywords) if keywords else "diversi temi"
     action = _segment_action(segment)
     templates = [
         "La conversazione tocca {topic}, mentre {action}.",
-        "Il dialogo si muove su {topic}, con {action}.",
+        "Emergono spunti su {topic}, con {action}.",
         "Si apre un confronto su {topic}: {action}.",
     ]
     selector = sum(ord(char) for char in topic) % len(templates)
@@ -1423,6 +1454,164 @@ def _segment_action(segment: dict[str, Any]) -> str:
 
 def _keywords_match(keywords: list[str], targets: set[str]) -> bool:
     return any(word in targets for word in keywords)
+
+
+def _trim_theme_list(items: list[str], limit: int) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        cleaned = _sanitize_theme_token(item)
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        output.append(cleaned)
+        if len(output) >= limit:
+            break
+    return output
+
+
+def _sanitize_themes(raw: Iterable[Any], *, limit: int) -> list[str]:
+    themes = [str(item).strip() for item in raw if str(item).strip()]
+    return _trim_theme_list(themes, limit=limit)
+
+
+def _is_theme_noise(token: str) -> bool:
+    if not token:
+        return True
+    if token.isdigit():
+        return True
+    if _is_valid_snowflake(token):
+        return True
+    if len(token) > 25:
+        return True
+    digits = sum(1 for char in token if char.isdigit())
+    if digits >= max(4, int(len(token) * 0.6)):
+        return True
+    return False
+
+
+def _sanitize_theme_token(token: str) -> str | None:
+    cleaned = re.sub(r"[^0-9a-zA-Zàèéìòù]", "", token.lower())
+    if not cleaned or cleaned in ITALIAN_STOPWORDS:
+        return None
+    if _is_theme_noise(cleaned):
+        return None
+    return cleaned
+
+
+def _looks_like_slash_tokens(text: str) -> bool:
+    return bool(re.search(r".*(\\w+\\s*/\\s*){2,}\\w+.*", text))
+
+
+def _filter_invalid_moments(moments: list[SummaryItem]) -> list[SummaryItem]:
+    return [moment for moment in moments if not _looks_like_slash_tokens(moment.text)]
+
+
+def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for msg in messages:
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        ts = _parse_ts(msg.get("ts"))
+        if ts is None:
+            continue
+        cleaned = _clean_text(content)
+        keywords = _extract_segment_keywords(cleaned)
+        enriched.append(
+            {
+                "message_id": msg.get("message_id"),
+                "author_id": msg.get("author_id"),
+                "ts": ts,
+                "cleaned": cleaned,
+                "keywords": keywords,
+            }
+        )
+    if not enriched:
+        return []
+    enriched.sort(key=lambda item: item["ts"])
+    start_ts = enriched[0]["ts"]
+    end_ts = enriched[-1]["ts"]
+    total_seconds = max(1.0, (end_ts - start_ts).total_seconds())
+    bucket_count = min(limit, 10, max(1, len(enriched)))
+    buckets: list[dict[str, Any]] = []
+    for idx in range(bucket_count):
+        buckets.append(
+            {
+                "start": start_ts + (end_ts - start_ts) * (idx / bucket_count),
+                "end": start_ts + (end_ts - start_ts) * ((idx + 1) / bucket_count),
+                "message_ids": [],
+                "authors": {},
+                "keyword_counts": {},
+                "negativity_hits": 0,
+                "positive_hits": 0,
+                "questions": 0,
+                "representative_ts": None,
+                "top_author_id": None,
+                "cluster_key": None,
+            }
+        )
+    for msg in enriched:
+        rel = (msg["ts"] - start_ts).total_seconds() / total_seconds
+        idx = min(bucket_count - 1, max(0, int(rel * bucket_count)))
+        bucket = buckets[idx]
+        bucket["message_ids"].append(str(msg.get("message_id")) if msg.get("message_id") else None)
+        author_id = str(msg.get("author_id") or "")
+        if author_id:
+            bucket["authors"][author_id] = bucket["authors"].get(author_id, 0) + 1
+        for word in msg["keywords"]:
+            if _is_theme_noise(word):
+                continue
+            bucket["keyword_counts"][word] = bucket["keyword_counts"].get(word, 0) + 1
+        bucket["negativity_hits"] += _count_keywords(msg["cleaned"], NEGATIVE_KEYWORDS)
+        bucket["positive_hits"] += _count_keywords(msg["cleaned"], POSITIVE_KEYWORDS)
+        bucket["questions"] += msg["cleaned"].count("?")
+        if bucket["representative_ts"] is None:
+            bucket["representative_ts"] = msg["ts"].isoformat()
+    output: list[dict[str, Any]] = []
+    for bucket in buckets:
+        if not bucket["message_ids"]:
+            continue
+        if bucket["authors"]:
+            bucket["top_author_id"] = max(bucket["authors"].items(), key=lambda item: item[1])[0]
+        keywords = _rank_keywords(_expand_keywords(bucket["keyword_counts"]))
+        bucket["cluster_key"] = "_".join(keywords) if keywords else "misc"
+        bucket["message_ids"] = [mid for mid in bucket["message_ids"] if mid]
+        if bucket["representative_ts"] is None:
+            bucket["representative_ts"] = start_ts.isoformat()
+        output.append(bucket)
+    return output
+
+
+def _build_bucket_summary(bucket: dict[str, Any], index: int, total: int) -> str:
+    keywords = _rank_keywords(_expand_keywords(bucket.get("keyword_counts", {})))
+    keywords = _trim_theme_list(keywords, limit=2)
+    if index == 0:
+        prefix = "All'inizio"
+    elif index >= total - 1:
+        prefix = "Verso la fine"
+    elif index == 1:
+        prefix = "Poco dopo"
+    else:
+        prefix = "Più tardi"
+    tone = _bucket_tone(bucket)
+    if keywords:
+        topic = " e ".join(keywords)
+        return f"{prefix} emergono spunti su {topic}, con {tone}."
+    return f"{prefix} il confronto procede con {tone}."
+
+
+def _bucket_tone(bucket: dict[str, Any]) -> str:
+    if bucket.get("negativity_hits", 0) > 0:
+        return "tensione e richieste di chiarimento"
+    if bucket.get("positive_hits", 0) > 0:
+        return "tono collaborativo e scambi costruttivi"
+    if bucket.get("questions", 0) > 1:
+        return "domande e chiarimenti in sequenza"
+    return "aggiornamenti e scambi regolari"
 
 
 def _extract_ai_text(response: Any) -> str:

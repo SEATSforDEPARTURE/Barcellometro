@@ -2033,35 +2033,58 @@ def setup(registry: ServiceRegistry) -> None:
         )
 
         ai_allowed = False
-        ai_reason = "disabled"
-        if profile in {"role2", "role3", "mod"}:
-            ai_enabled = await entitlements.is_feature_allowed(interaction.user, "ai")
-            ai_service_enabled = ai_service.is_enabled() if ai_service else False
-            if ai_enabled and ai_service_enabled:
-                ai_allowed = True
-                ai_reason = "ok"
-            else:
-                ai_reason = "disabled_by_entitlements"
+        ai_reason = "entitlements.policies.features.ai.allowed_profiles"
+        ai_enabled = await entitlements.is_feature_allowed(interaction.user, "ai")
+        ai_service_enabled = ai_service.is_enabled() if ai_service else False
+        if ai_enabled and ai_service_enabled:
+            ai_allowed = True
+            ai_reason = "entitlements.policies.features.ai.allowed_profiles:ok"
+        elif not ai_enabled:
+            ai_reason = "entitlements.policies.features.ai.allowed_profiles:denied"
+        else:
+            ai_reason = "entitlements.policies.features.ai.allowed_profiles:ok;ai_service_disabled"
 
-        if profile in {"role2", "role3", "mod"}:
-            ai_description = await summary_service.build_period_description(
-                tier=profile,
-                period_prefix=period_prefix,
-                score=barcello_result.score,
-                color=barcello_result.color,
-                metrics=metrics,
-                trend=barcello_result.trend,
-                ai_allowed=ai_allowed,
-                config=summary_config,
-            )
-            if ai_description:
-                period_description = ai_description
+        ai_description = await summary_service.build_period_description(
+            tier=profile,
+            period_prefix=period_prefix,
+            score=barcello_result.score,
+            color=barcello_result.color,
+            metrics=metrics,
+            trend=barcello_result.trend,
+            ai_allowed=ai_allowed,
+            config=summary_config,
+        )
+        if ai_description:
+            period_description = ai_description
 
         status_embed = _build_riassunto_status_embed(
             result=barcello_result,
             channel_label=channel_label,
             period_label=period_label,
             period_description=period_description,
+        )
+
+        model_name = ai_service.get_model("summary") if ai_service else None
+        cache_key = summary_service.build_cache_key(
+            guild_id=str(interaction.guild_id),
+            channel_id=str(interaction.channel_id),
+            start_ts=start_dt_utc.isoformat(),
+            end_ts=end_dt_utc.isoformat(),
+            tier=profile,
+            evidence_mode=False,
+            voice_context=channel_is_voice,
+            ai_allowed=ai_allowed,
+            model_name=model_name,
+        )
+        cache_hit = summary_service.peek_cache(cache_key, max_message_ts)
+        logger.info(
+            "riassunto: resolved_profile=%s tier=%s ai_allowed=%s ai_reason=%s cache_key=%s cache_hit=%s",
+            profile,
+            tier_label,
+            ai_allowed,
+            ai_reason,
+            cache_key,
+            cache_hit,
         )
 
         summary = await summary_service.build_summary(
@@ -2325,6 +2348,14 @@ def setup(registry: ServiceRegistry) -> None:
                     ai_line = f"AI: OFF" + (f" — {fallback}" if fallback else "")
                 sections_map["ai"] = [("🤖 AI", ai_line, 3)]
 
+            note_by_profile = {
+                "role1": "🔒 Per un riassunto più approfondito e le frasi iconiche, passa a PRO o a PRO MAX per vedere anche le dinamiche.",
+                "role2": "🔒 Per vedere anche le dinamiche interessanti passa a PRO MAX.",
+            }
+            note_text = note_by_profile.get(profile)
+            if note_text:
+                sections_map["note"] = [("📌 NOTE", note_text, 3)]
+
             if privacy_gaps:
                 lines = [
                     f"⚠️ PRIVACY NOTE: buchi rilevati dalle {_format_italian_time(start.isoformat())} alle {_format_italian_time(end.isoformat())}."
@@ -2337,7 +2368,7 @@ def setup(registry: ServiceRegistry) -> None:
             for section_id in section_order:
                 if section_id in sections_map:
                     sections.extend(sections_map[section_id])
-            for extra_id in ("voice", "privacy"):
+            for extra_id in ("voice", "privacy", "note"):
                 if extra_id in sections_map and extra_id not in section_order:
                     sections.extend(sections_map[extra_id])
 
