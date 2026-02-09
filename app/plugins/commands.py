@@ -333,27 +333,6 @@ def setup(registry: ServiceRegistry) -> None:
             output.extend(_split_embed_fields(embed, max_chars=max_chars))
         return output
 
-    def _normalize_embeds_for_discord(
-        embeds: list[discord.Embed],
-        *,
-        max_chars: int = MAX_EMBED_CHARS,
-    ) -> list[discord.Embed]:
-        if not embeds:
-            return []
-        max_before = max(_estimate_embed_size(embed) for embed in embeds)
-        normalized = _ensure_embed_limits(embeds, max_chars=max_chars)
-        max_after = max(_estimate_embed_size(embed) for embed in normalized) if normalized else 0
-        if max_after >= max_chars and max_chars > RETRY_EMBED_CHARS:
-            normalized = _ensure_embed_limits(embeds, max_chars=RETRY_EMBED_CHARS)
-            max_after = max(_estimate_embed_size(embed) for embed in normalized) if normalized else 0
-        logger.info(
-            "riassunto: normalize embeds max_before=%s max_after=%s count_after=%s",
-            max_before,
-            max_after,
-            len(normalized),
-        )
-        return normalized
-
     def _parse_hex_color(raw: str | None) -> int | None:
         if not raw:
             return None
@@ -1039,27 +1018,6 @@ def setup(registry: ServiceRegistry) -> None:
         if within_limit:
             return min(within_limit, key=len)
         return min(candidates, key=len)
-
-    async def _send_embeds_in_batches(
-        send_fn: Any,
-        embeds: list[discord.Embed],
-        *,
-        batch_size: int,
-    ) -> None:
-        for idx in range(0, len(embeds), batch_size):
-            batch = embeds[idx : idx + batch_size]
-            if batch:
-                await send_fn(embeds=batch)
-
-    async def _send_followup_embeds_in_batches(
-        embeds: list[discord.Embed],
-        *,
-        batch_size: int,
-    ) -> None:
-        for idx in range(0, len(embeds), batch_size):
-            batch = embeds[idx : idx + batch_size]
-            if batch:
-                await interaction.followup.send(embeds=batch, ephemeral=True)
 
     def _format_summary_impact_line(
         *,
@@ -2111,31 +2069,6 @@ def setup(registry: ServiceRegistry) -> None:
                 end_ts=end_ts,
                 ts=midpoint.isoformat(),
             )
-            if row:
-                record = {"author_id": row["author_id"], "content": row["content"]}
-                message_cache[message_id] = record
-                return record
-            return None
-
-        async def resolve_author_display(message_id: str | None) -> str | None:
-            if not message_id or interaction.guild is None:
-                return None
-            record = await fetch_message_record(message_id)
-            if not record:
-                return None
-            author_id = record.get("author_id")
-            if not author_id:
-                return None
-            display_name = await database.fetch_user_display_name(
-                guild_id=str(interaction.guild_id),
-                user_id=str(author_id),
-            )
-            if display_name:
-                return display_name
-            member = interaction.guild.get_member(int(author_id))
-            if member:
-                return _resolve_display_name(member)
-            return None
 
         message_cache: dict[str, dict[str, Any]] = {}
 
@@ -2442,30 +2375,21 @@ def setup(registry: ServiceRegistry) -> None:
         )
 
         async def try_send_dm() -> bool:
-            async def send_with_limits(max_chars: int, batch_size: int) -> None:
-                normalized_details = _normalize_embeds_for_discord(embeds, max_chars=max_chars)
-                await interaction.user.send(embeds=[status_embed])
-                await _send_embeds_in_batches(interaction.user.send, normalized_details, batch_size=batch_size)
-
             try:
-                await send_with_limits(MAX_EMBED_CHARS, batch_size=3)
+                await interaction.user.send(embeds=[status_embed, *embeds])
                 return True
             except discord.Forbidden:
                 return False
             except discord.HTTPException as exc:
                 if getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc):
                     logger.warning("riassunto: embed oversize in DM, retrying with smaller chunks")
+                    retry_embeds = _ensure_embed_limits(embeds, max_chars=RETRY_EMBED_CHARS)
                     try:
-                        await send_with_limits(RETRY_EMBED_CHARS, batch_size=1)
+                        await interaction.user.send(embeds=[status_embed])
+                        if retry_embeds:
+                            await interaction.user.send(embeds=retry_embeds)
                         return True
                     except (discord.Forbidden, discord.HTTPException):
-                        try:
-                            await interaction.user.send(
-                                "⚠️ Riassunto troppo lungo: riduci il range per riceverlo completo."
-                            )
-                            await interaction.user.send(embeds=[status_embed])
-                        except (discord.Forbidden, discord.HTTPException):
-                            pass
                         return False
                 return False
 
@@ -2475,25 +2399,15 @@ def setup(registry: ServiceRegistry) -> None:
             status: discord.Embed,
             detail_embeds: list[discord.Embed],
         ) -> None:
-            async def send_with_limits(max_chars: int, batch_size: int) -> None:
-                normalized_details = _normalize_embeds_for_discord(detail_embeds, max_chars=max_chars)
-                await interaction.followup.send(content=content, ephemeral=True)
-                await interaction.followup.send(embeds=[status], ephemeral=True)
-                await _send_followup_embeds_in_batches(normalized_details, batch_size=batch_size)
-
             try:
-                await send_with_limits(MAX_EMBED_CHARS, batch_size=3)
+                await interaction.followup.send(content=content, embeds=[status, *detail_embeds], ephemeral=True)
             except discord.HTTPException as exc:
                 if getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc):
                     logger.warning("riassunto: embed oversize in followup, retrying with smaller chunks")
-                    try:
-                        await send_with_limits(RETRY_EMBED_CHARS, batch_size=1)
-                    except discord.HTTPException:
-                        await interaction.followup.send(
-                            content="⚠️ Riassunto troppo lungo: riduci il range per riceverlo completo.",
-                            ephemeral=True,
-                        )
-                        await interaction.followup.send(embeds=[status], ephemeral=True)
+                    retry_embeds = _ensure_embed_limits(detail_embeds, max_chars=RETRY_EMBED_CHARS)
+                    await interaction.followup.send(content=content, embeds=[status], ephemeral=True)
+                    if retry_embeds:
+                        await interaction.followup.send(embeds=retry_embeds, ephemeral=True)
                 else:
                     raise
 
