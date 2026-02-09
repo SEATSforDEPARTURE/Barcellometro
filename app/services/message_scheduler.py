@@ -488,14 +488,30 @@ class MessageSchedulerService:
         if cached and cached[0] > now:
             return cached[1], cached[2], "hit", None
         try:
-        status = await self._barcello_service.get_current_status(guild_id, channel_id=channel_id, window_minutes=180)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to compute barcello color for %s:%s", guild_id, channel_id)
-            return "BLACK", None, "error", "barcello_unavailable"
-        raw_color = str(status["color"]).strip().upper()
+            status = await self._barcello_service.get_current_status(
+                guild_id,
+                channel_id=channel_id,
+                window_minutes=180,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "Barcello status failed; fallback BLACK. guild=%s channel=%s err=%s",
+                guild_id,
+                channel_id,
+                repr(exc),
+            )
+            status = {"color": "BLACK", "score": None, "source": "fallback"}
+        raw_color = str(status.get("color", "BLACK")).strip().upper()
         normalized = BARCELLO_COLOR_MAP.get(raw_color, "BLACK")
         score = status.get("score")
         reason = status.get("reason")
+        logger.info(
+            "Barcello status: guild=%s channel=%s color=%s score=%s",
+            guild_id,
+            channel_id,
+            normalized,
+            score,
+        )
         self._barcello_cache[guild_id] = (now + timedelta(seconds=BARCELLO_CACHE_TTL_SECONDS), normalized, score)
         return normalized, score, "miss", reason
 
