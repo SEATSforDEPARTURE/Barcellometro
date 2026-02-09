@@ -194,6 +194,7 @@ class BarcelloService:
         return {
             "score": result.score,
             "color": result.color,
+            "reason": None,
         }
 
     async def compute_pair(

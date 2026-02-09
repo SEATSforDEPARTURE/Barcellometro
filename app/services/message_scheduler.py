@@ -30,6 +30,14 @@ BARCELLO_COLOR_MAP = {
     "YELLOW": "YELLOW",
     "RED": "RED",
     "BLACK": "BLACK",
+    "VERDE": "GREEN",
+    "GIALLO": "YELLOW",
+    "ROSSO": "RED",
+    "NERO": "BLACK",
+    "VERDE ": "GREEN",
+    "GIALLO ": "YELLOW",
+    "ROSSO ": "RED",
+    "NERO ": "BLACK",
     "🟢": "GREEN",
     "🟡": "YELLOW",
     "🔴": "RED",
@@ -283,6 +291,13 @@ class MessageSchedulerService:
                 debug_payload["selected_source"],
                 debug_payload["cache_status"],
             )
+            if debug_payload.get("barcello_reason"):
+                logger.info(
+                    "Campaign barcello reason guild=%s campaign=%s reason=%s",
+                    guild_id,
+                    campaign_id,
+                    debug_payload["barcello_reason"],
+                )
             if not resolved_text:
                 await self._database.insert_send_log(
                     campaign_id=campaign_id,
@@ -413,6 +428,7 @@ class MessageSchedulerService:
                 "mood_mode": mood_mode,
                 "barcello_color": barcello_color,
                 "barcello_score": barcello_score,
+                "barcello_reason": barcello_reason,
                 "selected_source": selected_source,
                 "cache_status": cache_status,
             }
@@ -421,6 +437,7 @@ class MessageSchedulerService:
                 "mood_mode": mood_mode,
                 "barcello_color": barcello_color,
                 "barcello_score": barcello_score,
+                "barcello_reason": barcello_reason,
                 "selected_source": selected_source,
                 "cache_status": cache_status,
             }
@@ -428,6 +445,7 @@ class MessageSchedulerService:
             "mood_mode": mood_mode,
             "barcello_color": barcello_color,
             "barcello_score": barcello_score,
+            "barcello_reason": barcello_reason,
             "selected_source": selected_source,
             "cache_status": cache_status,
         }
@@ -470,14 +488,16 @@ class MessageSchedulerService:
         if cached and cached[0] > now:
             return cached[1], cached[2], "hit", None
         try:
-            status = await self._barcello_service.get_current_status(guild_id, channel_id=channel_id, window_minutes=180)
+        status = await self._barcello_service.get_current_status(guild_id, channel_id=channel_id, window_minutes=180)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to compute barcello color for %s:%s", guild_id, channel_id)
             return "BLACK", None, "error", "barcello_unavailable"
-        normalized = BARCELLO_COLOR_MAP.get(str(status["color"]).upper(), "BLACK")
+        raw_color = str(status["color"]).strip().upper()
+        normalized = BARCELLO_COLOR_MAP.get(raw_color, "BLACK")
         score = status.get("score")
+        reason = status.get("reason")
         self._barcello_cache[guild_id] = (now + timedelta(seconds=BARCELLO_CACHE_TTL_SECONDS), normalized, score)
-        return normalized, score, "miss", None
+        return normalized, score, "miss", reason
 
     async def _get_ai_message(self, guild_id: str) -> Optional[str]:
         if self._community_insights is None:
