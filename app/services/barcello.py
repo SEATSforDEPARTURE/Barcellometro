@@ -173,6 +173,16 @@ class BarcelloService:
         self._cache_result(cache_key, result)
         return result
 
+    async def get_current_color(
+        self,
+        guild_id: str,
+        *,
+        channel_id: str,
+        window_minutes: int = 180,
+    ) -> str:
+        result = await self.compute_channel(guild_id, channel_id, window_minutes)
+        return str(result.color)
+
     async def compute_pair(
         self,
         guild_id: str,
