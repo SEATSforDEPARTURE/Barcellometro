@@ -16,17 +16,17 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
     "tiers": {
         "role1": {
             "label": "PLUS",
-            "sections": ["themes", "moments", "notes"],
+            "sections": ["themes", "moments"],
             "limits": {
                 "themes": 6,
-                "moments": 5,
+                "moments": 10,
                 "quotes": 3,
-                "dynamics": 2,
+                "dynamics": 3,
             },
         },
         "role2": {
             "label": "PRO",
-            "sections": ["themes", "moments", "quotes", "notes"],
+            "sections": ["themes", "moments", "quotes"],
             "limits": {
                 "themes": 6,
                 "moments": 10,
@@ -39,9 +39,9 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             "sections": ["themes", "moments", "quotes", "dynamics"],
             "limits": {
                 "themes": 8,
-                "moments": 15,
+                "moments": 10,
                 "quotes": 3,
-                "dynamics": 4,
+                "dynamics": 3,
             },
         },
         "mod": {
@@ -58,14 +58,13 @@ DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
             ],
             "limits": {
                 "themes": 10,
-                "moments": 15,
+                "moments": 10,
                 "quotes": 3,
-                "dynamics": 5,
+                "dynamics": 3,
                 "impact": 3,
             },
         },
     },
-    "ai_enabled_tiers": ["role2", "role3", "mod"],
     "fallback_local": True,
     "evidence_mode": {
         "links_off": 2,
@@ -256,8 +255,7 @@ class SummaryService:
             tier=tier,
         )
 
-        ai_enabled_tiers = set(config.get("ai_enabled_tiers", []) or [])
-        use_ai = ai_allowed and tier in ai_enabled_tiers and self._ai_service is not None
+        use_ai = ai_allowed and self._ai_service is not None
 
         summary = local_summary
         ai_status: dict[str, Any] = {
@@ -320,8 +318,7 @@ class SummaryService:
         ai_allowed: bool,
         config: dict[str, Any],
     ) -> str | None:
-        ai_enabled_tiers = set(config.get("ai_enabled_tiers", []) or [])
-        use_ai = ai_allowed and tier in ai_enabled_tiers and self._ai_service is not None
+        use_ai = ai_allowed and self._ai_service is not None
         if not use_ai:
             return None
         model = self._ai_service.get_model("summary") if self._ai_service else None
@@ -361,6 +358,11 @@ class SummaryService:
         moments = _sanitize_summary_items(moments, drop_templates=False)
         quotes = _sanitize_summary_items(quotes, drop_templates=False)
         dynamics = _sanitize_summary_items(dynamics, drop_templates=False)
+        moments = _sort_moments_chronologically(moments)
+        quotes = _sort_quotes_chronologically(quotes)
+        dynamics = _sort_moments_chronologically(dynamics)
+        degrade = _sort_impacts_chronologically(degrade)
+        invigorate = _sort_impacts_chronologically(invigorate)
         cleaned_advice: list[str] = []
         for item in advice:
             sanitized = _sanitize_bullet_text(item)
@@ -624,6 +626,10 @@ class SummaryService:
             dynamics = _dedupe_summary_items(dynamics, local_summary.dynamics, limit=dynamic_limit)
         if len(dynamics) > dynamic_limit:
             dynamics = dynamics[:dynamic_limit]
+        quotes = _sort_quotes_chronologically(quotes)
+        dynamics = _sort_moments_chronologically(dynamics)
+        degrade = _sort_impacts_chronologically(degrade)
+        invigorate = _sort_impacts_chronologically(invigorate)
         if not advice:
             advice = local_summary.advice
         if not degrade:
@@ -1214,6 +1220,22 @@ def _dedupe_summary_items(
 
 def _sort_moments_chronologically(items: list[SummaryItem]) -> list[SummaryItem]:
     def sort_key(item: SummaryItem) -> tuple[bool, str]:
+        ts = item.ts or ""
+        return (not bool(ts), ts)
+
+    return sorted(items, key=sort_key)
+
+
+def _sort_quotes_chronologically(items: list[SummaryQuote]) -> list[SummaryQuote]:
+    def sort_key(item: SummaryQuote) -> tuple[bool, str]:
+        ts = item.ts or ""
+        return (not bool(ts), ts)
+
+    return sorted(items, key=sort_key)
+
+
+def _sort_impacts_chronologically(items: list[SummaryImpact]) -> list[SummaryImpact]:
+    def sort_key(item: SummaryImpact) -> tuple[bool, str]:
         ts = item.ts or ""
         return (not bool(ts), ts)
 
