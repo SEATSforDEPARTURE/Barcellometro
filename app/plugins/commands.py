@@ -2325,6 +2325,14 @@ def setup(registry: ServiceRegistry) -> None:
                     ai_line = f"AI: OFF" + (f" — {fallback}" if fallback else "")
                 sections_map["ai"] = [("🤖 AI", ai_line, 3)]
 
+            note_by_profile = {
+                "role1": "🔒 Per un riassunto più approfondito e le frasi iconiche, passa a PRO o a PRO MAX per vedere anche le dinamiche.",
+                "role2": "🔒 Per vedere anche le dinamiche interessanti passa a PRO MAX.",
+            }
+            note_text = note_by_profile.get(profile)
+            if note_text:
+                sections_map["note"] = [("📌 NOTE", note_text, 3)]
+
             if privacy_gaps:
                 lines = [
                     f"⚠️ PRIVACY NOTE: buchi rilevati dalle {_format_italian_time(start.isoformat())} alle {_format_italian_time(end.isoformat())}."
@@ -2337,7 +2345,7 @@ def setup(registry: ServiceRegistry) -> None:
             for section_id in section_order:
                 if section_id in sections_map:
                     sections.extend(sections_map[section_id])
-            for extra_id in ("voice", "privacy"):
+            for extra_id in ("voice", "privacy", "note"):
                 if extra_id in sections_map and extra_id not in section_order:
                     sections.extend(sections_map[extra_id])
 
