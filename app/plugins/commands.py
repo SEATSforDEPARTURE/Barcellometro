@@ -2111,6 +2111,31 @@ def setup(registry: ServiceRegistry) -> None:
                 end_ts=end_ts,
                 ts=midpoint.isoformat(),
             )
+            if row:
+                record = {"author_id": row["author_id"], "content": row["content"]}
+                message_cache[message_id] = record
+                return record
+            return None
+
+        async def resolve_author_display(message_id: str | None) -> str | None:
+            if not message_id or interaction.guild is None:
+                return None
+            record = await fetch_message_record(message_id)
+            if not record:
+                return None
+            author_id = record.get("author_id")
+            if not author_id:
+                return None
+            display_name = await database.fetch_user_display_name(
+                guild_id=str(interaction.guild_id),
+                user_id=str(author_id),
+            )
+            if display_name:
+                return display_name
+            member = interaction.guild.get_member(int(author_id))
+            if member:
+                return _resolve_display_name(member)
+            return None
 
         message_cache: dict[str, dict[str, Any]] = {}
 
