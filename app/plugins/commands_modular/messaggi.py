@@ -38,12 +38,7 @@ def _truncate(text: str, limit: int = 100) -> str:
 
 
 def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -> None:
-    quiet_group = app_commands.Group(name="quiet", description="Quiet hours")
-    cap_group = app_commands.Group(name="cap", description="Limite giornaliero per canale")
-    messaggi_group.add_command(quiet_group)
-    messaggi_group.add_command(cap_group)
-
-    @quiet_group.command(name="status", description="Stato quiet hours")
+    @messaggi_group.command(name="quiet_status", description="Stato quiet hours")
     async def messaggi_quiet_status(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.quiet.status", ctx):
             return
@@ -55,21 +50,21 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             ephemeral=True,
         )
 
-    @quiet_group.command(name="on", description="Abilita quiet hours")
+    @messaggi_group.command(name="quiet_on", description="Abilita quiet hours")
     async def messaggi_quiet_on(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.quiet.on", ctx):
             return
         await ctx.database.set_setting("messages_quiet_enabled", "1")
         await interaction.response.send_message("Quiet hours abilitate.", ephemeral=True)
 
-    @quiet_group.command(name="off", description="Disabilita quiet hours")
+    @messaggi_group.command(name="quiet_off", description="Disabilita quiet hours")
     async def messaggi_quiet_off(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.quiet.off", ctx):
             return
         await ctx.database.set_setting("messages_quiet_enabled", "0")
         await interaction.response.send_message("Quiet hours disabilitate.", ephemeral=True)
 
-    @quiet_group.command(name="set", description="Imposta quiet hours")
+    @messaggi_group.command(name="quiet_set", description="Imposta quiet hours")
     @app_commands.describe(start="Ora inizio (HH:MM)", end="Ora fine (HH:MM)")
     async def messaggi_quiet_set(interaction: discord.Interaction, start: str, end: str) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.quiet.set", ctx):
@@ -78,7 +73,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.set_setting("messages_quiet_end", end)
         await interaction.response.send_message(f"Quiet hours aggiornate: {start}–{end}.", ephemeral=True)
 
-    @cap_group.command(name="status", description="Stato cap giornaliero")
+    @messaggi_group.command(name="cap_status", description="Stato cap giornaliero")
     async def messaggi_cap_status(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.cap.status", ctx):
             return
@@ -89,21 +84,21 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             ephemeral=True,
         )
 
-    @cap_group.command(name="on", description="Abilita cap giornaliero")
+    @messaggi_group.command(name="cap_on", description="Abilita cap giornaliero")
     async def messaggi_cap_on(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.cap.on", ctx):
             return
         await ctx.database.set_setting("messages_daily_cap_enabled", "1")
         await interaction.response.send_message("Cap giornaliero abilitato.", ephemeral=True)
 
-    @cap_group.command(name="off", description="Disabilita cap giornaliero")
+    @messaggi_group.command(name="cap_off", description="Disabilita cap giornaliero")
     async def messaggi_cap_off(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.cap.off", ctx):
             return
         await ctx.database.set_setting("messages_daily_cap_enabled", "0")
         await interaction.response.send_message("Cap giornaliero disabilitato.", ephemeral=True)
 
-    @cap_group.command(name="set", description="Imposta cap giornaliero")
+    @messaggi_group.command(name="cap_set", description="Imposta cap giornaliero")
     @app_commands.describe(n="Numero massimo invii per canale")
     async def messaggi_cap_set(interaction: discord.Interaction, n: int) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.cap.set", ctx):
@@ -113,6 +108,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             return
         await ctx.database.set_setting("messages_daily_cap", str(n))
         await interaction.response.send_message(f"Cap giornaliero impostato a {n}.", ephemeral=True)
+
     @messaggi_group.command(name="on", description="Abilita i messaggi automatici nel canale corrente")
     async def messaggi_on(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.on", ctx):
