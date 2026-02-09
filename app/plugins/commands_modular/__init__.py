@@ -6,6 +6,7 @@ from .permissions import check_permission, ensure_admin
 from .privacy import register_privacy
 from .riassunto import register_riassunto
 from .roles import register_roles
+from .messaggi import register_messaggi
 from .settings import get_setting, set_setting
 from .status import register_status
 from .stt import register_stt
@@ -24,6 +25,7 @@ __all__ = [
     "register_privacy",
     "register_riassunto",
     "register_roles",
+    "register_messaggi",
     "register_status",
     "register_stt",
     "register_translate",

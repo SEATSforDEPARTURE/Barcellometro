@@ -38,8 +38,11 @@ class CommandContext:
         database = registry.get("database")
         entitlements = EntitlementsService(database)
         registry.register("entitlements", entitlements)
-        barcello = BarcelloService(database)
-        registry.register("barcello", barcello)
+        if registry.has("barcello"):
+            barcello = registry.get("barcello")
+        else:
+            barcello = BarcelloService(database)
+            registry.register("barcello", barcello)
         barcello_calibration = BarcelloCalibrationService(database)
         registry.register("barcello_calibration", barcello_calibration)
         summary_service = SummaryService(database, ai_service=registry.get("ai") if registry.has("ai") else None)
