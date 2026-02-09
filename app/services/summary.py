@@ -168,6 +168,7 @@ class SummaryItem:
     cluster_key: Optional[str] = None
     actor_display: Optional[str] = None
     actors_display: list[str] = field(default_factory=list)
+    in_call: bool = False
 
 
 @dataclass
@@ -177,6 +178,7 @@ class SummaryQuote:
     author_id: Optional[str]
     message_ids: list[str] = field(default_factory=list)
     actor_display: Optional[str] = None
+    in_call: bool = False
 
 
 @dataclass
@@ -450,6 +452,10 @@ class SummaryService:
                 "ts": msg.get("ts"),
                 "author_id": msg.get("author_id"),
                 "content": msg.get("content"),
+                "meta": {
+                    "kind": (msg.get("meta") or {}).get("kind"),
+                    "in_call": (msg.get("meta") or {}).get("in_call"),
+                },
             }
             for msg in messages[:80]
         ]
@@ -463,6 +469,7 @@ class SummaryService:
             "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
             "TEMI devono essere solo keyword brevi (no nomi). "
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
+            "Non inventare eventi di chiamata: usa solo quelli presenti nella timeline (kind: call/privacy/presence). "
             "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
             "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
             "Momenti: stile narrativo e descrittivo, frasi complete; niente template tipo 'Si discute di'. "
@@ -594,6 +601,7 @@ class SummaryService:
                 if not isinstance(item, dict):
                     continue
                 ts = item.get("ts")
+                in_call = bool(item.get("in_call"))
                 if is_quote:
                     text = str(item.get("quote_text") or item.get("text") or "").strip()
                 elif is_dynamic:
@@ -612,6 +620,7 @@ class SummaryService:
                             author_id=author_id,
                             message_ids=message_ids,
                             actor_display=None,
+                            in_call=in_call,
                         )
                     )
                 else:
@@ -623,6 +632,7 @@ class SummaryService:
                             message_ids=message_ids,
                             actor_display=None,
                             actors_display=[],
+                            in_call=in_call,
                         )
                     )
             return output
@@ -973,6 +983,7 @@ class SummaryService:
                     author_id=bucket.get("top_author_id"),
                     message_ids=message_ids[:3],
                     cluster_key=bucket.get("cluster_key"),
+                    in_call=bool(bucket.get("in_call_count", 0)),
                 )
             )
         return items
@@ -988,12 +999,14 @@ class SummaryService:
                 candidates.append(msg)
         output: list[SummaryQuote] = []
         for msg in candidates[:limit]:
+            in_call = bool((msg.get("meta") or {}).get("in_call"))
             output.append(
                 SummaryQuote(
                     ts=msg.get("ts") or None,
                     text=_shorten(msg.get("content") or ""),
                     author_id=msg.get("author_id"),
                     message_ids=[str(msg.get("message_id"))] if msg.get("message_id") else [],
+                    in_call=in_call,
                 )
             )
         return output
@@ -1009,6 +1022,7 @@ class SummaryService:
         dynamics: list[SummaryItem] = []
         primary_id = _pick_message_id(messages)
         top_author = _pick_top_author_id(messages)
+        any_in_call = _any_in_call(messages)
         reply_war = bool(barcello_metrics.get("reply_war"))
         top_author_share = float(barcello_metrics.get("top1_author_share") or 0)
         negativity_hits = int(barcello_metrics.get("negativity_hits") or 0)
@@ -1019,6 +1033,7 @@ class SummaryService:
                     text="Botta e risposta fitto, ritmo acceso.",
                     author_id=top_author,
                     message_ids=[primary_id] if primary_id else [],
+                    in_call=any_in_call,
                 )
             )
         if top_author_share > 0.4:
@@ -1028,6 +1043,7 @@ class SummaryService:
                     text="Conversazione concentrata su pochi utenti.",
                     author_id=top_author,
                     message_ids=[primary_id] if primary_id else [],
+                    in_call=any_in_call,
                 )
             )
         if negativity_hits > 0:
@@ -1037,6 +1053,7 @@ class SummaryService:
                     text="Toni pungenti o negativi compaiono nella finestra.",
                     author_id=top_author,
                     message_ids=[primary_id] if primary_id else [],
+                    in_call=any_in_call,
                 )
             )
         if not dynamics:
@@ -1046,6 +1063,7 @@ class SummaryService:
                     text="Dinamica complessivamente lineare.",
                     author_id=top_author,
                     message_ids=[primary_id] if primary_id else [],
+                    in_call=any_in_call,
                 )
             )
         return dynamics[:limit]
@@ -1152,6 +1170,13 @@ def _pick_top_author_id(messages: list[dict[str, Any]]) -> Optional[str]:
     if not counts:
         return None
     return max(counts.items(), key=lambda item: item[1])[0]
+
+
+def _any_in_call(messages: list[dict[str, Any]]) -> bool:
+    for msg in messages:
+        if (msg.get("meta") or {}).get("in_call"):
+            return True
+    return False
 
 
 def _parse_ts(value: str | None) -> Optional[datetime]:
@@ -1521,6 +1546,7 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
             continue
         cleaned = _clean_text(content)
         keywords = _extract_segment_keywords(cleaned)
+        in_call = bool((msg.get("meta") or {}).get("in_call"))
         enriched.append(
             {
                 "message_id": msg.get("message_id"),
@@ -1528,6 +1554,7 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
                 "ts": ts,
                 "cleaned": cleaned,
                 "keywords": keywords,
+                "in_call": in_call,
             }
         )
     if not enriched:
@@ -1552,6 +1579,7 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
                 "representative_ts": None,
                 "top_author_id": None,
                 "cluster_key": None,
+                "in_call_count": 0,
             }
         )
     for msg in enriched:
@@ -1569,6 +1597,8 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
         bucket["negativity_hits"] += _count_keywords(msg["cleaned"], NEGATIVE_KEYWORDS)
         bucket["positive_hits"] += _count_keywords(msg["cleaned"], POSITIVE_KEYWORDS)
         bucket["questions"] += msg["cleaned"].count("?")
+        if msg.get("in_call"):
+            bucket["in_call_count"] += 1
         if bucket["representative_ts"] is None:
             bucket["representative_ts"] = msg["ts"].isoformat()
     output: list[dict[str, Any]] = []
