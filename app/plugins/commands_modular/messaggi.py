@@ -10,6 +10,26 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.message_scheduler import calculate_initial_next_run
 
+QUIET_DEFAULT_START = "01:00"
+QUIET_DEFAULT_END = "08:30"
+CAP_DEFAULT = 6
+
+MOOD_CHOICES = [
+    app_commands.Choice(name="AUTO", value="AUTO"),
+    app_commands.Choice(name="IGNORE_BARCELLO", value="IGNORE_BARCELLO"),
+    app_commands.Choice(name="GREEN_ONLY", value="GREEN_ONLY"),
+    app_commands.Choice(name="YELLOW_ONLY", value="YELLOW_ONLY"),
+    app_commands.Choice(name="RED_ONLY", value="RED_ONLY"),
+]
+
+
+async def _ensure_setting(ctx: CommandContext, key: str, default: str) -> str:
+    stored = await ctx.database.get_setting(key)
+    if stored is None:
+        await ctx.database.set_setting(key, default)
+        return default
+    return stored
+
 
 def _truncate(text: str, limit: int = 100) -> str:
     if len(text) <= limit:
@@ -18,6 +38,81 @@ def _truncate(text: str, limit: int = 100) -> str:
 
 
 def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -> None:
+    quiet_group = app_commands.Group(name="quiet", description="Quiet hours")
+    cap_group = app_commands.Group(name="cap", description="Limite giornaliero per canale")
+    messaggi_group.add_command(quiet_group)
+    messaggi_group.add_command(cap_group)
+
+    @quiet_group.command(name="status", description="Stato quiet hours")
+    async def messaggi_quiet_status(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.messaggi.quiet.status", ctx):
+            return
+        enabled = await _ensure_setting(ctx, "messages_quiet_enabled", "1")
+        start = await _ensure_setting(ctx, "messages_quiet_start", QUIET_DEFAULT_START)
+        end = await _ensure_setting(ctx, "messages_quiet_end", QUIET_DEFAULT_END)
+        await interaction.response.send_message(
+            f"Quiet hours {'abilitate' if enabled == '1' else 'disabilitate'}: {start}–{end}.",
+            ephemeral=True,
+        )
+
+    @quiet_group.command(name="on", description="Abilita quiet hours")
+    async def messaggi_quiet_on(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.messaggi.quiet.on", ctx):
+            return
+        await ctx.database.set_setting("messages_quiet_enabled", "1")
+        await interaction.response.send_message("Quiet hours abilitate.", ephemeral=True)
+
+    @quiet_group.command(name="off", description="Disabilita quiet hours")
+    async def messaggi_quiet_off(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.messaggi.quiet.off", ctx):
+            return
+        await ctx.database.set_setting("messages_quiet_enabled", "0")
+        await interaction.response.send_message("Quiet hours disabilitate.", ephemeral=True)
+
+    @quiet_group.command(name="set", description="Imposta quiet hours")
+    @app_commands.describe(start="Ora inizio (HH:MM)", end="Ora fine (HH:MM)")
+    async def messaggi_quiet_set(interaction: discord.Interaction, start: str, end: str) -> None:
+        if not await check_permission(interaction, "barcellometro.messaggi.quiet.set", ctx):
+            return
+        await ctx.database.set_setting("messages_quiet_start", start)
+        await ctx.database.set_setting("messages_quiet_end", end)
+        await interaction.response.send_message(f"Quiet hours aggiornate: {start}–{end}.", ephemeral=True)
+
+    @cap_group.command(name="status", description="Stato cap giornaliero")
+    async def messaggi_cap_status(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.messaggi.cap.status", ctx):
+            return
+        enabled = await _ensure_setting(ctx, "messages_daily_cap_enabled", "1")
+        cap = await _ensure_setting(ctx, "messages_daily_cap", str(CAP_DEFAULT))
+        await interaction.response.send_message(
+            f"Cap giornaliero {'attivo' if enabled == '1' else 'disattivo'}: {cap} invii/giorno.",
+            ephemeral=True,
+        )
+
+    @cap_group.command(name="on", description="Abilita cap giornaliero")
+    async def messaggi_cap_on(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.messaggi.cap.on", ctx):
+            return
+        await ctx.database.set_setting("messages_daily_cap_enabled", "1")
+        await interaction.response.send_message("Cap giornaliero abilitato.", ephemeral=True)
+
+    @cap_group.command(name="off", description="Disabilita cap giornaliero")
+    async def messaggi_cap_off(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "barcellometro.messaggi.cap.off", ctx):
+            return
+        await ctx.database.set_setting("messages_daily_cap_enabled", "0")
+        await interaction.response.send_message("Cap giornaliero disabilitato.", ephemeral=True)
+
+    @cap_group.command(name="set", description="Imposta cap giornaliero")
+    @app_commands.describe(n="Numero massimo invii per canale")
+    async def messaggi_cap_set(interaction: discord.Interaction, n: int) -> None:
+        if not await check_permission(interaction, "barcellometro.messaggi.cap.set", ctx):
+            return
+        if n <= 0:
+            await interaction.response.send_message("Il cap deve essere > 0.", ephemeral=True)
+            return
+        await ctx.database.set_setting("messages_daily_cap", str(n))
+        await interaction.response.send_message(f"Cap giornaliero impostato a {n}.", ephemeral=True)
     @messaggi_group.command(name="on", description="Abilita i messaggi automatici nel canale corrente")
     async def messaggi_on(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.on", ctx):
@@ -56,16 +151,25 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @messaggi_group.command(name="aggiungi", description="Aggiungi una nuova campagna custom")
     @app_commands.describe(
         testo="Testo del messaggio",
+        testo_verde="Testo per mood verde",
+        testo_giallo="Testo per mood giallo",
+        testo_rosso="Testo per mood rosso",
+        mood_mode="Modalità barcello",
         ogni_minuti="Intervallo in minuti",
         ora_inizio="Ora di inizio (HH:MM, Europe/Rome)",
         jitter_sec="Jitter opzionale in secondi",
         solo_se_inattivo_min="Invia solo se inattivo da X minuti",
     )
+    @app_commands.choices(mood_mode=MOOD_CHOICES)
     async def messaggi_aggiungi(
         interaction: discord.Interaction,
         testo: str,
         ogni_minuti: int,
         ora_inizio: str,
+        testo_verde: Optional[str] = None,
+        testo_giallo: Optional[str] = None,
+        testo_rosso: Optional[str] = None,
+        mood_mode: Optional[app_commands.Choice[str]] = None,
         jitter_sec: Optional[int] = 0,
         solo_se_inattivo_min: Optional[int] = 0,
     ) -> None:
@@ -92,11 +196,15 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             campaign_type="CUSTOM",
             name=None,
             text=testo,
+            text_green=testo_verde,
+            text_yellow=testo_giallo,
+            text_red=testo_rosso,
             enabled=True,
             start_time_local=ora_inizio,
             interval_minutes=ogni_minuti,
             jitter_seconds=jitter_sec,
             only_if_idle_minutes=solo_se_inattivo_min,
+            mood_mode=mood_mode.value if mood_mode else "AUTO",
             next_run_at=next_run.isoformat(),
             created_by=str(interaction.user.id),
         )
@@ -118,6 +226,14 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             return
         lines = []
         for row in campaigns:
+            variants = []
+            if row["text_green"]:
+                variants.append("G")
+            if row["text_yellow"]:
+                variants.append("Y")
+            if row["text_red"]:
+                variants.append("R")
+            variant_str = "".join(variants) if variants else "-"
             lines.append(
                 " | ".join(
                     [
@@ -127,6 +243,8 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
                         f"start {row['start_time_local']}",
                         f"jitter {row['jitter_seconds']}s",
                         f"idle {row['only_if_idle_minutes']}m",
+                        f"mode {row['mood_mode']}",
+                        f"var {variant_str}",
                         f"last {row['last_sent_at'] or '-'}",
                         f"next {row['next_run_at']}",
                         _truncate(row["text"] or ""),

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 import aiosqlite
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -180,11 +181,15 @@ class DatabaseService:
                 type TEXT NOT NULL DEFAULT 'CUSTOM',
                 name TEXT NULL,
                 text TEXT NULL,
+                text_green TEXT NULL,
+                text_yellow TEXT NULL,
+                text_red TEXT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 start_time_local TEXT NOT NULL,
                 interval_minutes INTEGER NOT NULL,
                 jitter_seconds INTEGER NOT NULL DEFAULT 0,
                 only_if_idle_minutes INTEGER NOT NULL DEFAULT 0,
+                mood_mode TEXT NOT NULL DEFAULT 'AUTO',
                 last_sent_at TEXT NULL,
                 next_run_at TEXT NOT NULL,
                 created_by TEXT NULL,
@@ -214,10 +219,31 @@ class DatabaseService:
                 last_message_at TEXT NOT NULL,
                 PRIMARY KEY (guild_id, channel_id)
             );
+
+            CREATE TABLE IF NOT EXISTS message_rotation_state (
+                guild_id TEXT PRIMARY KEY,
+                last_campaign_id INTEGER NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
+        await self._ensure_message_campaign_columns()
         await self._conn.commit()
         logger.info("Database schema initialized")
+
+    async def _ensure_message_campaign_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(message_campaigns)")
+        existing = {row["name"] for row in columns}
+        missing = {
+            "text_green": "TEXT NULL",
+            "text_yellow": "TEXT NULL",
+            "text_red": "TEXT NULL",
+            "mood_mode": "TEXT NOT NULL DEFAULT 'AUTO'",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE message_campaigns ADD COLUMN {name} {col_def}")
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
         assert self._conn is not None
@@ -893,11 +919,15 @@ class DatabaseService:
         campaign_type: str,
         name: Optional[str],
         text: Optional[str],
+        text_green: Optional[str],
+        text_yellow: Optional[str],
+        text_red: Optional[str],
         enabled: bool,
         start_time_local: str,
         interval_minutes: int,
         jitter_seconds: int,
         only_if_idle_minutes: int,
+        mood_mode: str,
         next_run_at: str,
         created_by: Optional[str],
     ) -> int:
@@ -906,22 +936,26 @@ class DatabaseService:
         cursor = await self._conn.execute(
             """
             INSERT INTO message_campaigns (
-                guild_id, type, name, text, enabled, start_time_local, interval_minutes,
-                jitter_seconds, only_if_idle_minutes, last_sent_at, next_run_at, created_by,
+                guild_id, type, name, text, text_green, text_yellow, text_red, enabled, start_time_local, interval_minutes,
+                jitter_seconds, only_if_idle_minutes, mood_mode, last_sent_at, next_run_at, created_by,
                 created_at, updated_at, deleted_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
             """,
             (
                 guild_id,
                 campaign_type,
                 name,
                 text,
+                text_green,
+                text_yellow,
+                text_red,
                 1 if enabled else 0,
                 start_time_local,
                 interval_minutes,
                 jitter_seconds,
                 only_if_idle_minutes,
+                mood_mode,
                 next_run_at,
                 created_by,
                 now,
@@ -1046,3 +1080,64 @@ class DatabaseService:
             (guild_id, channel_id, since_iso),
         )
         return int(row["count"]) if row else 0
+
+    async def count_sent_today(self, guild_id: str, channel_id: str, day_yyyymmdd: str) -> int:
+        tz = ZoneInfo("Europe/Rome")
+        day = datetime.fromisoformat(day_yyyymmdd).date()
+        start_local = datetime.combine(day, time.min, tzinfo=tz)
+        end_local = start_local + timedelta(days=1)
+        start_utc = start_local.astimezone(timezone.utc).isoformat()
+        end_utc = end_local.astimezone(timezone.utc).isoformat()
+        row = await self.fetchone(
+            """
+            SELECT COUNT(*) AS count
+            FROM message_send_log
+            WHERE guild_id = ? AND channel_id = ? AND status = 'sent' AND sent_at >= ? AND sent_at < ?
+            """,
+            (guild_id, channel_id, start_utc, end_utc),
+        )
+        return int(row["count"]) if row else 0
+
+    async def get_rotation_state(self, guild_id: str) -> Optional[int]:
+        row = await self.fetchone(
+            "SELECT last_campaign_id FROM message_rotation_state WHERE guild_id = ?",
+            (guild_id,),
+        )
+        if row is None:
+            return None
+        return row["last_campaign_id"]
+
+    async def set_rotation_state(self, guild_id: str, last_campaign_id: Optional[int]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO message_rotation_state (guild_id, last_campaign_id, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                last_campaign_id = excluded.last_campaign_id,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, last_campaign_id, now),
+        )
+
+    async def list_custom_campaigns_enabled(self, guild_id: str) -> list[dict[str, object]]:
+        rows = await self.fetchall(
+            """
+            SELECT *
+            FROM message_campaigns
+            WHERE guild_id = ? AND type = 'CUSTOM' AND enabled = 1 AND deleted_at IS NULL
+            ORDER BY id ASC
+            """,
+            (guild_id,),
+        )
+        return [dict(row) for row in rows]
+
+    async def list_campaign_guilds(self) -> list[str]:
+        rows = await self.fetchall(
+            """
+            SELECT DISTINCT guild_id
+            FROM message_campaigns
+            WHERE enabled = 1 AND deleted_at IS NULL
+            """,
+        )
+        return [row["guild_id"] for row in rows]

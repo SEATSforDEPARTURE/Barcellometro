@@ -60,8 +60,10 @@ python -m app.main
 ## Comandi disponibili (solo guild)
 
 ### Impostazioni DB (opzionali)
-- `messages_quiet_hours_start` / `messages_quiet_hours_end`: quiet hours (HH:MM Europe/Rome) per messaggi community.
-- `messages_daily_cap_per_channel`: limite invii/giorno per canale per messaggi community.
+- `messages_quiet_enabled`: `1`/`0` per attivare/disattivare le quiet hours (default 1).
+- `messages_quiet_start` / `messages_quiet_end`: quiet hours (HH:MM Europe/Rome) per messaggi community (default 01:00–08:30).
+- `messages_daily_cap_enabled`: `1`/`0` per attivare/disattivare il cap giornaliero (default 1).
+- `messages_daily_cap`: limite invii/giorno per canale per messaggi community (default 6).
 
 ### Abilitazione canali
 - `/barcellometro check on` → abilita raccolta eventi nel canale.
@@ -121,7 +123,9 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/barcellometro messaggi on` → abilita invii automatici nel canale corrente.
 - `/barcellometro messaggi off` → disabilita nel canale corrente.
 - `/barcellometro messaggi status` → stato canale + conteggio campagne.
-- `/barcellometro messaggi aggiungi testo:"..." ogni_minuti:<int> ora_inizio:"HH:MM" [jitter_sec:<int>] [solo_se_inattivo_min:<int>]`
+- `/barcellometro messaggi aggiungi testo:"..." ogni_minuti:<int> ora_inizio:"HH:MM" [testo_verde:"..."] [testo_giallo:"..."] [testo_rosso:"..."] [mood_mode:<AUTO|IGNORE_BARCELLO|GREEN_ONLY|YELLOW_ONLY|RED_ONLY>] [jitter_sec:<int>] [solo_se_inattivo_min:<int>]`
+- `/barcellometro messaggi quiet status|on|off|set start:"HH:MM" end:"HH:MM"` → gestione quiet hours.
+- `/barcellometro messaggi cap status|on|off|set n:<int>` → gestione cap giornaliero.
 - `/barcellometro messaggi lista` → elenco campagne con ID reali.
 - `/barcellometro messaggi cancella id:<int>` → soft delete.
 - `/barcellometro messaggi pausa id:<int>` → disabilita.

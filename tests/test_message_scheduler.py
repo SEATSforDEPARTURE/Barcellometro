@@ -5,6 +5,10 @@ from zoneinfo import ZoneInfo
 from app.services.database import DatabaseService
 from app.services.message_scheduler import (
     calculate_initial_next_run,
+    is_in_quiet_hours,
+    select_round_robin_campaign,
+    select_text_for_mood,
+    should_skip_for_daily_cap,
     should_skip_for_idle,
 )
 
@@ -36,6 +40,71 @@ def test_idle_skip() -> None:
     )
 
 
+def test_is_in_quiet_hours() -> None:
+    assert is_in_quiet_hours(datetime(2024, 1, 1, 2, 0).time(), "01:00", "08:30")
+    assert not is_in_quiet_hours(datetime(2024, 1, 1, 10, 0).time(), "01:00", "08:30")
+    assert is_in_quiet_hours(datetime(2024, 1, 1, 23, 0).time(), "22:00", "07:00")
+    assert is_in_quiet_hours(datetime(2024, 1, 1, 6, 30).time(), "22:00", "07:00")
+    assert not is_in_quiet_hours(datetime(2024, 1, 1, 12, 0).time(), "22:00", "07:00")
+
+
+def test_daily_cap_skip() -> None:
+    assert should_skip_for_daily_cap(6, 6)
+    assert not should_skip_for_daily_cap(5, 6)
+
+
+def test_round_robin_selection() -> None:
+    now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    campaigns = [
+        {"id": 1, "next_run_at": now.isoformat()},
+        {"id": 2, "next_run_at": now.isoformat()},
+        {"id": 3, "next_run_at": now.isoformat()},
+    ]
+    selected = select_round_robin_campaign(campaigns, 2, now)
+    assert selected["id"] == 3
+    selected_wrap = select_round_robin_campaign(campaigns, 3, now)
+    assert selected_wrap["id"] == 1
+
+    campaigns[2]["next_run_at"] = (now + timedelta(minutes=10)).isoformat()
+    selected_fallback = select_round_robin_campaign(campaigns, 2, now)
+    assert selected_fallback["id"] == 1
+
+
+def test_barcello_text_selection() -> None:
+    text, reason = select_text_for_mood(
+        mood_mode="AUTO",
+        base_text="base",
+        text_green=None,
+        text_yellow=None,
+        text_red="red",
+        barcello_color="RED",
+    )
+    assert text == "red"
+    assert reason == "barcello_red"
+
+    text, reason = select_text_for_mood(
+        mood_mode="AUTO",
+        base_text="base",
+        text_green=None,
+        text_yellow=None,
+        text_red=None,
+        barcello_color="RED",
+    )
+    assert text == "base"
+    assert reason == "barcello_red"
+
+    text, reason = select_text_for_mood(
+        mood_mode="RED_ONLY",
+        base_text="base",
+        text_green=None,
+        text_yellow=None,
+        text_red=None,
+        barcello_color="GREEN",
+    )
+    assert text == "base"
+    assert reason == "barcello_red"
+
+
 def test_db_crud_campaigns() -> None:
     async def _run() -> None:
         db = DatabaseService(":memory:")
@@ -50,11 +119,15 @@ def test_db_crud_campaigns() -> None:
             campaign_type="CUSTOM",
             name=None,
             text="Hello world",
+            text_green=None,
+            text_yellow=None,
+            text_red=None,
             enabled=True,
             start_time_local="10:00",
             interval_minutes=60,
             jitter_seconds=0,
             only_if_idle_minutes=0,
+            mood_mode="AUTO",
             next_run_at=datetime.now(timezone.utc).isoformat(),
             created_by="user1",
         )
