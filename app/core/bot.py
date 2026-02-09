@@ -10,10 +10,13 @@ from app.core.plugin_loader import PluginLoader
 from app.core.service_registry import ServiceRegistry
 from app.services.ai import AiService
 from app.services.backfill import BackfillService
+from app.services.community_insights import CommunityInsightsService
 from app.services.database import DatabaseService
 from app.services.ingest import IngestService
 from app.services.permissions import CommandGuardService
 from app.services.retention import RetentionService
+from app.services.barcello import BarcelloService
+from app.services.message_scheduler import MessageSchedulerService
 from app.services.status import StatusService
 from app.services.stt.ai_stt import AiSttService
 from app.services.stt.faster_whisper import FasterWhisperSttService
@@ -67,6 +70,9 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     stt_ai_service = None
     translate_local_service = None
     translate_ai_service = None
+    message_scheduler = None
+    barcello_service = None
+    community_insights = None
 
     instance_mode = normalize_instance_mode(config.instance_mode)
     logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
@@ -79,9 +85,17 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         backfill_service = BackfillService(database_service, config.default_retention_days)
         guard_service = CommandGuardService(database_service)
         ai_service = AiService(database_service, config.openai_api_key)
+        barcello_service = BarcelloService(database_service)
+        community_insights = CommunityInsightsService(ai_service)
         stt_ai_service = AiSttService(database_service, ai_service)
         translate_local_service = ArgosTranslateService()
         translate_ai_service = AiTranslateService(ai_service)
+        message_scheduler = MessageSchedulerService(
+            database_service,
+            bot,
+            community_insights=community_insights,
+            barcello_service=barcello_service,
+        )
 
     registry.register("config", config)
     registry.register("bot", bot)
@@ -94,6 +108,9 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("backfill", backfill_service)
         registry.register("guard", guard_service)
         registry.register("ai", ai_service)
+        registry.register("barcello", barcello_service)
+        registry.register("community_insights", community_insights)
+        registry.register("message_scheduler", message_scheduler)
         registry.register("stt.ai", stt_ai_service)
         registry.register("translate.local", translate_local_service)
         registry.register("translate.ai", translate_ai_service)
@@ -118,10 +135,19 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         status_service.register_component("backfill", backfill_service)
         status_service.register_component("guard", guard_service)
         status_service.register_component("ai", ai_service)
+        status_service.register_component("barcello", barcello_service)
+        status_service.register_component("community_insights", community_insights)
+        status_service.register_component("message_scheduler", message_scheduler)
         status_service.register_component("stt.local", stt_local_service)
         status_service.register_component("stt.ai", stt_ai_service)
         status_service.register_component("translate.local", translate_local_service)
         status_service.register_component("translate.ai", translate_ai_service)
         status_service.register_component("plugins", plugin_loader)
+
+    if instance_mode == "main" and message_scheduler is not None:
+        async def handle_ready() -> None:
+            message_scheduler.start()
+
+        bot.add_listener(handle_ready, "on_ready")
 
     return bot, registry

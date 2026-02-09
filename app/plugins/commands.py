@@ -11,6 +11,7 @@ from app.plugins.commands_modular import (
     register_admin,
     register_audio_notes,
     register_barcello,
+    register_messaggi,
     register_privacy,
     register_riassunto,
     register_roles,
@@ -35,6 +36,7 @@ def setup(registry: ServiceRegistry) -> None:
     stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
     translate_group = app_commands.Group(name="translate", description="Impostazioni traduzione")
     audio_notes_group = app_commands.Group(name="audio_notes", description="Note vocali")
+    messaggi_group = app_commands.Group(name="messaggi", description="Messaggi community")
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Ingest da canale vocale")
     privacy_group = app_commands.Group(name="privacy", description="Privacy per voice ingest")
     status_group = app_commands.Group(name="status", description="Stato servizi")
@@ -44,6 +46,7 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group.add_command(stt_group)
     barcellometro_group.add_command(translate_group)
     barcellometro_group.add_command(audio_notes_group)
+    barcellometro_group.add_command(messaggi_group)
     barcellometro_group.add_command(voice_ingest_group)
 
     register_admin(barcellometro_group, ctx)
@@ -51,6 +54,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_stt(stt_group, ctx)
     register_translate(translate_group, ctx)
     register_audio_notes(audio_notes_group, ctx)
+    register_messaggi(messaggi_group, ctx)
     register_voice_ingest(voice_ingest_group, ctx)
     register_privacy(privacy_group, ctx)
     register_status(status_group, ctx)
