@@ -37,6 +37,7 @@ logs/
 *.pem
 *.key
 *.crt
+*.json
 
 # === Local DB / Artifacts ===
 *.sqlite
