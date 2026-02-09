@@ -181,9 +181,9 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @app_commands.choices(mood_mode=MOOD_CHOICES)
     async def messaggi_aggiungi(
         interaction: discord.Interaction,
-        testo: Optional[str] = None,
         ogni_minuti: int,
         ora_inizio: str,
+        testo: Optional[str] = None,
         testo_verde: Optional[str] = None,
         testo_giallo: Optional[str] = None,
         testo_rosso: Optional[str] = None,
