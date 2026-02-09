@@ -206,8 +206,44 @@ class SummaryService:
         self._database = database
         self._ai_service = ai_service
         self._cache_ttl = cache_ttl_seconds
-        self._cache: dict[tuple[str, str, str, str, str, bool, bool], tuple[float, SummaryResult, str | None]] = {}
+        self._cache: dict[
+            tuple[str, str, str, str, str, bool, bool, bool, str | None],
+            tuple[float, SummaryResult, str | None],
+        ] = {}
         self._response_format_supported: bool | None = None
+
+    def build_cache_key(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+        tier: str,
+        evidence_mode: bool,
+        voice_context: bool,
+        ai_allowed: bool,
+        model_name: str | None,
+    ) -> tuple[str, str, str, str, str, bool, bool, bool, str | None]:
+        return (
+            guild_id,
+            channel_id,
+            start_ts,
+            end_ts,
+            tier,
+            evidence_mode,
+            voice_context,
+            ai_allowed,
+            model_name,
+        )
+
+    def peek_cache(self, cache_key: tuple[str, ...], max_message_ts: Optional[str]) -> bool:
+        now_epoch = datetime.now(timezone.utc).timestamp()
+        cached = self._cache.get(cache_key)
+        if cached and cached[0] > now_epoch:
+            if max_message_ts and cached[2] and max_message_ts <= cached[2]:
+                return True
+        return False
 
     async def get_config(self) -> dict[str, Any]:
         raw = await self._database.get_setting("summary.config")
@@ -239,7 +275,18 @@ class SummaryService:
         max_message_ts: Optional[str],
         messages: list[dict[str, Any]],
     ) -> SummaryResult:
-        cache_key = (guild_id, channel_id, start_ts, end_ts, tier, evidence_mode, voice_context)
+        model_name = self._ai_service.get_model("summary") if self._ai_service else None
+        cache_key = self.build_cache_key(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            tier=tier,
+            evidence_mode=evidence_mode,
+            voice_context=voice_context,
+            ai_allowed=ai_allowed,
+            model_name=model_name,
+        )
         now_epoch = datetime.now(timezone.utc).timestamp()
         cached = self._cache.get(cache_key)
         if cached and cached[0] > now_epoch:
@@ -265,15 +312,17 @@ class SummaryService:
             "fallback": False,
             "reason": "disabled",
         }
+        ai_called = False
         if use_ai:
             ai_status.update({"enabled": True, "provider": "openai"})
-            model = self._ai_service.get_model("summary") if self._ai_service else None
+            model = model_name
             client = self._ai_service.client() if self._ai_service else None
             ai_status["model"] = model
             if not model or not client:
                 ai_status.update({"enabled": False, "fallback": True, "reason": "missing_key"})
             else:
                 try:
+                    ai_called = True
                     ai_payload = await self._call_ai(
                         client=client,
                         model=model,
@@ -302,6 +351,10 @@ class SummaryService:
                     ai_status.update({"enabled": False, "fallback": True, "reason": f"exception:{exc.__class__.__name__}"})
 
         summary.ai_status = ai_status
+        if ai_called:
+            logger.info("summary: ai_called=true fallback_reason=%s", ai_status.get("reason"))
+        else:
+            logger.info("summary: ai_called=false fallback_reason=%s", ai_status.get("reason"))
         expires = now_epoch + self._cache_ttl
         self._cache[cache_key] = (expires, summary, max_message_ts)
         return summary
