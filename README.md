@@ -59,6 +59,10 @@ python -m app.main
 
 ## Comandi disponibili (solo guild)
 
+### Impostazioni DB (opzionali)
+- `messages_quiet_hours_start` / `messages_quiet_hours_end`: quiet hours (HH:MM Europe/Rome) per messaggi community.
+- `messages_daily_cap_per_channel`: limite invii/giorno per canale per messaggi community.
+
 ### Abilitazione canali
 - `/barcellometro check on` → abilita raccolta eventi nel canale.
 - `/barcellometro check off` → disabilita raccolta eventi nel canale.
@@ -112,6 +116,17 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/privacy on [voice_channel]`
 - `/privacy off [voice_channel]`
 - `/privacy status [voice_channel]`
+
+### Messaggi community
+- `/barcellometro messaggi on` → abilita invii automatici nel canale corrente.
+- `/barcellometro messaggi off` → disabilita nel canale corrente.
+- `/barcellometro messaggi status` → stato canale + conteggio campagne.
+- `/barcellometro messaggi aggiungi testo:"..." ogni_minuti:<int> ora_inizio:"HH:MM" [jitter_sec:<int>] [solo_se_inattivo_min:<int>]`
+- `/barcellometro messaggi lista` → elenco campagne con ID reali.
+- `/barcellometro messaggi cancella id:<int>` → soft delete.
+- `/barcellometro messaggi pausa id:<int>` → disabilita.
+- `/barcellometro messaggi riprendi id:<int>` → abilita + ricalcolo next_run.
+- `/barcellometro messaggi test id:<int>` → invio immediato nel canale corrente.
 
 ### Riassunto
 - `/riassunto ultimi <quantità> <minuti|ore|giorni|settimane>`

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import aiosqlite
@@ -162,6 +163,56 @@ class DatabaseService:
                 delta_target INTEGER NULL,
                 score_pred INTEGER NOT NULL,
                 profile TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS message_channels (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS message_campaigns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT 'CUSTOM',
+                name TEXT NULL,
+                text TEXT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                start_time_local TEXT NOT NULL,
+                interval_minutes INTEGER NOT NULL,
+                jitter_seconds INTEGER NOT NULL DEFAULT 0,
+                only_if_idle_minutes INTEGER NOT NULL DEFAULT 0,
+                last_sent_at TEXT NULL,
+                next_run_at TEXT NOT NULL,
+                created_by TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_message_campaigns_due
+            ON message_campaigns (guild_id, enabled, next_run_at);
+
+            CREATE TABLE IF NOT EXISTS message_send_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                sent_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reason TEXT NULL,
+                error TEXT NULL,
+                FOREIGN KEY(campaign_id) REFERENCES message_campaigns(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS channel_activity (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                last_message_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id)
             );
             """
         )
@@ -807,3 +858,191 @@ class DatabaseService:
         cursor = await self._conn.execute("DELETE FROM events WHERE ts < ?", (cutoff_ts,))
         await self._conn.commit()
         return cursor.rowcount
+
+    async def set_message_channel_enabled(self, guild_id: str, channel_id: str, enabled: bool) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO message_channels (guild_id, channel_id, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, channel_id, 1 if enabled else 0, now, now),
+        )
+
+    async def get_message_channel_status(self, guild_id: str, channel_id: str) -> bool:
+        row = await self.fetchone(
+            "SELECT enabled FROM message_channels WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        )
+        return bool(row["enabled"]) if row else False
+
+    async def list_enabled_message_channels(self, guild_id: str) -> list[str]:
+        rows = await self.fetchall(
+            "SELECT channel_id FROM message_channels WHERE guild_id = ? AND enabled = 1",
+            (guild_id,),
+        )
+        return [row["channel_id"] for row in rows]
+
+    async def create_message_campaign(
+        self,
+        *,
+        guild_id: str,
+        campaign_type: str,
+        name: Optional[str],
+        text: Optional[str],
+        enabled: bool,
+        start_time_local: str,
+        interval_minutes: int,
+        jitter_seconds: int,
+        only_if_idle_minutes: int,
+        next_run_at: str,
+        created_by: Optional[str],
+    ) -> int:
+        assert self._conn is not None
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self._conn.execute(
+            """
+            INSERT INTO message_campaigns (
+                guild_id, type, name, text, enabled, start_time_local, interval_minutes,
+                jitter_seconds, only_if_idle_minutes, last_sent_at, next_run_at, created_by,
+                created_at, updated_at, deleted_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
+            """,
+            (
+                guild_id,
+                campaign_type,
+                name,
+                text,
+                1 if enabled else 0,
+                start_time_local,
+                interval_minutes,
+                jitter_seconds,
+                only_if_idle_minutes,
+                next_run_at,
+                created_by,
+                now,
+                now,
+            ),
+        )
+        await self._conn.commit()
+        return int(cursor.lastrowid)
+
+    async def list_message_campaigns(self, guild_id: str, *, include_disabled: bool = True) -> list[aiosqlite.Row]:
+        conditions = ["guild_id = ?", "deleted_at IS NULL"]
+        params: list[Any] = [guild_id]
+        if not include_disabled:
+            conditions.append("enabled = 1")
+        query = f"SELECT * FROM message_campaigns WHERE {' AND '.join(conditions)} ORDER BY id ASC"
+        return await self.fetchall(query, tuple(params))
+
+    async def get_message_campaign(self, guild_id: str, campaign_id: int) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM message_campaigns
+            WHERE guild_id = ? AND id = ? AND deleted_at IS NULL
+            """,
+            (guild_id, campaign_id),
+        )
+
+    async def set_message_campaign_enabled(self, guild_id: str, campaign_id: int, enabled: bool) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE message_campaigns
+            SET enabled = ?, updated_at = ?
+            WHERE guild_id = ? AND id = ? AND deleted_at IS NULL
+            """,
+            (1 if enabled else 0, now, guild_id, campaign_id),
+        )
+
+    async def soft_delete_message_campaign(self, guild_id: str, campaign_id: int) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE message_campaigns
+            SET enabled = 0, deleted_at = ?, updated_at = ?
+            WHERE guild_id = ? AND id = ?
+            """,
+            (now, now, guild_id, campaign_id),
+        )
+
+    async def update_campaign_next_run(self, guild_id: str, campaign_id: int, next_run_at: str, last_sent_at: Optional[str]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE message_campaigns
+            SET next_run_at = ?, last_sent_at = ?, updated_at = ?
+            WHERE guild_id = ? AND id = ? AND deleted_at IS NULL
+            """,
+            (next_run_at, last_sent_at, now, guild_id, campaign_id),
+        )
+
+    async def due_message_campaigns(self, now_iso: str) -> list[dict[str, object]]:
+        rows = await self.fetchall(
+            """
+            SELECT *
+            FROM message_campaigns
+            WHERE enabled = 1 AND deleted_at IS NULL AND next_run_at <= ?
+            ORDER BY next_run_at ASC
+            """,
+            (now_iso,),
+        )
+        return [dict(row) for row in rows]
+
+    async def get_channel_last_activity(self, guild_id: str, channel_id: str) -> Optional[str]:
+        row = await self.fetchone(
+            """
+            SELECT last_message_at
+            FROM channel_activity
+            WHERE guild_id = ? AND channel_id = ?
+            """,
+            (guild_id, channel_id),
+        )
+        return row["last_message_at"] if row else None
+
+    async def upsert_channel_activity(self, guild_id: str, channel_id: str, last_message_at: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO channel_activity (guild_id, channel_id, last_message_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                last_message_at = excluded.last_message_at
+            """,
+            (guild_id, channel_id, last_message_at),
+        )
+
+    async def insert_send_log(
+        self,
+        *,
+        campaign_id: int,
+        guild_id: str,
+        channel_id: str,
+        sent_at: str,
+        status: str,
+        reason: Optional[str],
+        error: Optional[str],
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO message_send_log (
+                campaign_id, guild_id, channel_id, sent_at, status, reason, error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (campaign_id, guild_id, channel_id, sent_at, status, reason, error),
+        )
+
+    async def count_message_send_log_since(self, guild_id: str, channel_id: str, since_iso: str) -> int:
+        row = await self.fetchone(
+            """
+            SELECT COUNT(*) AS count
+            FROM message_send_log
+            WHERE guild_id = ? AND channel_id = ? AND status = 'sent' AND sent_at >= ?
+            """,
+            (guild_id, channel_id, since_iso),
+        )
+        return int(row["count"]) if row else 0
