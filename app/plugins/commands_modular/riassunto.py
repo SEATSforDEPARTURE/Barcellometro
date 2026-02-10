@@ -460,7 +460,30 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         )
         max_message_ts = latest_row["ts"] if latest_row else None
 
+        messages: list[dict[str, Any]] = []
         timeline_entries: list[dict[str, Any]] = []
+
+        def _append_event(
+            ts_value: str | None,
+            text: str,
+            kind: str = "call",
+            in_call: bool = True,
+            actor_id: str | None = None,
+            message_id: str | None = None,
+            meta: dict[str, Any] | None = None,
+        ) -> None:
+            timeline_entries.append(
+                {
+                    "ts": ts_value,
+                    "kind": kind,
+                    "in_call": in_call,
+                    "actor_id": actor_id,
+                    "text": text,
+                    "message_id": message_id,
+                    "meta": meta or {"kind": kind},
+                }
+            )
+
         voice_segments = 0
         for row in messages_rows:
             embeds_raw = row["embeds_json"] if "embeds_json" in row.keys() else None
@@ -792,6 +815,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             for entry in timeline_entries
             if entry.get("text")
         ]
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
 
         MIN_MSG_TOTAL_CHANNEL = 8
         content_messages = [
