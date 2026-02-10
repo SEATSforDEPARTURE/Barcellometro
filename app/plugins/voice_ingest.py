@@ -341,7 +341,7 @@ def setup(registry: ServiceRegistry) -> None:
                 guild_id=str(guild_id),
                 channel_id=str(voice_channel_id),
                 thread_id=None,
-                author_id=None,
+                author_id=str(bot.user.id) if bot.user else None,
                 content=None,
                 meta={"voice_session_id": session_id},
             )
@@ -358,10 +358,10 @@ def setup(registry: ServiceRegistry) -> None:
                 event_type="voice.leave",
                 platform="discord",
                 ts=_now_iso(),
-                guild_id=None,
-                channel_id=None,
+                guild_id=str(current_guild_id) if current_guild_id is not None else None,
+                channel_id=str(current_voice_channel_id) if current_voice_channel_id is not None else None,
                 thread_id=None,
-                author_id=None,
+                author_id=str(bot.user.id) if bot.user else None,
                 content=None,
                 meta={"voice_session_id": active_session_id},
             )
@@ -760,6 +760,49 @@ def setup(registry: ServiceRegistry) -> None:
             return
         if await _privacy_mode():
             return
+        before_channel = before.channel
+        after_channel = after.channel
+        if before_channel != after_channel:
+            async def _resolve_session_id(guild_id: int, channel_id: int) -> tuple[Optional[str], bool]:
+                if (
+                    active_session_id
+                    and current_guild_id == guild_id
+                    and current_voice_channel_id == channel_id
+                ):
+                    return active_session_id, False
+                session = await database.get_active_voice_session(str(guild_id), str(channel_id))
+                if session is None:
+                    return None, True
+                return session["voice_session_id"], False
+
+            async def _emit_voice_event(event_type: str, channel_id: int) -> None:
+                session_id, lookup_failed = await _resolve_session_id(member.guild.id, channel_id)
+                meta: dict[str, Any] = {"voice_session_id": session_id}
+                if before_channel is not None:
+                    meta["before_channel_id"] = str(before_channel.id)
+                if after_channel is not None:
+                    meta["after_channel_id"] = str(after_channel.id)
+                if lookup_failed:
+                    meta["session_lookup_failed"] = True
+                await ingest.emit(
+                    EventEnvelope(
+                        event_id=str(uuid4()),
+                        event_type=event_type,
+                        platform="discord",
+                        ts=_now_iso(),
+                        guild_id=str(member.guild.id),
+                        channel_id=str(channel_id),
+                        thread_id=None,
+                        author_id=str(member.id),
+                        content=None,
+                        meta=meta,
+                    )
+                )
+
+            if before_channel is not None:
+                await _emit_voice_event("voice.leave", before_channel.id)
+            if after_channel is not None:
+                await _emit_voice_event("voice.join", after_channel.id)
         target_voice_id = await _target_voice_channel_id()
         if target_voice_id is None:
             return
