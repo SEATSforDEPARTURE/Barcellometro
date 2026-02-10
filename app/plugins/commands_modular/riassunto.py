@@ -500,14 +500,15 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             embeds = json.loads(embeds_raw) if embeds_raw else []
             if any(isinstance(embed, dict) and embed.get("source") == "voice_ingest_stt" for embed in embeds):
                 voice_segments += 1
+            ts_parsed = _parse_iso_ts(row["ts"])
             _append_event(
-                ts_value=row["ts"],
+                ts_value=ts_parsed,
                 text=str(row["content"] or ""),
                 kind="chat",
                 in_call=False,
                 actor_id=str(row["author_id"] or "") or None,
                 message_id=str(row["message_id"] or "") or None,
-                meta={"kind": "chat", "in_call": False},
+                meta={"kind": "chat", "in_call": False, "embeds": embeds, "ts_raw": row["ts"]},
             )
 
         voice_minutes = 0
@@ -691,13 +692,6 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     )
                 privacy_disclaimer_lines.append(_build_privacy_disclaimer(gap_start, None, actor_name))
 
-            def _is_in_privacy_gap_dt(ts_value: datetime) -> bool:
-                for start, end, _actor in privacy_intervals:
-                    end_bound = end or end_dt_utc
-                    if start <= ts_value <= end_bound:
-                        return True
-                return False
-
             for event in privacy_events:
                 if event["event_type"] != "voice.transcript":
                     continue
@@ -751,8 +745,6 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     continue
                 moment_ts = _parse_iso_ts(moment.ts)
                 if moment_ts is None:
-                    continue
-                if _is_in_privacy_gap_dt(moment_ts):
                     continue
                 _append_event(
                     ts_value=moment_ts,
@@ -950,6 +942,70 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 ephemeral=True,
             )
             return
+
+        def _is_in_privacy_gap_dt(ts_value: datetime) -> bool:
+            for start, end, _actor in privacy_intervals:
+                end_bound = end or end_dt_utc
+                if start <= ts_value <= end_bound:
+                    return True
+            return False
+
+        normalized_timeline_entries: list[dict[str, Any]] = []
+        invalid_ts_samples: list[Any] = []
+        for entry in timeline_entries:
+            ts_value = entry.get("ts")
+            ts_dt: datetime | None
+            if isinstance(ts_value, datetime):
+                ts_dt = ts_value
+            elif isinstance(ts_value, str):
+                ts_dt = _parse_iso_ts(ts_value)
+            else:
+                ts_dt = None
+            if ts_dt is None:
+                if len(invalid_ts_samples) < 3:
+                    invalid_ts_samples.append(ts_value)
+                continue
+            normalized_entry = dict(entry)
+            normalized_entry["ts"] = ts_dt
+            normalized_timeline_entries.append(normalized_entry)
+        if invalid_ts_samples:
+            logger.warning("riassunto: dropped timeline entries with invalid ts samples=%s", invalid_ts_samples)
+        timeline_entries = normalized_timeline_entries
+
+        if privacy_intervals:
+            timeline_entries = [
+                entry
+                for entry in timeline_entries
+                if not (
+                    entry.get("kind") in {"chat", "transcript", "call"}
+                    and isinstance(entry.get("ts"), datetime)
+                    and _is_in_privacy_gap_dt(entry["ts"])
+                )
+            ]
+
+        timeline_entries.sort(key=lambda item: item["ts"])
+
+        messages = [
+            {
+                "message_id": entry.get("message_id"),
+                "author_id": str(entry.get("actor_id") or ""),
+                "ts": entry["ts"].isoformat(),
+                "content": str(entry.get("text") or ""),
+                "meta": {
+                    "in_call": bool(entry.get("in_call")),
+                    "kind": str(entry.get("kind") or ""),
+                    **(
+                        {
+                            key: value
+                            for key, value in (entry.get("meta") or {}).items()
+                            if key not in {"in_call", "kind"}
+                        }
+                    ),
+                },
+            }
+            for entry in timeline_entries
+            if str(entry.get("text") or "").strip()
+        ]
 
         MIN_MSG_TOTAL_CHANNEL = 8
         content_messages = [
