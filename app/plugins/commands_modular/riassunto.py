@@ -628,6 +628,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 end_ts=end_dt_utc.isoformat(),
                 limit=max_messages,
             )
+            last_privacy = await ctx.database.fetch_last_privacy_event_before(
+                channel_id=str(interaction.channel_id),
+                ts=start_dt_utc.isoformat(),
+            )
+            privacy_on = False
+            privacy_actor: str | None = None
+            if last_privacy is not None:
+                privacy_on = last_privacy["event_type"] == "voice.privacy_on"
+                privacy_actor = str(last_privacy["actor_id"] or "") or None
+            privacy_events = sorted(privacy_events, key=lambda item: str(item["ts"] or ""))
 
             def _parse_event_meta(event: dict[str, Any]) -> dict[str, Any]:
                 raw = event["meta_json"] if "meta_json" in event.keys() else None
@@ -771,6 +781,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             for entry in timeline_entries
             if entry.get("text")
         ]
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
 
         MIN_MSG_TOTAL_CHANNEL = 8
         content_messages = [
