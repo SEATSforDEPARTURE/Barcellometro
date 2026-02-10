@@ -435,11 +435,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             end_dt_utc.isoformat(),
         )
 
-        include_names = False
-        if profile == "mod":
-            include_names = True
-        else:
-            include_names = (barcello_result.color or "").lower() == "verde"
+        include_names = (barcello_result.color or "").lower() == "verde"
 
         period_prefix = _build_period_prefix(
             period_label,
@@ -518,6 +514,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         voice_minutes = 0
         voice_sessions = 0
         voice_transcripts = 0
+        voice_presence = 0
+        privacy_entries = 0
+        call_entries = 0
         voice_session_ranges: list[tuple[datetime, datetime]] = []
         forced_moments: list[SummaryItem] = []
         supplemental_moments: list[SummaryItem] = []
@@ -532,9 +531,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             )
             voice_sessions = len(sessions)
 
-            def _describe_duration(started: datetime, ended: datetime) -> str:
-                seconds = max(0, int((ended - started).total_seconds()))
-                minutes = max(1, int(seconds / 60))
+            def _describe_duration(seconds: float) -> str:
+                minutes = max(1, int(round(seconds / 60)))
                 hours = minutes // 60
                 if hours >= 1:
                     rem = minutes % 60
@@ -584,24 +582,51 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 if overlap_end > overlap_start:
                     voice_minutes += int((overlap_end - overlap_start).total_seconds() / 60)
                 voice_session_ranges.append((started, ended or end_dt_utc))
-                forced_moments.append(
+                overlap_seconds = max(0.0, (overlap_end - overlap_start).total_seconds())
+                overlap_label = _describe_duration(overlap_seconds) if overlap_seconds else "~1m"
+                if start_dt_utc <= started <= end_dt_utc:
+                    text = f"Parte una chiamata ({overlap_label}) che sposta il ritmo sul vocale."
+                    ts_value = started
+                else:
+                    text = f"Chiamata già in corso all'inizio del periodo ({overlap_label})."
+                    ts_value = start_dt_utc
+                supplemental_moments.append(
                     SummaryItem(
-                        ts=started.isoformat(),
-                        text=_describe_call_start(started, ended),
+                        ts=ts_value.isoformat(),
+                        text=text,
                         author_id=None,
                         message_ids=[],
                         in_call=True,
                     )
                 )
-                forced_moments.append(
-                    SummaryItem(
-                        ts=(ended or end_dt_utc).isoformat(),
-                        text=_describe_call_end(started, ended),
-                        author_id=None,
-                        message_ids=[],
-                        in_call=True,
+                _append_event(ts_value, text, kind="call")
+                call_entries += 1
+                if ended and start_dt_utc <= ended <= end_dt_utc:
+                    end_text = f"Termina la chiamata dopo {overlap_label} di confronto."
+                    supplemental_moments.append(
+                        SummaryItem(
+                            ts=ended.isoformat(),
+                            text=end_text,
+                            author_id=None,
+                            message_ids=[],
+                            in_call=True,
+                        )
                     )
-                )
+                    _append_event(ended, end_text, kind="call")
+                    call_entries += 1
+                if not ended or ended > end_dt_utc:
+                    continue_text = f"La chiamata prosegue oltre il periodo ({overlap_label})."
+                    supplemental_moments.append(
+                        SummaryItem(
+                            ts=end_dt_utc.isoformat(),
+                            text=continue_text,
+                            author_id=None,
+                            message_ids=[],
+                            in_call=True,
+                        )
+                    )
+                    _append_event(end_dt_utc, continue_text, kind="call")
+                    call_entries += 1
 
             privacy_events = await ctx.database.fetch_events_in_range(
                 channel_id=str(interaction.channel_id),
@@ -686,6 +711,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     continue
                 if ts_real < start_dt_utc or ts_real > end_dt_utc:
                     continue
+                if _is_in_privacy_gap_dt(ts_real):
+                    continue
                 content = event["content"] if "content" in event.keys() else None
                 if not content:
                     content = meta.get("content") or meta.get("text") or ""
@@ -707,6 +734,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 voice_transcripts += 1
 
+            filtered_messages = []
+            for message in messages:
+                if not _is_in_privacy_gap(message.get("ts")):
+                    filtered_messages.append(message)
+            messages = filtered_messages
+
             for moment in forced_moments:
                 if not moment.ts or not moment.text:
                     continue
@@ -724,11 +757,191 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
 
             logger.info(
-                "riassunto: voice_context_merge sessions=%s transcripts=%s forced_moments=%s",
+                "riassunto: voice_context_merge sessions=%s transcripts=%s presence=%s privacy=%s call=%s",
                 voice_sessions,
                 voice_transcripts,
-                len(forced_moments),
+                voice_presence,
+                privacy_entries,
+                call_entries,
             )
+
+        timeline_entries.sort(key=lambda item: item["ts"])
+        messages = [
+            {
+                "message_id": entry["message_id"],
+                "author_id": entry["actor_id"],
+                "ts": entry["ts"].isoformat(),
+                "content": entry["text"],
+                "meta": {"in_call": entry["in_call"], "kind": entry["kind"]},
+            }
+            for entry in timeline_entries
+            if entry.get("text")
+        ]
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
+
+        normalized_timeline_entries: list[dict[str, Any]] = []
+        for entry in timeline_entries:
+            ts_value = entry.get("ts")
+            ts_dt: datetime | None
+            if isinstance(ts_value, datetime):
+                ts_dt = ts_value
+            elif isinstance(ts_value, str):
+                ts_dt = _parse_iso_ts(ts_value)
+            else:
+                ts_dt = None
+            if ts_dt is None:
+                continue
+            normalized_entry = dict(entry)
+            normalized_entry["ts"] = ts_dt
+            normalized_timeline_entries.append(normalized_entry)
+        timeline_entries = normalized_timeline_entries
+        timeline_entries.sort(key=lambda item: item["ts"])
+
+        def _is_in_privacy_gap_dt(ts_value: datetime) -> bool:
+            for start, end, _actor in privacy_intervals:
+                end_bound = end or end_dt_utc
+                if start <= ts_value <= end_bound:
+                    return True
+            return False
+
+        normalized_timeline_entries: list[dict[str, Any]] = []
+        invalid_ts_samples: list[Any] = []
+        for entry in timeline_entries:
+            ts_value = entry.get("ts")
+            ts_dt: datetime | None
+            if isinstance(ts_value, datetime):
+                ts_dt = ts_value
+            elif isinstance(ts_value, str):
+                ts_dt = _parse_iso_ts(ts_value)
+            else:
+                ts_dt = None
+            if ts_dt is None:
+                if len(invalid_ts_samples) < 3:
+                    invalid_ts_samples.append(ts_value)
+                continue
+            normalized_entry = dict(entry)
+            normalized_entry["ts"] = ts_dt
+            normalized_timeline_entries.append(normalized_entry)
+        if invalid_ts_samples:
+            logger.warning("riassunto: dropped timeline entries with invalid ts samples=%s", invalid_ts_samples)
+        timeline_entries = normalized_timeline_entries
+
+        if privacy_intervals:
+            timeline_entries = [
+                entry
+                for entry in timeline_entries
+                if not (
+                    entry.get("kind") in {"chat", "transcript"}
+                    and isinstance(entry.get("ts"), datetime)
+                    and _is_in_privacy_gap_dt(entry["ts"])
+                )
+            ]
+
+        timeline_entries.sort(key=lambda item: item["ts"])
+
+        messages = [
+            {
+                "message_id": entry.get("message_id"),
+                "author_id": entry.get("actor_id"),
+                "ts": entry["ts"].isoformat(),
+                "content": entry.get("text"),
+                "meta": {
+                    "in_call": bool(entry.get("in_call")),
+                    "kind": str(entry.get("kind") or "chat"),
+                    **(
+                        {
+                            key: value
+                            for key, value in (entry.get("meta") or {}).items()
+                            if key not in {"in_call", "kind"}
+                        }
+                    ),
+                },
+            }
+            for entry in timeline_entries
+        ]
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if (message.get("content") or "").strip()
+            and message.get("meta", {}).get("kind") in {"chat", "transcript"}
+        ]
+        if len(content_messages) < MIN_MSG_TOTAL_CHANNEL:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
 
         def _is_in_privacy_gap_dt(ts_value: datetime) -> bool:
             for start, end, _actor in privacy_intervals:
@@ -888,13 +1101,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             messages=messages,
         )
 
-        if channel_is_voice and forced_moments:
+        if channel_is_voice and (privacy_moments or supplemental_moments):
             existing_texts = {moment.text.lower() for moment in summary.moments}
-            filtered_forced = [
-                moment for moment in forced_moments if moment.text and moment.text.lower() not in existing_texts
-            ]
+            filtered_privacy: list[SummaryItem] = []
+            filtered_supplemental: list[SummaryItem] = []
+            for moment in privacy_moments:
+                if moment.text and moment.text.lower() not in existing_texts:
+                    filtered_privacy.append(moment)
+                    existing_texts.add(moment.text.lower())
+            for moment in supplemental_moments:
+                if moment.text and moment.text.lower() not in existing_texts:
+                    filtered_supplemental.append(moment)
+                    existing_texts.add(moment.text.lower())
             combined = sorted(
-                summary.moments + filtered_forced,
+                summary.moments + filtered_supplemental + filtered_privacy,
                 key=lambda item: (not bool(item.ts), item.ts or ""),
             )
             moment_limit = tier_config.get("limits", {}).get("moments", 10)
@@ -902,10 +1122,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 moment_limit = int(moment_limit)
             except (TypeError, ValueError):
                 moment_limit = 10
-            forced_set = {id(item) for item in filtered_forced}
+            privacy_set = {id(item) for item in filtered_privacy}
             while len(combined) > moment_limit:
                 idx = next(
-                    (i for i in range(len(combined) - 1, -1, -1) if id(combined[i]) not in forced_set),
+                    (i for i in range(len(combined) - 1, -1, -1) if id(combined[i]) not in privacy_set),
                     None,
                 )
                 if idx is None:
