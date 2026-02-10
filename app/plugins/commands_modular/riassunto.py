@@ -532,6 +532,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     return True
             return False
 
+        def _is_in_privacy_gap(ts_value: str | None) -> bool:
+            ts_dt = _parse_iso_ts(ts_value)
+            if ts_dt is None:
+                return False
+            return _is_in_privacy_gap_dt(ts_dt)
+
         if channel_is_voice:
             sessions = await ctx.database.fetch_voice_sessions_in_range(
                 guild_id=str(interaction.guild_id),
@@ -721,7 +727,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     continue
                 if ts_real < start_dt_utc or ts_real > end_dt_utc:
                     continue
-                if _is_in_privacy_gap_dt(ts_real):
+                if _is_in_privacy_gap(ts_real.isoformat()):
                     continue
                 content = event["content"] if "content" in event.keys() else None
                 if not content:
@@ -744,17 +750,13 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 voice_transcripts += 1
 
-            filtered_messages = []
-            for message in messages:
-                if not _is_in_privacy_gap(message.get("ts")):
-                    filtered_messages.append(message)
-            messages = filtered_messages
-
             for moment in forced_moments:
                 if not moment.ts or not moment.text:
                     continue
                 moment_ts = _parse_iso_ts(moment.ts)
                 if moment_ts is None:
+                    continue
+                if _is_in_privacy_gap(moment.ts):
                     continue
                 _append_event(
                     ts_value=moment_ts,
@@ -765,6 +767,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     message_id=None,
                     meta={"in_call": True, "kind": "call"},
                 )
+
+            logger.info("riassunto: privacy applied on voice events (no pre-build messages filtering)")
 
             logger.info(
                 "riassunto: voice_context_merge sessions=%s transcripts=%s presence=%s privacy=%s call=%s",
