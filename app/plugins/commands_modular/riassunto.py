@@ -490,6 +490,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         call_entries = 0
         voice_session_ranges: list[tuple[datetime, datetime]] = []
         forced_moments: list[SummaryItem] = []
+        supplemental_moments: list[SummaryItem] = []
         privacy_intervals: list[tuple[datetime, datetime | None, str | None]] = []
         privacy_disclaimer_lines: list[str] = []
         if channel_is_voice:
@@ -791,6 +792,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             for entry in timeline_entries
             if entry.get("text")
         ]
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
 
         MIN_MSG_TOTAL_CHANNEL = 8
         content_messages = [
