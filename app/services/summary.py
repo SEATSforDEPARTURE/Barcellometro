@@ -461,6 +461,7 @@ class SummaryService:
         system_prompt = (
             "Scrivi in italiano e restituisci SOLO JSON valido. "
             "Non inventare dettagli. "
+            "Non inferire né ricostruire contenuti omessi per privacy. "
             "NON includere mai nomi di persone. "
             "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
             "TEMI devono essere solo keyword brevi (no nomi). "

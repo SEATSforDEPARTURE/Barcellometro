@@ -465,6 +465,29 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         max_message_ts = latest_row["ts"] if latest_row else None
 
         messages: list[dict[str, Any]] = []
+        timeline_entries: list[dict[str, Any]] = []
+
+        def _append_event(
+            ts_value: str | None,
+            text: str,
+            kind: str = "call",
+            in_call: bool = True,
+            actor_id: str | None = None,
+            message_id: str | None = None,
+            meta: dict[str, Any] | None = None,
+        ) -> None:
+            timeline_entries.append(
+                {
+                    "ts": ts_value,
+                    "kind": kind,
+                    "in_call": in_call,
+                    "actor_id": actor_id,
+                    "text": text,
+                    "message_id": message_id,
+                    "meta": meta or {"kind": kind},
+                }
+            )
+
         voice_segments = 0
         for row in messages_rows:
             embeds_raw = row["embeds_json"] if "embeds_json" in row.keys() else None
@@ -487,6 +510,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         voice_transcripts = 0
         voice_session_ranges: list[tuple[datetime, datetime]] = []
         forced_moments: list[SummaryItem] = []
+        supplemental_moments: list[SummaryItem] = []
+        privacy_intervals: list[tuple[datetime, datetime | None, str | None]] = []
+        privacy_disclaimer_lines: list[str] = []
         if channel_is_voice:
             sessions = await ctx.database.fetch_voice_sessions_in_range(
                 guild_id=str(interaction.guild_id),
@@ -517,12 +543,23 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     return f"La chiamata si chiude dopo {_describe_duration(started, ended)} di confronto."
                 return "Verso la fine del periodo la chiamata risulta ancora in corso."
 
-            def _describe_privacy_gap(started: datetime, ended: datetime | None, actor_name: str | None) -> str:
-                actor_label = f" da {actor_name}" if actor_name else ""
+            def _build_privacy_disclaimer(
+                started: datetime,
+                ended: datetime | None,
+                actor_name: str | None,
+            ) -> str:
+                start_label = _format_italian_time(started.isoformat())
+                actor_label = actor_name or "un moderatore"
                 if ended:
                     end_label = _format_italian_time(ended.isoformat())
-                    return f"Modalità privacy attiva{actor_label}: tratto di chiamata non trascritto fino alle {end_label}."
-                return f"Modalità privacy attiva{actor_label}: tratto di chiamata non trascritto fino a fine periodo."
+                    return (
+                        f"{start_label} 📞 — Contenuti omessi per privacy: modalità privacy "
+                        f"attivata da {actor_label} alle {start_label} e disattivata alle {end_label}."
+                    )
+                return (
+                    f"{start_label} 📞 — Contenuti omessi per privacy: modalità privacy "
+                    f"attivata da {actor_label} alle {start_label} ed è ancora attiva."
+                )
 
             session_lookup: dict[str, dict[str, Any]] = {}
             for session in sessions:
@@ -556,6 +593,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     )
                 )
 
+            privacy_events = await ctx.database.fetch_events_in_range(
+                channel_id=str(interaction.channel_id),
+                start_ts=start_dt_utc.isoformat(),
+                end_ts=end_dt_utc.isoformat(),
+                limit=max_messages,
+            )
             last_privacy = await ctx.database.fetch_last_privacy_event_before(
                 channel_id=str(interaction.channel_id),
                 ts=start_dt_utc.isoformat(),
@@ -565,12 +608,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             if last_privacy is not None:
                 privacy_on = last_privacy["event_type"] == "voice.privacy_on"
                 privacy_actor = str(last_privacy["actor_id"] or "") or None
-            privacy_events = await ctx.database.fetch_events_in_range(
-                channel_id=str(interaction.channel_id),
-                start_ts=start_dt_utc.isoformat(),
-                end_ts=end_dt_utc.isoformat(),
-                limit=max_messages,
-            )
+            privacy_events = sorted(privacy_events, key=lambda item: str(item["ts"] or ""))
 
             def _parse_event_meta(event: dict[str, Any]) -> dict[str, Any]:
                 raw = event["meta_json"] if "meta_json" in event.keys() else None
@@ -586,49 +624,48 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     return {}
 
             gap_start: datetime | None = start_dt_utc if privacy_on else None
-            gap_actor: str | None = privacy_actor
+            gap_actor: str | None = None
+            if gap_start is not None:
+                gap_actor = privacy_actor
             for event in privacy_events:
                 event_type = event["event_type"]
                 event_ts = _parse_iso_ts(event["ts"])
                 if not event_ts:
                     continue
+                actor_value = str(event["actor_id"] or "") or None
                 if event_type == "voice.privacy_on" and gap_start is None:
                     gap_start = event_ts
-                    gap_actor = str(event["actor_id"] or "") or None
+                    gap_actor = actor_value
                 if event_type == "voice.privacy_off" and gap_start is not None:
+                    privacy_intervals.append((gap_start, event_ts, gap_actor))
                     actor_name = None
                     if include_names and gap_actor:
                         actor_name = await ctx.database.fetch_user_display_name(
                             guild_id=str(interaction.guild_id),
                             user_id=str(gap_actor),
                         )
-                    forced_moments.append(
-                        SummaryItem(
-                            ts=gap_start.isoformat(),
-                            text=_describe_privacy_gap(gap_start, event_ts, actor_name),
-                            author_id=gap_actor,
-                            message_ids=[],
-                            in_call=True,
-                        )
-                    )
+                    privacy_disclaimer_lines.append(_build_privacy_disclaimer(gap_start, event_ts, actor_name))
                     gap_start = None
                     gap_actor = None
             if gap_start is not None:
+                privacy_intervals.append((gap_start, None, gap_actor))
                 actor_name = None
                 if include_names and gap_actor:
                     actor_name = await ctx.database.fetch_user_display_name(
                         guild_id=str(interaction.guild_id),
                         user_id=str(gap_actor),
                     )
-                forced_moments.append(
-                    SummaryItem(
-                        ts=gap_start.isoformat(),
-                        text=_describe_privacy_gap(gap_start, None, actor_name),
-                        author_id=gap_actor,
-                        message_ids=[],
-                        in_call=True,
-                    )
-                )
+                privacy_disclaimer_lines.append(_build_privacy_disclaimer(gap_start, None, actor_name))
+
+            def _is_in_privacy_gap(ts_value: str | None) -> bool:
+                parsed = _parse_iso_ts(ts_value)
+                if not parsed:
+                    return False
+                for start, end, _actor in privacy_intervals:
+                    end_bound = end or end_dt_utc
+                    if start <= parsed <= end_bound:
+                        return True
+                return False
 
             for event in privacy_events:
                 if event["event_type"] != "voice.transcript":
@@ -648,6 +685,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 if not ts_real:
                     continue
                 if ts_real < start_dt_utc or ts_real > end_dt_utc:
+                    continue
+                if _is_in_privacy_gap(ts_real.isoformat()):
                     continue
                 content = event["content"] if "content" in event.keys() else None
                 if not content:
@@ -670,8 +709,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 voice_transcripts += 1
 
+            filtered_messages = []
+            for message in messages:
+                if not _is_in_privacy_gap(message.get("ts")):
+                    filtered_messages.append(message)
+            messages = filtered_messages
+
             for moment in forced_moments:
                 if not moment.ts or not moment.text:
+                    continue
+                if _is_in_privacy_gap(moment.ts):
                     continue
                 messages.append(
                     {
@@ -691,6 +738,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             )
 
         messages.sort(key=lambda msg: msg.get("ts") or "")
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
 
         metrics = dict(barcello_result.metrics or {})
         metrics.update(
@@ -955,6 +1016,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
         def build_embeds() -> list[discord.Embed]:
             sections_map: dict[str, list[tuple[str, str, int]]] = {}
+            privacy_notice_line = "🔒 Alcuni contenuti sono stati omessi per privacy."
+            privacy_empty_line = "🔒 Contenuto omesso per privacy."
+            has_privacy_gaps = bool(privacy_intervals)
 
             themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
             sections_map["themes"] = [("🏷️ TEMI", themes_value, 1)]
@@ -973,8 +1037,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 for moment in summary.moments
             ]
             if moment_lines:
-                moment_lines = moment_lines[:10]
+                moment_limit = 10
+                if privacy_disclaimer_lines:
+                    allowed = max(moment_limit - len(privacy_disclaimer_lines), 0)
+                    moment_lines = moment_lines[:allowed]
+                    moment_lines.extend(privacy_disclaimer_lines)
+                else:
+                    moment_lines = moment_lines[:moment_limit]
                 sections_map["moments"] = [(moment_header, _format_bullets(moment_lines), 1)]
+            elif privacy_disclaimer_lines:
+                sections_map["moments"] = [(moment_header, _format_bullets(privacy_disclaimer_lines), 1)]
 
             quote_lines = [
                 _format_summary_quote_line(
@@ -987,6 +1059,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 for quote in summary.quotes
             ]
+            if has_privacy_gaps:
+                if quote_lines:
+                    quote_lines.append(privacy_notice_line)
+                else:
+                    quote_lines = [privacy_empty_line]
             if quote_lines and profile in {"role2", "role3", "mod"}:
                 sections_map["quotes"] = [("💬 FRASI ICONICHE", _format_bullets(quote_lines), 2)]
 
@@ -1001,6 +1078,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 for dynamic in summary.dynamics
             ]
+            if has_privacy_gaps:
+                if dynamic_lines:
+                    dynamic_lines.append(privacy_notice_line)
+                else:
+                    dynamic_lines = [privacy_empty_line]
             if dynamic_lines and profile in {"role3", "mod"}:
                 sections_map["dynamics"] = [("🧠 DINAMICHE INTERESSANTI", _format_bullets(dynamic_lines), 2)]
 
@@ -1029,6 +1111,13 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         primary_id=impact_primary.get(id(impact)),
                     )
                     invigorate_lines.append(line)
+                if has_privacy_gaps:
+                    if degrade_lines:
+                        degrade_lines.append(privacy_notice_line)
+                    elif invigorate_lines:
+                        invigorate_lines.append(privacy_notice_line)
+                    else:
+                        degrade_lines = [privacy_empty_line]
                 impact_sections: list[tuple[str, str, int]] = []
                 if degrade_lines:
                     impact_sections.append(("🔥 CHI DEGRADA", _format_bullets(degrade_lines), 3))
@@ -1038,6 +1127,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     sections_map["impact"] = impact_sections
 
                 advice_lines = summary.advice
+                if has_privacy_gaps:
+                    if advice_lines:
+                        advice_lines.append(privacy_notice_line)
+                    else:
+                        advice_lines = [privacy_empty_line]
                 if advice_lines:
                     sections_map["advice"] = [("🧭 CONSIGLI PERSONALIZZATI", _format_bullets(advice_lines), 3)]
 
