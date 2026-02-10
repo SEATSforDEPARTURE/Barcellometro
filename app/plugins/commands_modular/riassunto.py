@@ -642,63 +642,19 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 except json.JSONDecodeError:
                     return {}
 
-            name_cache: dict[str, str | None] = {}
-
-            async def _resolve_name(user_id: str | None) -> str | None:
-                if not user_id or not include_names:
-                    return None
-                if user_id in name_cache:
-                    return name_cache[user_id]
-                display = await ctx.database.fetch_user_display_name(
-                    guild_id=str(interaction.guild_id),
-                    user_id=str(user_id),
-                )
-                if not display and interaction.guild:
-                    member = interaction.guild.get_member(int(user_id))
-                    if member:
-                        display = _resolve_display_name(member)
-                name_cache[user_id] = display
-                return display
-
-            presence_events: list[dict[str, Any]] = []
-            privacy_sequence: list[dict[str, Any]] = []
+            gap_start: datetime | None = start_dt_utc if privacy_on else None
+            gap_actor: str | None = None
+            if gap_start is not None:
+                gap_actor = privacy_actor
             for event in privacy_events:
                 event_type = event["event_type"]
                 event_ts = _parse_iso_ts(event["ts"])
                 if not event_ts:
                     continue
-                if event_type in {"voice.join", "voice.leave"}:
-                    presence_events.append(
-                        {
-                            "ts": event_ts,
-                            "type": event_type,
-                            "actor_id": str(event["actor_id"] or "") or None,
-                        }
-                    )
-                    continue
-                if event_type in {"voice.privacy_on", "voice.privacy_off"}:
-                    privacy_sequence.append(
-                        {
-                            "ts": event_ts,
-                            "type": event_type,
-                            "actor_id": str(event["actor_id"] or "") or None,
-                        }
-                    )
-
-            privacy_sequence.sort(key=lambda item: item["ts"])
-            last_privacy = await ctx.database.fetch_last_privacy_event_before(
-                channel_id=str(interaction.channel_id),
-                ts=start_dt_utc.isoformat(),
-            )
-            privacy_on = False
-            if last_privacy is not None:
-                privacy_on = last_privacy["event_type"] == "voice.privacy_on"
-            gap_start = start_dt_utc if privacy_on else None
-            for item in privacy_sequence:
-                event_ts = item["ts"]
-                event_type = item["type"]
+                actor_value = str(event["actor_id"] or "") or None
                 if event_type == "voice.privacy_on" and gap_start is None:
                     gap_start = event_ts
+                    gap_actor = actor_value
                 if event_type == "voice.privacy_off" and gap_start is not None:
                     privacy_intervals.append((gap_start, event_ts, gap_actor))
                     actor_name = None
@@ -815,6 +771,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             for entry in timeline_entries
             if entry.get("text")
         ]
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
 
         MIN_MSG_TOTAL_CHANNEL = 8
         content_messages = [
