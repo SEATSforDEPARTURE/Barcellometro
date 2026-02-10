@@ -744,17 +744,13 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 voice_transcripts += 1
 
-            filtered_messages = []
-            for message in messages:
-                if not _is_in_privacy_gap(message.get("ts")):
-                    filtered_messages.append(message)
-            messages = filtered_messages
-
             for moment in forced_moments:
                 if not moment.ts or not moment.text:
                     continue
                 moment_ts = _parse_iso_ts(moment.ts)
                 if moment_ts is None:
+                    continue
+                if _is_in_privacy_gap_dt(moment_ts):
                     continue
                 _append_event(
                     ts_value=moment_ts,
@@ -765,6 +761,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     message_id=None,
                     meta={"in_call": True, "kind": "call"},
                 )
+
+            logger.info("riassunto: privacy applied on voice events (no pre-build messages filtering)")
 
             logger.info(
                 "riassunto: voice_context_merge sessions=%s transcripts=%s presence=%s privacy=%s call=%s",
