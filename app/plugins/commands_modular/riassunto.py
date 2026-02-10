@@ -522,6 +522,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         supplemental_moments: list[SummaryItem] = []
         privacy_intervals: list[tuple[datetime, datetime | None, str | None]] = []
         privacy_disclaimer_lines: list[str] = []
+
+        def _is_in_privacy_gap_dt(ts_dt: datetime) -> bool:
+            if not privacy_intervals:
+                return False
+            for start, end, _actor in privacy_intervals:
+                end_bound = end or end_dt_utc
+                if start <= ts_dt <= end_bound:
+                    return True
+            return False
+
         if channel_is_voice:
             sessions = await ctx.database.fetch_voice_sessions_in_range(
                 guild_id=str(interaction.guild_id),
@@ -765,114 +775,6 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 call_entries,
             )
 
-        timeline_entries.sort(key=lambda item: item["ts"])
-        messages = [
-            {
-                "message_id": entry["message_id"],
-                "author_id": entry["actor_id"],
-                "ts": entry["ts"].isoformat(),
-                "content": entry["text"],
-                "meta": {"in_call": entry["in_call"], "kind": entry["kind"]},
-            }
-            for entry in timeline_entries
-            if entry.get("text")
-        ]
-
-        MIN_MSG_TOTAL_CHANNEL = 8
-        content_messages = [
-            message
-            for message in messages
-            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
-        ]
-        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
-        if insufficient_data:
-            await interaction.followup.send(
-                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
-                ephemeral=True,
-            )
-            return
-
-        MIN_MSG_TOTAL_CHANNEL = 8
-        content_messages = [
-            message
-            for message in messages
-            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
-        ]
-        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
-        if insufficient_data:
-            await interaction.followup.send(
-                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
-                ephemeral=True,
-            )
-            return
-
-        MIN_MSG_TOTAL_CHANNEL = 8
-        content_messages = [
-            message
-            for message in messages
-            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
-        ]
-        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
-        if insufficient_data:
-            await interaction.followup.send(
-                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
-                ephemeral=True,
-            )
-            return
-
-        MIN_MSG_TOTAL_CHANNEL = 8
-        content_messages = [
-            message
-            for message in messages
-            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
-        ]
-        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
-        if insufficient_data:
-            await interaction.followup.send(
-                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
-                ephemeral=True,
-            )
-            return
-
-        MIN_MSG_TOTAL_CHANNEL = 8
-        content_messages = [
-            message
-            for message in messages
-            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
-        ]
-        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
-        if insufficient_data:
-            await interaction.followup.send(
-                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
-                ephemeral=True,
-            )
-            return
-
-        normalized_timeline_entries: list[dict[str, Any]] = []
-        for entry in timeline_entries:
-            ts_value = entry.get("ts")
-            ts_dt: datetime | None
-            if isinstance(ts_value, datetime):
-                ts_dt = ts_value
-            elif isinstance(ts_value, str):
-                ts_dt = _parse_iso_ts(ts_value)
-            else:
-                ts_dt = None
-            if ts_dt is None:
-                continue
-            normalized_entry = dict(entry)
-            normalized_entry["ts"] = ts_dt
-            normalized_timeline_entries.append(normalized_entry)
-        timeline_entries = normalized_timeline_entries
-        timeline_entries.sort(key=lambda item: item["ts"])
-
-        def _is_in_privacy_gap_dt(ts_value: datetime) -> bool:
-            for start, end, _actor in privacy_intervals:
-                end_bound = end or end_dt_utc
-                if start <= ts_value <= end_bound:
-                    return True
-            return False
-
         normalized_timeline_entries: list[dict[str, Any]] = []
         invalid_ts_samples: list[Any] = []
         for entry in timeline_entries:
@@ -895,83 +797,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             logger.warning("riassunto: dropped timeline entries with invalid ts samples=%s", invalid_ts_samples)
         timeline_entries = normalized_timeline_entries
 
-        if privacy_intervals:
-            timeline_entries = [
-                entry
-                for entry in timeline_entries
-                if not (
-                    entry.get("kind") in {"chat", "transcript"}
-                    and isinstance(entry.get("ts"), datetime)
-                    and _is_in_privacy_gap_dt(entry["ts"])
-                )
-            ]
-
-        timeline_entries.sort(key=lambda item: item["ts"])
-
-        messages = [
-            {
-                "message_id": entry.get("message_id"),
-                "author_id": entry.get("actor_id"),
-                "ts": entry["ts"].isoformat(),
-                "content": entry.get("text"),
-                "meta": {
-                    "in_call": bool(entry.get("in_call")),
-                    "kind": str(entry.get("kind") or "chat"),
-                    **(
-                        {
-                            key: value
-                            for key, value in (entry.get("meta") or {}).items()
-                            if key not in {"in_call", "kind"}
-                        }
-                    ),
-                },
-            }
-            for entry in timeline_entries
-        ]
-
-        MIN_MSG_TOTAL_CHANNEL = 8
-        content_messages = [
-            message
-            for message in messages
-            if (message.get("content") or "").strip()
-            and message.get("meta", {}).get("kind") in {"chat", "transcript"}
-        ]
-        if len(content_messages) < MIN_MSG_TOTAL_CHANNEL:
-            await interaction.followup.send(
-                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
-                ephemeral=True,
-            )
-            return
-
-        def _is_in_privacy_gap_dt(ts_value: datetime) -> bool:
-            for start, end, _actor in privacy_intervals:
-                end_bound = end or end_dt_utc
-                if start <= ts_value <= end_bound:
-                    return True
-            return False
-
-        normalized_timeline_entries: list[dict[str, Any]] = []
-        invalid_ts_samples: list[Any] = []
-        for entry in timeline_entries:
-            ts_value = entry.get("ts")
-            ts_dt: datetime | None
-            if isinstance(ts_value, datetime):
-                ts_dt = ts_value
-            elif isinstance(ts_value, str):
-                ts_dt = _parse_iso_ts(ts_value)
-            else:
-                ts_dt = None
-            if ts_dt is None:
-                if len(invalid_ts_samples) < 3:
-                    invalid_ts_samples.append(ts_value)
-                continue
-            normalized_entry = dict(entry)
-            normalized_entry["ts"] = ts_dt
-            normalized_timeline_entries.append(normalized_entry)
-        if invalid_ts_samples:
-            logger.warning("riassunto: dropped timeline entries with invalid ts samples=%s", invalid_ts_samples)
-        timeline_entries = normalized_timeline_entries
-
+        timeline_before_filter = len(timeline_entries)
         if privacy_intervals:
             timeline_entries = [
                 entry
@@ -982,6 +808,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     and _is_in_privacy_gap_dt(entry["ts"])
                 )
             ]
+        logger.info(
+            "riassunto: privacy_intervals=%d timeline_before=%d timeline_after=%d",
+            len(privacy_intervals),
+            timeline_before_filter,
+            len(timeline_entries),
+        )
 
         timeline_entries.sort(key=lambda item: item["ts"])
 
