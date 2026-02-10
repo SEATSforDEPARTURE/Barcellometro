@@ -520,6 +520,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         voice_session_ranges: list[tuple[datetime, datetime]] = []
         forced_moments: list[SummaryItem] = []
         supplemental_moments: list[SummaryItem] = []
+        privacy_moments: list[SummaryItem] = []
+        privacy_events: list[dict[str, Any]] = []
         privacy_intervals: list[tuple[datetime, datetime | None, str | None]] = []
         privacy_disclaimer_lines: list[str] = []
 
@@ -683,6 +685,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 event_ts = _parse_iso_ts(event["ts"])
                 if not event_ts:
                     continue
+                event_ts = event_ts.astimezone(timezone.utc)
                 actor_value = str(event["actor_id"] or "") or None
                 if event_type == "voice.privacy_on" and gap_start is None:
                     gap_start = event_ts
@@ -695,7 +698,17 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                             guild_id=str(interaction.guild_id),
                             user_id=str(gap_actor),
                         )
-                    privacy_disclaimer_lines.append(_build_privacy_disclaimer(gap_start, event_ts, actor_name))
+                    disclaimer_line = _build_privacy_disclaimer(gap_start, event_ts, actor_name)
+                    privacy_disclaimer_lines.append(disclaimer_line)
+                    privacy_moments.append(
+                        SummaryItem(
+                            ts=gap_start.isoformat(),
+                            text=disclaimer_line,
+                            author_id=None,
+                            message_ids=[],
+                            in_call=True,
+                        )
+                    )
                     gap_start = None
                     gap_actor = None
             if gap_start is not None:
@@ -706,7 +719,17 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         guild_id=str(interaction.guild_id),
                         user_id=str(gap_actor),
                     )
-                privacy_disclaimer_lines.append(_build_privacy_disclaimer(gap_start, None, actor_name))
+                disclaimer_line = _build_privacy_disclaimer(gap_start, None, actor_name)
+                privacy_disclaimer_lines.append(disclaimer_line)
+                privacy_moments.append(
+                    SummaryItem(
+                        ts=gap_start.isoformat(),
+                        text=disclaimer_line,
+                        author_id=None,
+                        message_ids=[],
+                        in_call=True,
+                    )
+                )
 
             for event in privacy_events:
                 if event["event_type"] != "voice.transcript":
@@ -725,6 +748,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     ts_real = _parse_iso_ts(event["ts"])
                 if not ts_real:
                     continue
+                ts_real = ts_real.astimezone(timezone.utc)
                 if ts_real < start_dt_utc or ts_real > end_dt_utc:
                     continue
                 if _is_in_privacy_gap(ts_real.isoformat()):
@@ -756,6 +780,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 moment_ts = _parse_iso_ts(moment.ts)
                 if moment_ts is None:
                     continue
+                moment_ts = moment_ts.astimezone(timezone.utc)
                 if _is_in_privacy_gap(moment.ts):
                     continue
                 _append_event(
@@ -767,6 +792,24 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     message_id=None,
                     meta={"in_call": True, "kind": "call"},
                 )
+
+            if privacy_intervals:
+                voice_activity_candidates = [
+                    entry.get("ts")
+                    for entry in timeline_entries
+                    if entry.get("kind") in {"chat", "transcript", "call"}
+                    and isinstance(entry.get("ts"), datetime)
+                    and start_dt_utc <= entry["ts"] <= end_dt_utc
+                ]
+                last_voice_activity_ts = max(voice_activity_candidates) if voice_activity_candidates else end_dt_utc
+                capped_intervals: list[tuple[datetime, datetime | None, str | None]] = []
+                for start, end, actor in privacy_intervals:
+                    if end is None:
+                        capped_end = min(last_voice_activity_ts, end_dt_utc)
+                        capped_intervals.append((start, capped_end, actor))
+                    else:
+                        capped_intervals.append((start, end.astimezone(timezone.utc), actor))
+                privacy_intervals = capped_intervals
 
             logger.info("riassunto: privacy applied on voice events (no pre-build messages filtering)")
 
@@ -801,7 +844,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             logger.warning("riassunto: dropped timeline entries with invalid ts samples=%s", invalid_ts_samples)
         timeline_entries = normalized_timeline_entries
 
-        timeline_before_filter = len(timeline_entries)
+        timeline_before_privacy = len(timeline_entries)
         if privacy_intervals:
             timeline_entries = [
                 entry
@@ -815,9 +858,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         logger.info(
             "riassunto: privacy_intervals=%d timeline_before=%d timeline_after=%d",
             len(privacy_intervals),
-            timeline_before_filter,
+            timeline_before_privacy,
             len(timeline_entries),
         )
+
+        timeline_after_privacy = len(timeline_entries)
 
         timeline_entries.sort(key=lambda item: item["ts"])
 
@@ -851,10 +896,24 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             and msg.get("meta", {}).get("kind") in {"chat", "transcript"}
         ]
         if len(content_messages) < MIN_MSG_TOTAL_CHANNEL:
-            await interaction.followup.send(
-                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
-                ephemeral=True,
-            )
+            if (
+                channel_is_voice
+                and timeline_before_privacy >= MIN_MSG_TOTAL_CHANNEL
+                and timeline_after_privacy < MIN_MSG_TOTAL_CHANNEL
+            ):
+                await interaction.followup.send(
+                    (
+                        "❗ Molti contenuti nel periodo selezionato sono stati esclusi per Privacy Mode "
+                        f"(prima: {timeline_before_privacy} eventi, dopo filtro: {timeline_after_privacy}). "
+                        "Prova ad allargare il periodo o verifica che la privacy venga disattivata correttamente."
+                    ),
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                    ephemeral=True,
+                )
             return
 
         metrics = dict(barcello_result.metrics or {})
