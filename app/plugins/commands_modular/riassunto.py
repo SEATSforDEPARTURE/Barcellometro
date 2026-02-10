@@ -464,7 +464,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         timeline_entries: list[dict[str, Any]] = []
 
         def _append_event(
-            ts_value: str | None,
+            ts_value: datetime | str | None,
             text: str,
             kind: str = "call",
             in_call: bool = True,
@@ -472,9 +472,18 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             message_id: str | None = None,
             meta: dict[str, Any] | None = None,
         ) -> None:
+            ts_dt: datetime | None
+            if isinstance(ts_value, datetime):
+                ts_dt = ts_value
+            elif isinstance(ts_value, str):
+                ts_dt = _parse_iso_ts(ts_value)
+            else:
+                ts_dt = None
+            if ts_dt is None:
+                return
             timeline_entries.append(
                 {
-                    "ts": ts_value,
+                    "ts": ts_dt,
                     "kind": kind,
                     "in_call": in_call,
                     "actor_id": actor_id,
@@ -856,6 +865,26 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 ephemeral=True,
             )
             return
+
+        normalized_timeline_entries: list[dict[str, Any]] = []
+        for entry in timeline_entries:
+            ts_value = entry.get("ts")
+            ts_dt: datetime | None
+            if isinstance(ts_value, datetime):
+                ts_dt = ts_value
+            elif isinstance(ts_value, str):
+                ts_dt = _parse_iso_ts(ts_value)
+            else:
+                ts_dt = None
+            if ts_dt is None:
+                continue
+            normalized_entry = dict(entry)
+            normalized_entry["ts"] = ts_dt
+            normalized_timeline_entries.append(normalized_entry)
+        timeline_entries = normalized_timeline_entries
+        timeline_entries.sort(key=lambda item: item["ts"])
+
+        messages.sort(key=lambda msg: msg.get("ts") or "")
 
         MIN_MSG_TOTAL_CHANNEL = 8
         content_messages = [
