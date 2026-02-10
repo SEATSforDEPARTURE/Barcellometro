@@ -41,19 +41,27 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         affected_bot_ids: list[int],
     ) -> None:
         ts = datetime.now(timezone.utc).isoformat()
+        session_id: str | None = None
+        lookup_failed = False
+        if interaction.guild_id is not None:
+            session = await ctx.database.get_active_voice_session(
+                str(interaction.guild_id),
+                str(voice_channel.id),
+            )
+            if session is not None:
+                session_id = session["voice_session_id"]
+            else:
+                lookup_failed = True
+        else:
+            lookup_failed = True
         meta: dict[str, object] = {
             "voice_channel_id": str(voice_channel.id),
             "affected_bot_ids": affected_bot_ids,
         }
-        if interaction.guild_id is not None:
-            session = await ctx.database.get_active_voice_session(
-                guild_id=str(interaction.guild_id),
-                voice_channel_id=str(voice_channel.id),
-            )
-            if session:
-                meta["voice_session_id"] = session["voice_session_id"]
-            else:
-                meta["session_lookup_failed"] = True
+        if session_id is not None:
+            meta["voice_session_id"] = session_id
+        if lookup_failed:
+            meta["session_lookup_failed"] = True
         await ctx.ingest.emit(
             EventEnvelope(
                 event_id=str(uuid4()),

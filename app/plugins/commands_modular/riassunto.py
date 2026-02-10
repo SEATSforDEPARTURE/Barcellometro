@@ -489,8 +489,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         privacy_entries = 0
         call_entries = 0
         voice_session_ranges: list[tuple[datetime, datetime]] = []
-        privacy_moments: list[SummaryItem] = []
-        supplemental_moments: list[SummaryItem] = []
+        forced_moments: list[SummaryItem] = []
+        privacy_intervals: list[tuple[datetime, datetime | None, str | None]] = []
+        privacy_disclaimer_lines: list[str] = []
         if channel_is_voice:
             sessions = await ctx.database.fetch_voice_sessions_in_range(
                 guild_id=str(interaction.guild_id),
@@ -504,30 +505,38 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 minutes = max(1, int(round(seconds / 60)))
                 hours = minutes // 60
                 if hours >= 1:
-                    remainder = minutes % 60
-                    if remainder:
-                        return f"~{hours}h {remainder}m"
-                    return f"~{hours}h"
-                return f"~{minutes}m"
+                    rem = minutes % 60
+                    if rem:
+                        return f"{hours}h {rem}m"
+                    return f"{hours}h"
+                return f"{minutes}m"
 
-            def _append_event(
-                ts_value: datetime,
-                text: str,
-                *,
-                kind: str,
-                in_call: bool = True,
-                actor_id: str | None = None,
-            ) -> None:
-                timeline_entries.append(
-                    {
-                        "ts": ts_value,
-                        "kind": kind,
-                        "in_call": in_call,
-                        "actor_id": actor_id,
-                        "text": text,
-                        "message_id": None,
-                        "meta": {"kind": kind},
-                    }
+            def _describe_call_start(started: datetime, ended: datetime | None) -> str:
+                if ended:
+                    return f"Parte una chiamata di circa {_describe_duration(started, ended)} che sposta il ritmo sul vocale."
+                return "Parte una chiamata che prosegue oltre il periodo considerato."
+
+            def _describe_call_end(started: datetime, ended: datetime | None) -> str:
+                if ended:
+                    return f"La chiamata si chiude dopo {_describe_duration(started, ended)} di confronto."
+                return "Verso la fine del periodo la chiamata risulta ancora in corso."
+
+            def _build_privacy_disclaimer(
+                started: datetime,
+                ended: datetime | None,
+                actor_name: str | None,
+            ) -> str:
+                start_label = _format_italian_time(started.isoformat())
+                actor_label = actor_name or "un moderatore"
+                if ended:
+                    end_label = _format_italian_time(ended.isoformat())
+                    return (
+                        f"{start_label} 📞 — Contenuti omessi per privacy: modalità privacy "
+                        f"attivata da {actor_label} alle {start_label} e disattivata alle {end_label}."
+                    )
+                return (
+                    f"{start_label} 📞 — Contenuti omessi per privacy: modalità privacy "
+                    f"attivata da {actor_label} alle {start_label} ed è ancora attiva."
                 )
 
             session_lookup: dict[str, dict[str, Any]] = {}
@@ -667,107 +676,35 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 if event_type == "voice.privacy_on" and gap_start is None:
                     gap_start = event_ts
                 if event_type == "voice.privacy_off" and gap_start is not None:
-                    end_label = _format_italian_time(event_ts.isoformat())
-                    gap_text = f"Modalità privacy attiva: tratto di chiamata non trascritto fino alle {end_label}."
-                    privacy_moments.append(
-                        SummaryItem(
-                            ts=gap_start.isoformat(),
-                            text=gap_text,
-                            author_id=item["actor_id"],
-                            message_ids=[],
-                            in_call=True,
+                    privacy_intervals.append((gap_start, event_ts, gap_actor))
+                    actor_name = None
+                    if include_names and gap_actor:
+                        actor_name = await ctx.database.fetch_user_display_name(
+                            guild_id=str(interaction.guild_id),
+                            user_id=str(gap_actor),
                         )
-                    )
-                    _append_event(gap_start, gap_text, kind="privacy")
-                    privacy_entries += 1
-                    off_text = "Modalità privacy disattivata: riprende la trascrizione."
-                    supplemental_moments.append(
-                        SummaryItem(
-                            ts=event_ts.isoformat(),
-                            text=off_text,
-                            author_id=item["actor_id"],
-                            message_ids=[],
-                            in_call=True,
-                        )
-                    )
-                    _append_event(event_ts, off_text, kind="privacy")
-                    privacy_entries += 1
+                    privacy_disclaimer_lines.append(_build_privacy_disclaimer(gap_start, event_ts, actor_name))
                     gap_start = None
-                elif event_type == "voice.privacy_off":
-                    off_text = "Modalità privacy disattivata: riprende la trascrizione."
-                    supplemental_moments.append(
-                        SummaryItem(
-                            ts=event_ts.isoformat(),
-                            text=off_text,
-                            author_id=item["actor_id"],
-                            message_ids=[],
-                            in_call=True,
-                        )
-                    )
-                    _append_event(event_ts, off_text, kind="privacy")
-                    privacy_entries += 1
+                    gap_actor = None
             if gap_start is not None:
-                gap_text = "Modalità privacy attiva: tratto di chiamata non trascritto fino a fine periodo."
-                privacy_moments.append(
-                    SummaryItem(
-                        ts=gap_start.isoformat(),
-                        text=gap_text,
-                        author_id=None,
-                        message_ids=[],
-                        in_call=True,
+                privacy_intervals.append((gap_start, None, gap_actor))
+                actor_name = None
+                if include_names and gap_actor:
+                    actor_name = await ctx.database.fetch_user_display_name(
+                        guild_id=str(interaction.guild_id),
+                        user_id=str(gap_actor),
                     )
-                )
-                _append_event(gap_start, gap_text, kind="privacy")
-                privacy_entries += 1
+                privacy_disclaimer_lines.append(_build_privacy_disclaimer(gap_start, None, actor_name))
 
-            presence_events.sort(key=lambda item: item["ts"])
-            grouped: list[list[dict[str, Any]]] = []
-            if presence_events:
-                current_group = [presence_events[0]]
-                group_start = presence_events[0]["ts"]
-                for event in presence_events[1:]:
-                    if event["ts"] - group_start <= timedelta(minutes=10):
-                        current_group.append(event)
-                    else:
-                        grouped.append(current_group)
-                        current_group = [event]
-                        group_start = event["ts"]
-                grouped.append(current_group)
-
-            for group in grouped:
-                if len(group) > 3:
-                    join_count = sum(1 for item in group if item["type"] == "voice.join")
-                    leave_count = sum(1 for item in group if item["type"] == "voice.leave")
-                    start_label = _format_italian_time(group[0]["ts"].isoformat())
-                    end_label = _format_italian_time(group[-1]["ts"].isoformat())
-                    text = f"Tra {start_label} e {end_label} entrano {join_count} persone ed escono {leave_count}."
-                    supplemental_moments.append(
-                        SummaryItem(
-                            ts=group[0]["ts"].isoformat(),
-                            text=text,
-                            author_id=None,
-                            message_ids=[],
-                            in_call=True,
-                        )
-                    )
-                    _append_event(group[0]["ts"], text, kind="presence")
-                    voice_presence += len(group)
-                    continue
-                for item in group:
-                    actor_label = await _resolve_name(item["actor_id"]) or "Una persona"
-                    verb = "entra" if item["type"] == "voice.join" else "esce"
-                    text = f"{actor_label} {verb} in chiamata."
-                    supplemental_moments.append(
-                        SummaryItem(
-                            ts=item["ts"].isoformat(),
-                            text=text,
-                            author_id=item["actor_id"],
-                            message_ids=[],
-                            in_call=True,
-                        )
-                    )
-                    _append_event(item["ts"], text, kind="presence", actor_id=item["actor_id"])
-                    voice_presence += 1
+            def _is_in_privacy_gap(ts_value: str | None) -> bool:
+                parsed = _parse_iso_ts(ts_value)
+                if not parsed:
+                    return False
+                for start, end, _actor in privacy_intervals:
+                    end_bound = end or end_dt_utc
+                    if start <= parsed <= end_bound:
+                        return True
+                return False
 
             for event in privacy_events:
                 if event["event_type"] != "voice.transcript":
@@ -787,6 +724,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 if not ts_real:
                     continue
                 if ts_real < start_dt_utc or ts_real > end_dt_utc:
+                    continue
+                if _is_in_privacy_gap(ts_real.isoformat()):
                     continue
                 content = event["content"] if "content" in event.keys() else None
                 if not content:
@@ -810,6 +749,27 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 voice_transcripts += 1
 
+            filtered_messages = []
+            for message in messages:
+                if not _is_in_privacy_gap(message.get("ts")):
+                    filtered_messages.append(message)
+            messages = filtered_messages
+
+            for moment in forced_moments:
+                if not moment.ts or not moment.text:
+                    continue
+                if _is_in_privacy_gap(moment.ts):
+                    continue
+                messages.append(
+                    {
+                        "message_id": None,
+                        "author_id": moment.author_id,
+                        "ts": moment.ts,
+                        "content": moment.text,
+                        "meta": {"in_call": True, "source": "voice_event"},
+                    }
+                )
+
             logger.info(
                 "riassunto: voice_context_merge sessions=%s transcripts=%s presence=%s privacy=%s call=%s",
                 voice_sessions,
@@ -831,6 +791,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             for entry in timeline_entries
             if entry.get("text")
         ]
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if message.get("meta", {}).get("source") in {"chat", "voice_transcript"}
+        ]
+        insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
+        if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
 
         metrics = dict(barcello_result.metrics or {})
         metrics.update(
@@ -1102,6 +1076,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
         def build_embeds() -> list[discord.Embed]:
             sections_map: dict[str, list[tuple[str, str, int]]] = {}
+            privacy_notice_line = "🔒 Alcuni contenuti sono stati omessi per privacy."
+            privacy_empty_line = "🔒 Contenuto omesso per privacy."
+            has_privacy_gaps = bool(privacy_intervals)
 
             themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
             sections_map["themes"] = [("🏷️ TEMI", themes_value, 1)]
@@ -1120,8 +1097,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 for moment in summary.moments
             ]
             if moment_lines:
-                moment_lines = moment_lines[:10]
+                moment_limit = 10
+                if privacy_disclaimer_lines:
+                    allowed = max(moment_limit - len(privacy_disclaimer_lines), 0)
+                    moment_lines = moment_lines[:allowed]
+                    moment_lines.extend(privacy_disclaimer_lines)
+                else:
+                    moment_lines = moment_lines[:moment_limit]
                 sections_map["moments"] = [(moment_header, _format_bullets(moment_lines), 1)]
+            elif privacy_disclaimer_lines:
+                sections_map["moments"] = [(moment_header, _format_bullets(privacy_disclaimer_lines), 1)]
 
             quote_lines = [
                 _format_summary_quote_line(
@@ -1134,6 +1119,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 for quote in summary.quotes
             ]
+            if has_privacy_gaps:
+                if quote_lines:
+                    quote_lines.append(privacy_notice_line)
+                else:
+                    quote_lines = [privacy_empty_line]
             if quote_lines and profile in {"role2", "role3", "mod"}:
                 sections_map["quotes"] = [("💬 FRASI ICONICHE", _format_bullets(quote_lines), 2)]
 
@@ -1148,6 +1138,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 )
                 for dynamic in summary.dynamics
             ]
+            if has_privacy_gaps:
+                if dynamic_lines:
+                    dynamic_lines.append(privacy_notice_line)
+                else:
+                    dynamic_lines = [privacy_empty_line]
             if dynamic_lines and profile in {"role3", "mod"}:
                 sections_map["dynamics"] = [("🧠 DINAMICHE INTERESSANTI", _format_bullets(dynamic_lines), 2)]
 
@@ -1176,6 +1171,13 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         primary_id=impact_primary.get(id(impact)),
                     )
                     invigorate_lines.append(line)
+                if has_privacy_gaps:
+                    if degrade_lines:
+                        degrade_lines.append(privacy_notice_line)
+                    elif invigorate_lines:
+                        invigorate_lines.append(privacy_notice_line)
+                    else:
+                        degrade_lines = [privacy_empty_line]
                 impact_sections: list[tuple[str, str, int]] = []
                 if degrade_lines:
                     impact_sections.append(("🔥 CHI DEGRADA", _format_bullets(degrade_lines), 3))
@@ -1185,6 +1187,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     sections_map["impact"] = impact_sections
 
                 advice_lines = summary.advice
+                if has_privacy_gaps:
+                    if advice_lines:
+                        advice_lines.append(privacy_notice_line)
+                    else:
+                        advice_lines = [privacy_empty_line]
                 if advice_lines:
                     sections_map["advice"] = [("🧭 CONSIGLI PERSONALIZZATI", _format_bullets(advice_lines), 3)]
 
