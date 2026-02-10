@@ -841,10 +841,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
         MIN_MSG_TOTAL_CHANNEL = 8
         content_messages = [
-            message
-            for message in messages
-            if (message.get("content") or "").strip()
-            and message.get("meta", {}).get("kind") in {"chat", "transcript"}
+            msg
+            for msg in messages
+            if (msg.get("content") or "").strip()
+            and msg.get("meta", {}).get("kind") in {"chat", "transcript"}
         ]
         if len(content_messages) < MIN_MSG_TOTAL_CHANNEL:
             await interaction.followup.send(
@@ -981,8 +981,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
         name_map: dict[str, str] = {}
         if interaction.guild:
-            for message in messages:
-                author_id = message.get("author_id")
+            for msg in messages:
+                author_id = msg.get("author_id")
                 if not author_id or author_id in name_map:
                     continue
                 member = interaction.guild.get_member(int(author_id))
