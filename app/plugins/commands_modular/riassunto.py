@@ -501,7 +501,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     "actor_id": row["author_id"],
                     "text": row["content"],
                     "message_id": row["message_id"],
-                    "meta": {"kind": "chat"},
+                    "author_id": row["author_id"],
+                    "ts": row["ts"],
+                    "content": row["content"],
+                    "embeds": embeds,
+                    "meta": {"in_call": False, "kind": "chat"},
                 }
             )
 
@@ -732,6 +736,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         "text": content,
                         "message_id": meta.get("message_id"),
                         "meta": {
+                            "in_call": True,
                             "kind": "transcript",
                             "voice_session_id": session_id,
                         },
@@ -756,7 +761,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         "author_id": moment.author_id,
                         "ts": moment.ts,
                         "content": moment.text,
-                        "meta": {"in_call": True, "source": "voice_event"},
+                        "meta": {"in_call": True, "kind": "call"},
                     }
                 )
 
@@ -846,6 +851,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         ]
         insufficient_data = len(content_messages) < MIN_MSG_TOTAL_CHANNEL
         if insufficient_data:
+            await interaction.followup.send(
+                "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
+                ephemeral=True,
+            )
+            return
+
+        MIN_MSG_TOTAL_CHANNEL = 8
+        content_messages = [
+            message
+            for message in messages
+            if (message.get("content") or "").strip()
+            and message.get("meta", {}).get("kind") in {"chat", "transcript"}
+        ]
+        if len(content_messages) < MIN_MSG_TOTAL_CHANNEL:
             await interaction.followup.send(
                 "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
                 ephemeral=True,
