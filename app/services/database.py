@@ -462,6 +462,85 @@ class DatabaseService:
             (channel_id, start_ts, end_ts, limit),
         )
 
+    async def fetch_messages_in_range_time_bucketed(
+        self,
+        *,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+        buckets: int,
+        per_bucket_limit: int,
+        include_bots: bool = True,
+    ) -> list[aiosqlite.Row]:
+        start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(end_ts.replace("Z", "+00:00"))
+        if end_dt < start_dt:
+            start_dt, end_dt = end_dt, start_dt
+        total_seconds = max(0, int((end_dt - start_dt).total_seconds()))
+        bucket_count = max(1, int(buckets or 1))
+        bucket_size = max(1, total_seconds // bucket_count)
+        per_bucket = max(1, int(per_bucket_limit or 1))
+
+        base_query = """
+            SELECT m.*
+            FROM messages AS m
+            LEFT JOIN users AS u ON u.user_id = m.author_id
+            WHERE m.channel_id = ? AND m.ts >= ? AND m.ts <= ?
+        """
+        if not include_bots:
+            base_query += " AND COALESCE(u.is_bot, 0) = 0"
+        base_query += " ORDER BY m.ts ASC LIMIT ?"
+
+        rows: list[aiosqlite.Row] = []
+        bucket_counts: list[int] = []
+        for idx in range(bucket_count):
+            bucket_start = start_dt + timedelta(seconds=idx * bucket_size)
+            if idx == bucket_count - 1:
+                bucket_end = end_dt
+            else:
+                bucket_end = bucket_start + timedelta(seconds=bucket_size - 1)
+            if bucket_end < bucket_start:
+                bucket_end = bucket_start
+            bucket_rows = await self.fetchall(
+                base_query,
+                (channel_id, bucket_start.isoformat(), bucket_end.isoformat(), per_bucket),
+            )
+            bucket_counts.append(len(bucket_rows))
+            rows.extend(bucket_rows)
+
+        deduped: list[aiosqlite.Row] = []
+        seen_message_ids: set[str] = set()
+        seen_fallback_keys: set[tuple[str, str, str]] = set()
+        for row in rows:
+            message_id = str(row["message_id"] or "").strip() if "message_id" in row.keys() else ""
+            if message_id:
+                if message_id in seen_message_ids:
+                    continue
+                seen_message_ids.add(message_id)
+                deduped.append(row)
+                continue
+            author_id = str(row["author_id"] or "").strip() if "author_id" in row.keys() else ""
+            ts_value = str(row["ts"] or "").strip() if "ts" in row.keys() else ""
+            content_value = str(row["content"] or "")
+            fallback_key = (author_id, ts_value, content_value)
+            if fallback_key in seen_fallback_keys:
+                continue
+            seen_fallback_keys.add(fallback_key)
+            deduped.append(row)
+
+        deduped.sort(key=lambda row: str(row["ts"] or ""))
+        logger.info(
+            "messages bucketed fetch: channel_id=%s buckets=%s per_bucket_limit=%s include_bots=%s bucket_counts=%s total=%s deduped=%s",
+            channel_id,
+            bucket_count,
+            per_bucket,
+            include_bots,
+            bucket_counts,
+            len(rows),
+            len(deduped),
+        )
+        return deduped
+
     async def fetch_events_in_range(
         self,
         *,
