@@ -447,11 +447,39 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         period_description = _local_period_description(period_prefix, barcello_result.color)
 
         max_messages = int(summary_config.get("max_messages", 600))
-        messages_rows = await ctx.database.fetch_messages_in_range(
-            channel_id=str(interaction.channel_id),
-            start_ts=start_dt_utc.isoformat(),
-            end_ts=end_dt_utc.isoformat(),
-            limit=max_messages,
+        duration_secs = max(0, int((end_dt_utc - start_dt_utc).total_seconds()))
+        if duration_secs >= 12 * 60 * 60:
+            buckets = 8
+        elif duration_secs >= 6 * 60 * 60:
+            buckets = 6
+        elif duration_secs >= 2 * 60 * 60:
+            buckets = 4
+        else:
+            buckets = 1
+        per_bucket_limit = max(1, max_messages // max(1, buckets))
+        if buckets > 1:
+            messages_rows = await ctx.database.fetch_messages_in_range_time_bucketed(
+                channel_id=str(interaction.channel_id),
+                start_ts=start_dt_utc.isoformat(),
+                end_ts=end_dt_utc.isoformat(),
+                buckets=buckets,
+                per_bucket_limit=per_bucket_limit,
+                include_bots=not IGNORE_BOTS,
+            )
+        else:
+            messages_rows = await ctx.database.fetch_messages_in_range(
+                channel_id=str(interaction.channel_id),
+                start_ts=start_dt_utc.isoformat(),
+                end_ts=end_dt_utc.isoformat(),
+                limit=max_messages,
+            )
+        logger.info(
+            "riassunto: range_sampling channel_id=%s duration_secs=%s buckets=%s per_bucket_limit=%s total_rows=%s",
+            interaction.channel_id,
+            duration_secs,
+            buckets,
+            per_bucket_limit,
+            len(messages_rows),
         )
         latest_row = await ctx.database.fetch_latest_message_in_range(
             channel_id=str(interaction.channel_id),
