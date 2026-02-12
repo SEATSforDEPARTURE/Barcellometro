@@ -29,6 +29,7 @@ from app.plugins.commands_modular.settings import get_setting
 logger = logging.getLogger(__name__)
 
 ROME_TZ = ZoneInfo("Europe/Rome")
+MOMENTS_FIELD_NAME = "📌 MOMENTI SALIENTI"
 
 
 def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -105,14 +106,38 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             return s[:limit]
         return s[: max(0, limit - 1)] + "…"
 
-    def _truncate_field_value_preserve_lines(value: str | None, limit: int = 1024) -> str:
+    def _truncate_line_preserve_md_link(line: str, line_limit: int) -> str:
+        if len(line) <= line_limit:
+            return line
+        if line_limit <= 1:
+            return _truncate_text(line, line_limit)
+        separator = " — "
+        if separator in line:
+            prefix, _, tail = line.partition(separator)
+            fixed_prefix = f"{prefix}{separator}"
+            fixed_len = len(fixed_prefix)
+            if fixed_len >= line_limit:
+                return _truncate_text(line, line_limit)
+            return fixed_prefix + _truncate_text(tail, line_limit - fixed_len)
+
+        link_match = re.search(r"\[[^\]]+\]\([^\)]+\)", line)
+        if link_match:
+            link_end = link_match.end()
+            prefix = line[:link_end]
+            suffix = line[link_end:]
+            if len(prefix) >= line_limit:
+                return _truncate_text(line, line_limit)
+            return prefix + _truncate_text(suffix, line_limit - len(prefix))
+        return _truncate_text(line, line_limit)
+
+    def _truncate_field_value_preserve_lines_preserve_md_links(value: str | None, limit: int = 1024) -> str:
         if value is None:
             return ""
         if len(value) <= limit:
             return value
         lines = value.split("\n")
         if len(lines) == 1:
-            return _truncate_text(value, limit)
+            return _truncate_line_preserve_md_link(value, limit)
         min_per_line = 20
         per_line = max(min_per_line, (limit - (len(lines) - 1)) // len(lines))
         while per_line >= min_per_line:
@@ -121,18 +146,39 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 if len(line) <= per_line:
                     new_lines.append(line)
                 else:
-                    new_lines.append(_truncate_text(line, per_line))
+                    new_lines.append(_truncate_line_preserve_md_link(line, per_line))
             out = "\n".join(new_lines)
             if len(out) <= limit:
                 return out
             per_line -= 5
+        return _truncate_line_preserve_md_link(value, limit)
+
+    def _truncate_moments_value_preserve_links(value: str | None, limit: int = 1024) -> str:
+        if value is None:
+            return ""
+        if len(value) <= limit:
+            return value
+        lines = value.split("\n")
+        if not lines:
+            return _truncate_text(value, limit)
+        available = max(40, limit - (len(lines) - 1))
+        per_line_budget = max(40, available // len(lines))
+        while per_line_budget >= 40:
+            out_lines = [_truncate_line_preserve_md_link(line, per_line_budget) for line in lines]
+            out = "\n".join(out_lines)
+            if len(out) <= limit:
+                return out
+            per_line_budget -= 10
         return _truncate_text(value, limit)
 
     def _safe_add_field(embed: discord.Embed, *, name: str, value: str, req_id: str, section: str) -> None:
         original_name = str(name or "")
         original_value = str(value or "")
         safe_name = _truncate_text(original_name, 256)
-        safe_value = _truncate_field_value_preserve_lines(original_value, 1024)
+        if original_name.startswith(MOMENTS_FIELD_NAME):
+            safe_value = _truncate_moments_value_preserve_links(original_value, 1024)
+        else:
+            safe_value = _truncate_field_value_preserve_lines_preserve_md_links(original_value, 1024)
         if original_name != safe_name:
             logger.info(
                 "riassunto: field name truncated req_id=%s section=%s before=%s after=%s",
@@ -1339,7 +1385,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
                 sections_map["themes"] = [("🏷️ TEMI", themes_value, 1)]
 
-                moment_header = "📌 MOMENTI SALIENTI"
+                moment_header = MOMENTS_FIELD_NAME
                 moment_lines = [
                     _format_summary_moment_line(
                         moment=moment,
@@ -1541,7 +1587,13 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     def add_field(field_name: str, field_value: str) -> None:
                         nonlocal current
                         safe_name = _truncate_text(field_name, 256)
-                        safe_value = _truncate_field_value_preserve_lines(field_value, 1024)
+                        if field_name == MOMENTS_FIELD_NAME:
+                            logger.debug("riassunto: moments field uses link-safe truncation")
+                            safe_value = field_value
+                            if len(safe_value) > 1024:
+                                safe_value = _truncate_moments_value_preserve_links(safe_value, 1024)
+                        else:
+                            safe_value = _truncate_field_value_preserve_lines_preserve_md_links(field_value, 1024)
                         if field_name != safe_name or field_value != safe_value:
                             logger.info(
                                 "riassunto: field truncated req_id=%s section=%s before=%s after=%s",
