@@ -94,6 +94,103 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
     def _with_spacing(text: str) -> str:
         return text
 
+    def _truncate_text(s: str | None, limit: int) -> str:
+        if s is None:
+            return ""
+        if limit <= 0:
+            return ""
+        if len(s) <= limit:
+            return s
+        if limit <= 1:
+            return s[:limit]
+        return s[: max(0, limit - 1)] + "…"
+
+    def _truncate_field_value_preserve_lines(value: str | None, limit: int = 1024) -> str:
+        if value is None:
+            return ""
+        if len(value) <= limit:
+            return value
+        lines = value.split("\n")
+        if len(lines) == 1:
+            return _truncate_text(value, limit)
+        min_per_line = 20
+        per_line = max(min_per_line, (limit - (len(lines) - 1)) // len(lines))
+        while per_line >= min_per_line:
+            new_lines = []
+            for line in lines:
+                if len(line) <= per_line:
+                    new_lines.append(line)
+                else:
+                    new_lines.append(_truncate_text(line, per_line))
+            out = "\n".join(new_lines)
+            if len(out) <= limit:
+                return out
+            per_line -= 5
+        return _truncate_text(value, limit)
+
+    def _safe_add_field(embed: discord.Embed, *, name: str, value: str, req_id: str, section: str) -> None:
+        original_name = str(name or "")
+        original_value = str(value or "")
+        safe_name = _truncate_text(original_name, 256)
+        safe_value = _truncate_field_value_preserve_lines(original_value, 1024)
+        if original_name != safe_name:
+            logger.info(
+                "riassunto: field name truncated req_id=%s section=%s before=%s after=%s",
+                req_id,
+                section,
+                len(original_name),
+                len(safe_name),
+            )
+        if original_value != safe_value:
+            logger.info(
+                "riassunto: field truncated req_id=%s section=%s before=%s after=%s",
+                req_id,
+                section,
+                len(original_value),
+                len(safe_value),
+            )
+        embed.add_field(name=safe_name, value=safe_value, inline=False)
+
+    def _sanitize_embeds_for_discord_limits(embeds: list[discord.Embed], *, req_id: str) -> list[discord.Embed]:
+        sanitized: list[discord.Embed] = []
+        for embed_idx, embed in enumerate(embeds, start=1):
+            description = embed.description or ""
+            safe_description = _truncate_text(description, 4096)
+            if description != safe_description:
+                logger.info(
+                    "riassunto: embed description truncated req_id=%s embed_idx=%s before=%s after=%s",
+                    req_id,
+                    embed_idx,
+                    len(description),
+                    len(safe_description),
+                )
+            clone = _clone_embed_shell(embed)
+            clone.title = _truncate_text(embed.title or "", 256) or None
+            clone.description = safe_description or None
+            clone.url = embed.url
+            if embed.author and embed.author.name:
+                clone.set_author(
+                    name=_truncate_text(embed.author.name, 256),
+                    url=embed.author.url,
+                    icon_url=embed.author.icon_url,
+                )
+            if embed.footer and embed.footer.text:
+                clone.set_footer(text=_truncate_text(embed.footer.text, 2048), icon_url=embed.footer.icon_url)
+            if embed.thumbnail and embed.thumbnail.url:
+                clone.set_thumbnail(url=embed.thumbnail.url)
+            if embed.image and embed.image.url:
+                clone.set_image(url=embed.image.url)
+            for field in embed.fields:
+                _safe_add_field(
+                    clone,
+                    name=field.name,
+                    value=field.value,
+                    req_id=req_id,
+                    section=f"embed{embed_idx}:{field.name}",
+                )
+            sanitized.append(clone)
+        return sanitized
+
     def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
         chunks = _split_field_chunks(value, 1024)
         available = 25 - len(embed.fields)
@@ -103,7 +200,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             chunks = chunks[:available]
         for idx, chunk in enumerate(chunks):
             field_name = name if idx == 0 else f"{name} (cont.)"
-            embed.add_field(name=field_name, value=chunk, inline=False)
+            _safe_add_field(embed, name=field_name, value=chunk, req_id="status", section=field_name)
 
     def _parse_hex_color(raw: str | None) -> int | None:
         if not raw:
@@ -1443,15 +1540,25 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
                     def add_field(field_name: str, field_value: str) -> None:
                         nonlocal current
+                        safe_name = _truncate_text(field_name, 256)
+                        safe_value = _truncate_field_value_preserve_lines(field_value, 1024)
+                        if field_name != safe_name or field_value != safe_value:
+                            logger.info(
+                                "riassunto: field truncated req_id=%s section=%s before=%s after=%s",
+                                req_id,
+                                field_name,
+                                len(field_value),
+                                len(safe_value),
+                            )
                         candidate = _clone_embed_shell(current)
                         for existing in current.fields:
                             candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
-                        candidate.add_field(name=field_name, value=field_value, inline=False)
+                        candidate.add_field(name=safe_name, value=safe_value, inline=False)
                         if _estimate_embed_size(candidate) >= target_max or len(candidate.fields) > 25:
                             if current.fields:
                                 chunks.append(current)
                             current = build_embed_shell("")
-                            current.add_field(name=field_name, value=field_value, inline=False)
+                            current.add_field(name=safe_name, value=safe_value, inline=False)
                         else:
                             current = candidate
 
@@ -1510,6 +1617,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             normalized_status = normalize_embeds_for_discord([status_embed])
             normalized_details = normalize_embeds_for_discord(embeds)
+            payload_embeds = _sanitize_embeds_for_discord_limits([*normalized_status, *normalized_details], req_id=req_id)
+            payload_embeds = _ensure_embed_limits(payload_embeds, max_chars=5600)
+            payload_embeds = _sanitize_embeds_for_discord_limits(payload_embeds, req_id=req_id)
             metrics_file = build_metrics_attachment()
             files = [metrics_file] if metrics_file else None
             logger.info(
@@ -1518,9 +1628,27 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 len(normalized_status),
                 len(normalized_details),
             )
+            for embed_idx, embed in enumerate(payload_embeds, start=1):
+                for field_idx, field in enumerate(embed.fields, start=1):
+                    if len(field.name or "") > 256 or len(field.value or "") > 1024:
+                        logger.warning(
+                            "riassunto: final hard truncation req_id=%s embed=%s field=%s",
+                            req_id,
+                            embed_idx,
+                            field_idx,
+                        )
+                        embed.set_field_at(
+                            index=field_idx - 1,
+                            name=_truncate_text(field.name or "", 256),
+                            value=_truncate_text(field.value or "", 1024),
+                            inline=field.inline,
+                        )
+                if embed.description and len(embed.description) > 4096:
+                    logger.warning("riassunto: final description hard truncation req_id=%s embed=%s", req_id, embed_idx)
+                    embed.description = _truncate_text(embed.description, 4096)
             sent_dm = await send_dm_or_followup(
                 interaction,
-                embeds=[*normalized_status, *normalized_details],
+                embeds=payload_embeds,
                 content="⚠️ Non posso inviarti DM, quindi ti mostro il riassunto qui in modalità privata.",
                 files=files,
                 ephemeral_fallback=True,
