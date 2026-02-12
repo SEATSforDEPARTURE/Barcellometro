@@ -1795,48 +1795,62 @@ def _sanitize_and_resolve_impacts(
         record = per_author.setdefault(impact.author_id, {"neg": 0, "pos": 0})
         record["pos"] += 1 + (1 if _is_positive_impact_reason(impact.reason) else 0)
 
-    overlap_removed = 0
+    authors_by_message_neg: dict[str, set[str]] = {}
+    authors_by_message_pos: dict[str, set[str]] = {}
+    for impact in filtered_degrade:
+        if impact.message_id and impact.author_id:
+            authors_by_message_neg.setdefault(impact.message_id, set()).add(impact.author_id)
+    for impact in filtered_invigorate:
+        if impact.message_id and impact.author_id:
+            authors_by_message_pos.setdefault(impact.message_id, set()).add(impact.author_id)
+
+    conflict_authors: set[str] = set()
+    for message_id, neg_authors in authors_by_message_neg.items():
+        pos_authors = authors_by_message_pos.get(message_id, set())
+        if neg_authors & pos_authors:
+            conflict_authors.update(neg_authors & pos_authors)
+
+    tie_dropped_authors = 0
+    message_conflict_dropped_authors = len(conflict_authors)
+    allowed_side: dict[str, str] = {}
+    for author_id, weights in per_author.items():
+        if author_id in conflict_authors:
+            allowed_side[author_id] = "none"
+            continue
+        if weights["pos"] > weights["neg"]:
+            allowed_side[author_id] = "pos"
+        elif weights["neg"] > weights["pos"]:
+            allowed_side[author_id] = "neg"
+        else:
+            allowed_side[author_id] = "none"
+            tie_dropped_authors += 1
+
     final_degrade: list[SummaryImpact] = []
     final_invigorate: list[SummaryImpact] = []
+    overlap_removed = 0
     for impact in filtered_degrade:
         if not impact.author_id:
             final_degrade.append(impact)
             continue
-        record = per_author.get(impact.author_id)
-        if not record:
+        if allowed_side.get(impact.author_id) == "neg":
             final_degrade.append(impact)
-            continue
-        if record["neg"] > 0 and record["pos"] > 0:
-            if record["neg"] > record["pos"]:
-                final_degrade.append(impact)
-            elif record["neg"] == record["pos"] and _is_negative_impact_reason(impact.reason):
-                final_degrade.append(impact)
-            else:
-                overlap_removed += 1
         else:
-            final_degrade.append(impact)
+            overlap_removed += 1
 
     for impact in filtered_invigorate:
         if not impact.author_id:
             final_invigorate.append(impact)
             continue
-        record = per_author.get(impact.author_id)
-        if not record:
+        if allowed_side.get(impact.author_id) == "pos":
             final_invigorate.append(impact)
-            continue
-        if record["neg"] > 0 and record["pos"] > 0:
-            if record["pos"] > record["neg"]:
-                final_invigorate.append(impact)
-            elif record["pos"] == record["neg"] and _is_positive_impact_reason(impact.reason):
-                final_invigorate.append(impact)
-            else:
-                overlap_removed += 1
         else:
-            final_invigorate.append(impact)
+            overlap_removed += 1
 
     logger.info(
-        "Summary impacts overlap resolution: overlap_removed=%s final_degrade=%s final_invigorate=%s",
+        "Summary impacts overlap resolution: overlap_removed=%s tie_dropped_authors=%s message_conflict_dropped_authors=%s final_degrade=%s final_invigorate=%s",
         overlap_removed,
+        tie_dropped_authors,
+        message_conflict_dropped_authors,
         len(final_degrade),
         len(final_invigorate),
     )

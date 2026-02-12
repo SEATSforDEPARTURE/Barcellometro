@@ -1401,10 +1401,22 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     def fit_moment_value(field_name: str, current_embed: discord.Embed) -> str:
                         nonlocal moment_lines
                         lines = list(moment_lines)
-                        value = _format_bullets(lines)
-                        while lines and len(value) > 1024:
-                            lines = lines[:-1]
-                            value = _format_bullets(lines)
+                        if not lines:
+                            return ""
+
+                        def _fit_with_tail_budget(max_tail: int) -> str:
+                            fitted_lines = [_truncate_moment_line(line, max_tail=max_tail) for line in lines]
+                            return _format_bullets(fitted_lines)
+
+                        available = max(40, 1024 - (3 * len(lines)))
+                        per_line_budget = max(40, available // len(lines))
+                        value = _fit_with_tail_budget(per_line_budget)
+                        truncated = False
+                        while len(value) > 1024 and per_line_budget > 40:
+                            per_line_budget = max(40, per_line_budget - 10)
+                            value = _fit_with_tail_budget(per_line_budget)
+                            truncated = True
+
                         while lines:
                             candidate = _clone_embed_shell(current_embed)
                             for existing in current_embed.fields:
@@ -1412,8 +1424,20 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                             candidate.add_field(name=field_name, value=value, inline=False)
                             if _estimate_embed_size(candidate) < target_max and len(candidate.fields) <= 25:
                                 break
+                            if per_line_budget > 40:
+                                per_line_budget = max(40, per_line_budget - 10)
+                                value = _fit_with_tail_budget(per_line_budget)
+                                truncated = True
+                                continue
                             lines = lines[:-1]
                             value = _format_bullets(lines)
+
+                        if truncated:
+                            logger.info(
+                                "riassunto: moment lines truncated lines=%s final_per_line_budget=%s",
+                                len(lines),
+                                per_line_budget,
+                            )
                         moment_lines = lines
                         return value
 
@@ -1593,3 +1617,21 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 text = text.replace("• •", "•", 1).strip()
             formatted.append(f"• {text}")
         return "\n".join(formatted)
+
+    def _truncate_moment_line(line: str, *, max_tail: int) -> str:
+        raw = str(line).strip()
+        if not raw:
+            return ""
+        prefix, separator, tail = raw.partition(" — ")
+        if not separator:
+            if len(raw) <= max_tail:
+                return raw
+            if max_tail <= 1:
+                return "…"
+            return f"{raw[: max_tail - 1].rstrip()}…"
+        tail = tail.strip()
+        if len(tail) <= max_tail:
+            return f"{prefix}{separator}{tail}"
+        if max_tail <= 1:
+            return f"{prefix}{separator}…"
+        return f"{prefix}{separator}{tail[: max_tail - 1].rstrip()}…"
