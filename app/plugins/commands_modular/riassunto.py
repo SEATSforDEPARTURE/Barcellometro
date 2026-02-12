@@ -315,6 +315,35 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
     def _jump_link(guild_id: int, channel_id: int, message_id: str) -> str:
         return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
+    def _is_valid_discord_jump_url(url: str | None) -> bool:
+        if not url:
+            return False
+        raw = str(url).strip()
+        if not raw.startswith(("https://discord.com/channels/", "https://discordapp.com/channels/")):
+            return False
+        return bool(
+            re.fullmatch(
+                r"https://(?:discord\.com|discordapp\.com)/channels/\d{17,20}/\d{17,20}/\d{17,20}",
+                raw,
+            )
+        )
+
+    def _resolve_jump_url(
+        *,
+        guild_id: int,
+        channel_id: int,
+        message_ref: str | None,
+    ) -> str | None:
+        if not message_ref:
+            return None
+        candidate = str(message_ref).strip()
+        if _is_valid_discord_jump_url(candidate):
+            return candidate
+        if re.fullmatch(r"\d{17,20}", candidate):
+            return _jump_link(guild_id, channel_id, candidate)
+        logger.debug("riassunto: discarded non-url message_ref for time link ref=%r", candidate[:80])
+        return None
+
     def _build_riassunto_status_embed(
         *,
         result: Any,
@@ -360,7 +389,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
     def _format_summary_time_link(
         ts: str | None,
-        message_id: str | None,
+        message_ref: str | None,
         *,
         guild_id: int,
         channel_id: int,
@@ -368,8 +397,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         in_call: bool = False,
     ) -> str:
         time_label = _format_italian_time(ts) or placeholder
-        if message_id:
-            jump = _jump_link(guild_id, channel_id, message_id)
+        jump = _resolve_jump_url(guild_id=guild_id, channel_id=channel_id, message_ref=message_ref)
+        if jump:
             time_link = f"**[{time_label}]({jump})**"
         else:
             time_link = f"**{time_label}**"
