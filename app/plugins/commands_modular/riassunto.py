@@ -171,6 +171,28 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             per_line_budget -= 10
         return _truncate_text(value, limit)
 
+    def _format_moments_chunk(lines: list[str], max_tail: int) -> str:
+        fitted = [_truncate_moment_line(line, max_tail=max_tail) for line in lines]
+        return _format_bullets(fitted)
+
+    def _truncate_moments_value_tail_only(value: str | None, limit: int = 1024) -> str:
+        if value is None:
+            return ""
+        if len(value) <= limit:
+            return value
+        lines = value.split("\n")
+        if not lines:
+            return _truncate_text(value, limit)
+        available = max(40, limit - (len(lines) - 1))
+        per_line_budget = max(40, available // len(lines))
+        while per_line_budget >= 40:
+            out_lines = [_truncate_line_preserve_md_link(line, per_line_budget) for line in lines]
+            out = "\n".join(out_lines)
+            if len(out) <= limit:
+                return out
+            per_line_budget -= 10
+        return _truncate_text(value, limit)
+
     def _safe_add_field(embed: discord.Embed, *, name: str, value: str, req_id: str, section: str) -> None:
         original_name = str(name or "")
         original_value = str(value or "")
@@ -1570,23 +1592,26 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     chunks: list[discord.Embed] = []
                     current = build_embed_shell("")
 
-                    def fit_moment_value(field_name: str, current_embed: discord.Embed) -> str:
-                        nonlocal moment_lines
-                        lines = list(moment_lines)
+                    def _fit_moments_chunk(
+                        chunk_lines: list[str],
+                        *,
+                        current_embed: discord.Embed,
+                        field_name: str,
+                    ) -> str:
+                        lines = list(chunk_lines)
                         if not lines:
                             return ""
-
-                        def _fit_with_tail_budget(max_tail: int) -> str:
-                            fitted_lines = [_truncate_moment_line(line, max_tail=max_tail) for line in lines]
-                            return _format_bullets(fitted_lines)
-
                         available = max(40, 1024 - (3 * len(lines)))
                         per_line_budget = max(40, available // len(lines))
-                        value = _fit_with_tail_budget(per_line_budget)
+                        value = _format_moments_chunk(lines, per_line_budget)
                         truncated = False
                         while len(value) > 1024 and per_line_budget > 40:
                             per_line_budget = max(40, per_line_budget - 10)
-                            value = _fit_with_tail_budget(per_line_budget)
+                            value = _format_moments_chunk(lines, per_line_budget)
+                            truncated = True
+                        while lines and len(value) > 1024:
+                            lines = lines[:-1]
+                            value = _format_moments_chunk(lines, per_line_budget)
                             truncated = True
 
                         while lines:
@@ -1598,11 +1623,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                                 break
                             if per_line_budget > 40:
                                 per_line_budget = max(40, per_line_budget - 10)
-                                value = _fit_with_tail_budget(per_line_budget)
+                                value = _format_moments_chunk(lines, per_line_budget)
                                 truncated = True
                                 continue
                             lines = lines[:-1]
-                            value = _format_bullets(lines)
+                            value = _format_moments_chunk(lines, per_line_budget)
+                            truncated = True
 
                         if truncated:
                             logger.info(
@@ -1610,13 +1636,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                                 len(lines),
                                 per_line_budget,
                             )
-                        moment_lines = lines
                         return value
 
-                    def add_field(field_name: str, field_value: str) -> None:
+                    def add_field(field_name: str, field_value: str, *, skip_truncation: bool = False) -> None:
                         nonlocal current
                         safe_name = _truncate_text(field_name, 256)
-                        if field_name == MOMENTS_FIELD_NAME:
+                        if skip_truncation:
+                            safe_value = field_value
+                            if len(safe_value) > 1024:
+                                safe_value = _truncate_moments_value_tail_only(safe_value, 1024)
+                        elif field_name == MOMENTS_FIELD_NAME:
                             logger.debug("riassunto: moments field uses link-safe truncation")
                             safe_value = field_value
                             if len(safe_value) > 1024:
@@ -1645,9 +1674,24 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
                     for name, value, _group in section_list:
                         if name == moment_header:
-                            moment_value = fit_moment_value(name, current)
-                            if moment_value:
-                                add_field(name, _with_spacing(moment_value))
+                            chunk_size = 5
+                            moment_chunks = [moment_lines[i : i + chunk_size] for i in range(0, len(moment_lines), chunk_size)]
+                            logger.info(
+                                "riassunto: moments split fields=%s total_lines=%s",
+                                len(moment_chunks),
+                                len(moment_lines),
+                            )
+                            for idx, lines_chunk in enumerate(moment_chunks):
+                                if not lines_chunk:
+                                    continue
+                                field_name = moment_header if idx == 0 else f"{moment_header} (cont.)"
+                                moment_value = _fit_moments_chunk(
+                                    lines_chunk,
+                                    current_embed=current,
+                                    field_name=field_name,
+                                )
+                                if moment_value:
+                                    add_field(field_name, _with_spacing(moment_value), skip_truncation=True)
                             continue
                         chunks_list = _split_field_chunks(_with_spacing(value), 1024)
                         for idx, chunk in enumerate(chunks_list):
