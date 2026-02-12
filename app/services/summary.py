@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -447,6 +448,7 @@ class SummaryService:
         barcello_metrics: dict[str, Any],
         config: dict[str, Any],
     ) -> dict[str, Any] | None:
+        sampled_messages = sample_messages_time_distributed(messages, max_items=80, buckets=6)
         snippet = [
             {
                 "ts": msg.get("ts"),
@@ -457,7 +459,7 @@ class SummaryService:
                     "in_call": (msg.get("meta") or {}).get("in_call"),
                 },
             }
-            for msg in messages[:80]
+            for msg in sampled_messages
         ]
         moments_target = _tier_limit(config, tier, "moments", 5)
         quotes_target = _tier_limit(config, tier, "quotes", 3)
@@ -477,6 +479,8 @@ class SummaryService:
             "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
             "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
             "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
+            "Distribuisci moments/quotes/dynamics su tutto l'intervallo temporale (inizio, metà, fine). "
+            "Per i moments usa bullet descrittivi di 1-2 frasi quando possibile, evitando formule troppo brevi. "
             "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
             "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
@@ -646,6 +650,17 @@ class SummaryService:
         advice = [str(item).strip() for item in (ai_payload.get("advice") or []) if str(item).strip()]
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
         invigorate = _normalize_impacts(ai_payload.get("invigorate_list"))
+        logger.info(
+            "Summary impacts pre-filter: degrade=%s invigorate=%s",
+            len(degrade),
+            len(invigorate),
+        )
+        degrade, invigorate = _sanitize_and_resolve_impacts(degrade, invigorate)
+        logger.info(
+            "Summary impacts post-filter: degrade=%s invigorate=%s",
+            len(degrade),
+            len(invigorate),
+        )
         moment_limit = _tier_limit(config, tier, "moments", 5)
         quote_limit = _tier_limit(config, tier, "quotes", 3)
         dynamic_limit = _tier_limit(config, tier, "dynamics", 2)
@@ -701,6 +716,7 @@ class SummaryService:
             degrade = local_summary.degrade
         if not invigorate:
             invigorate = local_summary.invigorate
+        degrade, invigorate = _sanitize_and_resolve_impacts(degrade, invigorate)
         return SummaryResult(
             themes=themes,
             moments=cast_items(moments, SummaryItem),
@@ -998,6 +1014,7 @@ class SummaryService:
                 continue
             if "\"" in content or "“" in content or len(content) > 80:
                 candidates.append(msg)
+        candidates = sample_messages_time_distributed(candidates, max_items=limit, buckets=min(6, max(1, limit)))
         output: list[SummaryQuote] = []
         for msg in candidates[:limit]:
             in_call = bool((msg.get("meta") or {}).get("in_call"))
@@ -1734,6 +1751,186 @@ def _normalize_impacts(raw: Any) -> list[SummaryImpact]:
             continue
         output.append(SummaryImpact(author_id=author_id, reason=reason, ts=ts, message_id=message_id))
     return output
+
+
+def _is_negative_impact_reason(reason: str) -> bool:
+    normalized = _clean_text(reason)
+    if not normalized:
+        return False
+    if _count_keywords(normalized, NEGATIVE_KEYWORDS) > 0:
+        return True
+    return bool(re.search(r"\b(insult|offes|aggress|provoc|callout|attacc|flame|caps)\w*", normalized))
+
+
+def _is_positive_impact_reason(reason: str) -> bool:
+    normalized = _clean_text(reason)
+    if not normalized:
+        return False
+    if _count_keywords(normalized, POSITIVE_KEYWORDS) > 0:
+        return True
+    return bool(re.search(r"\b(costrutt|calm|distens|support|media|aiut|gentil|rispett)\w*", normalized))
+
+
+def _sanitize_and_resolve_impacts(
+    degrade: list[SummaryImpact],
+    invigorate: list[SummaryImpact],
+) -> tuple[list[SummaryImpact], list[SummaryImpact]]:
+    deduped_degrade = _dedupe_impacts(degrade)
+    deduped_invigorate = _dedupe_impacts(invigorate)
+
+    filtered_degrade = [impact for impact in deduped_degrade if impact.message_id or _is_negative_impact_reason(impact.reason)]
+    filtered_invigorate = [
+        impact for impact in deduped_invigorate if impact.message_id or _is_positive_impact_reason(impact.reason)
+    ]
+
+    per_author: dict[str, dict[str, Any]] = {}
+    for impact in filtered_degrade:
+        if not impact.author_id:
+            continue
+        record = per_author.setdefault(impact.author_id, {"neg": 0, "pos": 0})
+        record["neg"] += 1 + (1 if _is_negative_impact_reason(impact.reason) else 0)
+    for impact in filtered_invigorate:
+        if not impact.author_id:
+            continue
+        record = per_author.setdefault(impact.author_id, {"neg": 0, "pos": 0})
+        record["pos"] += 1 + (1 if _is_positive_impact_reason(impact.reason) else 0)
+
+    overlap_removed = 0
+    final_degrade: list[SummaryImpact] = []
+    final_invigorate: list[SummaryImpact] = []
+    for impact in filtered_degrade:
+        if not impact.author_id:
+            final_degrade.append(impact)
+            continue
+        record = per_author.get(impact.author_id)
+        if not record:
+            final_degrade.append(impact)
+            continue
+        if record["neg"] > 0 and record["pos"] > 0:
+            if record["neg"] > record["pos"]:
+                final_degrade.append(impact)
+            elif record["neg"] == record["pos"] and _is_negative_impact_reason(impact.reason):
+                final_degrade.append(impact)
+            else:
+                overlap_removed += 1
+        else:
+            final_degrade.append(impact)
+
+    for impact in filtered_invigorate:
+        if not impact.author_id:
+            final_invigorate.append(impact)
+            continue
+        record = per_author.get(impact.author_id)
+        if not record:
+            final_invigorate.append(impact)
+            continue
+        if record["neg"] > 0 and record["pos"] > 0:
+            if record["pos"] > record["neg"]:
+                final_invigorate.append(impact)
+            elif record["pos"] == record["neg"] and _is_positive_impact_reason(impact.reason):
+                final_invigorate.append(impact)
+            else:
+                overlap_removed += 1
+        else:
+            final_invigorate.append(impact)
+
+    logger.info(
+        "Summary impacts overlap resolution: overlap_removed=%s final_degrade=%s final_invigorate=%s",
+        overlap_removed,
+        len(final_degrade),
+        len(final_invigorate),
+    )
+    return _sort_impacts_chronologically(final_degrade), _sort_impacts_chronologically(final_invigorate)
+
+
+def _dedupe_impacts(items: list[SummaryImpact]) -> list[SummaryImpact]:
+    seen: set[tuple[str, str, str, str]] = set()
+    output: list[SummaryImpact] = []
+    for item in items:
+        key = (
+            str(item.author_id or ""),
+            str(item.message_id or ""),
+            str(item.ts or ""),
+            _clean_text(item.reason),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
+    return output
+
+
+def sample_messages_time_distributed(
+    messages: list[dict[str, Any]],
+    *,
+    max_items: int,
+    buckets: int,
+) -> list[dict[str, Any]]:
+    if len(messages) <= max_items:
+        return list(messages)
+    effective_buckets = max(1, int(buckets or 1))
+    parsed_rows: list[tuple[datetime, dict[str, Any]]] = []
+    for msg in messages:
+        ts = _parse_ts(msg.get("ts"))
+        if ts is None:
+            continue
+        parsed_rows.append((ts, msg))
+    if len(parsed_rows) <= max_items:
+        return [msg for _, msg in sorted(parsed_rows, key=lambda item: item[0])]
+    parsed_rows.sort(key=lambda item: item[0])
+    min_ts = parsed_rows[0][0]
+    max_ts = parsed_rows[-1][0]
+    span_seconds = max(1.0, (max_ts - min_ts).total_seconds())
+    slots: list[list[tuple[datetime, dict[str, Any]]]] = [[] for _ in range(effective_buckets)]
+    for ts, msg in parsed_rows:
+        rel = (ts - min_ts).total_seconds() / span_seconds
+        idx = min(effective_buckets - 1, max(0, int(rel * effective_buckets)))
+        slots[idx].append((ts, msg))
+
+    per_bucket = max(1, math.ceil(max_items / effective_buckets))
+    picked: list[tuple[datetime, dict[str, Any]]] = []
+    slot_sizes = [len(slot) for slot in slots]
+    for slot in slots:
+        if not slot:
+            continue
+        ranked = sorted(slot, key=lambda item: _message_representativeness_score(item[1]), reverse=True)
+        take = ranked[:per_bucket]
+        if not take:
+            take = ranked[:1]
+        picked.extend(take)
+
+    if len(picked) > max_items:
+        picked.sort(key=lambda item: item[0])
+        step = len(picked) / max_items
+        reduced: list[tuple[datetime, dict[str, Any]]] = []
+        pos = 0.0
+        while len(reduced) < max_items and int(pos) < len(picked):
+            reduced.append(picked[int(pos)])
+            pos += step
+        picked = reduced
+
+    picked.sort(key=lambda item: item[0])
+    logger.info(
+        "summary: sampled_messages distribution total=%s max_items=%s buckets=%s slot_sizes=%s picked=%s",
+        len(messages),
+        max_items,
+        effective_buckets,
+        slot_sizes,
+        len(picked),
+    )
+    return [msg for _, msg in picked]
+
+
+def _message_representativeness_score(message: dict[str, Any]) -> int:
+    content = str(message.get("content") or "")
+    score = min(200, len(content))
+    if "@" in content:
+        score += 20
+    if re.search(r"[😀-🙏🌀-🫶]", content):
+        score += 20
+    if "<:" in content or "<a:" in content:
+        score += 15
+    return score
 
 
 def _normalize_ts_value(value: Any) -> Optional[str]:
