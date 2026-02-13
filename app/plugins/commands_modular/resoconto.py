@@ -62,8 +62,17 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         if daily_service is None:
             await send_ephemeral(interaction, "❌ Servizio resoconto non disponibile.")
             return
+
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
         sent = await daily_service.generate_and_send_for_channel(guild_id, channel_id, manual=True)
         if sent:
-            await send_ephemeral(interaction, "✅ Resoconto inviato ora. Aggiornata la data odierna per evitare doppio invio automatico.")
+            await interaction.followup.send(
+                "✅ Resoconto inviato ora. Aggiornata la data odierna per evitare doppio invio automatico.",
+                ephemeral=True,
+            )
         else:
-            await send_ephemeral(interaction, "⚠️ Non sono riuscito a inviare il resoconto in questo canale.")
+            await interaction.followup.send(
+                "⚠️ Non sono riuscito a inviare il resoconto in questo canale.",
+                ephemeral=True,
+            )
