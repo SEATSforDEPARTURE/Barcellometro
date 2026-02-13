@@ -130,7 +130,7 @@ def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, col
 def _moment_line(*, moment: SummaryItem, guild_id: int, channel_id: int, message_index: dict[str, MessageMeta], primary_id: str | None) -> str:
     ref = message_index.get(primary_id) if primary_id else _resolve_message_meta(moment.message_ids, message_index)
     ts = (ref.ts if ref else None) or moment.ts
-    text = str(moment.text or "").strip() or "(nessun dettaglio)"
+    text = str(moment.text or "").replace("{AUTHOR}", "").strip() or "(nessun dettaglio)"
     return f"• {format_time_link(guild_id, channel_id, primary_id or (ref.message_id if ref else None), ts)} — {text}"
 
 
@@ -144,7 +144,7 @@ def _quote_line(*, item: QuoteRenderItem, guild_id: int, channel_id: int) -> str
 def _dynamic_line(*, dynamic: SummaryItem, guild_id: int, channel_id: int, message_index: dict[str, MessageMeta], primary_id: str | None, display_names: list[str]) -> str:
     ref = message_index.get(primary_id) if primary_id else _resolve_message_meta(dynamic.message_ids, message_index)
     ts = (ref.ts if ref else None) or dynamic.ts
-    text = str(dynamic.text or "").strip() or "(nessun dettaglio)"
+    text = str(dynamic.text or "").replace("{AUTHOR}", "").strip() or "(nessun dettaglio)"
     line = f"• {format_time_link(guild_id, channel_id, primary_id or (ref.message_id if ref else None), ts)} — {text}"
     clean_names = [n for n in display_names if str(n or "").strip()]
     if clean_names:

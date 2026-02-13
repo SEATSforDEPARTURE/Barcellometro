@@ -115,7 +115,7 @@ class DailyResocontoService:
 
         return clean.strip()
 
-    def _integrate_author_in_moment(self, text: str, display_name: str | None) -> str:
+    def _apply_author_placeholder(self, text: str, display_name: str | None) -> str:
         clean = str(text or "").strip()
         if not clean:
             return clean
@@ -275,7 +275,7 @@ class DailyResocontoService:
                 message_id=primary_id,
                 message_cache=message_cache,
             ))
-            integrated = self._integrate_author_in_moment(moment.text, display)
+            integrated = self._apply_author_placeholder(moment.text, display)
             if is_green and display and self._contains_vague_actor(integrated):
                 integrated = re.sub(
                     r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b",
@@ -304,6 +304,11 @@ class DailyResocontoService:
                 if len(names) >= 3:
                     break
             dynamic_names[id(dynamic)] = names
+            primary_display = names[0] if names else None
+            dynamic_text = self._apply_author_placeholder(dynamic.text, primary_display)
+            if "{AUTHOR}" in dynamic_text:
+                dynamic_text = self._cleanup_placeholder_artifacts(dynamic_text.replace("{AUTHOR}", ""), had_author_placeholder=True, has_display_name=False)
+            dynamic.text = self._sanitize_moment_text(dynamic_text)
 
         for message_id in {m for m in [*moment_primary.values(), *quote_primary.values(), *dynamic_primary.values()] if m}:
             if message_id in message_index:
