@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import discord
@@ -21,54 +19,6 @@ logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
 DUE_WINDOW_SECONDS = 600
 
-
-def _extract_ai_text(response: Any) -> str:
-    output_text = getattr(response, "output_text", "") or ""
-    if output_text:
-        return output_text
-    output = getattr(response, "output", None)
-    if not isinstance(output, list):
-        return ""
-    parts: list[str] = []
-    for item in output:
-        contents = getattr(item, "content", None)
-        if not isinstance(contents, list):
-            continue
-        for content in contents:
-            text = getattr(content, "text", None)
-            if not text and getattr(content, "type", None) in {"output_text", "text"}:
-                text = getattr(content, "value", None)
-            if isinstance(text, str) and text:
-                parts.append(text)
-    return "\n".join(parts).strip()
-
-
-def _parse_json_safe(text: str) -> dict[str, Any] | None:
-    raw = str(text or "").strip()
-    if not raw:
-        return None
-    try:
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else None
-    except json.JSONDecodeError:
-        pass
-    fenced_matches = re.findall(r"```json\s*(\{[\s\S]*?\})\s*```", raw, flags=re.IGNORECASE)
-    for fenced in fenced_matches:
-        try:
-            parsed = json.loads(fenced)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            continue
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    try:
-        parsed = json.loads(raw[start : end + 1])
-        return parsed if isinstance(parsed, dict) else None
-    except json.JSONDecodeError:
-        return None
 
 
 class DailyResocontoService:
@@ -164,6 +114,37 @@ class DailyResocontoService:
         clean = re.sub(r"^[^\wÀ-ÖØ-öø-ÿA-Za-z0-9#]{1,4}\s+", "", clean)
         return " ".join(clean.split())
 
+    def _contains_vague_actor(self, text: str) -> bool:
+        return bool(re.search(r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b", str(text or ""), flags=re.IGNORECASE))
+
+    def _ensure_past_tense_vibe(self, text: str, bar: BarcelloResult, trend_value: str) -> str:
+        raw = " ".join(str(text or "").split())
+        if raw:
+            raw = raw.replace("\n", " ").strip()
+            raw = (raw[:139] + "…") if len(raw) > 140 else raw
+            if re.search(r"\b(è stato|è rimasto|ha tenuto|si è mantenuto|si è stabilizzato|ha chiuso)\b", raw, flags=re.IGNORECASE):
+                return raw
+        trend_head = (trend_value or "stabile").split(":", 1)[0].lower()
+        return f"Nella giornata di oggi il barcello è rimasto {bar.color} ({bar.score}/100), con trend {trend_head}."
+
+    def _strip_untrusted_names(self, text: str, allowed_names: set[str]) -> str:
+        cleaned = str(text or "")
+        if not cleaned:
+            return cleaned
+        allow_tokens = {"Oggi", "Nella", "Nel", "La", "Il", "I", "Le", "Barcello", "Discord"}
+        allowed_lower = {n.lower() for n in allowed_names if n}
+
+        def repl(match: re.Match[str]) -> str:
+            token = match.group(0)
+            if token in allow_tokens:
+                return token
+            if token.lower() in allowed_lower:
+                return token
+            return ""
+
+        out = re.sub(r"\b[A-Z][A-Za-zÀ-ÖØ-öø-ÿ]{2,}\b", repl, cleaned)
+        return " ".join(out.split())
+
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
         if not isinstance(channel, discord.abc.Messageable):
@@ -212,12 +193,24 @@ class DailyResocontoService:
             max_message_ts=messages[-1]["ts"] if messages else None,
             messages=messages,
             granularity_hint="days",
-            summary_mode="default",
+            summary_mode="daily_resoconto",
+            summary_context={
+                "score": bar.score,
+                "color": bar.color,
+                "barcello_verde": (bar.color == "verde" and int(bar.score) >= 70),
+            },
         )
 
         trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday)
-        barcello_line = await self._get_alert_vibe_line(barcello=bar, summary_result=summary, trend_value=trend_value)
-        advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
+        barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar, trend_value)
+        advice = [str(x).strip()[:160] for x in (getattr(summary, "advice", []) or []) if str(x).strip()][:5]
+        proverbio = str(getattr(summary, "proverbio", "") or "").strip()
+        if not advice or not proverbio:
+            fallback_advice, fallback_proverbio = self._fallback_advice_proverbio(bar.color)
+            if not advice:
+                advice = fallback_advice
+            if not proverbio:
+                proverbio = fallback_proverbio
         day_label = format_day_label(now_local)
 
         message_index: dict[str, MessageMeta] = {}
@@ -264,6 +257,8 @@ class DailyResocontoService:
 
         message_cache: dict[str, dict[str, Any]] = {}
         dynamic_names: dict[int, list[str]] = {}
+        allowed_names: set[str] = set()
+        is_green = (bar.color == "verde" and int(bar.score) >= 70)
         for moment in summary.moments:
             primary_id = moment_primary.get(id(moment))
             display = await resolve_display_name_from_message_id(
@@ -273,8 +268,18 @@ class DailyResocontoService:
                 message_id=primary_id,
                 message_cache=message_cache,
             )
+            if display:
+                allowed_names.add(display)
             integrated = self._integrate_author_in_moment(moment.text, display)
-            moment.text = self._sanitize_moment_text(integrated)
+            if is_green and display and self._contains_vague_actor(integrated):
+                integrated = re.sub(
+                    r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b",
+                    display,
+                    integrated,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+            moment.text = self._strip_untrusted_names(self._sanitize_moment_text(integrated), allowed_names)
 
         for dynamic in summary.dynamics:
             names: list[str] = []
@@ -291,6 +296,7 @@ class DailyResocontoService:
                 if display and display not in seen:
                     names.append(display)
                     seen.add(display)
+                    allowed_names.add(display)
                 if len(names) >= 3:
                     break
             dynamic_names[id(dynamic)] = names
@@ -393,76 +399,6 @@ class DailyResocontoService:
         logger.info("daily_resoconto sent guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
         return True
 
-    def _build_barcello_line(self, score: int, color: str | None, summary: SummaryResult | None) -> str:
-        degrade_count = len(getattr(summary, "degrade", []) or [])
-        invigorate_count = len(getattr(summary, "invigorate", []) or [])
-        cautious = degrade_count > invigorate_count
-        positive = invigorate_count > degrade_count
-        if score >= 85:
-            return "Oggi barcello in modalità SPA: chill totale, ma senza stuzzicare troppo 🌿😌" if cautious else "Oggi barcello in modalità SPA: chill totale e vibe verde 🌿😌"
-        if score >= 70:
-            return "Giornata stabile e in crescita: il mood gira bene, teniamolo morbido 🌱" if positive else "Giornata stabile: si respira bene, ma teniamo il mood morbido 🌱"
-        if score >= 55:
-            return "Barcello frizzantino: qualche scintilla c'è, andiamo di calma e ironia leggera ⚡🙂" if cautious else "Barcello frizzantino: occhio alle scintille, ma si recupera facile ⚡🙂"
-        if score >= 40:
-            return "Giornata piccante ma recuperabile: risposte lente e toni gentili aiutano tanto 🧯🐹" if positive else "Giornata piccante: meglio risposte lente e toni gentili 🧯🐹"
-        if color == "nero" and positive:
-            return "Barcello in allerta, ma con segnali di ripresa: calma, pause e zero escalation ⚫🫶"
-        return "Barcello in allerta: servono calma, pause e zero escalation ⚫🫶"
-
-    async def _get_alert_vibe_line(self, *, barcello: BarcelloResult, summary_result: SummaryResult, trend_value: str) -> str:
-        ai_enabled = bool(self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)())
-        if ai_enabled:
-            try:
-                now_local = datetime.now(ROME_TZ)
-                nonce = uuid4().hex[:10]
-                payload = {
-                    "score": barcello.score,
-                    "color": barcello.color,
-                    "trend": trend_value,
-                    "themes": list(summary_result.themes[:2]),
-                    "nonce": nonce,
-                    "ts": now_local.isoformat(),
-                }
-                client = self._ai.client()
-                model = self._ai.get_model("summary") or "gpt-4o-mini"
-                response = await client.responses.create(
-                    model=model,
-                    input=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "Scrivi UNA sola riga in italiano (max 140 caratteri), tono simpatico, coerente con score/colore barcello. "
-                                "Deve descrivere il barcello di oggi e citare esplicitamente almeno uno tra score/colore/trend/motivo. "
-                                "Non parlare di cose generiche scollegate. Non usare nomi persone. "
-                                "Varia stile ad ogni risposta, non ripetere formule standard, no elenco puntato."
-                            ),
-                        },
-                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                    ],
-                )
-                line = _extract_ai_text(response).splitlines()[0].strip()
-                if line:
-                    line = (line[:139] + "…") if len(line) > 140 else line
-                    line_l = line.lower()
-                    keywords = {
-                        "barcello",
-                        "verde",
-                        "giallo",
-                        "rosso",
-                        "nero",
-                        "stabile",
-                        "miglioramento",
-                        "peggioramento",
-                        "punti",
-                        str(barcello.score),
-                    }
-                    if any(k in line_l for k in keywords):
-                        return line
-            except Exception:
-                logger.warning("daily_resoconto alert vibe ai fallback")
-        return self._build_barcello_line(barcello.score, barcello.color, summary_result)
-
     async def _compute_yesterday_barcello(self, *, guild_id: str, channel_id: str, start_local: datetime) -> BarcelloResult | None:
         yesterday_local = start_local - timedelta(days=1)
         y_start_local = yesterday_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -510,32 +446,3 @@ class DailyResocontoService:
         }
         return fallback.get(color, (["Fermati, respira e chiarisci l'obiettivo comune.", "Riduci sarcasmo e giudizi personali.", "Riparti da regole semplici di convivenza."], "Dopo la tempesta, torna il sereno."))
 
-    async def _get_advice_proverbio(self, summary: object, color: str) -> tuple[list[str], str]:
-        color_key = (color or "").lower()
-        ai_enabled = self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)()
-        if ai_enabled:
-            try:
-                client = self._ai.client()
-                model = self._ai.get_model("summary") or "gpt-4o-mini"
-                payload = {"color": color, "themes": getattr(summary, "themes", []), "moments": [m.text for m in getattr(summary, "moments", [])[:4]]}
-                response = await client.responses.create(
-                    model=model,
-                    input=[
-                        {"role": "system", "content": "Rispondi in italiano. Restituisci SOLO un blocco ```json``` con schema: {\"advice_bullets\": [\"...\"], \"proverbio\": \"...\"}. advice_bullets deve avere 3-5 elementi, proverbio una sola riga."},
-                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                    ],
-                )
-                data = _parse_json_safe(_extract_ai_text(response))
-                if not data:
-                    raise ValueError("invalid_json")
-                advice_raw = [str(x).strip() for x in data.get("advice_bullets", []) if str(x).strip()]
-                advice = [item[:160] for item in advice_raw][:5]
-                proverbio = str(data.get("proverbio") or "").strip()
-                if advice and proverbio:
-                    return advice, proverbio
-                raise ValueError("missing_fields")
-            except Exception as exc:
-                logger.warning("daily_resoconto advice fallback reason=%s", exc.__class__.__name__)
-        else:
-            logger.info("daily_resoconto advice fallback reason=ai_disabled")
-        return self._fallback_advice_proverbio(color_key)

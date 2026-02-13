@@ -212,6 +212,8 @@ class SummaryResult:
     advice: list[str]
     metrics: dict[str, Any]
     ai_status: dict[str, Any]
+    vibe_line: str | None = None
+    proverbio: str | None = None
     cache_hit: bool = False
 
 
@@ -221,7 +223,7 @@ class SummaryService:
         self._ai_service = ai_service
         self._cache_ttl = cache_ttl_seconds
         self._cache: dict[
-            tuple[str, str, str, str, str, bool, bool, bool, str | None],
+            tuple[str, str, str, str, str, bool, bool, bool, str | None, str],
             tuple[float, SummaryResult, str | None],
         ] = {}
         self._response_format_supported: bool | None = None
@@ -238,7 +240,8 @@ class SummaryService:
         voice_context: bool,
         ai_allowed: bool,
         model_name: str | None,
-    ) -> tuple[str, str, str, str, str, bool, bool, bool, str | None]:
+        summary_mode: str,
+    ) -> tuple[str, str, str, str, str, bool, bool, bool, str | None, str]:
         return (
             guild_id,
             channel_id,
@@ -249,6 +252,7 @@ class SummaryService:
             voice_context,
             ai_allowed,
             model_name,
+            summary_mode,
         )
 
     def peek_cache(self, cache_key: tuple[str, ...], max_message_ts: Optional[str]) -> bool:
@@ -290,6 +294,7 @@ class SummaryService:
         messages: list[dict[str, Any]],
         granularity_hint: str | None = None,
         summary_mode: str = "default",
+        summary_context: dict[str, Any] | None = None,
     ) -> SummaryResult:
         model_name = self._ai_service.get_model("summary") if self._ai_service else None
         cache_key = self.build_cache_key(
@@ -302,6 +307,7 @@ class SummaryService:
             voice_context=voice_context,
             ai_allowed=ai_allowed,
             model_name=model_name,
+            summary_mode=summary_mode,
         )
         now_epoch = datetime.now(timezone.utc).timestamp()
         cached = self._cache.get(cache_key)
@@ -350,6 +356,7 @@ class SummaryService:
                         config=config,
                         granularity_hint=granularity_hint,
                         summary_mode=summary_mode,
+                        summary_context=summary_context,
                     )
                     if ai_payload:
                         await self._sanitize_ai_payload(
@@ -422,6 +429,7 @@ class SummaryService:
         tier: str,
         granularity_hint: str | None = None,
         summary_mode: str = "default",
+        summary_context: dict[str, Any] | None = None,
     ) -> SummaryResult:
         themes = self._extract_themes(messages, config, tier)
         moments_tier = _moments_policy_tier(tier)
@@ -469,6 +477,7 @@ class SummaryService:
         config: dict[str, Any],
         granularity_hint: str | None = None,
         summary_mode: str = "default",
+        summary_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         sampled_messages = sample_messages_time_distributed(messages, max_items=80, buckets=6)
         snippet = [
@@ -488,7 +497,7 @@ class SummaryService:
         logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
         quotes_target = _tier_limit(config, tier, "quotes", 3)
         dynamics_target = _tier_limit(config, tier, "dynamics", 2)
-        if summary_mode == "daily_report":
+        if summary_mode in {"daily_report", "daily_resoconto"}:
             narrative_extra = (
                 "Imposta un andamento narrativo della giornata: apertura, sviluppo, chiusura. "
                 "Niente copia verbatim dai messaggi. "
@@ -527,6 +536,13 @@ class SummaryService:
             "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
             "advice: lista stringhe brevi."
         )
+        if summary_mode == "daily_resoconto":
+            system_prompt += (
+                " In modalità daily_resoconto aggiungi anche `vibe_line` (una sola frase max 140 caratteri, "
+                "in italiano al passato prossimo, riferita esplicitamente al barcello di oggi usando score/colore/trend). "
+                "Se barcello_verde=true evita formule vaghe nei moments: preferisci {AUTHOR} quando il ref è disponibile. "
+                "Aggiungi opzionalmente `advice_bullets` (3-5) e `proverbio` (una riga)."
+            )
         user_payload = json.dumps(
             {
                 "tier": tier,
@@ -536,6 +552,7 @@ class SummaryService:
                 "dynamics_target_count": dynamics_target,
                 "metrics": barcello_metrics,
                 "granularity_hint": _granularity_prompt_hint(granularity_hint),
+                "summary_context": summary_context or {},
                 "messages": snippet,
             },
             ensure_ascii=False,
@@ -686,7 +703,9 @@ class SummaryService:
         moments = _normalize_items(ai_payload.get("moments"))
         quotes = _normalize_items(ai_payload.get("quotes") or ai_payload.get("iconic_quotes"), is_quote=True)
         dynamics = _normalize_items(ai_payload.get("dynamics"), is_dynamic=True)
-        advice = [str(item).strip() for item in (ai_payload.get("advice") or []) if str(item).strip()]
+        advice = [str(item).strip() for item in (ai_payload.get("advice") or ai_payload.get("advice_bullets") or []) if str(item).strip()]
+        vibe_line = str(ai_payload.get("vibe_line") or "").strip() or None
+        proverbio = str(ai_payload.get("proverbio") or "").strip() or None
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
         invigorate = _normalize_impacts(ai_payload.get("invigorate_list"))
         logger.info(
@@ -768,6 +787,8 @@ class SummaryService:
             advice=advice,
             metrics=local_summary.metrics,
             ai_status=local_summary.ai_status,
+            vibe_line=vibe_line,
+            proverbio=proverbio,
         )
 
     async def _sanitize_ai_payload(
