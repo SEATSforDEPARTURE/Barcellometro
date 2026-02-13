@@ -150,8 +150,73 @@ class DailyResocontoService:
             raw = raw.replace("\n", " ").strip()
             raw = (raw[:139] + "…") if len(raw) > 140 else raw
             if re.search(r"\b(è stato|è rimasto|ha tenuto|si è mantenuto|si è stabilizzato|ha chiuso)\b", raw, flags=re.IGNORECASE):
-                return raw
+                banned = ("trend", "stabile", "miglioramento", "peggioramento", "delta", "Δ", "rispetto a ieri")
+                lower_raw = raw.lower()
+                if not any(tok in lower_raw for tok in banned):
+                    return raw
         return f"Nella giornata di oggi il barcello è rimasto {bar.color} ({bar.score}/100), con un clima complessivamente disteso."
+
+    async def _build_who_interacted_candidates(self, *, rows: list[Any], guild_id: str) -> tuple[list[dict[str, Any]], list[str]]:
+        stats: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            row_map = dict(row) if not isinstance(row, dict) else row
+            author_id = str(row_map.get("author_id") or "").strip()
+            if not author_id:
+                continue
+            item = stats.setdefault(author_id, {"msg_count": 0, "mentions_made": 0, "replies": 0, "hour_slots": set()})
+            item["msg_count"] += 1
+            if str(row_map.get("reply_to_message_id") or "").strip():
+                item["replies"] += 1
+            try:
+                mentions = json.loads(str(row_map.get("mentions_json") or "[]"))
+                if isinstance(mentions, list):
+                    item["mentions_made"] += len([m for m in mentions if str(m).strip()])
+            except Exception:
+                pass
+            ts = str(row_map.get("ts") or "")
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(ROME_TZ)
+                item["hour_slots"].add(dt.hour // 3)
+            except Exception:
+                pass
+
+        scored: list[tuple[str, dict[str, Any]]] = []
+        for author_id, st in stats.items():
+            st["interaction_score"] = int(st["msg_count"]) + 2 * int(st["mentions_made"]) + int(st["replies"]) + len(st["hour_slots"])
+            st["weight"] = int(st["msg_count"]) + int(st["interaction_score"])
+            scored.append((author_id, st))
+
+        top_writers = sorted(scored, key=lambda x: x[1]["msg_count"], reverse=True)[:5]
+        top_interactors = sorted(scored, key=lambda x: x[1]["interaction_score"], reverse=True)[:5]
+        ordered_ids: list[str] = []
+        for author_id, _ in [*top_writers, *top_interactors]:
+            if author_id not in ordered_ids:
+                ordered_ids.append(author_id)
+        ordered_ids = sorted(ordered_ids, key=lambda aid: stats[aid]["weight"], reverse=True)[:8]
+
+        candidates: list[dict[str, Any]] = []
+        fallback_lines: list[str] = []
+        for author_id in ordered_ids:
+            st = stats[author_id]
+            name = safe_display_name(await self._database.fetch_user_display_name(guild_id=guild_id, user_id=author_id)) or "Qualcuno"
+            notes: list[str] = []
+            if st["msg_count"] >= 8:
+                notes.append("presenza costante in chat")
+            if st["mentions_made"] >= 3:
+                notes.append("ha coinvolto altre persone")
+            if len(st["hour_slots"]) >= 3:
+                notes.append("ha coperto più momenti della giornata")
+            if not notes:
+                notes.append("ha partecipato con continuità")
+            candidates.append({
+                "name": name,
+                "msg_count": int(st["msg_count"]),
+                "interaction_score": int(st["interaction_score"]),
+                "notes": notes,
+            })
+            fallback_lines.append(f"{name} ha tenuto viva la chat: {', '.join(notes[:2])}.")
+
+        return candidates, fallback_lines
 
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
@@ -165,6 +230,7 @@ class DailyResocontoService:
         end_dt = now_local.astimezone(timezone.utc)
         logger.debug("daily_resoconto period guild=%s channel=%s start_utc=%s end_utc=%s", guild_id, channel_id, start_dt.isoformat(), end_dt.isoformat())
         rows = await self._database.fetch_messages_in_range(channel_id=channel_id, start_ts=start_dt.isoformat(), end_ts=end_dt.isoformat(), limit=1200)
+        who_candidates, who_fallback_lines = await self._build_who_interacted_candidates(rows=rows, guild_id=guild_id)
         messages = [
             {
                 "ts": row["ts"],
@@ -207,6 +273,12 @@ class DailyResocontoService:
                 "color": bar.color,
                 "barcello_verde": (bar.color == "verde" and int(bar.score) >= 70),
                 "nonce": f"{now_local.isoformat()}-{uuid4().hex[:10]}",
+                "who_interacted_candidates": who_candidates,
+                "trend_reason": "",
+                "signals": {
+                    "negative_hits": int((bar.metrics or {}).get("negativity_hits") or 0),
+                    "positive_hits": int((bar.metrics or {}).get("positive_hits") or 0),
+                },
             },
         )
 
@@ -220,6 +292,9 @@ class DailyResocontoService:
                 advice = fallback_advice
             if not proverbio:
                 proverbio = fallback_proverbio
+        who_lines = [str(line).strip() for line in (getattr(summary, "who_interacted_today", []) or []) if str(line).strip()][:8]
+        if not who_lines:
+            who_lines = who_fallback_lines[:8]
         day_label = format_day_label(now_local)
 
         message_index: dict[str, MessageMeta] = {}
@@ -379,6 +454,7 @@ class DailyResocontoService:
             dynamic_names=dynamic_names,
             quote_render_items=quote_render_items,
             trend_value=trend_value,
+            who_interacted_lines=who_lines,
         )
 
         embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
@@ -450,9 +526,9 @@ class DailyResocontoService:
 
     def _fallback_advice_proverbio(self, color: str) -> tuple[list[str], str]:
         fallback = {
-            "verde": (["Mantieni il tono positivo e ringrazia chi aiuta.", "Conferma i prossimi passi in modo chiaro.", "Premia i contributi costruttivi del canale."], "Chi semina bene, raccoglie meglio."),
-            "giallo": (["Evita messaggi impulsivi e usa frasi brevi.", "Fai una domanda chiarificatrice prima di rispondere.", "Ricapitola i punti in disaccordo senza accuse."], "Meglio una parola in meno che una di troppo."),
-            "rosso": (["Sospendi i thread accesi per qualche minuto.", "Passa da accuse a fatti verificabili.", "Coinvolgi un moderatore se il tono non cala."], "Quando il ferro è caldo, la calma vale oro."),
+            "verde": (["Voi mantenete il tono positivo e ringraziate chi aiuta.", "Voi confermate i prossimi passi in modo chiaro.", "Voi valorizzate i contributi costruttivi del canale."], "Chi semina bene, raccoglie meglio."),
+            "giallo": (["Voi evitate messaggi impulsivi e usate frasi brevi.", "Voi fate una domanda chiarificatrice prima di rispondere.", "Voi ricapitolate i punti in disaccordo senza accuse."], "Meglio una parola in meno che una di troppo."),
+            "rosso": (["Voi sospendete i thread accesi per qualche minuto.", "Voi passate da accuse a fatti verificabili.", "Voi coinvolgete un moderatore se il tono non cala."], "Quando il ferro è caldo, la calma vale oro."),
         }
-        return fallback.get(color, (["Fermati, respira e chiarisci l'obiettivo comune.", "Riduci sarcasmo e giudizi personali.", "Riparti da regole semplici di convivenza."], "Dopo la tempesta, torna il sereno."))
+        return fallback.get(color, (["Voi vi fermate, respirate e chiarite l'obiettivo comune.", "Voi riducete sarcasmo e giudizi personali.", "Voi ripartite da regole semplici di convivenza."], "Dopo la tempesta, torna il sereno."))
 

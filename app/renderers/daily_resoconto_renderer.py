@@ -168,6 +168,7 @@ def build_daily_resoconto_embeds(
     dynamic_primary: dict[int, str | None],
     dynamic_names: dict[int, list[str]],
     quote_render_items: list[QuoteRenderItem],
+    who_interacted_lines: list[str] | None = None,
     trend_value: str | None = None,
 ) -> list[discord.Embed]:
     color_label = (barcello_status.color or "nero").lower()
@@ -216,6 +217,10 @@ def build_daily_resoconto_embeds(
     ]
     if dynamic_lines:
         _add_field_chunked(pages, name="🔁 DINAMICHE INTERESSANTI", value="\n".join(dynamic_lines), color=0x95A5A6)
+
+    who_lines = [f"• {line}" for line in (who_interacted_lines or []) if str(line or "").strip()][:8]
+    if who_lines:
+        _add_field_chunked(pages, name="👥 CHI HA INTERAGITO OGGI", value="\n".join(who_lines), color=0x95A5A6)
 
     advice_value = "\n".join(f"• {line}" for line in advice_bullets if str(line).strip())
     if advice_value:

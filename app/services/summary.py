@@ -214,6 +214,7 @@ class SummaryResult:
     ai_status: dict[str, Any]
     vibe_line: str | None = None
     proverbio: str | None = None
+    who_interacted_today: list[str] = field(default_factory=list)
     cache_hit: bool = False
 
 
@@ -555,7 +556,11 @@ class SummaryService:
                 "NON includere riferimenti a trend/delta/ieri: vietate le parole 'trend', 'stabile', 'miglioramento', 'peggioramento', 'Δ', 'delta', 'rispetto a ieri'. "
                 "Varia stile e lessico ad ogni invio, evita formule standard ripetitive. "
                 "Usa il campo `summary_context.nonce` solo come stimolo di variazione e non stamparlo. "
-                "Aggiungi opzionalmente `advice_bullets` (3-5) e `proverbio` (una riga)."
+                "Genera `advice_bullets` (4-6) rivolti alla community usando sempre il 'voi', senza citare persone singole: "
+                "se color=verde consigli di mantenimento, altrimenti consigli correttivi/de-escalation per tornare al verde. "
+                "Genera anche `who_interacted_today` come lista di oggetti {name, line}: usa solo i nomi forniti in summary_context.who_interacted_candidates, "
+                "nessun nome inventato, una frase per riga (max 160 caratteri), italiano corretto e neutro. "
+                "Aggiungi opzionalmente `proverbio` (una riga)."
             )
         user_payload = json.dumps(
             {
@@ -720,6 +725,21 @@ class SummaryService:
         advice = [str(item).strip() for item in (ai_payload.get("advice") or ai_payload.get("advice_bullets") or []) if str(item).strip()]
         vibe_line = str(ai_payload.get("vibe_line") or "").strip() or None
         proverbio = str(ai_payload.get("proverbio") or "").strip() or None
+        who_rows = ai_payload.get("who_interacted_today") or []
+        who_interacted_today: list[str] = []
+        if isinstance(who_rows, list):
+            for row in who_rows:
+                if isinstance(row, dict):
+                    name = str(row.get("name") or "").strip()
+                    line = str(row.get("line") or "").strip()
+                    if line and name and name not in line:
+                        line = f"{name}: {line}"
+                    if line:
+                        who_interacted_today.append(line)
+                else:
+                    line = str(row).strip()
+                    if line:
+                        who_interacted_today.append(line)
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
         invigorate = _normalize_impacts(ai_payload.get("invigorate_list"))
         logger.info(
@@ -803,6 +823,7 @@ class SummaryService:
             ai_status=local_summary.ai_status,
             vibe_line=vibe_line,
             proverbio=proverbio,
+            who_interacted_today=who_interacted_today,
         )
 
     async def _sanitize_ai_payload(
