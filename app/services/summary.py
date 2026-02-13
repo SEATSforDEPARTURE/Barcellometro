@@ -161,6 +161,16 @@ POSITIVE_KEYWORDS = {
 }
 
 
+
+THEME_EN_TO_IT = {
+    "humor": "umore",
+    "health": "salute",
+    "weather": "meteo",
+    "projectwork": "progetti",
+    "collaboration": "collaborazione",
+}
+
+
 @dataclass
 class SummaryItem:
     ts: Optional[str]
@@ -202,6 +212,8 @@ class SummaryResult:
     advice: list[str]
     metrics: dict[str, Any]
     ai_status: dict[str, Any]
+    vibe_line: str | None = None
+    proverbio: str | None = None
     cache_hit: bool = False
 
 
@@ -211,7 +223,7 @@ class SummaryService:
         self._ai_service = ai_service
         self._cache_ttl = cache_ttl_seconds
         self._cache: dict[
-            tuple[str, str, str, str, str, bool, bool, bool, str | None],
+            tuple[str, str, str, str, str, bool, bool, bool, str | None, str],
             tuple[float, SummaryResult, str | None],
         ] = {}
         self._response_format_supported: bool | None = None
@@ -228,7 +240,8 @@ class SummaryService:
         voice_context: bool,
         ai_allowed: bool,
         model_name: str | None,
-    ) -> tuple[str, str, str, str, str, bool, bool, bool, str | None]:
+        summary_mode: str,
+    ) -> tuple[str, str, str, str, str, bool, bool, bool, str | None, str]:
         return (
             guild_id,
             channel_id,
@@ -239,6 +252,7 @@ class SummaryService:
             voice_context,
             ai_allowed,
             model_name,
+            summary_mode,
         )
 
     def peek_cache(self, cache_key: tuple[str, ...], max_message_ts: Optional[str]) -> bool:
@@ -280,6 +294,7 @@ class SummaryService:
         messages: list[dict[str, Any]],
         granularity_hint: str | None = None,
         summary_mode: str = "default",
+        summary_context: dict[str, Any] | None = None,
     ) -> SummaryResult:
         model_name = self._ai_service.get_model("summary") if self._ai_service else None
         cache_key = self.build_cache_key(
@@ -292,6 +307,7 @@ class SummaryService:
             voice_context=voice_context,
             ai_allowed=ai_allowed,
             model_name=model_name,
+            summary_mode=summary_mode,
         )
         now_epoch = datetime.now(timezone.utc).timestamp()
         cached = self._cache.get(cache_key)
@@ -340,6 +356,7 @@ class SummaryService:
                         config=config,
                         granularity_hint=granularity_hint,
                         summary_mode=summary_mode,
+                        summary_context=summary_context,
                     )
                     if ai_payload:
                         await self._sanitize_ai_payload(
@@ -412,6 +429,7 @@ class SummaryService:
         tier: str,
         granularity_hint: str | None = None,
         summary_mode: str = "default",
+        summary_context: dict[str, Any] | None = None,
     ) -> SummaryResult:
         themes = self._extract_themes(messages, config, tier)
         moments_tier = _moments_policy_tier(tier)
@@ -459,6 +477,7 @@ class SummaryService:
         config: dict[str, Any],
         granularity_hint: str | None = None,
         summary_mode: str = "default",
+        summary_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         sampled_messages = sample_messages_time_distributed(messages, max_items=80, buckets=6)
         snippet = [
@@ -478,21 +497,39 @@ class SummaryService:
         logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
         quotes_target = _tier_limit(config, tier, "quotes", 3)
         dynamics_target = _tier_limit(config, tier, "dynamics", 2)
-        if summary_mode == "daily_report":
+        if summary_mode in {"daily_report", "daily_resoconto"}:
             narrative_extra = (
                 "Imposta un andamento narrativo della giornata: apertura, sviluppo, chiusura. "
                 "Niente copia verbatim dai messaggi. "
+                "Per FRASI ICONICHE non parafrasare: usa solo citazioni reali e fornisci sempre primary_ref. "
+                "Se non sei sicuro del testo esatto della frase, non inventare: restituisci il riferimento al messaggio. "
             )
+            names_rule = "NON includere mai nomi di persone reali: usa solo il placeholder {AUTHOR} nei moments quando necessario. "
+            if summary_mode == "daily_resoconto":
+                narrative_extra += (
+                    "MOMENTI SALIENTI: scrivi in stile narrativo come un racconto della giornata (inizio, sviluppo, chiusura). "
+                    "Non iniziare mai la frase con il nome della persona. "
+                    "Integra il nickname nel racconto in modo naturale, preferendo strutture come '... quando {AUTHOR} ...'. "
+                    "Evita qualsiasi forma che riveli o presuma il genere. "
+                    "Non usare strutture da elenco tipo '{AUTHOR} ha...'. "
+                    "Usa ganci temporali variati in base all'orario: 06:00-10:59 (La mattina/Di prima mattina/All'avvio della giornata), "
+                    "11:00-14:59 (Durante la tarda mattinata/Verso mezzogiorno/In piena giornata), 15:00-18:59 (Nel pomeriggio/Più tardi), "
+                    "19:00-22:59 (In serata/Sul finire della giornata). "
+                    "L'ultimo momento deve suonare come chiusura (es. 'La giornata si chiude con...' o 'In chiusura...'). "
+                    "Non usare la stessa apertura più di una volta; vietato ripetere esattamente la stessa locuzione in più bullet. "
+                    "Quando barcello_verde=true evita formule vaghe come 'un membro' o 'qualcuno' se {AUTHOR} è disponibile. "
+                )
         else:
             narrative_extra = ""
+            names_rule = "NON includere mai nomi di persone. "
         system_prompt = (
             "Scrivi in italiano e restituisci SOLO JSON valido. "
             + narrative_extra
             + "Non inventare dettagli. "
-            "Non inferire né ricostruire contenuti omessi per privacy. "
-            "NON includere mai nomi di persone. "
-            "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
-            "TEMI devono essere solo keyword brevi (no nomi). "
+            + "Non inferire né ricostruire contenuti omessi per privacy. "
+            + names_rule
+            + "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
+            "TEMI devono essere solo keyword brevi (no nomi). TEMI devono essere in italiano, minuscoli, una parola o snake_case, senza # e senza inglese. Se un tema ti verrebbe in inglese, traducilo in italiano. "
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
             "Non inventare eventi di chiamata: usa solo quelli presenti nella timeline (kind: call/privacy/presence). "
             "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
@@ -506,11 +543,20 @@ class SummaryService:
             "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
             "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
-            "quotes: oggetti con 'ts','quote_text','primary_ref','refs'. "
+            "quotes: oggetti con 'ts','primary_ref','refs' e 'quote_text' opzionale solo se certo al 100%. "
             "dynamics: oggetti con 'ts','dynamic_text','optional_ref','refs'. "
             "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
             "advice: lista stringhe brevi."
         )
+        if summary_mode == "daily_resoconto":
+            system_prompt += (
+                " In modalità daily_resoconto aggiungi anche `vibe_line`: UNA sola frase (max 140 caratteri), "
+                "in italiano al passato prossimo, riferita solo a colore + punti salute + vibe generale del barcello di oggi. "
+                "NON includere riferimenti a trend/delta/ieri: vietate le parole 'trend', 'stabile', 'miglioramento', 'peggioramento', 'Δ', 'delta', 'rispetto a ieri'. "
+                "Varia stile e lessico ad ogni invio, evita formule standard ripetitive. "
+                "Usa il campo `summary_context.nonce` solo come stimolo di variazione e non stamparlo. "
+                "Aggiungi opzionalmente `advice_bullets` (3-5) e `proverbio` (una riga)."
+            )
         user_payload = json.dumps(
             {
                 "tier": tier,
@@ -520,6 +566,7 @@ class SummaryService:
                 "dynamics_target_count": dynamics_target,
                 "metrics": barcello_metrics,
                 "granularity_hint": _granularity_prompt_hint(granularity_hint),
+                "summary_context": summary_context or {},
                 "messages": snippet,
             },
             ensure_ascii=False,
@@ -670,7 +717,9 @@ class SummaryService:
         moments = _normalize_items(ai_payload.get("moments"))
         quotes = _normalize_items(ai_payload.get("quotes") or ai_payload.get("iconic_quotes"), is_quote=True)
         dynamics = _normalize_items(ai_payload.get("dynamics"), is_dynamic=True)
-        advice = [str(item).strip() for item in (ai_payload.get("advice") or []) if str(item).strip()]
+        advice = [str(item).strip() for item in (ai_payload.get("advice") or ai_payload.get("advice_bullets") or []) if str(item).strip()]
+        vibe_line = str(ai_payload.get("vibe_line") or "").strip() or None
+        proverbio = str(ai_payload.get("proverbio") or "").strip() or None
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
         invigorate = _normalize_impacts(ai_payload.get("invigorate_list"))
         logger.info(
@@ -752,6 +801,8 @@ class SummaryService:
             advice=advice,
             metrics=local_summary.metrics,
             ai_status=local_summary.ai_status,
+            vibe_line=vibe_line,
+            proverbio=proverbio,
         )
 
     async def _sanitize_ai_payload(
@@ -1569,8 +1620,11 @@ def _is_theme_noise(token: str) -> bool:
 
 
 def _sanitize_theme_token(token: str) -> str | None:
-    cleaned = re.sub(r"[^0-9a-zA-Zàèéìòù]", "", token.lower())
-    if not cleaned or cleaned in ITALIAN_STOPWORDS:
+    cleaned = re.sub(r"[^0-9a-zA-Zàèéìòù_]", "", token.lower())
+    if not cleaned:
+        return None
+    cleaned = THEME_EN_TO_IT.get(cleaned, cleaned)
+    if cleaned in ITALIAN_STOPWORDS:
         return None
     if _is_theme_noise(cleaned):
         return None
