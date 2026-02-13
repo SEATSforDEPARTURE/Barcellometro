@@ -3,18 +3,72 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+import re
+from datetime import datetime, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import discord
 
+from app.renderers.daily_resoconto_renderer import MessageMeta, build_daily_resoconto_embeds, format_day_label
 from app.services.barcello import BarcelloService
 from app.services.database import DatabaseService
-from app.services.summary import SummaryService
-from app.utils.summary_render import build_summary_detail_embeds
+from app.services.summary import SummaryResult, SummaryService
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
+DUE_WINDOW_SECONDS = 600
+
+
+def _extract_ai_text(response: Any) -> str:
+    output_text = getattr(response, "output_text", "") or ""
+    if output_text:
+        return output_text
+    output = getattr(response, "output", None)
+    if not isinstance(output, list):
+        return ""
+    parts: list[str] = []
+    for item in output:
+        contents = getattr(item, "content", None)
+        if not isinstance(contents, list):
+            continue
+        for content in contents:
+            text = getattr(content, "text", None)
+            if not text and getattr(content, "type", None) in {"output_text", "text"}:
+                text = getattr(content, "value", None)
+            if isinstance(text, str) and text:
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def _parse_json_safe(text: str) -> dict[str, Any] | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    fenced_matches = re.findall(r"```json\s*(\{[\s\S]*?\})\s*```", raw, flags=re.IGNORECASE)
+    for fenced in fenced_matches:
+        try:
+            parsed = json.loads(fenced)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(raw[start : end + 1])
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
 
 
 class DailyResocontoService:
@@ -32,6 +86,8 @@ class DailyResocontoService:
         self._barcello = barcello_service
         self._ai = ai_service
         self._task: asyncio.Task[None] | None = None
+        self._missed_logged: dict[str, str] = {}
+        self._loop_started_logged = False
 
     def start(self) -> None:
         if self._task is None:
@@ -39,6 +95,9 @@ class DailyResocontoService:
 
     async def _loop(self) -> None:
         await self._bot.wait_until_ready()
+        if not self._loop_started_logged:
+            logger.info("daily_resoconto loop started interval=30s window=%ss", DUE_WINDOW_SECONDS)
+            self._loop_started_logged = True
         while True:
             try:
                 await self.run_once()
@@ -48,26 +107,39 @@ class DailyResocontoService:
 
     async def run_once(self) -> None:
         now_utc = datetime.now(timezone.utc)
+        now_local = now_utc.astimezone(ROME_TZ)
         for guild in self._bot.guilds:
             rows = await self._database.list_enabled_daily_report_channels(str(guild.id))
             for row in rows:
                 channel_id = str(row["channel_id"])
-                now_local = now_utc.astimezone(ROME_TZ)
                 today = now_local.date().isoformat()
                 if row["last_sent_local_date"] == today:
-                    logger.info("daily_resoconto skip channel=%s reason=already_sent", channel_id)
+                    logger.debug("daily_resoconto skip channel=%s reason=already_sent", channel_id)
                     continue
                 try:
                     hh, mm = str(row["send_time_local"]).split(":", 1)
                     send_local = now_local.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
                 except Exception:
-                    logger.warning("daily_resoconto invalid time channel=%s", channel_id)
+                    logger.warning("daily_resoconto skip channel=%s reason=invalid_time_format", channel_id)
                     continue
-                if now_local < send_local:
+                delta_seconds = (now_local - send_local).total_seconds()
+                if delta_seconds < 0:
+                    logger.debug("daily_resoconto skip channel=%s reason=not_due_yet", channel_id)
+                    continue
+                if delta_seconds > DUE_WINDOW_SECONDS:
+                    missed_key = f"{guild.id}:{channel_id}"
+                    if self._missed_logged.get(missed_key) != today:
+                        logger.warning(
+                            "daily_resoconto skip channel=%s reason=missed_window delta=%.0fs",
+                            channel_id,
+                            delta_seconds,
+                        )
+                        self._missed_logged[missed_key] = today
                     continue
                 sent = await self.generate_and_send_for_channel(str(guild.id), channel_id, manual=False)
                 if sent:
                     await self._database.mark_daily_report_sent(str(guild.id), channel_id, today)
+                    logger.info("daily_resoconto sent ok guild=%s channel=%s", guild.id, channel_id)
 
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
@@ -75,8 +147,10 @@ class DailyResocontoService:
             logger.warning("daily_resoconto channel not accessible guild=%s channel=%s", guild_id, channel_id)
             return False
 
-        end_dt = datetime.now(timezone.utc)
-        start_dt = end_dt - timedelta(hours=24)
+        now_local = datetime.now(ROME_TZ)
+        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_dt = start_local.astimezone(timezone.utc)
+        end_dt = now_local.astimezone(timezone.utc)
         rows = await self._database.fetch_messages_in_range(
             channel_id=channel_id,
             start_ts=start_dt.isoformat(),
@@ -116,110 +190,169 @@ class DailyResocontoService:
             summary_mode="daily_report",
         )
 
-        period_desc = await self._summary.build_period_description(
-            period_prefix="Nelle ultime 24 ore",
-            score=bar.score,
-            color=bar.color,
-            metrics=bar.metrics,
-            trend=bar.trend,
-            ai_allowed=ai_allowed,
-        )
-        tones = self._build_tone_line(bar.metrics)
+        barcello_line = self._build_barcello_line(bar.score, bar.color, summary)
         advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
+        day_label = format_day_label(now_local)
 
-        emoji = {"verde": "🟢", "giallo": "🟡", "rosso": "🔴", "nero": "⚫"}.get(bar.color, "⚫")
-        alert = {
-            "verde": "È un buon momento per scrivere e partecipare 💬",
-            "giallo": "Clima un po’ teso: scrivi con calma e chiarisci se serve 🙂",
-            "rosso": "Tensione alta: evita provocazioni e abbassa i toni 🧯",
-            "nero": "Situazione critica: meglio fermarsi e moderare subito 🚨",
-        }.get(bar.color, "Situazione critica: meglio fermarsi e moderare subito 🚨")
-        status_embed = discord.Embed(
-            title="📊 RESOCONTO GIORNALIERO — PRO MAX",
-            description=f"🕒 **Ultime 24 ore**\n\n**{emoji} ALLERTA {bar.color.upper()}**\n{alert}\n{tones}",
-            color={"verde": 0x2ECC71, "giallo": 0xF1C40F, "rosso": 0xE74C3C, "nero": 0x2F3136}.get(bar.color, 0x2F3136),
-        )
-        status_embed.add_field(name="🫀 PUNTI SALUTE", value=f"{bar.score}/100\n{period_desc}", inline=False)
-        status_embed.set_footer(text="Barcellometro")
+        referenced_message_ids: set[str] = set()
+        for item in summary.moments:
+            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
+        for item in summary.quotes:
+            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
+        for item in summary.dynamics:
+            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
 
-        details = build_summary_detail_embeds(
-            profile="role3",
-            summary=summary,
-            include_names=False,
-            include_date_in_time=False,
+        message_index: dict[str, MessageMeta] = {}
+        for row in rows:
+            message_id = str(row["message_id"] or "").strip()
+            if message_id:
+                message_index[message_id] = MessageMeta(message_id=message_id, ts=str(row["ts"] or "") or None)
+
+        for message_id in referenced_message_ids:
+            if message_id in message_index:
+                continue
+            record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=message_id)
+            if record:
+                message_index[message_id] = MessageMeta(message_id=message_id, ts=str(record["ts"] or "") or None)
+
+        channel_name = getattr(channel, "name", None) or channel_id
+        embeds = build_daily_resoconto_embeds(
             guild_id=int(guild_id),
             channel_id=int(channel_id),
-            name_map={},
-            moment_primary={},
-            quote_primary={},
-            dynamic_primary={},
-            impact_primary={},
-            moment_display={},
-            quote_display={},
-            dynamic_names={},
-            quote_texts={},
-            privacy_intervals=None,
-            privacy_disclaimer_lines=None,
-            metrics_report=None,
-            extra_sections=[
-                ("🧭 I CONSIGLI DEL BARCELLOMETRO", "\n".join(f"• {x}" for x in advice), 3),
-                ("🍀 PROVERBIO DEL GIORNO", proverbio, 3),
-            ],
-            tier_label="PRO MAX",
-            tier_config=config["tiers"]["role3"],
-            details_color=0x95A5A6,
-            req_id="daily",
-            format_moment_line=lambda **kw: kw["moment"].text,
-            format_quote_line=lambda **kw: f'“{kw["quote"].text}”',
-            format_dynamic_line=lambda **kw: kw["dynamic"].text,
-            format_impact_line=lambda **kw: kw["impact"].reason,
-            format_bullets=lambda lines: "\n".join(f"• {ln}" for ln in lines if str(ln).strip()),
+            channel_name=str(channel_name),
+            barcello_status=bar,
+            barcello_line=barcello_line,
+            summary_result=summary,
+            message_index=message_index,
+            advice_bullets=advice,
+            proverbio=proverbio,
+            day_label=day_label,
         )
-
-        await channel.send(embeds=[status_embed, *details[:1]])
+        embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
+        for embed in embeds[1:]:
+            embed.set_footer(text="")
+        if len(embeds) > 1:
+            ai_status = getattr(summary, "ai_status", {}) or {}
+            ai_used = bool(ai_status.get("enabled"))
+            model_name = str(ai_status.get("model") or getattr(self._ai, "get_model", lambda _k: None)("summary") or "")
+            if ai_used and model_name:
+                embeds[-1].set_footer(text=f"Resoconto elaborato con {model_name}. Eventuali imprecisioni sono possibili.")
+            else:
+                embeds[-1].set_footer(text="Resoconto elaborato in loco. Eventuali imprecisioni sono possibili.")
+        try:
+            await channel.send(embeds=embeds)
+        except discord.HTTPException:
+            logger.exception("daily_resoconto send failed guild=%s channel=%s", guild_id, channel_id)
+            return False
         if manual:
             today = datetime.now(ROME_TZ).date().isoformat()
             await self._database.mark_daily_report_sent(guild_id, channel_id, today)
         logger.info("daily_resoconto sent guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
         return True
 
-    def _build_tone_line(self, metrics: dict[str, object]) -> str:
-        negativity_hits = int(metrics.get("negativity_hits") or 0)
-        positive_hits = int(metrics.get("positive_hits") or 0)
-        questions = int(metrics.get("questions") or 0)
-        if negativity_hits > 0:
-            return "Analisi toni del giorno: tono con tensione e bisogno di chiarimenti 🧯"
-        if positive_hits > 0:
-            return "Analisi toni del giorno: tono collaborativo e scambi costruttivi 🌿"
-        if questions > 1:
-            return "Analisi toni del giorno: giornata ricca di domande e chiarimenti ❓"
-        return "Analisi toni del giorno: scambi regolari e ritmo stabile 🌤️"
+    def _build_barcello_line(self, score: int, color: str | None, summary: SummaryResult | None) -> str:
+        degrade_count = len(getattr(summary, "degrade", []) or [])
+        invigorate_count = len(getattr(summary, "invigorate", []) or [])
+        cautious = degrade_count > invigorate_count
+        positive = invigorate_count > degrade_count
+
+        if score >= 85:
+            if cautious:
+                return "Oggi barcello in modalità SPA: chill totale, ma senza stuzzicare troppo 🌿😌"
+            return "Oggi barcello in modalità SPA: chill totale e vibe verde 🌿😌"
+        if score >= 70:
+            if positive:
+                return "Giornata stabile e in crescita: il mood gira bene, teniamolo morbido 🌱"
+            return "Giornata stabile: si respira bene, ma teniamo il mood morbido 🌱"
+        if score >= 55:
+            if cautious:
+                return "Barcello frizzantino: qualche scintilla c'è, andiamo di calma e ironia leggera ⚡🙂"
+            return "Barcello frizzantino: occhio alle scintille, ma si recupera facile ⚡🙂"
+        if score >= 40:
+            if positive:
+                return "Giornata piccante ma recuperabile: risposte lente e toni gentili aiutano tanto 🧯🐹"
+            return "Giornata piccante: meglio risposte lente e toni gentili 🧯🐹"
+        if color == "nero" and positive:
+            return "Barcello in allerta, ma con segnali di ripresa: calma, pause e zero escalation ⚫🫶"
+        return "Barcello in allerta: servono calma, pause e zero escalation ⚫🫶"
+
+    def _fallback_advice_proverbio(self, color: str) -> tuple[list[str], str]:
+        fallback = {
+            "verde": (
+                [
+                    "Mantieni il tono positivo e ringrazia chi aiuta.",
+                    "Conferma i prossimi passi in modo chiaro.",
+                    "Premia i contributi costruttivi del canale.",
+                ],
+                "Chi semina bene, raccoglie meglio.",
+            ),
+            "giallo": (
+                [
+                    "Evita messaggi impulsivi e usa frasi brevi.",
+                    "Fai una domanda chiarificatrice prima di rispondere.",
+                    "Ricapitola i punti in disaccordo senza accuse.",
+                ],
+                "Meglio una parola in meno che una di troppo.",
+            ),
+            "rosso": (
+                [
+                    "Sospendi i thread accesi per qualche minuto.",
+                    "Passa da accuse a fatti verificabili.",
+                    "Coinvolgi un moderatore se il tono non cala.",
+                ],
+                "Quando il ferro è caldo, la calma vale oro.",
+            ),
+        }
+        return fallback.get(
+            color,
+            (
+                [
+                    "Fermati, respira e chiarisci l'obiettivo comune.",
+                    "Riduci sarcasmo e giudizi personali.",
+                    "Riparti da regole semplici di convivenza.",
+                ],
+                "Dopo la tempesta, torna il sereno.",
+            ),
+        )
 
     async def _get_advice_proverbio(self, summary: object, color: str) -> tuple[list[str], str]:
-        if self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)():
+        color_key = (color or "").lower()
+        ai_enabled = self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)()
+        if ai_enabled:
             try:
                 client = self._ai.client()
                 model = self._ai.get_model("summary") or "gpt-4o-mini"
-                payload = {"color": color, "themes": getattr(summary, "themes", []), "moments": [m.text for m in getattr(summary, "moments", [])[:4]]}
+                payload = {
+                    "color": color,
+                    "themes": getattr(summary, "themes", []),
+                    "moments": [m.text for m in getattr(summary, "moments", [])[:4]],
+                }
                 response = await client.responses.create(
                     model=model,
-                    response_format={"type": "json_object"},
                     input=[
-                        {"role": "system", "content": "Restituisci SOLO JSON con advice_bullets (3-5) e proverbio (1 riga). Italiano."},
+                        {
+                            "role": "system",
+                            "content": (
+                                "Rispondi in italiano. Restituisci SOLO un blocco ```json``` con schema: "
+                                '{"advice_bullets": ["..."], "proverbio": "..."}. '
+                                "advice_bullets deve avere 3-5 elementi, proverbio una sola riga."
+                            ),
+                        },
                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                     ],
                 )
-                text = getattr(response, "output_text", "") or "{}"
-                data = json.loads(text)
-                advice = [str(x).strip() for x in data.get("advice_bullets", []) if str(x).strip()][:5]
+                text = _extract_ai_text(response)
+                data = _parse_json_safe(text)
+                if not data:
+                    raise ValueError("invalid_json")
+                advice_raw = [str(x).strip() for x in data.get("advice_bullets", []) if str(x).strip()]
+                advice = [item[:160] for item in advice_raw][:5]
                 proverbio = str(data.get("proverbio") or "").strip()
                 if advice and proverbio:
                     return advice, proverbio
-            except Exception:
-                logger.exception("daily_resoconto advice ai failed")
-        fallback = {
-            "verde": (["Mantieni il tono positivo e ringrazia chi aiuta.", "Conferma i prossimi passi in modo chiaro.", "Premia i contributi costruttivi del canale."], "Chi semina bene, raccoglie meglio."),
-            "giallo": (["Evita messaggi impulsivi e usa frasi brevi.", "Fai una domanda chiarificatrice prima di rispondere.", "Ricapitola i punti in disaccordo senza accuse."], "Meglio una parola in meno che una di troppo."),
-            "rosso": (["Sospendi i thread accesi per qualche minuto.", "Passa da accuse a fatti verificabili.", "Coinvolgi un moderatore se il tono non cala."], "Quando il ferro è caldo, la calma vale oro."),
-        }
-        return fallback.get(color, (["Fermati, respira e chiarisci l'obiettivo comune.", "Riduci sarcasmo e giudizi personali.", "Riparti da regole semplici di convivenza."], "Dopo la tempesta, torna il sereno."))
+                raise ValueError("missing_fields")
+            except Exception as exc:
+                logger.warning("daily_resoconto advice fallback reason=%s", exc.__class__.__name__)
+        else:
+            logger.info("daily_resoconto advice fallback reason=ai_disabled")
+        return self._fallback_advice_proverbio(color_key)
