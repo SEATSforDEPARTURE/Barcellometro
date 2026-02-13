@@ -15,6 +15,7 @@ from app.utils.embed_limits import _split_field_chunks
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
+from app.utils.trend_render import normalize_trend, render_trend, render_trend_value
 
 logger = logging.getLogger(__name__)
 
@@ -580,7 +581,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.Object, ctx
             if not _is_effectively_empty_text(reasons_text):
                 _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
         if output_flags.get("show_trend"):
-            trend_value = trend_text if trend_text else _render_trend(*_normalize_trend(result.trend))
+            trend_value = trend_text if trend_text else render_trend_value(result.trend)
             if trend_reason and not _is_effectively_empty_text(trend_reason):
                 trend_value = f"{trend_value}\n{trend_reason}"
             _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
@@ -1078,8 +1079,8 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.Object, ctx
                 )
 
             reasons_text = _bullets_to_text(_format_motivations(result.reasons))
-            trend_direction, trend_delta = _normalize_trend(result.trend)
-            trend_text = _render_trend(trend_direction, trend_delta)
+            trend_direction, trend_delta = normalize_trend(result.trend)
+            trend_text = render_trend(trend_direction, trend_delta)
             trend_reason = _build_trend_reason(result.reasons, trend_direction) if result.trend else ""
             advice_candidates = [item.strip() for item in (result.advice or []) if str(item).strip()]
             color_label = (result.color or "nero").lower()
