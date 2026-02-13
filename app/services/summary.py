@@ -278,6 +278,7 @@ class SummaryService:
         barcello_metrics: dict[str, Any],
         max_message_ts: Optional[str],
         messages: list[dict[str, Any]],
+        granularity_hint: str | None = None,
     ) -> SummaryResult:
         model_name = self._ai_service.get_model("summary") if self._ai_service else None
         cache_key = self.build_cache_key(
@@ -304,6 +305,7 @@ class SummaryService:
             config=config,
             barcello_metrics=barcello_metrics,
             tier=tier,
+            granularity_hint=granularity_hint,
         )
 
         use_ai = ai_allowed and self._ai_service is not None
@@ -335,6 +337,7 @@ class SummaryService:
                         tier=tier,
                         barcello_metrics=barcello_metrics,
                         config=config,
+                        granularity_hint=granularity_hint,
                     )
                     if ai_payload:
                         await self._sanitize_ai_payload(
@@ -405,10 +408,11 @@ class SummaryService:
         config: dict[str, Any],
         barcello_metrics: dict[str, Any],
         tier: str,
+        granularity_hint: str | None = None,
     ) -> SummaryResult:
         themes = self._extract_themes(messages, config, tier)
         moments_tier = _moments_policy_tier(tier)
-        moments = self._extract_moments(messages, config, moments_tier)
+        moments = self._extract_moments(messages, config, moments_tier, granularity_hint=granularity_hint)
         quotes = self._extract_quotes(messages, config, tier)
         dynamics = self._extract_dynamics(barcello_metrics, messages, config, tier)
         degrade, invigorate = self._extract_impact(messages, config, tier)
@@ -450,6 +454,7 @@ class SummaryService:
         tier: str,
         barcello_metrics: dict[str, Any],
         config: dict[str, Any],
+        granularity_hint: str | None = None,
     ) -> dict[str, Any] | None:
         sampled_messages = sample_messages_time_distributed(messages, max_items=80, buckets=6)
         snippet = [
@@ -502,6 +507,7 @@ class SummaryService:
                 "quotes_target_count": quotes_target,
                 "dynamics_target_count": dynamics_target,
                 "metrics": barcello_metrics,
+                "granularity_hint": _granularity_prompt_hint(granularity_hint),
                 "messages": snippet,
             },
             ensure_ascii=False,
@@ -991,14 +997,21 @@ class SummaryService:
         themes = [word for word, _ in ranked]
         return _trim_theme_list(themes, limit)
 
-    def _extract_moments(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[SummaryItem]:
+    def _extract_moments(
+        self,
+        messages: list[dict[str, Any]],
+        config: dict[str, Any],
+        tier: str,
+        *,
+        granularity_hint: str | None = None,
+    ) -> list[SummaryItem]:
         limit = _tier_limit(config, tier, "moments", 5)
         buckets = _bucket_messages_by_time(messages, limit)
         if not buckets:
             return []
         items: list[SummaryItem] = []
         for idx, bucket in enumerate(buckets):
-            text = _build_bucket_summary(bucket, idx, len(buckets))
+            text = _build_bucket_summary(bucket, idx, len(buckets), granularity_hint=granularity_hint)
             message_ids = bucket["message_ids"]
             items.append(
                 SummaryItem(
@@ -1641,7 +1654,13 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
     return output
 
 
-def _build_bucket_summary(bucket: dict[str, Any], index: int, total: int) -> str:
+def _build_bucket_summary(
+    bucket: dict[str, Any],
+    index: int,
+    total: int,
+    *,
+    granularity_hint: str | None = None,
+) -> str:
     keywords = _rank_keywords(_expand_keywords(bucket.get("keyword_counts", {})))
     keywords = _trim_theme_list(keywords, limit=2)
     if index == 0:
@@ -1652,6 +1671,10 @@ def _build_bucket_summary(bucket: dict[str, Any], index: int, total: int) -> str
         prefix = "Poco dopo"
     else:
         prefix = "Più tardi"
+    if granularity_hint == "days" and index == 0:
+        prefix = "Nel corso della giornata"
+    elif granularity_hint == "weeks" and index == 0:
+        prefix = "Nel corso della settimana"
     tone = _bucket_tone(bucket)
     if keywords:
         topic = " e ".join(keywords)
@@ -1995,6 +2018,18 @@ def _moments_policy_tier(tier: str) -> str:
     if tier in {"role1", "role2", "role3", "mod"}:
         return "role3"
     return tier
+
+
+def _granularity_prompt_hint(granularity_hint: str | None) -> str | None:
+    if not granularity_hint:
+        return None
+    mapping = {
+        "minutes": "riassumi per eventi ravvicinati; evidenzia picchi e svolte negli ultimi minuti",
+        "hours": "riassumi per fasce orarie; evidenzia temi e cambi di tono tra le ore",
+        "days": "riassumi per giorno; evidenzia cosa è successo in ciascun giorno",
+        "weeks": "riassumi per settimana; evidenzia macro-temi e momenti top",
+    }
+    return mapping.get(granularity_hint, granularity_hint)
 
 
 def _compact_text_word_boundary(text: str, limit: int) -> str:

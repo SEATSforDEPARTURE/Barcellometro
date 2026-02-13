@@ -317,12 +317,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         local = parsed.astimezone(ROME_TZ)
         return local.strftime("%d/%m/%Y %H:%M")
 
-    def _format_italian_time(ts: str | None) -> str:
+    def _format_italian_time(ts: str | None, *, include_date: bool = False) -> str:
         parsed = _parse_iso_ts(ts)
         if parsed is None:
             return ""
         local = parsed.astimezone(ROME_TZ)
-        return local.strftime("%H:%M")
+        return local.strftime("%d/%m %H:%M") if include_date else local.strftime("%H:%M")
 
     def _parse_italian_datetime(value: str) -> datetime | None:
         raw = value.strip()
@@ -333,6 +333,45 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             except ValueError:
                 continue
         return None
+
+    def _granularity_hint_for_period(period_label: str, unit: str | None = None) -> str:
+        unit_key = (unit or "").lower()
+        if period_label == "ultimi":
+            if unit_key == "minuti":
+                return "minutes"
+            if unit_key == "ore":
+                return "hours"
+            if unit_key == "giorni":
+                return "days"
+            if unit_key == "settimane":
+                return "weeks"
+        return "hours"
+
+    async def _validate_coverage_or_reply(
+        interaction: discord.Interaction,
+        *,
+        start_dt_utc: datetime,
+        end_dt_utc: datetime,
+    ) -> bool:
+        min_ts, max_ts = await ctx.database.get_channel_coverage(str(interaction.channel_id))
+        if max_ts is None:
+            await send_ephemeral(interaction, "❌ Dati insufficienti: non ci sono messaggi salvati per questo canale.")
+            return False
+        min_dt = _parse_iso_ts(min_ts)
+        max_dt = _parse_iso_ts(max_ts)
+        if min_dt and start_dt_utc < min_dt:
+            await send_ephemeral(
+                interaction,
+                f"❌ Range fuori dai dati disponibili (dati da {_format_italian_ts(min_ts)}). Riduci la finestra temporale.",
+            )
+            return False
+        if max_dt and end_dt_utc > max_dt:
+            await send_ephemeral(
+                interaction,
+                f"❌ Range fuori dai dati disponibili (dati fino a {_format_italian_ts(max_ts)}). Riduci la finestra temporale.",
+            )
+            return False
+        return True
 
     def _jump_link(guild_id: int, channel_id: int, message_id: str) -> str:
         return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
@@ -417,8 +456,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         channel_id: int,
         placeholder: str = "--:--",
         in_call: bool = False,
+        include_date: bool = False,
     ) -> str:
-        time_label = _format_italian_time(ts) or placeholder
+        time_label = _format_italian_time(ts, include_date=include_date) or placeholder
         jump = _resolve_jump_url(guild_id=guild_id, channel_id=channel_id, message_ref=message_ref)
         if jump:
             time_link = f"**[{time_label}]({jump})**"
@@ -437,6 +477,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         display_name: str | None,
         link_limit: int,
         primary_id: str | None,
+        include_date: bool = False,
     ) -> str:
         text = moment.text
         if include_names:
@@ -457,6 +498,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             guild_id=guild_id,
             channel_id=channel_id,
             in_call=moment.in_call,
+            include_date=include_date,
         )
         return f"{time_link} — {text}"
 
@@ -468,6 +510,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         primary_id: str | None,
         display_name: str | None,
         text_override: str | None,
+        include_date: bool = False,
     ) -> str:
         text = text_override or quote.text
         if display_name and display_name.lower() in {"un utente", "utente", "unknown"}:
@@ -479,6 +522,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             guild_id=guild_id,
             channel_id=channel_id,
             in_call=quote.in_call,
+            include_date=include_date,
         )
         line = f"{time_link} — “{text}”"
         if speaker:
@@ -493,6 +537,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         primary_id: str | None,
         include_names: bool,
         display_names: list[str],
+        include_date: bool = False,
     ) -> str:
         text = dynamic.text
         suffix = ""
@@ -508,6 +553,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             guild_id=guild_id,
             channel_id=channel_id,
             in_call=dynamic.in_call,
+            include_date=include_date,
         )
         return f"{time_link} — {text}{suffix}"
 
@@ -533,12 +579,14 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         link_limit: int,
         prefix: str,
         primary_id: str | None,
+        include_date: bool = False,
     ) -> str:
         time_link = _format_summary_time_link(
             impact.ts,
             primary_id,
             guild_id=guild_id,
             channel_id=channel_id,
+            include_date=include_date,
         )
         if display_name:
             return f"{time_link} — {prefix} {display_name} — {impact.reason}"
@@ -589,6 +637,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         start_dt: datetime,
         end_dt: datetime,
         period_label: str,
+        granularity_hint: str = "hours",
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.")
@@ -625,6 +674,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             end_dt_utc = end_dt.astimezone(timezone.utc)
             if end_dt_utc < start_dt_utc:
                 start_dt_utc, end_dt_utc = end_dt_utc, start_dt_utc
+            if not await _validate_coverage_or_reply(interaction, start_dt_utc=start_dt_utc, end_dt_utc=end_dt_utc):
+                return
 
             channel = interaction.channel
             if channel is None or not isinstance(channel, discord.abc.GuildChannel):
@@ -650,7 +701,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 barcello_result.window_end_ts,
             )
 
-            include_names = (barcello_result.color or "").lower() == "verde"
+            barcello_color = (barcello_result.color or "").lower()
+            include_names = barcello_color == "verde"
+            if not channel_is_voice and ctx.config.name_policy_text_show_names_always:
+                include_names = True
             if profile == "mod":
                 include_names = True
                 logger.info("riassunto: mod_show_names_override=true color=%s", barcello_result.color)
@@ -664,10 +718,19 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 end_ts=barcello_result.window_end_ts,
             )
             period_description = _local_period_description(period_prefix, barcello_result.color)
+            include_date_in_time = start_dt_utc.astimezone(ROME_TZ).date() != end_dt_utc.astimezone(ROME_TZ).date()
 
             max_messages = int(summary_config.get("max_messages", 600))
             duration_secs = max(0, int((end_dt_utc - start_dt_utc).total_seconds()))
-            if duration_secs >= 12 * 60 * 60:
+            if granularity_hint == "minutes":
+                buckets = 3
+            elif granularity_hint == "hours":
+                buckets = 5
+            elif granularity_hint == "days":
+                buckets = 7
+            elif granularity_hint == "weeks":
+                buckets = 8
+            elif duration_secs >= 12 * 60 * 60:
                 buckets = 8
             elif duration_secs >= 6 * 60 * 60:
                 buckets = 6
@@ -743,6 +806,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             voice_segments = 0
             for row in messages_rows:
+                if int(row["is_deleted"] or 0) == 1 if "is_deleted" in row.keys() else False:
+                    continue
                 embeds_raw = row["embeds_json"] if "embeds_json" in row.keys() else None
                 embeds = json.loads(embeds_raw) if embeds_raw else []
                 if any(isinstance(embed, dict) and embed.get("source") == "voice_ingest_stt" for embed in embeds):
@@ -1241,6 +1306,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 barcello_metrics=metrics,
                 max_message_ts=max_message_ts,
                 messages=messages,
+                granularity_hint=granularity_hint,
             )
 
             if channel_is_voice and (privacy_moments or supplemental_moments):
@@ -1338,6 +1404,15 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             message_cache: dict[str, dict[str, Any]] = {}
 
+            def _should_show_name(content_origin: str) -> bool:
+                if not channel_is_voice:
+                    return bool(ctx.config.name_policy_text_show_names_always)
+                if content_origin == "chat":
+                    return bool(ctx.config.name_policy_voice_show_names_for_chat_messages)
+                if not bool(ctx.config.name_policy_voice_show_names_for_voice_transcripts_when_green_only):
+                    return True
+                return barcello_color == "verde"
+
             async def fetch_message_record(message_id: str) -> dict[str, Any] | None:
                 if message_id in message_cache:
                     return message_cache[message_id]
@@ -1346,7 +1421,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     message_id=message_id,
                 )
                 if row:
-                    record = {"author_id": row["author_id"], "content": row["content"]}
+                    embeds_raw = row["embeds_json"] if "embeds_json" in row.keys() else None
+                    embeds = json.loads(embeds_raw) if embeds_raw else []
+                    is_voice_transcript = any(
+                        isinstance(embed, dict) and embed.get("source") == "voice_ingest_stt" for embed in embeds
+                    )
+                    record = {
+                        "author_id": row["author_id"],
+                        "content": row["content"],
+                        "origin": "voice_transcript" if is_voice_transcript else "chat",
+                    }
                     message_cache[message_id] = record
                     return record
                 return None
@@ -1356,6 +1440,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     return None
                 record = await fetch_message_record(message_id)
                 if not record:
+                    return None
+                if not _should_show_name(str(record.get("origin") or "chat")):
                     return None
                 author_id = record.get("author_id")
                 if not author_id:
@@ -1450,6 +1536,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         display_name=moment_display.get(id(moment)),
                         link_limit=1,
                         primary_id=moment_primary.get(id(moment)),
+                        include_date=include_date_in_time,
                     )
                     for moment in summary.moments
                 ]
@@ -1473,6 +1560,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         primary_id=quote_primary.get(id(quote)),
                         display_name=quote_display.get(id(quote)),
                         text_override=quote_texts.get(id(quote)),
+                        include_date=include_date_in_time,
                     )
                     for quote in summary.quotes
                 ]
@@ -1492,6 +1580,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         primary_id=dynamic_primary.get(id(dynamic)),
                         include_names=include_names,
                         display_names=dynamic_names.get(id(dynamic), []),
+                        include_date=include_date_in_time,
                     )
                     for dynamic in summary.dynamics
                 ]
@@ -1514,6 +1603,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                             link_limit=1,
                             prefix="🔥",
                             primary_id=impact_primary.get(id(impact)),
+                            include_date=include_date_in_time,
                         )
                         degrade_lines.append(line)
                     invigorate_lines = []
@@ -1526,6 +1616,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                             link_limit=1,
                             prefix="🌿",
                             primary_id=impact_primary.get(id(impact)),
+                            include_date=include_date_in_time,
                         )
                         invigorate_lines.append(line)
                     if has_privacy_gaps:
@@ -1810,6 +1901,27 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         if quantita <= 0:
             await send_ephemeral(interaction, "Specifica una quantità valida.")
             return
+        if unita.value == "minuti" and quantita > ctx.config.riassunto_max_minutes:
+            await send_ephemeral(
+                interaction,
+                "❌ Limite massimo: ultimi 60 minuti. Prova con le ore (es: /riassunto ultimi 2 ore).",
+            )
+            return
+        if unita.value == "ore" and quantita > ctx.config.riassunto_max_hours:
+            await send_ephemeral(
+                interaction,
+                "❌ Limite massimo: ultime 24 ore. Prova con i giorni (es: /riassunto ultimi 2 giorni).",
+            )
+            return
+        if unita.value == "giorni" and quantita > ctx.config.riassunto_max_days:
+            await send_ephemeral(
+                interaction,
+                "❌ Limite massimo: ultimi 30 giorni. Prova con le settimane (es: /riassunto ultimi 2 settimane).",
+            )
+            return
+        if unita.value == "settimane" and quantita > ctx.config.riassunto_max_weeks:
+            await send_ephemeral(interaction, "❌ Limite massimo: ultime 4 settimane. Riduci la finestra temporale.")
+            return
         now = datetime.now(ROME_TZ)
         delta_map = {
             "minuti": timedelta(minutes=quantita),
@@ -1818,20 +1930,26 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             "settimane": timedelta(weeks=quantita),
         }
         start_dt = now - delta_map.get(unita.value, timedelta(minutes=quantita))
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now, period_label="ultimi")
+        await _run_riassunto(
+            interaction,
+            start_dt=start_dt,
+            end_dt=now,
+            period_label="ultimi",
+            granularity_hint=_granularity_hint_for_period("ultimi", unita.value),
+        )
 
     @riassunto_group.command(name="oggi", description="Riassunto della giornata di oggi")
     async def riassunto_oggi(interaction: discord.Interaction) -> None:
         now = datetime.now(ROME_TZ)
         start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now, period_label="oggi")
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now, period_label="oggi", granularity_hint="hours")
 
     @riassunto_group.command(name="ieri", description="Riassunto della giornata di ieri")
     async def riassunto_ieri(interaction: discord.Interaction) -> None:
         now = datetime.now(ROME_TZ)
         end_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
         start_dt = end_dt - timedelta(days=1)
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="ieri")
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="ieri", granularity_hint="days")
 
     @riassunto_group.command(name="range", description="Riassunto di un range custom (data+ora italiane)")
     @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)")
@@ -1841,7 +1959,15 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         if not start_dt or not end_dt:
             await send_ephemeral(interaction, "Formato data/ora non valido. Usa DD/MM/YYYY HH:MM.")
             return
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="range")
+        start_utc = start_dt.astimezone(timezone.utc)
+        end_utc = end_dt.astimezone(timezone.utc)
+        if end_utc < start_utc:
+            start_utc, end_utc = end_utc, start_utc
+        duration_days = (end_utc - start_utc).total_seconds() / 86400
+        if duration_days > ctx.config.riassunto_range_max_days:
+            await send_ephemeral(interaction, "❌ Range troppo elevato (max 30 giorni). Riduci la finestra temporale.")
+            return
+        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="range", granularity_hint="days")
 
     def _clean_bullets(lines: list[str] | None) -> list[str]:
         if not lines:

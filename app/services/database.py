@@ -455,12 +455,26 @@ class DatabaseService:
         return await self.fetchall(
             """
             SELECT * FROM messages
-            WHERE channel_id = ? AND ts >= ? AND ts <= ?
+            WHERE channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
             ORDER BY ts ASC
             LIMIT ?
             """,
             (channel_id, start_ts, end_ts, limit),
         )
+
+
+    async def get_channel_coverage(self, channel_id: str) -> tuple[Optional[str], Optional[str]]:
+        row = await self.fetchone(
+            """
+            SELECT MIN(ts) AS min_ts, MAX(ts) AS max_ts
+            FROM messages
+            WHERE channel_id = ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (channel_id,),
+        )
+        if not row:
+            return None, None
+        return row["min_ts"], row["max_ts"]
 
     async def fetch_messages_in_range_time_bucketed(
         self,
@@ -485,7 +499,7 @@ class DatabaseService:
             SELECT m.*
             FROM messages AS m
             LEFT JOIN users AS u ON u.user_id = m.author_id
-            WHERE m.channel_id = ? AND m.ts >= ? AND m.ts <= ?
+            WHERE m.channel_id = ? AND m.ts >= ? AND m.ts <= ? AND COALESCE(m.is_deleted, 0) = 0
         """
         if not include_bots:
             base_query += " AND COALESCE(u.is_bot, 0) = 0"
@@ -570,7 +584,7 @@ class DatabaseService:
             """
             SELECT ts, message_id
             FROM messages
-            WHERE channel_id = ? AND ts >= ? AND ts <= ?
+            WHERE channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
             ORDER BY ts DESC
             LIMIT 1
             """,
@@ -587,7 +601,7 @@ class DatabaseService:
             """
             SELECT message_id
             FROM messages
-            WHERE channel_id = ?
+            WHERE channel_id = ? AND COALESCE(is_deleted, 0) = 0
             ORDER BY ABS(strftime('%s', ts) - strftime('%s', ?)) ASC
             LIMIT 1
             """,
@@ -609,7 +623,7 @@ class DatabaseService:
             """
             SELECT message_id
             FROM messages
-            WHERE channel_id = ? AND ts >= ? AND ts <= ?
+            WHERE channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
             ORDER BY ABS(strftime('%s', ts) - strftime('%s', ?)) ASC
             LIMIT 1
             """,
@@ -624,7 +638,7 @@ class DatabaseService:
             """
             SELECT 1
             FROM messages
-            WHERE channel_id = ? AND message_id = ?
+            WHERE channel_id = ? AND message_id = ? AND COALESCE(is_deleted, 0) = 0
             LIMIT 1
             """,
             (channel_id, message_id),
@@ -639,9 +653,9 @@ class DatabaseService:
     ) -> Optional[aiosqlite.Row]:
         return await self.fetchone(
             """
-            SELECT message_id, author_id, content, ts
+            SELECT message_id, author_id, content, ts, embeds_json
             FROM messages
-            WHERE channel_id = ? AND message_id = ?
+            WHERE channel_id = ? AND message_id = ? AND COALESCE(is_deleted, 0) = 0
             LIMIT 1
             """,
             (channel_id, message_id),
