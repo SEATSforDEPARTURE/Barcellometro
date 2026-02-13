@@ -96,6 +96,14 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
     def _with_spacing(text: str) -> str:
         return text
 
+    def _bold_header(s: str | None) -> str | None:
+        if not s:
+            return s
+        t = s.strip()
+        if t.startswith("**") and t.endswith("**"):
+            return t
+        return f"**{t}**"
+
     def _truncate_text(s: str | None, limit: int) -> str:
         if s is None:
             return ""
@@ -1388,12 +1396,17 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             if ai_description:
                 period_description = ai_description
 
+            dm_mode = True
+
             status_embed = _build_riassunto_status_embed(
                 result=barcello_result,
                 channel_label=channel_label,
                 period_label=period_label,
                 period_description=period_description,
             )
+            if dm_mode:
+                status_embed.title = _bold_header(status_embed.title)
+                status_embed.set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
 
             model_name = ctx.ai.get_model("summary") if ctx.ai else None
             cache_key = ctx.summary_service.build_cache_key(
@@ -1673,9 +1686,18 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     format_dynamic_line=_format_summary_dynamics_line,
                     format_impact_line=_format_summary_impact_line,
                     format_bullets=_format_bullets,
+                    dm_mode=dm_mode,
                 )
 
             embeds = build_embeds()
+            if dm_mode and embeds:
+                ai_used = bool(summary.ai_status.get("reason") == "ok")
+                if ai_used:
+                    ai_model_name = str(summary.ai_status.get("model") or model_name or "unknown-model")
+                    footer_text = f"Riassunto elaborato con {ai_model_name}. Eventuali imprecisioni sono possibili."
+                else:
+                    footer_text = "Riassunto elaborato in loco. Eventuali imprecisioni sono possibili."
+                embeds[-1].set_footer(text=footer_text)
 
             logger.info(
                 "riassunto: report id=%s user=%s channel=%s range=%s-%s tier=%s ai=%s cache=%s voice=%s",

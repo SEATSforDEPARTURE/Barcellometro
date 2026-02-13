@@ -380,7 +380,11 @@ class DailyResocontoService:
             try:
                 client = self._ai.client()
                 model = self._ai.get_model("summary") or "gpt-4o-mini"
-                payload = {"color": color, "themes": getattr(summary, "themes", []), "moments": [m.text for m in getattr(summary, "moments", [])[:4]]}
+                payload = {
+                    "color": color,
+                    "themes": getattr(summary, "themes", []),
+                    "moments": [m.text for m in getattr(summary, "moments", [])[:4]],
+                }
                 response = await client.responses.create(
                     model=model,
                     input=[
