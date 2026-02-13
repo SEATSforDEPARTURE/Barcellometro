@@ -13,7 +13,7 @@ from app.renderers.daily_resoconto_renderer import MessageMeta, QuoteRenderItem,
 from app.services.barcello import BarcelloResult, BarcelloService
 from app.services.database import DatabaseService
 from app.services.summary import SummaryResult, SummaryService
-from app.utils.summary_names import resolve_display_name_from_message_id, resolve_primary_message_id
+from app.utils.summary_names import resolve_display_name_from_message_id, resolve_primary_message_id, safe_display_name
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -96,15 +96,41 @@ class DailyResocontoService:
                     )
                     logger.info("daily_resoconto sent ok guild=%s channel=%s", guild.id, channel_id)
 
+    def _cleanup_placeholder_artifacts(self, text: str, *, had_author_placeholder: bool, has_display_name: bool) -> str:
+        clean = str(text or "")
+        clean = re.sub(r"\s+a\s*,\s*", " ", clean)
+        clean = re.sub(r"\s*,\s*", ", ", clean)
+        clean = re.sub(r",\s*,+", ", ", clean)
+        clean = re.sub(r",\s*([\.!\?])", r"\1", clean)
+        clean = re.sub(r"^[\s,–—-]+", "", clean)
+        clean = re.sub(r"^,\s+", "", clean)
+        clean = re.sub(r"\s{2,}", " ", clean).strip()
+
+        lower_clean = clean.lower()
+        if not has_display_name and had_author_placeholder:
+            if lower_clean.startswith("tardi,"):
+                clean = f"Più {clean[0].lower() + clean[1:] if clean else ''}"
+            if re.match(r"^(ha\b|ha condiviso\b)", clean, flags=re.IGNORECASE):
+                clean = f"Qualcuno {clean[0].lower() + clean[1:] if clean else ''}".strip()
+
+        return clean.strip()
+
     def _integrate_author_in_moment(self, text: str, display_name: str | None) -> str:
         clean = str(text or "").strip()
         if not clean:
             return clean
-        if "{AUTHOR}" not in clean:
-            return clean
-        if not display_name:
-            return clean.replace("{AUTHOR}", "").strip()
-        return clean.replace("{AUTHOR}", display_name).strip()
+        display = safe_display_name(display_name)
+        had_placeholder = "{AUTHOR}" in clean
+        if had_placeholder:
+            clean = clean.replace("{AUTHOR}", display or "")
+        clean = self._cleanup_placeholder_artifacts(
+            clean,
+            had_author_placeholder=had_placeholder,
+            has_display_name=bool(display),
+        )
+        if not clean:
+            return "Qualcuno ha partecipato alla conversazione in modo costruttivo."
+        return clean
 
     def _sanitize_moment_text(self, text: str) -> str:
         clean = str(text or "").strip()
@@ -126,24 +152,6 @@ class DailyResocontoService:
                 return raw
         trend_head = (trend_value or "stabile").split(":", 1)[0].lower()
         return f"Nella giornata di oggi il barcello è rimasto {bar.color} ({bar.score}/100), con trend {trend_head}."
-
-    def _strip_untrusted_names(self, text: str, allowed_names: set[str]) -> str:
-        cleaned = str(text or "")
-        if not cleaned:
-            return cleaned
-        allow_tokens = {"Oggi", "Nella", "Nel", "La", "Il", "I", "Le", "Barcello", "Discord"}
-        allowed_lower = {n.lower() for n in allowed_names if n}
-
-        def repl(match: re.Match[str]) -> str:
-            token = match.group(0)
-            if token in allow_tokens:
-                return token
-            if token.lower() in allowed_lower:
-                return token
-            return ""
-
-        out = re.sub(r"\b[A-Z][A-Za-zÀ-ÖØ-öø-ÿ]{2,}\b", repl, cleaned)
-        return " ".join(out.split())
 
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
@@ -257,19 +265,16 @@ class DailyResocontoService:
 
         message_cache: dict[str, dict[str, Any]] = {}
         dynamic_names: dict[int, list[str]] = {}
-        allowed_names: set[str] = set()
         is_green = (bar.color == "verde" and int(bar.score) >= 70)
         for moment in summary.moments:
             primary_id = moment_primary.get(id(moment))
-            display = await resolve_display_name_from_message_id(
+            display = safe_display_name(await resolve_display_name_from_message_id(
                 database=self._database,
                 guild_id=guild_id,
                 channel_id=channel_id,
                 message_id=primary_id,
                 message_cache=message_cache,
-            )
-            if display:
-                allowed_names.add(display)
+            ))
             integrated = self._integrate_author_in_moment(moment.text, display)
             if is_green and display and self._contains_vague_actor(integrated):
                 integrated = re.sub(
@@ -279,24 +284,23 @@ class DailyResocontoService:
                     count=1,
                     flags=re.IGNORECASE,
                 )
-            moment.text = self._strip_untrusted_names(self._sanitize_moment_text(integrated), allowed_names)
+            moment.text = self._sanitize_moment_text(integrated)
 
         for dynamic in summary.dynamics:
             names: list[str] = []
             seen: set[str] = set()
             candidate_ids = [dynamic_primary.get(id(dynamic)), *dynamic.message_ids]
             for candidate in candidate_ids:
-                display = await resolve_display_name_from_message_id(
+                display = safe_display_name(await resolve_display_name_from_message_id(
                     database=self._database,
                     guild_id=guild_id,
                     channel_id=channel_id,
                     message_id=candidate,
                     message_cache=message_cache,
-                )
+                ))
                 if display and display not in seen:
                     names.append(display)
                     seen.add(display)
-                    allowed_names.add(display)
                 if len(names) >= 3:
                     break
             dynamic_names[id(dynamic)] = names
@@ -327,13 +331,13 @@ class DailyResocontoService:
                     if compact:
                         quote_text = compact[:319] + "…" if len(compact) > 320 else compact
                     quote_ts = str(record["ts"] or "") or quote_ts
-                    author_display = await resolve_display_name_from_message_id(
+                    author_display = safe_display_name(await resolve_display_name_from_message_id(
                         database=self._database,
                         guild_id=guild_id,
                         channel_id=channel_id,
                         message_id=primary_id,
                         message_cache=message_cache,
-                    )
+                    ))
 
             if not quote_text:
                 fallback = str(quote.text or "").strip()

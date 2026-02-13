@@ -83,4 +83,12 @@ async def resolve_display_name_from_message_id(
     author_id = str(record.get("author_id") or "").strip()
     if not author_id:
         return None
-    return await database.fetch_user_display_name(guild_id=guild_id, user_id=author_id)
+    return safe_display_name(await database.fetch_user_display_name(guild_id=guild_id, user_id=author_id))
+
+
+
+def safe_display_name(name: str | None) -> str | None:
+    if name is None:
+        return None
+    trimmed = str(name).strip()
+    return trimmed or None
