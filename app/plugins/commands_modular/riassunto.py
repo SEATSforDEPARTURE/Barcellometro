@@ -193,6 +193,53 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             per_line_budget -= 10
         return _truncate_text(value, limit)
 
+    def _split_lines_into_field_values(lines: list[str], limit: int = 1024) -> list[str]:
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = 0
+
+        def _explode_if_needed(line: str) -> list[str]:
+            if len(line) <= limit:
+                return [line]
+            if " — " in line:
+                prefix, tail = line.split(" — ", 1)
+                prefix = f"{prefix} — "
+                if len(prefix) < limit:
+                    first_tail = tail[: max(1, limit - len(prefix))]
+                    extra = tail[len(first_tail) :]
+                    expanded = [prefix + first_tail]
+                    cont_limit = max(1, limit - 2)
+                    while extra:
+                        expanded.append(f"↳ {extra[:cont_limit]}")
+                        extra = extra[cont_limit:]
+                    return expanded
+            expanded: list[str] = []
+            extra = line
+            while extra:
+                expanded.append(extra[:limit])
+                extra = extra[limit:]
+            return expanded
+
+        for raw_line in lines:
+            line = str(raw_line or "")
+            if not line:
+                continue
+            for expanded_line in _explode_if_needed(line):
+                line_len = len(expanded_line) + (1 if current else 0)
+                if current and (current_len + line_len) > limit:
+                    chunks.append("\n".join(current))
+                    current = [expanded_line]
+                    current_len = len(expanded_line)
+                    continue
+
+                current.append(expanded_line)
+                current_len += line_len
+
+        if current:
+            chunks.append("\n".join(current))
+
+        return chunks
+
     def _safe_add_field(embed: discord.Embed, *, name: str, value: str, req_id: str, section: str) -> None:
         original_name = str(name or "")
         original_value = str(value or "")
@@ -1742,106 +1789,59 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     chunks: list[discord.Embed] = []
                     current = build_embed_shell("")
 
-                    def _fit_moments_chunk(
-                        chunk_lines: list[str],
-                        *,
-                        current_embed: discord.Embed,
-                        field_name: str,
-                    ) -> str:
-                        lines = list(chunk_lines)
-                        if not lines:
-                            return ""
-                        available = max(40, 1024 - (3 * len(lines)))
-                        per_line_budget = max(40, available // len(lines))
-                        value = _format_moments_chunk(lines, per_line_budget)
-                        truncated = False
-                        while len(value) > 1024 and per_line_budget > 40:
-                            per_line_budget = max(40, per_line_budget - 10)
-                            value = _format_moments_chunk(lines, per_line_budget)
-                            truncated = True
-                        while lines and len(value) > 1024:
-                            lines = lines[:-1]
-                            value = _format_moments_chunk(lines, per_line_budget)
-                            truncated = True
-
-                        while lines:
-                            candidate = _clone_embed_shell(current_embed)
-                            for existing in current_embed.fields:
-                                candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
-                            candidate.add_field(name=field_name, value=value, inline=False)
-                            if _estimate_embed_size(candidate) < target_max and len(candidate.fields) <= 25:
-                                break
-                            if per_line_budget > 40:
-                                per_line_budget = max(40, per_line_budget - 10)
-                                value = _format_moments_chunk(lines, per_line_budget)
-                                truncated = True
-                                continue
-                            lines = lines[:-1]
-                            value = _format_moments_chunk(lines, per_line_budget)
-                            truncated = True
-
-                        if truncated:
-                            logger.info(
-                                "riassunto: moment lines truncated lines=%s final_per_line_budget=%s",
-                                len(lines),
-                                per_line_budget,
-                            )
-                        return value
-
                     def add_field(field_name: str, field_value: str, *, skip_truncation: bool = False) -> None:
                         nonlocal current
                         safe_name = _truncate_text(field_name, 256)
+
                         if skip_truncation:
-                            safe_value = field_value
-                            if len(safe_value) > 1024:
-                                safe_value = _truncate_moments_value_tail_only(safe_value, 1024)
-                        elif field_name == MOMENTS_FIELD_NAME:
-                            logger.debug("riassunto: moments field uses link-safe truncation")
-                            safe_value = field_value
-                            if len(safe_value) > 1024:
-                                safe_value = _truncate_moments_value_preserve_links(safe_value, 1024)
+                            split_values = _split_lines_into_field_values(field_value.split("\n"), 1024)
+                            if not split_values:
+                                split_values = [""]
                         else:
-                            safe_value = _truncate_field_value_preserve_lines_preserve_md_links(field_value, 1024)
-                        if field_name != safe_name or field_value != safe_value:
-                            logger.info(
-                                "riassunto: field truncated req_id=%s section=%s before=%s after=%s",
-                                req_id,
-                                field_name,
-                                len(field_value),
-                                len(safe_value),
-                            )
-                        candidate = _clone_embed_shell(current)
-                        for existing in current.fields:
-                            candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
-                        candidate.add_field(name=safe_name, value=safe_value, inline=False)
-                        if _estimate_embed_size(candidate) >= target_max or len(candidate.fields) > 25:
-                            if current.fields:
-                                chunks.append(current)
-                            current = build_embed_shell("")
-                            current.add_field(name=safe_name, value=safe_value, inline=False)
-                        else:
-                            current = candidate
+                            if field_name == MOMENTS_FIELD_NAME:
+                                logger.debug("riassunto: moments field uses link-safe truncation")
+                                safe_value = field_value
+                                if len(safe_value) > 1024:
+                                    safe_value = _truncate_moments_value_preserve_links(safe_value, 1024)
+                            else:
+                                safe_value = _truncate_field_value_preserve_lines_preserve_md_links(field_value, 1024)
+                            split_values = [safe_value]
+
+                        for idx, safe_value in enumerate(split_values):
+                            emitted_name = safe_name if idx == 0 else _truncate_text(f"{safe_name} (cont.)", 256)
+                            if not skip_truncation and (field_name != emitted_name or field_value != safe_value):
+                                logger.info(
+                                    "riassunto: field truncated req_id=%s section=%s before=%s after=%s",
+                                    req_id,
+                                    field_name,
+                                    len(field_value),
+                                    len(safe_value),
+                                )
+                            candidate = _clone_embed_shell(current)
+                            for existing in current.fields:
+                                candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
+                            candidate.add_field(name=emitted_name, value=safe_value, inline=False)
+                            if _estimate_embed_size(candidate) >= target_max or len(candidate.fields) > 25:
+                                if current.fields:
+                                    chunks.append(current)
+                                current = build_embed_shell("")
+                                current.add_field(name=emitted_name, value=safe_value, inline=False)
+                            else:
+                                current = candidate
 
                     for name, value, _group in section_list:
                         if name == moment_header:
-                            chunk_size = 5
-                            moment_chunks = [moment_lines[i : i + chunk_size] for i in range(0, len(moment_lines), chunk_size)]
+                            moment_field_values = _split_lines_into_field_values(moment_lines, 1024)
+                            max_field_len = max((len(v) for v in moment_field_values), default=0)
                             logger.info(
-                                "riassunto: moments split fields=%s total_lines=%s",
-                                len(moment_chunks),
+                                "riassunto: moments split fields=%d lines=%d max_field_len=%d",
+                                len(moment_field_values),
                                 len(moment_lines),
+                                max_field_len,
                             )
-                            for idx, lines_chunk in enumerate(moment_chunks):
-                                if not lines_chunk:
-                                    continue
+                            for idx, moment_value in enumerate(moment_field_values):
                                 field_name = moment_header if idx == 0 else f"{moment_header} (cont.)"
-                                moment_value = _fit_moments_chunk(
-                                    lines_chunk,
-                                    current_embed=current,
-                                    field_name=field_name,
-                                )
-                                if moment_value:
-                                    add_field(field_name, _with_spacing(moment_value), skip_truncation=True)
+                                add_field(field_name, _with_spacing(moment_value), skip_truncation=True)
                             continue
                         chunks_list = _split_field_chunks(_with_spacing(value), 1024)
                         for idx, chunk in enumerate(chunks_list):
