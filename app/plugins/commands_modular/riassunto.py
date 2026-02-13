@@ -347,31 +347,54 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 return "weeks"
         return "hours"
 
-    async def _validate_coverage_or_reply(
+    async def _validate_coverage_or_adjust(
         interaction: discord.Interaction,
         *,
         start_dt_utc: datetime,
         end_dt_utc: datetime,
-    ) -> bool:
+    ) -> tuple[datetime | None, datetime | None, str | None]:
+        requested_start = start_dt_utc
+        requested_end = end_dt_utc
         min_ts, max_ts = await ctx.database.get_channel_coverage(str(interaction.channel_id))
         if max_ts is None:
             await send_ephemeral(interaction, "❌ Dati insufficienti: non ci sono messaggi salvati per questo canale.")
-            return False
+            return None, None, None
         min_dt = _parse_iso_ts(min_ts)
         max_dt = _parse_iso_ts(max_ts)
-        if min_dt and start_dt_utc < min_dt:
-            await send_ephemeral(
-                interaction,
-                f"❌ Range fuori dai dati disponibili (dati da {_format_italian_ts(min_ts)}). Riduci la finestra temporale.",
-            )
-            return False
-        if max_dt and end_dt_utc > max_dt:
+        if max_dt and start_dt_utc > max_dt:
             await send_ephemeral(
                 interaction,
                 f"❌ Range fuori dai dati disponibili (dati fino a {_format_italian_ts(max_ts)}). Riduci la finestra temporale.",
             )
-            return False
-        return True
+            return None, None, None
+        if min_dt and end_dt_utc < min_dt:
+            await send_ephemeral(
+                interaction,
+                f"❌ Range fuori dai dati disponibili (dati da {_format_italian_ts(min_ts)}). Riduci la finestra temporale.",
+            )
+            return None, None, None
+
+        warning_note: str | None = None
+        if min_dt and start_dt_utc < min_dt:
+            start_dt_utc = min_dt
+            warning_note = f"⚠️ Dati disponibili da {_format_italian_ts(min_ts)}. Riassunto da lì."
+        if max_dt and end_dt_utc > max_dt:
+            end_dt_utc = max_dt
+            note2 = f"⚠️ Dati disponibili fino a {_format_italian_ts(max_ts)}. Riassunto fino a lì."
+            warning_note = f"{warning_note}\n{note2}" if warning_note else note2
+
+        logger.info(
+            "riassunto: coverage_adjust channel=%s req_start=%s req_end=%s cov_min=%s cov_max=%s adj_start=%s adj_end=%s clamped=%s",
+            interaction.channel_id,
+            requested_start.isoformat(),
+            requested_end.isoformat(),
+            min_ts,
+            max_ts,
+            start_dt_utc.isoformat(),
+            end_dt_utc.isoformat(),
+            bool(warning_note),
+        )
+        return start_dt_utc, end_dt_utc, warning_note
 
     def _jump_link(guild_id: int, channel_id: int, message_id: str) -> str:
         return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
@@ -674,7 +697,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             end_dt_utc = end_dt.astimezone(timezone.utc)
             if end_dt_utc < start_dt_utc:
                 start_dt_utc, end_dt_utc = end_dt_utc, start_dt_utc
-            if not await _validate_coverage_or_reply(interaction, start_dt_utc=start_dt_utc, end_dt_utc=end_dt_utc):
+            start_dt_utc, end_dt_utc, coverage_note = await _validate_coverage_or_adjust(
+                interaction,
+                start_dt_utc=start_dt_utc,
+                end_dt_utc=end_dt_utc,
+            )
+            if start_dt_utc is None or end_dt_utc is None:
                 return
 
             channel = interaction.channel
@@ -718,6 +746,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 end_ts=barcello_result.window_end_ts,
             )
             period_description = _local_period_description(period_prefix, barcello_result.color)
+            if coverage_note:
+                period_description = f"{period_description}\n{coverage_note}"
             include_date_in_time = start_dt_utc.astimezone(ROME_TZ).date() != end_dt_utc.astimezone(ROME_TZ).date()
 
             max_messages = int(summary_config.get("max_messages", 600))
