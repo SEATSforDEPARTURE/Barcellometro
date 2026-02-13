@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from app.services.barcello import NEGATIVE_KEYWORDS
 from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)
+MOMENT_TEXT_LIMIT = 200
 
 DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
     "tiers": {
@@ -276,6 +278,7 @@ class SummaryService:
         barcello_metrics: dict[str, Any],
         max_message_ts: Optional[str],
         messages: list[dict[str, Any]],
+        granularity_hint: str | None = None,
     ) -> SummaryResult:
         model_name = self._ai_service.get_model("summary") if self._ai_service else None
         cache_key = self.build_cache_key(
@@ -302,6 +305,7 @@ class SummaryService:
             config=config,
             barcello_metrics=barcello_metrics,
             tier=tier,
+            granularity_hint=granularity_hint,
         )
 
         use_ai = ai_allowed and self._ai_service is not None
@@ -333,6 +337,7 @@ class SummaryService:
                         tier=tier,
                         barcello_metrics=barcello_metrics,
                         config=config,
+                        granularity_hint=granularity_hint,
                     )
                     if ai_payload:
                         await self._sanitize_ai_payload(
@@ -403,9 +408,11 @@ class SummaryService:
         config: dict[str, Any],
         barcello_metrics: dict[str, Any],
         tier: str,
+        granularity_hint: str | None = None,
     ) -> SummaryResult:
         themes = self._extract_themes(messages, config, tier)
-        moments = self._extract_moments(messages, config, tier)
+        moments_tier = _moments_policy_tier(tier)
+        moments = self._extract_moments(messages, config, moments_tier, granularity_hint=granularity_hint)
         quotes = self._extract_quotes(messages, config, tier)
         dynamics = self._extract_dynamics(barcello_metrics, messages, config, tier)
         degrade, invigorate = self._extract_impact(messages, config, tier)
@@ -414,6 +421,7 @@ class SummaryService:
         quotes = _sanitize_summary_items(quotes, drop_templates=False)
         dynamics = _sanitize_summary_items(dynamics, drop_templates=False)
         moments = _sort_moments_chronologically(moments)
+        moments = _compact_moment_items(moments, limit=MOMENT_TEXT_LIMIT)
         quotes = _sort_quotes_chronologically(quotes)
         dynamics = _sort_moments_chronologically(dynamics)
         degrade = _sort_impacts_chronologically(degrade)
@@ -446,7 +454,9 @@ class SummaryService:
         tier: str,
         barcello_metrics: dict[str, Any],
         config: dict[str, Any],
+        granularity_hint: str | None = None,
     ) -> dict[str, Any] | None:
+        sampled_messages = sample_messages_time_distributed(messages, max_items=80, buckets=6)
         snippet = [
             {
                 "ts": msg.get("ts"),
@@ -457,9 +467,11 @@ class SummaryService:
                     "in_call": (msg.get("meta") or {}).get("in_call"),
                 },
             }
-            for msg in messages[:80]
+            for msg in sampled_messages
         ]
-        moments_target = _tier_limit(config, tier, "moments", 5)
+        moments_policy_tier = _moments_policy_tier(tier)
+        moments_target = _tier_limit(config, moments_policy_tier, "moments", 5)
+        logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
         quotes_target = _tier_limit(config, tier, "quotes", 3)
         dynamics_target = _tier_limit(config, tier, "dynamics", 2)
         system_prompt = (
@@ -477,6 +489,8 @@ class SummaryService:
             "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
             "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
             "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
+            "Distribuisci moments/quotes/dynamics su tutto l'intervallo temporale (inizio, metà, fine). "
+            "Per i moments usa bullet descrittivi di 1-2 frasi quando possibile, evitando formule troppo brevi. "
             "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
             "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
@@ -493,6 +507,7 @@ class SummaryService:
                 "quotes_target_count": quotes_target,
                 "dynamics_target_count": dynamics_target,
                 "metrics": barcello_metrics,
+                "granularity_hint": _granularity_prompt_hint(granularity_hint),
                 "messages": snippet,
             },
             ensure_ascii=False,
@@ -646,7 +661,19 @@ class SummaryService:
         advice = [str(item).strip() for item in (ai_payload.get("advice") or []) if str(item).strip()]
         degrade = _normalize_impacts(ai_payload.get("degrade_list"))
         invigorate = _normalize_impacts(ai_payload.get("invigorate_list"))
-        moment_limit = _tier_limit(config, tier, "moments", 5)
+        logger.info(
+            "Summary impacts pre-filter: degrade=%s invigorate=%s",
+            len(degrade),
+            len(invigorate),
+        )
+        degrade, invigorate = _sanitize_and_resolve_impacts(degrade, invigorate)
+        logger.info(
+            "Summary impacts post-filter: degrade=%s invigorate=%s",
+            len(degrade),
+            len(invigorate),
+        )
+        moments_policy_tier = _moments_policy_tier(tier)
+        moment_limit = _tier_limit(config, moments_policy_tier, "moments", 5)
         quote_limit = _tier_limit(config, tier, "quotes", 3)
         dynamic_limit = _tier_limit(config, tier, "dynamics", 2)
         if not themes:
@@ -679,6 +706,7 @@ class SummaryService:
         if len(moments) > moment_limit:
             moments = moments[:moment_limit]
         moments = _sort_moments_chronologically(moments)
+        moments = _compact_moment_items(moments, limit=MOMENT_TEXT_LIMIT)
         if not quotes:
             quotes = _sanitize_summary_items(local_summary.quotes)
         if len(quotes) < quote_limit:
@@ -701,6 +729,7 @@ class SummaryService:
             degrade = local_summary.degrade
         if not invigorate:
             invigorate = local_summary.invigorate
+        degrade, invigorate = _sanitize_and_resolve_impacts(degrade, invigorate)
         return SummaryResult(
             themes=themes,
             moments=cast_items(moments, SummaryItem),
@@ -968,14 +997,21 @@ class SummaryService:
         themes = [word for word, _ in ranked]
         return _trim_theme_list(themes, limit)
 
-    def _extract_moments(self, messages: list[dict[str, Any]], config: dict[str, Any], tier: str) -> list[SummaryItem]:
+    def _extract_moments(
+        self,
+        messages: list[dict[str, Any]],
+        config: dict[str, Any],
+        tier: str,
+        *,
+        granularity_hint: str | None = None,
+    ) -> list[SummaryItem]:
         limit = _tier_limit(config, tier, "moments", 5)
         buckets = _bucket_messages_by_time(messages, limit)
         if not buckets:
             return []
         items: list[SummaryItem] = []
         for idx, bucket in enumerate(buckets):
-            text = _build_bucket_summary(bucket, idx, len(buckets))
+            text = _build_bucket_summary(bucket, idx, len(buckets), granularity_hint=granularity_hint)
             message_ids = bucket["message_ids"]
             items.append(
                 SummaryItem(
@@ -998,6 +1034,7 @@ class SummaryService:
                 continue
             if "\"" in content or "“" in content or len(content) > 80:
                 candidates.append(msg)
+        candidates = sample_messages_time_distributed(candidates, max_items=limit, buckets=min(6, max(1, limit)))
         output: list[SummaryQuote] = []
         for msg in candidates[:limit]:
             in_call = bool((msg.get("meta") or {}).get("in_call"))
@@ -1617,7 +1654,13 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
     return output
 
 
-def _build_bucket_summary(bucket: dict[str, Any], index: int, total: int) -> str:
+def _build_bucket_summary(
+    bucket: dict[str, Any],
+    index: int,
+    total: int,
+    *,
+    granularity_hint: str | None = None,
+) -> str:
     keywords = _rank_keywords(_expand_keywords(bucket.get("keyword_counts", {})))
     keywords = _trim_theme_list(keywords, limit=2)
     if index == 0:
@@ -1628,6 +1671,10 @@ def _build_bucket_summary(bucket: dict[str, Any], index: int, total: int) -> str
         prefix = "Poco dopo"
     else:
         prefix = "Più tardi"
+    if granularity_hint == "days" and index == 0:
+        prefix = "Nel corso della giornata"
+    elif granularity_hint == "weeks" and index == 0:
+        prefix = "Nel corso della settimana"
     tone = _bucket_tone(bucket)
     if keywords:
         topic = " e ".join(keywords)
@@ -1736,6 +1783,200 @@ def _normalize_impacts(raw: Any) -> list[SummaryImpact]:
     return output
 
 
+def _is_negative_impact_reason(reason: str) -> bool:
+    normalized = _clean_text(reason)
+    if not normalized:
+        return False
+    if _count_keywords(normalized, NEGATIVE_KEYWORDS) > 0:
+        return True
+    return bool(re.search(r"\b(insult|offes|aggress|provoc|callout|attacc|flame|caps)\w*", normalized))
+
+
+def _is_positive_impact_reason(reason: str) -> bool:
+    normalized = _clean_text(reason)
+    if not normalized:
+        return False
+    if _count_keywords(normalized, POSITIVE_KEYWORDS) > 0:
+        return True
+    return bool(re.search(r"\b(costrutt|calm|distens|support|media|aiut|gentil|rispett)\w*", normalized))
+
+
+def _sanitize_and_resolve_impacts(
+    degrade: list[SummaryImpact],
+    invigorate: list[SummaryImpact],
+) -> tuple[list[SummaryImpact], list[SummaryImpact]]:
+    deduped_degrade = _dedupe_impacts(degrade)
+    deduped_invigorate = _dedupe_impacts(invigorate)
+
+    filtered_degrade = [impact for impact in deduped_degrade if impact.message_id or _is_negative_impact_reason(impact.reason)]
+    filtered_invigorate = [
+        impact for impact in deduped_invigorate if impact.message_id or _is_positive_impact_reason(impact.reason)
+    ]
+
+    per_author: dict[str, dict[str, Any]] = {}
+    for impact in filtered_degrade:
+        if not impact.author_id:
+            continue
+        record = per_author.setdefault(impact.author_id, {"neg": 0, "pos": 0})
+        record["neg"] += 1 + (1 if _is_negative_impact_reason(impact.reason) else 0)
+    for impact in filtered_invigorate:
+        if not impact.author_id:
+            continue
+        record = per_author.setdefault(impact.author_id, {"neg": 0, "pos": 0})
+        record["pos"] += 1 + (1 if _is_positive_impact_reason(impact.reason) else 0)
+
+    authors_by_message_neg: dict[str, set[str]] = {}
+    authors_by_message_pos: dict[str, set[str]] = {}
+    for impact in filtered_degrade:
+        if impact.message_id and impact.author_id:
+            authors_by_message_neg.setdefault(impact.message_id, set()).add(impact.author_id)
+    for impact in filtered_invigorate:
+        if impact.message_id and impact.author_id:
+            authors_by_message_pos.setdefault(impact.message_id, set()).add(impact.author_id)
+
+    conflict_authors: set[str] = set()
+    for message_id, neg_authors in authors_by_message_neg.items():
+        pos_authors = authors_by_message_pos.get(message_id, set())
+        if neg_authors & pos_authors:
+            conflict_authors.update(neg_authors & pos_authors)
+
+    tie_dropped_authors = 0
+    message_conflict_dropped_authors = len(conflict_authors)
+    allowed_side: dict[str, str] = {}
+    for author_id, weights in per_author.items():
+        if author_id in conflict_authors:
+            allowed_side[author_id] = "none"
+            continue
+        if weights["pos"] > weights["neg"]:
+            allowed_side[author_id] = "pos"
+        elif weights["neg"] > weights["pos"]:
+            allowed_side[author_id] = "neg"
+        else:
+            allowed_side[author_id] = "none"
+            tie_dropped_authors += 1
+
+    final_degrade: list[SummaryImpact] = []
+    final_invigorate: list[SummaryImpact] = []
+    overlap_removed = 0
+    for impact in filtered_degrade:
+        if not impact.author_id:
+            final_degrade.append(impact)
+            continue
+        if allowed_side.get(impact.author_id) == "neg":
+            final_degrade.append(impact)
+        else:
+            overlap_removed += 1
+
+    for impact in filtered_invigorate:
+        if not impact.author_id:
+            final_invigorate.append(impact)
+            continue
+        if allowed_side.get(impact.author_id) == "pos":
+            final_invigorate.append(impact)
+        else:
+            overlap_removed += 1
+
+    logger.info(
+        "Summary impacts overlap resolution: overlap_removed=%s tie_dropped_authors=%s message_conflict_dropped_authors=%s final_degrade=%s final_invigorate=%s",
+        overlap_removed,
+        tie_dropped_authors,
+        message_conflict_dropped_authors,
+        len(final_degrade),
+        len(final_invigorate),
+    )
+    return _sort_impacts_chronologically(final_degrade), _sort_impacts_chronologically(final_invigorate)
+
+
+def _dedupe_impacts(items: list[SummaryImpact]) -> list[SummaryImpact]:
+    seen: set[tuple[str, str, str, str]] = set()
+    output: list[SummaryImpact] = []
+    for item in items:
+        key = (
+            str(item.author_id or ""),
+            str(item.message_id or ""),
+            str(item.ts or ""),
+            _clean_text(item.reason),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
+    return output
+
+
+def sample_messages_time_distributed(
+    messages: list[dict[str, Any]],
+    *,
+    max_items: int,
+    buckets: int,
+) -> list[dict[str, Any]]:
+    if len(messages) <= max_items:
+        return list(messages)
+    effective_buckets = max(1, int(buckets or 1))
+    parsed_rows: list[tuple[datetime, dict[str, Any]]] = []
+    for msg in messages:
+        ts = _parse_ts(msg.get("ts"))
+        if ts is None:
+            continue
+        parsed_rows.append((ts, msg))
+    if len(parsed_rows) <= max_items:
+        return [msg for _, msg in sorted(parsed_rows, key=lambda item: item[0])]
+    parsed_rows.sort(key=lambda item: item[0])
+    min_ts = parsed_rows[0][0]
+    max_ts = parsed_rows[-1][0]
+    span_seconds = max(1.0, (max_ts - min_ts).total_seconds())
+    slots: list[list[tuple[datetime, dict[str, Any]]]] = [[] for _ in range(effective_buckets)]
+    for ts, msg in parsed_rows:
+        rel = (ts - min_ts).total_seconds() / span_seconds
+        idx = min(effective_buckets - 1, max(0, int(rel * effective_buckets)))
+        slots[idx].append((ts, msg))
+
+    per_bucket = max(1, math.ceil(max_items / effective_buckets))
+    picked: list[tuple[datetime, dict[str, Any]]] = []
+    slot_sizes = [len(slot) for slot in slots]
+    for slot in slots:
+        if not slot:
+            continue
+        ranked = sorted(slot, key=lambda item: _message_representativeness_score(item[1]), reverse=True)
+        take = ranked[:per_bucket]
+        if not take:
+            take = ranked[:1]
+        picked.extend(take)
+
+    if len(picked) > max_items:
+        picked.sort(key=lambda item: item[0])
+        step = len(picked) / max_items
+        reduced: list[tuple[datetime, dict[str, Any]]] = []
+        pos = 0.0
+        while len(reduced) < max_items and int(pos) < len(picked):
+            reduced.append(picked[int(pos)])
+            pos += step
+        picked = reduced
+
+    picked.sort(key=lambda item: item[0])
+    logger.info(
+        "summary: sampled_messages distribution total=%s max_items=%s buckets=%s slot_sizes=%s picked=%s",
+        len(messages),
+        max_items,
+        effective_buckets,
+        slot_sizes,
+        len(picked),
+    )
+    return [msg for _, msg in picked]
+
+
+def _message_representativeness_score(message: dict[str, Any]) -> int:
+    content = str(message.get("content") or "")
+    score = min(200, len(content))
+    if "@" in content:
+        score += 20
+    if re.search(r"[😀-🙏🌀-🫶]", content):
+        score += 20
+    if "<:" in content or "<a:" in content:
+        score += 15
+    return score
+
+
 def _normalize_ts_value(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -1771,6 +2012,46 @@ def _tier_limit(config: dict[str, Any], tier: str, key: str, fallback: int) -> i
         except (TypeError, ValueError):
             return fallback
     return fallback
+
+
+def _moments_policy_tier(tier: str) -> str:
+    if tier in {"role1", "role2", "role3", "mod"}:
+        return "role3"
+    return tier
+
+
+def _granularity_prompt_hint(granularity_hint: str | None) -> str | None:
+    if not granularity_hint:
+        return None
+    mapping = {
+        "minutes": "riassumi per eventi ravvicinati; evidenzia picchi e svolte negli ultimi minuti",
+        "hours": "riassumi per fasce orarie; evidenzia temi e cambi di tono tra le ore",
+        "days": "riassumi per giorno; evidenzia cosa è successo in ciascun giorno",
+        "weeks": "riassumi per settimana; evidenzia macro-temi e momenti top",
+    }
+    return mapping.get(granularity_hint, granularity_hint)
+
+
+def _compact_text_word_boundary(text: str, limit: int) -> str:
+    cleaned = " ".join((text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    if limit <= 1:
+        return "…"
+    cut = cleaned[: limit - 1]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    if not cut:
+        cut = cleaned[: limit - 1]
+    return f"{cut}…"
+
+
+def _compact_moment_items(items: list[SummaryItem], *, limit: int) -> list[SummaryItem]:
+    output: list[SummaryItem] = []
+    for item in items:
+        item.text = _compact_text_word_boundary(item.text or "", limit)
+        output.append(item)
+    return output
 
 
 def cast_items(items: Iterable[Any], target: type) -> list[Any]:
