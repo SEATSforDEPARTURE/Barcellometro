@@ -13,11 +13,11 @@ import discord
 from app.renderers.daily_resoconto_renderer import MessageMeta, build_daily_resoconto_embeds, format_day_label
 from app.services.barcello import BarcelloService
 from app.services.database import DatabaseService
-from app.services.summary import SummaryService
+from app.services.summary import SummaryResult, SummaryService
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
-DUE_WINDOW_SECONDS = 90
+DUE_WINDOW_SECONDS = 600
 
 
 def _extract_ai_text(response: Any) -> str:
@@ -86,6 +86,8 @@ class DailyResocontoService:
         self._barcello = barcello_service
         self._ai = ai_service
         self._task: asyncio.Task[None] | None = None
+        self._missed_logged: dict[str, str] = {}
+        self._loop_started_logged = False
 
     def start(self) -> None:
         if self._task is None:
@@ -93,6 +95,9 @@ class DailyResocontoService:
 
     async def _loop(self) -> None:
         await self._bot.wait_until_ready()
+        if not self._loop_started_logged:
+            logger.info("daily_resoconto loop started interval=30s window=%ss", DUE_WINDOW_SECONDS)
+            self._loop_started_logged = True
         while True:
             try:
                 await self.run_once()
@@ -122,11 +127,14 @@ class DailyResocontoService:
                     logger.debug("daily_resoconto skip channel=%s reason=not_due_yet", channel_id)
                     continue
                 if delta_seconds > DUE_WINDOW_SECONDS:
-                    logger.debug(
-                        "daily_resoconto skip channel=%s reason=missed_window delta=%.0fs",
-                        channel_id,
-                        delta_seconds,
-                    )
+                    missed_key = f"{guild.id}:{channel_id}"
+                    if self._missed_logged.get(missed_key) != today:
+                        logger.warning(
+                            "daily_resoconto skip channel=%s reason=missed_window delta=%.0fs",
+                            channel_id,
+                            delta_seconds,
+                        )
+                        self._missed_logged[missed_key] = today
                     continue
                 sent = await self.generate_and_send_for_channel(str(guild.id), channel_id, manual=False)
                 if sent:
@@ -182,7 +190,7 @@ class DailyResocontoService:
             summary_mode="daily_report",
         )
 
-        tones = self._build_tone_line(bar.metrics)
+        barcello_line = self._build_barcello_line(bar.score, bar.color, summary)
         advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
         day_label = format_day_label(now_local)
 
@@ -213,7 +221,7 @@ class DailyResocontoService:
             channel_id=int(channel_id),
             channel_name=str(channel_name),
             barcello_status=bar,
-            tones_line=tones,
+            barcello_line=barcello_line,
             summary_result=summary,
             message_index=message_index,
             advice_bullets=advice,
@@ -242,17 +250,31 @@ class DailyResocontoService:
         logger.info("daily_resoconto sent guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
         return True
 
-    def _build_tone_line(self, metrics: dict[str, object]) -> str:
-        negativity_hits = int(metrics.get("negativity_hits") or 0)
-        positive_hits = int(metrics.get("positive_hits") or 0)
-        questions = int(metrics.get("questions") or 0)
-        if negativity_hits > 0:
-            return "tono con tensione e bisogno di chiarimenti 🧯"
-        if positive_hits > 0:
-            return "tono collaborativo e scambi costruttivi 🌿"
-        if questions > 1:
-            return "giornata ricca di domande e chiarimenti ❓"
-        return "scambi regolari e ritmo stabile 🌤️"
+    def _build_barcello_line(self, score: int, color: str | None, summary: SummaryResult | None) -> str:
+        degrade_count = len(getattr(summary, "degrade", []) or [])
+        invigorate_count = len(getattr(summary, "invigorate", []) or [])
+        cautious = degrade_count > invigorate_count
+        positive = invigorate_count > degrade_count
+
+        if score >= 85:
+            if cautious:
+                return "Oggi barcello in modalità SPA: chill totale, ma senza stuzzicare troppo 🌿😌"
+            return "Oggi barcello in modalità SPA: chill totale e vibe verde 🌿😌"
+        if score >= 70:
+            if positive:
+                return "Giornata stabile e in crescita: il mood gira bene, teniamolo morbido 🌱"
+            return "Giornata stabile: si respira bene, ma teniamo il mood morbido 🌱"
+        if score >= 55:
+            if cautious:
+                return "Barcello frizzantino: qualche scintilla c'è, andiamo di calma e ironia leggera ⚡🙂"
+            return "Barcello frizzantino: occhio alle scintille, ma si recupera facile ⚡🙂"
+        if score >= 40:
+            if positive:
+                return "Giornata piccante ma recuperabile: risposte lente e toni gentili aiutano tanto 🧯🐹"
+            return "Giornata piccante: meglio risposte lente e toni gentili 🧯🐹"
+        if color == "nero" and positive:
+            return "Barcello in allerta, ma con segnali di ripresa: calma, pause e zero escalation ⚫🫶"
+        return "Barcello in allerta: servono calma, pause e zero escalation ⚫🫶"
 
     def _fallback_advice_proverbio(self, color: str) -> tuple[list[str], str]:
         fallback = {

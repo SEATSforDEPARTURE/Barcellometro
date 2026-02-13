@@ -74,6 +74,13 @@ def format_day_label(dt_local: datetime) -> str:
     return f"{WEEKDAY_IT[dt_local.weekday()]}, {dt_local.day} {MONTH_IT[dt_local.month]} {dt_local.year}"
 
 
+def _as_hashtag(value: str) -> str:
+    clean = str(value or "").strip()
+    if not clean:
+        return ""
+    return clean if clean.startswith("#") else f"#{clean}"
+
+
 def _resolve_message_meta(message_ids: Iterable[str], message_index: dict[str, MessageMeta]) -> MessageMeta | None:
     for mid in message_ids:
         key = str(mid or "").strip()
@@ -185,7 +192,7 @@ def build_daily_resoconto_embeds(
     channel_id: int,
     channel_name: str,
     barcello_status: BarcelloResult,
-    tones_line: str,
+    barcello_line: str,
     summary_result: SummaryResult,
     message_index: dict[str, MessageMeta],
     advice_bullets: list[str],
@@ -201,7 +208,7 @@ def build_daily_resoconto_embeds(
     }
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
 
-    description = f"🗓️ **{day_label}**\n\n**{emoji} ALLERTA {alert_label}**\nAnalisi toni del giorno: {tones_line}"
+    description = f"🗓️ **{day_label}**\n\n**{emoji} ALLERTA {alert_label}**\n{barcello_line}"
     if len(description) > MAX_EMBED_DESCRIPTION:
         logger.info(
             "daily_resoconto renderer truncating_description original_len=%s",
@@ -221,7 +228,8 @@ def build_daily_resoconto_embeds(
     first_details = discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)
     pages: list[discord.Embed] = [first_details]
 
-    themes_value = ", ".join(summary_result.themes) if summary_result.themes else "Nessun tema rilevato."
+    themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]
+    themes_value = ", ".join(themes) if themes else "Nessun tema rilevato."
     _add_field_chunked(pages, name="🏷️ TEMI", value=themes_value, color=0x95A5A6)
 
     moment_lines = [_moment_line(moment=it, guild_id=guild_id, channel_id=channel_id, message_index=message_index) for it in summary_result.moments[:8]]
