@@ -361,16 +361,37 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             return None, None, None
         min_dt = _parse_iso_ts(min_ts)
         max_dt = _parse_iso_ts(max_ts)
-        if max_dt and start_dt_utc > max_dt:
+
+        async def _send_no_data() -> tuple[None, None, None]:
             await send_ephemeral(
                 interaction,
-                f"❌ Range fuori dai dati disponibili (dati fino a {_format_italian_ts(max_ts)}). Riduci la finestra temporale.",
+                f"⚠️ Nessun dato nel periodo richiesto. Ultimi dati disponibili: {_format_italian_ts(max_ts)}. "
+                "Prova ad aumentare la finestra temporale.",
+            )
+            logger.info(
+                "riassunto: coverage_adjust channel=%s req_start=%s req_end=%s cov_min=%s cov_max=%s status=no-data",
+                interaction.channel_id,
+                requested_start.isoformat(),
+                requested_end.isoformat(),
+                min_ts,
+                max_ts,
             )
             return None, None, None
+
+        if max_dt and start_dt_utc > max_dt:
+            return await _send_no_data()
         if min_dt and end_dt_utc < min_dt:
             await send_ephemeral(
                 interaction,
                 f"❌ Range fuori dai dati disponibili (dati da {_format_italian_ts(min_ts)}). Riduci la finestra temporale.",
+            )
+            logger.info(
+                "riassunto: coverage_adjust channel=%s req_start=%s req_end=%s cov_min=%s cov_max=%s status=hard-error-before-start",
+                interaction.channel_id,
+                requested_start.isoformat(),
+                requested_end.isoformat(),
+                min_ts,
+                max_ts,
             )
             return None, None, None
 
@@ -383,8 +404,11 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             note2 = f"⚠️ Dati disponibili fino a {_format_italian_ts(max_ts)}. Riassunto fino a lì."
             warning_note = f"{warning_note}\n{note2}" if warning_note else note2
 
+        if start_dt_utc > end_dt_utc:
+            return await _send_no_data()
+
         logger.info(
-            "riassunto: coverage_adjust channel=%s req_start=%s req_end=%s cov_min=%s cov_max=%s adj_start=%s adj_end=%s clamped=%s",
+            "riassunto: coverage_adjust channel=%s req_start=%s req_end=%s cov_min=%s cov_max=%s adj_start=%s adj_end=%s clamped=%s status=%s",
             interaction.channel_id,
             requested_start.isoformat(),
             requested_end.isoformat(),
@@ -393,6 +417,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             start_dt_utc.isoformat(),
             end_dt_utc.isoformat(),
             bool(warning_note),
+            "clamped" if warning_note else "ok",
         )
         return start_dt_utc, end_dt_utc, warning_note
 
