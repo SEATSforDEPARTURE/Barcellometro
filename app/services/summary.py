@@ -492,6 +492,10 @@ class SummaryService:
             narrative_extra = (
                 "Imposta un andamento narrativo della giornata: apertura, sviluppo, chiusura. "
                 "Niente copia verbatim dai messaggi. "
+                "Per MOMENTI SALIENTI usa stile narrativo e integra i nomi nel testo quando possibile, "
+                "senza mai aggiungere un suffisso finale tipo '— Nome'. "
+                "Per FRASI ICONICHE non parafrasare: usa solo citazioni reali e fornisci sempre primary_ref. "
+                "Se non sei sicuro del testo esatto della frase, non inventare: restituisci il riferimento al messaggio. "
             )
         else:
             narrative_extra = ""
@@ -516,7 +520,7 @@ class SummaryService:
             "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
             "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
             "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
-            "quotes: oggetti con 'ts','quote_text','primary_ref','refs'. "
+            "quotes: oggetti con 'ts','primary_ref','refs' e 'quote_text' opzionale solo se certo al 100%. "
             "dynamics: oggetti con 'ts','dynamic_text','optional_ref','refs'. "
             "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
             "advice: lista stringhe brevi."

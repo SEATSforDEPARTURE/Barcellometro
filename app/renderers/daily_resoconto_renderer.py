@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.services.barcello import BarcelloResult
-from app.services.summary import SummaryItem, SummaryQuote, SummaryResult
+from app.services.summary import SummaryItem, SummaryResult
 from app.utils.trend_render import render_trend_value
 
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -28,6 +28,14 @@ class MessageMeta:
     message_id: str
     ts: str | None
     author_id: str | None = None
+
+
+@dataclass(frozen=True)
+class QuoteRenderItem:
+    message_id: str | None
+    ts: str | None
+    quote_text: str
+    author_display: str | None
 
 
 def _render_health_bar(score: int, color_emoji: str) -> str:
@@ -119,23 +127,17 @@ def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, col
         pages[-1].add_field(name=field_name[:256], value=chunk[:MAX_FIELD_VALUE], inline=False)
 
 
-def _moment_line(*, moment: SummaryItem, guild_id: int, channel_id: int, message_index: dict[str, MessageMeta], primary_id: str | None, display_name: str | None) -> str:
+def _moment_line(*, moment: SummaryItem, guild_id: int, channel_id: int, message_index: dict[str, MessageMeta], primary_id: str | None) -> str:
     ref = message_index.get(primary_id) if primary_id else _resolve_message_meta(moment.message_ids, message_index)
     ts = (ref.ts if ref else None) or moment.ts
     text = str(moment.text or "").strip() or "(nessun dettaglio)"
-    line = f"• {format_time_link(guild_id, channel_id, primary_id or (ref.message_id if ref else None), ts)} — {text}"
-    if display_name:
-        line += f" — {display_name}"
-    return line
+    return f"• {format_time_link(guild_id, channel_id, primary_id or (ref.message_id if ref else None), ts)} — {text}"
 
 
-def _quote_line(*, quote: SummaryQuote, guild_id: int, channel_id: int, message_index: dict[str, MessageMeta], primary_id: str | None, display_name: str | None) -> str:
-    ref = message_index.get(primary_id) if primary_id else _resolve_message_meta(quote.message_ids, message_index)
-    ts = (ref.ts if ref else None) or quote.ts
-    text = str(quote.text or "").strip() or "(nessun testo)"
-    line = f"• {format_time_link(guild_id, channel_id, primary_id or (ref.message_id if ref else None), ts)} — “{text}”"
-    if display_name:
-        line += f" — {display_name}"
+def _quote_line(*, item: QuoteRenderItem, guild_id: int, channel_id: int) -> str:
+    line = f"• {format_time_link(guild_id, channel_id, item.message_id, item.ts)} — “{item.quote_text}”"
+    if item.author_display:
+        line += f" — {item.author_display}"
     return line
 
 
@@ -163,11 +165,9 @@ def build_daily_resoconto_embeds(
     proverbio: str,
     day_label: str,
     moment_primary: dict[int, str | None],
-    quote_primary: dict[int, str | None],
     dynamic_primary: dict[int, str | None],
-    moment_display: dict[int, str | None],
-    quote_display: dict[int, str | None],
     dynamic_names: dict[int, list[str]],
+    quote_render_items: list[QuoteRenderItem],
 ) -> list[discord.Embed]:
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
@@ -192,30 +192,13 @@ def build_daily_resoconto_embeds(
     _add_field_chunked(pages, name="🏷️ TEMI", value=themes_value, color=0x95A5A6)
 
     moment_lines = [
-        _moment_line(
-            moment=it,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            message_index=message_index,
-            primary_id=moment_primary.get(id(it)),
-            display_name=moment_display.get(id(it)),
-        )
+        _moment_line(moment=it, guild_id=guild_id, channel_id=channel_id, message_index=message_index, primary_id=moment_primary.get(id(it)))
         for it in summary_result.moments[:8]
     ]
     if moment_lines:
         _add_field_chunked(pages, name="📌 MOMENTI SALIENTI", value="\n".join(moment_lines), color=0x95A5A6)
 
-    quote_lines = [
-        _quote_line(
-            quote=it,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            message_index=message_index,
-            primary_id=quote_primary.get(id(it)),
-            display_name=quote_display.get(id(it)),
-        )
-        for it in summary_result.quotes[:5]
-    ]
+    quote_lines = [_quote_line(item=it, guild_id=guild_id, channel_id=channel_id) for it in quote_render_items[:5]]
     if quote_lines:
         _add_field_chunked(pages, name="💬 FRASI ICONICHE", value="\n".join(quote_lines), color=0x95A5A6)
 

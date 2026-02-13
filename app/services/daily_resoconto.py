@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from app.renderers.daily_resoconto_renderer import MessageMeta, build_daily_resoconto_embeds, format_day_label
+from app.renderers.daily_resoconto_renderer import MessageMeta, QuoteRenderItem, build_daily_resoconto_embeds, format_day_label
 from app.services.barcello import BarcelloService
 from app.services.database import DatabaseService
 from app.services.summary import SummaryResult, SummaryService
@@ -256,26 +256,8 @@ class DailyResocontoService:
             )
 
         name_cache: dict[str, str | None] = {}
-        moment_display: dict[int, str | None] = {}
-        quote_display: dict[int, str | None] = {}
         dynamic_names: dict[int, list[str]] = {}
 
-        for moment in summary.moments:
-            moment_display[id(moment)] = await self._resolve_author_display_name(
-                guild_id=guild_id,
-                channel_id=channel_id,
-                message_id=moment_primary.get(id(moment)),
-                message_index=message_index,
-                name_cache=name_cache,
-            )
-        for quote in summary.quotes:
-            quote_display[id(quote)] = await self._resolve_author_display_name(
-                guild_id=guild_id,
-                channel_id=channel_id,
-                message_id=quote_primary.get(id(quote)),
-                message_index=message_index,
-                name_cache=name_cache,
-            )
         for dynamic in summary.dynamics:
             names: list[str] = []
             seen: set[str] = set()
@@ -306,6 +288,46 @@ class DailyResocontoService:
                     author_id=str(record["author_id"] or "") or None,
                 )
 
+        quote_render_items: list[QuoteRenderItem] = []
+        for quote in summary.quotes:
+            primary_id = quote_primary.get(id(quote))
+            quote_text: str | None = None
+            quote_ts: str | None = quote.ts
+            author_display: str | None = None
+
+            if primary_id:
+                record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=primary_id)
+                if record:
+                    raw_content = str(record["content"] or "")
+                    compact = " ".join(raw_content.split()).replace("```", "'''")
+                    if compact:
+                        quote_text = compact[:319] + "…" if len(compact) > 320 else compact
+                    quote_ts = str(record["ts"] or "") or quote_ts
+                    author_display = await self._resolve_author_display_name(
+                        guild_id=guild_id,
+                        channel_id=channel_id,
+                        message_id=primary_id,
+                        message_index=message_index,
+                        name_cache=name_cache,
+                    )
+
+            if not quote_text:
+                fallback = str(quote.text or "").strip()
+                looks_quote = fallback.startswith(('"', "“", "'")) or fallback.endswith(('"', "”", "'"))
+                if looks_quote and len(fallback) <= 320:
+                    quote_text = fallback.strip('"”\'“ ')
+            if not quote_text:
+                continue
+
+            quote_render_items.append(
+                QuoteRenderItem(
+                    message_id=primary_id,
+                    ts=quote_ts,
+                    quote_text=quote_text,
+                    author_display=author_display,
+                )
+            )
+
         channel_name = getattr(channel, "name", None) or channel_id
         embeds = build_daily_resoconto_embeds(
             guild_id=int(guild_id),
@@ -319,11 +341,9 @@ class DailyResocontoService:
             proverbio=proverbio,
             day_label=day_label,
             moment_primary=moment_primary,
-            quote_primary=quote_primary,
             dynamic_primary=dynamic_primary,
-            moment_display=moment_display,
-            quote_display=quote_display,
             dynamic_names=dynamic_names,
+            quote_render_items=quote_render_items,
         )
 
         embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
