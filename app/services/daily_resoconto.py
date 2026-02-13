@@ -4,14 +4,15 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import discord
 
 from app.renderers.daily_resoconto_renderer import MessageMeta, QuoteRenderItem, build_daily_resoconto_embeds, format_day_label
-from app.services.barcello import BarcelloService
+from app.services.barcello import BarcelloResult, BarcelloService
 from app.services.database import DatabaseService
 from app.services.summary import SummaryResult, SummaryService
 
@@ -111,11 +112,14 @@ class DailyResocontoService:
             for row in rows:
                 channel_id = str(row["channel_id"])
                 today = now_local.date().isoformat()
-                if row["last_sent_local_date"] == today:
+                already_sent_today = row["last_sent_local_date"] == today
+                send_time_setting = str(row["send_time_local"])
+                last_sent_time_local = str(row["last_sent_time_local"] or "")
+                if already_sent_today and send_time_setting == last_sent_time_local:
                     logger.debug("daily_resoconto skip channel=%s reason=already_sent", channel_id)
                     continue
                 try:
-                    hh, mm = str(row["send_time_local"]).split(":", 1)
+                    hh, mm = send_time_setting.split(":", 1)
                     send_local = now_local.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
                 except Exception:
                     logger.warning("daily_resoconto skip channel=%s reason=invalid_time_format", channel_id)
@@ -132,7 +136,13 @@ class DailyResocontoService:
                     continue
                 sent = await self.generate_and_send_for_channel(str(guild.id), channel_id, manual=False)
                 if sent:
-                    await self._database.mark_daily_report_sent(str(guild.id), channel_id, today)
+                    await self._database.mark_daily_report_sent(
+                        str(guild.id),
+                        channel_id,
+                        today,
+                        local_time_str=send_time_setting,
+                        sent_kind="scheduled",
+                    )
                     logger.info("daily_resoconto sent ok guild=%s channel=%s", guild.id, channel_id)
 
     async def _resolve_primary_ref(self, *, channel_id: str, start_ts: str, end_ts: str, ts: str | None, message_ids: list[str], message_index: dict[str, MessageMeta]) -> str | None:
@@ -175,6 +185,7 @@ class DailyResocontoService:
         start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         start_dt = start_local.astimezone(timezone.utc)
         end_dt = now_local.astimezone(timezone.utc)
+        logger.debug("daily_resoconto period guild=%s channel=%s start_utc=%s end_utc=%s", guild_id, channel_id, start_dt.isoformat(), end_dt.isoformat())
         rows = await self._database.fetch_messages_in_range(channel_id=channel_id, start_ts=start_dt.isoformat(), end_ts=end_dt.isoformat(), limit=1200)
         messages = [
             {
@@ -188,7 +199,13 @@ class DailyResocontoService:
             if str(row["content"] or "").strip()
         ]
 
-        bar = await self._barcello.compute_channel(guild_id, channel_id, 1440, now_ts=end_dt.isoformat())
+        bar = await self._barcello.compute_channel_range(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            start_ts=start_dt.isoformat(),
+            end_ts=end_dt.isoformat(),
+        )
+        bar_yesterday = await self._compute_yesterday_barcello(guild_id=guild_id, channel_id=channel_id, start_local=start_local)
         config = await self._summary.get_config()
         ai_allowed = bool(self._ai and getattr(self._ai, "is_enabled", lambda: False)())
         summary = await self._summary.build_summary(
@@ -209,9 +226,10 @@ class DailyResocontoService:
             summary_mode="daily_report",
         )
 
-        barcello_line = self._build_barcello_line(bar.score, bar.color, summary)
+        barcello_line = await self._get_alert_vibe_line(barcello=bar, summary_result=summary)
         advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
         day_label = format_day_label(now_local)
+        trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday)
 
         message_index: dict[str, MessageMeta] = {}
         for row in rows:
@@ -344,6 +362,7 @@ class DailyResocontoService:
             dynamic_primary=dynamic_primary,
             dynamic_names=dynamic_names,
             quote_render_items=quote_render_items,
+            trend_value=trend_value,
         )
 
         embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
@@ -364,7 +383,13 @@ class DailyResocontoService:
             return False
         if manual:
             today = datetime.now(ROME_TZ).date().isoformat()
-            await self._database.mark_daily_report_sent(guild_id, channel_id, today)
+            await self._database.mark_daily_report_sent(
+                guild_id,
+                channel_id,
+                today,
+                local_time_str=datetime.now(ROME_TZ).strftime("%H:%M"),
+                sent_kind="manual",
+            )
         logger.info("daily_resoconto sent guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
         return True
 
@@ -385,6 +410,80 @@ class DailyResocontoService:
             return "Barcello in allerta, ma con segnali di ripresa: calma, pause e zero escalation ⚫🫶"
         return "Barcello in allerta: servono calma, pause e zero escalation ⚫🫶"
 
+    async def _get_alert_vibe_line(self, *, barcello: BarcelloResult, summary_result: SummaryResult) -> str:
+        ai_enabled = bool(self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)())
+        if ai_enabled:
+            try:
+                now_local = datetime.now(ROME_TZ)
+                nonce = uuid4().hex[:10]
+                payload = {
+                    "score": barcello.score,
+                    "color": barcello.color,
+                    "themes": list(summary_result.themes[:2]),
+                    "nonce": nonce,
+                    "ts": now_local.isoformat(),
+                }
+                client = self._ai.client()
+                model = self._ai.get_model("summary") or "gpt-4o-mini"
+                response = await client.responses.create(
+                    model=model,
+                    input=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Scrivi UNA sola riga in italiano (max 140 caratteri), tono simpatico, coerente con score/colore barcello. "
+                                "Varia stile ad ogni risposta, non ripetere formule standard, no elenco puntato."
+                            ),
+                        },
+                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                    ],
+                )
+                line = _extract_ai_text(response).splitlines()[0].strip()
+                if line:
+                    return (line[:139] + "…") if len(line) > 140 else line
+            except Exception:
+                logger.warning("daily_resoconto alert vibe ai fallback")
+        return self._build_barcello_line(barcello.score, barcello.color, summary_result)
+
+    async def _compute_yesterday_barcello(self, *, guild_id: str, channel_id: str, start_local: datetime) -> BarcelloResult | None:
+        yesterday_local = start_local - timedelta(days=1)
+        y_start_local = yesterday_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        y_end_local = yesterday_local.replace(hour=23, minute=59, second=59, microsecond=999000)
+        try:
+            return await self._barcello.compute_channel_range(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                start_ts=y_start_local.astimezone(timezone.utc).isoformat(),
+                end_ts=y_end_local.astimezone(timezone.utc).isoformat(),
+            )
+        except Exception:
+            logger.exception("daily_resoconto yesterday barcello failed guild=%s channel=%s", guild_id, channel_id)
+            return None
+
+    def _build_trend_vs_yesterday(self, *, bar_today: BarcelloResult, bar_yesterday: BarcelloResult | None) -> str:
+        if bar_yesterday is None:
+            return "Stabile (Δ +0): confronto con ieri non disponibile."
+        delta = int(bar_today.score) - int(bar_yesterday.score)
+        if delta >= 4:
+            direction = "In miglioramento"
+        elif delta <= -4:
+            direction = "In peggioramento"
+        else:
+            direction = "Stabile"
+        today_neg = int((bar_today.metrics or {}).get("negativity_hits") or 0)
+        y_neg = int((bar_yesterday.metrics or {}).get("negativity_hits") or 0)
+        today_pos = int((bar_today.metrics or {}).get("positive_hits") or 0)
+        y_pos = int((bar_yesterday.metrics or {}).get("positive_hits") or 0)
+        if today_neg < y_neg and today_pos >= y_pos:
+            reason = "meno tensione e più supporto rispetto a ieri"
+        elif today_neg > y_neg:
+            reason = "più frizioni e callout rispetto a ieri"
+        elif today_pos > y_pos:
+            reason = "più messaggi costruttivi e supporto rispetto a ieri"
+        else:
+            reason = "clima simile a ieri, senza scossoni rilevanti"
+        return f"{direction} (Δ {delta:+d}): {reason}."
+
     def _fallback_advice_proverbio(self, color: str) -> tuple[list[str], str]:
         fallback = {
             "verde": (["Mantieni il tono positivo e ringrazia chi aiuta.", "Conferma i prossimi passi in modo chiaro.", "Premia i contributi costruttivi del canale."], "Chi semina bene, raccoglie meglio."),
@@ -400,11 +499,7 @@ class DailyResocontoService:
             try:
                 client = self._ai.client()
                 model = self._ai.get_model("summary") or "gpt-4o-mini"
-                payload = {
-                    "color": color,
-                    "themes": getattr(summary, "themes", []),
-                    "moments": [m.text for m in getattr(summary, "moments", [])[:4]],
-                }
+                payload = {"color": color, "themes": getattr(summary, "themes", []), "moments": [m.text for m in getattr(summary, "moments", [])[:4]]}
                 response = await client.responses.create(
                     model=model,
                     input=[

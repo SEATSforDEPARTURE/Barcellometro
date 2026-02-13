@@ -168,6 +168,7 @@ def build_daily_resoconto_embeds(
     dynamic_primary: dict[int, str | None],
     dynamic_names: dict[int, list[str]],
     quote_render_items: list[QuoteRenderItem],
+    trend_value: str | None = None,
 ) -> list[discord.Embed]:
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
@@ -181,7 +182,7 @@ def build_daily_resoconto_embeds(
     status_embed = discord.Embed(title=f"📊 RESOCONTO GIORNALIERO — #{channel_name}", description=description, color=embed_color)
     health_bar = _render_health_bar(barcello_status.score, emoji)
     status_embed.add_field(name="🫀 PUNTI SALUTE", value=f"{health_bar} ({barcello_status.score}/100)", inline=False)
-    trend_text = render_trend_value(barcello_status.trend)
+    trend_text = trend_value or render_trend_value(barcello_status.trend)
     if trend_text:
         status_embed.add_field(name="📈 TREND", value=trend_text, inline=False)
     status_embed.set_footer(text="")
