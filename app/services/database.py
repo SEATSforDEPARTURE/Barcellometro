@@ -173,6 +173,8 @@ class DatabaseService:
                 enabled INTEGER NOT NULL DEFAULT 0,
                 send_time_local TEXT NOT NULL DEFAULT '00:00',
                 last_sent_local_date TEXT NULL,
+                last_sent_time_local TEXT NULL,
+                last_sent_kind TEXT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (guild_id, channel_id)
@@ -241,6 +243,7 @@ class DatabaseService:
             """
         )
         await self._ensure_message_campaign_columns()
+        await self._ensure_daily_report_columns()
         await self._conn.commit()
         logger.info("Database schema initialized")
 
@@ -258,6 +261,18 @@ class DatabaseService:
         for name, col_def in missing.items():
             if name not in existing:
                 await self._conn.execute(f"ALTER TABLE message_campaigns ADD COLUMN {name} {col_def}")
+
+    async def _ensure_daily_report_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(daily_reports)")
+        existing = {row["name"] for row in columns}
+        missing = {
+            "last_sent_time_local": "TEXT NULL",
+            "last_sent_kind": "TEXT NULL",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE daily_reports ADD COLUMN {name} {col_def}")
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
         assert self._conn is not None
@@ -1024,25 +1039,35 @@ class DatabaseService:
 
     async def get_daily_report_config(self, guild_id: str, channel_id: str) -> Optional[aiosqlite.Row]:
         return await self.fetchone(
-            "SELECT guild_id, channel_id, enabled, send_time_local, last_sent_local_date FROM daily_reports WHERE guild_id = ? AND channel_id = ?",
+            "SELECT guild_id, channel_id, enabled, send_time_local, last_sent_local_date, last_sent_time_local, last_sent_kind FROM daily_reports WHERE guild_id = ? AND channel_id = ?",
             (guild_id, channel_id),
         )
 
     async def list_enabled_daily_report_channels(self, guild_id: str) -> list[aiosqlite.Row]:
         return await self.fetchall(
-            "SELECT channel_id, send_time_local, last_sent_local_date FROM daily_reports WHERE guild_id = ? AND enabled = 1",
+            "SELECT channel_id, send_time_local, last_sent_local_date, last_sent_time_local, last_sent_kind FROM daily_reports WHERE guild_id = ? AND enabled = 1",
             (guild_id,),
         )
 
-    async def mark_daily_report_sent(self, guild_id: str, channel_id: str, local_date_str: str) -> None:
+    async def mark_daily_report_sent(
+        self,
+        guild_id: str,
+        channel_id: str,
+        local_date_str: str,
+        *,
+        local_time_str: str,
+        sent_kind: str,
+    ) -> None:
         now = datetime.now(timezone.utc).isoformat()
+        safe_time = self._validate_hhmm(local_time_str)
+        kind = sent_kind if sent_kind in {"scheduled", "manual"} else "scheduled"
         await self.execute(
             """
             UPDATE daily_reports
-            SET last_sent_local_date = ?, updated_at = ?
+            SET last_sent_local_date = ?, last_sent_time_local = ?, last_sent_kind = ?, updated_at = ?
             WHERE guild_id = ? AND channel_id = ?
             """,
-            (local_date_str, now, guild_id, channel_id),
+            (local_date_str, safe_time, kind, now, guild_id, channel_id),
         )
 
     async def set_message_channel_enabled(self, guild_id: str, channel_id: str, enabled: bool) -> None:
