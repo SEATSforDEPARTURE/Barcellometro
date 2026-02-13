@@ -50,7 +50,6 @@ def _parse_json_safe(text: str) -> dict[str, Any] | None:
         return parsed if isinstance(parsed, dict) else None
     except json.JSONDecodeError:
         pass
-
     fenced_matches = re.findall(r"```json\s*(\{[\s\S]*?\})\s*```", raw, flags=re.IGNORECASE)
     for fenced in fenced_matches:
         try:
@@ -59,7 +58,6 @@ def _parse_json_safe(text: str) -> dict[str, Any] | None:
                 return parsed
         except json.JSONDecodeError:
             continue
-
     start = raw.find("{")
     end = raw.rfind("}")
     if start == -1 or end == -1 or end <= start:
@@ -129,17 +127,43 @@ class DailyResocontoService:
                 if delta_seconds > DUE_WINDOW_SECONDS:
                     missed_key = f"{guild.id}:{channel_id}"
                     if self._missed_logged.get(missed_key) != today:
-                        logger.warning(
-                            "daily_resoconto skip channel=%s reason=missed_window delta=%.0fs",
-                            channel_id,
-                            delta_seconds,
-                        )
+                        logger.warning("daily_resoconto skip channel=%s reason=missed_window delta=%.0fs", channel_id, delta_seconds)
                         self._missed_logged[missed_key] = today
                     continue
                 sent = await self.generate_and_send_for_channel(str(guild.id), channel_id, manual=False)
                 if sent:
                     await self._database.mark_daily_report_sent(str(guild.id), channel_id, today)
                     logger.info("daily_resoconto sent ok guild=%s channel=%s", guild.id, channel_id)
+
+    async def _resolve_primary_ref(self, *, channel_id: str, start_ts: str, end_ts: str, ts: str | None, message_ids: list[str], message_index: dict[str, MessageMeta]) -> str | None:
+        for mid in message_ids:
+            key = str(mid or "").strip()
+            if re.fullmatch(r"\d{17,20}", key):
+                return key
+        if ts:
+            nearest = await self._database.fetch_nearest_message_id_in_range(channel_id=channel_id, start_ts=start_ts, end_ts=end_ts, ts=ts)
+            if nearest:
+                return nearest
+        return None
+
+    async def _resolve_author_display_name(self, *, guild_id: str, channel_id: str, message_id: str | None, message_index: dict[str, MessageMeta], name_cache: dict[str, str | None]) -> str | None:
+        if not message_id:
+            return None
+        meta = message_index.get(message_id)
+        author_id = str(meta.author_id or "").strip() if meta else ""
+        if not author_id:
+            record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=message_id)
+            if record:
+                author_id = str(record["author_id"] or "").strip()
+                if message_id not in message_index:
+                    message_index[message_id] = MessageMeta(message_id=message_id, ts=str(record["ts"] or "") or None, author_id=author_id or None)
+        if not author_id:
+            return None
+        if author_id in name_cache:
+            return name_cache[author_id]
+        display = await self._database.fetch_user_display_name(guild_id=guild_id, user_id=author_id)
+        name_cache[author_id] = display
+        return display
 
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
@@ -151,12 +175,7 @@ class DailyResocontoService:
         start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         start_dt = start_local.astimezone(timezone.utc)
         end_dt = now_local.astimezone(timezone.utc)
-        rows = await self._database.fetch_messages_in_range(
-            channel_id=channel_id,
-            start_ts=start_dt.isoformat(),
-            end_ts=end_dt.isoformat(),
-            limit=1200,
-        )
+        rows = await self._database.fetch_messages_in_range(channel_id=channel_id, start_ts=start_dt.isoformat(), end_ts=end_dt.isoformat(), limit=1200)
         messages = [
             {
                 "ts": row["ts"],
@@ -178,7 +197,7 @@ class DailyResocontoService:
             start_ts=start_dt.isoformat(),
             end_ts=end_dt.isoformat(),
             tier="role3",
-            include_names=False,
+            include_names=True,
             ai_allowed=ai_allowed,
             evidence_mode=False,
             voice_context=False,
@@ -194,26 +213,98 @@ class DailyResocontoService:
         advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
         day_label = format_day_label(now_local)
 
-        referenced_message_ids: set[str] = set()
-        for item in summary.moments:
-            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
-        for item in summary.quotes:
-            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
-        for item in summary.dynamics:
-            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
-
         message_index: dict[str, MessageMeta] = {}
         for row in rows:
             message_id = str(row["message_id"] or "").strip()
             if message_id:
-                message_index[message_id] = MessageMeta(message_id=message_id, ts=str(row["ts"] or "") or None)
+                message_index[message_id] = MessageMeta(
+                    message_id=message_id,
+                    ts=str(row["ts"] or "") or None,
+                    author_id=str(row["author_id"] or "") or None,
+                )
 
-        for message_id in referenced_message_ids:
+        moment_primary: dict[int, str | None] = {}
+        quote_primary: dict[int, str | None] = {}
+        dynamic_primary: dict[int, str | None] = {}
+
+        for moment in summary.moments:
+            moment_primary[id(moment)] = await self._resolve_primary_ref(
+                channel_id=channel_id,
+                start_ts=start_dt.isoformat(),
+                end_ts=end_dt.isoformat(),
+                ts=moment.ts,
+                message_ids=moment.message_ids,
+                message_index=message_index,
+            )
+        for quote in summary.quotes:
+            quote_primary[id(quote)] = await self._resolve_primary_ref(
+                channel_id=channel_id,
+                start_ts=start_dt.isoformat(),
+                end_ts=end_dt.isoformat(),
+                ts=quote.ts,
+                message_ids=quote.message_ids,
+                message_index=message_index,
+            )
+        for dynamic in summary.dynamics:
+            dynamic_primary[id(dynamic)] = await self._resolve_primary_ref(
+                channel_id=channel_id,
+                start_ts=start_dt.isoformat(),
+                end_ts=end_dt.isoformat(),
+                ts=dynamic.ts,
+                message_ids=dynamic.message_ids,
+                message_index=message_index,
+            )
+
+        name_cache: dict[str, str | None] = {}
+        moment_display: dict[int, str | None] = {}
+        quote_display: dict[int, str | None] = {}
+        dynamic_names: dict[int, list[str]] = {}
+
+        for moment in summary.moments:
+            moment_display[id(moment)] = await self._resolve_author_display_name(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                message_id=moment_primary.get(id(moment)),
+                message_index=message_index,
+                name_cache=name_cache,
+            )
+        for quote in summary.quotes:
+            quote_display[id(quote)] = await self._resolve_author_display_name(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                message_id=quote_primary.get(id(quote)),
+                message_index=message_index,
+                name_cache=name_cache,
+            )
+        for dynamic in summary.dynamics:
+            names: list[str] = []
+            seen: set[str] = set()
+            candidate_ids = [dynamic_primary.get(id(dynamic)), *dynamic.message_ids]
+            for candidate in candidate_ids:
+                display = await self._resolve_author_display_name(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    message_id=candidate,
+                    message_index=message_index,
+                    name_cache=name_cache,
+                )
+                if display and display not in seen:
+                    names.append(display)
+                    seen.add(display)
+                if len(names) >= 3:
+                    break
+            dynamic_names[id(dynamic)] = names
+
+        for message_id in {m for m in [*moment_primary.values(), *quote_primary.values(), *dynamic_primary.values()] if m}:
             if message_id in message_index:
                 continue
             record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=message_id)
             if record:
-                message_index[message_id] = MessageMeta(message_id=message_id, ts=str(record["ts"] or "") or None)
+                message_index[message_id] = MessageMeta(
+                    message_id=message_id,
+                    ts=str(record["ts"] or "") or None,
+                    author_id=str(record["author_id"] or "") or None,
+                )
 
         channel_name = getattr(channel, "name", None) or channel_id
         embeds = build_daily_resoconto_embeds(
@@ -227,7 +318,14 @@ class DailyResocontoService:
             advice_bullets=advice,
             proverbio=proverbio,
             day_label=day_label,
+            moment_primary=moment_primary,
+            quote_primary=quote_primary,
+            dynamic_primary=dynamic_primary,
+            moment_display=moment_display,
+            quote_display=quote_display,
+            dynamic_names=dynamic_names,
         )
+
         embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
         for embed in embeds[1:]:
             embed.set_footer(text="")
@@ -255,65 +353,25 @@ class DailyResocontoService:
         invigorate_count = len(getattr(summary, "invigorate", []) or [])
         cautious = degrade_count > invigorate_count
         positive = invigorate_count > degrade_count
-
         if score >= 85:
-            if cautious:
-                return "Oggi barcello in modalità SPA: chill totale, ma senza stuzzicare troppo 🌿😌"
-            return "Oggi barcello in modalità SPA: chill totale e vibe verde 🌿😌"
+            return "Oggi barcello in modalità SPA: chill totale, ma senza stuzzicare troppo 🌿😌" if cautious else "Oggi barcello in modalità SPA: chill totale e vibe verde 🌿😌"
         if score >= 70:
-            if positive:
-                return "Giornata stabile e in crescita: il mood gira bene, teniamolo morbido 🌱"
-            return "Giornata stabile: si respira bene, ma teniamo il mood morbido 🌱"
+            return "Giornata stabile e in crescita: il mood gira bene, teniamolo morbido 🌱" if positive else "Giornata stabile: si respira bene, ma teniamo il mood morbido 🌱"
         if score >= 55:
-            if cautious:
-                return "Barcello frizzantino: qualche scintilla c'è, andiamo di calma e ironia leggera ⚡🙂"
-            return "Barcello frizzantino: occhio alle scintille, ma si recupera facile ⚡🙂"
+            return "Barcello frizzantino: qualche scintilla c'è, andiamo di calma e ironia leggera ⚡🙂" if cautious else "Barcello frizzantino: occhio alle scintille, ma si recupera facile ⚡🙂"
         if score >= 40:
-            if positive:
-                return "Giornata piccante ma recuperabile: risposte lente e toni gentili aiutano tanto 🧯🐹"
-            return "Giornata piccante: meglio risposte lente e toni gentili 🧯🐹"
+            return "Giornata piccante ma recuperabile: risposte lente e toni gentili aiutano tanto 🧯🐹" if positive else "Giornata piccante: meglio risposte lente e toni gentili 🧯🐹"
         if color == "nero" and positive:
             return "Barcello in allerta, ma con segnali di ripresa: calma, pause e zero escalation ⚫🫶"
         return "Barcello in allerta: servono calma, pause e zero escalation ⚫🫶"
 
     def _fallback_advice_proverbio(self, color: str) -> tuple[list[str], str]:
         fallback = {
-            "verde": (
-                [
-                    "Mantieni il tono positivo e ringrazia chi aiuta.",
-                    "Conferma i prossimi passi in modo chiaro.",
-                    "Premia i contributi costruttivi del canale.",
-                ],
-                "Chi semina bene, raccoglie meglio.",
-            ),
-            "giallo": (
-                [
-                    "Evita messaggi impulsivi e usa frasi brevi.",
-                    "Fai una domanda chiarificatrice prima di rispondere.",
-                    "Ricapitola i punti in disaccordo senza accuse.",
-                ],
-                "Meglio una parola in meno che una di troppo.",
-            ),
-            "rosso": (
-                [
-                    "Sospendi i thread accesi per qualche minuto.",
-                    "Passa da accuse a fatti verificabili.",
-                    "Coinvolgi un moderatore se il tono non cala.",
-                ],
-                "Quando il ferro è caldo, la calma vale oro.",
-            ),
+            "verde": (["Mantieni il tono positivo e ringrazia chi aiuta.", "Conferma i prossimi passi in modo chiaro.", "Premia i contributi costruttivi del canale."], "Chi semina bene, raccoglie meglio."),
+            "giallo": (["Evita messaggi impulsivi e usa frasi brevi.", "Fai una domanda chiarificatrice prima di rispondere.", "Ricapitola i punti in disaccordo senza accuse."], "Meglio una parola in meno che una di troppo."),
+            "rosso": (["Sospendi i thread accesi per qualche minuto.", "Passa da accuse a fatti verificabili.", "Coinvolgi un moderatore se il tono non cala."], "Quando il ferro è caldo, la calma vale oro."),
         }
-        return fallback.get(
-            color,
-            (
-                [
-                    "Fermati, respira e chiarisci l'obiettivo comune.",
-                    "Riduci sarcasmo e giudizi personali.",
-                    "Riparti da regole semplici di convivenza.",
-                ],
-                "Dopo la tempesta, torna il sereno.",
-            ),
-        )
+        return fallback.get(color, (["Fermati, respira e chiarisci l'obiettivo comune.", "Riduci sarcasmo e giudizi personali.", "Riparti da regole semplici di convivenza."], "Dopo la tempesta, torna il sereno."))
 
     async def _get_advice_proverbio(self, summary: object, color: str) -> tuple[list[str], str]:
         color_key = (color or "").lower()
@@ -330,19 +388,11 @@ class DailyResocontoService:
                 response = await client.responses.create(
                     model=model,
                     input=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "Rispondi in italiano. Restituisci SOLO un blocco ```json``` con schema: "
-                                '{"advice_bullets": ["..."], "proverbio": "..."}. '
-                                "advice_bullets deve avere 3-5 elementi, proverbio una sola riga."
-                            ),
-                        },
+                        {"role": "system", "content": "Rispondi in italiano. Restituisci SOLO un blocco ```json``` con schema: {\"advice_bullets\": [\"...\"], \"proverbio\": \"...\"}. advice_bullets deve avere 3-5 elementi, proverbio una sola riga."},
                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                     ],
                 )
-                text = _extract_ai_text(response)
-                data = _parse_json_safe(text)
+                data = _parse_json_safe(_extract_ai_text(response))
                 if not data:
                     raise ValueError("invalid_json")
                 advice_raw = [str(x).strip() for x in data.get("advice_bullets", []) if str(x).strip()]

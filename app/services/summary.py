@@ -161,6 +161,16 @@ POSITIVE_KEYWORDS = {
 }
 
 
+
+THEME_EN_TO_IT = {
+    "humor": "umore",
+    "health": "salute",
+    "weather": "meteo",
+    "projectwork": "progetti",
+    "collaboration": "collaborazione",
+}
+
+
 @dataclass
 class SummaryItem:
     ts: Optional[str]
@@ -492,7 +502,7 @@ class SummaryService:
             "Non inferire né ricostruire contenuti omessi per privacy. "
             "NON includere mai nomi di persone. "
             "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
-            "TEMI devono essere solo keyword brevi (no nomi). "
+            "TEMI devono essere solo keyword brevi (no nomi). TEMI devono essere in italiano, minuscoli, una parola o snake_case, senza # e senza inglese. Se un tema ti verrebbe in inglese, traducilo in italiano. "
             "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
             "Non inventare eventi di chiamata: usa solo quelli presenti nella timeline (kind: call/privacy/presence). "
             "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
@@ -1569,8 +1579,11 @@ def _is_theme_noise(token: str) -> bool:
 
 
 def _sanitize_theme_token(token: str) -> str | None:
-    cleaned = re.sub(r"[^0-9a-zA-Zàèéìòù]", "", token.lower())
-    if not cleaned or cleaned in ITALIAN_STOPWORDS:
+    cleaned = re.sub(r"[^0-9a-zA-Zàèéìòù_]", "", token.lower())
+    if not cleaned:
+        return None
+    cleaned = THEME_EN_TO_IT.get(cleaned, cleaned)
+    if cleaned in ITALIAN_STOPWORDS:
         return None
     if _is_theme_noise(cleaned):
         return None
