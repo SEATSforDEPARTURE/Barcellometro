@@ -507,13 +507,17 @@ class SummaryService:
             names_rule = "NON includere mai nomi di persone reali: usa solo il placeholder {AUTHOR} nei moments quando necessario. "
             if summary_mode == "daily_resoconto":
                 narrative_extra += (
-                    "MOMENTI SALIENTI: scrivi in stile narrativo. "
+                    "MOMENTI SALIENTI: scrivi in stile narrativo come un racconto della giornata (inizio, sviluppo, chiusura). "
                     "Non iniziare mai la frase con il nome della persona. "
-                    "Integra il nickname nel racconto in modo naturale. "
+                    "Integra il nickname nel racconto in modo naturale, preferendo strutture come '... quando {AUTHOR} ...'. "
                     "Evita qualsiasi forma che riveli o presuma il genere. "
                     "Non usare strutture da elenco tipo '{AUTHOR} ha...'. "
-                    "Esempio corretto: 'Nel corso della mattinata, {AUTHOR} condivide...'. "
-                    "Esempio sbagliato: '{AUTHOR} ha condiviso...'. "
+                    "Usa ganci temporali variati in base all'orario: 06:00-10:59 (La mattina/Di prima mattina/All'avvio della giornata), "
+                    "11:00-14:59 (Durante la tarda mattinata/Verso mezzogiorno/In piena giornata), 15:00-18:59 (Nel pomeriggio/Più tardi), "
+                    "19:00-22:59 (In serata/Sul finire della giornata). "
+                    "L'ultimo momento deve suonare come chiusura (es. 'La giornata si chiude con...' o 'In chiusura...'). "
+                    "Non usare la stessa apertura più di una volta; vietato ripetere esattamente la stessa locuzione in più bullet. "
+                    "Quando barcello_verde=true evita formule vaghe come 'un membro' o 'qualcuno' se {AUTHOR} è disponibile. "
                 )
         else:
             narrative_extra = ""
@@ -546,9 +550,11 @@ class SummaryService:
         )
         if summary_mode == "daily_resoconto":
             system_prompt += (
-                " In modalità daily_resoconto aggiungi anche `vibe_line` (una sola frase max 140 caratteri, "
-                "in italiano al passato prossimo, riferita esplicitamente al barcello di oggi usando score/colore/trend). "
-                "Se barcello_verde=true evita formule vaghe nei moments: preferisci {AUTHOR} quando il ref è disponibile. "
+                " In modalità daily_resoconto aggiungi anche `vibe_line`: UNA sola frase (max 140 caratteri), "
+                "in italiano al passato prossimo, riferita solo a colore + punti salute + vibe generale del barcello di oggi. "
+                "NON includere riferimenti a trend/delta/ieri: vietate le parole 'trend', 'stabile', 'miglioramento', 'peggioramento', 'Δ', 'delta', 'rispetto a ieri'. "
+                "Varia stile e lessico ad ogni invio, evita formule standard ripetitive. "
+                "Usa il campo `summary_context.nonce` solo come stimolo di variazione e non stamparlo. "
                 "Aggiungi opzionalmente `advice_bullets` (3-5) e `proverbio` (una riga)."
             )
         user_payload = json.dumps(

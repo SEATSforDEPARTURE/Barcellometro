@@ -5,6 +5,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import discord
@@ -143,24 +144,14 @@ class DailyResocontoService:
     def _contains_vague_actor(self, text: str) -> bool:
         return bool(re.search(r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b", str(text or ""), flags=re.IGNORECASE))
 
-    def _ensure_narrative_moment_style(self, text: str, display_name: str | None) -> str:
-        clean = str(text or "").strip()
-        if not clean:
-            return clean
-        display = safe_display_name(display_name)
-        if display and clean.lower().startswith(display.lower()):
-            return f"Nel corso della conversazione, {clean}"
-        return clean
-
-    def _ensure_past_tense_vibe(self, text: str, bar: BarcelloResult, trend_value: str) -> str:
+    def _ensure_past_tense_vibe(self, text: str, bar: BarcelloResult) -> str:
         raw = " ".join(str(text or "").split())
         if raw:
             raw = raw.replace("\n", " ").strip()
             raw = (raw[:139] + "…") if len(raw) > 140 else raw
             if re.search(r"\b(è stato|è rimasto|ha tenuto|si è mantenuto|si è stabilizzato|ha chiuso)\b", raw, flags=re.IGNORECASE):
                 return raw
-        trend_head = (trend_value or "stabile").split(":", 1)[0].lower()
-        return f"Nella giornata di oggi il barcello è rimasto {bar.color} ({bar.score}/100), con trend {trend_head}."
+        return f"Nella giornata di oggi il barcello è rimasto {bar.color} ({bar.score}/100), con un clima complessivamente disteso."
 
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
@@ -215,11 +206,12 @@ class DailyResocontoService:
                 "score": bar.score,
                 "color": bar.color,
                 "barcello_verde": (bar.color == "verde" and int(bar.score) >= 70),
+                "nonce": f"{now_local.isoformat()}-{uuid4().hex[:10]}",
             },
         )
 
         trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday)
-        barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar, trend_value)
+        barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar)
         advice = [str(x).strip()[:160] for x in (getattr(summary, "advice", []) or []) if str(x).strip()][:5]
         proverbio = str(getattr(summary, "proverbio", "") or "").strip()
         if not advice or not proverbio:
@@ -293,7 +285,6 @@ class DailyResocontoService:
                     count=1,
                     flags=re.IGNORECASE,
                 )
-            integrated = self._ensure_narrative_moment_style(integrated, display)
             moment.text = self._sanitize_moment_text(integrated)
 
         for dynamic in summary.dynamics:
