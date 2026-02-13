@@ -150,27 +150,19 @@ class DailyResocontoService:
         clean = str(text or "").strip()
         if not clean:
             return clean
+        if "{AUTHOR}" not in clean:
+            return clean
         if not display_name:
             return clean.replace("{AUTHOR}", "").strip()
-        if "{AUTHOR}" in clean:
-            return clean.replace("{AUTHOR}", display_name).strip()
-        first = clean[0].lower() + clean[1:] if len(clean) > 1 else clean.lower()
-        return f"{display_name} {first}".strip()
+        return clean.replace("{AUTHOR}", display_name).strip()
 
-    def _sanitize_invented_names(self, text: str, allowed_names: set[str]) -> str:
-        allow_tokens = {"Oggi", "Ieri", "Barcello", "Discord"}
-        allowed_lower = {name.lower() for name in allowed_names}
-
-        def repl(match: re.Match[str]) -> str:
-            token = match.group(0)
-            if token in allow_tokens:
-                return token
-            if token.lower() in allowed_lower:
-                return token
-            return ""
-
-        out = re.sub(r"\b[A-Z][A-Za-zÀ-ÖØ-öø-ÿ]{2,}\b", repl, text)
-        return " ".join(out.split())
+    def _sanitize_moment_text(self, text: str) -> str:
+        clean = str(text or "").strip()
+        if not clean:
+            return clean
+        clean = re.sub(r"^(?:alba|mattina|pomeriggio|sera)\s*,\s+", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"^[^\wÀ-ÖØ-öø-ÿA-Za-z0-9#]{1,4}\s+", "", clean)
+        return " ".join(clean.split())
 
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
@@ -220,7 +212,7 @@ class DailyResocontoService:
             max_message_ts=messages[-1]["ts"] if messages else None,
             messages=messages,
             granularity_hint="days",
-            summary_mode="daily_report",
+            summary_mode="default",
         )
 
         trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday)
@@ -272,8 +264,6 @@ class DailyResocontoService:
 
         message_cache: dict[str, dict[str, Any]] = {}
         dynamic_names: dict[int, list[str]] = {}
-        allowed_names: set[str] = set()
-
         for moment in summary.moments:
             primary_id = moment_primary.get(id(moment))
             display = await resolve_display_name_from_message_id(
@@ -283,10 +273,8 @@ class DailyResocontoService:
                 message_id=primary_id,
                 message_cache=message_cache,
             )
-            if display:
-                allowed_names.add(display)
             integrated = self._integrate_author_in_moment(moment.text, display)
-            moment.text = self._sanitize_invented_names(integrated, allowed_names)
+            moment.text = self._sanitize_moment_text(integrated)
 
         for dynamic in summary.dynamics:
             names: list[str] = []
@@ -303,7 +291,6 @@ class DailyResocontoService:
                 if display and display not in seen:
                     names.append(display)
                     seen.add(display)
-                    allowed_names.add(display)
                 if len(names) >= 3:
                     break
             dynamic_names[id(dynamic)] = names
