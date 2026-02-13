@@ -12,6 +12,7 @@ from app.services.barcello import NEGATIVE_KEYWORDS
 from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)
+MOMENT_TEXT_LIMIT = 200
 
 DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
     "tiers": {
@@ -406,7 +407,8 @@ class SummaryService:
         tier: str,
     ) -> SummaryResult:
         themes = self._extract_themes(messages, config, tier)
-        moments = self._extract_moments(messages, config, tier)
+        moments_tier = _moments_policy_tier(tier)
+        moments = self._extract_moments(messages, config, moments_tier)
         quotes = self._extract_quotes(messages, config, tier)
         dynamics = self._extract_dynamics(barcello_metrics, messages, config, tier)
         degrade, invigorate = self._extract_impact(messages, config, tier)
@@ -415,6 +417,7 @@ class SummaryService:
         quotes = _sanitize_summary_items(quotes, drop_templates=False)
         dynamics = _sanitize_summary_items(dynamics, drop_templates=False)
         moments = _sort_moments_chronologically(moments)
+        moments = _compact_moment_items(moments, limit=MOMENT_TEXT_LIMIT)
         quotes = _sort_quotes_chronologically(quotes)
         dynamics = _sort_moments_chronologically(dynamics)
         degrade = _sort_impacts_chronologically(degrade)
@@ -461,7 +464,9 @@ class SummaryService:
             }
             for msg in sampled_messages
         ]
-        moments_target = _tier_limit(config, tier, "moments", 5)
+        moments_policy_tier = _moments_policy_tier(tier)
+        moments_target = _tier_limit(config, moments_policy_tier, "moments", 5)
+        logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
         quotes_target = _tier_limit(config, tier, "quotes", 3)
         dynamics_target = _tier_limit(config, tier, "dynamics", 2)
         system_prompt = (
@@ -661,7 +666,8 @@ class SummaryService:
             len(degrade),
             len(invigorate),
         )
-        moment_limit = _tier_limit(config, tier, "moments", 5)
+        moments_policy_tier = _moments_policy_tier(tier)
+        moment_limit = _tier_limit(config, moments_policy_tier, "moments", 5)
         quote_limit = _tier_limit(config, tier, "quotes", 3)
         dynamic_limit = _tier_limit(config, tier, "dynamics", 2)
         if not themes:
@@ -694,6 +700,7 @@ class SummaryService:
         if len(moments) > moment_limit:
             moments = moments[:moment_limit]
         moments = _sort_moments_chronologically(moments)
+        moments = _compact_moment_items(moments, limit=MOMENT_TEXT_LIMIT)
         if not quotes:
             quotes = _sanitize_summary_items(local_summary.quotes)
         if len(quotes) < quote_limit:
@@ -1982,6 +1989,34 @@ def _tier_limit(config: dict[str, Any], tier: str, key: str, fallback: int) -> i
         except (TypeError, ValueError):
             return fallback
     return fallback
+
+
+def _moments_policy_tier(tier: str) -> str:
+    if tier in {"role1", "role2", "role3", "mod"}:
+        return "role3"
+    return tier
+
+
+def _compact_text_word_boundary(text: str, limit: int) -> str:
+    cleaned = " ".join((text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    if limit <= 1:
+        return "…"
+    cut = cleaned[: limit - 1]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    if not cut:
+        cut = cleaned[: limit - 1]
+    return f"{cut}…"
+
+
+def _compact_moment_items(items: list[SummaryItem], *, limit: int) -> list[SummaryItem]:
+    output: list[SummaryItem] = []
+    for item in items:
+        item.text = _compact_text_word_boundary(item.text or "", limit)
+        output.append(item)
+    return output
 
 
 def cast_items(items: Iterable[Any], target: type) -> list[Any]:

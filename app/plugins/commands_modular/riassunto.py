@@ -651,6 +651,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             )
 
             include_names = (barcello_result.color or "").lower() == "verde"
+            if profile == "mod":
+                include_names = True
+                logger.info("riassunto: mod_show_names_override=true color=%s", barcello_result.color)
+            logger.info("riassunto: moments policy=role3 for tier=%s", profile)
 
             period_prefix = _build_period_prefix(
                 period_label,
