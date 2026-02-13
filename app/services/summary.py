@@ -501,12 +501,20 @@ class SummaryService:
             narrative_extra = (
                 "Imposta un andamento narrativo della giornata: apertura, sviluppo, chiusura. "
                 "Niente copia verbatim dai messaggi. "
-                "Per MOMENTI SALIENTI usa stile narrativo ma NON scrivere mai nomi propri: usa il placeholder {AUTHOR} quando serve. "
-                "Non aggiungere mai un suffisso finale tipo '— Nome'. "
                 "Per FRASI ICONICHE non parafrasare: usa solo citazioni reali e fornisci sempre primary_ref. "
                 "Se non sei sicuro del testo esatto della frase, non inventare: restituisci il riferimento al messaggio. "
             )
-            names_rule = "NON includere mai nomi di persone (usa solo {AUTHOR} nei moments). "
+            names_rule = "NON includere mai nomi di persone reali: usa solo il placeholder {AUTHOR} nei moments quando necessario. "
+            if summary_mode == "daily_resoconto":
+                narrative_extra += (
+                    "MOMENTI SALIENTI: scrivi in stile narrativo. "
+                    "Non iniziare mai la frase con il nome della persona. "
+                    "Integra il nickname nel racconto in modo naturale. "
+                    "Evita qualsiasi forma che riveli o presuma il genere. "
+                    "Non usare strutture da elenco tipo '{AUTHOR} ha...'. "
+                    "Esempio corretto: 'Nel corso della mattinata, {AUTHOR} condivide...'. "
+                    "Esempio sbagliato: '{AUTHOR} ha condiviso...'. "
+                )
         else:
             narrative_extra = ""
             names_rule = "NON includere mai nomi di persone. "

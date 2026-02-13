@@ -143,6 +143,15 @@ class DailyResocontoService:
     def _contains_vague_actor(self, text: str) -> bool:
         return bool(re.search(r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b", str(text or ""), flags=re.IGNORECASE))
 
+    def _ensure_narrative_moment_style(self, text: str, display_name: str | None) -> str:
+        clean = str(text or "").strip()
+        if not clean:
+            return clean
+        display = safe_display_name(display_name)
+        if display and clean.lower().startswith(display.lower()):
+            return f"Nel corso della conversazione, {clean}"
+        return clean
+
     def _ensure_past_tense_vibe(self, text: str, bar: BarcelloResult, trend_value: str) -> str:
         raw = " ".join(str(text or "").split())
         if raw:
@@ -284,6 +293,7 @@ class DailyResocontoService:
                     count=1,
                     flags=re.IGNORECASE,
                 )
+            integrated = self._ensure_narrative_moment_style(integrated, display)
             moment.text = self._sanitize_moment_text(integrated)
 
         for dynamic in summary.dynamics:
