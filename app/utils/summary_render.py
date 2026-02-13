@@ -77,6 +77,7 @@ def build_summary_detail_embeds(
     format_dynamic_line: Callable[..., str],
     format_impact_line: Callable[..., str],
     format_bullets: Callable[[list[str]], str],
+    dm_mode: bool = False,
 ) -> list[discord.Embed]:
     sections_map: dict[str, list[tuple[str, str, int]]] = {}
     has_privacy_gaps = bool(privacy_intervals)
@@ -234,5 +235,6 @@ def build_summary_detail_embeds(
     embeds = _ensure_embed_limits(embeds, max_chars=MAX_EMBED_CHARS)
     total = max(len(embeds), 1)
     for idx, embed in enumerate(embeds, start=1):
-        embed.title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label} (Pag {idx}/{total})"
+        base_title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label} (Pag {idx}/{total})"
+        embed.title = f"**{base_title}**" if dm_mode else base_title
     return embeds
