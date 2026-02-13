@@ -754,8 +754,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            command_config = await ctx.entitlements.get_command_profile_config(interaction.user, "riassunto")
-            profile, winner_role_id = await ctx.entitlements.resolve_profile_with_role_id(interaction.user)
+            member = interaction.user
+            profile, winner_role_id = await ctx.entitlements.resolve_profile_with_role_id(member)
+            command_config = await ctx.entitlements.get_command_profile_config(member, "riassunto")
             if not command_config["allowed"]:
                 dm_text = command_config["messages"].get("dm_text", "Serve almeno PLUS per usare /riassunto.")
                 await send_ephemeral(interaction, dm_text)
@@ -769,6 +770,28 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             end_dt_utc = end_dt.astimezone(timezone.utc)
             if end_dt_utc < start_dt_utc:
                 start_dt_utc, end_dt_utc = end_dt_utc, start_dt_utc
+            duration_seconds = max(0, int((end_dt_utc - start_dt_utc).total_seconds()))
+            tier_cap = await ctx.entitlements.get_command_limit_seconds(member, "riassunto", "max_window_seconds")
+            logger.info("riassunto: tier_limit profile=%s duration=%s cap=%s", profile, duration_seconds, tier_cap)
+            if tier_cap is not None and duration_seconds > tier_cap:
+                suggestion = ""
+                if granularity_hint in {"days", "weeks"}:
+                    suggestion = " Riduci i giorni richiesti o passa al tier successivo."
+                if granularity_hint == "weeks" or duration_seconds >= 14 * 24 * 60 * 60:
+                    suggestion = " Prova con `/riassunto ultimi 7 giorni` oppure passa al tier successivo."
+
+                if profile == "role1":
+                    await send_ephemeral(
+                        interaction,
+                        f"❌ Limite PLUS: massimo 24 ore. Per periodi più lunghi serve PRO.{suggestion}",
+                    )
+                    return
+                if profile == "role2":
+                    await send_ephemeral(
+                        interaction,
+                        f"❌ Limite PRO: massimo 7 giorni. Per periodi più lunghi serve PRO MAX.{suggestion}",
+                    )
+                    return
             start_dt_utc, end_dt_utc, coverage_note = await _validate_coverage_or_adjust(
                 interaction,
                 start_dt_utc=start_dt_utc,
@@ -823,7 +846,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             include_date_in_time = start_dt_utc.astimezone(ROME_TZ).date() != end_dt_utc.astimezone(ROME_TZ).date()
 
             max_messages = int(summary_config.get("max_messages", 600))
-            duration_secs = max(0, int((end_dt_utc - start_dt_utc).total_seconds()))
+            duration_secs = duration_seconds
             if granularity_hint == "minutes":
                 buckets = 3
             elif granularity_hint == "hours":

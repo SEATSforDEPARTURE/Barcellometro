@@ -161,6 +161,18 @@ class EntitlementsService:
             "messages": messages,
         }
 
+    async def get_command_limit_seconds(self, member: Any, command: str, limit_key: str) -> int | None:
+        profile = await self.resolve_profile(member)
+        policy = await self._get_command_policy(command)
+        limits = policy.get("limits", {}) if isinstance(policy, dict) else {}
+        mapping = limits.get(limit_key, {}) if isinstance(limits, dict) else {}
+
+        if isinstance(mapping, dict):
+            val = mapping.get(profile)
+            if isinstance(val, int) and val > 0:
+                return val
+        return None
+
     async def _get_command_policy(self, command: str) -> dict[str, Any]:
         policies = await self._get_json_setting("entitlements.policies", DEFAULT_POLICIES)
         commands = policies.get("commands", {}) if isinstance(policies, dict) else {}

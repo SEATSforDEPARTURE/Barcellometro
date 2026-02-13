@@ -6,7 +6,16 @@
       "role_to_profile": {}
     },
     "policies": {
-      "commands": {},
+      "commands": {
+        "riassunto": {
+          "limits": {
+            "max_window_seconds": {
+              "role1": 86400,
+              "role2": 604800
+            }
+          }
+        }
+      },
       "features": { "ai": { "allowed_profiles": [] } }
     }
   }
