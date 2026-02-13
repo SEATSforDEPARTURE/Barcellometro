@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import discord
@@ -16,6 +18,57 @@ from app.services.summary import SummaryService
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
 DUE_WINDOW_SECONDS = 90
+
+
+def _extract_ai_text(response: Any) -> str:
+    output_text = getattr(response, "output_text", "") or ""
+    if output_text:
+        return output_text
+    output = getattr(response, "output", None)
+    if not isinstance(output, list):
+        return ""
+    parts: list[str] = []
+    for item in output:
+        contents = getattr(item, "content", None)
+        if not isinstance(contents, list):
+            continue
+        for content in contents:
+            text = getattr(content, "text", None)
+            if not text and getattr(content, "type", None) in {"output_text", "text"}:
+                text = getattr(content, "value", None)
+            if isinstance(text, str) and text:
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def _parse_json_safe(text: str) -> dict[str, Any] | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    fenced_matches = re.findall(r"```json\s*(\{[\s\S]*?\})\s*```", raw, flags=re.IGNORECASE)
+    for fenced in fenced_matches:
+        try:
+            parsed = json.loads(fenced)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(raw[start : end + 1])
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
 
 
 class DailyResocontoService:
@@ -176,8 +229,12 @@ class DailyResocontoService:
         )
 
         if period_desc:
-            embeds[0].add_field(name="📝 CONTESTO PERIODO", value=period_desc, inline=False)
-        await channel.send(embeds=embeds)
+            embeds[0].add_field(name="📝 CONTESTO PERIODO", value=period_desc[:1024], inline=False)
+        try:
+            await channel.send(embeds=embeds)
+        except discord.HTTPException:
+            logger.exception("daily_resoconto send failed guild=%s channel=%s", guild_id, channel_id)
+            return False
         if manual:
             today = datetime.now(ROME_TZ).date().isoformat()
             await self._database.mark_daily_report_sent(guild_id, channel_id, today)
@@ -196,31 +253,83 @@ class DailyResocontoService:
             return "giornata ricca di domande e chiarimenti ❓"
         return "scambi regolari e ritmo stabile 🌤️"
 
+    def _fallback_advice_proverbio(self, color: str) -> tuple[list[str], str]:
+        fallback = {
+            "verde": (
+                [
+                    "Mantieni il tono positivo e ringrazia chi aiuta.",
+                    "Conferma i prossimi passi in modo chiaro.",
+                    "Premia i contributi costruttivi del canale.",
+                ],
+                "Chi semina bene, raccoglie meglio.",
+            ),
+            "giallo": (
+                [
+                    "Evita messaggi impulsivi e usa frasi brevi.",
+                    "Fai una domanda chiarificatrice prima di rispondere.",
+                    "Ricapitola i punti in disaccordo senza accuse.",
+                ],
+                "Meglio una parola in meno che una di troppo.",
+            ),
+            "rosso": (
+                [
+                    "Sospendi i thread accesi per qualche minuto.",
+                    "Passa da accuse a fatti verificabili.",
+                    "Coinvolgi un moderatore se il tono non cala.",
+                ],
+                "Quando il ferro è caldo, la calma vale oro.",
+            ),
+        }
+        return fallback.get(
+            color,
+            (
+                [
+                    "Fermati, respira e chiarisci l'obiettivo comune.",
+                    "Riduci sarcasmo e giudizi personali.",
+                    "Riparti da regole semplici di convivenza.",
+                ],
+                "Dopo la tempesta, torna il sereno.",
+            ),
+        )
+
     async def _get_advice_proverbio(self, summary: object, color: str) -> tuple[list[str], str]:
-        if self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)():
+        color_key = (color or "").lower()
+        ai_enabled = self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)()
+        if ai_enabled:
             try:
                 client = self._ai.client()
                 model = self._ai.get_model("summary") or "gpt-4o-mini"
-                payload = {"color": color, "themes": getattr(summary, "themes", []), "moments": [m.text for m in getattr(summary, "moments", [])[:4]]}
+                payload = {
+                    "color": color,
+                    "themes": getattr(summary, "themes", []),
+                    "moments": [m.text for m in getattr(summary, "moments", [])[:4]],
+                }
                 response = await client.responses.create(
                     model=model,
-                    response_format={"type": "json_object"},
                     input=[
-                        {"role": "system", "content": "Restituisci SOLO JSON con advice_bullets (3-5) e proverbio (1 riga). Italiano."},
+                        {
+                            "role": "system",
+                            "content": (
+                                "Rispondi in italiano. Restituisci SOLO un blocco ```json``` con schema: "
+                                '{"advice_bullets": ["..."], "proverbio": "..."}. '
+                                "advice_bullets deve avere 3-5 elementi, proverbio una sola riga."
+                            ),
+                        },
                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                     ],
                 )
-                text = getattr(response, "output_text", "") or "{}"
-                data = json.loads(text)
-                advice = [str(x).strip() for x in data.get("advice_bullets", []) if str(x).strip()][:5]
+                text = _extract_ai_text(response)
+                data = _parse_json_safe(text)
+                if not data:
+                    raise ValueError("invalid_json")
+                advice_raw = [str(x).strip() for x in data.get("advice_bullets", []) if str(x).strip()]
+                advice = [item[:160] for item in advice_raw][:5]
                 proverbio = str(data.get("proverbio") or "").strip()
                 if advice and proverbio:
                     return advice, proverbio
-            except Exception:
-                logger.exception("daily_resoconto advice ai failed")
-        fallback = {
-            "verde": (["Mantieni il tono positivo e ringrazia chi aiuta.", "Conferma i prossimi passi in modo chiaro.", "Premia i contributi costruttivi del canale."], "Chi semina bene, raccoglie meglio."),
-            "giallo": (["Evita messaggi impulsivi e usa frasi brevi.", "Fai una domanda chiarificatrice prima di rispondere.", "Ricapitola i punti in disaccordo senza accuse."], "Meglio una parola in meno che una di troppo."),
-            "rosso": (["Sospendi i thread accesi per qualche minuto.", "Passa da accuse a fatti verificabili.", "Coinvolgi un moderatore se il tono non cala."], "Quando il ferro è caldo, la calma vale oro."),
-        }
-        return fallback.get(color, (["Fermati, respira e chiarisci l'obiettivo comune.", "Riduci sarcasmo e giudizi personali.", "Riparti da regole semplici di convivenza."], "Dopo la tempesta, torna il sereno."))
+                raise ValueError("missing_fields")
+            except Exception as exc:
+                logger.warning("daily_resoconto advice fallback reason=%s", exc.__class__.__name__)
+        else:
+            logger.info("daily_resoconto advice fallback reason=ai_disabled")
+        return self._fallback_advice_proverbio(color_key)
