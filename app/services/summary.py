@@ -279,6 +279,7 @@ class SummaryService:
         max_message_ts: Optional[str],
         messages: list[dict[str, Any]],
         granularity_hint: str | None = None,
+        summary_mode: str = "default",
     ) -> SummaryResult:
         model_name = self._ai_service.get_model("summary") if self._ai_service else None
         cache_key = self.build_cache_key(
@@ -338,6 +339,7 @@ class SummaryService:
                         barcello_metrics=barcello_metrics,
                         config=config,
                         granularity_hint=granularity_hint,
+                        summary_mode=summary_mode,
                     )
                     if ai_payload:
                         await self._sanitize_ai_payload(
@@ -409,6 +411,7 @@ class SummaryService:
         barcello_metrics: dict[str, Any],
         tier: str,
         granularity_hint: str | None = None,
+        summary_mode: str = "default",
     ) -> SummaryResult:
         themes = self._extract_themes(messages, config, tier)
         moments_tier = _moments_policy_tier(tier)
@@ -455,6 +458,7 @@ class SummaryService:
         barcello_metrics: dict[str, Any],
         config: dict[str, Any],
         granularity_hint: str | None = None,
+        summary_mode: str = "default",
     ) -> dict[str, Any] | None:
         sampled_messages = sample_messages_time_distributed(messages, max_items=80, buckets=6)
         snippet = [
@@ -474,9 +478,17 @@ class SummaryService:
         logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
         quotes_target = _tier_limit(config, tier, "quotes", 3)
         dynamics_target = _tier_limit(config, tier, "dynamics", 2)
+        if summary_mode == "daily_report":
+            narrative_extra = (
+                "Imposta un andamento narrativo della giornata: apertura, sviluppo, chiusura. "
+                "Niente copia verbatim dai messaggi. "
+            )
+        else:
+            narrative_extra = ""
         system_prompt = (
             "Scrivi in italiano e restituisci SOLO JSON valido. "
-            "Non inventare dettagli. "
+            + narrative_extra
+            + "Non inventare dettagli. "
             "Non inferire né ricostruire contenuti omessi per privacy. "
             "NON includere mai nomi di persone. "
             "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "

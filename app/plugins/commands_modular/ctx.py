@@ -30,6 +30,7 @@ class CommandContext:
     ingest: IngestService
     ai: Any
     voice_ingest: Any
+    daily_resoconto: Any
     timezone: ZoneInfo
 
     @classmethod
@@ -53,6 +54,7 @@ class CommandContext:
         status_service = registry.get("status")
         ai_service = registry.get("ai")
         voice_ingest = registry.get("voice_ingest") if registry.has("voice_ingest") else None
+        daily_resoconto = registry.get("daily_resoconto") if registry.has("daily_resoconto") else None
         ingest: IngestService = registry.get("ingest")
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
@@ -71,5 +73,6 @@ class CommandContext:
             ingest=ingest,
             ai=ai_service,
             voice_ingest=voice_ingest,
+            daily_resoconto=daily_resoconto,
             timezone=timezone,
         )

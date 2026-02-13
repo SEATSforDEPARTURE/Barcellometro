@@ -18,6 +18,8 @@ from app.services.retention import RetentionService
 from app.services.barcello import BarcelloService
 from app.services.message_scheduler import MessageSchedulerService
 from app.services.status import StatusService
+from app.services.summary import SummaryService
+from app.services.daily_resoconto import DailyResocontoService
 from app.services.stt.ai_stt import AiSttService
 from app.services.stt.faster_whisper import FasterWhisperSttService
 from app.services.translate.ai_translate import AiTranslateService
@@ -73,6 +75,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     message_scheduler = None
     barcello_service = None
     community_insights = None
+    daily_resoconto = None
 
     instance_mode = normalize_instance_mode(config.instance_mode)
     logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
@@ -96,6 +99,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
             community_insights=community_insights,
             barcello_service=barcello_service,
         )
+        summary_service = SummaryService(database_service, ai_service=ai_service)
+        daily_resoconto = DailyResocontoService(database_service, bot, summary_service, barcello_service, ai_service=ai_service)
 
     registry.register("config", config)
     registry.register("bot", bot)
@@ -111,6 +116,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("barcello", barcello_service)
         registry.register("community_insights", community_insights)
         registry.register("message_scheduler", message_scheduler)
+        registry.register("daily_resoconto", daily_resoconto)
         registry.register("stt.ai", stt_ai_service)
         registry.register("translate.local", translate_local_service)
         registry.register("translate.ai", translate_ai_service)
@@ -138,6 +144,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         status_service.register_component("barcello", barcello_service)
         status_service.register_component("community_insights", community_insights)
         status_service.register_component("message_scheduler", message_scheduler)
+        status_service.register_component("daily_resoconto", daily_resoconto)
         status_service.register_component("stt.local", stt_local_service)
         status_service.register_component("stt.ai", stt_ai_service)
         status_service.register_component("translate.local", translate_local_service)

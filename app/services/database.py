@@ -166,6 +166,18 @@ class DatabaseService:
                 profile TEXT NULL
             );
 
+
+            CREATE TABLE IF NOT EXISTS daily_reports (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                send_time_local TEXT NOT NULL DEFAULT '00:00',
+                last_sent_local_date TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id)
+            );
+
             CREATE TABLE IF NOT EXISTS message_channels (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -979,6 +991,59 @@ class DatabaseService:
         cursor = await self._conn.execute("DELETE FROM events WHERE ts < ?", (cutoff_ts,))
         await self._conn.commit()
         return cursor.rowcount
+
+
+    def _validate_hhmm(self, value: str) -> str:
+        parsed = datetime.strptime(value, "%H:%M")
+        return parsed.strftime("%H:%M")
+
+    async def upsert_daily_report_channel(self, guild_id: str, channel_id: str, enabled: bool | int, send_time_local: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        safe_time = self._validate_hhmm(send_time_local)
+        await self.execute(
+            """
+            INSERT INTO daily_reports (guild_id, channel_id, enabled, send_time_local, last_sent_local_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                send_time_local = excluded.send_time_local,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, channel_id, 1 if bool(enabled) else 0, safe_time, now, now),
+        )
+
+    async def set_daily_report_enabled(self, guild_id: str, channel_id: str, enabled: bool) -> None:
+        row = await self.get_daily_report_config(guild_id, channel_id)
+        send_time = str(row["send_time_local"]) if row else "00:00"
+        await self.upsert_daily_report_channel(guild_id, channel_id, enabled, send_time)
+
+    async def set_daily_report_time(self, guild_id: str, channel_id: str, send_time_local: str) -> None:
+        row = await self.get_daily_report_config(guild_id, channel_id)
+        enabled = bool(row["enabled"]) if row else False
+        await self.upsert_daily_report_channel(guild_id, channel_id, enabled, send_time_local)
+
+    async def get_daily_report_config(self, guild_id: str, channel_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            "SELECT guild_id, channel_id, enabled, send_time_local, last_sent_local_date FROM daily_reports WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        )
+
+    async def list_enabled_daily_report_channels(self, guild_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT channel_id, send_time_local, last_sent_local_date FROM daily_reports WHERE guild_id = ? AND enabled = 1",
+            (guild_id,),
+        )
+
+    async def mark_daily_report_sent(self, guild_id: str, channel_id: str, local_date_str: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE daily_reports
+            SET last_sent_local_date = ?, updated_at = ?
+            WHERE guild_id = ? AND channel_id = ?
+            """,
+            (local_date_str, now, guild_id, channel_id),
+        )
 
     async def set_message_channel_enabled(self, guild_id: str, channel_id: str, enabled: bool) -> None:
         now = datetime.now(timezone.utc).isoformat()

@@ -14,6 +14,7 @@ from app.plugins.commands_modular import (
     register_messaggi,
     register_privacy,
     register_riassunto,
+    register_resoconto,
     register_roles,
     register_status,
     register_stt,
@@ -41,6 +42,7 @@ def setup(registry: ServiceRegistry) -> None:
     privacy_group = app_commands.Group(name="privacy", description="Privacy per voice ingest")
     status_group = app_commands.Group(name="status", description="Stato servizi")
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunto conversazione")
+    resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
 
     barcellometro_group.add_command(role_group)
     barcellometro_group.add_command(stt_group)
@@ -59,11 +61,13 @@ def setup(registry: ServiceRegistry) -> None:
     register_privacy(privacy_group, ctx)
     register_status(status_group, ctx)
     register_riassunto(riassunto_group, ctx)
+    register_resoconto(resoconto_group, ctx)
     register_barcello(bot.tree, guild, ctx)
 
     bot.tree.add_command(barcellometro_group, guild=guild)
     bot.tree.add_command(riassunto_group, guild=guild)
     bot.tree.add_command(status_group, guild=guild)
+    bot.tree.add_command(resoconto_group, guild=guild)
     bot.tree.add_command(privacy_group, guild=guild)
 
     async def handle_ready() -> None:

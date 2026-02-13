@@ -4,6 +4,7 @@ from .barcello import register_barcello
 from .ctx import CommandContext
 from .permissions import check_permission, ensure_admin
 from .privacy import register_privacy
+from .resoconto import register_resoconto
 from .riassunto import register_riassunto
 from .roles import register_roles
 from .messaggi import register_messaggi
@@ -23,6 +24,7 @@ __all__ = [
     "register_audio_notes",
     "register_barcello",
     "register_privacy",
+    "register_resoconto",
     "register_riassunto",
     "register_roles",
     "register_messaggi",

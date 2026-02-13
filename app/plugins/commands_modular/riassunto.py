@@ -25,6 +25,7 @@ from app.utils.embed_limits import (
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
+from app.utils.summary_render import build_summary_detail_embeds
 
 logger = logging.getLogger(__name__)
 
@@ -1643,254 +1644,36 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 metrics_report = _build_metrics_report(metrics)
 
             def build_embeds() -> list[discord.Embed]:
-                sections_map: dict[str, list[tuple[str, str, int]]] = {}
-                privacy_notice_line = "🔒 Alcuni contenuti sono stati omessi per privacy."
-                privacy_empty_line = "🔒 Contenuto omesso per privacy."
-                has_privacy_gaps = bool(privacy_intervals)
-
-                themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
-                sections_map["themes"] = [("🏷️ TEMI", themes_value, 1)]
-
-                moment_header = MOMENTS_FIELD_NAME
-                moment_lines = [
-                    _format_summary_moment_line(
-                        moment=moment,
-                        guild_id=interaction.guild_id,
-                        channel_id=interaction.channel_id,
-                        include_names=include_names,
-                        display_name=moment_display.get(id(moment)),
-                        link_limit=1,
-                        primary_id=moment_primary.get(id(moment)),
-                        include_date=include_date_in_time,
-                    )
-                    for moment in summary.moments
-                ]
-                if moment_lines:
-                    moment_limit = 10
-                    if privacy_disclaimer_lines:
-                        allowed = max(moment_limit - len(privacy_disclaimer_lines), 0)
-                        moment_lines = moment_lines[:allowed]
-                        moment_lines.extend(privacy_disclaimer_lines)
-                    else:
-                        moment_lines = moment_lines[:moment_limit]
-                    sections_map["moments"] = [(moment_header, _format_bullets(moment_lines), 1)]
-                elif privacy_disclaimer_lines:
-                    sections_map["moments"] = [(moment_header, _format_bullets(privacy_disclaimer_lines), 1)]
-
-                quote_lines = [
-                    _format_summary_quote_line(
-                        quote=quote,
-                        guild_id=interaction.guild_id,
-                        channel_id=interaction.channel_id,
-                        primary_id=quote_primary.get(id(quote)),
-                        display_name=quote_display.get(id(quote)),
-                        text_override=quote_texts.get(id(quote)),
-                        include_date=include_date_in_time,
-                    )
-                    for quote in summary.quotes
-                ]
-                if has_privacy_gaps:
-                    if quote_lines:
-                        quote_lines.append(privacy_notice_line)
-                    else:
-                        quote_lines = [privacy_empty_line]
-                if quote_lines and profile in {"role2", "role3", "mod"}:
-                    sections_map["quotes"] = [("💬 FRASI ICONICHE", _format_bullets(quote_lines), 2)]
-
-                dynamic_lines = [
-                    _format_summary_dynamics_line(
-                        dynamic=dynamic,
-                        guild_id=interaction.guild_id,
-                        channel_id=interaction.channel_id,
-                        primary_id=dynamic_primary.get(id(dynamic)),
-                        include_names=include_names,
-                        display_names=dynamic_names.get(id(dynamic), []),
-                        include_date=include_date_in_time,
-                    )
-                    for dynamic in summary.dynamics
-                ]
-                if has_privacy_gaps:
-                    if dynamic_lines:
-                        dynamic_lines.append(privacy_notice_line)
-                    else:
-                        dynamic_lines = [privacy_empty_line]
-                if dynamic_lines and profile in {"role3", "mod"}:
-                    sections_map["dynamics"] = [("🧠 DINAMICHE INTERESSANTI", _format_bullets(dynamic_lines), 2)]
-
-                if profile == "mod":
-                    degrade_lines = []
-                    for impact in summary.degrade:
-                        line = _format_summary_impact_line(
-                            impact=impact,
-                            guild_id=interaction.guild_id,
-                            channel_id=interaction.channel_id,
-                            display_name=name_map.get(impact.author_id or ""),
-                            link_limit=1,
-                            prefix="🔥",
-                            primary_id=impact_primary.get(id(impact)),
-                            include_date=include_date_in_time,
-                        )
-                        degrade_lines.append(line)
-                    invigorate_lines = []
-                    for impact in summary.invigorate:
-                        line = _format_summary_impact_line(
-                            impact=impact,
-                            guild_id=interaction.guild_id,
-                            channel_id=interaction.channel_id,
-                            display_name=name_map.get(impact.author_id or ""),
-                            link_limit=1,
-                            prefix="🌿",
-                            primary_id=impact_primary.get(id(impact)),
-                            include_date=include_date_in_time,
-                        )
-                        invigorate_lines.append(line)
-                    if has_privacy_gaps:
-                        if degrade_lines:
-                            degrade_lines.append(privacy_notice_line)
-                        elif invigorate_lines:
-                            invigorate_lines.append(privacy_notice_line)
-                        else:
-                            degrade_lines = [privacy_empty_line]
-                    impact_sections: list[tuple[str, str, int]] = []
-                    if degrade_lines:
-                        impact_sections.append(("🔥 CHI DEGRADA", _format_bullets(degrade_lines), 3))
-                    if invigorate_lines:
-                        impact_sections.append(("🌿 CHI RINVIGORISCE", _format_bullets(invigorate_lines), 3))
-                    if impact_sections:
-                        sections_map["impact"] = impact_sections
-
-                    advice_lines = summary.advice
-                    if has_privacy_gaps:
-                        if advice_lines:
-                            advice_lines.append(privacy_notice_line)
-                        else:
-                            advice_lines = [privacy_empty_line]
-                    if advice_lines:
-                        sections_map["advice"] = [("🧭 CONSIGLI PERSONALIZZATI", _format_bullets(advice_lines), 3)]
-
-                    sections_map["metrics"] = [
-                        ("🧱 METRICHE AGGREGATE", _with_spacing("Dettagli completi nel file allegato."), 3)
-                    ]
-
-                    ai_note = summary.ai_status
-                    if ai_note.get("enabled"):
-                        ai_line = f"AI: ON ({ai_note.get('model')})"
-                    else:
-                        fallback = "fallback locale attivo" if ai_note.get("fallback") or not ai_allowed else ""
-                        ai_line = f"AI: OFF" + (f" — {fallback}" if fallback else "")
-                    sections_map["ai"] = [("🤖 AI", ai_line, 3)]
-
-                note_by_profile = {
-                    "role1": "🔒 Per un riassunto più approfondito e le frasi iconiche, passa a PRO o a PRO MAX per vedere anche le dinamiche.",
-                    "role2": "🔒 Per vedere anche le dinamiche interessanti passa a PRO MAX.",
-                }
-                note_text = note_by_profile.get(profile)
-                if note_text:
-                    sections_map["note"] = [("📌 NOTE", note_text, 3)]
-
-                section_order = tier_config.get("sections") or list(sections_map.keys())
-                sections: list[tuple[str, str, int]] = []
-                for section_id in section_order:
-                    if section_id in sections_map:
-                        sections.extend(sections_map[section_id])
-                for extra_id in ("note",):
-                    if extra_id in sections_map and extra_id not in section_order:
-                        sections.extend(sections_map[extra_id])
-
-                groups = sorted({group for _, _, group in sections})
-                embed_color = details_color
-                embeds: list[discord.Embed] = []
-
-                def build_embed_shell(title_suffix: str) -> discord.Embed:
-                    title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label}{title_suffix}"
-                    embed = discord.Embed(title=title, color=embed_color)
-                    embed.set_footer(text="Barcellometro")
-                    return embed
-
-                def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
-                    target_max = MAX_EMBED_CHARS
-                    chunks: list[discord.Embed] = []
-                    current = build_embed_shell("")
-
-                    def add_field(field_name: str, field_value: str, *, skip_truncation: bool = False) -> None:
-                        nonlocal current
-                        safe_name = _truncate_text(field_name, 256)
-
-                        if skip_truncation:
-                            split_values = _split_lines_into_field_values(field_value.split("\n"), 1024)
-                            if not split_values:
-                                split_values = [""]
-                        else:
-                            if field_name == MOMENTS_FIELD_NAME:
-                                logger.debug("riassunto: moments field uses link-safe truncation")
-                                safe_value = field_value
-                                if len(safe_value) > 1024:
-                                    safe_value = _truncate_moments_value_preserve_links(safe_value, 1024)
-                            else:
-                                safe_value = _truncate_field_value_preserve_lines_preserve_md_links(field_value, 1024)
-                            split_values = [safe_value]
-
-                        for idx, safe_value in enumerate(split_values):
-                            emitted_name = safe_name if idx == 0 else _truncate_text(f"{safe_name} (cont.)", 256)
-                            if not skip_truncation and (field_name != emitted_name or field_value != safe_value):
-                                logger.info(
-                                    "riassunto: field truncated req_id=%s section=%s before=%s after=%s",
-                                    req_id,
-                                    field_name,
-                                    len(field_value),
-                                    len(safe_value),
-                                )
-                            candidate = _clone_embed_shell(current)
-                            for existing in current.fields:
-                                candidate.add_field(name=existing.name, value=existing.value, inline=existing.inline)
-                            candidate.add_field(name=emitted_name, value=safe_value, inline=False)
-                            if _estimate_embed_size(candidate) >= target_max or len(candidate.fields) > 25:
-                                if current.fields:
-                                    chunks.append(current)
-                                current = build_embed_shell("")
-                                current.add_field(name=emitted_name, value=safe_value, inline=False)
-                            else:
-                                current = candidate
-
-                    for name, value, _group in section_list:
-                        if name == moment_header:
-                            moment_field_values = _split_lines_into_field_values(moment_lines, 1024)
-                            max_field_len = max((len(v) for v in moment_field_values), default=0)
-                            logger.info(
-                                "riassunto: moments split fields=%d lines=%d max_field_len=%d",
-                                len(moment_field_values),
-                                len(moment_lines),
-                                max_field_len,
-                            )
-                            for idx, moment_value in enumerate(moment_field_values):
-                                field_name = moment_header if idx == 0 else f"{moment_header} (cont.)"
-                                add_field(field_name, _with_spacing(moment_value), skip_truncation=True)
-                            continue
-                        chunks_list = _split_field_chunks(_with_spacing(value), 1024)
-                        for idx, chunk in enumerate(chunks_list):
-                            field_name = name if idx == 0 else f"{name} (cont.)"
-                            add_field(field_name, chunk)
-
-                    if current.fields:
-                        chunks.append(current)
-                    return chunks
-
-                if len(groups) <= 1:
-                    embeds = chunk_sections(sections)
-                else:
-                    for group in groups:
-                        group_sections = [item for item in sections if item[2] == group]
-                        if group_sections:
-                            embeds.extend(chunk_sections(group_sections))
-
-                embeds = _ensure_embed_limits(embeds, max_chars=MAX_EMBED_CHARS)
-                if any(_estimate_embed_size(embed) >= 6000 for embed in embeds):
-                    embeds = _ensure_embed_limits(embeds, max_chars=5600)
-
-                total = max(len(embeds), 1)
-                for idx, embed in enumerate(embeds, start=1):
-                    embed.title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label} (Pag {idx}/{total})"
-                return embeds
+                return build_summary_detail_embeds(
+                    profile=profile,
+                    summary=summary,
+                    include_names=include_names,
+                    include_date_in_time=include_date_in_time,
+                    guild_id=interaction.guild_id,
+                    channel_id=interaction.channel_id,
+                    name_map=name_map,
+                    moment_primary=moment_primary,
+                    quote_primary=quote_primary,
+                    dynamic_primary=dynamic_primary,
+                    impact_primary=impact_primary,
+                    moment_display=moment_display,
+                    quote_display=quote_display,
+                    dynamic_names=dynamic_names,
+                    quote_texts=quote_texts,
+                    privacy_intervals=[("", "")] if privacy_intervals else None,
+                    privacy_disclaimer_lines=privacy_disclaimer_lines,
+                    metrics_report=metrics_report,
+                    extra_sections=None,
+                    tier_label=tier_label,
+                    tier_config=tier_config,
+                    details_color=details_color,
+                    req_id=req_id,
+                    format_moment_line=_format_summary_moment_line,
+                    format_quote_line=_format_summary_quote_line,
+                    format_dynamic_line=_format_summary_dynamics_line,
+                    format_impact_line=_format_summary_impact_line,
+                    format_bullets=_format_bullets,
+                )
 
             embeds = build_embeds()
 
