@@ -18,6 +18,22 @@ MAX_FIELDS_PER_EMBED = 24
 
 logger = logging.getLogger(__name__)
 
+WEEKDAY_IT = {0: "Lunedì", 1: "Martedì", 2: "Mercoledì", 3: "Giovedì", 4: "Venerdì", 5: "Sabato", 6: "Domenica"}
+MONTH_IT = {
+    1: "Gennaio",
+    2: "Febbraio",
+    3: "Marzo",
+    4: "Aprile",
+    5: "Maggio",
+    6: "Giugno",
+    7: "Luglio",
+    8: "Agosto",
+    9: "Settembre",
+    10: "Ottobre",
+    11: "Novembre",
+    12: "Dicembre",
+}
+
 
 @dataclass(frozen=True)
 class MessageMeta:
@@ -35,7 +51,7 @@ def _jump_link(guild_id: int, channel_id: int, message_id: str) -> str:
     return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
 
-def _format_local_time(ts: str | None) -> str:
+def _format_local_time_hhmm(ts: str | None) -> str:
     if not ts:
         return "--:--"
     try:
@@ -43,8 +59,19 @@ def _format_local_time(ts: str | None) -> str:
     except Exception:
         return "--:--"
     if dt.tzinfo is None:
-        return dt.strftime("%d/%m %H:%M")
-    return dt.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
+        return dt.strftime("%H:%M")
+    return dt.astimezone(ROME_TZ).strftime("%H:%M")
+
+
+def format_time_link(guild_id: int, channel_id: int, message_id: str | None, ts: str | None) -> str:
+    hhmm = _format_local_time_hhmm(ts)
+    if message_id:
+        return f"[**{hhmm}**]({_jump_link(guild_id, channel_id, message_id)})"
+    return f"**{hhmm}**"
+
+
+def format_day_label(dt_local: datetime) -> str:
+    return f"{WEEKDAY_IT[dt_local.weekday()]}, {dt_local.day} {MONTH_IT[dt_local.month]} {dt_local.year}"
 
 
 def _resolve_message_meta(message_ids: Iterable[str], message_index: dict[str, MessageMeta]) -> MessageMeta | None:
@@ -106,7 +133,6 @@ def _add_field_chunked(
         if len(pages[-1].fields) >= MAX_FIELDS_PER_EMBED:
             logger.info("daily_resoconto renderer new_page reason=max_fields")
             next_page = discord.Embed(title="🗒️ DETTAGLI", color=color)
-            next_page.set_footer(text="Barcellometro")
             pages.append(next_page)
         pages[-1].add_field(name=field_name[:256], value=chunk[:MAX_FIELD_VALUE], inline=False)
 
@@ -121,9 +147,8 @@ def _moment_line(
     ref = _resolve_message_meta(moment.message_ids, message_index)
     text = str(moment.text or "").strip() or "(nessun dettaglio)"
     if ref:
-        label = _format_local_time(ref.ts or moment.ts)
-        return f"• [{label}]({_jump_link(guild_id, channel_id, ref.message_id)}) — {text}"
-    return f"• {_format_local_time(moment.ts)} — {text}"
+        return f"• {format_time_link(guild_id, channel_id, ref.message_id, ref.ts or moment.ts)} — {text}"
+    return f"• {format_time_link(guild_id, channel_id, None, moment.ts)} — {text}"
 
 
 def _quote_line(
@@ -136,9 +161,8 @@ def _quote_line(
     ref = _resolve_message_meta(quote.message_ids, message_index)
     text = str(quote.text or "").strip() or "(nessun testo)"
     if ref:
-        label = _format_local_time(ref.ts or quote.ts)
-        return f"• [{label}]({_jump_link(guild_id, channel_id, ref.message_id)}) — “{text}”"
-    return f"• {_format_local_time(quote.ts)} — “{text}”"
+        return f"• {format_time_link(guild_id, channel_id, ref.message_id, ref.ts or quote.ts)} — “{text}”"
+    return f"• {format_time_link(guild_id, channel_id, None, quote.ts)} — “{text}”"
 
 
 def _dynamic_line(
@@ -151,9 +175,8 @@ def _dynamic_line(
     ref = _resolve_message_meta(dynamic.message_ids, message_index)
     text = str(dynamic.text or "").strip() or "(nessun dettaglio)"
     if ref:
-        label = _format_local_time(ref.ts or dynamic.ts)
-        return f"• [{label}]({_jump_link(guild_id, channel_id, ref.message_id)}) — {text}"
-    return f"• {_format_local_time(dynamic.ts)} — {text}"
+        return f"• {format_time_link(guild_id, channel_id, ref.message_id, ref.ts or dynamic.ts)} — {text}"
+    return f"• {format_time_link(guild_id, channel_id, None, dynamic.ts)} — {text}"
 
 
 def build_daily_resoconto_embeds(
@@ -167,6 +190,7 @@ def build_daily_resoconto_embeds(
     message_index: dict[str, MessageMeta],
     advice_bullets: list[str],
     proverbio: str,
+    day_label: str,
 ) -> list[discord.Embed]:
     color_label = (barcello_status.color or "nero").lower()
     color_map = {
@@ -177,7 +201,7 @@ def build_daily_resoconto_embeds(
     }
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
 
-    description = f"🕒 **Ultime 24 ore**\n\n**{emoji} ALLERTA {alert_label}**\nAnalisi toni del giorno: {tones_line}"
+    description = f"🗓️ **{day_label}**\n\n**{emoji} ALLERTA {alert_label}**\nAnalisi toni del giorno: {tones_line}"
     if len(description) > MAX_EMBED_DESCRIPTION:
         logger.info(
             "daily_resoconto renderer truncating_description original_len=%s",
@@ -192,10 +216,9 @@ def build_daily_resoconto_embeds(
     )
     health_bar = _render_health_bar(barcello_status.score, emoji)
     status_embed.add_field(name="🫀 PUNTI SALUTE", value=f"{health_bar} ({barcello_status.score}/100)", inline=False)
-    status_embed.set_footer(text="Barcellometro")
+    status_embed.set_footer(text="")
 
     first_details = discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)
-    first_details.set_footer(text="Barcellometro")
     pages: list[discord.Embed] = [first_details]
 
     themes_value = ", ".join(summary_result.themes) if summary_result.themes else "Nessun tema rilevato."

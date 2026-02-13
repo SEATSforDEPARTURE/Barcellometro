@@ -4,13 +4,13 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import discord
 
-from app.renderers.daily_resoconto_renderer import MessageMeta, build_daily_resoconto_embeds
+from app.renderers.daily_resoconto_renderer import MessageMeta, build_daily_resoconto_embeds, format_day_label
 from app.services.barcello import BarcelloService
 from app.services.database import DatabaseService
 from app.services.summary import SummaryService
@@ -109,7 +109,7 @@ class DailyResocontoService:
                 channel_id = str(row["channel_id"])
                 today = now_local.date().isoformat()
                 if row["last_sent_local_date"] == today:
-                    logger.info("daily_resoconto skip channel=%s reason=already_sent", channel_id)
+                    logger.debug("daily_resoconto skip channel=%s reason=already_sent", channel_id)
                     continue
                 try:
                     hh, mm = str(row["send_time_local"]).split(":", 1)
@@ -119,10 +119,10 @@ class DailyResocontoService:
                     continue
                 delta_seconds = (now_local - send_local).total_seconds()
                 if delta_seconds < 0:
-                    logger.info("daily_resoconto skip channel=%s reason=not_due_yet", channel_id)
+                    logger.debug("daily_resoconto skip channel=%s reason=not_due_yet", channel_id)
                     continue
                 if delta_seconds > DUE_WINDOW_SECONDS:
-                    logger.info(
+                    logger.debug(
                         "daily_resoconto skip channel=%s reason=missed_window delta=%.0fs",
                         channel_id,
                         delta_seconds,
@@ -139,8 +139,10 @@ class DailyResocontoService:
             logger.warning("daily_resoconto channel not accessible guild=%s channel=%s", guild_id, channel_id)
             return False
 
-        end_dt = datetime.now(timezone.utc)
-        start_dt = end_dt - timedelta(hours=24)
+        now_local = datetime.now(ROME_TZ)
+        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_dt = start_local.astimezone(timezone.utc)
+        end_dt = now_local.astimezone(timezone.utc)
         rows = await self._database.fetch_messages_in_range(
             channel_id=channel_id,
             start_ts=start_dt.isoformat(),
@@ -180,19 +182,9 @@ class DailyResocontoService:
             summary_mode="daily_report",
         )
 
-        period_desc = await self._summary.build_period_description(
-            tier="role3",
-            period_prefix="Nelle ultime 24 ore",
-            score=bar.score,
-            color=bar.color,
-            metrics=bar.metrics,
-            trend=bar.trend,
-            ai_allowed=ai_allowed,
-            config=config,
-        )
-        period_desc = period_desc or ""
         tones = self._build_tone_line(bar.metrics)
         advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
+        day_label = format_day_label(now_local)
 
         referenced_message_ids: set[str] = set()
         for item in summary.moments:
@@ -226,10 +218,19 @@ class DailyResocontoService:
             message_index=message_index,
             advice_bullets=advice,
             proverbio=proverbio,
+            day_label=day_label,
         )
-
-        if period_desc:
-            embeds[0].add_field(name="📝 CONTESTO PERIODO", value=period_desc[:1024], inline=False)
+        embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
+        for embed in embeds[1:]:
+            embed.set_footer(text="")
+        if len(embeds) > 1:
+            ai_status = getattr(summary, "ai_status", {}) or {}
+            ai_used = bool(ai_status.get("enabled"))
+            model_name = str(ai_status.get("model") or getattr(self._ai, "get_model", lambda _k: None)("summary") or "")
+            if ai_used and model_name:
+                embeds[-1].set_footer(text=f"Resoconto elaborato con {model_name}. Eventuali imprecisioni sono possibili.")
+            else:
+                embeds[-1].set_footer(text="Resoconto elaborato in loco. Eventuali imprecisioni sono possibili.")
         try:
             await channel.send(embeds=embeds)
         except discord.HTTPException:
