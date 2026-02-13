@@ -15,6 +15,7 @@ from app.utils.summary_render import build_summary_detail_embeds
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
+DUE_WINDOW_SECONDS = 90
 
 
 class DailyResocontoService:
@@ -48,11 +49,11 @@ class DailyResocontoService:
 
     async def run_once(self) -> None:
         now_utc = datetime.now(timezone.utc)
+        now_local = now_utc.astimezone(ROME_TZ)
         for guild in self._bot.guilds:
             rows = await self._database.list_enabled_daily_report_channels(str(guild.id))
             for row in rows:
                 channel_id = str(row["channel_id"])
-                now_local = now_utc.astimezone(ROME_TZ)
                 today = now_local.date().isoformat()
                 if row["last_sent_local_date"] == today:
                     logger.info("daily_resoconto skip channel=%s reason=already_sent", channel_id)
@@ -61,13 +62,23 @@ class DailyResocontoService:
                     hh, mm = str(row["send_time_local"]).split(":", 1)
                     send_local = now_local.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
                 except Exception:
-                    logger.warning("daily_resoconto invalid time channel=%s", channel_id)
+                    logger.warning("daily_resoconto skip channel=%s reason=invalid_time_format", channel_id)
                     continue
-                if now_local < send_local:
+                delta_seconds = (now_local - send_local).total_seconds()
+                if delta_seconds < 0:
+                    logger.info("daily_resoconto skip channel=%s reason=not_due_yet", channel_id)
+                    continue
+                if delta_seconds > DUE_WINDOW_SECONDS:
+                    logger.info(
+                        "daily_resoconto skip channel=%s reason=missed_window delta=%.0fs",
+                        channel_id,
+                        delta_seconds,
+                    )
                     continue
                 sent = await self.generate_and_send_for_channel(str(guild.id), channel_id, manual=False)
                 if sent:
                     await self._database.mark_daily_report_sent(str(guild.id), channel_id, today)
+                    logger.info("daily_resoconto sent ok guild=%s channel=%s", guild.id, channel_id)
 
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
@@ -117,13 +128,16 @@ class DailyResocontoService:
         )
 
         period_desc = await self._summary.build_period_description(
+            tier="role3",
             period_prefix="Nelle ultime 24 ore",
             score=bar.score,
             color=bar.color,
             metrics=bar.metrics,
             trend=bar.trend,
             ai_allowed=ai_allowed,
+            config=config,
         )
+        period_desc = period_desc or ""
         tones = self._build_tone_line(bar.metrics)
         advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
 
@@ -139,7 +153,11 @@ class DailyResocontoService:
             description=f"🕒 **Ultime 24 ore**\n\n**{emoji} ALLERTA {bar.color.upper()}**\n{alert}\n{tones}",
             color={"verde": 0x2ECC71, "giallo": 0xF1C40F, "rosso": 0xE74C3C, "nero": 0x2F3136}.get(bar.color, 0x2F3136),
         )
-        status_embed.add_field(name="🫀 PUNTI SALUTE", value=f"{bar.score}/100\n{period_desc}", inline=False)
+        status_embed.add_field(
+            name="🫀 PUNTI SALUTE",
+            value=f"{bar.score}/100" + (f"\n{period_desc}" if period_desc else ""),
+            inline=False,
+        )
         status_embed.set_footer(text="Barcellometro")
 
         details = build_summary_detail_embeds(
