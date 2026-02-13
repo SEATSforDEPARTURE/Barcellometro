@@ -8,10 +8,10 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from app.renderers.daily_resoconto_renderer import MessageMeta, build_daily_resoconto_embeds
 from app.services.barcello import BarcelloService
 from app.services.database import DatabaseService
 from app.services.summary import SummaryService
-from app.utils.summary_render import build_summary_detail_embeds
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -141,60 +141,43 @@ class DailyResocontoService:
         tones = self._build_tone_line(bar.metrics)
         advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
 
-        emoji = {"verde": "🟢", "giallo": "🟡", "rosso": "🔴", "nero": "⚫"}.get(bar.color, "⚫")
-        alert = {
-            "verde": "È un buon momento per scrivere e partecipare 💬",
-            "giallo": "Clima un po’ teso: scrivi con calma e chiarisci se serve 🙂",
-            "rosso": "Tensione alta: evita provocazioni e abbassa i toni 🧯",
-            "nero": "Situazione critica: meglio fermarsi e moderare subito 🚨",
-        }.get(bar.color, "Situazione critica: meglio fermarsi e moderare subito 🚨")
-        status_embed = discord.Embed(
-            title="📊 RESOCONTO GIORNALIERO — PRO MAX",
-            description=f"🕒 **Ultime 24 ore**\n\n**{emoji} ALLERTA {bar.color.upper()}**\n{alert}\n{tones}",
-            color={"verde": 0x2ECC71, "giallo": 0xF1C40F, "rosso": 0xE74C3C, "nero": 0x2F3136}.get(bar.color, 0x2F3136),
-        )
-        status_embed.add_field(
-            name="🫀 PUNTI SALUTE",
-            value=f"{bar.score}/100" + (f"\n{period_desc}" if period_desc else ""),
-            inline=False,
-        )
-        status_embed.set_footer(text="Barcellometro")
+        referenced_message_ids: set[str] = set()
+        for item in summary.moments:
+            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
+        for item in summary.quotes:
+            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
+        for item in summary.dynamics:
+            referenced_message_ids.update(str(mid) for mid in item.message_ids if str(mid).strip())
 
-        details = build_summary_detail_embeds(
-            profile="role3",
-            summary=summary,
-            include_names=False,
-            include_date_in_time=False,
+        message_index: dict[str, MessageMeta] = {}
+        for row in rows:
+            message_id = str(row["message_id"] or "").strip()
+            if message_id:
+                message_index[message_id] = MessageMeta(message_id=message_id, ts=str(row["ts"] or "") or None)
+
+        for message_id in referenced_message_ids:
+            if message_id in message_index:
+                continue
+            record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=message_id)
+            if record:
+                message_index[message_id] = MessageMeta(message_id=message_id, ts=str(record["ts"] or "") or None)
+
+        channel_name = getattr(channel, "name", None) or channel_id
+        embeds = build_daily_resoconto_embeds(
             guild_id=int(guild_id),
             channel_id=int(channel_id),
-            name_map={},
-            moment_primary={},
-            quote_primary={},
-            dynamic_primary={},
-            impact_primary={},
-            moment_display={},
-            quote_display={},
-            dynamic_names={},
-            quote_texts={},
-            privacy_intervals=None,
-            privacy_disclaimer_lines=None,
-            metrics_report=None,
-            extra_sections=[
-                ("🧭 I CONSIGLI DEL BARCELLOMETRO", "\n".join(f"• {x}" for x in advice), 3),
-                ("🍀 PROVERBIO DEL GIORNO", proverbio, 3),
-            ],
-            tier_label="PRO MAX",
-            tier_config=config["tiers"]["role3"],
-            details_color=0x95A5A6,
-            req_id="daily",
-            format_moment_line=lambda **kw: kw["moment"].text,
-            format_quote_line=lambda **kw: f'“{kw["quote"].text}”',
-            format_dynamic_line=lambda **kw: kw["dynamic"].text,
-            format_impact_line=lambda **kw: kw["impact"].reason,
-            format_bullets=lambda lines: "\n".join(f"• {ln}" for ln in lines if str(ln).strip()),
+            channel_name=str(channel_name),
+            barcello_status=bar,
+            tones_line=tones,
+            summary_result=summary,
+            message_index=message_index,
+            advice_bullets=advice,
+            proverbio=proverbio,
         )
 
-        await channel.send(embeds=[status_embed, *details[:1]])
+        if period_desc:
+            embeds[0].add_field(name="📝 CONTESTO PERIODO", value=period_desc, inline=False)
+        await channel.send(embeds=embeds)
         if manual:
             today = datetime.now(ROME_TZ).date().isoformat()
             await self._database.mark_daily_report_sent(guild_id, channel_id, today)
@@ -206,12 +189,12 @@ class DailyResocontoService:
         positive_hits = int(metrics.get("positive_hits") or 0)
         questions = int(metrics.get("questions") or 0)
         if negativity_hits > 0:
-            return "Analisi toni del giorno: tono con tensione e bisogno di chiarimenti 🧯"
+            return "tono con tensione e bisogno di chiarimenti 🧯"
         if positive_hits > 0:
-            return "Analisi toni del giorno: tono collaborativo e scambi costruttivi 🌿"
+            return "tono collaborativo e scambi costruttivi 🌿"
         if questions > 1:
-            return "Analisi toni del giorno: giornata ricca di domande e chiarimenti ❓"
-        return "Analisi toni del giorno: scambi regolari e ritmo stabile 🌤️"
+            return "giornata ricca di domande e chiarimenti ❓"
+        return "scambi regolari e ritmo stabile 🌤️"
 
     async def _get_advice_proverbio(self, summary: object, color: str) -> tuple[list[str], str]:
         if self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)():
