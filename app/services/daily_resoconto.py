@@ -15,6 +15,7 @@ from app.renderers.daily_resoconto_renderer import MessageMeta, QuoteRenderItem,
 from app.services.barcello import BarcelloResult, BarcelloService
 from app.services.database import DatabaseService
 from app.services.summary import SummaryResult, SummaryService
+from app.utils.summary_names import resolve_display_name_from_message_id, resolve_primary_message_id
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -145,35 +146,31 @@ class DailyResocontoService:
                     )
                     logger.info("daily_resoconto sent ok guild=%s channel=%s", guild.id, channel_id)
 
-    async def _resolve_primary_ref(self, *, channel_id: str, start_ts: str, end_ts: str, ts: str | None, message_ids: list[str], message_index: dict[str, MessageMeta]) -> str | None:
-        for mid in message_ids:
-            key = str(mid or "").strip()
-            if re.fullmatch(r"\d{17,20}", key):
-                return key
-        if ts:
-            nearest = await self._database.fetch_nearest_message_id_in_range(channel_id=channel_id, start_ts=start_ts, end_ts=end_ts, ts=ts)
-            if nearest:
-                return nearest
-        return None
+    def _integrate_author_in_moment(self, text: str, display_name: str | None) -> str:
+        clean = str(text or "").strip()
+        if not clean:
+            return clean
+        if not display_name:
+            return clean.replace("{AUTHOR}", "").strip()
+        if "{AUTHOR}" in clean:
+            return clean.replace("{AUTHOR}", display_name).strip()
+        first = clean[0].lower() + clean[1:] if len(clean) > 1 else clean.lower()
+        return f"{display_name} {first}".strip()
 
-    async def _resolve_author_display_name(self, *, guild_id: str, channel_id: str, message_id: str | None, message_index: dict[str, MessageMeta], name_cache: dict[str, str | None]) -> str | None:
-        if not message_id:
-            return None
-        meta = message_index.get(message_id)
-        author_id = str(meta.author_id or "").strip() if meta else ""
-        if not author_id:
-            record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=message_id)
-            if record:
-                author_id = str(record["author_id"] or "").strip()
-                if message_id not in message_index:
-                    message_index[message_id] = MessageMeta(message_id=message_id, ts=str(record["ts"] or "") or None, author_id=author_id or None)
-        if not author_id:
-            return None
-        if author_id in name_cache:
-            return name_cache[author_id]
-        display = await self._database.fetch_user_display_name(guild_id=guild_id, user_id=author_id)
-        name_cache[author_id] = display
-        return display
+    def _sanitize_invented_names(self, text: str, allowed_names: set[str]) -> str:
+        allow_tokens = {"Oggi", "Ieri", "Barcello", "Discord"}
+        allowed_lower = {name.lower() for name in allowed_names}
+
+        def repl(match: re.Match[str]) -> str:
+            token = match.group(0)
+            if token in allow_tokens:
+                return token
+            if token.lower() in allowed_lower:
+                return token
+            return ""
+
+        out = re.sub(r"\b[A-Z][A-Za-zÀ-ÖØ-öø-ÿ]{2,}\b", repl, text)
+        return " ".join(out.split())
 
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False) -> bool:
         channel = self._bot.get_channel(int(channel_id))
@@ -226,10 +223,10 @@ class DailyResocontoService:
             summary_mode="daily_report",
         )
 
-        barcello_line = await self._get_alert_vibe_line(barcello=bar, summary_result=summary)
+        trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday)
+        barcello_line = await self._get_alert_vibe_line(barcello=bar, summary_result=summary, trend_value=trend_value)
         advice, proverbio = await self._get_advice_proverbio(summary, bar.color)
         day_label = format_day_label(now_local)
-        trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday)
 
         message_index: dict[str, MessageMeta] = {}
         for row in rows:
@@ -246,51 +243,67 @@ class DailyResocontoService:
         dynamic_primary: dict[int, str | None] = {}
 
         for moment in summary.moments:
-            moment_primary[id(moment)] = await self._resolve_primary_ref(
+            moment_primary[id(moment)] = await resolve_primary_message_id(
+                database=self._database,
                 channel_id=channel_id,
                 start_ts=start_dt.isoformat(),
                 end_ts=end_dt.isoformat(),
                 ts=moment.ts,
                 message_ids=moment.message_ids,
-                message_index=message_index,
             )
         for quote in summary.quotes:
-            quote_primary[id(quote)] = await self._resolve_primary_ref(
+            quote_primary[id(quote)] = await resolve_primary_message_id(
+                database=self._database,
                 channel_id=channel_id,
                 start_ts=start_dt.isoformat(),
                 end_ts=end_dt.isoformat(),
                 ts=quote.ts,
                 message_ids=quote.message_ids,
-                message_index=message_index,
             )
         for dynamic in summary.dynamics:
-            dynamic_primary[id(dynamic)] = await self._resolve_primary_ref(
+            dynamic_primary[id(dynamic)] = await resolve_primary_message_id(
+                database=self._database,
                 channel_id=channel_id,
                 start_ts=start_dt.isoformat(),
                 end_ts=end_dt.isoformat(),
                 ts=dynamic.ts,
                 message_ids=dynamic.message_ids,
-                message_index=message_index,
             )
 
-        name_cache: dict[str, str | None] = {}
+        message_cache: dict[str, dict[str, Any]] = {}
         dynamic_names: dict[int, list[str]] = {}
+        allowed_names: set[str] = set()
+
+        for moment in summary.moments:
+            primary_id = moment_primary.get(id(moment))
+            display = await resolve_display_name_from_message_id(
+                database=self._database,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                message_id=primary_id,
+                message_cache=message_cache,
+            )
+            if display:
+                allowed_names.add(display)
+            integrated = self._integrate_author_in_moment(moment.text, display)
+            moment.text = self._sanitize_invented_names(integrated, allowed_names)
 
         for dynamic in summary.dynamics:
             names: list[str] = []
             seen: set[str] = set()
             candidate_ids = [dynamic_primary.get(id(dynamic)), *dynamic.message_ids]
             for candidate in candidate_ids:
-                display = await self._resolve_author_display_name(
+                display = await resolve_display_name_from_message_id(
+                    database=self._database,
                     guild_id=guild_id,
                     channel_id=channel_id,
                     message_id=candidate,
-                    message_index=message_index,
-                    name_cache=name_cache,
+                    message_cache=message_cache,
                 )
                 if display and display not in seen:
                     names.append(display)
                     seen.add(display)
+                    allowed_names.add(display)
                 if len(names) >= 3:
                     break
             dynamic_names[id(dynamic)] = names
@@ -321,12 +334,12 @@ class DailyResocontoService:
                     if compact:
                         quote_text = compact[:319] + "…" if len(compact) > 320 else compact
                     quote_ts = str(record["ts"] or "") or quote_ts
-                    author_display = await self._resolve_author_display_name(
+                    author_display = await resolve_display_name_from_message_id(
+                        database=self._database,
                         guild_id=guild_id,
                         channel_id=channel_id,
                         message_id=primary_id,
-                        message_index=message_index,
-                        name_cache=name_cache,
+                        message_cache=message_cache,
                     )
 
             if not quote_text:
@@ -410,7 +423,7 @@ class DailyResocontoService:
             return "Barcello in allerta, ma con segnali di ripresa: calma, pause e zero escalation ⚫🫶"
         return "Barcello in allerta: servono calma, pause e zero escalation ⚫🫶"
 
-    async def _get_alert_vibe_line(self, *, barcello: BarcelloResult, summary_result: SummaryResult) -> str:
+    async def _get_alert_vibe_line(self, *, barcello: BarcelloResult, summary_result: SummaryResult, trend_value: str) -> str:
         ai_enabled = bool(self._ai and getattr(self._ai, "is_enabled", lambda: False)() and getattr(self._ai, "client", lambda: None)())
         if ai_enabled:
             try:
@@ -419,6 +432,7 @@ class DailyResocontoService:
                 payload = {
                     "score": barcello.score,
                     "color": barcello.color,
+                    "trend": trend_value,
                     "themes": list(summary_result.themes[:2]),
                     "nonce": nonce,
                     "ts": now_local.isoformat(),
@@ -432,6 +446,8 @@ class DailyResocontoService:
                             "role": "system",
                             "content": (
                                 "Scrivi UNA sola riga in italiano (max 140 caratteri), tono simpatico, coerente con score/colore barcello. "
+                                "Deve descrivere il barcello di oggi e citare esplicitamente almeno uno tra score/colore/trend/motivo. "
+                                "Non parlare di cose generiche scollegate. Non usare nomi persone. "
                                 "Varia stile ad ogni risposta, non ripetere formule standard, no elenco puntato."
                             ),
                         },
@@ -440,7 +456,22 @@ class DailyResocontoService:
                 )
                 line = _extract_ai_text(response).splitlines()[0].strip()
                 if line:
-                    return (line[:139] + "…") if len(line) > 140 else line
+                    line = (line[:139] + "…") if len(line) > 140 else line
+                    line_l = line.lower()
+                    keywords = {
+                        "barcello",
+                        "verde",
+                        "giallo",
+                        "rosso",
+                        "nero",
+                        "stabile",
+                        "miglioramento",
+                        "peggioramento",
+                        "punti",
+                        str(barcello.score),
+                    }
+                    if any(k in line_l for k in keywords):
+                        return line
             except Exception:
                 logger.warning("daily_resoconto alert vibe ai fallback")
         return self._build_barcello_line(barcello.score, barcello.color, summary_result)
