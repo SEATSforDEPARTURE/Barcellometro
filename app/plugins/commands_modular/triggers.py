@@ -10,7 +10,19 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.services.message_scheduler import calculate_initial_next_run
 
 
-def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandContext) -> None:
+    qna_group = app_commands.Group(name="qna", description="Trigger e limiti QnA")
+    frasi_group = app_commands.Group(name="frasi", description="Trigger e regole frasi")
+    barcello_group = app_commands.Group(name="barcello", description="Trigger Barcello")
+    prompt_group = app_commands.Group(name="prompt", description="Trigger e campagne prompt")
+    insights_group = app_commands.Group(name="insights", description="Trigger curiosità utenti")
+
+    barcellometro_group.add_command(qna_group)
+    barcellometro_group.add_command(frasi_group)
+    barcellometro_group.add_command(barcello_group)
+    barcellometro_group.add_command(prompt_group)
+    barcellometro_group.add_command(insights_group)
+
     async def _require_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in un canale.", ephemeral=True)
@@ -34,61 +46,64 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
         await ctx.database.set_trigger_enabled(guild_id, channel_id, key, enabled)
         await interaction.response.send_message(f"Trigger {key} {'abilitato' if enabled else 'disabilitato'}.", ephemeral=True)
 
-    @trigger_group.command(name="status", description="Stato trigger nel canale corrente")
-    async def trigger_status(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        guild_id, channel_id = scope
-        data = await ctx.database.list_triggers(guild_id, channel_id)
-        order = ["barcello", "frasi", "prompt", "qna", "insights"]
-        lines = [f"- {k}: {'on' if data.get(k, False) else 'off'}" for k in order]
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
-
-    @trigger_group.command(name="barcello_on", description="Abilita trigger barcello")
+    @barcello_group.command(name="on", description="Abilita trigger barcello")
     async def barcello_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "barcello", "on")
 
-    @trigger_group.command(name="barcello_off", description="Disabilita trigger barcello")
+    @barcello_group.command(name="off", description="Disabilita trigger barcello")
     async def barcello_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "barcello", "off")
 
-    @trigger_group.command(name="barcello_status", description="Stato trigger barcello")
+    @barcello_group.command(name="status", description="Stato trigger barcello")
     async def barcello_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "barcello", "status")
 
-    @trigger_group.command(name="frasi_on", description="Abilita trigger frasi")
+    @frasi_group.command(name="on", description="Abilita trigger frasi")
     async def frasi_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "frasi", "on")
 
-    @trigger_group.command(name="frasi_off", description="Disabilita trigger frasi")
+    @frasi_group.command(name="off", description="Disabilita trigger frasi")
     async def frasi_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "frasi", "off")
 
-    @trigger_group.command(name="frasi_status", description="Stato trigger frasi")
+    @frasi_group.command(name="status", description="Stato trigger frasi")
     async def frasi_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "frasi", "status")
 
-    @trigger_group.command(name="frasi_add", description="Aggiungi frase trigger")
-    @app_commands.describe(phrase="Frase", match_mode="EXACT|CONTAINS|REGEX", case_sensitive="Case sensitive")
-    async def frasi_add(interaction: discord.Interaction, phrase: str, match_mode: str = "CONTAINS", case_sensitive: bool = False) -> None:
+    @frasi_group.command(name="add", description="Aggiungi frase trigger")
+    @app_commands.describe(phrase="Frase", match_mode="contains|regex")
+    @app_commands.choices(
+        match_mode=[
+            app_commands.Choice(name="contains", value="CONTAINS"),
+            app_commands.Choice(name="regex", value="REGEX"),
+        ]
+    )
+    async def frasi_add(interaction: discord.Interaction, phrase: str, match_mode: app_commands.Choice[str]) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, channel_id = scope
-        await ctx.database.add_trigger_phrase(guild_id, channel_id, phrase, match_mode.upper(), case_sensitive)
+        await ctx.database.add_trigger_phrase(guild_id, channel_id, phrase, match_mode.value, False)
         await interaction.response.send_message("Frase aggiunta.", ephemeral=True)
 
-    @trigger_group.command(name="frasi_remove", description="Rimuovi frase trigger")
-    async def frasi_remove(interaction: discord.Interaction, phrase: str) -> None:
+    @frasi_group.command(name="remove", description="Rimuovi frase trigger")
+    async def frasi_remove(interaction: discord.Interaction, id_or_phrase: str) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, channel_id = scope
+        phrase = id_or_phrase
+        if id_or_phrase.isdigit():
+            rows = await ctx.database.list_trigger_phrases(guild_id, channel_id)
+            row = next((r for r in rows if int(r["id"]) == int(id_or_phrase)), None)
+            if row is None:
+                await interaction.response.send_message("Nessuna frase trovata per quell'id.", ephemeral=True)
+                return
+            phrase = str(row["phrase"])
         await ctx.database.remove_trigger_phrase(guild_id, channel_id, phrase)
         await interaction.response.send_message("Frase rimossa.", ephemeral=True)
 
-    @trigger_group.command(name="frasi_list", description="Lista frasi")
+    @frasi_group.command(name="list", description="Lista frasi")
     async def frasi_list(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -101,25 +116,25 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
         lines = [f"{r['id']}. {r['phrase']} [{r['match_mode']}] {'cs' if r['case_sensitive'] else 'ci'}" for r in rows]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-    @trigger_group.command(name="prompt_on", description="Abilita trigger prompt")
+    @prompt_group.command(name="on", description="Abilita trigger prompt")
     async def prompt_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "prompt", "on")
 
-    @trigger_group.command(name="prompt_off", description="Disabilita trigger prompt")
+    @prompt_group.command(name="off", description="Disabilita trigger prompt")
     async def prompt_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "prompt", "off")
 
-    @trigger_group.command(name="prompt_status", description="Stato trigger prompt")
+    @prompt_group.command(name="status", description="Stato trigger prompt")
     async def prompt_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "prompt", "status")
 
-    @trigger_group.command(name="prompt_create", description="Crea campagna AI_PROMPT")
+    @prompt_group.command(name="create", description="Crea campagna AI_PROMPT")
     async def prompt_create(
         interaction: discord.Interaction,
         name: str,
         time_local: str,
         interval_minutes: int,
-        prompt: str,
+        prompt_text: str,
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
@@ -130,7 +145,7 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
             channel_id=str(interaction.channel_id),
             campaign_type="AI_PROMPT",
             name=name,
-            text=prompt,
+            text=prompt_text,
             text_green=None,
             text_yellow=None,
             text_red=None,
@@ -146,7 +161,7 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
         )
         await interaction.response.send_message(f"Campagna AI_PROMPT creata: {campaign_id}", ephemeral=True)
 
-    @trigger_group.command(name="prompt_list", description="Lista campagne AI_PROMPT")
+    @prompt_group.command(name="list", description="Lista campagne AI_PROMPT")
     async def prompt_list(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
@@ -166,27 +181,35 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
             ephemeral=True,
         )
 
-    @trigger_group.command(name="prompt_delete", description="Elimina campagna AI_PROMPT")
-    async def prompt_delete(interaction: discord.Interaction, id: int) -> None:
+    @prompt_group.command(name="delete", description="Elimina campagna AI_PROMPT")
+    async def prompt_delete(interaction: discord.Interaction, id_or_name: str) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
             return
-        await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), id)
+        campaign_id: int | None = int(id_or_name) if id_or_name.isdigit() else None
+        if campaign_id is None:
+            rows = await ctx.database.list_message_campaigns(str(interaction.guild_id), include_disabled=True)
+            row = next((r for r in rows if str(r["type"]) == "AI_PROMPT" and str(r["name"] or "") == id_or_name), None)
+            if row is None:
+                await interaction.response.send_message("Campagna non trovata.", ephemeral=True)
+                return
+            campaign_id = int(row["id"])
+        await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), campaign_id)
         await interaction.response.send_message("Campagna eliminata.", ephemeral=True)
 
-    @trigger_group.command(name="qna_on", description="Abilita trigger qna")
+    @qna_group.command(name="on", description="Abilita trigger qna")
     async def qna_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "on")
 
-    @trigger_group.command(name="qna_off", description="Disabilita trigger qna")
+    @qna_group.command(name="off", description="Disabilita trigger qna")
     async def qna_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "off")
 
-    @trigger_group.command(name="qna_status", description="Stato trigger qna")
+    @qna_group.command(name="status", description="Stato trigger qna")
     async def qna_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "status")
 
-    @trigger_group.command(name="qna_limits_show", description="Mostra limiti giornalieri QnA")
+    @qna_group.command(name="limits_show", description="Mostra limiti giornalieri QnA")
     async def qna_limits_show(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -208,7 +231,7 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
         pretty = json.dumps(data, ensure_ascii=False, indent=2)
         await interaction.response.send_message(f"```json\n{pretty}\n```", ephemeral=True)
 
-    @trigger_group.command(name="qna_limits_set", description="Imposta limite giornaliero QnA per tier")
+    @qna_group.command(name="limits_set", description="Imposta limite giornaliero QnA per tier")
     async def qna_limits_set(interaction: discord.Interaction, tier_key: str, limit_int: int) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -238,7 +261,7 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
         await ctx.database.set_setting("qna.daily_limits", json.dumps(data, ensure_ascii=False))
         await interaction.response.send_message(f"Limite aggiornato: {key}={limit_int}", ephemeral=True)
 
-    @trigger_group.command(name="qna_bonus_add", description="Aggiunge bonus domande QnA a un utente")
+    @qna_group.command(name="bonus_add", description="Aggiunge bonus domande QnA a un utente")
     async def qna_bonus_add(interaction: discord.Interaction, user: discord.Member, amount_int: int, hours_valid: int | None = None) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
@@ -264,7 +287,7 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
             ephemeral=True,
         )
 
-    @trigger_group.command(name="qna_bonus_clear", description="Rimuove bonus domande QnA")
+    @qna_group.command(name="bonus_clear", description="Rimuove bonus domande QnA")
     async def qna_bonus_clear(interaction: discord.Interaction, user: discord.Member) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
@@ -276,7 +299,7 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
         await ctx.database.clear_qna_bonus(str(interaction.guild_id), str(user.id))
         await interaction.response.send_message(f"Bonus rimosso per {user.mention}.", ephemeral=True)
 
-    @trigger_group.command(name="qna_bonus_show", description="Mostra bonus domande QnA")
+    @qna_group.command(name="bonus_show", description="Mostra bonus domande QnA")
     async def qna_bonus_show(interaction: discord.Interaction, user: discord.Member) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
@@ -291,14 +314,14 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
             ephemeral=True,
         )
 
-    @trigger_group.command(name="insights_on", description="Abilita trigger curiosità utenti")
+    @insights_group.command(name="on", description="Abilita trigger curiosità utenti")
     async def insights_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "insights", "on")
 
-    @trigger_group.command(name="insights_off", description="Disabilita trigger curiosità utenti")
+    @insights_group.command(name="off", description="Disabilita trigger curiosità utenti")
     async def insights_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "insights", "off")
 
-    @trigger_group.command(name="insights_status", description="Stato trigger curiosità utenti")
+    @insights_group.command(name="status", description="Stato trigger curiosità utenti")
     async def insights_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "insights", "status")
