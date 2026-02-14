@@ -4,6 +4,7 @@ import asyncio
 import difflib
 import json
 import logging
+import hashlib
 import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -438,10 +439,24 @@ class TriggerEngineService:
         channel_bundle: dict[str, object] | None = None
         target_ids_fragment = "all"
         if cache_scope != "global":
-            channel_bundle = await self._build_qna_payload(guild_id, channel_id, question, source=source)
+            user_id = ""
+            if isinstance(source, discord.Message):
+                user_id = str(source.author.id)
+            elif isinstance(source, discord.Interaction):
+                user_id = str(source.user.id)
+            channel_bundle = await self._build_qna_payload(
+                guild_id,
+                channel_id,
+                question,
+                source=source,
+                session_user_id=user_id,
+            )
             cache_fragment = str(channel_bundle.get("cache_fragment") or cache_fragment)
             target_ids_fragment = str(channel_bundle.get("target_ids_fragment") or target_ids_fragment)
-        cache_key = f"qna:{cache_scope}:{cache_channel}:{target_ids_fragment}:{cache_fragment}:{normalized_question}"
+            session_signature = str(channel_bundle.get("session_signature") or "nosession")
+        else:
+            session_signature = "nosession"
+        cache_key = f"qna:{cache_scope}:{cache_channel}:{target_ids_fragment}:{cache_fragment}:{session_signature}:{normalized_question}"
         cached = await self._database.get_cache(cache_key)
         if cached is not None:
             logger.info("qna cache hit scope=%s channel_id=%s", scope, channel_id)
@@ -464,16 +479,23 @@ class TriggerEngineService:
         if channel_answer and channel_answer.get("can_answer") and ambiguous_note:
             answer_text = str(channel_answer.get("answer") or "").strip()
             channel_answer["answer"] = f"{ambiguous_note}\n\n{answer_text}" if answer_text else ambiguous_note
-        if scope == "channel":
-            if channel_answer and channel_answer.get("can_answer"):
-                ttl = int(channel_bundle.get("cache_ttl") or 60 * 60)
-                await self._database.set_cache(cache_key, str(channel_answer.get("answer") or ""), ttl)
-            return channel_answer
 
-        # mixed scope
         if channel_answer and channel_answer.get("can_answer"):
             ttl = int(channel_bundle.get("cache_ttl") or 60 * 60)
             await self._database.set_cache(cache_key, str(channel_answer.get("answer") or ""), ttl)
+            if channel_bundle.get("session_user_id"):
+                await self._store_qna_turn(
+                    guild_id,
+                    channel_id,
+                    str(channel_bundle.get("session_user_id") or ""),
+                    question,
+                    str(channel_answer.get("answer") or ""),
+                )
+
+        if scope == "channel":
+            return channel_answer
+
+        if channel_answer and channel_answer.get("can_answer"):
             return channel_answer
         global_answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
         if not global_answer or not global_answer.get("can_answer"):
@@ -587,84 +609,78 @@ class TriggerEngineService:
         question: str,
         *,
         source: discord.Interaction | discord.Message | None = None,
+        session_user_id: str = "",
     ) -> dict[str, object]:
         guild = source.guild if source else None
         targets, ambiguous_note, capped_note = self._infer_target_members_with_notes(source, question, guild)
         start_dt, end_dt, range_label = self.infer_time_range(question, person_focused=bool(targets))
         start_iso = start_dt.isoformat()
         end_iso = end_dt.isoformat()
-        logger.info(
-            "qna inferred range channel_id=%s label=%s start=%s end=%s target_users=%s",
-            channel_id,
-            range_label,
-            start_iso,
-            end_iso,
-            [str(member.id) for member in targets],
-        )
+        explicit_time = self._has_explicit_time_marker(question)
 
-        rows = await self._database.fetchall(
-            """
-            SELECT author_id, COUNT(*) as c
-            FROM messages AS m
-            LEFT JOIN users AS u ON u.user_id = m.author_id
-            WHERE m.guild_id = ? AND m.channel_id = ? AND m.ts >= ? AND m.ts <= ?
-              AND COALESCE(m.is_deleted, 0) = 0
-              AND COALESCE(u.is_bot, 0) = 0
-            GROUP BY author_id
-            ORDER BY c DESC
-            LIMIT 5
-            """,
-            (guild_id, channel_id, start_iso, end_iso),
-        )
-        top = [{"author_id": r["author_id"], "count": int(r["c"])} for r in rows]
-        total_row = await self._database.fetchone(
-            """
-            SELECT COUNT(*) AS c
-            FROM messages AS m
-            LEFT JOIN users AS u ON u.user_id = m.author_id
-            WHERE m.guild_id = ? AND m.channel_id = ? AND m.ts >= ? AND m.ts <= ?
-              AND COALESCE(m.is_deleted, 0) = 0
-              AND COALESCE(u.is_bot, 0) = 0
-            """,
-            (guild_id, channel_id, start_iso, end_iso),
-        )
-        total = int(total_row["c"]) if total_row else 0
-        bucketed = await self._database.fetch_messages_in_range_time_bucketed(
+        conversation_history = await self._load_qna_history(guild_id, channel_id, session_user_id)
+        session_signature = self._session_signature(conversation_history)
+
+        retrieval_mode = "full_history"
+        if explicit_time:
+            retrieval_mode = "window"
+
+        window_rows = await self._database.fetch_messages_in_range_time_bucketed(
             channel_id=channel_id,
             start_ts=start_iso,
             end_ts=end_iso,
-            buckets=8,
-            per_bucket_limit=10,
+            buckets=12,
+            per_bucket_limit=20,
             include_bots=False,
         )
-        recent = [self._truncate_text(str(m["content"] or ""), 280) for m in bucketed][-80:]
-        channel_context = [
-            self._truncate_text(str(r["content"] or ""), 220)
-            for r in bucketed[-20:]
-            if str(r["content"] or "").strip()
-        ]
+        window_ranked = self._rank_evidence_rows(window_rows, question)
+
+        if explicit_time:
+            evidence_ranked = window_ranked[:60]
+            if len(evidence_ranked) < 8 or self._is_weak_relevance(evidence_ranked):
+                full_rows = await self._database.search_channel_messages(channel_id=channel_id, query_text=question, limit=60, candidate_pool=300)
+                evidence_ranked = self._normalize_search_rows(full_rows)
+                retrieval_mode = "window_then_full"
+        else:
+            full_rows = await self._database.search_channel_messages(channel_id=channel_id, query_text=question, limit=60, candidate_pool=300)
+            evidence_ranked = self._normalize_search_rows(full_rows)
+
+        evidence_pack = self._build_evidence_pack(evidence_ranked, guild)
+        logger.info(
+            "qna retrieval mode=%s channel_id=%s evidence_count=%s range=%s",
+            retrieval_mode,
+            channel_id,
+            len(evidence_pack),
+            range_label,
+        )
 
         context: dict[str, object] = {
             "time_range_label": range_label,
             "start": start_iso,
             "end": end_iso,
-            "total_messages": total,
-            "top_talkers": top,
-            "recent_messages": recent,
-            "channel_context": channel_context,
+            "retrieval_mode": retrieval_mode,
+            "conversation_previous": conversation_history,
+            "evidence": evidence_pack,
         }
-        constraints = ["solo canale corrente", "non includere PII", "rispondi in italiano"]
-        cache_ttl = 60 * 60
+        constraints = [
+            "solo canale corrente",
+            "non includere PII",
+            "rispondi in italiano",
+            "usa solo le prove fornite",
+            "non inventare contenuti",
+            "includi 2-6 link [prova](jump_url) quando possibile",
+        ]
+        cache_ttl = 50 * 60
         empty_reply = ""
 
         if targets:
             per_target_messages: dict[str, list[dict[str, str]]] = {}
-            missing_targets: list[str] = []
             target_rows_for_payload: list[dict[str, str]] = []
+            missing_targets: list[str] = []
             for target in targets:
                 target_rows = await self._database.fetchall(
                     """
-                    SELECT m.ts, m.content, m.message_id
+                    SELECT m.ts, m.content, m.message_id, m.guild_id, m.channel_id
                     FROM messages AS m
                     LEFT JOIN users AS u ON u.user_id = m.author_id
                     WHERE m.channel_id = ?
@@ -679,26 +695,28 @@ class TriggerEngineService:
                     (channel_id, str(target.id), start_iso, end_iso),
                 )
                 sampled_rows = self._sample_messages(list(target_rows), keep_start=20, keep_end=80)
-                message_items: list[dict[str, str]] = []
+                items: list[dict[str, str]] = []
                 for row in sampled_rows:
                     content = self._truncate_text(str(row["content"] or ""), 350).strip()
                     if not content:
                         continue
                     message_id = str(row["message_id"] or "").strip()
-                    jump_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}" if message_id else ""
-                    message_items.append(
+                    row_guild_id = str(row["guild_id"] or guild_id)
+                    row_channel_id = str(row["channel_id"] or channel_id)
+                    jump_url = f"https://discord.com/channels/{row_guild_id}/{row_channel_id}/{message_id}" if message_id else ""
+                    items.append(
                         {
                             "created_at": str(row["ts"] or ""),
                             "content": content,
                             "message_id": message_id,
-                            "channel_id": channel_id,
-                            "guild_id": guild_id,
+                            "channel_id": row_channel_id,
+                            "guild_id": row_guild_id,
                             "jump_url": jump_url,
                         }
                     )
-                per_target_messages[str(target.id)] = message_items
+                per_target_messages[str(target.id)] = items
                 target_rows_for_payload.append({"id": str(target.id), "display_name": target.display_name})
-                if not message_items:
+                if not items:
                     missing_targets.append(target.display_name)
 
             if len(missing_targets) == len(targets):
@@ -712,30 +730,31 @@ class TriggerEngineService:
                     "targets": target_rows_for_payload,
                     "per_target_messages": per_target_messages,
                     "focus_instruction": (
-                        "Per ciascuna persona target, produci 2-5 bullet di cose interessanti basate solo sui messaggi forniti. "
-                        "Aggiungi fino a 2 citazioni brevi (max 120 caratteri) per target, sempre con prova. "
-                        "Per ogni bullet/citazione includi un link prova usando i jump_url forniti. "
-                        "Formato Discord Markdown per sezioni per persona, senza inventare contenuti. "
-                        "Se per una persona non ci sono messaggi, dichiaralo chiaramente."
+                        "Per ciascun target: 2-5 bullet su cose interessanti, fino a 2 citazioni brevi (<=120 caratteri), "
+                        "ogni punto con link prova [prova](jump_url). Se mancano prove, dichiaralo."
                     ),
-                    "output_example": "**Nome**\n- Punto interessante ([prova](jump_url))\n- \"citazione\" ([link](jump_url))",
-                    "target_cap_note": capped_note,
                 }
             )
-            cache_ttl = 60 * 60
         else:
-            context["focus_instruction"] = "Riassumi i temi rilevanti nel canale per il periodo indicato."
-            cache_ttl = 45 * 60
+            context["focus_instruction"] = (
+                "Rispondi alla domanda usando solo le prove. Struttura chiara e inserisci link prova cliccabili. "
+                "Se la domanda è follow-up, usa la conversazione precedente."
+            )
 
         prompt = {
+            "system": (
+                "Sei il servizio QnA del Barcellometro. Rispondi solo usando le prove fornite. "
+                "Non inventare contenuti. Se la domanda è un follow-up, usa la conversazione precedente."
+            ),
             "question": question,
             "constraints": constraints,
             "context": context,
             "output_schema": {"can_answer": "bool", "answer": "string", "refusal_reason": "string|null"},
         }
+
         target_ids = sorted(str(member.id) for member in targets)
         target_ids_fragment = "-".join(target_ids) if target_ids else "all"
-        cache_fragment = f"{channel_id}:{start_iso}:{end_iso}"
+        cache_fragment = f"{channel_id}:{retrieval_mode}:{start_iso}:{end_iso}"
         merged_note = "\n".join(note for note in [ambiguous_note, capped_note] if note).strip()
         return {
             "payload": json.dumps(prompt, ensure_ascii=False),
@@ -744,6 +763,8 @@ class TriggerEngineService:
             "cache_ttl": cache_ttl,
             "empty_reply": empty_reply,
             "ambiguous_note": merged_note,
+            "session_user_id": session_user_id,
+            "session_signature": session_signature,
         }
 
     def infer_time_range(
@@ -898,6 +919,119 @@ class TriggerEngineService:
         if len(rows) <= keep_start + keep_end:
             return rows
         return rows[:keep_start] + rows[-keep_end:]
+
+    def _has_explicit_time_marker(self, question: str) -> bool:
+        q = question.lower()
+        return any(token in q for token in ["oggi", "ieri", "stamattina", "questa settimana", "questa sera", "ultima ora", "ultim'ora", "ultime", "ultimi", "mese"])
+
+    def _rank_evidence_rows(self, rows: list[object], question: str) -> list[dict[str, object]]:
+        keywords = [token for token in re.findall(r"\w+", question.lower()) if len(token) > 2][:12]
+        phrase = question.strip().lower()
+        ranked: list[dict[str, object]] = []
+        for row in rows:
+            content = str(row["content"] or "")
+            lower = content.lower()
+            score = 0
+            for kw in keywords:
+                idx = lower.find(kw)
+                if idx >= 0:
+                    score += 1
+                    if idx < 80:
+                        score += 1
+            if phrase and phrase in lower:
+                score += 2
+            if score <= 0 and keywords:
+                continue
+            ranked.append(
+                {
+                    "message_id": str(row["message_id"] or ""),
+                    "guild_id": str(row["guild_id"] or ""),
+                    "channel_id": str(row["channel_id"] or ""),
+                    "author_id": str(row["author_id"] or ""),
+                    "created_at": str(row["ts"] or row["created_at"] or ""),
+                    "content": content,
+                    "score": score,
+                }
+            )
+        ranked.sort(key=lambda item: (int(item.get("score", 0)), str(item.get("created_at", ""))), reverse=True)
+        return ranked
+
+    def _normalize_search_rows(self, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        ranked: list[dict[str, object]] = []
+        for row in rows:
+            ranked.append(
+                {
+                    "message_id": str(row.get("message_id") or ""),
+                    "guild_id": str(row.get("guild_id") or ""),
+                    "channel_id": str(row.get("channel_id") or ""),
+                    "author_id": str(row.get("author_id") or ""),
+                    "created_at": str(row.get("created_at") or ""),
+                    "content": str(row.get("content") or ""),
+                    "score": int(row.get("score") or 0),
+                }
+            )
+        return ranked
+
+    def _is_weak_relevance(self, ranked_rows: list[dict[str, object]]) -> bool:
+        if not ranked_rows:
+            return True
+        top_scores = [int(r.get("score") or 0) for r in ranked_rows[:8]]
+        avg = sum(top_scores) / max(1, len(top_scores))
+        return avg < 2
+
+    def _build_evidence_pack(self, ranked_rows: list[dict[str, object]], guild: discord.Guild | None) -> list[dict[str, str]]:
+        pack: list[dict[str, str]] = []
+        for row in ranked_rows[:60]:
+            guild_id = str(row.get("guild_id") or "")
+            channel_id = str(row.get("channel_id") or "")
+            message_id = str(row.get("message_id") or "")
+            jump_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}" if message_id else ""
+            author_id = str(row.get("author_id") or "")
+            author_name = author_id
+            if guild and author_id.isdigit():
+                member = guild.get_member(int(author_id))
+                if member is not None:
+                    author_name = member.display_name
+            pack.append(
+                {
+                    "author_name": author_name,
+                    "created_at_iso": str(row.get("created_at") or ""),
+                    "snippet": self._truncate_text(str(row.get("content") or ""), 240),
+                    "jump_url": jump_url,
+                }
+            )
+        return pack
+
+    async def _load_qna_history(self, guild_id: str, channel_id: str, user_id: str) -> list[dict[str, str]]:
+        if not user_id:
+            return []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        history = await self._database.get_qna_session_history(guild_id, channel_id, user_id, now_iso)
+        normalized: list[dict[str, str]] = []
+        for entry in history[-4:]:
+            q = self._truncate_text(str(entry.get("q") or ""), 300)
+            a = self._truncate_text(str(entry.get("a") or ""), 400)
+            ts = str(entry.get("ts") or "")
+            if q:
+                normalized.append({"q": q, "a": a, "ts": ts})
+        return normalized
+
+    async def _store_qna_turn(self, guild_id: str, channel_id: str, user_id: str, question: str, answer: str) -> None:
+        if not user_id:
+            return
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        history = await self._database.get_qna_session_history(guild_id, channel_id, user_id, now_iso)
+        history.append({"q": self._truncate_text(question, 300), "a": self._truncate_text(answer, 400), "ts": now_iso})
+        history = history[-4:]
+        expires_at = (now + timedelta(minutes=30)).isoformat()
+        await self._database.upsert_qna_session_history(guild_id, channel_id, user_id, history, now_iso, expires_at)
+
+    def _session_signature(self, history: list[dict[str, str]]) -> str:
+        if not history:
+            return "nosession"
+        raw = "|".join(str(item.get("q") or "") for item in history[-2:])
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
 
     async def _ask_ai_json(self, payload: str) -> dict[str, object] | None:
         if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:

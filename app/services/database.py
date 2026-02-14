@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 
@@ -311,6 +312,17 @@ class DatabaseService:
                 expires_at TEXT NULL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (guild_id, user_id)
+            );
+            
+
+            CREATE TABLE IF NOT EXISTS qna_sessions (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                history_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, user_id)
             );
             """
         )
@@ -655,6 +667,119 @@ class DatabaseService:
             len(deduped),
         )
         return deduped
+
+    async def search_channel_messages(
+        self,
+        channel_id: str,
+        query_text: str,
+        limit: int = 60,
+        candidate_pool: int = 300,
+    ) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(60, int(limit or 60)))
+        safe_pool = max(safe_limit, min(300, int(candidate_pool or 300)))
+        keywords = [token for token in re.findall(r"\w+", query_text.lower()) if len(token) > 2][:12]
+        phrase = query_text.strip().lower()
+
+        params: list[Any] = [channel_id]
+        where_parts = ["m.channel_id = ?", "COALESCE(m.is_deleted, 0) = 0", "COALESCE(u.is_bot, 0) = 0"]
+        if keywords:
+            like_parts: list[str] = []
+            for kw in keywords:
+                like_parts.append("LOWER(m.content) LIKE ?")
+                params.append(f"%{kw}%")
+            where_parts.append("(" + " OR ".join(like_parts) + ")")
+
+        sql = f"""
+            SELECT
+                m.message_id,
+                m.guild_id,
+                m.channel_id,
+                m.author_id,
+                m.ts AS created_at,
+                m.content
+            FROM messages AS m
+            LEFT JOIN users AS u ON u.user_id = m.author_id
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY m.ts DESC
+            LIMIT ?
+        """
+        params.append(safe_pool)
+        rows = await self.fetchall(sql, tuple(params))
+        scored: list[dict[str, Any]] = []
+        for row in rows:
+            content = str(row["content"] or "")
+            lower = content.lower()
+            score = 0
+            for kw in keywords:
+                idx = lower.find(kw)
+                if idx >= 0:
+                    score += 1
+                    if idx < 80:
+                        score += 1
+            if phrase and phrase in lower:
+                score += 2
+            if score <= 0 and keywords:
+                continue
+            scored.append(
+                {
+                    "message_id": str(row["message_id"] or ""),
+                    "guild_id": str(row["guild_id"] or ""),
+                    "channel_id": str(row["channel_id"] or ""),
+                    "author_id": str(row["author_id"] or ""),
+                    "created_at": str(row["created_at"] or ""),
+                    "content": content,
+                    "score": score,
+                }
+            )
+        scored.sort(key=lambda item: (int(item.get("score", 0)), str(item.get("created_at", ""))), reverse=True)
+        return scored[:safe_limit]
+
+    async def get_qna_session_history(self, guild_id: str, channel_id: str, user_id: str, now_iso: str) -> list[dict[str, str]]:
+        row = await self.fetchone(
+            """
+            SELECT history_json, expires_at
+            FROM qna_sessions
+            WHERE guild_id = ? AND channel_id = ? AND user_id = ?
+            """,
+            (guild_id, channel_id, user_id),
+        )
+        if not row:
+            return []
+        expires_at = str(row["expires_at"] or "")
+        if expires_at and expires_at < now_iso:
+            await self.execute(
+                "DELETE FROM qna_sessions WHERE guild_id = ? AND channel_id = ? AND user_id = ?",
+                (guild_id, channel_id, user_id),
+            )
+            return []
+        try:
+            parsed = json.loads(str(row["history_json"] or "[]"))
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [item for item in parsed if isinstance(item, dict)]
+
+    async def upsert_qna_session_history(
+        self,
+        guild_id: str,
+        channel_id: str,
+        user_id: str,
+        history: list[dict[str, str]],
+        now_iso: str,
+        expires_at_iso: str,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO qna_sessions (guild_id, channel_id, user_id, history_json, updated_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, user_id) DO UPDATE SET
+                history_json = excluded.history_json,
+                updated_at = excluded.updated_at,
+                expires_at = excluded.expires_at
+            """,
+            (guild_id, channel_id, user_id, json.dumps(history, ensure_ascii=False), now_iso, expires_at_iso),
+        )
 
     async def fetch_events_in_range(
         self,
