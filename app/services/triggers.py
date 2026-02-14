@@ -159,27 +159,28 @@ class TriggerEngineService:
             guild_id = str(row["guild_id"])
             channel_id = str(row["channel_id"])
             status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
-            color = str(status.get("color") or "").upper()
+            color = self._normalize_barcello_color(status.get("color"))
+            stored_color = color or ""
             score = int(status.get("score") or 0)
             prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
-            prev_color = str(prev.get("last_color") or "").upper() if prev else None
+            prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
             prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
             now = datetime.now(timezone.utc)
             cooldown_key = f"{guild_id}:{channel_id}"
             last_sent = self._barcello_cooldown.get(cooldown_key)
             if last_sent and (now - last_sent) < timedelta(minutes=10):
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, color, score, now.isoformat())
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
                 continue
             if prev_color and prev_score is not None:
                 if color == prev_color and abs(score - prev_score) < 5:
-                    await self._database.upsert_barcello_trigger_state(guild_id, channel_id, color, score, now.isoformat())
+                    await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
                     continue
-            msg = self._render_barcello_transition(prev_color, color, prev_score, score, templates=templates)
+            msg = self._render_barcello_transition(prev_color, stored_color, prev_score, score, templates=templates)
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and msg:
                 await channel.send(msg)
                 self._barcello_cooldown[cooldown_key] = now
-            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, color, score, now.isoformat())
+            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
 
     async def _handle_phrases(self, envelope: EventEnvelope) -> None:
         assert envelope.guild_id and envelope.channel_id
@@ -238,6 +239,19 @@ class TriggerEngineService:
                 return False
         return needle in haystack
 
+    def _normalize_barcello_color(self, color: str | None) -> str | None:
+        if color is None:
+            return None
+        normalized = str(color).strip().upper()
+        if not normalized:
+            return None
+        english_to_italian = {"GREEN": "VERDE", "YELLOW": "GIALLO", "RED": "ROSSO", "BLACK": "NERO"}
+        canonical = {"VERDE", "GIALLO", "ROSSO", "NERO"}
+        mapped = english_to_italian.get(normalized, normalized)
+        if mapped in canonical:
+            return mapped
+        return normalized
+
     def _render_barcello_transition(
         self,
         old: str | None,
@@ -246,7 +260,7 @@ class TriggerEngineService:
         new_score: int,
         templates: dict[str, str] | None = None,
     ) -> str:
-        worsening = {"GREEN": 0, "YELLOW": 1, "RED": 2, "BLACK": 3}
+        worsening = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
         template_dict = templates if isinstance(templates, dict) else {}
         values = {
             "old": old or "",
