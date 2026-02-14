@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.services.barcello import BarcelloService
+from app.services.config_file_loader import load_json_file
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope
@@ -17,6 +18,7 @@ from app.utils.pii import contains_pii
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
+BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
 class TriggerEngineService:
@@ -146,11 +148,17 @@ class TriggerEngineService:
     async def _poll_barcello(self) -> None:
         if self._bot is None:
             return
+        config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        window_minutes = config.get("window_minutes")
+        if not isinstance(window_minutes, int) or window_minutes <= 0:
+            window_minutes = 60
+        raw_templates = config.get("templates")
+        templates = raw_templates if isinstance(raw_templates, dict) else {}
         rows = await self._database.list_enabled_trigger_channels("barcello")
         for row in rows:
             guild_id = str(row["guild_id"])
             channel_id = str(row["channel_id"])
-            status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=180)
+            status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
             color = str(status.get("color") or "").upper()
             score = int(status.get("score") or 0)
             prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
@@ -166,7 +174,7 @@ class TriggerEngineService:
                 if color == prev_color and abs(score - prev_score) < 5:
                     await self._database.upsert_barcello_trigger_state(guild_id, channel_id, color, score, now.isoformat())
                     continue
-            msg = self._render_barcello_transition(prev_color, color, prev_score, score)
+            msg = self._render_barcello_transition(prev_color, color, prev_score, score, templates=templates)
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and msg:
                 await channel.send(msg)
@@ -230,15 +238,44 @@ class TriggerEngineService:
                 return False
         return needle in haystack
 
-    def _render_barcello_transition(self, old: str | None, new: str, old_score: int | None, new_score: int) -> str:
+    def _render_barcello_transition(
+        self,
+        old: str | None,
+        new: str,
+        old_score: int | None,
+        new_score: int,
+        templates: dict[str, str] | None = None,
+    ) -> str:
         worsening = {"GREEN": 0, "YELLOW": 1, "RED": 2, "BLACK": 3}
+        template_dict = templates if isinstance(templates, dict) else {}
+        values = {
+            "old": old or "",
+            "new": new,
+            "old_score": "" if old_score is None else str(old_score),
+            "new_score": str(new_score),
+        }
+
+        def render_template(message_template: str | None) -> str | None:
+            if not isinstance(message_template, str):
+                return None
+            return re.sub(r"\{(old|new|old_score|new_score)\}", lambda match: values[match.group(1)], message_template)
+
         if old is None:
-            return f"Barcello ora {new} ({new_score})."
-        if worsening.get(new, 99) > worsening.get(old, 99):
-            return f"⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score})."
-        if worsening.get(new, 99) < worsening.get(old, 99):
-            return f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
-        return f"Barcello aggiornato: {new_score}."
+            return render_template(template_dict.get("INIT")) or f"📌 Barcello ora {new} (score {new_score})"
+
+        severity_new = worsening.get(new, 99)
+        severity_old = worsening.get(old, 99)
+
+        if old != new:
+            exact_template = render_template(template_dict.get(f"{old}->{new}"))
+            if exact_template:
+                return exact_template
+
+        if severity_new > severity_old:
+            return render_template(template_dict.get("WORSEN")) or f"⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score})."
+        if severity_new < severity_old:
+            return render_template(template_dict.get("IMPROVE")) or f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
+        return render_template(template_dict.get("SAME")) or f"Barcello aggiornato: {new_score}."
 
     async def _resolve_qna_limit(self, interaction: discord.Interaction) -> int:
         profile = await self._entitlements.resolve_profile(interaction.user)
