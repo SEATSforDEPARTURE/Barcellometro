@@ -474,7 +474,9 @@ class TriggerEngineService:
             await self._database.set_cache(cache_key, empty_reply, 30 * 60)
             return {"can_answer": True, "answer": empty_reply, "refusal_reason": None}
 
-        channel_answer = await self._ask_ai_json(str(channel_bundle.get("payload") or "{}"))
+        payload_obj = json.loads(str(channel_bundle.get("payload") or "{}"))
+        payload_obj = self._shrink_payload_for_budget(payload_obj, str(channel_bundle.get("breadth") or "normal"))
+        channel_answer = await self._ask_ai_json(json.dumps(payload_obj, ensure_ascii=False))
         ambiguous_note = str(channel_bundle.get("ambiguous_note") or "").strip()
         if channel_answer and channel_answer.get("can_answer") and ambiguous_note:
             answer_text = str(channel_answer.get("answer") or "").strip()
@@ -614,44 +616,74 @@ class TriggerEngineService:
         guild = source.guild if source else None
         targets, ambiguous_note, capped_note = self._infer_target_members_with_notes(source, question, guild)
         start_dt, end_dt, range_label = self.infer_time_range(question, person_focused=bool(targets))
-        start_iso = start_dt.isoformat()
-        end_iso = end_dt.isoformat()
+        breadth = self.classify_qna_breadth(question)
+        budgets = self._qna_budgets_for_breadth(breadth)
         explicit_time = self._has_explicit_time_marker(question)
 
-        conversation_history = await self._load_qna_history(guild_id, channel_id, session_user_id)
+        if breadth == "broad" and not explicit_time and "senza limiti" not in question.lower():
+            end_dt = datetime.now(timezone.utc)
+            start_dt = end_dt - timedelta(hours=24)
+            range_label = "ultime 24 ore"
+
+        start_iso = start_dt.isoformat()
+        end_iso = end_dt.isoformat()
+        session_turns = int(budgets.get("session_turns") or 1)
+        conversation_history = await self._load_qna_history(guild_id, channel_id, session_user_id, max_turns=session_turns)
         session_signature = self._session_signature(conversation_history)
 
         retrieval_mode = "full_history"
         if explicit_time:
             retrieval_mode = "window"
 
+        evidence_max = int(budgets.get("evidence_max") or 20)
+        snippet_max = int(budgets.get("snippet_max") or 140)
+        candidate_pool = int(budgets.get("candidate_pool") or 180)
+
         window_rows = await self._database.fetch_messages_in_range_time_bucketed(
             channel_id=channel_id,
             start_ts=start_iso,
             end_ts=end_iso,
-            buckets=12,
-            per_bucket_limit=20,
+            buckets=10,
+            per_bucket_limit=max(6, evidence_max),
             include_bots=False,
         )
         window_ranked = self._rank_evidence_rows(window_rows, question)
 
+        full_history_needed = False
         if explicit_time:
-            evidence_ranked = window_ranked[:60]
-            if len(evidence_ranked) < 8 or self._is_weak_relevance(evidence_ranked):
-                full_rows = await self._database.search_channel_messages(channel_id=channel_id, query_text=question, limit=60, candidate_pool=300)
-                evidence_ranked = self._normalize_search_rows(full_rows)
+            evidence_ranked = window_ranked[:evidence_max]
+            if len(evidence_ranked) < 6 or self._is_weak_relevance(evidence_ranked):
+                full_history_needed = True
                 retrieval_mode = "window_then_full"
         else:
-            full_rows = await self._database.search_channel_messages(channel_id=channel_id, query_text=question, limit=60, candidate_pool=300)
+            if breadth == "broad":
+                evidence_ranked = window_ranked[:evidence_max]
+                if len(evidence_ranked) < 6 or self._is_weak_relevance(evidence_ranked):
+                    full_history_needed = True
+                    retrieval_mode = "window_then_full"
+            else:
+                full_history_needed = True
+                retrieval_mode = "full_history"
+                evidence_ranked = []
+
+        if full_history_needed:
+            min_content_length = 16 if breadth == "broad" else 0
+            full_rows = await self._database.search_channel_messages(
+                channel_id=channel_id,
+                query_text=question,
+                limit=evidence_max,
+                candidate_pool=candidate_pool,
+                min_content_length=min_content_length,
+            )
             evidence_ranked = self._normalize_search_rows(full_rows)
 
-        evidence_pack = self._build_evidence_pack(evidence_ranked, guild)
+        evidence_pack = self._build_evidence_pack(evidence_ranked, guild, snippet_max=snippet_max, evidence_max=evidence_max)
         logger.info(
-            "qna retrieval mode=%s channel_id=%s evidence_count=%s range=%s",
+            "qna retrieval mode=%s channel_id=%s breadth=%s evidence_count=%s",
             retrieval_mode,
             channel_id,
+            breadth,
             len(evidence_pack),
-            range_label,
         )
 
         context: dict[str, object] = {
@@ -661,6 +693,7 @@ class TriggerEngineService:
             "retrieval_mode": retrieval_mode,
             "conversation_previous": conversation_history,
             "evidence": evidence_pack,
+            "breadth": breadth,
         }
         constraints = [
             "solo canale corrente",
@@ -668,9 +701,8 @@ class TriggerEngineService:
             "rispondi in italiano",
             "usa solo le prove fornite",
             "non inventare contenuti",
-            "includi 2-6 link [prova](jump_url) quando possibile",
         ]
-        cache_ttl = 50 * 60
+        cache_ttl = int(budgets.get("cache_ttl") or 45 * 60)
         empty_reply = ""
 
         if targets:
@@ -694,10 +726,10 @@ class TriggerEngineService:
                     """,
                     (channel_id, str(target.id), start_iso, end_iso),
                 )
-                sampled_rows = self._sample_messages(list(target_rows), keep_start=20, keep_end=80)
+                sampled_rows = self._sample_messages(list(target_rows), keep_start=12, keep_end=40)
                 items: list[dict[str, str]] = []
                 for row in sampled_rows:
-                    content = self._truncate_text(str(row["content"] or ""), 350).strip()
+                    content = self._truncate_text(str(row["content"] or ""), 220).strip()
                     if not content:
                         continue
                     message_id = str(row["message_id"] or "").strip()
@@ -735,13 +767,19 @@ class TriggerEngineService:
                     ),
                 }
             )
-        else:
+
+        if breadth == "broad":
+            context["focus_instruction"] = (
+                "Risposta sintetica (max 6 bullet), 2-3 link prova, niente allucinazioni. "
+                "Chiudi con: Se mi dici un nome o un tema, posso cercare con più precisione nel database del canale."
+            )
+        elif "focus_instruction" not in context:
             context["focus_instruction"] = (
                 "Rispondi alla domanda usando solo le prove. Struttura chiara e inserisci link prova cliccabili. "
                 "Se la domanda è follow-up, usa la conversazione precedente."
             )
 
-        prompt = {
+        prompt_obj = {
             "system": (
                 "Sei il servizio QnA del Barcellometro. Rispondi solo usando le prove fornite. "
                 "Non inventare contenuti. Se la domanda è un follow-up, usa la conversazione precedente."
@@ -754,10 +792,10 @@ class TriggerEngineService:
 
         target_ids = sorted(str(member.id) for member in targets)
         target_ids_fragment = "-".join(target_ids) if target_ids else "all"
-        cache_fragment = f"{channel_id}:{retrieval_mode}:{start_iso}:{end_iso}"
+        cache_fragment = f"{channel_id}:{retrieval_mode}:{start_iso}:{end_iso}:{breadth}"
         merged_note = "\n".join(note for note in [ambiguous_note, capped_note] if note).strip()
         return {
-            "payload": json.dumps(prompt, ensure_ascii=False),
+            "payload": json.dumps(prompt_obj, ensure_ascii=False),
             "cache_fragment": cache_fragment,
             "target_ids_fragment": target_ids_fragment,
             "cache_ttl": cache_ttl,
@@ -765,6 +803,7 @@ class TriggerEngineService:
             "ambiguous_note": merged_note,
             "session_user_id": session_user_id,
             "session_signature": session_signature,
+            "breadth": breadth,
         }
 
     def infer_time_range(
@@ -979,9 +1018,16 @@ class TriggerEngineService:
         avg = sum(top_scores) / max(1, len(top_scores))
         return avg < 2
 
-    def _build_evidence_pack(self, ranked_rows: list[dict[str, object]], guild: discord.Guild | None) -> list[dict[str, str]]:
+    def _build_evidence_pack(
+        self,
+        ranked_rows: list[dict[str, object]],
+        guild: discord.Guild | None,
+        *,
+        snippet_max: int,
+        evidence_max: int,
+    ) -> list[dict[str, str]]:
         pack: list[dict[str, str]] = []
-        for row in ranked_rows[:60]:
+        for row in ranked_rows[: max(1, min(60, evidence_max))]:
             guild_id = str(row.get("guild_id") or "")
             channel_id = str(row.get("channel_id") or "")
             message_id = str(row.get("message_id") or "")
@@ -996,19 +1042,21 @@ class TriggerEngineService:
                 {
                     "author_name": author_name,
                     "created_at_iso": str(row.get("created_at") or ""),
-                    "snippet": self._truncate_text(str(row.get("content") or ""), 240),
+                    "snippet": self._truncate_text(str(row.get("content") or ""), max(80, snippet_max)),
                     "jump_url": jump_url,
                 }
             )
         return pack
 
-    async def _load_qna_history(self, guild_id: str, channel_id: str, user_id: str) -> list[dict[str, str]]:
+    async def _load_qna_history(self, guild_id: str, channel_id: str, user_id: str, *, max_turns: int = 2) -> list[dict[str, str]]:
         if not user_id:
             return []
         now_iso = datetime.now(timezone.utc).isoformat()
         history = await self._database.get_qna_session_history(guild_id, channel_id, user_id, now_iso)
+        if max_turns <= 0:
+            return []
         normalized: list[dict[str, str]] = []
-        for entry in history[-4:]:
+        for entry in history[-max_turns:]:
             q = self._truncate_text(str(entry.get("q") or ""), 300)
             a = self._truncate_text(str(entry.get("a") or ""), 400)
             ts = str(entry.get("ts") or "")
@@ -1032,6 +1080,119 @@ class TriggerEngineService:
             return "nosession"
         raw = "|".join(str(item.get("q") or "") for item in history[-2:])
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+    def classify_qna_breadth(self, question: str) -> str:
+        q = question.strip().lower()
+        if not q:
+            return "normal"
+        broad_tokens = [
+            "riassumi",
+            "cosa è successo",
+            "che hanno detto",
+            "di cosa si parla",
+            "tutto",
+            "in generale",
+            "spiega",
+            "dammi un recap",
+            "recap",
+        ]
+        narrow_signals = 0
+        if re.search(r"<@!?\d+>", question):
+            narrow_signals += 1
+        if self._has_explicit_time_marker(question):
+            narrow_signals += 1
+        if re.search(r"\b\w+\s+\d{4}\b", question):
+            narrow_signals += 1
+        if len([t for t in re.findall(r"\w+", q) if len(t) > 3]) >= 4:
+            narrow_signals += 1
+        broad_signals = sum(1 for token in broad_tokens if token in q)
+        if len(q) < 18 and "?" in q:
+            broad_signals += 1
+        if broad_signals >= 1 and narrow_signals == 0:
+            return "broad"
+        if narrow_signals >= 2:
+            return "narrow"
+        return "normal"
+
+    def _qna_budgets_for_breadth(self, breadth: str) -> dict[str, int]:
+        if breadth == "narrow":
+            return {
+                "candidate_pool": 220,
+                "evidence_max": 30,
+                "snippet_max": 180,
+                "session_turns": 2,
+                "cache_ttl": 30 * 60,
+            }
+        if breadth == "broad":
+            return {
+                "candidate_pool": 120,
+                "evidence_max": 12,
+                "snippet_max": 120,
+                "session_turns": 1,
+                "cache_ttl": 60 * 60,
+            }
+        return {
+            "candidate_pool": 180,
+            "evidence_max": 22,
+            "snippet_max": 150,
+            "session_turns": 2,
+            "cache_ttl": 45 * 60,
+        }
+
+    def _shrink_payload_for_budget(self, payload_obj: dict[str, object], breadth: str) -> dict[str, object]:
+        obj = json.loads(json.dumps(payload_obj, ensure_ascii=False))
+        target_tokens = 8000 if breadth == "broad" else 12000
+        steps: list[str] = []
+
+        def approx_tokens() -> int:
+            return len(json.dumps(obj, ensure_ascii=False)) // 4
+
+        def trim_evidence(max_items: int) -> None:
+            context = obj.get("context")
+            if isinstance(context, dict) and isinstance(context.get("evidence"), list):
+                context["evidence"] = context["evidence"][:max_items]
+
+        def trim_snippets(max_chars: int) -> None:
+            context = obj.get("context")
+            if isinstance(context, dict) and isinstance(context.get("evidence"), list):
+                for item in context["evidence"]:
+                    if isinstance(item, dict) and "snippet" in item:
+                        item["snippet"] = self._truncate_text(str(item.get("snippet") or ""), max_chars)
+
+        original_tokens = approx_tokens()
+        for size in [20, 12, 8]:
+            if approx_tokens() <= target_tokens:
+                break
+            trim_evidence(size)
+            steps.append(f"evidence->{size}")
+        for chars in [120, 80]:
+            if approx_tokens() <= target_tokens:
+                break
+            trim_snippets(chars)
+            steps.append(f"snippet->{chars}")
+        if approx_tokens() > target_tokens:
+            context = obj.get("context")
+            if isinstance(context, dict):
+                context.pop("channel_context", None)
+                context.pop("recent_messages", None)
+                steps.append("drop_optional_context")
+        if approx_tokens() > target_tokens:
+            context = obj.get("context")
+            if isinstance(context, dict) and isinstance(context.get("conversation_previous"), list):
+                context["conversation_previous"] = context["conversation_previous"][:1]
+                steps.append("session->1")
+        if approx_tokens() > target_tokens:
+            trim_evidence(6)
+            steps.append("evidence->6")
+
+        logger.info(
+            "qna payload shrink breadth=%s tokens_before=%s tokens_after=%s steps=%s",
+            breadth,
+            original_tokens,
+            approx_tokens(),
+            steps,
+        )
+        return obj
 
     async def _ask_ai_json(self, payload: str) -> dict[str, object] | None:
         if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:

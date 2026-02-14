@@ -674,6 +674,7 @@ class DatabaseService:
         query_text: str,
         limit: int = 60,
         candidate_pool: int = 300,
+        min_content_length: int = 0,
     ) -> list[dict[str, Any]]:
         safe_limit = max(1, min(60, int(limit or 60)))
         safe_pool = max(safe_limit, min(300, int(candidate_pool or 300)))
@@ -682,6 +683,9 @@ class DatabaseService:
 
         params: list[Any] = [channel_id]
         where_parts = ["m.channel_id = ?", "COALESCE(m.is_deleted, 0) = 0", "COALESCE(u.is_bot, 0) = 0"]
+        if min_content_length > 0:
+            where_parts.append("LENGTH(TRIM(COALESCE(m.content, ''))) >= ?")
+            params.append(int(min_content_length))
         if keywords:
             like_parts: list[str] = []
             for kw in keywords:
