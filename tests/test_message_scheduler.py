@@ -164,6 +164,7 @@ def test_db_crud_campaigns() -> None:
 
         campaign_id = await db.create_message_campaign(
             guild_id="guild1",
+            channel_id="channel1",
             campaign_type="CUSTOM",
             name=None,
             text="Hello world",

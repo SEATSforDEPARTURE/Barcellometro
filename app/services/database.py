@@ -192,6 +192,7 @@ class DatabaseService:
             CREATE TABLE IF NOT EXISTS message_campaigns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
+                channel_id TEXT NULL,
                 type TEXT NOT NULL DEFAULT 'CUSTOM',
                 name TEXT NULL,
                 text TEXT NULL,
@@ -284,6 +285,8 @@ class DatabaseService:
         columns = await self.fetchall("PRAGMA table_info(message_campaigns)")
         existing = {row["name"] for row in columns}
         missing = {
+            "guild_id": "TEXT NULL",
+            "channel_id": "TEXT NULL",
             "text_green": "TEXT NULL",
             "text_yellow": "TEXT NULL",
             "text_red": "TEXT NULL",
@@ -1254,6 +1257,7 @@ class DatabaseService:
         self,
         *,
         guild_id: str,
+        channel_id: str,
         campaign_type: str,
         name: Optional[str],
         text: Optional[str],
@@ -1275,14 +1279,15 @@ class DatabaseService:
         cursor = await self._conn.execute(
             """
             INSERT INTO message_campaigns (
-                guild_id, type, name, text, text_green, text_yellow, text_red, text_black, enabled, start_time_local, interval_minutes,
+                guild_id, channel_id, type, name, text, text_green, text_yellow, text_red, text_black, enabled, start_time_local, interval_minutes,
                 jitter_seconds, only_if_idle_minutes, mood_mode, last_sent_at, next_run_at, created_by,
                 created_at, updated_at, deleted_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
             """,
             (
                 guild_id,
+                channel_id,
                 campaign_type,
                 name,
                 text,

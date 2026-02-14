@@ -120,12 +120,13 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
         interval_minutes: int,
         prompt: str,
     ) -> None:
-        if interaction.guild_id is None:
+        if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
             return
         next_run = calculate_initial_next_run(datetime.now(timezone.utc), time_local, interval_minutes, ctx.timezone)
         campaign_id = await ctx.database.create_message_campaign(
             guild_id=str(interaction.guild_id),
+            channel_id=str(interaction.channel_id),
             campaign_type="AI_PROMPT",
             name=name,
             text=prompt,
@@ -155,7 +156,12 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
             await interaction.response.send_message("Nessuna campagna AI_PROMPT.", ephemeral=True)
             return
         await interaction.response.send_message(
-            "\n".join([f"ID {r['id']} {'on' if r['enabled'] else 'off'} {r['name'] or '-'}" for r in rows]),
+            "\n".join(
+                [
+                    f"ID {r['id']} {'on' if r['enabled'] else 'off'} {r['name'] or '-'} ch={r['channel_id'] or '-'} next={r['next_run_at'] or '-'}"
+                    for r in rows
+                ]
+            ),
             ephemeral=True,
         )
 

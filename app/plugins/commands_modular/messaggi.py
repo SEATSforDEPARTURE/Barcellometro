@@ -194,7 +194,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.aggiungi", ctx):
             return
-        if interaction.guild_id is None:
+        if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
             return
         if ogni_minuti <= 0:
@@ -225,6 +225,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
         campaign_id = await ctx.database.create_message_campaign(
             guild_id=str(interaction.guild_id),
+            channel_id=str(interaction.channel_id),
             campaign_type="CUSTOM",
             name=None,
             text=testo,
