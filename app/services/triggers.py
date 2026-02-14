@@ -187,12 +187,37 @@ class TriggerEngineService:
         window_minutes = config.get("window_minutes")
         if not isinstance(window_minutes, int) or window_minutes <= 0:
             window_minutes = 60
+        min_messages = config.get("min_messages")
+        if not isinstance(min_messages, int) or min_messages <= 0:
+            min_messages = 10
         raw_templates = config.get("templates")
         templates = raw_templates if isinstance(raw_templates, dict) else {}
         rows = await self._database.list_enabled_trigger_channels("barcello")
         for row in rows:
             guild_id = str(row["guild_id"])
             channel_id = str(row["channel_id"])
+            window_end = datetime.now(timezone.utc)
+            window_start = window_end - timedelta(minutes=window_minutes)
+            count_row = await self._database.fetchone(
+                """
+                SELECT COUNT(*) AS count
+                FROM messages AS m
+                LEFT JOIN users AS u ON u.user_id = m.author_id
+                WHERE m.channel_id = ?
+                  AND m.ts >= ?
+                  AND m.ts <= ?
+                  AND COALESCE(m.is_deleted, 0) = 0
+                  AND COALESCE(u.is_bot, 0) = 0
+                """,
+                (channel_id, window_start.isoformat(), window_end.isoformat()),
+            )
+            message_count = int(count_row["count"]) if count_row else 0
+            if message_count < min_messages:
+                logger.debug(
+                    "barcello skip low activity",
+                    extra={"channel_id": channel_id, "count": message_count, "min_messages": min_messages},
+                )
+                continue
             status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
             color = self._normalize_barcello_color(status.get("color"))
             stored_color = color or ""

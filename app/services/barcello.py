@@ -795,6 +795,8 @@ class BarcelloService:
         for author in authors:
             counts[author] = counts.get(author, 0) + 1
         top_authors = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:3]
+        if len(top_authors) < 2:
+            return False
         total = len(authors)
         top_ratio = sum(count for _, count in top_authors[:2]) / total
         if top_ratio < 0.7:
