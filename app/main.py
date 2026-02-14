@@ -29,11 +29,13 @@ def main() -> None:
     backfill = None
     ai_service = None
     daily_resoconto = None
+    trigger_engine = None
     if instance_mode == "main":
         retention = registry.get("retention")
         backfill = registry.get("backfill")
         ai_service = registry.get("ai")
         daily_resoconto = registry.get("daily_resoconto") if registry.has("daily_resoconto") else None
+        trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
 
     async def runner() -> None:
         await database.connect()
@@ -50,6 +52,8 @@ def main() -> None:
             backfill.start()
             if daily_resoconto:
                 daily_resoconto.start()
+            if trigger_engine:
+                trigger_engine.start(bot)
             calibration = registry.get("barcello_calibration") if registry.has("barcello_calibration") else None
             if calibration:
                 async def _calibration_loop() -> None:

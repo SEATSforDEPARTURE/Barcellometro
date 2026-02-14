@@ -1,5 +1,6 @@
 from .admin import register_admin
 from .audio_notes import register_audio_notes
+from .ask import register_ask
 from .barcello import register_barcello
 from .ctx import CommandContext
 from .permissions import check_permission, ensure_admin
@@ -12,6 +13,7 @@ from .settings import get_setting, set_setting
 from .status import register_status
 from .stt import register_stt
 from .translate import register_translate
+from .triggers import register_triggers
 from .voice_ingest import register_voice_ingest
 
 __all__ = [
@@ -22,6 +24,7 @@ __all__ = [
     "set_setting",
     "register_admin",
     "register_audio_notes",
+    "register_ask",
     "register_barcello",
     "register_privacy",
     "register_resoconto",
@@ -31,5 +34,6 @@ __all__ = [
     "register_status",
     "register_stt",
     "register_translate",
+    "register_triggers",
     "register_voice_ingest",
 ]
