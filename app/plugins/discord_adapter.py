@@ -10,6 +10,7 @@ import discord
 from app.core.service_registry import ServiceRegistry
 from app.services.backfill import BackfillResult
 from app.services.ingest import EventEnvelope, IngestService
+from app.utils.pii import redact_pii
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ def setup(registry: ServiceRegistry) -> None:
     bot: discord.Client = registry.get("bot")
     database = registry.get("database")
     ingest: IngestService = registry.get("ingest")
+    trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
     backfill = registry.get("backfill")
     config = registry.get("config")
     warned_disabled_channels: set[str] = set()
@@ -137,13 +139,14 @@ def setup(registry: ServiceRegistry) -> None:
                     ts = message.created_at.replace(tzinfo=timezone.utc).isoformat()
                     await record_user(message.author, message.guild, True, ts)
                     reply_to = str(message.reference.message_id) if message.reference else None
+                    content_redacted, _ = redact_pii(message.content)
                     await database.insert_message(
                         message_id=str(message.id),
                         guild_id=str(message.guild.id),
                         channel_id=str(message.channel.id),
                         author_id=str(message.author.id),
                         ts=ts,
-                        content=message.content,
+                        content=content_redacted,
                         reply_to_message_id=reply_to,
                         mentions=[str(user.id) for user in message.mentions],
                         attachments=[{"id": str(att.id), "url": att.url, "filename": att.filename} for att in message.attachments],
@@ -159,7 +162,7 @@ def setup(registry: ServiceRegistry) -> None:
                         guild_id=str(message.guild.id),
                         channel_id=str(message.channel.id),
                         author_id=str(message.author.id),
-                        content=message.content,
+                        content=content_redacted,
                         meta={"message_id": str(message.id), "backfill": True},
                         ts=ts,
                     )
@@ -251,13 +254,14 @@ def setup(registry: ServiceRegistry) -> None:
         embeds = [embed.to_dict() for embed in message.embeds]
         if voice_meta:
             embeds.append({"voice_meta": voice_meta})
+        content_redacted, _ = redact_pii(message.content)
         await database.insert_message(
             message_id=str(message.id),
             guild_id=str(message.guild.id),
             channel_id=str(message.channel.id),
             author_id=str(message.author.id),
             ts=ts,
-            content=message.content,
+            content=content_redacted,
             reply_to_message_id=reply_to,
             mentions=[str(user.id) for user in message.mentions],
             attachments=[{"id": str(att.id), "url": att.url, "filename": att.filename} for att in message.attachments],
@@ -273,7 +277,7 @@ def setup(registry: ServiceRegistry) -> None:
             guild_id=str(message.guild.id),
             channel_id=str(message.channel.id),
             author_id=str(message.author.id),
-            content=message.content,
+            content=content_redacted,
             meta={"message_id": str(message.id)},
         )
         if voice_meta:
@@ -282,9 +286,20 @@ def setup(registry: ServiceRegistry) -> None:
                 guild_id=str(message.guild.id),
                 channel_id=str(message.channel.id),
                 author_id=str(message.author.id),
-                content=message.content,
+                content=content_redacted,
                 meta={"message_id": str(message.id), **voice_meta},
             )
+        if trigger_engine is not None:
+            mentions_bot = bot.user is not None and bot.user.mentioned_in(message)
+            reply_to_bot = bool(
+                message.reference
+                and message.reference.resolved is not None
+                and isinstance(message.reference.resolved, discord.Message)
+                and bot.user is not None
+                and message.reference.resolved.author.id == bot.user.id
+            )
+            if mentions_bot or reply_to_bot:
+                await trigger_engine.handle_message_qna(message)
 
     @bot.event
     async def on_message_edit(before: discord.Message, after: discord.Message) -> None:
@@ -296,13 +311,14 @@ def setup(registry: ServiceRegistry) -> None:
         if not enabled:
             return
         edited_ts = _now_iso()
-        await database.update_message_edit(str(after.id), edited_ts, after.content)
+        content_redacted, _ = redact_pii(after.content)
+        await database.update_message_edit(str(after.id), edited_ts, content_redacted)
         await emit_event(
             "message.edit",
             guild_id=str(after.guild.id),
             channel_id=str(after.channel.id),
             author_id=str(after.author.id),
-            content=after.content,
+            content=content_redacted,
             meta={"message_id": str(after.id)},
         )
 
@@ -405,3 +421,5 @@ def setup(registry: ServiceRegistry) -> None:
                 "nickname": after.nick,
             },
         )
+    if trigger_engine is not None:
+        ingest.register_consumer(trigger_engine.on_event)
