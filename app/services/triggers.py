@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
+import hashlib
 import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -82,7 +84,13 @@ class TriggerEngineService:
             return
 
         scope = await self._decide_qna_scope(question)
-        answer = await self._handle_qna(scope=scope, guild_id=guild_id, channel_id=channel_id, question=question)
+        answer = await self._handle_qna(
+            scope=scope,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            question=question,
+            source=interaction,
+        )
         if answer is None:
             await interaction.followup.send("AI non disponibile al momento.", ephemeral=True)
             return
@@ -104,7 +112,7 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await interaction.followup.send(text, ephemeral=True)
+        await interaction.followup.send(text, ephemeral=False)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         if message.guild is None:
@@ -131,7 +139,13 @@ class TriggerEngineService:
             await message.reply("Hai esaurito le domande di oggi.")
             return
         scope = await self._decide_qna_scope(question)
-        answer = await self._handle_qna(scope=scope, guild_id=guild_id, channel_id=channel_id, question=question)
+        answer = await self._handle_qna(
+            scope=scope,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            question=question,
+            source=message,
+        )
         if answer is None or not answer.get("can_answer"):
             await message.reply((answer or {}).get("refusal_reason") or "Non posso rispondere.")
             return
@@ -409,11 +423,40 @@ class TriggerEngineService:
                     str(candidate.get("source_message_id") or ""),
                 )
 
-    async def _handle_qna(self, *, scope: str, guild_id: str, channel_id: str, question: str) -> dict[str, object] | None:
+    async def _handle_qna(
+        self,
+        *,
+        scope: str,
+        guild_id: str,
+        channel_id: str,
+        question: str,
+        source: discord.Interaction | discord.Message | None = None,
+    ) -> dict[str, object] | None:
         normalized_question = self._normalize_question(question)
         cache_scope = "global" if scope == "global" else scope
         cache_channel = channel_id if cache_scope == "channel" else "global"
-        cache_key = f"qna:{cache_scope}:{cache_channel}:{normalized_question}"
+        cache_fragment = "default"
+        channel_bundle: dict[str, object] | None = None
+        target_ids_fragment = "all"
+        if cache_scope != "global":
+            user_id = ""
+            if isinstance(source, discord.Message):
+                user_id = str(source.author.id)
+            elif isinstance(source, discord.Interaction):
+                user_id = str(source.user.id)
+            channel_bundle = await self._build_qna_payload(
+                guild_id,
+                channel_id,
+                question,
+                source=source,
+                session_user_id=user_id,
+            )
+            cache_fragment = str(channel_bundle.get("cache_fragment") or cache_fragment)
+            target_ids_fragment = str(channel_bundle.get("target_ids_fragment") or target_ids_fragment)
+            session_signature = str(channel_bundle.get("session_signature") or "nosession")
+        else:
+            session_signature = "nosession"
+        cache_key = f"qna:{cache_scope}:{cache_channel}:{target_ids_fragment}:{cache_fragment}:{session_signature}:{normalized_question}"
         cached = await self._database.get_cache(cache_key)
         if cached is not None:
             logger.info("qna cache hit scope=%s channel_id=%s", scope, channel_id)
@@ -425,15 +468,34 @@ class TriggerEngineService:
                 await self._database.set_cache(cache_key, str(answer.get("answer") or ""), 7 * 24 * 3600)
             return answer
 
-        channel_answer = await self._ask_ai_json(await self._build_qna_payload(guild_id, channel_id, question))
+        assert channel_bundle is not None
+        empty_reply = str(channel_bundle.get("empty_reply") or "").strip()
+        if empty_reply:
+            await self._database.set_cache(cache_key, empty_reply, 30 * 60)
+            return {"can_answer": True, "answer": empty_reply, "refusal_reason": None}
+
+        channel_answer = await self._ask_ai_json(str(channel_bundle.get("payload") or "{}"))
+        ambiguous_note = str(channel_bundle.get("ambiguous_note") or "").strip()
+        if channel_answer and channel_answer.get("can_answer") and ambiguous_note:
+            answer_text = str(channel_answer.get("answer") or "").strip()
+            channel_answer["answer"] = f"{ambiguous_note}\n\n{answer_text}" if answer_text else ambiguous_note
+
+        if channel_answer and channel_answer.get("can_answer"):
+            ttl = int(channel_bundle.get("cache_ttl") or 60 * 60)
+            await self._database.set_cache(cache_key, str(channel_answer.get("answer") or ""), ttl)
+            if channel_bundle.get("session_user_id"):
+                await self._store_qna_turn(
+                    guild_id,
+                    channel_id,
+                    str(channel_bundle.get("session_user_id") or ""),
+                    question,
+                    str(channel_answer.get("answer") or ""),
+                )
+
         if scope == "channel":
-            if channel_answer and channel_answer.get("can_answer"):
-                await self._database.set_cache(cache_key, str(channel_answer.get("answer") or ""), 60 * 60)
             return channel_answer
 
-        # mixed scope
         if channel_answer and channel_answer.get("can_answer"):
-            await self._database.set_cache(cache_key, str(channel_answer.get("answer") or ""), 60 * 60)
             return channel_answer
         global_answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
         if not global_answer or not global_answer.get("can_answer"):
@@ -540,35 +602,436 @@ class TriggerEngineService:
         bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
         return tier_limit + max(0, bonus)
 
-    async def _build_qna_payload(self, guild_id: str, channel_id: str, question: str) -> str:
-        now = datetime.now(ROME_TZ)
-        day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=ROME_TZ).astimezone(timezone.utc)
-        rows = await self._database.fetchall(
-            """
-            SELECT author_id, COUNT(*) as c
-            FROM messages
-            WHERE guild_id = ? AND channel_id = ? AND ts >= ?
-            GROUP BY author_id
-            ORDER BY c DESC
-            LIMIT 5
-            """,
-            (guild_id, channel_id, day_start.isoformat()),
+    async def _build_qna_payload(
+        self,
+        guild_id: str,
+        channel_id: str,
+        question: str,
+        *,
+        source: discord.Interaction | discord.Message | None = None,
+        session_user_id: str = "",
+    ) -> dict[str, object]:
+        guild = source.guild if source else None
+        targets, ambiguous_note, capped_note = self._infer_target_members_with_notes(source, question, guild)
+        start_dt, end_dt, range_label = self.infer_time_range(question, person_focused=bool(targets))
+        start_iso = start_dt.isoformat()
+        end_iso = end_dt.isoformat()
+        explicit_time = self._has_explicit_time_marker(question)
+
+        conversation_history = await self._load_qna_history(guild_id, channel_id, session_user_id)
+        session_signature = self._session_signature(conversation_history)
+
+        retrieval_mode = "full_history"
+        if explicit_time:
+            retrieval_mode = "window"
+
+        window_rows = await self._database.fetch_messages_in_range_time_bucketed(
+            channel_id=channel_id,
+            start_ts=start_iso,
+            end_ts=end_iso,
+            buckets=12,
+            per_bucket_limit=20,
+            include_bots=False,
         )
-        top = [{"author_id": r["author_id"], "count": int(r["c"])} for r in rows]
-        total_row = await self._database.fetchone(
-            "SELECT COUNT(*) AS c FROM messages WHERE guild_id = ? AND channel_id = ? AND ts >= ?",
-            (guild_id, channel_id, day_start.isoformat()),
+        window_ranked = self._rank_evidence_rows(window_rows, question)
+
+        if explicit_time:
+            evidence_ranked = window_ranked[:60]
+            if len(evidence_ranked) < 8 or self._is_weak_relevance(evidence_ranked):
+                full_rows = await self._database.search_channel_messages(channel_id=channel_id, query_text=question, limit=60, candidate_pool=300)
+                evidence_ranked = self._normalize_search_rows(full_rows)
+                retrieval_mode = "window_then_full"
+        else:
+            full_rows = await self._database.search_channel_messages(channel_id=channel_id, query_text=question, limit=60, candidate_pool=300)
+            evidence_ranked = self._normalize_search_rows(full_rows)
+
+        evidence_pack = self._build_evidence_pack(evidence_ranked, guild)
+        logger.info(
+            "qna retrieval mode=%s channel_id=%s evidence_count=%s range=%s",
+            retrieval_mode,
+            channel_id,
+            len(evidence_pack),
+            range_label,
         )
-        total = int(total_row["c"]) if total_row else 0
-        latest = await self._database.fetch_messages_in_range(channel_id=channel_id, start_ts=day_start.isoformat(), end_ts=datetime.now(timezone.utc).isoformat(), limit=30)
-        recent = [str(m["content"] or "") for m in latest][-30:]
+
+        context: dict[str, object] = {
+            "time_range_label": range_label,
+            "start": start_iso,
+            "end": end_iso,
+            "retrieval_mode": retrieval_mode,
+            "conversation_previous": conversation_history,
+            "evidence": evidence_pack,
+        }
+        constraints = [
+            "solo canale corrente",
+            "non includere PII",
+            "rispondi in italiano",
+            "usa solo le prove fornite",
+            "non inventare contenuti",
+            "includi 2-6 link [prova](jump_url) quando possibile",
+        ]
+        cache_ttl = 50 * 60
+        empty_reply = ""
+
+        if targets:
+            per_target_messages: dict[str, list[dict[str, str]]] = {}
+            target_rows_for_payload: list[dict[str, str]] = []
+            missing_targets: list[str] = []
+            for target in targets:
+                target_rows = await self._database.fetchall(
+                    """
+                    SELECT m.ts, m.content, m.message_id, m.guild_id, m.channel_id
+                    FROM messages AS m
+                    LEFT JOIN users AS u ON u.user_id = m.author_id
+                    WHERE m.channel_id = ?
+                      AND m.author_id = ?
+                      AND m.ts >= ?
+                      AND m.ts <= ?
+                      AND COALESCE(m.is_deleted, 0) = 0
+                      AND COALESCE(u.is_bot, 0) = 0
+                    ORDER BY m.ts ASC
+                    LIMIT 120
+                    """,
+                    (channel_id, str(target.id), start_iso, end_iso),
+                )
+                sampled_rows = self._sample_messages(list(target_rows), keep_start=20, keep_end=80)
+                items: list[dict[str, str]] = []
+                for row in sampled_rows:
+                    content = self._truncate_text(str(row["content"] or ""), 350).strip()
+                    if not content:
+                        continue
+                    message_id = str(row["message_id"] or "").strip()
+                    row_guild_id = str(row["guild_id"] or guild_id)
+                    row_channel_id = str(row["channel_id"] or channel_id)
+                    jump_url = f"https://discord.com/channels/{row_guild_id}/{row_channel_id}/{message_id}" if message_id else ""
+                    items.append(
+                        {
+                            "created_at": str(row["ts"] or ""),
+                            "content": content,
+                            "message_id": message_id,
+                            "channel_id": row_channel_id,
+                            "guild_id": row_guild_id,
+                            "jump_url": jump_url,
+                        }
+                    )
+                per_target_messages[str(target.id)] = items
+                target_rows_for_payload.append({"id": str(target.id), "display_name": target.display_name})
+                if not items:
+                    missing_targets.append(target.display_name)
+
+            if len(missing_targets) == len(targets):
+                names = ", ".join(missing_targets)
+                empty_reply = (
+                    f"Non ho trovato messaggi di {names} nel periodo richiesto ({range_label}). "
+                    "Prova con una finestra più ampia, ad esempio 'ultimi 7 giorni'."
+                )
+            context.update(
+                {
+                    "targets": target_rows_for_payload,
+                    "per_target_messages": per_target_messages,
+                    "focus_instruction": (
+                        "Per ciascun target: 2-5 bullet su cose interessanti, fino a 2 citazioni brevi (<=120 caratteri), "
+                        "ogni punto con link prova [prova](jump_url). Se mancano prove, dichiaralo."
+                    ),
+                }
+            )
+        else:
+            context["focus_instruction"] = (
+                "Rispondi alla domanda usando solo le prove. Struttura chiara e inserisci link prova cliccabili. "
+                "Se la domanda è follow-up, usa la conversazione precedente."
+            )
+
         prompt = {
+            "system": (
+                "Sei il servizio QnA del Barcellometro. Rispondi solo usando le prove fornite. "
+                "Non inventare contenuti. Se la domanda è un follow-up, usa la conversazione precedente."
+            ),
             "question": question,
-            "constraints": ["solo canale corrente", "non includere PII", "rispondi in italiano"],
-            "context": {"total_messages_today": total, "top_talkers_today": top, "recent_messages": recent},
+            "constraints": constraints,
+            "context": context,
             "output_schema": {"can_answer": "bool", "answer": "string", "refusal_reason": "string|null"},
         }
-        return json.dumps(prompt, ensure_ascii=False)
+
+        target_ids = sorted(str(member.id) for member in targets)
+        target_ids_fragment = "-".join(target_ids) if target_ids else "all"
+        cache_fragment = f"{channel_id}:{retrieval_mode}:{start_iso}:{end_iso}"
+        merged_note = "\n".join(note for note in [ambiguous_note, capped_note] if note).strip()
+        return {
+            "payload": json.dumps(prompt, ensure_ascii=False),
+            "cache_fragment": cache_fragment,
+            "target_ids_fragment": target_ids_fragment,
+            "cache_ttl": cache_ttl,
+            "empty_reply": empty_reply,
+            "ambiguous_note": merged_note,
+            "session_user_id": session_user_id,
+            "session_signature": session_signature,
+        }
+
+    def infer_time_range(
+        self,
+        question: str,
+        tz: str = "Europe/Rome",
+        *,
+        person_focused: bool = False,
+    ) -> tuple[datetime, datetime, str]:
+        local_tz = ZoneInfo(tz)
+        q = question.lower()
+        now_local = datetime.now(local_tz)
+        now_utc = datetime.now(timezone.utc)
+
+        def as_utc(dt_local: datetime) -> datetime:
+            return dt_local.astimezone(timezone.utc)
+
+        today_start = datetime.combine(now_local.date(), datetime.min.time(), tzinfo=local_tz)
+        if "ultima ora" in q or "ultim'ora" in q:
+            return now_utc - timedelta(hours=1), now_utc, "ultima ora"
+        if (m := re.search(r"ultime\s+(\d{1,2})\s+ore", q)):
+            hours = max(1, int(m.group(1)))
+            return now_utc - timedelta(hours=hours), now_utc, f"ultime {hours} ore"
+        if (m := re.search(r"ultimi\s+(\d{1,2})\s+giorni", q)):
+            days = min(30, max(1, int(m.group(1))))
+            return now_utc - timedelta(days=days), now_utc, f"ultimi {days} giorni"
+        if "stamattina" in q:
+            morning = today_start + timedelta(hours=6)
+            return as_utc(morning), now_utc, "stamattina"
+        if "questa sera" in q:
+            evening = today_start + timedelta(hours=18)
+            return as_utc(evening), now_utc, "questa sera"
+        if "ieri" in q:
+            yesterday_start = today_start - timedelta(days=1)
+            return as_utc(yesterday_start), as_utc(today_start), "ieri"
+        if "oggi" in q:
+            return as_utc(today_start), now_utc, "oggi"
+        if "questa settimana" in q:
+            week_start = today_start - timedelta(days=today_start.weekday())
+            return as_utc(week_start), now_utc, "questa settimana"
+        default_hours = 24 if person_focused else 6
+        return now_utc - timedelta(hours=default_hours), now_utc, f"ultime {default_hours} ore"
+
+    def infer_target_members(
+        self,
+        interaction_or_message: discord.Interaction | discord.Message | None,
+        question: str,
+        guild: discord.Guild | None,
+    ) -> list[discord.Member]:
+        targets, _, _ = self._infer_target_members_with_notes(interaction_or_message, question, guild)
+        return targets
+
+    def _infer_target_members_with_notes(
+        self,
+        interaction_or_message: discord.Interaction | discord.Message | None,
+        question: str,
+        guild: discord.Guild | None,
+    ) -> tuple[list[discord.Member], str, str]:
+        if guild is None:
+            return [], "", ""
+
+        targets: list[discord.Member] = []
+        ambiguous_note = ""
+        capped_note = ""
+
+        mention_ids = re.findall(r"<@!?(\d+)>", question)
+        for mention_id in mention_ids:
+            member = guild.get_member(int(mention_id))
+            if member and not member.bot:
+                targets.append(member)
+
+        if isinstance(interaction_or_message, discord.Message):
+            for member in interaction_or_message.mentions:
+                if not member.bot:
+                    targets.append(member)
+
+        if isinstance(interaction_or_message, discord.Interaction):
+            data = interaction_or_message.data if isinstance(interaction_or_message.data, dict) else {}
+            resolved = data.get("resolved") if isinstance(data, dict) else None
+            users = resolved.get("users") if isinstance(resolved, dict) else None
+            if isinstance(users, dict):
+                for user_id in users.keys():
+                    member = guild.get_member(int(user_id))
+                    if member and not member.bot:
+                        targets.append(member)
+
+        if not targets:
+            raw_tokens = [token.strip() for token in re.split(r"\s*(?:,|\be\b|&|\band\b)\s*", question, flags=re.IGNORECASE)]
+            stopwords = {
+                "che", "cosa", "oggi", "ieri", "interessante", "ha", "scritto", "nel", "canale", "questa", "settimana",
+                "ultima", "ultime", "ultimi", "ora", "ore", "giorni", "stamattina", "sera", "chi", "di"
+            }
+            name_tokens: list[str] = []
+            for token in raw_tokens:
+                words = [w for w in re.findall(r"\b[\wÀ-ÿ']+\b", token) if len(w) > 2]
+                for w in words:
+                    if w.lower() in stopwords:
+                        continue
+                    if w[0].isupper() or len(raw_tokens) > 1:
+                        name_tokens.append(w)
+
+            unresolved_count = 0
+            for token in name_tokens:
+                token_l = token.lower()
+                prefix_matches = [
+                    m for m in guild.members
+                    if not m.bot and (m.display_name.lower().startswith(token_l) or m.name.lower().startswith(token_l))
+                ]
+                if len(prefix_matches) == 1:
+                    targets.append(prefix_matches[0])
+                    continue
+                if len(prefix_matches) > 1:
+                    unresolved_count += 1
+                    continue
+
+                choices: dict[str, discord.Member] = {}
+                for member in guild.members:
+                    if member.bot:
+                        continue
+                    choices[member.display_name.lower()] = member
+                    choices[member.name.lower()] = member
+                close = difflib.get_close_matches(token_l, list(choices.keys()), n=2, cutoff=0.9)
+                if len(close) == 1:
+                    targets.append(choices[close[0]])
+                elif len(close) > 1:
+                    unresolved_count += 1
+
+            if unresolved_count > 0 and not targets:
+                ambiguous_note = "Non sono sicuro di chi intendi. Intanto rispondo sul canale."
+
+        deduped: list[discord.Member] = []
+        seen_ids: set[int] = set()
+        for member in targets:
+            if member.id in seen_ids:
+                continue
+            seen_ids.add(member.id)
+            deduped.append(member)
+
+        if len(deduped) > 3:
+            capped = len(deduped)
+            deduped = deduped[:3]
+            capped_note = f"Ho considerato i primi 3 target su {capped} richiesti."
+
+        return deduped, ambiguous_note, capped_note
+
+    def _truncate_text(self, text: str, max_chars: int) -> str:
+        if len(text) <= max_chars:
+            return text
+        return f"{text[: max_chars - 1]}…"
+
+    def _sample_messages(self, rows: list[object], *, keep_start: int, keep_end: int) -> list[object]:
+        if len(rows) <= keep_start + keep_end:
+            return rows
+        return rows[:keep_start] + rows[-keep_end:]
+
+    def _has_explicit_time_marker(self, question: str) -> bool:
+        q = question.lower()
+        return any(token in q for token in ["oggi", "ieri", "stamattina", "questa settimana", "questa sera", "ultima ora", "ultim'ora", "ultime", "ultimi", "mese"])
+
+    def _rank_evidence_rows(self, rows: list[object], question: str) -> list[dict[str, object]]:
+        keywords = [token for token in re.findall(r"\w+", question.lower()) if len(token) > 2][:12]
+        phrase = question.strip().lower()
+        ranked: list[dict[str, object]] = []
+        for row in rows:
+            content = str(row["content"] or "")
+            lower = content.lower()
+            score = 0
+            for kw in keywords:
+                idx = lower.find(kw)
+                if idx >= 0:
+                    score += 1
+                    if idx < 80:
+                        score += 1
+            if phrase and phrase in lower:
+                score += 2
+            if score <= 0 and keywords:
+                continue
+            ranked.append(
+                {
+                    "message_id": str(row["message_id"] or ""),
+                    "guild_id": str(row["guild_id"] or ""),
+                    "channel_id": str(row["channel_id"] or ""),
+                    "author_id": str(row["author_id"] or ""),
+                    "created_at": str(row["ts"] or row["created_at"] or ""),
+                    "content": content,
+                    "score": score,
+                }
+            )
+        ranked.sort(key=lambda item: (int(item.get("score", 0)), str(item.get("created_at", ""))), reverse=True)
+        return ranked
+
+    def _normalize_search_rows(self, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        ranked: list[dict[str, object]] = []
+        for row in rows:
+            ranked.append(
+                {
+                    "message_id": str(row.get("message_id") or ""),
+                    "guild_id": str(row.get("guild_id") or ""),
+                    "channel_id": str(row.get("channel_id") or ""),
+                    "author_id": str(row.get("author_id") or ""),
+                    "created_at": str(row.get("created_at") or ""),
+                    "content": str(row.get("content") or ""),
+                    "score": int(row.get("score") or 0),
+                }
+            )
+        return ranked
+
+    def _is_weak_relevance(self, ranked_rows: list[dict[str, object]]) -> bool:
+        if not ranked_rows:
+            return True
+        top_scores = [int(r.get("score") or 0) for r in ranked_rows[:8]]
+        avg = sum(top_scores) / max(1, len(top_scores))
+        return avg < 2
+
+    def _build_evidence_pack(self, ranked_rows: list[dict[str, object]], guild: discord.Guild | None) -> list[dict[str, str]]:
+        pack: list[dict[str, str]] = []
+        for row in ranked_rows[:60]:
+            guild_id = str(row.get("guild_id") or "")
+            channel_id = str(row.get("channel_id") or "")
+            message_id = str(row.get("message_id") or "")
+            jump_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}" if message_id else ""
+            author_id = str(row.get("author_id") or "")
+            author_name = author_id
+            if guild and author_id.isdigit():
+                member = guild.get_member(int(author_id))
+                if member is not None:
+                    author_name = member.display_name
+            pack.append(
+                {
+                    "author_name": author_name,
+                    "created_at_iso": str(row.get("created_at") or ""),
+                    "snippet": self._truncate_text(str(row.get("content") or ""), 240),
+                    "jump_url": jump_url,
+                }
+            )
+        return pack
+
+    async def _load_qna_history(self, guild_id: str, channel_id: str, user_id: str) -> list[dict[str, str]]:
+        if not user_id:
+            return []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        history = await self._database.get_qna_session_history(guild_id, channel_id, user_id, now_iso)
+        normalized: list[dict[str, str]] = []
+        for entry in history[-4:]:
+            q = self._truncate_text(str(entry.get("q") or ""), 300)
+            a = self._truncate_text(str(entry.get("a") or ""), 400)
+            ts = str(entry.get("ts") or "")
+            if q:
+                normalized.append({"q": q, "a": a, "ts": ts})
+        return normalized
+
+    async def _store_qna_turn(self, guild_id: str, channel_id: str, user_id: str, question: str, answer: str) -> None:
+        if not user_id:
+            return
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        history = await self._database.get_qna_session_history(guild_id, channel_id, user_id, now_iso)
+        history.append({"q": self._truncate_text(question, 300), "a": self._truncate_text(answer, 400), "ts": now_iso})
+        history = history[-4:]
+        expires_at = (now + timedelta(minutes=30)).isoformat()
+        await self._database.upsert_qna_session_history(guild_id, channel_id, user_id, history, now_iso, expires_at)
+
+    def _session_signature(self, history: list[dict[str, str]]) -> str:
+        if not history:
+            return "nosession"
+        raw = "|".join(str(item.get("q") or "") for item in history[-2:])
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
 
     async def _ask_ai_json(self, payload: str) -> dict[str, object] | None:
         if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:

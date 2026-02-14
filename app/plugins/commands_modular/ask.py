@@ -8,13 +8,12 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 
 
-async def _handle_ask_like(interaction: discord.Interaction, ctx: CommandContext, domanda: str | None, azione: app_commands.Choice[str] | None) -> None:
+async def _handle_ask_like(interaction: discord.Interaction, ctx: CommandContext, testo: str) -> None:
     if ctx.trigger_engine is None:
         await interaction.response.send_message("Servizio trigger non disponibile.", ephemeral=True)
         return
-    command_mode = (azione.value if azione else "").strip().lower()
-    question_text = (domanda or "").strip()
-    if command_mode == "stato" or question_text.lower() == "stato":
+    text_value = (testo or "").strip()
+    if text_value.lower() == "stato":
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa questo comando in un server.", ephemeral=True)
             return
@@ -37,21 +36,19 @@ async def _handle_ask_like(interaction: discord.Interaction, ctx: CommandContext
             ephemeral=True,
         )
         return
-    if not question_text:
-        await interaction.response.send_message("Inserisci una domanda oppure usa azione=stato.", ephemeral=True)
+    if not text_value:
+        await interaction.response.send_message("Inserisci una domanda o scrivi 'stato'.", ephemeral=True)
         return
-    await ctx.trigger_engine.handle_qna_question(interaction, question_text)
+    await ctx.trigger_engine.handle_qna_question(interaction, text_value)
 
 
 def register_ask(tree: app_commands.CommandTree, guild: discord.Object, ctx: CommandContext) -> None:
     @tree.command(name="ask", description="Fai una domanda al Q&A", guild=guild)
-    @app_commands.describe(domanda="Testo domanda", azione="Azione rapida")
-    @app_commands.choices(azione=[app_commands.Choice(name="stato", value="stato")])
-    async def ask(interaction: discord.Interaction, domanda: str | None = None, azione: app_commands.Choice[str] | None = None) -> None:
-        await _handle_ask_like(interaction, ctx, domanda, azione)
+    @app_commands.describe(testo="Testo domanda (usa 'stato' per vedere quota)")
+    async def ask(interaction: discord.Interaction, testo: str) -> None:
+        await _handle_ask_like(interaction, ctx, testo)
 
     @tree.command(name="domanda", description="Alias di /ask", guild=guild)
-    @app_commands.describe(domanda="Testo domanda", azione="Azione rapida")
-    @app_commands.choices(azione=[app_commands.Choice(name="stato", value="stato")])
-    async def domanda(interaction: discord.Interaction, domanda: str | None = None, azione: app_commands.Choice[str] | None = None) -> None:
-        await _handle_ask_like(interaction, ctx, domanda, azione)
+    @app_commands.describe(testo="Testo domanda (usa 'stato' per vedere quota)")
+    async def domanda(interaction: discord.Interaction, testo: str) -> None:
+        await _handle_ask_like(interaction, ctx, testo)
