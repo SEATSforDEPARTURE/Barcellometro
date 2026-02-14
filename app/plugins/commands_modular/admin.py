@@ -146,3 +146,33 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
         else:
             message = f"Calibrazione non aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
         await interaction.followup.send(message, ephemeral=True)
+
+    @barcellometro_group.command(name="insights_config", description="Configura curiosità utenti con istruzione naturale")
+    async def insights_config(interaction: discord.Interaction, testo: str) -> None:
+        if not await check_permission(interaction, "barcellometro.ai", ctx):
+            return
+        if ctx.trigger_engine is None:
+            await interaction.response.send_message("Trigger engine non disponibile.", ephemeral=True)
+            return
+        config = await ctx.trigger_engine.configure_insights(testo)
+        await interaction.response.send_message(
+            f"Configurazione salvata: ogni {config['interval_minutes']} min. Template: {config['template'][:120]}",
+            ephemeral=True,
+        )
+
+    @barcellometro_group.command(name="insights_status", description="Mostra stato e configurazione curiosità utenti")
+    async def insights_status(interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message("Usa in un canale.", ephemeral=True)
+            return
+        if ctx.trigger_engine is None:
+            await interaction.response.send_message("Trigger engine non disponibile.", ephemeral=True)
+            return
+        status = await ctx.trigger_engine.get_insights_status(str(interaction.guild_id), str(interaction.channel_id))
+        await interaction.response.send_message(
+            f"Insights: {'on' if status['enabled'] else 'off'}\n"
+            f"Intervallo: {status['interval_minutes']} min\n"
+            f"Template: {str(status['template'])[:140]}\n"
+            f"Ultimo invio: {status['last_post_at'] or '-'}",
+            ephemeral=True,
+        )

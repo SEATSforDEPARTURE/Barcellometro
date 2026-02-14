@@ -40,7 +40,7 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
             return
         guild_id, channel_id = scope
         data = await ctx.database.list_triggers(guild_id, channel_id)
-        order = ["barcello", "frasi", "prompt", "qna"]
+        order = ["barcello", "frasi", "prompt", "qna", "insights"]
         lines = [f"- {k}: {'on' if data.get(k, False) else 'off'}" for k in order]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
@@ -184,3 +184,15 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
     @trigger_group.command(name="qna_status", description="Stato trigger qna")
     async def qna_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "status")
+
+    @trigger_group.command(name="insights_on", description="Abilita trigger curiosità utenti")
+    async def insights_on(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "insights", "on")
+
+    @trigger_group.command(name="insights_off", description="Disabilita trigger curiosità utenti")
+    async def insights_off(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "insights", "off")
+
+    @trigger_group.command(name="insights_status", description="Stato trigger curiosità utenti")
+    async def insights_status(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "insights", "status")
