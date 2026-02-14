@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.services.barcello import BarcelloService
+from app.services.config_file_loader import load_json_file
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope
@@ -17,6 +18,7 @@ from app.utils.pii import contains_pii
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
+BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
 class TriggerEngineService:
@@ -146,32 +148,39 @@ class TriggerEngineService:
     async def _poll_barcello(self) -> None:
         if self._bot is None:
             return
+        config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        window_minutes = config.get("window_minutes")
+        if not isinstance(window_minutes, int) or window_minutes <= 0:
+            window_minutes = 60
+        raw_templates = config.get("templates")
+        templates = raw_templates if isinstance(raw_templates, dict) else {}
         rows = await self._database.list_enabled_trigger_channels("barcello")
         for row in rows:
             guild_id = str(row["guild_id"])
             channel_id = str(row["channel_id"])
-            status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=180)
-            color = str(status.get("color") or "").upper()
+            status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
+            color = self._normalize_barcello_color(status.get("color"))
+            stored_color = color or ""
             score = int(status.get("score") or 0)
             prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
-            prev_color = str(prev.get("last_color") or "").upper() if prev else None
+            prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
             prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
             now = datetime.now(timezone.utc)
             cooldown_key = f"{guild_id}:{channel_id}"
             last_sent = self._barcello_cooldown.get(cooldown_key)
             if last_sent and (now - last_sent) < timedelta(minutes=10):
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, color, score, now.isoformat())
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
                 continue
             if prev_color and prev_score is not None:
                 if color == prev_color and abs(score - prev_score) < 5:
-                    await self._database.upsert_barcello_trigger_state(guild_id, channel_id, color, score, now.isoformat())
+                    await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
                     continue
-            msg = self._render_barcello_transition(prev_color, color, prev_score, score)
+            msg = self._render_barcello_transition(prev_color, stored_color, prev_score, score, templates=templates)
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and msg:
                 await channel.send(msg)
                 self._barcello_cooldown[cooldown_key] = now
-            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, color, score, now.isoformat())
+            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
 
     async def _handle_phrases(self, envelope: EventEnvelope) -> None:
         assert envelope.guild_id and envelope.channel_id
@@ -230,15 +239,57 @@ class TriggerEngineService:
                 return False
         return needle in haystack
 
-    def _render_barcello_transition(self, old: str | None, new: str, old_score: int | None, new_score: int) -> str:
-        worsening = {"GREEN": 0, "YELLOW": 1, "RED": 2, "BLACK": 3}
+    def _normalize_barcello_color(self, color: str | None) -> str | None:
+        if color is None:
+            return None
+        normalized = str(color).strip().upper()
+        if not normalized:
+            return None
+        english_to_italian = {"GREEN": "VERDE", "YELLOW": "GIALLO", "RED": "ROSSO", "BLACK": "NERO"}
+        canonical = {"VERDE", "GIALLO", "ROSSO", "NERO"}
+        mapped = english_to_italian.get(normalized, normalized)
+        if mapped in canonical:
+            return mapped
+        return normalized
+
+    def _render_barcello_transition(
+        self,
+        old: str | None,
+        new: str,
+        old_score: int | None,
+        new_score: int,
+        templates: dict[str, str] | None = None,
+    ) -> str:
+        worsening = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
+        template_dict = templates if isinstance(templates, dict) else {}
+        values = {
+            "old": old or "",
+            "new": new,
+            "old_score": "" if old_score is None else str(old_score),
+            "new_score": str(new_score),
+        }
+
+        def render_template(message_template: str | None) -> str | None:
+            if not isinstance(message_template, str):
+                return None
+            return re.sub(r"\{(old|new|old_score|new_score)\}", lambda match: values[match.group(1)], message_template)
+
         if old is None:
-            return f"Barcello ora {new} ({new_score})."
-        if worsening.get(new, 99) > worsening.get(old, 99):
-            return f"⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score})."
-        if worsening.get(new, 99) < worsening.get(old, 99):
-            return f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
-        return f"Barcello aggiornato: {new_score}."
+            return render_template(template_dict.get("INIT")) or f"📌 Barcello ora {new} (score {new_score})"
+
+        severity_new = worsening.get(new, 99)
+        severity_old = worsening.get(old, 99)
+
+        if old != new:
+            exact_template = render_template(template_dict.get(f"{old}->{new}"))
+            if exact_template:
+                return exact_template
+
+        if severity_new > severity_old:
+            return render_template(template_dict.get("WORSEN")) or f"⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score})."
+        if severity_new < severity_old:
+            return render_template(template_dict.get("IMPROVE")) or f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
+        return render_template(template_dict.get("SAME")) or f"Barcello aggiornato: {new_score}."
 
     async def _resolve_qna_limit(self, interaction: discord.Interaction) -> int:
         profile = await self._entitlements.resolve_profile(interaction.user)

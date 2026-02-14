@@ -1,0 +1,21 @@
+{
+  "window_minutes": 60,
+  "templates": {
+    "INIT": "📌 Barcello ora {new} (score {new_score})",
+    "GREEN->YELLOW": "🟡 Attenzione: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
+    "GREEN->RED": "🔴 Allerta: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
+    "GREEN->BLACK": "⚫ Critico: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
+    "YELLOW->GREEN": "🟢 Migliora: Barcello torna {new} ({old_score}→{new_score}).",
+    "YELLOW->RED": "🔴 Peggiora: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
+    "YELLOW->BLACK": "⚫ Peggiora: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
+    "RED->GREEN": "🟢 Forte miglioramento: {old} → {new} ({old_score}→{new_score}).",
+    "RED->YELLOW": "🟡 Migliora: {old} → {new} ({old_score}→{new_score}).",
+    "RED->BLACK": "⚫ Peggiora: {old} → {new} ({old_score}→{new_score}).",
+    "BLACK->GREEN": "🟢 Recupero completo: {old} → {new} ({old_score}→{new_score}).",
+    "BLACK->YELLOW": "🟡 Migliora: {old} → {new} ({old_score}→{new_score}).",
+    "BLACK->RED": "🔴 Migliora ma resta critica: {old} → {new} ({old_score}→{new_score}).",
+    "WORSEN": "⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score}).",
+    "IMPROVE": "✅ Barcello migliora: {old} → {new} ({old_score}→{new_score}).",
+    "SAME": "ℹ️ Barcello invariato: {new} (score {new_score})."
+  }
+}
