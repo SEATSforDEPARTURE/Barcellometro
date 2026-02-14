@@ -45,7 +45,6 @@ def setup(registry: ServiceRegistry) -> None:
     status_group = app_commands.Group(name="status", description="Stato servizi")
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunto conversazione")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
-    trigger_group = app_commands.Group(name="trigger", description="Trigger Engine")
 
     barcellometro_group.add_command(role_group)
     barcellometro_group.add_command(stt_group)
@@ -53,7 +52,6 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group.add_command(audio_notes_group)
     barcellometro_group.add_command(messaggi_group)
     barcellometro_group.add_command(voice_ingest_group)
-    barcellometro_group.add_command(trigger_group)
 
     register_admin(barcellometro_group, ctx)
     register_roles(role_group, ctx)
@@ -66,7 +64,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_status(status_group, ctx)
     register_riassunto(riassunto_group, ctx)
     register_resoconto(resoconto_group, ctx)
-    register_triggers(trigger_group, ctx)
+    register_triggers(barcellometro_group, ctx)
     register_barcello(bot.tree, guild, ctx)
     register_ask(bot.tree, guild, ctx)
 
