@@ -1416,6 +1416,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 end_ts=end_dt_utc.isoformat(),
                 tier=profile,
                 evidence_mode=False,
+                summary_mode="default",
                 voice_context=channel_is_voice,
                 ai_allowed=ai_allowed,
                 model_name=model_name,
