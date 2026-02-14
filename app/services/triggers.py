@@ -111,7 +111,7 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await interaction.followup.send(text, ephemeral=True)
+        await interaction.followup.send(text, ephemeral=False)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         if message.guild is None:
@@ -436,10 +436,12 @@ class TriggerEngineService:
         cache_channel = channel_id if cache_scope == "channel" else "global"
         cache_fragment = "default"
         channel_bundle: dict[str, object] | None = None
+        target_ids_fragment = "all"
         if cache_scope != "global":
             channel_bundle = await self._build_qna_payload(guild_id, channel_id, question, source=source)
             cache_fragment = str(channel_bundle.get("cache_fragment") or cache_fragment)
-        cache_key = f"qna:{cache_scope}:{cache_channel}:{cache_fragment}:{normalized_question}"
+            target_ids_fragment = str(channel_bundle.get("target_ids_fragment") or target_ids_fragment)
+        cache_key = f"qna:{cache_scope}:{cache_channel}:{target_ids_fragment}:{cache_fragment}:{normalized_question}"
         cached = await self._database.get_cache(cache_key)
         if cached is not None:
             logger.info("qna cache hit scope=%s channel_id=%s", scope, channel_id)
@@ -587,17 +589,17 @@ class TriggerEngineService:
         source: discord.Interaction | discord.Message | None = None,
     ) -> dict[str, object]:
         guild = source.guild if source else None
-        target_member, ambiguous_note = self._infer_target_member_with_note(source, question, guild)
-        start_dt, end_dt, range_label = self.infer_time_range(question, person_focused=target_member is not None)
+        targets, ambiguous_note, capped_note = self._infer_target_members_with_notes(source, question, guild)
+        start_dt, end_dt, range_label = self.infer_time_range(question, person_focused=bool(targets))
         start_iso = start_dt.isoformat()
         end_iso = end_dt.isoformat()
         logger.info(
-            "qna inferred range channel_id=%s label=%s start=%s end=%s target_user=%s",
+            "qna inferred range channel_id=%s label=%s start=%s end=%s target_users=%s",
             channel_id,
             range_label,
             start_iso,
             end_iso,
-            str(target_member.id) if target_member else "none",
+            [str(member.id) for member in targets],
         )
 
         rows = await self._database.fetchall(
@@ -636,6 +638,11 @@ class TriggerEngineService:
             include_bots=False,
         )
         recent = [self._truncate_text(str(m["content"] or ""), 280) for m in bucketed][-80:]
+        channel_context = [
+            self._truncate_text(str(r["content"] or ""), 220)
+            for r in bucketed[-20:]
+            if str(r["content"] or "").strip()
+        ]
 
         context: dict[str, object] = {
             "time_range_label": range_label,
@@ -644,55 +651,75 @@ class TriggerEngineService:
             "total_messages": total,
             "top_talkers": top,
             "recent_messages": recent,
+            "channel_context": channel_context,
         }
         constraints = ["solo canale corrente", "non includere PII", "rispondi in italiano"]
         cache_ttl = 60 * 60
         empty_reply = ""
-        if target_member is not None:
-            target_rows = await self._database.fetchall(
-                """
-                SELECT m.ts, m.content
-                FROM messages AS m
-                LEFT JOIN users AS u ON u.user_id = m.author_id
-                WHERE m.channel_id = ?
-                  AND m.author_id = ?
-                  AND m.ts >= ?
-                  AND m.ts <= ?
-                  AND COALESCE(m.is_deleted, 0) = 0
-                  AND COALESCE(u.is_bot, 0) = 0
-                ORDER BY m.ts ASC
-                LIMIT 200
-                """,
-                (channel_id, str(target_member.id), start_iso, end_iso),
-            )
-            sampled_rows = self._sample_messages(list(target_rows), keep_start=20, keep_end=80)
-            target_messages = [
-                {"created_at": str(r["ts"] or ""), "content": self._truncate_text(str(r["content"] or ""), 350)}
-                for r in sampled_rows
-                if str(r["content"] or "").strip()
-            ]
-            if not target_messages:
-                display_name = target_member.display_name
+
+        if targets:
+            per_target_messages: dict[str, list[dict[str, str]]] = {}
+            missing_targets: list[str] = []
+            target_rows_for_payload: list[dict[str, str]] = []
+            for target in targets:
+                target_rows = await self._database.fetchall(
+                    """
+                    SELECT m.ts, m.content, m.message_id
+                    FROM messages AS m
+                    LEFT JOIN users AS u ON u.user_id = m.author_id
+                    WHERE m.channel_id = ?
+                      AND m.author_id = ?
+                      AND m.ts >= ?
+                      AND m.ts <= ?
+                      AND COALESCE(m.is_deleted, 0) = 0
+                      AND COALESCE(u.is_bot, 0) = 0
+                    ORDER BY m.ts ASC
+                    LIMIT 120
+                    """,
+                    (channel_id, str(target.id), start_iso, end_iso),
+                )
+                sampled_rows = self._sample_messages(list(target_rows), keep_start=20, keep_end=80)
+                message_items: list[dict[str, str]] = []
+                for row in sampled_rows:
+                    content = self._truncate_text(str(row["content"] or ""), 350).strip()
+                    if not content:
+                        continue
+                    message_id = str(row["message_id"] or "").strip()
+                    jump_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}" if message_id else ""
+                    message_items.append(
+                        {
+                            "created_at": str(row["ts"] or ""),
+                            "content": content,
+                            "message_id": message_id,
+                            "channel_id": channel_id,
+                            "guild_id": guild_id,
+                            "jump_url": jump_url,
+                        }
+                    )
+                per_target_messages[str(target.id)] = message_items
+                target_rows_for_payload.append({"id": str(target.id), "display_name": target.display_name})
+                if not message_items:
+                    missing_targets.append(target.display_name)
+
+            if len(missing_targets) == len(targets):
+                names = ", ".join(missing_targets)
                 empty_reply = (
-                    f"Non ho trovato messaggi di {display_name} nel periodo richiesto ({range_label}). "
+                    f"Non ho trovato messaggi di {names} nel periodo richiesto ({range_label}). "
                     "Prova con una finestra più ampia, ad esempio 'ultimi 7 giorni'."
                 )
-            channel_context = [
-                self._truncate_text(str(r["content"] or ""), 240)
-                for r in bucketed[-20:]
-                if str(r["content"] or "").strip()
-            ]
             context.update(
                 {
-                    "target_user": {"id": str(target_member.id), "display_name": target_member.display_name},
-                    "target_messages": target_messages,
-                    "channel_context": channel_context,
+                    "targets": target_rows_for_payload,
+                    "per_target_messages": per_target_messages,
                     "focus_instruction": (
-                        "Riassumi cosa ha scritto di interessante "
-                        f"{target_member.display_name} nel periodo {range_label}. "
-                        "Evidenzia temi, momenti, 2-3 citazioni brevi se presenti. "
-                        "Se non ci sono abbastanza messaggi, dillo chiaramente."
+                        "Per ciascuna persona target, produci 2-5 bullet di cose interessanti basate solo sui messaggi forniti. "
+                        "Aggiungi fino a 2 citazioni brevi (max 120 caratteri) per target, sempre con prova. "
+                        "Per ogni bullet/citazione includi un link prova usando i jump_url forniti. "
+                        "Formato Discord Markdown per sezioni per persona, senza inventare contenuti. "
+                        "Se per una persona non ci sono messaggi, dichiaralo chiaramente."
                     ),
+                    "output_example": "**Nome**\n- Punto interessante ([prova](jump_url))\n- \"citazione\" ([link](jump_url))",
+                    "target_cap_note": capped_note,
                 }
             )
             cache_ttl = 60 * 60
@@ -706,14 +733,17 @@ class TriggerEngineService:
             "context": context,
             "output_schema": {"can_answer": "bool", "answer": "string", "refusal_reason": "string|null"},
         }
-        target_key = str(target_member.id) if target_member else "all"
-        cache_fragment = f"{channel_id}:{target_key}:{start_iso}:{end_iso}"
+        target_ids = sorted(str(member.id) for member in targets)
+        target_ids_fragment = "-".join(target_ids) if target_ids else "all"
+        cache_fragment = f"{channel_id}:{start_iso}:{end_iso}"
+        merged_note = "\n".join(note for note in [ambiguous_note, capped_note] if note).strip()
         return {
             "payload": json.dumps(prompt, ensure_ascii=False),
             "cache_fragment": cache_fragment,
+            "target_ids_fragment": target_ids_fragment,
             "cache_ttl": cache_ttl,
             "empty_reply": empty_reply,
-            "ambiguous_note": ambiguous_note,
+            "ambiguous_note": merged_note,
         }
 
     def infer_time_range(
@@ -757,32 +787,39 @@ class TriggerEngineService:
         default_hours = 24 if person_focused else 6
         return now_utc - timedelta(hours=default_hours), now_utc, f"ultime {default_hours} ore"
 
-    def infer_target_member(
+    def infer_target_members(
         self,
         interaction_or_message: discord.Interaction | discord.Message | None,
         question: str,
         guild: discord.Guild | None,
-    ) -> discord.Member | None:
-        target, _ = self._infer_target_member_with_note(interaction_or_message, question, guild)
-        return target
+    ) -> list[discord.Member]:
+        targets, _, _ = self._infer_target_members_with_notes(interaction_or_message, question, guild)
+        return targets
 
-    def _infer_target_member_with_note(
+    def _infer_target_members_with_notes(
         self,
         interaction_or_message: discord.Interaction | discord.Message | None,
         question: str,
         guild: discord.Guild | None,
-    ) -> tuple[discord.Member | None, str]:
+    ) -> tuple[list[discord.Member], str, str]:
         if guild is None:
-            return None, ""
-        mention_match = re.search(r"<@!?(\d+)>", question)
-        if mention_match:
-            member = guild.get_member(int(mention_match.group(1)))
+            return [], "", ""
+
+        targets: list[discord.Member] = []
+        ambiguous_note = ""
+        capped_note = ""
+
+        mention_ids = re.findall(r"<@!?(\d+)>", question)
+        for mention_id in mention_ids:
+            member = guild.get_member(int(mention_id))
             if member and not member.bot:
-                return member, ""
+                targets.append(member)
+
         if isinstance(interaction_or_message, discord.Message):
             for member in interaction_or_message.mentions:
                 if not member.bot:
-                    return member, ""
+                    targets.append(member)
+
         if isinstance(interaction_or_message, discord.Interaction):
             data = interaction_or_message.data if isinstance(interaction_or_message.data, dict) else {}
             resolved = data.get("resolved") if isinstance(data, dict) else None
@@ -791,39 +828,66 @@ class TriggerEngineService:
                 for user_id in users.keys():
                     member = guild.get_member(int(user_id))
                     if member and not member.bot:
-                        return member, ""
+                        targets.append(member)
 
-        candidates = [token for token in re.findall(r"\b[\wÀ-ÿ']+\b", question) if len(token) > 2]
-        stopwords = {"che", "cosa", "oggi", "ieri", "interessante", "ha", "scritto", "nel", "canale", "questa", "settimana"}
-        name_tokens = [t for t in candidates if t[0].isupper() and t.lower() not in stopwords]
-        if not name_tokens:
-            name_tokens = [t for t in candidates if t.lower() not in stopwords][:1]
-        if not name_tokens:
-            return None, ""
-        token = name_tokens[0].lower()
+        if not targets:
+            raw_tokens = [token.strip() for token in re.split(r"\s*(?:,|\be\b|&|\band\b)\s*", question, flags=re.IGNORECASE)]
+            stopwords = {
+                "che", "cosa", "oggi", "ieri", "interessante", "ha", "scritto", "nel", "canale", "questa", "settimana",
+                "ultima", "ultime", "ultimi", "ora", "ore", "giorni", "stamattina", "sera", "chi", "di"
+            }
+            name_tokens: list[str] = []
+            for token in raw_tokens:
+                words = [w for w in re.findall(r"\b[\wÀ-ÿ']+\b", token) if len(w) > 2]
+                for w in words:
+                    if w.lower() in stopwords:
+                        continue
+                    if w[0].isupper() or len(raw_tokens) > 1:
+                        name_tokens.append(w)
 
-        prefix_matches = [
-            m
-            for m in guild.members
-            if not m.bot and (m.display_name.lower().startswith(token) or m.name.lower().startswith(token))
-        ]
-        if len(prefix_matches) == 1:
-            return prefix_matches[0], ""
-        if len(prefix_matches) > 1:
-            return None, "Non sono sicuro di chi intendi. Intanto rispondo sul canale."
+            unresolved_count = 0
+            for token in name_tokens:
+                token_l = token.lower()
+                prefix_matches = [
+                    m for m in guild.members
+                    if not m.bot and (m.display_name.lower().startswith(token_l) or m.name.lower().startswith(token_l))
+                ]
+                if len(prefix_matches) == 1:
+                    targets.append(prefix_matches[0])
+                    continue
+                if len(prefix_matches) > 1:
+                    unresolved_count += 1
+                    continue
 
-        choices: dict[str, discord.Member] = {}
-        for member in guild.members:
-            if member.bot:
+                choices: dict[str, discord.Member] = {}
+                for member in guild.members:
+                    if member.bot:
+                        continue
+                    choices[member.display_name.lower()] = member
+                    choices[member.name.lower()] = member
+                close = difflib.get_close_matches(token_l, list(choices.keys()), n=2, cutoff=0.9)
+                if len(close) == 1:
+                    targets.append(choices[close[0]])
+                elif len(close) > 1:
+                    unresolved_count += 1
+
+            if unresolved_count > 0 and not targets:
+                ambiguous_note = "Non sono sicuro di chi intendi. Intanto rispondo sul canale."
+
+        deduped: list[discord.Member] = []
+        seen_ids: set[int] = set()
+        for member in targets:
+            if member.id in seen_ids:
                 continue
-            choices[member.display_name.lower()] = member
-            choices[member.name.lower()] = member
-        close = difflib.get_close_matches(token, list(choices.keys()), n=2, cutoff=0.9)
-        if len(close) == 1:
-            return choices[close[0]], ""
-        if len(close) > 1:
-            return None, "Non sono sicuro di chi intendi. Intanto rispondo sul canale."
-        return None, ""
+            seen_ids.add(member.id)
+            deduped.append(member)
+
+        if len(deduped) > 3:
+            capped = len(deduped)
+            deduped = deduped[:3]
+            capped_note = f"Ho considerato i primi 3 target su {capped} richiesti."
+
+        return deduped, ambiguous_note, capped_note
 
     def _truncate_text(self, text: str, max_chars: int) -> str:
         if len(text) <= max_chars:
