@@ -302,6 +302,16 @@ class DatabaseService:
                 last_used_at TEXT NULL,
                 PRIMARY KEY (guild_id, user_id, hobby, source_message_id)
             );
+
+
+            CREATE TABLE IF NOT EXISTS qna_user_bonus (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                bonus INTEGER NOT NULL,
+                expires_at TEXT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            );
             """
         )
         await self._ensure_message_campaign_columns()
@@ -1073,6 +1083,44 @@ class DatabaseService:
             (now, guild_id, user_id, hobby, source_message_id),
         )
 
+
+    async def get_qna_bonus(self, guild_id: str, user_id: str) -> tuple[int, Optional[str]]:
+        row = await self.fetchone(
+            "SELECT bonus, expires_at FROM qna_user_bonus WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        if not row:
+            return 0, None
+        expires_at = row["expires_at"]
+        if expires_at:
+            try:
+                if datetime.fromisoformat(str(expires_at)) <= datetime.now(timezone.utc):
+                    await self.clear_qna_bonus(guild_id, user_id)
+                    return 0, None
+            except ValueError:
+                await self.clear_qna_bonus(guild_id, user_id)
+                return 0, None
+        return int(row["bonus"] or 0), str(expires_at) if expires_at else None
+
+    async def set_qna_bonus(self, guild_id: str, user_id: str, bonus: int, expires_at: Optional[str]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO qna_user_bonus (guild_id, user_id, bonus, expires_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                bonus = excluded.bonus,
+                expires_at = excluded.expires_at,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, user_id, bonus, expires_at, now),
+        )
+
+    async def clear_qna_bonus(self, guild_id: str, user_id: str) -> None:
+        await self.execute(
+            "DELETE FROM qna_user_bonus WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
     async def get_usage(self, guild_id: str, user_id: str, command: str, window_date: str) -> int:
         row = await self.fetch_usage_counter(guild_id, user_id, command, window_date)
         if not row:

@@ -154,6 +154,23 @@ class TriggerEngineService:
         state = await self._database.get_trigger_state(guild_id, channel_id, "insights")
         return self._community_insights.status(enabled, config, state.get("last_post_at"))
 
+    async def get_qna_quota_for_member(self, member, guild_id: str, channel_id: str | None = None) -> dict[str, object]:
+        _ = channel_id
+        profile = await self._entitlements.resolve_profile(member)
+        limit = await self._resolve_qna_limit_for_member(member)
+        window_date = datetime.now(ROME_TZ).date().isoformat()
+        used = await self._database.get_usage(guild_id, str(member.id), "qna", window_date)
+        now_rome = datetime.now(ROME_TZ)
+        reset_local = datetime.combine(now_rome.date() + timedelta(days=1), datetime.min.time(), tzinfo=ROME_TZ)
+        remaining = max(0, limit - used)
+        return {
+            "tier": profile,
+            "limit": limit,
+            "used": used,
+            "remaining": remaining,
+            "resets_at_iso": reset_local.isoformat(),
+        }
+
     async def _barcello_loop(self) -> None:
         while True:
             try:
@@ -464,28 +481,39 @@ class TriggerEngineService:
         raw = await self._database.get_setting("qna.daily_limits")
         defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
         if not raw:
-            return int(defaults.get(profile, defaults["base"]))
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = defaults
-        if not isinstance(parsed, dict):
-            parsed = defaults
-        return int(parsed.get(profile, parsed.get("base", 0)))
+            tier_limit = int(defaults.get(profile, defaults["base"]))
+        else:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = defaults
+            if not isinstance(parsed, dict):
+                parsed = defaults
+            tier_limit = int(parsed.get(profile, parsed.get("base", 0)))
+        if interaction.guild_id is None:
+            return tier_limit
+        bonus, _ = await self._database.get_qna_bonus(str(interaction.guild_id), str(interaction.user.id))
+        return tier_limit + max(0, bonus)
 
     async def _resolve_qna_limit_for_member(self, member) -> int:
         profile = await self._entitlements.resolve_profile(member)
         raw = await self._database.get_setting("qna.daily_limits")
         defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
         if not raw:
-            return int(defaults.get(profile, defaults["base"]))
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = defaults
-        if not isinstance(parsed, dict):
-            parsed = defaults
-        return int(parsed.get(profile, parsed.get("base", 0)))
+            tier_limit = int(defaults.get(profile, defaults["base"]))
+        else:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = defaults
+            if not isinstance(parsed, dict):
+                parsed = defaults
+            tier_limit = int(parsed.get(profile, parsed.get("base", 0)))
+        guild = getattr(member, "guild", None)
+        if guild is None:
+            return tier_limit
+        bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
+        return tier_limit + max(0, bonus)
 
     async def _build_qna_payload(self, guild_id: str, channel_id: str, question: str) -> str:
         now = datetime.now(ROME_TZ)

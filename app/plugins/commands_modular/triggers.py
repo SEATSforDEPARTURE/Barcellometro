@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
@@ -184,6 +185,111 @@ def register_triggers(trigger_group: app_commands.Group, ctx: CommandContext) ->
     @trigger_group.command(name="qna_status", description="Stato trigger qna")
     async def qna_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "status")
+
+    @trigger_group.command(name="qna_limits_show", description="Mostra limiti giornalieri QnA")
+    async def qna_limits_show(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        profile = await ctx.entitlements.resolve_profile(interaction.user)
+        if profile != "mod":
+            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+            return
+        raw = await ctx.database.get_setting("qna.daily_limits")
+        defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
+        if not raw:
+            data = defaults
+        else:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = defaults
+            data = parsed if isinstance(parsed, dict) else defaults
+        pretty = json.dumps(data, ensure_ascii=False, indent=2)
+        await interaction.response.send_message(f"```json\n{pretty}\n```", ephemeral=True)
+
+    @trigger_group.command(name="qna_limits_set", description="Imposta limite giornaliero QnA per tier")
+    async def qna_limits_set(interaction: discord.Interaction, tier_key: str, limit_int: int) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        profile = await ctx.entitlements.resolve_profile(interaction.user)
+        if profile != "mod":
+            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+            return
+        allowed_keys = {"base", "role1", "role2", "role3", "mod"}
+        key = tier_key.strip().lower()
+        if key not in allowed_keys:
+            await interaction.response.send_message("tier_key non valido. Usa: base, role1, role2, role3, mod.", ephemeral=True)
+            return
+        if limit_int < 0 or limit_int > 999:
+            await interaction.response.send_message("limit_int deve essere tra 0 e 999.", ephemeral=True)
+            return
+        raw = await ctx.database.get_setting("qna.daily_limits")
+        data = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                data.update(parsed)
+        data[key] = int(limit_int)
+        await ctx.database.set_setting("qna.daily_limits", json.dumps(data, ensure_ascii=False))
+        await interaction.response.send_message(f"Limite aggiornato: {key}={limit_int}", ephemeral=True)
+
+    @trigger_group.command(name="qna_bonus_add", description="Aggiunge bonus domande QnA a un utente")
+    async def qna_bonus_add(interaction: discord.Interaction, user: discord.Member, amount_int: int, hours_valid: int | None = None) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            return
+        profile = await ctx.entitlements.resolve_profile(interaction.user)
+        if profile != "mod":
+            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+            return
+        if amount_int < 0 or amount_int > 999:
+            await interaction.response.send_message("amount_int deve essere tra 0 e 999.", ephemeral=True)
+            return
+        expires_at = None
+        if hours_valid is not None:
+            if hours_valid <= 0 or hours_valid > 24 * 30:
+                await interaction.response.send_message("hours_valid non valido (1..720).", ephemeral=True)
+                return
+            expires_at = (datetime.now(timezone.utc) + timedelta(hours=hours_valid)).isoformat()
+        current_bonus, _ = await ctx.database.get_qna_bonus(str(interaction.guild_id), str(user.id))
+        new_bonus = current_bonus + int(amount_int)
+        await ctx.database.set_qna_bonus(str(interaction.guild_id), str(user.id), new_bonus, expires_at)
+        await interaction.response.send_message(
+            f"Bonus impostato per {user.mention}: {current_bonus} → {new_bonus}" + (f" fino a {expires_at}" if expires_at else ""),
+            ephemeral=True,
+        )
+
+    @trigger_group.command(name="qna_bonus_clear", description="Rimuove bonus domande QnA")
+    async def qna_bonus_clear(interaction: discord.Interaction, user: discord.Member) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            return
+        profile = await ctx.entitlements.resolve_profile(interaction.user)
+        if profile != "mod":
+            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+            return
+        await ctx.database.clear_qna_bonus(str(interaction.guild_id), str(user.id))
+        await interaction.response.send_message(f"Bonus rimosso per {user.mention}.", ephemeral=True)
+
+    @trigger_group.command(name="qna_bonus_show", description="Mostra bonus domande QnA")
+    async def qna_bonus_show(interaction: discord.Interaction, user: discord.Member) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            return
+        profile = await ctx.entitlements.resolve_profile(interaction.user)
+        if profile != "mod":
+            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+            return
+        bonus, expires_at = await ctx.database.get_qna_bonus(str(interaction.guild_id), str(user.id))
+        await interaction.response.send_message(
+            f"Bonus attivo per {user.mention}: {bonus}\nScadenza: {expires_at or '-'}",
+            ephemeral=True,
+        )
 
     @trigger_group.command(name="insights_on", description="Abilita trigger curiosità utenti")
     async def insights_on(interaction: discord.Interaction) -> None:
