@@ -13,6 +13,7 @@ import discord
 from app.services.barcello import BarcelloService
 from app.services.community_insights import CommunityInsightsService
 from app.services.database import DatabaseService
+from app.services.ai import AiService
 
 logger = logging.getLogger(__name__)
 
@@ -194,11 +195,13 @@ class MessageSchedulerService:
         *,
         community_insights: Optional[CommunityInsightsService] = None,
         barcello_service: Optional[BarcelloService] = None,
+        ai_service: Optional[AiService] = None,
     ) -> None:
         self._database = database
         self._bot = bot
         self._community_insights = community_insights
         self._barcello_service = barcello_service
+        self._ai_service = ai_service
         self._task: Optional[asyncio.Task[None]] = None
         self._barcello_cache: dict[str, tuple[datetime, str, Optional[int]]] = {}
         self._metrics = {
@@ -258,6 +261,10 @@ class MessageSchedulerService:
             return
 
         for channel_id in channel_ids:
+            if campaign_type == "AI_PROMPT":
+                enabled_prompt = await self._database.get_trigger_enabled(guild_id, str(channel_id), "prompt")
+                if not enabled_prompt:
+                    continue
             skip_reason = await self._skip_for_quiet_hours(now)
             if skip_reason is None:
                 skip_reason = await self._skip_for_daily_cap(guild_id, channel_id, now)
@@ -411,6 +418,29 @@ class MessageSchedulerService:
                 "selected_source": "base",
                 "cache_status": "n/a",
             }
+        if campaign_type == "AI_PROMPT":
+            prompt = str(campaign.get("text") or "")
+            if not prompt:
+                return "AI non disponibile", "no_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": None, "barcello_score": None, "selected_source": "base", "cache_status": "n/a"}
+            barcello_color, barcello_score, _, _ = await self._get_barcello_color(guild_id, channel_id)
+            channel = self._bot.get_channel(int(channel_id))
+            channel_name = channel.name if channel and hasattr(channel, "name") else "canale"
+            guild = self._bot.get_guild(int(guild_id))
+            guild_name = guild.name if guild else "guild"
+            today = datetime.now(ROME_TZ).date().isoformat()
+            resolved_prompt = (
+                prompt.replace("{guild_name}", guild_name)
+                .replace("{channel_name}", channel_name)
+                .replace("{barcello_score}", str(barcello_score or "n/a"))
+                .replace("{barcello_color}", str(barcello_color or "n/a"))
+                .replace("{today_date}", today)
+            )
+            if self._ai_service is None or not self._ai_service.is_enabled() or self._ai_service.client() is None:
+                return "AI non disponibile", "ai_unavailable", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "fallback", "cache_status": "n/a"}
+            model = self._ai_service.get_model("summary") or "gpt-4o-mini"
+            response = await self._ai_service.client().responses.create(model=model, input=resolved_prompt)
+            text = (getattr(response, "output_text", "") or "").strip() or "AI non disponibile"
+            return text, "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "n/a"}
 
         mood_mode = str(campaign.get("mood_mode") or "AUTO")
         barcello_color, barcello_score, cache_status, barcello_reason = await self._get_barcello_color(guild_id, channel_id)

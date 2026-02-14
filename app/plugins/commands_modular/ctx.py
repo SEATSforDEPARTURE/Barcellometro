@@ -31,6 +31,7 @@ class CommandContext:
     ai: Any
     voice_ingest: Any
     daily_resoconto: Any
+    trigger_engine: Any
     timezone: ZoneInfo
 
     @classmethod
@@ -55,6 +56,7 @@ class CommandContext:
         ai_service = registry.get("ai")
         voice_ingest = registry.get("voice_ingest") if registry.has("voice_ingest") else None
         daily_resoconto = registry.get("daily_resoconto") if registry.has("daily_resoconto") else None
+        trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
         ingest: IngestService = registry.get("ingest")
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
@@ -74,5 +76,6 @@ class CommandContext:
             ai=ai_service,
             voice_ingest=voice_ingest,
             daily_resoconto=daily_resoconto,
+            trigger_engine=trigger_engine,
             timezone=timezone,
         )
