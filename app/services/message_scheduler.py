@@ -13,6 +13,7 @@ import discord
 from app.services.barcello import BarcelloService
 from app.services.community_insights import CommunityInsightsService
 from app.services.database import DatabaseService
+from app.services.ai import AiService
 
 logger = logging.getLogger(__name__)
 
@@ -194,11 +195,13 @@ class MessageSchedulerService:
         *,
         community_insights: Optional[CommunityInsightsService] = None,
         barcello_service: Optional[BarcelloService] = None,
+        ai_service: Optional[AiService] = None,
     ) -> None:
         self._database = database
         self._bot = bot
         self._community_insights = community_insights
         self._barcello_service = barcello_service
+        self._ai_service = ai_service
         self._task: Optional[asyncio.Task[None]] = None
         self._barcello_cache: dict[str, tuple[datetime, str, Optional[int]]] = {}
         self._metrics = {
@@ -245,73 +248,118 @@ class MessageSchedulerService:
         guild_id = str(campaign["guild_id"])
         campaign_id = int(campaign["id"])
         campaign_type = str(campaign["type"])
-
-        channel_ids = await self._database.list_enabled_message_channels(guild_id)
-        if not channel_ids:
-            logger.info("Campaign %s skipped (no enabled channels)", campaign_id)
+        campaign_channel_id = campaign.get("channel_id")
+        if not campaign_channel_id:
+            logger.error("Campaign %s missing channel_id", campaign_id)
+            await self._database.insert_send_log(
+                campaign_id=campaign_id,
+                guild_id=guild_id,
+                channel_id="unknown",
+                sent_at=now.isoformat(),
+                status="error",
+                reason="missing_channel_id",
+                error="missing channel_id",
+            )
             await self._database.update_campaign_next_run(
                 guild_id=guild_id,
                 campaign_id=campaign_id,
                 next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
-                last_sent_at=now.isoformat(),
+                last_sent_at=None,
+            )
+            return
+        channel_id = str(campaign_channel_id)
+
+        if campaign_type == "AI_PROMPT":
+            enabled_prompt = await self._database.get_trigger_enabled(guild_id, channel_id, "prompt")
+            if not enabled_prompt:
+                await self._database.insert_send_log(
+                    campaign_id=campaign_id,
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    sent_at=now.isoformat(),
+                    status="skipped",
+                    reason="prompt_trigger_disabled",
+                    error=None,
+                )
+                await self._database.update_campaign_next_run(
+                    guild_id=guild_id,
+                    campaign_id=campaign_id,
+                    next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                    last_sent_at=None,
+                )
+                return
+
+        skip_reason = await self._skip_for_quiet_hours(now)
+        if skip_reason is None:
+            skip_reason = await self._skip_for_daily_cap(guild_id, channel_id, now)
+        if skip_reason is None:
+            skip_reason = await self._skip_for_idle(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                only_if_idle_minutes=int(campaign["only_if_idle_minutes"]),
+                now=now,
+            )
+        if skip_reason:
+            await self._database.insert_send_log(
+                campaign_id=campaign_id,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                sent_at=now.isoformat(),
+                status="skipped",
+                reason=skip_reason,
+                error=None,
+            )
+            await self._database.update_campaign_next_run(
+                guild_id=guild_id,
+                campaign_id=campaign_id,
+                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                last_sent_at=None,
             )
             return
 
-        for channel_id in channel_ids:
-            skip_reason = await self._skip_for_quiet_hours(now)
-            if skip_reason is None:
-                skip_reason = await self._skip_for_daily_cap(guild_id, channel_id, now)
-            if skip_reason is None:
-                skip_reason = await self._skip_for_idle(
-                    guild_id=guild_id,
-                    channel_id=channel_id,
-                    only_if_idle_minutes=int(campaign["only_if_idle_minutes"]),
-                    now=now,
-                )
-            if skip_reason:
-                await self._database.insert_send_log(
-                    campaign_id=campaign_id,
-                    guild_id=guild_id,
-                    channel_id=channel_id,
-                    sent_at=now.isoformat(),
-                    status="skipped",
-                    reason=skip_reason,
-                    error=None,
-                )
-                continue
-
-            resolved_text, send_reason, debug_payload = await self._resolve_campaign_text(campaign, guild_id, channel_id)
+        resolved_text, send_reason, debug_payload = await self._resolve_campaign_text(campaign, guild_id, channel_id)
+        logger.info(
+            "Campaign selection guild=%s campaign=%s channel_id=%s mode=%s color=%s score=%s source=%s cache=%s",
+            guild_id,
+            campaign_id,
+            channel_id,
+            debug_payload["mood_mode"],
+            debug_payload["barcello_color"],
+            debug_payload["barcello_score"],
+            debug_payload["selected_source"],
+            debug_payload["cache_status"],
+        )
+        if debug_payload.get("barcello_reason"):
             logger.info(
-                "Campaign selection guild=%s campaign=%s mode=%s color=%s score=%s source=%s cache=%s",
+                "Campaign barcello reason guild=%s campaign=%s reason=%s",
                 guild_id,
                 campaign_id,
-                debug_payload["mood_mode"],
-                debug_payload["barcello_color"],
-                debug_payload["barcello_score"],
-                debug_payload["selected_source"],
-                debug_payload["cache_status"],
+                debug_payload["barcello_reason"],
             )
-            if debug_payload.get("barcello_reason"):
-                logger.info(
-                    "Campaign barcello reason guild=%s campaign=%s reason=%s",
-                    guild_id,
-                    campaign_id,
-                    debug_payload["barcello_reason"],
-                )
-            if not resolved_text:
-                await self._database.insert_send_log(
-                    campaign_id=campaign_id,
-                    guild_id=guild_id,
-                    channel_id=channel_id,
-                    sent_at=now.isoformat(),
-                    status="skipped",
-                    reason="no_text_for_mode",
-                    error=None,
-                )
-                continue
+        if not resolved_text:
+            await self._database.insert_send_log(
+                campaign_id=campaign_id,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                sent_at=now.isoformat(),
+                status="skipped",
+                reason=send_reason or "no_text_for_mode",
+                error=None,
+            )
+            await self._database.update_campaign_next_run(
+                guild_id=guild_id,
+                campaign_id=campaign_id,
+                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                last_sent_at=None,
+            )
+            return
 
-            channel = self._bot.get_channel(int(channel_id))
-            if channel is None or not isinstance(channel, discord.abc.Messageable):
+        channel = self._bot.get_channel(int(channel_id))
+        if channel is None:
+            try:
+                channel = await self._bot.fetch_channel(int(channel_id))
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException, ValueError) as exc:
+                logger.warning("Failed to resolve channel for campaign %s channel %s: %s", campaign_id, channel_id, exc)
                 await self._database.insert_send_log(
                     campaign_id=campaign_id,
                     guild_id=guild_id,
@@ -319,39 +367,68 @@ class MessageSchedulerService:
                     sent_at=now.isoformat(),
                     status="error",
                     reason="missing_channel",
-                    error="Channel not found or not messageable",
-                )
-                continue
-
-            try:
-                await channel.send(content=str(resolved_text))
-                await self._database.insert_send_log(
-                    campaign_id=campaign_id,
-                    guild_id=guild_id,
-                    channel_id=channel_id,
-                    sent_at=now.isoformat(),
-                    status="sent",
-                    reason=send_reason,
-                    error=None,
-                )
-            except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
-                logger.warning("Failed to send campaign %s to channel %s: %s", campaign_id, channel_id, exc)
-                await self._database.insert_send_log(
-                    campaign_id=campaign_id,
-                    guild_id=guild_id,
-                    channel_id=channel_id,
-                    sent_at=now.isoformat(),
-                    status="error",
-                    reason="send_failed",
                     error=str(exc),
                 )
+                await self._database.update_campaign_next_run(
+                    guild_id=guild_id,
+                    campaign_id=campaign_id,
+                    next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                    last_sent_at=None,
+                )
+                return
+        if not isinstance(channel, discord.abc.Messageable):
+            await self._database.insert_send_log(
+                campaign_id=campaign_id,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                sent_at=now.isoformat(),
+                status="error",
+                reason="missing_channel",
+                error="Channel not messageable",
+            )
+            await self._database.update_campaign_next_run(
+                guild_id=guild_id,
+                campaign_id=campaign_id,
+                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                last_sent_at=None,
+            )
+            return
 
-        await self._database.update_campaign_next_run(
-            guild_id=guild_id,
-            campaign_id=campaign_id,
-            next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
-            last_sent_at=now.isoformat(),
-        )
+        logger.info("Sending campaign id=%s to channel_id=%s", campaign_id, channel_id)
+        try:
+            await channel.send(content=str(resolved_text))
+            await self._database.insert_send_log(
+                campaign_id=campaign_id,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                sent_at=now.isoformat(),
+                status="sent",
+                reason=send_reason,
+                error=None,
+            )
+            await self._database.update_campaign_next_run(
+                guild_id=guild_id,
+                campaign_id=campaign_id,
+                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                last_sent_at=now.isoformat(),
+            )
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
+            logger.warning("Failed to send campaign %s to channel %s: %s", campaign_id, channel_id, exc)
+            await self._database.insert_send_log(
+                campaign_id=campaign_id,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                sent_at=now.isoformat(),
+                status="error",
+                reason="send_failed",
+                error=str(exc),
+            )
+            await self._database.update_campaign_next_run(
+                guild_id=guild_id,
+                campaign_id=campaign_id,
+                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                last_sent_at=None,
+            )
 
     async def _skip_for_quiet_hours(self, now: datetime) -> Optional[str]:
         settings = await self._get_quiet_settings()
@@ -411,6 +488,29 @@ class MessageSchedulerService:
                 "selected_source": "base",
                 "cache_status": "n/a",
             }
+        if campaign_type == "AI_PROMPT":
+            prompt = str(campaign.get("text") or "")
+            if not prompt:
+                return None, "no_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": None, "barcello_score": None, "selected_source": "base", "cache_status": "n/a"}
+            barcello_color, barcello_score, _, _ = await self._get_barcello_color(guild_id, channel_id)
+            channel = self._bot.get_channel(int(channel_id))
+            channel_name = channel.name if channel and hasattr(channel, "name") else "canale"
+            guild = self._bot.get_guild(int(guild_id))
+            guild_name = guild.name if guild else "guild"
+            today = datetime.now(ROME_TZ).date().isoformat()
+            resolved_prompt = (
+                prompt.replace("{guild_name}", guild_name)
+                .replace("{channel_name}", channel_name)
+                .replace("{barcello_score}", str(barcello_score or "n/a"))
+                .replace("{barcello_color}", str(barcello_color or "n/a"))
+                .replace("{today_date}", today)
+            )
+            if self._ai_service is None or not self._ai_service.is_enabled() or self._ai_service.client() is None:
+                return None, "ai_disabled", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "fallback", "cache_status": "n/a"}
+            model = self._ai_service.get_model("summary") or "gpt-4o-mini"
+            response = await self._ai_service.client().responses.create(model=model, input=resolved_prompt)
+            text = (getattr(response, "output_text", "") or "").strip() or "AI non disponibile"
+            return text, "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "n/a"}
 
         mood_mode = str(campaign.get("mood_mode") or "AUTO")
         barcello_color, barcello_score, cache_status, barcello_reason = await self._get_barcello_color(guild_id, channel_id)

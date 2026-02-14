@@ -192,6 +192,7 @@ class DatabaseService:
             CREATE TABLE IF NOT EXISTS message_campaigns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
+                channel_id TEXT NULL,
                 type TEXT NOT NULL DEFAULT 'CUSTOM',
                 name TEXT NULL,
                 text TEXT NULL,
@@ -240,6 +241,38 @@ class DatabaseService:
                 last_campaign_id INTEGER NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS trigger_channels (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                trigger_key TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, trigger_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS trigger_barcello_state (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                last_color TEXT NULL,
+                last_score INTEGER NULL,
+                last_ts TEXT NULL,
+                PRIMARY KEY (guild_id, channel_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS trigger_phrases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                phrase TEXT NOT NULL,
+                match_mode TEXT NOT NULL DEFAULT 'CONTAINS',
+                case_sensitive INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_seen_ts TEXT NULL,
+                last_seen_message_id TEXT NULL,
+                UNIQUE (guild_id, channel_id, phrase)
+            );
             """
         )
         await self._ensure_message_campaign_columns()
@@ -252,6 +285,8 @@ class DatabaseService:
         columns = await self.fetchall("PRAGMA table_info(message_campaigns)")
         existing = {row["name"] for row in columns}
         missing = {
+            "guild_id": "TEXT NULL",
+            "channel_id": "TEXT NULL",
             "text_green": "TEXT NULL",
             "text_yellow": "TEXT NULL",
             "text_red": "TEXT NULL",
@@ -759,6 +794,127 @@ class DatabaseService:
         row = await self.fetchone("SELECT ts FROM events ORDER BY ts DESC LIMIT 1")
         return row["ts"] if row else None
 
+    async def get_trigger_enabled(self, guild_id: str, channel_id: str, trigger_key: str) -> bool:
+        row = await self.fetchone(
+            "SELECT enabled FROM trigger_channels WHERE guild_id = ? AND channel_id = ? AND trigger_key = ?",
+            (guild_id, channel_id, trigger_key),
+        )
+        return bool(row["enabled"]) if row else False
+
+    async def set_trigger_enabled(self, guild_id: str, channel_id: str, trigger_key: str, enabled: bool) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO trigger_channels (guild_id, channel_id, trigger_key, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, trigger_key) DO UPDATE SET
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, channel_id, trigger_key, 1 if enabled else 0, now, now),
+        )
+
+    async def list_triggers(self, guild_id: str, channel_id: str) -> dict[str, bool]:
+        rows = await self.fetchall(
+            "SELECT trigger_key, enabled FROM trigger_channels WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        )
+        data = {"barcello": False, "frasi": False, "prompt": False, "qna": False}
+        for row in rows:
+            data[str(row["trigger_key"])] = bool(row["enabled"])
+        return data
+
+    async def list_enabled_trigger_channels(self, trigger_key: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT guild_id, channel_id FROM trigger_channels WHERE trigger_key = ? AND enabled = 1",
+            (trigger_key,),
+        )
+
+    async def get_barcello_trigger_state(self, guild_id: str, channel_id: str) -> Optional[dict[str, Any]]:
+        row = await self.fetchone(
+            "SELECT guild_id, channel_id, last_color, last_score, last_ts FROM trigger_barcello_state WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        )
+        return dict(row) if row else None
+
+    async def upsert_barcello_trigger_state(
+        self,
+        guild_id: str,
+        channel_id: str,
+        last_color: Optional[str],
+        last_score: Optional[int],
+        last_ts: Optional[str],
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_barcello_state (guild_id, channel_id, last_color, last_score, last_ts)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                last_color = excluded.last_color,
+                last_score = excluded.last_score,
+                last_ts = excluded.last_ts
+            """,
+            (guild_id, channel_id, last_color, last_score, last_ts),
+        )
+
+    async def add_trigger_phrase(
+        self,
+        guild_id: str,
+        channel_id: str,
+        phrase: str,
+        match_mode: str,
+        case_sensitive: bool,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_phrases (guild_id, channel_id, phrase, match_mode, case_sensitive, enabled)
+            VALUES (?, ?, ?, ?, ?, 1)
+            ON CONFLICT(guild_id, channel_id, phrase) DO UPDATE SET
+                match_mode = excluded.match_mode,
+                case_sensitive = excluded.case_sensitive,
+                enabled = 1
+            """,
+            (guild_id, channel_id, phrase, match_mode, 1 if case_sensitive else 0),
+        )
+
+    async def remove_trigger_phrase(self, guild_id: str, channel_id: str, phrase: str) -> None:
+        await self.execute(
+            "DELETE FROM trigger_phrases WHERE guild_id = ? AND channel_id = ? AND phrase = ?",
+            (guild_id, channel_id, phrase),
+        )
+
+    async def list_trigger_phrases(self, guild_id: str, channel_id: str) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            "SELECT * FROM trigger_phrases WHERE guild_id = ? AND channel_id = ? ORDER BY id ASC",
+            (guild_id, channel_id),
+        )
+        return [dict(row) for row in rows]
+
+    async def get_matching_phrases(self, guild_id: str, channel_id: str) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            "SELECT * FROM trigger_phrases WHERE guild_id = ? AND channel_id = ? AND enabled = 1 ORDER BY id ASC",
+            (guild_id, channel_id),
+        )
+        return [dict(row) for row in rows]
+
+    async def update_phrase_last_seen(self, phrase_id: int, ts: str, message_id: str) -> None:
+        await self.execute(
+            "UPDATE trigger_phrases SET last_seen_ts = ?, last_seen_message_id = ? WHERE id = ?",
+            (ts, message_id, phrase_id),
+        )
+
+    async def get_usage(self, guild_id: str, user_id: str, command: str, window_date: str) -> int:
+        row = await self.fetch_usage_counter(guild_id, user_id, command, window_date)
+        if not row:
+            return 0
+        return int(row["used_count"])
+
+    async def increment_usage(self, guild_id: str, user_id: str, command: str, window_date: str, ts: str) -> int:
+        current = await self.get_usage(guild_id, user_id, command, window_date)
+        new_value = current + 1
+        await self.upsert_usage_counter(guild_id, user_id, command, window_date, new_value, ts)
+        return new_value
+
     async def earliest_event_ts(self) -> Optional[str]:
         row = await self.fetchone("SELECT ts FROM events ORDER BY ts ASC LIMIT 1")
         return row["ts"] if row else None
@@ -1101,6 +1257,7 @@ class DatabaseService:
         self,
         *,
         guild_id: str,
+        channel_id: str,
         campaign_type: str,
         name: Optional[str],
         text: Optional[str],
@@ -1122,14 +1279,15 @@ class DatabaseService:
         cursor = await self._conn.execute(
             """
             INSERT INTO message_campaigns (
-                guild_id, type, name, text, text_green, text_yellow, text_red, text_black, enabled, start_time_local, interval_minutes,
+                guild_id, channel_id, type, name, text, text_green, text_yellow, text_red, text_black, enabled, start_time_local, interval_minutes,
                 jitter_seconds, only_if_idle_minutes, mood_mode, last_sent_at, next_run_at, created_by,
                 created_at, updated_at, deleted_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
             """,
             (
                 guild_id,
+                channel_id,
                 campaign_type,
                 name,
                 text,
