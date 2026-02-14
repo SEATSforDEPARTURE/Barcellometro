@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.services.barcello import BarcelloService
+from app.services.community_insights import CommunityInsightsService
 from app.services.config_file_loader import load_json_file
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
@@ -28,11 +29,13 @@ class TriggerEngineService:
         barcello: BarcelloService,
         entitlements: EntitlementsService,
         ai_service,
+        community_insights: CommunityInsightsService | None = None,
     ) -> None:
         self._database = database
         self._barcello = barcello
         self._entitlements = entitlements
         self._ai = ai_service
+        self._community_insights = community_insights or CommunityInsightsService(ai_service)
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
         self._barcello_cooldown: dict[str, datetime] = {}
@@ -58,38 +61,40 @@ class TriggerEngineService:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa questo comando in un canale.", ephemeral=True)
             return
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
         guild_id = str(interaction.guild_id)
         channel_id = str(interaction.channel_id)
         if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
-            await interaction.response.send_message("Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
+            await interaction.followup.send("Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
             return
         if is_out_of_scope_question(question):
-            await interaction.response.send_message("Posso rispondere solo su questo canale.", ephemeral=True)
+            await interaction.followup.send("Posso rispondere solo su questo canale.", ephemeral=True)
             return
         if is_sensitive_question(question):
-            await interaction.response.send_message("Non posso aiutare con dati personali o sensibili.", ephemeral=True)
+            await interaction.followup.send("Non posso aiutare con dati personali o sensibili.", ephemeral=True)
             return
         limit = await self._resolve_qna_limit(interaction)
         window_date = datetime.now(ROME_TZ).date().isoformat()
         used = await self._database.get_usage(guild_id, str(interaction.user.id), "qna", window_date)
         if used >= limit:
-            await interaction.response.send_message("Hai esaurito le domande di oggi.", ephemeral=True)
+            await interaction.followup.send("Hai esaurito le domande di oggi.", ephemeral=True)
             return
 
-        payload = await self._build_qna_payload(guild_id, channel_id, question)
-        answer = await self._ask_ai_json(payload)
+        scope = await self._decide_qna_scope(question)
+        answer = await self._handle_qna(scope=scope, guild_id=guild_id, channel_id=channel_id, question=question)
         if answer is None:
-            await interaction.response.send_message("AI non disponibile al momento.", ephemeral=True)
+            await interaction.followup.send("AI non disponibile al momento.", ephemeral=True)
             return
         if not answer.get("can_answer"):
-            await interaction.response.send_message(answer.get("refusal_reason") or "Non posso rispondere.", ephemeral=True)
+            await interaction.followup.send(answer.get("refusal_reason") or "Non posso rispondere.", ephemeral=True)
             return
         text = str(answer.get("answer") or "").strip()
         if not text:
-            await interaction.response.send_message("Risposta non valida.", ephemeral=True)
+            await interaction.followup.send("Risposta non valida.", ephemeral=True)
             return
         if contains_pii(text):
-            await interaction.response.send_message("Non posso condividere dati personali.", ephemeral=True)
+            await interaction.followup.send("Non posso condividere dati personali.", ephemeral=True)
             return
 
         await self._database.increment_usage(
@@ -99,7 +104,7 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await interaction.response.send_message(text)
+        await interaction.followup.send(text, ephemeral=True)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         if message.guild is None:
@@ -125,8 +130,8 @@ class TriggerEngineService:
         if used >= limit:
             await message.reply("Hai esaurito le domande di oggi.")
             return
-        payload = await self._build_qna_payload(guild_id, channel_id, question)
-        answer = await self._ask_ai_json(payload)
+        scope = await self._decide_qna_scope(question)
+        answer = await self._handle_qna(scope=scope, guild_id=guild_id, channel_id=channel_id, question=question)
         if answer is None or not answer.get("can_answer"):
             await message.reply((answer or {}).get("refusal_reason") or "Non posso rispondere.")
             return
@@ -137,10 +142,40 @@ class TriggerEngineService:
         await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
         await message.reply(text)
 
+    async def configure_insights(self, prompt_text: str) -> dict[str, object]:
+        config = await self._community_insights.parse_config_prompt(prompt_text)
+        await self._database.set_setting("community_insights.config", json.dumps(config, ensure_ascii=False))
+        return config
+
+    async def get_insights_status(self, guild_id: str, channel_id: str) -> dict[str, object]:
+        raw = await self._database.get_setting("community_insights.config")
+        config = await self._community_insights.get_config(raw)
+        enabled = await self._database.get_trigger_enabled(guild_id, channel_id, "insights")
+        state = await self._database.get_trigger_state(guild_id, channel_id, "insights")
+        return self._community_insights.status(enabled, config, state.get("last_post_at"))
+
+    async def get_qna_quota_for_member(self, member, guild_id: str, channel_id: str | None = None) -> dict[str, object]:
+        _ = channel_id
+        profile = await self._entitlements.resolve_profile(member)
+        limit = await self._resolve_qna_limit_for_member(member)
+        window_date = datetime.now(ROME_TZ).date().isoformat()
+        used = await self._database.get_usage(guild_id, str(member.id), "qna", window_date)
+        now_rome = datetime.now(ROME_TZ)
+        reset_local = datetime.combine(now_rome.date() + timedelta(days=1), datetime.min.time(), tzinfo=ROME_TZ)
+        remaining = max(0, limit - used)
+        return {
+            "tier": profile,
+            "limit": limit,
+            "used": used,
+            "remaining": remaining,
+            "resets_at_iso": reset_local.isoformat(),
+        }
+
     async def _barcello_loop(self) -> None:
         while True:
             try:
                 await self._poll_barcello()
+                await self._poll_insights()
             except Exception:  # noqa: BLE001
                 logger.exception("Trigger barcello poll failed")
             await asyncio.sleep(60)
@@ -291,33 +326,194 @@ class TriggerEngineService:
             return render_template(template_dict.get("IMPROVE")) or f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
         return render_template(template_dict.get("SAME")) or f"Barcello aggiornato: {new_score}."
 
+    async def _poll_insights(self) -> None:
+        if self._bot is None:
+            return
+        rows = await self._database.list_enabled_trigger_channels("insights")
+        now = datetime.now(timezone.utc)
+        config = await self._community_insights.get_config(await self._database.get_setting("community_insights.config"))
+        interval_minutes = max(10, int(config.get("interval_minutes") or 180))
+        min_reuse_ts = (now - timedelta(days=7)).isoformat()
+        for row in rows:
+            guild_id = str(row["guild_id"])
+            channel_id = str(row["channel_id"])
+            state = await self._database.get_trigger_state(guild_id, channel_id, "insights")
+            last_post_at = state.get("last_post_at")
+            if last_post_at:
+                try:
+                    if now - datetime.fromisoformat(str(last_post_at)) < timedelta(minutes=interval_minutes):
+                        continue
+                except ValueError:
+                    pass
+            messages = await self._database.list_recent_messages_for_hobbies(guild_id, channel_id, limit=60)
+            heuristics = self._community_insights.extract_hobbies_from_messages(messages)
+            ai_extracted = await self._community_insights.extract_hobbies_ai(messages)
+            for entry in [*heuristics, *ai_extracted]:
+                if entry.get("hobby") and entry.get("source_message_id"):
+                    await self._database.insert_user_hobby(
+                        guild_id=guild_id,
+                        user_id=str(entry.get("user_id") or ""),
+                        user_name=str(entry.get("user_name") or "utente"),
+                        hobby=str(entry.get("hobby") or ""),
+                        source_channel_id=str(entry.get("source_channel_id") or channel_id),
+                        source_message_id=str(entry.get("source_message_id") or ""),
+                        source_created_at=str(entry.get("source_created_at") or now.isoformat()),
+                    )
+            candidate = await self._database.get_next_hobby(guild_id, channel_id, min_reuse_ts)
+            if not candidate:
+                continue
+            jump_url = f"https://discord.com/channels/{guild_id}/{candidate['source_channel_id']}/{candidate['source_message_id']}"
+            dt = self._format_italian_datetime(str(candidate.get("source_created_at") or now.isoformat()))
+            text = self._community_insights.render_template(
+                str(config.get("template") or ""),
+                {
+                    "user_name": str(candidate.get("user_name") or "utente"),
+                    "hobby": str(candidate.get("hobby") or ""),
+                    "dt": dt,
+                    "jump_url": jump_url,
+                },
+            )
+            channel = self._bot.get_channel(int(channel_id))
+            if channel and isinstance(channel, discord.abc.Messageable):
+                await channel.send(text)
+                await self._database.set_trigger_state(guild_id, channel_id, "insights", {"last_post_at": now.isoformat()})
+                await self._database.mark_hobby_used(
+                    guild_id,
+                    str(candidate.get("user_id") or ""),
+                    str(candidate.get("hobby") or ""),
+                    str(candidate.get("source_message_id") or ""),
+                )
+
+    async def _handle_qna(self, *, scope: str, guild_id: str, channel_id: str, question: str) -> dict[str, object] | None:
+        normalized_question = self._normalize_question(question)
+        cache_scope = "global" if scope == "global" else scope
+        cache_channel = channel_id if cache_scope == "channel" else "global"
+        cache_key = f"qna:{cache_scope}:{cache_channel}:{normalized_question}"
+        cached = await self._database.get_cache(cache_key)
+        if cached is not None:
+            logger.info("qna cache hit scope=%s channel_id=%s", scope, channel_id)
+            return {"can_answer": True, "answer": cached, "refusal_reason": None}
+
+        if scope == "global":
+            answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
+            if answer and answer.get("can_answer"):
+                await self._database.set_cache(cache_key, str(answer.get("answer") or ""), 7 * 24 * 3600)
+            return answer
+
+        channel_answer = await self._ask_ai_json(await self._build_qna_payload(guild_id, channel_id, question))
+        if scope == "channel":
+            if channel_answer and channel_answer.get("can_answer"):
+                await self._database.set_cache(cache_key, str(channel_answer.get("answer") or ""), 60 * 60)
+            return channel_answer
+
+        # mixed scope
+        if channel_answer and channel_answer.get("can_answer"):
+            await self._database.set_cache(cache_key, str(channel_answer.get("answer") or ""), 60 * 60)
+            return channel_answer
+        global_answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
+        if not global_answer or not global_answer.get("can_answer"):
+            return channel_answer or global_answer
+        fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{str(global_answer.get('answer') or '').strip()}"
+        await self._database.set_cache(f"qna:mixed:global:{normalized_question}", fallback_text, 7 * 24 * 3600)
+        return {"can_answer": True, "answer": fallback_text, "refusal_reason": None}
+
+    async def _decide_qna_scope(self, question: str) -> str:
+        q = question.lower()
+        channel_indicators = [
+            "nel canale",
+            "qui",
+            "oggi",
+            "scrive",
+            "partecipa",
+            "barcella",
+            "in chat",
+            "in questa stanza",
+            "@",
+        ]
+        global_indicators = ["cos'è", "chi è", "come si fa", "definisci", "spiegami"]
+        channel_score = sum(1 for token in channel_indicators if token in q)
+        global_score = sum(1 for token in global_indicators if token in q)
+        if channel_score > 0 and global_score == 0:
+            return "channel"
+        if global_score > 0 and channel_score == 0:
+            return "global"
+        if channel_score > 0 and global_score > 0:
+            return "mixed"
+        classified = await self._classify_scope_with_ai(question)
+        return classified if classified in {"channel", "global", "mixed"} else "mixed"
+
+    async def _classify_scope_with_ai(self, question: str) -> str:
+        payload = json.dumps(
+            {
+                "task": "qna_scope_classification",
+                "question": question,
+                "reply_only_json": True,
+                "output_schema": {"scope": "channel|global|mixed", "confidence": 0.0, "reason": "string"},
+            },
+            ensure_ascii=False,
+        )
+        answer = await self._ask_ai_json(payload)
+        if not answer:
+            return "mixed"
+        scope = str(answer.get("scope") or "mixed").strip().lower()
+        return scope
+
+    async def _build_qna_global_payload(self, question: str) -> str:
+        prompt = {
+            "question": question,
+            "constraints": ["risposta generale", "non includere PII", "rispondi in italiano"],
+            "output_schema": {"can_answer": "bool", "answer": "string", "refusal_reason": "string|null"},
+        }
+        return json.dumps(prompt, ensure_ascii=False)
+
+    def _normalize_question(self, question: str) -> str:
+        return re.sub(r"\s+", " ", question.strip().lower())
+
+    def _format_italian_datetime(self, dt: str) -> str:
+        try:
+            parsed = datetime.fromisoformat(dt)
+        except ValueError:
+            return dt
+        return parsed.astimezone(ROME_TZ).strftime("%Y-%m-%d %H:%M")
+
     async def _resolve_qna_limit(self, interaction: discord.Interaction) -> int:
         profile = await self._entitlements.resolve_profile(interaction.user)
         raw = await self._database.get_setting("qna.daily_limits")
         defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
         if not raw:
-            return int(defaults.get(profile, defaults["base"]))
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = defaults
-        if not isinstance(parsed, dict):
-            parsed = defaults
-        return int(parsed.get(profile, parsed.get("base", 0)))
+            tier_limit = int(defaults.get(profile, defaults["base"]))
+        else:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = defaults
+            if not isinstance(parsed, dict):
+                parsed = defaults
+            tier_limit = int(parsed.get(profile, parsed.get("base", 0)))
+        if interaction.guild_id is None:
+            return tier_limit
+        bonus, _ = await self._database.get_qna_bonus(str(interaction.guild_id), str(interaction.user.id))
+        return tier_limit + max(0, bonus)
 
     async def _resolve_qna_limit_for_member(self, member) -> int:
         profile = await self._entitlements.resolve_profile(member)
         raw = await self._database.get_setting("qna.daily_limits")
         defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
         if not raw:
-            return int(defaults.get(profile, defaults["base"]))
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = defaults
-        if not isinstance(parsed, dict):
-            parsed = defaults
-        return int(parsed.get(profile, parsed.get("base", 0)))
+            tier_limit = int(defaults.get(profile, defaults["base"]))
+        else:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = defaults
+            if not isinstance(parsed, dict):
+                parsed = defaults
+            tier_limit = int(parsed.get(profile, parsed.get("base", 0)))
+        guild = getattr(member, "guild", None)
+        if guild is None:
+            return tier_limit
+        bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
+        return tier_limit + max(0, bonus)
 
     async def _build_qna_payload(self, guild_id: str, channel_id: str, question: str) -> str:
         now = datetime.now(ROME_TZ)
@@ -363,7 +559,7 @@ class TriggerEngineService:
 
 def is_out_of_scope_question(question: str) -> bool:
     q = question.lower()
-    needles = ["altro canale", "privato", "salottino", "dm", "sezione privata", "cosa dicono in", "nel canale"]
+    needles = ["altro canale", "privato", "salottino", "dm", "sezione privata", "cosa dicono in"]
     return any(n in q for n in needles)
 
 
