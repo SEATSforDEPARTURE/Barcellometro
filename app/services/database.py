@@ -273,6 +273,35 @@ class DatabaseService:
                 last_seen_message_id TEXT NULL,
                 UNIQUE (guild_id, channel_id, phrase)
             );
+
+            CREATE TABLE IF NOT EXISTS trigger_state (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                trigger_key TEXT NOT NULL,
+                state_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, trigger_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS kv_cache (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_hobbies (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                user_name TEXT,
+                hobby TEXT NOT NULL,
+                source_channel_id TEXT NOT NULL,
+                source_message_id TEXT NOT NULL,
+                source_created_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT NULL,
+                PRIMARY KEY (guild_id, user_id, hobby, source_message_id)
+            );
             """
         )
         await self._ensure_message_campaign_columns()
@@ -819,7 +848,7 @@ class DatabaseService:
             "SELECT trigger_key, enabled FROM trigger_channels WHERE guild_id = ? AND channel_id = ?",
             (guild_id, channel_id),
         )
-        data = {"barcello": False, "frasi": False, "prompt": False, "qna": False}
+        data = {"barcello": False, "frasi": False, "prompt": False, "qna": False, "insights": False}
         for row in rows:
             data[str(row["trigger_key"])] = bool(row["enabled"])
         return data
@@ -901,6 +930,147 @@ class DatabaseService:
         await self.execute(
             "UPDATE trigger_phrases SET last_seen_ts = ?, last_seen_message_id = ? WHERE id = ?",
             (ts, message_id, phrase_id),
+        )
+
+    async def get_trigger_state(self, guild_id: str, channel_id: str, trigger_key: str) -> dict[str, Any]:
+        row = await self.fetchone(
+            "SELECT state_json FROM trigger_state WHERE guild_id = ? AND channel_id = ? AND trigger_key = ?",
+            (guild_id, channel_id, trigger_key),
+        )
+        if not row:
+            return {}
+        try:
+            parsed = json.loads(str(row["state_json"] or "{}"))
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    async def set_trigger_state(self, guild_id: str, channel_id: str, trigger_key: str, state: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO trigger_state (guild_id, channel_id, trigger_key, state_json, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, trigger_key) DO UPDATE SET
+                state_json = excluded.state_json,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, channel_id, trigger_key, json.dumps(state, ensure_ascii=False), now),
+        )
+
+    async def get_cache(self, key: str) -> Optional[str]:
+        now = datetime.now(timezone.utc).isoformat()
+        row = await self.fetchone(
+            "SELECT value FROM kv_cache WHERE key = ? AND expires_at > ?",
+            (key, now),
+        )
+        if not row:
+            await self.execute("DELETE FROM kv_cache WHERE key = ? AND expires_at <= ?", (key, now))
+            return None
+        return str(row["value"])
+
+    async def set_cache(self, key: str, value: str, ttl_seconds: int) -> None:
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=max(1, ttl_seconds))
+        await self.execute(
+            """
+            INSERT INTO kv_cache (key, value, expires_at, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                expires_at = excluded.expires_at,
+                created_at = excluded.created_at
+            """,
+            (key, value, expires_at.isoformat(), now.isoformat()),
+        )
+
+    async def insert_user_hobby(
+        self,
+        guild_id: str,
+        user_id: str,
+        user_name: str,
+        hobby: str,
+        source_channel_id: str,
+        source_message_id: str,
+        source_created_at: str,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT OR IGNORE INTO user_hobbies (
+                guild_id, user_id, user_name, hobby, source_channel_id, source_message_id, source_created_at, created_at, last_used_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (guild_id, user_id, user_name, hobby, source_channel_id, source_message_id, source_created_at, now),
+        )
+
+    async def list_recent_messages_for_hobbies(
+        self,
+        guild_id: str,
+        channel_id: str,
+        limit: int = 60,
+    ) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT
+                m.message_id,
+                m.guild_id,
+                m.channel_id,
+                m.author_id,
+                m.ts,
+                m.content,
+                COALESCE(gm.nickname, u.display_name, u.global_name, u.username, m.author_id) AS user_name
+            FROM messages m
+            LEFT JOIN users u ON u.user_id = m.author_id
+            LEFT JOIN guild_memberships gm ON gm.guild_id = m.guild_id AND gm.user_id = m.author_id
+            WHERE m.guild_id = ? AND m.channel_id = ? AND COALESCE(m.is_deleted, 0) = 0 AND COALESCE(m.content, '') <> ''
+            ORDER BY m.ts DESC
+            LIMIT ?
+            """,
+            (guild_id, channel_id, limit),
+        )
+        return [dict(row) for row in rows]
+
+    async def get_next_hobby(
+        self,
+        guild_id: str,
+        channel_id: str,
+        not_used_since_iso: str,
+    ) -> Optional[dict[str, Any]]:
+        row = await self.fetchone(
+            """
+            SELECT * FROM user_hobbies
+            WHERE guild_id = ?
+              AND source_channel_id = ?
+              AND (last_used_at IS NULL OR last_used_at < ?)
+            ORDER BY COALESCE(last_used_at, '1970-01-01T00:00:00+00:00') ASC, source_created_at DESC
+            LIMIT 1
+            """,
+            (guild_id, channel_id, not_used_since_iso),
+        )
+        if row:
+            return dict(row)
+        fallback = await self.fetchone(
+            """
+            SELECT * FROM user_hobbies
+            WHERE guild_id = ?
+              AND (last_used_at IS NULL OR last_used_at < ?)
+            ORDER BY COALESCE(last_used_at, '1970-01-01T00:00:00+00:00') ASC, source_created_at DESC
+            LIMIT 1
+            """,
+            (guild_id, not_used_since_iso),
+        )
+        return dict(fallback) if fallback else None
+
+    async def mark_hobby_used(self, guild_id: str, user_id: str, hobby: str, source_message_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE user_hobbies
+            SET last_used_at = ?
+            WHERE guild_id = ? AND user_id = ? AND hobby = ? AND source_message_id = ?
+            """,
+            (now, guild_id, user_id, hobby, source_message_id),
         )
 
     async def get_usage(self, guild_id: str, user_id: str, command: str, window_date: str) -> int:
