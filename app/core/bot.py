@@ -106,7 +106,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         summary_service = SummaryService(database_service, ai_service=ai_service)
         daily_resoconto = DailyResocontoService(database_service, bot, summary_service, barcello_service, ai_service=ai_service)
         entitlements_service = EntitlementsService(database_service)
-        trigger_engine = TriggerEngineService(database_service, barcello_service, entitlements_service, ai_service)
+        trigger_engine = TriggerEngineService(database_service, barcello_service, entitlements_service, ai_service, community_insights)
 
     registry.register("config", config)
     registry.register("bot", bot)
