@@ -61,38 +61,40 @@ class TriggerEngineService:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa questo comando in un canale.", ephemeral=True)
             return
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
         guild_id = str(interaction.guild_id)
         channel_id = str(interaction.channel_id)
         if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
-            await interaction.response.send_message("Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
+            await interaction.followup.send("Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
             return
         if is_out_of_scope_question(question):
-            await interaction.response.send_message("Posso rispondere solo su questo canale.", ephemeral=True)
+            await interaction.followup.send("Posso rispondere solo su questo canale.", ephemeral=True)
             return
         if is_sensitive_question(question):
-            await interaction.response.send_message("Non posso aiutare con dati personali o sensibili.", ephemeral=True)
+            await interaction.followup.send("Non posso aiutare con dati personali o sensibili.", ephemeral=True)
             return
         limit = await self._resolve_qna_limit(interaction)
         window_date = datetime.now(ROME_TZ).date().isoformat()
         used = await self._database.get_usage(guild_id, str(interaction.user.id), "qna", window_date)
         if used >= limit:
-            await interaction.response.send_message("Hai esaurito le domande di oggi.", ephemeral=True)
+            await interaction.followup.send("Hai esaurito le domande di oggi.", ephemeral=True)
             return
 
         scope = await self._decide_qna_scope(question)
         answer = await self._handle_qna(scope=scope, guild_id=guild_id, channel_id=channel_id, question=question)
         if answer is None:
-            await interaction.response.send_message("AI non disponibile al momento.", ephemeral=True)
+            await interaction.followup.send("AI non disponibile al momento.", ephemeral=True)
             return
         if not answer.get("can_answer"):
-            await interaction.response.send_message(answer.get("refusal_reason") or "Non posso rispondere.", ephemeral=True)
+            await interaction.followup.send(answer.get("refusal_reason") or "Non posso rispondere.", ephemeral=True)
             return
         text = str(answer.get("answer") or "").strip()
         if not text:
-            await interaction.response.send_message("Risposta non valida.", ephemeral=True)
+            await interaction.followup.send("Risposta non valida.", ephemeral=True)
             return
         if contains_pii(text):
-            await interaction.response.send_message("Non posso condividere dati personali.", ephemeral=True)
+            await interaction.followup.send("Non posso condividere dati personali.", ephemeral=True)
             return
 
         await self._database.increment_usage(
@@ -102,7 +104,7 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await interaction.response.send_message(text)
+        await interaction.followup.send(text, ephemeral=True)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         if message.guild is None:
