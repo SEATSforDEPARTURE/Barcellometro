@@ -91,3 +91,31 @@ def test_infer_time_range_mese_scorso_boundaries() -> None:
 
     assert start_dt == prev_month_start_local.astimezone(start_dt.tzinfo)
     assert end_dt == current_month_start_local.astimezone(end_dt.tzinfo)
+
+
+def test_decorate_proof_links_formats_discord_jump_urls() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "- Punto [prova](https://discord.com/channels/1/2/3)"
+    evidence = [
+        {
+            "jump_url": "https://discord.com/channels/1/2/3",
+            "created_at_iso": "2026-02-14T19:00:00+00:00",
+        }
+    ]
+
+    decorated = service._decorate_proof_links(answer, evidence)
+    assert "[🧾 14/02 20:00](https://discord.com/channels/1/2/3)" in decorated
+
+
+def test_decorate_proof_links_keeps_unknown_links() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "- Punto [prova](https://discord.com/channels/1/2/999)"
+    evidence = [
+        {
+            "jump_url": "https://discord.com/channels/1/2/3",
+            "created_at_iso": "2026-02-14T19:00:00+00:00",
+        }
+    ]
+
+    decorated = service._decorate_proof_links(answer, evidence)
+    assert decorated == answer

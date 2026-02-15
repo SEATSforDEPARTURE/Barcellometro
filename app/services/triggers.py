@@ -59,28 +59,34 @@ class TriggerEngineService:
             return
         await self._handle_phrases(envelope)
 
+    async def _qna_reply(self, interaction: discord.Interaction, text: str, *, ephemeral: bool) -> None:
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=ephemeral)
+            return
+        await interaction.response.send_message(text, ephemeral=ephemeral)
+
     async def handle_qna_question(self, interaction: discord.Interaction, question: str) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await interaction.response.send_message("Usa questo comando in un canale.", ephemeral=True)
+            await self._qna_reply(interaction, "Usa questo comando in un canale.", ephemeral=True)
             return
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            await interaction.response.defer(ephemeral=False, thinking=True)
         guild_id = str(interaction.guild_id)
         channel_id = str(interaction.channel_id)
         if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
-            await interaction.followup.send("Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
+            await self._qna_reply(interaction, "Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
             return
         if is_out_of_scope_question(question):
-            await interaction.followup.send("Posso rispondere solo su questo canale.", ephemeral=True)
+            await self._qna_reply(interaction, "Posso rispondere solo su questo canale.", ephemeral=True)
             return
         if is_sensitive_question(question):
-            await interaction.followup.send("Non posso aiutare con dati personali o sensibili.", ephemeral=True)
+            await self._qna_reply(interaction, "Non posso aiutare con dati personali o sensibili.", ephemeral=True)
             return
         limit = await self._resolve_qna_limit(interaction)
         window_date = datetime.now(ROME_TZ).date().isoformat()
         used = await self._database.get_usage(guild_id, str(interaction.user.id), "qna", window_date)
         if used >= limit:
-            await interaction.followup.send("Hai esaurito le domande di oggi.", ephemeral=True)
+            await self._qna_reply(interaction, "Hai esaurito le domande di oggi.", ephemeral=True)
             return
 
         scope = await self._decide_qna_scope(question)
@@ -92,17 +98,22 @@ class TriggerEngineService:
             source=interaction,
         )
         if answer is None:
-            await interaction.followup.send("AI non disponibile al momento.", ephemeral=True)
+            await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
             return
         if not answer.get("can_answer"):
-            await interaction.followup.send(answer.get("refusal_reason") or "Non posso rispondere.", ephemeral=True)
+            await self._qna_reply(interaction, str(answer.get("refusal_reason") or "Non posso rispondere."), ephemeral=True)
             return
         text = str(answer.get("answer") or "").strip()
         if not text:
-            await interaction.followup.send("Risposta non valida.", ephemeral=True)
+            await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
             return
+
+        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else None
+        if isinstance(evidence_pack, list):
+            text = self._decorate_proof_links(text, evidence_pack)
+
         if contains_pii(text):
-            await interaction.followup.send("Non posso condividere dati personali.", ephemeral=True)
+            await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
             return
 
         await self._database.increment_usage(
@@ -112,7 +123,7 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await interaction.followup.send(text, ephemeral=False)
+        await self._qna_reply(interaction, text, ephemeral=False)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         if message.guild is None:
@@ -150,7 +161,15 @@ class TriggerEngineService:
             await message.reply((answer or {}).get("refusal_reason") or "Non posso rispondere.")
             return
         text = str(answer.get("answer") or "").strip()
-        if not text or contains_pii(text):
+        if not text:
+            await message.reply("Risposta non valida.")
+            return
+
+        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else None
+        if isinstance(evidence_pack, list):
+            text = self._decorate_proof_links(text, evidence_pack)
+
+        if contains_pii(text):
             await message.reply("Non posso condividere dati personali.")
             return
         await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
@@ -460,19 +479,20 @@ class TriggerEngineService:
         cached = await self._database.get_cache(cache_key)
         if cached is not None:
             logger.info("qna cache hit scope=%s channel_id=%s", scope, channel_id)
-            return {"can_answer": True, "answer": cached, "refusal_reason": None}
+            return {"can_answer": True, "answer": cached, "refusal_reason": None, "evidence_pack": []}
 
         if scope == "global":
             answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
             if answer and answer.get("can_answer"):
                 await self._database.set_cache(cache_key, str(answer.get("answer") or ""), 7 * 24 * 3600)
+                answer["evidence_pack"] = []
             return answer
 
         assert channel_bundle is not None
         empty_reply = str(channel_bundle.get("empty_reply") or "").strip()
         if empty_reply:
             await self._database.set_cache(cache_key, empty_reply, 30 * 60)
-            return {"can_answer": True, "answer": empty_reply, "refusal_reason": None}
+            return {"can_answer": True, "answer": empty_reply, "refusal_reason": None, "evidence_pack": channel_bundle.get("evidence_pack", [])}
 
         payload_obj = json.loads(str(channel_bundle.get("payload") or "{}"))
         payload_obj = self._shrink_payload_for_budget(payload_obj, str(channel_bundle.get("breadth") or "normal"))
@@ -494,6 +514,9 @@ class TriggerEngineService:
                     str(channel_answer.get("answer") or ""),
                 )
 
+        if channel_answer and channel_answer.get("can_answer"):
+            channel_answer["evidence_pack"] = channel_bundle.get("evidence_pack", [])
+
         if scope == "channel":
             return channel_answer
 
@@ -504,7 +527,7 @@ class TriggerEngineService:
             return channel_answer or global_answer
         fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{str(global_answer.get('answer') or '').strip()}"
         await self._database.set_cache(f"qna:mixed:global:{normalized_question}", fallback_text, 7 * 24 * 3600)
-        return {"can_answer": True, "answer": fallback_text, "refusal_reason": None}
+        return {"can_answer": True, "answer": fallback_text, "refusal_reason": None, "evidence_pack": []}
 
     async def _decide_qna_scope(self, question: str) -> str:
         q = question.lower()
@@ -564,6 +587,35 @@ class TriggerEngineService:
         except ValueError:
             return dt
         return parsed.astimezone(ROME_TZ).strftime("%Y-%m-%d %H:%M")
+
+    def _decorate_proof_links(self, answer_text: str, evidence: list[dict[str, str]]) -> str:
+        if not answer_text or not evidence:
+            return answer_text
+
+        jump_to_label: dict[str, str] = {}
+        for item in evidence:
+            jump_url = str(item.get("jump_url") or "").strip()
+            created_at_iso = str(item.get("created_at_iso") or "").strip()
+            if not jump_url or not created_at_iso:
+                continue
+            normalized_iso = created_at_iso.replace("Z", "+00:00")
+            try:
+                parsed = datetime.fromisoformat(normalized_iso)
+            except ValueError:
+                continue
+            jump_to_label[jump_url] = parsed.astimezone(ROME_TZ).strftime("🧾 %d/%m %H:%M")
+
+        if not jump_to_label:
+            return answer_text
+
+        def replacer(match: re.Match[str]) -> str:
+            _label = match.group(1)
+            jump_url = match.group(2)
+            if jump_url not in jump_to_label:
+                return match.group(0)
+            return f"[{jump_to_label[jump_url]}]({jump_url})"
+
+        return re.sub(r"\[([^\]]+)\]\((https://discord\.com/channels/\d+/\d+/\d+)\)", replacer, answer_text)
 
     async def _resolve_qna_limit(self, interaction: discord.Interaction) -> int:
         profile = await self._entitlements.resolve_profile(interaction.user)
@@ -763,19 +815,19 @@ class TriggerEngineService:
                     "per_target_messages": per_target_messages,
                     "focus_instruction": (
                         "Per ciascun target: 2-5 bullet su cose interessanti, fino a 2 citazioni brevi (<=120 caratteri), "
-                        "ogni punto con link prova [prova](jump_url). Se mancano prove, dichiaralo."
+                        "ogni punto deve includere un link prova nel formato: [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome. Se mancano prove, dichiaralo."
                     ),
                 }
             )
 
         if breadth == "broad":
             context["focus_instruction"] = (
-                "Risposta sintetica (max 6 bullet), 2-3 link prova, niente allucinazioni. "
+                "Risposta sintetica (max 6 bullet), 2-3 link prova nel formato [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome, niente allucinazioni. "
                 "Chiudi con: Se mi dici un nome o un tema, posso cercare con più precisione nel database del canale."
             )
         elif "focus_instruction" not in context:
             context["focus_instruction"] = (
-                "Rispondi alla domanda usando solo le prove. Struttura chiara e inserisci link prova cliccabili. "
+                "Rispondi alla domanda usando solo le prove. Struttura chiara e inserisci link prova nel formato [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome. "
                 "Se la domanda è follow-up, usa la conversazione precedente."
             )
 
@@ -804,6 +856,7 @@ class TriggerEngineService:
             "session_user_id": session_user_id,
             "session_signature": session_signature,
             "breadth": breadth,
+            "evidence_pack": evidence_pack,
         }
 
     def infer_time_range(
