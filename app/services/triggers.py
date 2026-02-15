@@ -152,7 +152,7 @@ class TriggerEngineService:
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
             return
 
-        embed = self._build_qna_embed(text, evidence_pack)
+        embed = self._build_qna_embed(question_clean, text, evidence_pack)
 
         await self._database.increment_usage(
             guild_id,
@@ -246,7 +246,7 @@ class TriggerEngineService:
                 return
 
             await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
-            embed = self._build_qna_embed(text, evidence_pack)
+            embed = self._build_qna_embed(question_clean, text, evidence_pack)
             await message.reply(
                 content=f"{message.author.mention} **chiede:** {question_clean}",
                 embed=embed,
@@ -824,55 +824,124 @@ class TriggerEngineService:
         bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
         return tier_limit + max(0, bonus)
 
-    def _build_qna_embed(self, answer_text: str, evidence: list[dict[str, str]]) -> discord.Embed:
+    def _build_qna_embed(self, question: str, answer_text: str, evidence: list[dict[str, str]]) -> discord.Embed:
         embed = discord.Embed(
-            description=self._truncate_embed_description(self._bulletize_answer(answer_text, evidence)),
+            description=self._truncate_embed_description(self._bulletize_answer(question, answer_text, evidence)),
             timestamp=datetime.now(timezone.utc),
         )
         embed.set_footer(text="Barcellometro Q&A")
         return embed
 
-    def _bulletize_answer(self, answer_text: str, evidence: list[dict[str, str]]) -> str:
+    def _bulletize_answer(self, question: str, answer_text: str, evidence: list[dict[str, str]]) -> str:
         lines = [line.strip() for line in answer_text.splitlines() if line.strip()]
         if not lines:
             return answer_text
 
-        default_url = ""
-        url_to_label: dict[str, str] = {}
-        for item in evidence:
-            jump_url = str(item.get("jump_url") or "").strip()
-            created_at_iso = str(item.get("created_at_iso") or "").strip().replace("Z", "+00:00")
-            if not jump_url:
-                continue
-            if not default_url:
-                default_url = jump_url
-            if not created_at_iso:
-                continue
-            try:
-                created_at = datetime.fromisoformat(created_at_iso)
-            except ValueError:
-                continue
-            url_to_label[jump_url] = created_at.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
-
         final_lines: list[str] = []
-        url_re = r"https://discord\.com/channels/\d+/\d+/\d+"
         for raw_line in lines:
             line = re.sub(r"^\s*[•\-–—]\s*", "", raw_line).strip()
+            line = self._strip_proof_artifacts(line)
             if not line:
                 continue
-            line_url_match = re.search(url_re, line)
-            proof_url = line_url_match.group(0) if line_url_match else default_url
-            if line_url_match:
-                line = re.sub(url_re, "", line).strip()
-                line = re.sub(r"\s{2,}", " ", line)
+            proof = self._pick_proof_for_bullet(line, evidence)
+            if not proof:
+                continue
+            jump_url = str(proof.get("jump_url") or "").strip()
+            if not self._is_valid_jump_url(jump_url):
+                continue
+            if not self._is_bullet_relevant(question, line):
+                continue
 
-            if proof_url:
-                ts = url_to_label.get(proof_url)
-                if ts:
-                    final_lines.append(f"• [🧾 {ts}]({proof_url}) {line}".strip())
-                    continue
-            final_lines.append(f"• {line}")
-        return "\n".join(final_lines) if final_lines else answer_text
+            ts = self._format_proof_timestamp(str(proof.get("created_at_iso") or ""))
+            if not ts:
+                continue
+            final_lines.append(f"• [🧾 {ts}]({jump_url}) {line}")
+
+        if final_lines:
+            return "\n".join(final_lines)
+        return "Non ho trovato prove dirette e attinenti alla domanda nel periodo richiesto."
+
+    def _strip_proof_artifacts(self, text: str) -> str:
+        cleaned = text or ""
+        cleaned = re.sub(r"\[\s*🧾[^\]]*\]\([^)]+\)", "", cleaned)
+        cleaned = re.sub(r"\(\s*https?://discord\.com/channels/[^)]+\)", "", cleaned)
+        cleaned = re.sub(r"https?://discord\.com/channels/\S+", "", cleaned)
+        cleaned = re.sub(r"\]\(\s*0\s*\)", "", cleaned)
+        cleaned = re.sub(r"\]\(\s*\)", "", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+        cleaned = re.sub(r"([,.;:!?]){2,}", r"\1", cleaned)
+        return cleaned.strip(" -–—•\t\n\r")
+
+    def _is_valid_jump_url(self, jump_url: str) -> bool:
+        return jump_url.startswith("https://discord.com/channels/")
+
+    def _format_proof_timestamp(self, created_at_iso: str) -> str:
+        normalized = (created_at_iso or "").strip().replace("Z", "+00:00")
+        if not normalized:
+            return ""
+        try:
+            created_at = datetime.fromisoformat(normalized)
+        except ValueError:
+            return ""
+        return created_at.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
+
+    def _pick_proof_for_bullet(self, clean_text: str, evidence_pack: list[dict[str, str]]) -> dict[str, str] | None:
+        if not evidence_pack:
+            return None
+
+        id_match = re.search(r"\b\d{17,20}\b", clean_text or "")
+        if id_match:
+            message_id = id_match.group(0)
+            for item in evidence_pack:
+                jump_url = str(item.get("jump_url") or "")
+                if message_id in jump_url and self._is_valid_jump_url(jump_url):
+                    return item
+
+        url_match = re.search(r"https?://discord\.com/channels/\S+", clean_text or "")
+        if url_match:
+            url = url_match.group(0)
+            if self._is_valid_jump_url(url):
+                for item in evidence_pack:
+                    if str(item.get("jump_url") or "").strip() == url:
+                        return item
+
+        for item in evidence_pack:
+            jump_url = str(item.get("jump_url") or "").strip()
+            if self._is_valid_jump_url(jump_url):
+                return item
+        return None
+
+    def _is_bullet_relevant(self, question: str, bullet: str) -> bool:
+        q_raw = (question or "").strip()
+        b_raw = (bullet or "").strip()
+        if not q_raw or not b_raw:
+            return False
+
+        q_norm = re.sub(r"[^\w\s]", " ", q_raw.lower())
+        b_norm = re.sub(r"[^\w\s]", " ", b_raw.lower())
+        stopwords = {
+            "come", "quando", "dove", "cosa", "perche", "perché", "quale", "quali", "della", "delle", "degli", "dello",
+            "dell", "questa", "questo", "quello", "quella", "nella", "nelle", "negli", "nello", "dopo", "prima", "sulla",
+            "sulle", "solo", "sono", "anche", "dalla", "dalle", "dallo", "dentro", "fuori", "avete", "abbiamo", "hanno",
+            "dicono", "detto", "fatto", "oggi", "ieri", "domani", "delle", "degli", "dati", "messaggi", "canale",
+        }
+
+        proper_names = [token.lower() for token in re.findall(r"\b[A-ZÀ-Ý][\wÀ-ÿ']+\b", q_raw)]
+        long_tokens = [
+            token
+            for token in re.findall(r"\b\w{4,}\b", q_norm)
+            if token not in stopwords
+        ]
+        keywords = set(proper_names + long_tokens)
+        if keywords and any(keyword in b_norm for keyword in keywords):
+            return True
+
+        asks_what_said = bool(re.search(r"\bcosa\s+ha\s+detto\b|\bha\s+detto\b", q_norm))
+        speech_tokens = ["ha detto", "ha promesso", "ha confermato", "ha scritto", "ha risposto"]
+        if asks_what_said and any(token in b_norm for token in speech_tokens):
+            return True
+        return False
 
     def _truncate_embed_description(self, description: str, *, max_len: int = 4096) -> str:
         if len(description) <= max_len:
@@ -976,6 +1045,9 @@ class TriggerEngineService:
             "rispondi in italiano",
             "usa solo le prove fornite",
             "non inventare contenuti",
+            "rispondi solo alla domanda senza contesto generale extra",
+            "massimo 4 bullet verificabili",
+            "se non ci sono prove dirette dillo chiaramente",
         ]
         cache_ttl = int(budgets.get("cache_ttl") or 45 * 60)
         empty_reply = ""
@@ -1037,21 +1109,21 @@ class TriggerEngineService:
                     "targets": target_rows_for_payload,
                     "per_target_messages": per_target_messages,
                     "focus_instruction": (
-                        "Per ciascun target: 2-5 bullet su cose interessanti, fino a 2 citazioni brevi (<=120 caratteri), "
-                        "ogni punto deve includere un link prova nel formato: [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome. Se mancano prove, dichiaralo."
+                        "Per ciascun target: massimo 4 bullet strettamente pertinenti alla domanda, frasi verificabili e niente contesto generale. "
+                        "Se mancano prove dirette, dichiaralo esplicitamente e non inventare."
                     ),
                 }
             )
 
         if breadth == "broad":
             context["focus_instruction"] = (
-                "Risposta sintetica (max 6 bullet), 2-3 link prova nel formato [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome, niente allucinazioni. "
-                "Chiudi con: Se mi dici un nome o un tema, posso cercare con più precisione nel database del canale."
+                "Risposta sintetica (max 4 bullet) solo su elementi pertinenti alla domanda, senza contesto generale extra. "
+                "Se non ci sono prove dirette, dichiaralo chiaramente e non inventare."
             )
         elif "focus_instruction" not in context:
             context["focus_instruction"] = (
-                "Rispondi alla domanda usando solo le prove. Struttura chiara e inserisci link prova nel formato [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome. "
-                "Se la domanda è follow-up, usa la conversazione precedente."
+                "Rispondi solo alla domanda usando prove fornite, massimo 4 bullet verificabili e nessun contesto generale. "
+                "Se non ci sono prove dirette, dillo chiaramente senza inventare. Se la domanda è follow-up, usa la conversazione precedente."
             )
 
         prompt_obj = {
