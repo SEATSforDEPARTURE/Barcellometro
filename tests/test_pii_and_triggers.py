@@ -176,9 +176,9 @@ def test_decorate_proof_links_removes_newlines_and_spaces_inside_link_url() -> N
     assert "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)" in decorated
 
 
-def test_extract_target_speaker_and_alias() -> None:
+def test_extract_target_speaker_raw() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    assert service._extract_target_speaker("è vero che Dany ha detto che potevo sfogarmi?") == "daniela"
+    assert service._extract_target_speaker("è vero che Dany Sun ☀️ ha detto che potevo sfogarmi?") == "Dany Sun"
 
 
 def test_bulletize_answer_filters_evidence_by_target_author() -> None:
@@ -205,7 +205,7 @@ def test_bulletize_answer_filters_evidence_by_target_author() -> None:
         },
     ]
 
-    out = service._bulletize_answer("è vero che Dany ha detto che potevo sfogarmi?", answer, evidence)
+    out = service._bulletize_answer("è vero che Daniela ha detto che potevo sfogarmi?", answer, evidence)
     assert "https://discord.com/channels/1/2/4" in out
     assert "https://discord.com/channels/1/2/3" not in out
 
@@ -226,10 +226,10 @@ def test_bulletize_answer_returns_no_direct_evidence_when_target_missing() -> No
     ]
 
     out = service._bulletize_answer("cosa ha detto Daniela?", answer, evidence)
-    assert out == "Non ho trovato prove dirette di un messaggio di daniela nel periodo richiesto."
+    assert out == "Non ho trovato prove dirette di un messaggio di Daniela nel periodo richiesto."
 
 
-def test_filter_evidence_by_target_accepts_raw_alias_token() -> None:
+def test_filter_evidence_by_target_matches_decorated_name() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     evidence = [
         {
@@ -241,11 +241,11 @@ def test_filter_evidence_by_target_accepts_raw_alias_token() -> None:
         }
     ]
 
-    filtered = service._filter_evidence_by_target(evidence, "daniela", target_raw="dany")
+    filtered = service._filter_evidence_by_target(evidence, "Dany")
     assert len(filtered) == 1
 
 
-def test_bulletize_answer_fallbacks_to_other_references_without_attribution() -> None:
+def test_bulletize_answer_no_target_evidence_has_no_links() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "• Dicevano della live senza censura alle 20"
     evidence = [
@@ -261,5 +261,5 @@ def test_bulletize_answer_fallbacks_to_other_references_without_attribution() ->
     ]
 
     out = service._bulletize_answer("è vero che Daniela ha detto live senza censura alle 20?", answer, evidence)
-    assert out.startswith("Non ho trovato un messaggio diretto di daniela")
-    assert "https://discord.com/channels/1/2/3" in out
+    assert out == "Non ho trovato prove dirette di un messaggio di Daniela nel periodo richiesto."
+    assert "https://discord.com/channels/1/2/3" not in out
