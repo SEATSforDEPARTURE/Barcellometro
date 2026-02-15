@@ -167,55 +167,78 @@ class TriggerEngineService:
         await q_msg.reply(text, mention_author=False)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
-        if message.guild is None:
-            return
-        question = message.content.strip()
-        if not question:
-            return
-        if "?" not in question and not question.lower().startswith("domanda:"):
-            return
-        guild_id = str(message.guild.id)
-        channel_id = str(message.channel.id)
-        if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
-            return
-        if is_out_of_scope_question(question_text):
-            await message.reply("Posso rispondere solo su questo canale.")
-            return
-        if is_sensitive_question(question_text):
-            await message.reply("Non posso aiutare con dati personali o sensibili.")
-            return
-        limit = await self._resolve_qna_limit_for_member(message.author)
-        window_date = datetime.now(ROME_TZ).date().isoformat()
-        used = await self._database.get_usage(guild_id, str(message.author.id), "qna", window_date)
-        if used >= limit:
-            await message.reply("Hai esaurito le domande di oggi.")
-            return
-        scope = await self._decide_qna_scope(question_text)
-        answer = await self._handle_qna(
-            scope=scope,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            question=question_text,
-            source=message,
-        )
-        if answer is None or not answer.get("can_answer"):
-            await message.reply((answer or {}).get("refusal_reason") or "Non posso rispondere.")
-            return
-        text = str(answer.get("answer") or "").strip()
-        if not text:
-            await message.reply("Risposta non valida.")
-            return
+        try:
+            if message.guild is None:
+                return
+            content = (message.content or "").strip()
+            if not content:
+                return
 
-        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
-        if not isinstance(evidence_pack, list):
-            evidence_pack = []
-        text = self._decorate_proof_links(text, evidence_pack)
+            question = content
+            if question.lower().startswith("domanda:"):
+                question = question.split(":", 1)[1].strip()
+            if not question:
+                return
+            if "?" not in question and not content.lower().startswith("domanda:"):
+                return
 
-        if contains_pii(text):
-            await message.reply("Non posso condividere dati personali.")
+            guild_id = str(message.guild.id)
+            channel_id = str(message.channel.id)
+            if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
+                return
+            if is_out_of_scope_question(question):
+                await message.reply("Posso rispondere solo su questo canale.", mention_author=False)
+                return
+            if is_sensitive_question(question):
+                await message.reply("Non posso aiutare con dati personali o sensibili.", mention_author=False)
+                return
+
+            limit = await self._resolve_qna_limit_for_member(message.author)
+            window_date = datetime.now(ROME_TZ).date().isoformat()
+            used = await self._database.get_usage(guild_id, str(message.author.id), "qna", window_date)
+            if used >= limit:
+                await message.reply("Hai esaurito le domande di oggi.", mention_author=False)
+                return
+
+            scope = await self._decide_qna_scope(question)
+            answer = await self._handle_qna(
+                scope=scope,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                question=question,
+                source=message,
+            )
+            if answer is None or not answer.get("can_answer"):
+                await message.reply((answer or {}).get("refusal_reason") or "Non posso rispondere.", mention_author=False)
+                return
+
+            text = str(answer.get("answer") or "").strip()
+            if not text:
+                await message.reply("Risposta non valida.", mention_author=False)
+                return
+
+            evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
+            if not isinstance(evidence_pack, list):
+                evidence_pack = []
+            text = self._decorate_proof_links(text, evidence_pack)
+
+            if contains_pii(text):
+                await message.reply("Non posso condividere dati personali.", mention_author=False)
+                return
+
+            await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
+            embed = discord.Embed(title="Risposta", description=text)
+            await message.reply(embed=embed, mention_author=False)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "handle_message_qna failed",
+                extra={
+                    "guild_id": str(message.guild.id) if message.guild else "",
+                    "channel_id": str(getattr(message.channel, "id", "") or ""),
+                    "message_id": str(getattr(message, "id", "") or ""),
+                },
+            )
             return
-        await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
-        await message.reply(text)
 
     async def configure_insights(self, prompt_text: str) -> dict[str, object]:
         config = await self._community_insights.parse_config_prompt(prompt_text)
