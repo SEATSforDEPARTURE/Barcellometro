@@ -825,123 +825,59 @@ class TriggerEngineService:
         return tier_limit + max(0, bonus)
 
     def _build_qna_embed(self, answer_text: str, evidence: list[dict[str, str]]) -> discord.Embed:
-        description = self._truncate_embed_description(self._bulletize_answer(answer_text))
-        all_proof_lines = self._build_proof_lines(evidence)
-        visible_count = len(all_proof_lines)
+        embed = discord.Embed(
+            description=self._truncate_embed_description(self._bulletize_answer(answer_text, evidence)),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(text="Barcellometro Q&A")
+        return embed
 
-        while True:
-            embed = discord.Embed(description=description, timestamp=datetime.now(timezone.utc))
-            embed.set_footer(text="Barcellometro Q&A")
-
-            overflow_chunked = self._add_chunked_fields(embed, name="Prove", lines=all_proof_lines[:visible_count])
-            overflow_total = max(0, len(all_proof_lines) - visible_count) + overflow_chunked
-            if overflow_total > 0:
-                overflow_note = f"_(+{overflow_total} altre prove non mostrate)_"
-                if len(embed.fields) < 25 and len(overflow_note) <= 1024:
-                    embed.add_field(name="Prove", value=overflow_note, inline=False)
-                else:
-                    embed.description = self._append_embed_note(str(embed.description or ""), overflow_note)
-
-            if self._embed_text_size(embed) <= 6000 or visible_count <= 0:
-                return embed
-
-            visible_count = max(0, visible_count - max(1, visible_count // 5))
-
-    def _bulletize_answer(self, answer_text: str) -> str:
+    def _bulletize_answer(self, answer_text: str, evidence: list[dict[str, str]]) -> str:
         lines = [line.strip() for line in answer_text.splitlines() if line.strip()]
         if not lines:
             return answer_text
-        return "\n".join(f"• {line}" for line in lines)
 
-    def _build_proof_lines(self, evidence: list[dict[str, str]]) -> list[str]:
-        lines: list[str] = []
+        default_url = ""
+        url_to_label: dict[str, str] = {}
         for item in evidence:
             jump_url = str(item.get("jump_url") or "").strip()
             created_at_iso = str(item.get("created_at_iso") or "").strip().replace("Z", "+00:00")
-            if not jump_url or not created_at_iso:
+            if not jump_url:
+                continue
+            if not default_url:
+                default_url = jump_url
+            if not created_at_iso:
                 continue
             try:
                 created_at = datetime.fromisoformat(created_at_iso)
             except ValueError:
                 continue
-            ts = created_at.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
-            lines.append(f"• [🧾 {ts}]({jump_url})")
-        return lines
+            url_to_label[jump_url] = created_at.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
+
+        final_lines: list[str] = []
+        url_re = r"https://discord\.com/channels/\d+/\d+/\d+"
+        for raw_line in lines:
+            line = re.sub(r"^\s*[•\-–—]\s*", "", raw_line).strip()
+            if not line:
+                continue
+            line_url_match = re.search(url_re, line)
+            proof_url = line_url_match.group(0) if line_url_match else default_url
+            if line_url_match:
+                line = re.sub(url_re, "", line).strip()
+                line = re.sub(r"\s{2,}", " ", line)
+
+            if proof_url:
+                ts = url_to_label.get(proof_url)
+                if ts:
+                    final_lines.append(f"• [🧾 {ts}]({proof_url}) {line}".strip())
+                    continue
+            final_lines.append(f"• {line}")
+        return "\n".join(final_lines) if final_lines else answer_text
 
     def _truncate_embed_description(self, description: str, *, max_len: int = 4096) -> str:
         if len(description) <= max_len:
             return description
         return description[: max_len - 1].rstrip() + "…"
-
-    def _append_embed_note(self, description: str, note: str) -> str:
-        if not description:
-            return self._truncate_embed_description(note)
-        candidate = f"{description}\n\n{note}"
-        if len(candidate) <= 4096:
-            return candidate
-        allowed = max(0, 4096 - len(note) - 3)
-        if allowed <= 0:
-            return self._truncate_embed_description(description)
-        return f"{description[:allowed].rstrip()}…\n\n{note}"
-
-    def _add_chunked_fields(
-        self,
-        embed: discord.Embed,
-        *,
-        name: str,
-        lines: list[str],
-        max_value_len: int = 1024,
-        max_fields: int = 25,
-    ) -> int:
-        if not lines:
-            return 0
-
-        normalized_lines: list[str] = []
-        for line in lines:
-            clean = (line or "").strip()
-            if not clean:
-                continue
-            if len(clean) > max_value_len:
-                clean = clean[: max_value_len - 1].rstrip() + "…"
-            normalized_lines.append(clean)
-        if not normalized_lines:
-            return 0
-
-        chunks: list[str] = []
-        chunk_counts: list[int] = []
-        current_lines: list[str] = []
-        for line in normalized_lines:
-            candidate = line if not current_lines else "\n".join([*current_lines, line])
-            if len(candidate) <= max_value_len:
-                current_lines.append(line)
-                continue
-            chunks.append("\n".join(current_lines))
-            chunk_counts.append(len(current_lines))
-            current_lines = [line]
-        if current_lines:
-            chunks.append("\n".join(current_lines))
-            chunk_counts.append(len(current_lines))
-
-        available_fields = max(0, max_fields - len(embed.fields))
-        added_chunks = min(len(chunks), available_fields)
-        for idx, chunk in enumerate(chunks[:added_chunks]):
-            field_name = name if idx == 0 else f"{name} (cont.)"
-            embed.add_field(name=field_name, value=chunk, inline=False)
-
-        shown_lines = sum(chunk_counts[:added_chunks])
-        return max(0, len(normalized_lines) - shown_lines)
-
-    def _embed_text_size(self, embed: discord.Embed) -> int:
-        payload = embed.to_dict()
-        total = len(str(payload.get("title") or "")) + len(str(payload.get("description") or ""))
-        footer = payload.get("footer") or {}
-        total += len(str(footer.get("text") or ""))
-        author = payload.get("author") or {}
-        total += len(str(author.get("name") or ""))
-        for field in payload.get("fields") or []:
-            total += len(str(field.get("name") or ""))
-            total += len(str(field.get("value") or ""))
-        return total
 
     async def _build_qna_payload(
         self,
