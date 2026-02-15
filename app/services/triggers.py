@@ -1078,6 +1078,35 @@ class TriggerEngineService:
         normalized = self._normalize_text(text)
         return {token for token in normalized.split() if len(token) > 1 and token not in IT_STOPWORDS}
 
+    def _filter_evidence_by_target(self, evidence: list[dict[str, str]], target_name: str | None) -> list[dict[str, str]]:
+        if not target_name:
+            return evidence
+        target_norm = self._normalize_person_name(target_name)
+        alias_norm = self._normalize_person_name(TARGET_NAME_ALIASES.get(target_norm, target_norm))
+        allowed = {target_norm, alias_norm}
+        filtered: list[dict[str, str]] = []
+        for item in evidence:
+            author_name_norm = self._normalize_person_name(str(item.get("author_name") or ""))
+            author_id_norm = self._normalize_person_name(str(item.get("author_id") or ""))
+            if not author_name_norm and not author_id_norm:
+                continue
+            if any(name and (name == author_name_norm or name in author_name_norm or author_name_norm in name) for name in allowed):
+                filtered.append(item)
+                continue
+            if author_id_norm in allowed:
+                filtered.append(item)
+        return filtered
+
+    def _normalize_text(self, text: str) -> str:
+        normalized = unicodedata.normalize("NFKD", (text or "").lower())
+        normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+        normalized = re.sub(r"[^\w\s]", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _tokenize(self, text: str) -> set[str]:
+        normalized = self._normalize_text(text)
+        return {token for token in normalized.split() if len(token) > 1 and token not in IT_STOPWORDS}
+
     def _is_bullet_relevant(self, question: str, bullet: str) -> bool:
         q_raw = (question or "").strip()
         b_raw = (bullet or "").strip()
