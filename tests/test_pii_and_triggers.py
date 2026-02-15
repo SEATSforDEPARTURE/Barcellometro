@@ -137,3 +137,24 @@ def test_decorate_proof_links_rewrites_naked_proof_url() -> None:
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert decorated == "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)"
+
+
+def test_decorate_proof_links_removes_broken_spacing_patterns() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "Test [🧾 14/02 14:26] ( https://discord.com/channels/1/2/3 )"
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+
+    decorated = service._decorate_proof_links(answer, evidence)
+    assert "] (http" not in decorated
+    assert "]\n(http" not in decorated
+    assert "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)" in decorated
+
+
+def test_decorate_proof_links_removes_newlines_and_spaces_inside_link_url() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "Fonte: [🧾 14/02 14:26](https://discord.com/channels/1/\n2/3 )"
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+
+    decorated = service._decorate_proof_links(answer, evidence)
+    assert "\n" not in decorated.split("(", 1)[1].split(")", 1)[0]
+    assert "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)" in decorated

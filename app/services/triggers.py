@@ -147,9 +147,10 @@ class TriggerEngineService:
             await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
             return
 
-        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else None
-        if isinstance(evidence_pack, list):
-            text = self._decorate_proof_links(text, evidence_pack)
+        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
+        if not isinstance(evidence_pack, list):
+            evidence_pack = []
+        text = self._decorate_proof_links(text, evidence_pack)
 
         if contains_pii(text):
             await q_msg.delete()
@@ -205,9 +206,10 @@ class TriggerEngineService:
             await message.reply("Risposta non valida.")
             return
 
-        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else None
-        if isinstance(evidence_pack, list):
-            text = self._decorate_proof_links(text, evidence_pack)
+        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
+        if not isinstance(evidence_pack, list):
+            evidence_pack = []
+        text = self._decorate_proof_links(text, evidence_pack)
 
         if contains_pii(text):
             await message.reply("Non posso condividere dati personali.")
@@ -650,37 +652,69 @@ class TriggerEngineService:
         url_re = r"https://discord\.com/channels/\d+/\d+/\d+"
         decorated = answer_text
 
+        # Step 0: normalize almost-valid markdown links.
+        decorated = re.sub(r"\]\s+\(", "](", decorated)
+        decorated = re.sub(r"\(\s+", "(", decorated)
+        decorated = re.sub(r"\s+\)", ")", decorated)
+
+        def normalize_link_url(match: re.Match[str]) -> str:
+            label = match.group(1).strip()
+            raw_url = match.group(2)
+            cleaned_url = raw_url.replace("\n", "").replace(" ", "")
+            return f"[{label}]({cleaned_url})"
+
+        decorated = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", normalize_link_url, decorated)
+
+        def label_for_url(url: str) -> str | None:
+            return jump_to_label.get(url)
+
+        # Step 1: transform proof-like labels with parenthesized URL into valid markdown.
+        def replace_labeled_proof(match: re.Match[str]) -> str:
+            raw_label = re.sub(r"\s+", " ", match.group(1).strip())
+            jump_url = match.group(2).strip()
+            existing = re.match(r"\[?(🧾\s*\d{1,2}/\d{1,2}\s*\d{1,2}:\d{2})\]?", raw_label)
+            if existing:
+                label = existing.group(1)
+            else:
+                label = label_for_url(jump_url) or "🧾 prova"
+            if label_for_url(jump_url):
+                label = label_for_url(jump_url) or label
+            return f"[{label}]({jump_url})"
+
+        decorated = re.sub(
+            rf"(\[?🧾\s*\d{{1,2}}/\d{{1,2}}\s*\d{{1,2}}:\d{{2}}\]?)\s*\(\s*({url_re})\s*\)",
+            replace_labeled_proof,
+            decorated,
+        )
+
+        # Normalize any remaining markdown links pointing to discord channels.
         def normalize_or_relabel(match: re.Match[str]) -> str:
             label = match.group(1).strip()
             jump_url = match.group(2).strip()
-            if jump_url in jump_to_label:
-                return f"[{jump_to_label[jump_url]}]({jump_url})"
-            return f"[{label}]({jump_url})"
+            mapped = label_for_url(jump_url)
+            final_label = mapped or label
+            return f"[{final_label}]({jump_url})"
 
-        # Fix malformed markdown like: [🧾 14/02 14:26] (https://discord.com/channels/...)
-        decorated = re.sub(rf"\[([^\]]+)\]\s*\(\s*({url_re})\s*\)", normalize_or_relabel, decorated)
+        decorated = re.sub(rf"\[([^\]]+)\]\((({url_re}))\)", normalize_or_relabel, decorated)
 
-        # Collapse patterns like "prova (URL)" / "prove URL" / "🧾 URL" into one clickable proof link
-        def replace_proof_and_url(match: re.Match[str]) -> str:
-            jump_url = match.group("url")
-            label = jump_to_label.get(jump_url)
+        # Step 2: replace proof tokens with naked/parenthesized URLs.
+        def replace_proof_with_url(match: re.Match[str]) -> str:
+            jump_url = match.group("url").strip()
+            label = label_for_url(jump_url)
             if not label:
                 return jump_url
             return f"[{label}]({jump_url})"
 
         decorated = re.sub(
             rf"(?i)(?:\bprov(?:a|e)\.?\b|🧾)\s*[:\-]?\s*\(?\s*(?P<url>{url_re})\s*\)?",
-            replace_proof_and_url,
+            replace_proof_with_url,
             decorated,
         )
 
-        # Rewrite any remaining markdown links pointing to Discord jump URLs
-        decorated = re.sub(rf"\[([^\]]+)\]\((({url_re}))\)", normalize_or_relabel, decorated)
-
-        # Rewrite naked Discord URLs to clickable proof links when evidence timestamp exists
+        # Step 2b: naked URLs become timestamped proof links when evidence is available.
         def replace_naked_url(match: re.Match[str]) -> str:
             jump_url = match.group(1)
-            label = jump_to_label.get(jump_url)
+            label = label_for_url(jump_url)
             if not label:
                 return jump_url
             return f"[{label}]({jump_url})"
