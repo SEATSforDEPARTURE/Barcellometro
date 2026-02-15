@@ -827,9 +827,35 @@ class TriggerEngineService:
         if (m := re.search(r"ultime\s+(\d{1,2})\s+ore", q)):
             hours = max(1, int(m.group(1)))
             return now_utc - timedelta(hours=hours), now_utc, f"ultime {hours} ore"
+        if (m := re.search(r"\b(\d{1,2})\s+ore\s+fa\b", q)):
+            hours = max(1, int(m.group(1)))
+            return now_utc - timedelta(hours=hours), now_utc, f"{hours} ore fa"
         if (m := re.search(r"ultimi\s+(\d{1,2})\s+giorni", q)):
             days = min(30, max(1, int(m.group(1))))
             return now_utc - timedelta(days=days), now_utc, f"ultimi {days} giorni"
+        if "l'altro ieri" in q or "l’altro ieri" in q:
+            day_start = today_start - timedelta(days=2)
+            return as_utc(day_start), as_utc(day_start + timedelta(days=1)), "l'altro ieri"
+        if (m := re.search(r"\b(\d{1,2})\s+giorni?\s+fa\b", q)):
+            days = min(30, max(1, int(m.group(1))))
+            day_start = today_start - timedelta(days=days)
+            day_end = day_start + timedelta(days=1)
+            suffix = "giorno" if days == 1 else "giorni"
+            return as_utc(day_start), as_utc(day_end), f"{days} {suffix} fa"
+        if "scorsa settimana" in q:
+            week_start = today_start - timedelta(days=today_start.weekday(), weeks=1)
+            return as_utc(week_start), as_utc(week_start + timedelta(days=7)), "scorsa settimana"
+        if (m := re.search(r"\b(\d{1,2})\s+settimane?\s+fa\b", q)):
+            weeks = max(1, int(m.group(1)))
+            reference_day = today_start - timedelta(weeks=weeks)
+            week_start = reference_day - timedelta(days=reference_day.weekday())
+            suffix = "settimana" if weeks == 1 else "settimane"
+            return as_utc(week_start), as_utc(week_start + timedelta(days=7)), f"{weeks} {suffix} fa"
+        if "mese scorso" in q:
+            month_start = today_start.replace(day=1)
+            previous_month_end = month_start - timedelta(days=1)
+            previous_month_start = month_start.replace(year=previous_month_end.year, month=previous_month_end.month)
+            return as_utc(previous_month_start), as_utc(month_start), "mese scorso"
         if "stamattina" in q:
             morning = today_start + timedelta(hours=6)
             return as_utc(morning), now_utc, "stamattina"
@@ -961,7 +987,29 @@ class TriggerEngineService:
 
     def _has_explicit_time_marker(self, question: str) -> bool:
         q = question.lower()
-        return any(token in q for token in ["oggi", "ieri", "stamattina", "questa settimana", "questa sera", "ultima ora", "ultim'ora", "ultime", "ultimi", "mese"])
+        if re.search(r"\b\d{1,2}\s+(?:ore|giorni?|settimane?)\s+fa\b", q):
+            return True
+        return any(
+            token in q for token in [
+                "oggi",
+                "ieri",
+                "l'altro ieri",
+                "l’altro ieri",
+                "stamattina",
+                "questa settimana",
+                "scorsa settimana",
+                "questa sera",
+                "ultima ora",
+                "ultim'ora",
+                "ultime",
+                "ultimi",
+                "ore fa",
+                "giorni fa",
+                "settimane fa",
+                "mese",
+                "mese scorso",
+            ]
+        )
 
     def _rank_evidence_rows(self, rows: list[object], question: str) -> list[dict[str, object]]:
         keywords = [token for token in re.findall(r"\w+", question.lower()) if len(token) > 2][:12]
