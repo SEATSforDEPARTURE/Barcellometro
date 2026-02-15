@@ -609,9 +609,12 @@ class DatabaseService:
         per_bucket = max(1, int(per_bucket_limit or 1))
 
         base_query = """
-            SELECT m.*
+            SELECT
+                m.*, 
+                COALESCE(gm.nickname, u.display_name, u.global_name, u.username, m.author_id) AS author_name
             FROM messages AS m
             LEFT JOIN users AS u ON u.user_id = m.author_id
+            LEFT JOIN guild_memberships AS gm ON gm.guild_id = m.guild_id AND gm.user_id = m.author_id
             WHERE m.channel_id = ? AND m.ts >= ? AND m.ts <= ? AND COALESCE(m.is_deleted, 0) = 0
         """
         if not include_bots:
@@ -700,9 +703,11 @@ class DatabaseService:
                 m.channel_id,
                 m.author_id,
                 m.ts AS created_at,
-                m.content
+                m.content,
+                COALESCE(gm.nickname, u.display_name, u.global_name, u.username, m.author_id) AS author_name
             FROM messages AS m
             LEFT JOIN users AS u ON u.user_id = m.author_id
+            LEFT JOIN guild_memberships AS gm ON gm.guild_id = m.guild_id AND gm.user_id = m.author_id
             WHERE {' AND '.join(where_parts)}
             ORDER BY m.ts DESC
             LIMIT ?
@@ -730,6 +735,7 @@ class DatabaseService:
                     "guild_id": str(row["guild_id"] or ""),
                     "channel_id": str(row["channel_id"] or ""),
                     "author_id": str(row["author_id"] or ""),
+                    "author_name": str(row["author_name"] or row["author_id"] or ""),
                     "created_at": str(row["created_at"] or ""),
                     "content": content,
                     "score": score,

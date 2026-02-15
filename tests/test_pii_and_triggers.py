@@ -78,6 +78,22 @@ def test_infer_time_range_hours_ago_window() -> None:
     assert end_dt - start_dt == timedelta(hours=3)
 
 
+
+
+def test_infer_time_range_ieri_uses_full_previous_local_day() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    start_dt, end_dt, label = service.infer_time_range("Cosa ha detto ieri?")
+    assert label == "ieri"
+
+    rome = ZoneInfo("Europe/Rome")
+    now_local = datetime.now(rome)
+    today_start_local = datetime.combine(now_local.date(), datetime.min.time(), tzinfo=rome)
+    expected_start = (today_start_local - timedelta(days=1)).astimezone(start_dt.tzinfo)
+    expected_end = today_start_local.astimezone(end_dt.tzinfo)
+
+    assert start_dt == expected_start
+    assert end_dt == expected_end
+
 def test_infer_time_range_mese_scorso_boundaries() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     start_dt, end_dt, label = service.infer_time_range("Cosa è successo mese scorso?")
@@ -158,3 +174,92 @@ def test_decorate_proof_links_removes_newlines_and_spaces_inside_link_url() -> N
     decorated = service._decorate_proof_links(answer, evidence)
     assert "\n" not in decorated.split("(", 1)[1].split(")", 1)[0]
     assert "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)" in decorated
+
+
+def test_extract_target_speaker_raw() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._extract_target_speaker("è vero che Dany Sun ☀️ ha detto che potevo sfogarmi?") == "Dany Sun"
+
+
+def test_bulletize_answer_filters_evidence_by_target_author() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "• Ha detto che potevi sfogarti quando eri giù."
+    evidence = [
+        {
+            "message_id": "1",
+            "channel_id": "2",
+            "author_id": "10",
+            "author_name": "Daniele",
+            "created_at_iso": "2026-02-14T13:00:00+00:00",
+            "content": "non c'entra niente",
+            "jump_url": "https://discord.com/channels/1/2/3",
+        },
+        {
+            "message_id": "2",
+            "channel_id": "2",
+            "author_id": "11",
+            "author_name": "Daniela 🌸",
+            "created_at_iso": "2026-02-14T14:00:00+00:00",
+            "content": "ti ho detto che potevi sfogarti quando eri giù",
+            "jump_url": "https://discord.com/channels/1/2/4",
+        },
+    ]
+
+    out = service._bulletize_answer("è vero che Daniela ha detto che potevo sfogarmi?", answer, evidence)
+    assert "https://discord.com/channels/1/2/4" in out
+    assert "https://discord.com/channels/1/2/3" not in out
+
+
+def test_bulletize_answer_returns_no_direct_evidence_when_target_missing() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "• Ha detto che potevi sfogarti."
+    evidence = [
+        {
+            "message_id": "1",
+            "channel_id": "2",
+            "author_id": "10",
+            "author_name": "Marco",
+            "created_at_iso": "2026-02-14T13:00:00+00:00",
+            "content": "messaggio non correlato a questa domanda",
+            "jump_url": "https://discord.com/channels/1/2/3",
+        }
+    ]
+
+    out = service._bulletize_answer("cosa ha detto Daniela?", answer, evidence)
+    assert out == "Non ho trovato prove dirette di un messaggio di Daniela nel periodo richiesto."
+
+
+def test_filter_evidence_by_target_matches_decorated_name() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    evidence = [
+        {
+            "author_name": "Dany Sun ☀️",
+            "author_id": "11",
+            "jump_url": "https://discord.com/channels/1/2/4",
+            "created_at_iso": "2026-02-14T14:00:00+00:00",
+            "content": "ti ho detto che potevi sfogarti quando eri giù",
+        }
+    ]
+
+    filtered = service._filter_evidence_by_target(evidence, "Dany")
+    assert len(filtered) == 1
+
+
+def test_bulletize_answer_no_target_evidence_has_no_links() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "• Dicevano della live senza censura alle 20"
+    evidence = [
+        {
+            "message_id": "1",
+            "channel_id": "2",
+            "author_id": "10",
+            "author_name": "Marco",
+            "created_at_iso": "2026-02-14T13:00:00+00:00",
+            "content": "stasera live senza censura alle 20, si può sfogare tutto",
+            "jump_url": "https://discord.com/channels/1/2/3",
+        }
+    ]
+
+    out = service._bulletize_answer("è vero che Daniela ha detto live senza censura alle 20?", answer, evidence)
+    assert out == "Non ho trovato prove dirette di un messaggio di Daniela nel periodo richiesto."
+    assert "https://discord.com/channels/1/2/3" not in out

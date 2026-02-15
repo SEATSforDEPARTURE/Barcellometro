@@ -6,6 +6,7 @@ import json
 import logging
 import hashlib
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,14 @@ from app.utils.pii import contains_pii
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
+IT_STOPWORDS = {
+    "a", "ad", "ai", "al", "all", "alla", "alle", "anche", "avete", "che", "chi", "ci", "coi", "col", "come",
+    "con", "cosa", "da", "dagli", "dai", "dal", "dalla", "dalle", "dei", "degli", "del", "della", "delle", "dello",
+    "di", "dove", "e", "ed", "era", "erano", "essere", "fatto", "ha", "hai", "hanno", "ho", "i", "il", "in", "io",
+    "la", "le", "li", "lo", "loro", "ma", "mi", "nei", "nel", "nella", "no", "non", "o", "per", "perche", "perché",
+    "piu", "più", "poi", "puo", "può", "quale", "quali", "quello", "questa", "questo", "se", "sei", "si", "solo", "sono",
+    "su", "sul", "sulla", "tra", "tu", "un", "una", "uno", "vi", "voi",
+}
 
 
 class TriggerEngineService:
@@ -837,33 +846,69 @@ class TriggerEngineService:
         if not lines:
             return answer_text
 
+        target_raw = self._extract_target_raw(question)
+        scoped_evidence = self._filter_evidence_by_target(evidence, target_raw)
+        if target_raw and not scoped_evidence:
+            logger.info(
+                "qna no direct evidence target_raw=%s total_evidence=%s evidence_target=%s produced=%s discarded=%s avg_best_score=%.3f",
+                target_raw,
+                len(evidence),
+                0,
+                0,
+                0,
+                0.0,
+            )
+            return f"Non ho trovato prove dirette di un messaggio di {target_raw} nel periodo richiesto."
+
         final_lines: list[str] = []
+        produced = 0
+        discarded = 0
+        best_scores: list[float] = []
         for raw_line in lines:
             line = re.sub(r"^\s*[•\-–—]\s*", "", raw_line).strip()
             line = self._strip_proof_artifacts(line)
             if not line:
                 continue
-            proof = self._pick_proof_for_bullet(line, evidence)
+            proof, score = self._best_evidence_for_bullet(line, scoped_evidence)
+            best_scores.append(score)
             if not proof:
+                discarded += 1
                 continue
             jump_url = str(proof.get("jump_url") or "").strip()
             if not self._is_valid_jump_url(jump_url):
+                discarded += 1
                 continue
             if not self._is_bullet_relevant(question, line):
+                discarded += 1
                 continue
 
             ts = self._format_proof_timestamp(str(proof.get("created_at_iso") or ""))
             if not ts:
+                discarded += 1
                 continue
             final_lines.append(f"• [🧾 {ts}]({jump_url}) {line}")
+            produced += 1
 
+        avg_best_score = (sum(best_scores) / len(best_scores)) if best_scores else 0.0
+        logger.info(
+            "qna mapping stats target_raw=%s total_evidence=%s evidence_target=%s produced=%s discarded=%s avg_best_score=%.3f",
+            target_raw,
+            len(evidence),
+            len(scoped_evidence),
+            produced,
+            discarded,
+            avg_best_score,
+        )
         if final_lines:
             return "\n".join(final_lines)
-        return "Non ho trovato prove dirette e attinenti alla domanda nel periodo richiesto."
+        if target_raw:
+            return f"Non ho trovato prove dirette di un messaggio di {target_raw} nel periodo richiesto."
+        return "Non ho trovato prove dirette nel periodo richiesto."
 
     def _strip_proof_artifacts(self, text: str) -> str:
         cleaned = text or ""
         cleaned = re.sub(r"\[\s*🧾[^\]]*\]\([^)]+\)", "", cleaned)
+        cleaned = re.sub(r"🧾\s*\d{1,2}/\d{1,2}\s*\d{1,2}:\d{2}", "", cleaned)
         cleaned = re.sub(r"\(\s*https?://discord\.com/channels/[^)]+\)", "", cleaned)
         cleaned = re.sub(r"https?://discord\.com/channels/\S+", "", cleaned)
         cleaned = re.sub(r"\]\(\s*0\s*\)", "", cleaned)
@@ -886,31 +931,108 @@ class TriggerEngineService:
             return ""
         return created_at.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
 
-    def _pick_proof_for_bullet(self, clean_text: str, evidence_pack: list[dict[str, str]]) -> dict[str, str] | None:
+    def _score(self, bullet: str, msg: str) -> float:
+        bullet_tokens = set(self._norm_tokens(bullet))
+        msg_tokens = set(self._norm_tokens(msg))
+        if not bullet_tokens or not msg_tokens:
+            return 0.0
+        return len(bullet_tokens & msg_tokens) / max(len(bullet_tokens), 1)
+
+    def _best_evidence_for_bullet(self, clean_text: str, evidence_pack: list[dict[str, str]]) -> tuple[dict[str, str] | None, float]:
         if not evidence_pack:
-            return None
+            return None, 0.0
 
-        id_match = re.search(r"\b\d{17,20}\b", clean_text or "")
-        if id_match:
-            message_id = id_match.group(0)
-            for item in evidence_pack:
-                jump_url = str(item.get("jump_url") or "")
-                if message_id in jump_url and self._is_valid_jump_url(jump_url):
-                    return item
-
-        url_match = re.search(r"https?://discord\.com/channels/\S+", clean_text or "")
-        if url_match:
-            url = url_match.group(0)
-            if self._is_valid_jump_url(url):
-                for item in evidence_pack:
-                    if str(item.get("jump_url") or "").strip() == url:
-                        return item
-
+        best_item: dict[str, str] | None = None
+        best_score = 0.0
+        best_content = ""
         for item in evidence_pack:
             jump_url = str(item.get("jump_url") or "").strip()
-            if self._is_valid_jump_url(jump_url):
-                return item
+            if not self._is_valid_jump_url(jump_url):
+                continue
+            message_content = str(item.get("content") or item.get("snippet") or "")
+            score = self._score(clean_text, message_content)
+            if score > best_score:
+                best_score = score
+                best_item = item
+                best_content = message_content
+
+        if best_score >= 0.10:
+            return best_item, best_score
+        logger.info(
+            "qna bullet discarded for low evidence overlap score=%.3f bullet='%s' candidate='%s'",
+            best_score,
+            self._truncate_text(clean_text, 50),
+            self._truncate_text(best_content, 50),
+        )
+        return None, best_score
+
+    def _norm_tokens(self, value: str) -> list[str]:
+        base = unicodedata.normalize("NFKD", (value or "").lower())
+        base = "".join(char for char in base if unicodedata.category(char) != "Mn")
+        base = re.sub(r"[^a-z0-9\s]", " ", base)
+        cleaned = re.sub(r"\s+", " ", base).strip()
+        return [token for token in cleaned.split() if len(token) >= 2 and token not in IT_STOPWORDS]
+
+    def _clean_target_fragment(self, value: str) -> str:
+        cleaned = re.sub(r"<@!?\d+>", " ", value or "")
+        cleaned = re.sub(r"[\"'“”‘’`]+", " ", cleaned)
+        cleaned = unicodedata.normalize("NFKD", cleaned)
+        cleaned = "".join(ch for ch in cleaned if unicodedata.category(ch) != "Mn")
+        cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned[:40]
+
+    def _extract_target_raw(self, question: str) -> str | None:
+        q = (question or "").strip()
+        if not q:
+            return None
+
+        patterns: list[tuple[str, int]] = [
+            (r"\bcosa\s+ha\s+detto\s+(.+?)(?:\?|$)", 1),
+            (r"\b(è|è)\s+vero\s+che\s+(.+?)\s+ha\s+detto\b", 2),
+            (r"\b(.+?)\s+ha\s+detto\b", 1),
+        ]
+        for pattern, group in patterns:
+            match = re.search(pattern, q, flags=re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_target_fragment(match.group(group))
+            if candidate:
+                return candidate
         return None
+
+    def _author_matches_target(self, author_name: str, target_raw: str) -> bool:
+        author_tokens = set(self._norm_tokens(author_name))
+        target_tokens = self._norm_tokens(target_raw)
+        if not target_tokens:
+            return False
+        if len(target_tokens) >= 2:
+            hits = sum(1 for token in target_tokens if token in author_tokens)
+            return hits >= len(target_tokens)
+        target = target_tokens[0]
+        return target in author_tokens or any(token.startswith(target) or target.startswith(token) for token in author_tokens)
+
+    def _extract_target_speaker(self, question: str) -> str | None:
+        return self._extract_target_raw(question)
+
+    def _filter_evidence_by_target(self, evidence: list[dict[str, str]], target_raw: str | None) -> list[dict[str, str]]:
+        if not target_raw:
+            return evidence
+        filtered: list[dict[str, str]] = []
+        for item in evidence:
+            if self._author_matches_target(str(item.get("author_name") or ""), target_raw):
+                filtered.append(item)
+        return filtered
+
+    def _normalize_text(self, text: str) -> str:
+        normalized = unicodedata.normalize("NFKD", (text or "").lower())
+        normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+        normalized = re.sub(r"[^a-z0-9\s]", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _tokenize(self, text: str) -> set[str]:
+        normalized = self._normalize_text(text)
+        return {token for token in normalized.split() if len(token) > 1 and token not in IT_STOPWORDS}
 
     def _is_bullet_relevant(self, question: str, bullet: str) -> bool:
         q_raw = (question or "").strip()
@@ -1047,6 +1169,7 @@ class TriggerEngineService:
             "non inventare contenuti",
             "rispondi solo alla domanda senza contesto generale extra",
             "massimo 4 bullet verificabili",
+            "rispondi SOLO con affermazioni ricavate dai messaggi evidenza del target quando presente",
             "se non ci sono prove dirette dillo chiaramente",
         ]
         cache_ttl = int(budgets.get("cache_ttl") or 45 * 60)
@@ -1110,6 +1233,7 @@ class TriggerEngineService:
                     "per_target_messages": per_target_messages,
                     "focus_instruction": (
                         "Per ciascun target: massimo 4 bullet strettamente pertinenti alla domanda, frasi verificabili e niente contesto generale. "
+                        "Rispondi SOLO con affermazioni ricavate dai messaggi evidenza del target. "
                         "Se mancano prove dirette, dichiaralo esplicitamente e non inventare."
                     ),
                 }
@@ -1129,7 +1253,8 @@ class TriggerEngineService:
         prompt_obj = {
             "system": (
                 "Sei il servizio QnA del Barcellometro. Rispondi solo usando le prove fornite. "
-                "Non inventare contenuti. Se la domanda è un follow-up, usa la conversazione precedente."
+                "Non inventare contenuti. Se c'è un target speaker, usa solo evidenze del target. "
+                "Se la domanda è un follow-up, usa la conversazione precedente."
             ),
             "question": question,
             "constraints": constraints,
@@ -1169,57 +1294,66 @@ class TriggerEngineService:
         def as_utc(dt_local: datetime) -> datetime:
             return dt_local.astimezone(timezone.utc)
 
+        def finalize(start: datetime, end: datetime, label: str) -> tuple[datetime, datetime, str]:
+            logger.info(
+                "qna time_range label=%s start=%s end=%s",
+                label,
+                start.isoformat(),
+                end.isoformat(),
+            )
+            return start, end, label
+
         today_start = datetime.combine(now_local.date(), datetime.min.time(), tzinfo=local_tz)
         if "ultima ora" in q or "ultim'ora" in q:
-            return now_utc - timedelta(hours=1), now_utc, "ultima ora"
+            return finalize(now_utc - timedelta(hours=1), now_utc, "ultima ora")
         if (m := re.search(r"ultime\s+(\d{1,2})\s+ore", q)):
             hours = max(1, int(m.group(1)))
-            return now_utc - timedelta(hours=hours), now_utc, f"ultime {hours} ore"
+            return finalize(now_utc - timedelta(hours=hours), now_utc, f"ultime {hours} ore")
         if (m := re.search(r"\b(\d{1,2})\s+ore\s+fa\b", q)):
             hours = max(1, int(m.group(1)))
-            return now_utc - timedelta(hours=hours), now_utc, f"{hours} ore fa"
+            return finalize(now_utc - timedelta(hours=hours), now_utc, f"{hours} ore fa")
         if (m := re.search(r"ultimi\s+(\d{1,2})\s+giorni", q)):
             days = min(30, max(1, int(m.group(1))))
-            return now_utc - timedelta(days=days), now_utc, f"ultimi {days} giorni"
+            return finalize(now_utc - timedelta(days=days), now_utc, f"ultimi {days} giorni")
         if "l'altro ieri" in q or "l’altro ieri" in q:
             day_start = today_start - timedelta(days=2)
-            return as_utc(day_start), as_utc(day_start + timedelta(days=1)), "l'altro ieri"
+            return finalize(as_utc(day_start), as_utc(day_start + timedelta(days=1)), "l'altro ieri")
         if (m := re.search(r"\b(\d{1,2})\s+giorni?\s+fa\b", q)):
             days = min(30, max(1, int(m.group(1))))
             day_start = today_start - timedelta(days=days)
             day_end = day_start + timedelta(days=1)
             suffix = "giorno" if days == 1 else "giorni"
-            return as_utc(day_start), as_utc(day_end), f"{days} {suffix} fa"
+            return finalize(as_utc(day_start), as_utc(day_end), f"{days} {suffix} fa")
         if "scorsa settimana" in q:
             week_start = today_start - timedelta(days=today_start.weekday(), weeks=1)
-            return as_utc(week_start), as_utc(week_start + timedelta(days=7)), "scorsa settimana"
+            return finalize(as_utc(week_start), as_utc(week_start + timedelta(days=7)), "scorsa settimana")
         if (m := re.search(r"\b(\d{1,2})\s+settimane?\s+fa\b", q)):
             weeks = max(1, int(m.group(1)))
             reference_day = today_start - timedelta(weeks=weeks)
             week_start = reference_day - timedelta(days=reference_day.weekday())
             suffix = "settimana" if weeks == 1 else "settimane"
-            return as_utc(week_start), as_utc(week_start + timedelta(days=7)), f"{weeks} {suffix} fa"
+            return finalize(as_utc(week_start), as_utc(week_start + timedelta(days=7)), f"{weeks} {suffix} fa")
         if "mese scorso" in q:
             month_start = today_start.replace(day=1)
             previous_month_end = month_start - timedelta(days=1)
             previous_month_start = month_start.replace(year=previous_month_end.year, month=previous_month_end.month)
-            return as_utc(previous_month_start), as_utc(month_start), "mese scorso"
+            return finalize(as_utc(previous_month_start), as_utc(month_start), "mese scorso")
         if "stamattina" in q:
             morning = today_start + timedelta(hours=6)
-            return as_utc(morning), now_utc, "stamattina"
+            return finalize(as_utc(morning), now_utc, "stamattina")
         if "questa sera" in q:
             evening = today_start + timedelta(hours=18)
-            return as_utc(evening), now_utc, "questa sera"
+            return finalize(as_utc(evening), now_utc, "questa sera")
         if "ieri" in q:
             yesterday_start = today_start - timedelta(days=1)
-            return as_utc(yesterday_start), as_utc(today_start), "ieri"
+            return finalize(as_utc(yesterday_start), as_utc(today_start), "ieri")
         if "oggi" in q:
-            return as_utc(today_start), now_utc, "oggi"
+            return finalize(as_utc(today_start), now_utc, "oggi")
         if "questa settimana" in q:
             week_start = today_start - timedelta(days=today_start.weekday())
-            return as_utc(week_start), now_utc, "questa settimana"
+            return finalize(as_utc(week_start), now_utc, "questa settimana")
         default_hours = 24 if person_focused else 6
-        return now_utc - timedelta(hours=default_hours), now_utc, f"ultime {default_hours} ore"
+        return finalize(now_utc - timedelta(hours=default_hours), now_utc, f"ultime {default_hours} ore")
 
     def infer_target_members(
         self,
@@ -1383,6 +1517,7 @@ class TriggerEngineService:
                     "guild_id": str(row["guild_id"] or ""),
                     "channel_id": str(row["channel_id"] or ""),
                     "author_id": str(row["author_id"] or ""),
+                    "author_name": str(row["author_name"] or row["author_id"] or ""),
                     "created_at": str(row["ts"] or row["created_at"] or ""),
                     "content": content,
                     "score": score,
@@ -1400,6 +1535,7 @@ class TriggerEngineService:
                     "guild_id": str(row.get("guild_id") or ""),
                     "channel_id": str(row.get("channel_id") or ""),
                     "author_id": str(row.get("author_id") or ""),
+                    "author_name": str(row.get("author_name") or row.get("author_id") or ""),
                     "created_at": str(row.get("created_at") or ""),
                     "content": str(row.get("content") or ""),
                     "score": int(row.get("score") or 0),
@@ -1429,16 +1565,22 @@ class TriggerEngineService:
             message_id = str(row.get("message_id") or "")
             jump_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}" if message_id else ""
             author_id = str(row.get("author_id") or "")
-            author_name = author_id
-            if guild and author_id.isdigit():
+            author_name = str(row.get("author_name") or author_id)
+            if guild and author_id.isdigit() and author_name == author_id:
                 member = guild.get_member(int(author_id))
                 if member is not None:
                     author_name = member.display_name
+            content = str(row.get("content") or "")
             pack.append(
                 {
+                    "message_id": message_id,
+                    "channel_id": channel_id,
+                    "author_id": author_id,
                     "author_name": author_name,
+                    "created_at": str(row.get("created_at") or ""),
                     "created_at_iso": str(row.get("created_at") or ""),
-                    "snippet": self._truncate_text(str(row.get("content") or ""), max(80, snippet_max)),
+                    "content": content,
+                    "snippet": self._truncate_text(content, max(80, snippet_max)),
                     "jump_url": jump_url,
                 }
             )
