@@ -6,6 +6,7 @@ import json
 import logging
 import hashlib
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,17 @@ from app.utils.pii import contains_pii
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
+TARGET_NAME_ALIASES = {
+    "dany": "daniela",
+}
+IT_STOPWORDS = {
+    "a", "ad", "ai", "al", "all", "alla", "alle", "anche", "avete", "che", "chi", "ci", "coi", "col", "come",
+    "con", "cosa", "da", "dagli", "dai", "dal", "dalla", "dalle", "dei", "degli", "del", "della", "delle", "dello",
+    "di", "dove", "e", "ed", "era", "erano", "essere", "fatto", "ha", "hai", "hanno", "ho", "i", "il", "in", "io",
+    "la", "le", "li", "lo", "loro", "ma", "mi", "nei", "nel", "nella", "no", "non", "o", "per", "perche", "perché",
+    "piu", "più", "poi", "puo", "può", "quale", "quali", "quello", "questa", "questo", "se", "sei", "si", "solo", "sono",
+    "su", "sul", "sulla", "tra", "tu", "un", "una", "uno", "vi", "voi",
+}
 
 
 class TriggerEngineService:
@@ -837,13 +849,23 @@ class TriggerEngineService:
         if not lines:
             return answer_text
 
+        target_name = self._extract_target_speaker(question)
+        scoped_evidence = self._filter_evidence_by_target(evidence, target_name)
+        if target_name and not scoped_evidence:
+            logger.info(
+                "qna no evidence for target speaker target_name=%s evidence_pack_count=%s",
+                target_name,
+                len(evidence),
+            )
+            return f"Non ho trovato prove dirette di un messaggio di {target_name} nel periodo richiesto."
+
         final_lines: list[str] = []
         for raw_line in lines:
             line = re.sub(r"^\s*[•\-–—]\s*", "", raw_line).strip()
             line = self._strip_proof_artifacts(line)
             if not line:
                 continue
-            proof = self._pick_proof_for_bullet(line, evidence)
+            proof = self._pick_proof_for_bullet(line, scoped_evidence)
             if not proof:
                 continue
             jump_url = str(proof.get("jump_url") or "").strip()
@@ -864,6 +886,7 @@ class TriggerEngineService:
     def _strip_proof_artifacts(self, text: str) -> str:
         cleaned = text or ""
         cleaned = re.sub(r"\[\s*🧾[^\]]*\]\([^)]+\)", "", cleaned)
+        cleaned = re.sub(r"🧾\s*\d{1,2}/\d{1,2}\s*\d{1,2}:\d{2}", "", cleaned)
         cleaned = re.sub(r"\(\s*https?://discord\.com/channels/[^)]+\)", "", cleaned)
         cleaned = re.sub(r"https?://discord\.com/channels/\S+", "", cleaned)
         cleaned = re.sub(r"\]\(\s*0\s*\)", "", cleaned)
@@ -890,27 +913,98 @@ class TriggerEngineService:
         if not evidence_pack:
             return None
 
-        id_match = re.search(r"\b\d{17,20}\b", clean_text or "")
-        if id_match:
-            message_id = id_match.group(0)
-            for item in evidence_pack:
-                jump_url = str(item.get("jump_url") or "")
-                if message_id in jump_url and self._is_valid_jump_url(jump_url):
-                    return item
+        bullet_tokens = self._tokenize(clean_text)
+        if not bullet_tokens:
+            return None
 
-        url_match = re.search(r"https?://discord\.com/channels/\S+", clean_text or "")
-        if url_match:
-            url = url_match.group(0)
-            if self._is_valid_jump_url(url):
-                for item in evidence_pack:
-                    if str(item.get("jump_url") or "").strip() == url:
-                        return item
-
+        best_item: dict[str, str] | None = None
+        best_score = 0.0
+        best_content = ""
         for item in evidence_pack:
             jump_url = str(item.get("jump_url") or "").strip()
-            if self._is_valid_jump_url(jump_url):
-                return item
+            if not self._is_valid_jump_url(jump_url):
+                continue
+            message_content = str(item.get("content") or item.get("snippet") or "")
+            msg_tokens = self._tokenize(message_content)
+            if not msg_tokens:
+                continue
+            overlap = len(bullet_tokens & msg_tokens)
+            score = overlap / max(len(bullet_tokens), 1)
+            if score > best_score:
+                best_score = score
+                best_item = item
+                best_content = message_content
+
+        if best_score < 0.18:
+            logger.info(
+                "qna bullet discarded for low evidence overlap score=%.3f bullet='%s' candidate='%s'",
+                best_score,
+                self._truncate_text(clean_text, 50),
+                self._truncate_text(best_content, 50),
+            )
+            return None
+        return best_item
+
+    def _normalize_person_name(self, value: str) -> str:
+        base = unicodedata.normalize("NFKD", (value or "").lower())
+        base = "".join(char for char in base if unicodedata.category(char) != "Mn")
+        base = re.sub(r"[^\w\s]", " ", base)
+        base = re.sub(r"_", " ", base)
+        return re.sub(r"\s+", " ", base).strip()
+
+    def _extract_target_speaker(self, question: str) -> str | None:
+        q = (question or "").strip()
+        if not q:
+            return None
+
+        patterns = [
+            r"e\s*vero\s+che\s+([\wÀ-ÿ'_.\-\s]+?)\s+ha\s+detto",
+            r"è\s*vero\s+che\s+([\wÀ-ÿ'_.\-\s]+?)\s+ha\s+detto",
+            r"cosa\s+ha\s+detto\s+([\wÀ-ÿ'_.\-\s]+)",
+            r"([\wÀ-ÿ'_.\-\s]+?)\s+ha\s+detto",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, q, flags=re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._normalize_person_name(match.group(1))
+            if not candidate:
+                continue
+            candidate = candidate.split(" che ")[0].split(" mi ")[0].strip()
+            candidate = re.sub(r"^(?:e|è)?\s*vero\s+che\s+", "", candidate).strip()
+            if not candidate:
+                continue
+            return TARGET_NAME_ALIASES.get(candidate, candidate)
         return None
+
+    def _filter_evidence_by_target(self, evidence: list[dict[str, str]], target_name: str | None) -> list[dict[str, str]]:
+        if not target_name:
+            return evidence
+        target_norm = self._normalize_person_name(target_name)
+        alias_norm = self._normalize_person_name(TARGET_NAME_ALIASES.get(target_norm, target_norm))
+        allowed = {target_norm, alias_norm}
+        filtered: list[dict[str, str]] = []
+        for item in evidence:
+            author_name_norm = self._normalize_person_name(str(item.get("author_name") or ""))
+            author_id_norm = self._normalize_person_name(str(item.get("author_id") or ""))
+            if not author_name_norm and not author_id_norm:
+                continue
+            if any(name and (name == author_name_norm or name in author_name_norm or author_name_norm in name) for name in allowed):
+                filtered.append(item)
+                continue
+            if author_id_norm in allowed:
+                filtered.append(item)
+        return filtered
+
+    def _normalize_text(self, text: str) -> str:
+        normalized = unicodedata.normalize("NFKD", (text or "").lower())
+        normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+        normalized = re.sub(r"[^\w\s]", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _tokenize(self, text: str) -> set[str]:
+        normalized = self._normalize_text(text)
+        return {token for token in normalized.split() if len(token) > 1 and token not in IT_STOPWORDS}
 
     def _is_bullet_relevant(self, question: str, bullet: str) -> bool:
         q_raw = (question or "").strip()
@@ -1047,6 +1141,7 @@ class TriggerEngineService:
             "non inventare contenuti",
             "rispondi solo alla domanda senza contesto generale extra",
             "massimo 4 bullet verificabili",
+            "rispondi SOLO con affermazioni ricavate dai messaggi evidenza del target quando presente",
             "se non ci sono prove dirette dillo chiaramente",
         ]
         cache_ttl = int(budgets.get("cache_ttl") or 45 * 60)
@@ -1110,6 +1205,7 @@ class TriggerEngineService:
                     "per_target_messages": per_target_messages,
                     "focus_instruction": (
                         "Per ciascun target: massimo 4 bullet strettamente pertinenti alla domanda, frasi verificabili e niente contesto generale. "
+                        "Rispondi SOLO con affermazioni ricavate dai messaggi evidenza del target. "
                         "Se mancano prove dirette, dichiaralo esplicitamente e non inventare."
                     ),
                 }
@@ -1129,7 +1225,8 @@ class TriggerEngineService:
         prompt_obj = {
             "system": (
                 "Sei il servizio QnA del Barcellometro. Rispondi solo usando le prove fornite. "
-                "Non inventare contenuti. Se la domanda è un follow-up, usa la conversazione precedente."
+                "Non inventare contenuti. Se c'è un target speaker, usa solo evidenze del target. "
+                "Se la domanda è un follow-up, usa la conversazione precedente."
             ),
             "question": question,
             "constraints": constraints,
@@ -1383,6 +1480,7 @@ class TriggerEngineService:
                     "guild_id": str(row["guild_id"] or ""),
                     "channel_id": str(row["channel_id"] or ""),
                     "author_id": str(row["author_id"] or ""),
+                    "author_name": str(row["author_name"] or row["author_id"] or ""),
                     "created_at": str(row["ts"] or row["created_at"] or ""),
                     "content": content,
                     "score": score,
@@ -1400,6 +1498,7 @@ class TriggerEngineService:
                     "guild_id": str(row.get("guild_id") or ""),
                     "channel_id": str(row.get("channel_id") or ""),
                     "author_id": str(row.get("author_id") or ""),
+                    "author_name": str(row.get("author_name") or row.get("author_id") or ""),
                     "created_at": str(row.get("created_at") or ""),
                     "content": str(row.get("content") or ""),
                     "score": int(row.get("score") or 0),
@@ -1429,16 +1528,22 @@ class TriggerEngineService:
             message_id = str(row.get("message_id") or "")
             jump_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}" if message_id else ""
             author_id = str(row.get("author_id") or "")
-            author_name = author_id
-            if guild and author_id.isdigit():
+            author_name = str(row.get("author_name") or author_id)
+            if guild and author_id.isdigit() and author_name == author_id:
                 member = guild.get_member(int(author_id))
                 if member is not None:
                     author_name = member.display_name
+            content = str(row.get("content") or "")
             pack.append(
                 {
+                    "message_id": message_id,
+                    "channel_id": channel_id,
+                    "author_id": author_id,
                     "author_name": author_name,
+                    "created_at": str(row.get("created_at") or ""),
                     "created_at_iso": str(row.get("created_at") or ""),
-                    "snippet": self._truncate_text(str(row.get("content") or ""), max(80, snippet_max)),
+                    "content": content,
+                    "snippet": self._truncate_text(content, max(80, snippet_max)),
                     "jump_url": jump_url,
                 }
             )

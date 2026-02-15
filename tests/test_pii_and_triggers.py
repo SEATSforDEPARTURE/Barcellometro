@@ -158,3 +158,56 @@ def test_decorate_proof_links_removes_newlines_and_spaces_inside_link_url() -> N
     decorated = service._decorate_proof_links(answer, evidence)
     assert "\n" not in decorated.split("(", 1)[1].split(")", 1)[0]
     assert "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)" in decorated
+
+
+def test_extract_target_speaker_and_alias() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._extract_target_speaker("è vero che Dany ha detto che potevo sfogarmi?") == "daniela"
+
+
+def test_bulletize_answer_filters_evidence_by_target_author() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "• Ha detto che potevi sfogarti quando eri giù."
+    evidence = [
+        {
+            "message_id": "1",
+            "channel_id": "2",
+            "author_id": "10",
+            "author_name": "Daniele",
+            "created_at_iso": "2026-02-14T13:00:00+00:00",
+            "content": "non c'entra niente",
+            "jump_url": "https://discord.com/channels/1/2/3",
+        },
+        {
+            "message_id": "2",
+            "channel_id": "2",
+            "author_id": "11",
+            "author_name": "Daniela 🌸",
+            "created_at_iso": "2026-02-14T14:00:00+00:00",
+            "content": "ti ho detto che potevi sfogarti quando eri giù",
+            "jump_url": "https://discord.com/channels/1/2/4",
+        },
+    ]
+
+    out = service._bulletize_answer("è vero che Dany ha detto che potevo sfogarmi?", answer, evidence)
+    assert "https://discord.com/channels/1/2/4" in out
+    assert "https://discord.com/channels/1/2/3" not in out
+
+
+def test_bulletize_answer_returns_no_direct_evidence_when_target_missing() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "• Ha detto che potevi sfogarti."
+    evidence = [
+        {
+            "message_id": "1",
+            "channel_id": "2",
+            "author_id": "10",
+            "author_name": "Marco",
+            "created_at_iso": "2026-02-14T13:00:00+00:00",
+            "content": "ti ho detto che potevi sfogarti",
+            "jump_url": "https://discord.com/channels/1/2/3",
+        }
+    ]
+
+    out = service._bulletize_answer("cosa ha detto Daniela?", answer, evidence)
+    assert out == "Non ho trovato prove dirette di un messaggio di daniela nel periodo richiesto."
