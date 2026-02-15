@@ -78,6 +78,22 @@ def test_infer_time_range_hours_ago_window() -> None:
     assert end_dt - start_dt == timedelta(hours=3)
 
 
+
+
+def test_infer_time_range_ieri_uses_full_previous_local_day() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    start_dt, end_dt, label = service.infer_time_range("Cosa ha detto ieri?")
+    assert label == "ieri"
+
+    rome = ZoneInfo("Europe/Rome")
+    now_local = datetime.now(rome)
+    today_start_local = datetime.combine(now_local.date(), datetime.min.time(), tzinfo=rome)
+    expected_start = (today_start_local - timedelta(days=1)).astimezone(start_dt.tzinfo)
+    expected_end = today_start_local.astimezone(end_dt.tzinfo)
+
+    assert start_dt == expected_start
+    assert end_dt == expected_end
+
 def test_infer_time_range_mese_scorso_boundaries() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     start_dt, end_dt, label = service.infer_time_range("Cosa è successo mese scorso?")
@@ -204,10 +220,46 @@ def test_bulletize_answer_returns_no_direct_evidence_when_target_missing() -> No
             "author_id": "10",
             "author_name": "Marco",
             "created_at_iso": "2026-02-14T13:00:00+00:00",
-            "content": "ti ho detto che potevi sfogarti",
+            "content": "messaggio non correlato a questa domanda",
             "jump_url": "https://discord.com/channels/1/2/3",
         }
     ]
 
     out = service._bulletize_answer("cosa ha detto Daniela?", answer, evidence)
     assert out == "Non ho trovato prove dirette di un messaggio di daniela nel periodo richiesto."
+
+
+def test_filter_evidence_by_target_accepts_raw_alias_token() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    evidence = [
+        {
+            "author_name": "Dany Sun ☀️",
+            "author_id": "11",
+            "jump_url": "https://discord.com/channels/1/2/4",
+            "created_at_iso": "2026-02-14T14:00:00+00:00",
+            "content": "ti ho detto che potevi sfogarti quando eri giù",
+        }
+    ]
+
+    filtered = service._filter_evidence_by_target(evidence, "daniela", target_raw="dany")
+    assert len(filtered) == 1
+
+
+def test_bulletize_answer_fallbacks_to_other_references_without_attribution() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "• Dicevano della live senza censura alle 20"
+    evidence = [
+        {
+            "message_id": "1",
+            "channel_id": "2",
+            "author_id": "10",
+            "author_name": "Marco",
+            "created_at_iso": "2026-02-14T13:00:00+00:00",
+            "content": "stasera live senza censura alle 20, si può sfogare tutto",
+            "jump_url": "https://discord.com/channels/1/2/3",
+        }
+    ]
+
+    out = service._bulletize_answer("è vero che Daniela ha detto live senza censura alle 20?", answer, evidence)
+    assert out.startswith("Non ho trovato un messaggio diretto di daniela")
+    assert "https://discord.com/channels/1/2/3" in out
