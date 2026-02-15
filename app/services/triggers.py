@@ -103,16 +103,16 @@ class TriggerEngineService:
             await self._qna_reply(interaction, upgrade_text, ephemeral=True)
             return
 
-        limit = await self._resolve_qna_limit(interaction)
+        limit = await self._resolve_qna_limit(interaction, profile=profile, limits=limits)
         window_date = datetime.now(ROME_TZ).date().isoformat()
         used = await self._database.get_usage(guild_id, str(interaction.user.id), "qna", window_date)
         if used >= limit:
             if profile == "role1":
                 delta = max(0, limit_pro - limit_plus)
-                message = f"Domande terminate, aggiorna al piano PRO per avere +({delta}) domande al giorno."
+                message = f"Domande terminate, aggiorna al piano PRO per avere +{delta} al giorno."
             elif profile == "role2":
                 delta = max(0, limit_promax - limit_pro)
-                message = f"Domande terminate, aggiorna al piano PRO MAX per avere +({delta}) domande al giorno."
+                message = f"Domande terminate, aggiorna al piano PRO MAX per avere +{delta} al giorno."
             elif profile == "role3":
                 message = "Domande terminate, aspetta domani per averne altre."
             else:
@@ -120,42 +120,39 @@ class TriggerEngineService:
             await self._qna_reply(interaction, message, ephemeral=True)
             return
 
-        if not question_text.endswith("?"):
-            question_text = f"{question_text}?"
-        question_echo = f"{interaction.user.mention} **chiede:** {question_text}"
-        q_msg = await interaction.followup.send(question_echo, wait=True, ephemeral=False)
+        question_clean = question_text
+        if not question_clean.endswith("?"):
+            question_clean = f"{question_clean}?"
+        public_content = f"{interaction.user.mention} **chiede:** {question_clean}"
 
-        scope = await self._decide_qna_scope(question_text)
+        scope = await self._decide_qna_scope(question_clean)
         answer = await self._handle_qna(
             scope=scope,
             guild_id=guild_id,
             channel_id=channel_id,
-            question=question_text,
+            question=question_clean,
             source=interaction,
         )
         if answer is None:
-            await q_msg.delete()
             await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
             return
         if not answer.get("can_answer"):
-            await q_msg.delete()
             await self._qna_reply(interaction, str(answer.get("refusal_reason") or "Non posso rispondere."), ephemeral=True)
             return
         text = str(answer.get("answer") or "").strip()
         if not text:
-            await q_msg.delete()
             await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
             return
 
         evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
         if not isinstance(evidence_pack, list):
             evidence_pack = []
-        text = self._decorate_proof_links(text, evidence_pack)
 
         if contains_pii(text):
-            await q_msg.delete()
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
             return
+
+        embed = self._build_qna_embed(text, evidence_pack)
 
         await self._database.increment_usage(
             guild_id,
@@ -164,7 +161,7 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await q_msg.reply(text, mention_author=False)
+        await interaction.followup.send(content=public_content, embed=embed, ephemeral=False)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         try:
@@ -193,19 +190,42 @@ class TriggerEngineService:
                 await message.reply("Non posso aiutare con dati personali o sensibili.", mention_author=False)
                 return
 
-            limit = await self._resolve_qna_limit_for_member(message.author)
+            profile = await self._entitlements.resolve_profile(message.author)
+            limits = await self._get_qna_daily_limits()
+            limit_plus = int(limits.get("role1", 1))
+            limit_pro = int(limits.get("role2", 2))
+            limit_promax = int(limits.get("role3", 3))
+            if profile == "base":
+                await message.reply("Per fare domande usa /ask e fai upgrade a PLUS/PRO/PRO MAX.", mention_author=False)
+                return
+
+            limit = await self._resolve_qna_limit_for_member(message.author, profile=profile, limits=limits)
             window_date = datetime.now(ROME_TZ).date().isoformat()
             used = await self._database.get_usage(guild_id, str(message.author.id), "qna", window_date)
             if used >= limit:
-                await message.reply("Hai esaurito le domande di oggi.", mention_author=False)
+                if profile == "role1":
+                    delta = max(0, limit_pro - limit_plus)
+                    quota_msg = f"Domande terminate, aggiorna al piano PRO per avere +{delta} al giorno."
+                elif profile == "role2":
+                    delta = max(0, limit_promax - limit_pro)
+                    quota_msg = f"Domande terminate, aggiorna al piano PRO MAX per avere +{delta} al giorno."
+                elif profile == "role3":
+                    quota_msg = "Domande terminate, aspetta domani per averne altre."
+                else:
+                    quota_msg = "Hai esaurito le domande di oggi."
+                await message.reply(quota_msg, mention_author=False)
                 return
 
-            scope = await self._decide_qna_scope(question)
+            question_clean = question.strip()
+            if not question_clean.endswith("?"):
+                question_clean = f"{question_clean}?"
+
+            scope = await self._decide_qna_scope(question_clean)
             answer = await self._handle_qna(
                 scope=scope,
                 guild_id=guild_id,
                 channel_id=channel_id,
-                question=question,
+                question=question_clean,
                 source=message,
             )
             if answer is None or not answer.get("can_answer"):
@@ -220,15 +240,18 @@ class TriggerEngineService:
             evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
             if not isinstance(evidence_pack, list):
                 evidence_pack = []
-            text = self._decorate_proof_links(text, evidence_pack)
 
             if contains_pii(text):
                 await message.reply("Non posso condividere dati personali.", mention_author=False)
                 return
 
             await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
-            embed = discord.Embed(title="Risposta", description=text)
-            await message.reply(embed=embed, mention_author=False)
+            embed = self._build_qna_embed(text, evidence_pack)
+            await message.reply(
+                content=f"{message.author.mention} **chiede:** {question_clean}",
+                embed=embed,
+                mention_author=False,
+            )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "handle_message_qna failed",
@@ -776,24 +799,59 @@ class TriggerEngineService:
                 continue
         return limits
 
-    async def _resolve_qna_limit(self, interaction: discord.Interaction) -> int:
-        profile = await self._entitlements.resolve_profile(interaction.user)
-        limits = await self._get_qna_daily_limits()
+    async def _resolve_qna_limit(
+        self,
+        interaction: discord.Interaction,
+        *,
+        profile: str | None = None,
+        limits: dict[str, int] | None = None,
+    ) -> int:
+        profile = profile or await self._entitlements.resolve_profile(interaction.user)
+        limits = limits or await self._get_qna_daily_limits()
         tier_limit = int(limits.get(profile, limits.get("base", 0)))
         if interaction.guild_id is None:
             return tier_limit
         bonus, _ = await self._database.get_qna_bonus(str(interaction.guild_id), str(interaction.user.id))
         return tier_limit + max(0, bonus)
 
-    async def _resolve_qna_limit_for_member(self, member) -> int:
-        profile = await self._entitlements.resolve_profile(member)
-        limits = await self._get_qna_daily_limits()
+    async def _resolve_qna_limit_for_member(self, member, *, profile: str | None = None, limits: dict[str, int] | None = None) -> int:
+        profile = profile or await self._entitlements.resolve_profile(member)
+        limits = limits or await self._get_qna_daily_limits()
         tier_limit = int(limits.get(profile, limits.get("base", 0)))
         guild = getattr(member, "guild", None)
         if guild is None:
             return tier_limit
         bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
         return tier_limit + max(0, bonus)
+
+    def _build_qna_embed(self, answer_text: str, evidence: list[dict[str, str]]) -> discord.Embed:
+        embed = discord.Embed(description=self._bulletize_answer(answer_text), timestamp=datetime.now(timezone.utc))
+        embed.set_footer(text="Barcellometro Q&A")
+        proof_lines = self._build_proof_lines(evidence)
+        if proof_lines:
+            embed.add_field(name="Prove", value="• " + "\n• ".join(proof_lines), inline=False)
+        return embed
+
+    def _bulletize_answer(self, answer_text: str) -> str:
+        lines = [line.strip() for line in answer_text.splitlines() if line.strip()]
+        if not lines:
+            return answer_text
+        return "\n".join(f"• {line}" for line in lines)
+
+    def _build_proof_lines(self, evidence: list[dict[str, str]]) -> list[str]:
+        lines: list[str] = []
+        for item in evidence:
+            jump_url = str(item.get("jump_url") or "").strip()
+            created_at_iso = str(item.get("created_at_iso") or "").strip().replace("Z", "+00:00")
+            if not jump_url or not created_at_iso:
+                continue
+            try:
+                created_at = datetime.fromisoformat(created_at_iso)
+            except ValueError:
+                continue
+            ts = created_at.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
+            lines.append(f"[🧾 {ts}]({jump_url})")
+        return lines
 
     async def _build_qna_payload(
         self,
