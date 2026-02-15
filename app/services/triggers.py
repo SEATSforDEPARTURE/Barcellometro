@@ -75,6 +75,7 @@ class TriggerEngineService:
             return
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=False, thinking=True)
+
         guild_id = str(interaction.guild_id)
         channel_id = str(interaction.channel_id)
         if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
@@ -86,12 +87,43 @@ class TriggerEngineService:
         if is_sensitive_question(question_text):
             await self._qna_reply(interaction, "Non posso aiutare con dati personali o sensibili.", ephemeral=True)
             return
+
+        profile = await self._entitlements.resolve_profile(interaction.user)
+        limits = await self._get_qna_daily_limits()
+        limit_plus = int(limits.get("role1", 1))
+        limit_pro = int(limits.get("role2", 2))
+        limit_promax = int(limits.get("role3", 3))
+        if profile == "base":
+            upgrade_text = (
+                "Per fare domande devi fare l'upgrade a PLUS, PRO o PRO MAX.\n"
+                f"• PLUS: {limit_plus} domande/giorno\n"
+                f"• PRO: {limit_pro} domande/giorno\n"
+                f"• PRO MAX: {limit_promax} domande/giorno"
+            )
+            await self._qna_reply(interaction, upgrade_text, ephemeral=True)
+            return
+
         limit = await self._resolve_qna_limit(interaction)
         window_date = datetime.now(ROME_TZ).date().isoformat()
         used = await self._database.get_usage(guild_id, str(interaction.user.id), "qna", window_date)
         if used >= limit:
-            await self._qna_reply(interaction, "Hai esaurito le domande di oggi.", ephemeral=True)
+            if profile == "role1":
+                delta = max(0, limit_pro - limit_plus)
+                message = f"Domande terminate, aggiorna al piano PRO per avere +({delta}) domande al giorno."
+            elif profile == "role2":
+                delta = max(0, limit_promax - limit_pro)
+                message = f"Domande terminate, aggiorna al piano PRO MAX per avere +({delta}) domande al giorno."
+            elif profile == "role3":
+                message = "Domande terminate, aspetta domani per averne altre."
+            else:
+                message = "Hai esaurito le domande di oggi."
+            await self._qna_reply(interaction, message, ephemeral=True)
             return
+
+        if not question_text.endswith("?"):
+            question_text = f"{question_text}?"
+        question_echo = f"{interaction.user.mention} **chiede:** {question_text}"
+        q_msg = await interaction.followup.send(question_echo, wait=True, ephemeral=False)
 
         scope = await self._decide_qna_scope(question_text)
         answer = await self._handle_qna(
@@ -102,13 +134,16 @@ class TriggerEngineService:
             source=interaction,
         )
         if answer is None:
+            await q_msg.delete()
             await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
             return
         if not answer.get("can_answer"):
+            await q_msg.delete()
             await self._qna_reply(interaction, str(answer.get("refusal_reason") or "Non posso rispondere."), ephemeral=True)
             return
         text = str(answer.get("answer") or "").strip()
         if not text:
+            await q_msg.delete()
             await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
             return
 
@@ -117,6 +152,7 @@ class TriggerEngineService:
             text = self._decorate_proof_links(text, evidence_pack)
 
         if contains_pii(text):
+            await q_msg.delete()
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
             return
 
@@ -127,9 +163,6 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-
-        question_echo = f"{interaction.user.mention} {question_text}"
-        q_msg = await interaction.followup.send(question_echo, ephemeral=False, wait=True)
         await q_msg.reply(text, mention_author=False)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
@@ -596,48 +629,100 @@ class TriggerEngineService:
         return parsed.astimezone(ROME_TZ).strftime("%Y-%m-%d %H:%M")
 
     def _decorate_proof_links(self, answer_text: str, evidence: list[dict[str, str]]) -> str:
-        if not answer_text or not evidence:
+        if not answer_text:
             return answer_text
 
         jump_to_label: dict[str, str] = {}
         for item in evidence:
             jump_url = str(item.get("jump_url") or "").strip()
             created_at_iso = str(item.get("created_at_iso") or "").strip()
-            if not jump_url or not created_at_iso:
+            if not jump_url:
                 continue
-            normalized_iso = created_at_iso.replace("Z", "+00:00")
+            if created_at_iso:
+                normalized_iso = created_at_iso.replace("Z", "+00:00")
+                try:
+                    parsed = datetime.fromisoformat(normalized_iso)
+                except ValueError:
+                    parsed = None
+                if parsed is not None:
+                    jump_to_label[jump_url] = parsed.astimezone(ROME_TZ).strftime("🧾 %d/%m %H:%M")
+
+        url_re = r"https://discord\.com/channels/\d+/\d+/\d+"
+        decorated = answer_text
+
+        def normalize_or_relabel(match: re.Match[str]) -> str:
+            label = match.group(1).strip()
+            jump_url = match.group(2).strip()
+            if jump_url in jump_to_label:
+                return f"[{jump_to_label[jump_url]}]({jump_url})"
+            return f"[{label}]({jump_url})"
+
+        # Fix malformed markdown like: [🧾 14/02 14:26] (https://discord.com/channels/...)
+        decorated = re.sub(rf"\[([^\]]+)\]\s*\(\s*({url_re})\s*\)", normalize_or_relabel, decorated)
+
+        # Collapse patterns like "prova (URL)" / "prove URL" / "🧾 URL" into one clickable proof link
+        def replace_proof_and_url(match: re.Match[str]) -> str:
+            jump_url = match.group("url")
+            label = jump_to_label.get(jump_url)
+            if not label:
+                return jump_url
+            return f"[{label}]({jump_url})"
+
+        decorated = re.sub(
+            rf"(?i)(?:\bprov(?:a|e)\.?\b|🧾)\s*[:\-]?\s*\(?\s*(?P<url>{url_re})\s*\)?",
+            replace_proof_and_url,
+            decorated,
+        )
+
+        # Rewrite any remaining markdown links pointing to Discord jump URLs
+        decorated = re.sub(rf"\[([^\]]+)\]\((({url_re}))\)", normalize_or_relabel, decorated)
+
+        # Rewrite naked Discord URLs to clickable proof links when evidence timestamp exists
+        def replace_naked_url(match: re.Match[str]) -> str:
+            jump_url = match.group(1)
+            label = jump_to_label.get(jump_url)
+            if not label:
+                return jump_url
+            return f"[{label}]({jump_url})"
+
+        decorated = re.sub(rf"(?<!\]\()({url_re})", replace_naked_url, decorated)
+        decorated = re.sub(
+            r"(?i)\bprov(?:a|e)\.?\s*[:\-]?\s*\((\[[^\]]+\]\(https://discord\.com/channels/\d+/\d+/\d+\))\)",
+            r"\1",
+            decorated,
+        )
+        decorated = re.sub(
+            r"(?i)\bprov(?:a|e)\.?\s*[:\-]?\s*(\[[^\]]+\]\(https://discord\.com/channels/\d+/\d+/\d+\))",
+            r"\1",
+            decorated,
+        )
+        return decorated
+
+    async def _get_qna_daily_limits(self) -> dict[str, int]:
+        defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
+        raw = await self._database.get_setting("qna.daily_limits")
+        if not raw:
+            return defaults
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return defaults
+        if not isinstance(parsed, dict):
+            return defaults
+        limits = defaults.copy()
+        for key, value in parsed.items():
+            if key not in limits:
+                continue
             try:
-                parsed = datetime.fromisoformat(normalized_iso)
-            except ValueError:
+                limits[key] = int(value)
+            except (TypeError, ValueError):
                 continue
-            jump_to_label[jump_url] = parsed.astimezone(ROME_TZ).strftime("🧾 %d/%m %H:%M")
-
-        if not jump_to_label:
-            return answer_text
-
-        def replacer(match: re.Match[str]) -> str:
-            _label = match.group(1)
-            jump_url = match.group(2)
-            if jump_url not in jump_to_label:
-                return match.group(0)
-            return f"[{jump_to_label[jump_url]}]({jump_url})"
-
-        return re.sub(r"\[([^\]]+)\]\((https://discord\.com/channels/\d+/\d+/\d+)\)", replacer, answer_text)
+        return limits
 
     async def _resolve_qna_limit(self, interaction: discord.Interaction) -> int:
         profile = await self._entitlements.resolve_profile(interaction.user)
-        raw = await self._database.get_setting("qna.daily_limits")
-        defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
-        if not raw:
-            tier_limit = int(defaults.get(profile, defaults["base"]))
-        else:
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError:
-                parsed = defaults
-            if not isinstance(parsed, dict):
-                parsed = defaults
-            tier_limit = int(parsed.get(profile, parsed.get("base", 0)))
+        limits = await self._get_qna_daily_limits()
+        tier_limit = int(limits.get(profile, limits.get("base", 0)))
         if interaction.guild_id is None:
             return tier_limit
         bonus, _ = await self._database.get_qna_bonus(str(interaction.guild_id), str(interaction.user.id))
@@ -645,18 +730,8 @@ class TriggerEngineService:
 
     async def _resolve_qna_limit_for_member(self, member) -> int:
         profile = await self._entitlements.resolve_profile(member)
-        raw = await self._database.get_setting("qna.daily_limits")
-        defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
-        if not raw:
-            tier_limit = int(defaults.get(profile, defaults["base"]))
-        else:
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError:
-                parsed = defaults
-            if not isinstance(parsed, dict):
-                parsed = defaults
-            tier_limit = int(parsed.get(profile, parsed.get("base", 0)))
+        limits = await self._get_qna_daily_limits()
+        tier_limit = int(limits.get(profile, limits.get("base", 0)))
         guild = getattr(member, "guild", None)
         if guild is None:
             return tier_limit

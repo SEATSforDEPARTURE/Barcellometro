@@ -119,3 +119,21 @@ def test_decorate_proof_links_keeps_unknown_links() -> None:
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert decorated == answer
+
+
+def test_decorate_proof_links_fixes_spaced_markdown_parentheses() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "Fonte: [🧾 14/02 14:26] (https://discord.com/channels/1/2/3)"
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+
+    decorated = service._decorate_proof_links(answer, evidence)
+    assert "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)" in decorated
+
+
+def test_decorate_proof_links_rewrites_naked_proof_url() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "prova (https://discord.com/channels/1/2/3)"
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+
+    decorated = service._decorate_proof_links(answer, evidence)
+    assert decorated == "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)"
