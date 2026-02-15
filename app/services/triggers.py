@@ -66,8 +66,12 @@ class TriggerEngineService:
         await interaction.response.send_message(text, ephemeral=ephemeral)
 
     async def handle_qna_question(self, interaction: discord.Interaction, question: str) -> None:
+        question_text = (question or "").strip()
         if interaction.guild_id is None or interaction.channel_id is None:
             await self._qna_reply(interaction, "Usa questo comando in un canale.", ephemeral=True)
+            return
+        if not question_text:
+            await self._qna_reply(interaction, "Inserisci una domanda valida.", ephemeral=True)
             return
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=False, thinking=True)
@@ -76,10 +80,10 @@ class TriggerEngineService:
         if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
             await self._qna_reply(interaction, "Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
             return
-        if is_out_of_scope_question(question):
+        if is_out_of_scope_question(question_text):
             await self._qna_reply(interaction, "Posso rispondere solo su questo canale.", ephemeral=True)
             return
-        if is_sensitive_question(question):
+        if is_sensitive_question(question_text):
             await self._qna_reply(interaction, "Non posso aiutare con dati personali o sensibili.", ephemeral=True)
             return
         limit = await self._resolve_qna_limit(interaction)
@@ -89,12 +93,12 @@ class TriggerEngineService:
             await self._qna_reply(interaction, "Hai esaurito le domande di oggi.", ephemeral=True)
             return
 
-        scope = await self._decide_qna_scope(question)
+        scope = await self._decide_qna_scope(question_text)
         answer = await self._handle_qna(
             scope=scope,
             guild_id=guild_id,
             channel_id=channel_id,
-            question=question,
+            question=question_text,
             source=interaction,
         )
         if answer is None:
@@ -123,7 +127,10 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await self._qna_reply(interaction, text, ephemeral=False)
+
+        question_echo = f"{interaction.user.mention} {question_text}"
+        q_msg = await interaction.followup.send(question_echo, ephemeral=False, wait=True)
+        await q_msg.reply(text, mention_author=False)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         if message.guild is None:
@@ -137,10 +144,10 @@ class TriggerEngineService:
         channel_id = str(message.channel.id)
         if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
             return
-        if is_out_of_scope_question(question):
+        if is_out_of_scope_question(question_text):
             await message.reply("Posso rispondere solo su questo canale.")
             return
-        if is_sensitive_question(question):
+        if is_sensitive_question(question_text):
             await message.reply("Non posso aiutare con dati personali o sensibili.")
             return
         limit = await self._resolve_qna_limit_for_member(message.author)
@@ -149,12 +156,12 @@ class TriggerEngineService:
         if used >= limit:
             await message.reply("Hai esaurito le domande di oggi.")
             return
-        scope = await self._decide_qna_scope(question)
+        scope = await self._decide_qna_scope(question_text)
         answer = await self._handle_qna(
             scope=scope,
             guild_id=guild_id,
             channel_id=channel_id,
-            question=question,
+            question=question_text,
             source=message,
         )
         if answer is None or not answer.get("can_answer"):
