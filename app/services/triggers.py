@@ -103,16 +103,16 @@ class TriggerEngineService:
             await self._qna_reply(interaction, upgrade_text, ephemeral=True)
             return
 
-        limit = await self._resolve_qna_limit(interaction)
+        limit = await self._resolve_qna_limit(interaction, profile=profile, limits=limits)
         window_date = datetime.now(ROME_TZ).date().isoformat()
         used = await self._database.get_usage(guild_id, str(interaction.user.id), "qna", window_date)
         if used >= limit:
             if profile == "role1":
                 delta = max(0, limit_pro - limit_plus)
-                message = f"Domande terminate, aggiorna al piano PRO per avere +({delta}) domande al giorno."
+                message = f"Domande terminate, aggiorna al piano PRO per avere +{delta} al giorno."
             elif profile == "role2":
                 delta = max(0, limit_promax - limit_pro)
-                message = f"Domande terminate, aggiorna al piano PRO MAX per avere +({delta}) domande al giorno."
+                message = f"Domande terminate, aggiorna al piano PRO MAX per avere +{delta} al giorno."
             elif profile == "role3":
                 message = "Domande terminate, aspetta domani per averne altre."
             else:
@@ -120,42 +120,39 @@ class TriggerEngineService:
             await self._qna_reply(interaction, message, ephemeral=True)
             return
 
-        if not question_text.endswith("?"):
-            question_text = f"{question_text}?"
-        question_echo = f"{interaction.user.mention} **chiede:** {question_text}"
-        q_msg = await interaction.followup.send(question_echo, wait=True, ephemeral=False)
+        question_clean = question_text
+        if not question_clean.endswith("?"):
+            question_clean = f"{question_clean}?"
+        public_content = f"{interaction.user.mention} **chiede:** {question_clean}"
 
-        scope = await self._decide_qna_scope(question_text)
+        scope = await self._decide_qna_scope(question_clean)
         answer = await self._handle_qna(
             scope=scope,
             guild_id=guild_id,
             channel_id=channel_id,
-            question=question_text,
+            question=question_clean,
             source=interaction,
         )
         if answer is None:
-            await q_msg.delete()
             await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
             return
         if not answer.get("can_answer"):
-            await q_msg.delete()
             await self._qna_reply(interaction, str(answer.get("refusal_reason") or "Non posso rispondere."), ephemeral=True)
             return
         text = str(answer.get("answer") or "").strip()
         if not text:
-            await q_msg.delete()
             await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
             return
 
         evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
         if not isinstance(evidence_pack, list):
             evidence_pack = []
-        text = self._decorate_proof_links(text, evidence_pack)
 
         if contains_pii(text):
-            await q_msg.delete()
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
             return
+
+        embed = self._build_qna_embed(question_clean, text, evidence_pack)
 
         await self._database.increment_usage(
             guild_id,
@@ -164,7 +161,7 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await q_msg.reply(text, mention_author=False)
+        await interaction.followup.send(content=public_content, embed=embed, ephemeral=False)
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         try:
@@ -193,19 +190,42 @@ class TriggerEngineService:
                 await message.reply("Non posso aiutare con dati personali o sensibili.", mention_author=False)
                 return
 
-            limit = await self._resolve_qna_limit_for_member(message.author)
+            profile = await self._entitlements.resolve_profile(message.author)
+            limits = await self._get_qna_daily_limits()
+            limit_plus = int(limits.get("role1", 1))
+            limit_pro = int(limits.get("role2", 2))
+            limit_promax = int(limits.get("role3", 3))
+            if profile == "base":
+                await message.reply("Per fare domande usa /ask e fai upgrade a PLUS/PRO/PRO MAX.", mention_author=False)
+                return
+
+            limit = await self._resolve_qna_limit_for_member(message.author, profile=profile, limits=limits)
             window_date = datetime.now(ROME_TZ).date().isoformat()
             used = await self._database.get_usage(guild_id, str(message.author.id), "qna", window_date)
             if used >= limit:
-                await message.reply("Hai esaurito le domande di oggi.", mention_author=False)
+                if profile == "role1":
+                    delta = max(0, limit_pro - limit_plus)
+                    quota_msg = f"Domande terminate, aggiorna al piano PRO per avere +{delta} al giorno."
+                elif profile == "role2":
+                    delta = max(0, limit_promax - limit_pro)
+                    quota_msg = f"Domande terminate, aggiorna al piano PRO MAX per avere +{delta} al giorno."
+                elif profile == "role3":
+                    quota_msg = "Domande terminate, aspetta domani per averne altre."
+                else:
+                    quota_msg = "Hai esaurito le domande di oggi."
+                await message.reply(quota_msg, mention_author=False)
                 return
 
-            scope = await self._decide_qna_scope(question)
+            question_clean = question.strip()
+            if not question_clean.endswith("?"):
+                question_clean = f"{question_clean}?"
+
+            scope = await self._decide_qna_scope(question_clean)
             answer = await self._handle_qna(
                 scope=scope,
                 guild_id=guild_id,
                 channel_id=channel_id,
-                question=question,
+                question=question_clean,
                 source=message,
             )
             if answer is None or not answer.get("can_answer"):
@@ -220,15 +240,18 @@ class TriggerEngineService:
             evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
             if not isinstance(evidence_pack, list):
                 evidence_pack = []
-            text = self._decorate_proof_links(text, evidence_pack)
 
             if contains_pii(text):
                 await message.reply("Non posso condividere dati personali.", mention_author=False)
                 return
 
             await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
-            embed = discord.Embed(title="Risposta", description=text)
-            await message.reply(embed=embed, mention_author=False)
+            embed = self._build_qna_embed(question_clean, text, evidence_pack)
+            await message.reply(
+                content=f"{message.author.mention} **chiede:** {question_clean}",
+                embed=embed,
+                mention_author=False,
+            )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "handle_message_qna failed",
@@ -776,24 +799,154 @@ class TriggerEngineService:
                 continue
         return limits
 
-    async def _resolve_qna_limit(self, interaction: discord.Interaction) -> int:
-        profile = await self._entitlements.resolve_profile(interaction.user)
-        limits = await self._get_qna_daily_limits()
+    async def _resolve_qna_limit(
+        self,
+        interaction: discord.Interaction,
+        *,
+        profile: str | None = None,
+        limits: dict[str, int] | None = None,
+    ) -> int:
+        profile = profile or await self._entitlements.resolve_profile(interaction.user)
+        limits = limits or await self._get_qna_daily_limits()
         tier_limit = int(limits.get(profile, limits.get("base", 0)))
         if interaction.guild_id is None:
             return tier_limit
         bonus, _ = await self._database.get_qna_bonus(str(interaction.guild_id), str(interaction.user.id))
         return tier_limit + max(0, bonus)
 
-    async def _resolve_qna_limit_for_member(self, member) -> int:
-        profile = await self._entitlements.resolve_profile(member)
-        limits = await self._get_qna_daily_limits()
+    async def _resolve_qna_limit_for_member(self, member, *, profile: str | None = None, limits: dict[str, int] | None = None) -> int:
+        profile = profile or await self._entitlements.resolve_profile(member)
+        limits = limits or await self._get_qna_daily_limits()
         tier_limit = int(limits.get(profile, limits.get("base", 0)))
         guild = getattr(member, "guild", None)
         if guild is None:
             return tier_limit
         bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
         return tier_limit + max(0, bonus)
+
+    def _build_qna_embed(self, question: str, answer_text: str, evidence: list[dict[str, str]]) -> discord.Embed:
+        embed = discord.Embed(
+            description=self._truncate_embed_description(self._bulletize_answer(question, answer_text, evidence)),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(text="Barcellometro Q&A")
+        return embed
+
+    def _bulletize_answer(self, question: str, answer_text: str, evidence: list[dict[str, str]]) -> str:
+        lines = [line.strip() for line in answer_text.splitlines() if line.strip()]
+        if not lines:
+            return answer_text
+
+        final_lines: list[str] = []
+        for raw_line in lines:
+            line = re.sub(r"^\s*[•\-–—]\s*", "", raw_line).strip()
+            line = self._strip_proof_artifacts(line)
+            if not line:
+                continue
+            proof = self._pick_proof_for_bullet(line, evidence)
+            if not proof:
+                continue
+            jump_url = str(proof.get("jump_url") or "").strip()
+            if not self._is_valid_jump_url(jump_url):
+                continue
+            if not self._is_bullet_relevant(question, line):
+                continue
+
+            ts = self._format_proof_timestamp(str(proof.get("created_at_iso") or ""))
+            if not ts:
+                continue
+            final_lines.append(f"• [🧾 {ts}]({jump_url}) {line}")
+
+        if final_lines:
+            return "\n".join(final_lines)
+        return "Non ho trovato prove dirette e attinenti alla domanda nel periodo richiesto."
+
+    def _strip_proof_artifacts(self, text: str) -> str:
+        cleaned = text or ""
+        cleaned = re.sub(r"\[\s*🧾[^\]]*\]\([^)]+\)", "", cleaned)
+        cleaned = re.sub(r"\(\s*https?://discord\.com/channels/[^)]+\)", "", cleaned)
+        cleaned = re.sub(r"https?://discord\.com/channels/\S+", "", cleaned)
+        cleaned = re.sub(r"\]\(\s*0\s*\)", "", cleaned)
+        cleaned = re.sub(r"\]\(\s*\)", "", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+        cleaned = re.sub(r"([,.;:!?]){2,}", r"\1", cleaned)
+        return cleaned.strip(" -–—•\t\n\r")
+
+    def _is_valid_jump_url(self, jump_url: str) -> bool:
+        return jump_url.startswith("https://discord.com/channels/")
+
+    def _format_proof_timestamp(self, created_at_iso: str) -> str:
+        normalized = (created_at_iso or "").strip().replace("Z", "+00:00")
+        if not normalized:
+            return ""
+        try:
+            created_at = datetime.fromisoformat(normalized)
+        except ValueError:
+            return ""
+        return created_at.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
+
+    def _pick_proof_for_bullet(self, clean_text: str, evidence_pack: list[dict[str, str]]) -> dict[str, str] | None:
+        if not evidence_pack:
+            return None
+
+        id_match = re.search(r"\b\d{17,20}\b", clean_text or "")
+        if id_match:
+            message_id = id_match.group(0)
+            for item in evidence_pack:
+                jump_url = str(item.get("jump_url") or "")
+                if message_id in jump_url and self._is_valid_jump_url(jump_url):
+                    return item
+
+        url_match = re.search(r"https?://discord\.com/channels/\S+", clean_text or "")
+        if url_match:
+            url = url_match.group(0)
+            if self._is_valid_jump_url(url):
+                for item in evidence_pack:
+                    if str(item.get("jump_url") or "").strip() == url:
+                        return item
+
+        for item in evidence_pack:
+            jump_url = str(item.get("jump_url") or "").strip()
+            if self._is_valid_jump_url(jump_url):
+                return item
+        return None
+
+    def _is_bullet_relevant(self, question: str, bullet: str) -> bool:
+        q_raw = (question or "").strip()
+        b_raw = (bullet or "").strip()
+        if not q_raw or not b_raw:
+            return False
+
+        q_norm = re.sub(r"[^\w\s]", " ", q_raw.lower())
+        b_norm = re.sub(r"[^\w\s]", " ", b_raw.lower())
+        stopwords = {
+            "come", "quando", "dove", "cosa", "perche", "perché", "quale", "quali", "della", "delle", "degli", "dello",
+            "dell", "questa", "questo", "quello", "quella", "nella", "nelle", "negli", "nello", "dopo", "prima", "sulla",
+            "sulle", "solo", "sono", "anche", "dalla", "dalle", "dallo", "dentro", "fuori", "avete", "abbiamo", "hanno",
+            "dicono", "detto", "fatto", "oggi", "ieri", "domani", "delle", "degli", "dati", "messaggi", "canale",
+        }
+
+        proper_names = [token.lower() for token in re.findall(r"\b[A-ZÀ-Ý][\wÀ-ÿ']+\b", q_raw)]
+        long_tokens = [
+            token
+            for token in re.findall(r"\b\w{4,}\b", q_norm)
+            if token not in stopwords
+        ]
+        keywords = set(proper_names + long_tokens)
+        if keywords and any(keyword in b_norm for keyword in keywords):
+            return True
+
+        asks_what_said = bool(re.search(r"\bcosa\s+ha\s+detto\b|\bha\s+detto\b", q_norm))
+        speech_tokens = ["ha detto", "ha promesso", "ha confermato", "ha scritto", "ha risposto"]
+        if asks_what_said and any(token in b_norm for token in speech_tokens):
+            return True
+        return False
+
+    def _truncate_embed_description(self, description: str, *, max_len: int = 4096) -> str:
+        if len(description) <= max_len:
+            return description
+        return description[: max_len - 1].rstrip() + "…"
 
     async def _build_qna_payload(
         self,
@@ -892,6 +1045,9 @@ class TriggerEngineService:
             "rispondi in italiano",
             "usa solo le prove fornite",
             "non inventare contenuti",
+            "rispondi solo alla domanda senza contesto generale extra",
+            "massimo 4 bullet verificabili",
+            "se non ci sono prove dirette dillo chiaramente",
         ]
         cache_ttl = int(budgets.get("cache_ttl") or 45 * 60)
         empty_reply = ""
@@ -953,21 +1109,21 @@ class TriggerEngineService:
                     "targets": target_rows_for_payload,
                     "per_target_messages": per_target_messages,
                     "focus_instruction": (
-                        "Per ciascun target: 2-5 bullet su cose interessanti, fino a 2 citazioni brevi (<=120 caratteri), "
-                        "ogni punto deve includere un link prova nel formato: [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome. Se mancano prove, dichiaralo."
+                        "Per ciascun target: massimo 4 bullet strettamente pertinenti alla domanda, frasi verificabili e niente contesto generale. "
+                        "Se mancano prove dirette, dichiaralo esplicitamente e non inventare."
                     ),
                 }
             )
 
         if breadth == "broad":
             context["focus_instruction"] = (
-                "Risposta sintetica (max 6 bullet), 2-3 link prova nel formato [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome, niente allucinazioni. "
-                "Chiudi con: Se mi dici un nome o un tema, posso cercare con più precisione nel database del canale."
+                "Risposta sintetica (max 4 bullet) solo su elementi pertinenti alla domanda, senza contesto generale extra. "
+                "Se non ci sono prove dirette, dichiaralo chiaramente e non inventare."
             )
         elif "focus_instruction" not in context:
             context["focus_instruction"] = (
-                "Rispondi alla domanda usando solo le prove. Struttura chiara e inserisci link prova nel formato [🧾 dd/mm HH:MM](jump_url) usando created_at_iso in Europe/Rome. "
-                "Se la domanda è follow-up, usa la conversazione precedente."
+                "Rispondi solo alla domanda usando prove fornite, massimo 4 bullet verificabili e nessun contesto generale. "
+                "Se non ci sono prove dirette, dillo chiaramente senza inventare. Se la domanda è follow-up, usa la conversazione precedente."
             )
 
         prompt_obj = {
