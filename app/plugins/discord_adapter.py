@@ -299,7 +299,10 @@ def setup(registry: ServiceRegistry) -> None:
                 and message.reference.resolved.author.id == bot.user.id
             )
             if mentions_bot or reply_to_bot:
-                await trigger_engine.handle_message_qna(message)
+                try:
+                    await trigger_engine.handle_message_qna(message)
+                except Exception:  # noqa: BLE001
+                    logger.exception("on_message qna handler failed", extra={"message_id": str(message.id)})
 
     @bot.event
     async def on_message_edit(before: discord.Message, after: discord.Message) -> None:
