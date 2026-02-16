@@ -46,6 +46,44 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await ctx.database.set_trigger_enabled(guild_id, channel_id, key, enabled)
         await interaction.response.send_message(f"Trigger {key} {'abilitato' if enabled else 'disabilitato'}.", ephemeral=True)
 
+    async def _require_mod(interaction: discord.Interaction) -> bool:
+        profile = await ctx.entitlements.resolve_profile(interaction.user)
+        if profile == "mod":
+            return True
+        await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+        return False
+
+    def _normalize_phrase_templates_state(raw_state: dict[str, object]) -> dict[str, object]:
+        state: dict[str, object] = {}
+
+        templates: dict[str, str] = {}
+        raw_templates = raw_state.get("templates")
+        if isinstance(raw_templates, dict):
+            for kind in ("DEFAULT", "FIRST"):
+                value = raw_templates.get(kind)
+                if isinstance(value, str):
+                    templates[kind] = value
+        if templates:
+            state["templates"] = templates
+
+        per_user: dict[str, dict[str, str]] = {}
+        raw_per_user = raw_state.get("per_user")
+        if isinstance(raw_per_user, dict):
+            for user_id, user_templates_raw in raw_per_user.items():
+                if not isinstance(user_id, str) or not isinstance(user_templates_raw, dict):
+                    continue
+                clean_user_templates: dict[str, str] = {}
+                for kind in ("DEFAULT", "FIRST"):
+                    value = user_templates_raw.get(kind)
+                    if isinstance(value, str):
+                        clean_user_templates[kind] = value
+                if clean_user_templates:
+                    per_user[user_id] = clean_user_templates
+        if per_user:
+            state["per_user"] = per_user
+
+        return state
+
     @barcello_group.command(name="on", description="Abilita trigger barcello")
     async def barcello_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "barcello", "on")
@@ -115,6 +153,86 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             return
         lines = [f"{r['id']}. {r['phrase']} [{r['match_mode']}] {'cs' if r['case_sensitive'] else 'ci'}" for r in rows]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @frasi_group.command(name="template_show", description="Mostra template trigger frasi")
+    async def frasi_template_show(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        if not await _require_mod(interaction):
+            return
+        guild_id, channel_id = scope
+        state = await ctx.database.get_trigger_state(guild_id, channel_id, "frasi")
+        normalized = _normalize_phrase_templates_state(state)
+        pretty = json.dumps(normalized, ensure_ascii=False, indent=2)
+        guide = (
+            "Placeholder disponibili:\n"
+            "{author}, {author_name}, {phrase}, {count_user}, {last_seen_human}, {last_seen_dt}"
+        )
+        await interaction.response.send_message(f"```json\n{pretty}\n```\n{guide}", ephemeral=True)
+
+    @frasi_group.command(name="template_set", description="Imposta template trigger frasi (canale)")
+    @app_commands.choices(
+        kind=[
+            app_commands.Choice(name="DEFAULT", value="DEFAULT"),
+            app_commands.Choice(name="FIRST", value="FIRST"),
+        ]
+    )
+    async def frasi_template_set(interaction: discord.Interaction, kind: app_commands.Choice[str], text: str) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        if not await _require_mod(interaction):
+            return
+        guild_id, channel_id = scope
+        state = await ctx.database.get_trigger_state(guild_id, channel_id, "frasi")
+        normalized = _normalize_phrase_templates_state(state)
+        templates = dict(normalized.get("templates") or {})
+        templates[kind.value] = text
+        normalized["templates"] = templates
+        await ctx.database.set_trigger_state(guild_id, channel_id, "frasi", normalized)
+        await interaction.response.send_message(f"Template {kind.value} aggiornato.", ephemeral=True)
+
+    @frasi_group.command(name="template_set_user", description="Imposta template trigger frasi per utente")
+    @app_commands.choices(
+        kind=[
+            app_commands.Choice(name="DEFAULT", value="DEFAULT"),
+            app_commands.Choice(name="FIRST", value="FIRST"),
+        ]
+    )
+    async def frasi_template_set_user(
+        interaction: discord.Interaction,
+        user: discord.Member,
+        kind: app_commands.Choice[str],
+        text: str,
+    ) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        if not await _require_mod(interaction):
+            return
+        guild_id, channel_id = scope
+        state = await ctx.database.get_trigger_state(guild_id, channel_id, "frasi")
+        normalized = _normalize_phrase_templates_state(state)
+        per_user = dict(normalized.get("per_user") or {})
+        user_id = str(user.id)
+        user_templates = dict(per_user.get(user_id) or {})
+        user_templates[kind.value] = text
+        per_user[user_id] = user_templates
+        normalized["per_user"] = per_user
+        await ctx.database.set_trigger_state(guild_id, channel_id, "frasi", normalized)
+        await interaction.response.send_message(f"Template {kind.value} aggiornato per {user.mention}.", ephemeral=True)
+
+    @frasi_group.command(name="template_reset", description="Reset template trigger frasi")
+    async def frasi_template_reset(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        if not await _require_mod(interaction):
+            return
+        guild_id, channel_id = scope
+        await ctx.database.set_trigger_state(guild_id, channel_id, "frasi", {})
+        await interaction.response.send_message("Template trigger frasi resettati (fallback attivo).", ephemeral=True)
 
     @prompt_group.command(name="on", description="Abilita trigger prompt")
     async def prompt_on(interaction: discord.Interaction) -> None:
