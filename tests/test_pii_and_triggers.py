@@ -263,3 +263,71 @@ def test_bulletize_answer_no_target_evidence_has_no_links() -> None:
     out = service._bulletize_answer("è vero che Daniela ha detto live senza censura alle 20?", answer, evidence)
     assert out == "Non ho trovato prove dirette di un messaggio di Daniela nel periodo richiesto."
     assert "https://discord.com/channels/1/2/3" not in out
+
+
+def test_render_barcello_transition_uses_first_today_template_and_new_placeholders() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    templates = {
+        "GIALLO_FIRST_TODAY": "Prima volta oggi in {new}: #{state_count_today}",
+        "ROSSO->GIALLO": "fallback {new}",
+    }
+
+    out = service._render_barcello_transition(
+        "ROSSO",
+        "GIALLO",
+        70,
+        50,
+        templates=templates,
+        first_today_for_new=True,
+        extra_placeholders={"state_count_today": "1"},
+    )
+    assert out == "Prima volta oggi in GIALLO: #1"
+
+
+def test_render_barcello_transition_falls_back_to_english_transition_key() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    templates = {"GREEN->YELLOW": "{old}->{new} {state_count_today} {last_in_state_human} {last_in_state_dt}"}
+
+    out = service._render_barcello_transition(
+        "VERDE",
+        "GIALLO",
+        10,
+        20,
+        templates=templates,
+        extra_placeholders={
+            "state_count_today": "2",
+            "last_in_state_human": "3 ore",
+            "last_in_state_dt": "16/02/2026 19:15",
+        },
+    )
+    assert out == "VERDE->GIALLO 2 3 ore 16/02/2026 19:15"
+
+
+def test_format_barcello_last_seen_helpers() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    now = datetime(2026, 2, 16, 19, 15, tzinfo=ZoneInfo("UTC"))
+
+    assert service._format_barcello_last_seen_human(None, now) == "mai"
+    assert service._format_barcello_last_seen_dt(None) == "mai"
+
+    last_seen = "2026-02-16T18:15:00+00:00"
+    assert service._format_barcello_last_seen_human(last_seen, now) == "60 minuti"
+    assert service._format_barcello_last_seen_dt(last_seen) == "16/02/2026 19:15"
+
+
+def test_apply_hysteresis_blocks_flapping_for_green_yellow_band() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._apply_hysteresis("VERDE", "GIALLO", 59) == "VERDE"
+    assert service._apply_hysteresis("GIALLO", "VERDE", 61) == "GIALLO"
+
+
+def test_apply_hysteresis_allows_real_transition_past_threshold() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._apply_hysteresis("VERDE", "GIALLO", 57) == "GIALLO"
+    assert service._apply_hysteresis("ROSSO", "NERO", 17) == "NERO"
+
+
+def test_apply_hysteresis_keeps_raw_when_prev_unknown_or_jump_transition() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._apply_hysteresis(None, "GIALLO", 50) == "GIALLO"
+    assert service._apply_hysteresis("VERDE", "ROSSO", 20) == "ROSSO"
