@@ -5,10 +5,12 @@ import difflib
 import json
 import logging
 import hashlib
+import random
 import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from typing import Any
 
 import discord
 
@@ -629,13 +631,21 @@ class TriggerEngineService:
         total_days = total_hours // 24
         return f"{total_days} giorni"
 
+    def _pick_template_value(self, value: Any) -> str:
+        if isinstance(value, list):
+            options = [v for v in value if isinstance(v, str) and v.strip()]
+            return random.choice(options) if options else ""
+        if isinstance(value, str):
+            return value
+        return ""
+
     def _render_barcello_transition(
         self,
         old: str | None,
         new: str,
         old_score: int | None,
         new_score: int,
-        templates: dict[str, str] | None = None,
+        templates: dict[str, Any] | None = None,
         first_today_for_new: bool = False,
         extra_placeholders: dict[str, str] | None = None,
     ) -> str:
@@ -657,13 +667,14 @@ class TriggerEngineService:
                 if raw is not None:
                     values[key] = str(raw)
 
-        def render_template(message_template: str | None) -> str | None:
-            if not isinstance(message_template, str):
+        def render_template(message_template: Any) -> str | None:
+            selected_template = self._pick_template_value(message_template)
+            if not selected_template:
                 return None
             return re.sub(
                 r"\{(old|new|old_score|new_score|state_count_today|last_in_state_human|last_in_state_dt)\}",
                 lambda match: values[match.group(1)],
-                message_template,
+                selected_template,
             )
 
         if old is None:

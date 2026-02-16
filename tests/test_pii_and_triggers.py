@@ -331,3 +331,38 @@ def test_apply_hysteresis_keeps_raw_when_prev_unknown_or_jump_transition() -> No
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     assert service._apply_hysteresis(None, "GIALLO", 50) == "GIALLO"
     assert service._apply_hysteresis("VERDE", "ROSSO", 20) == "ROSSO"
+
+
+def test_pick_template_value_supports_string_and_list() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._pick_template_value("ciao") == "ciao"
+    picked = service._pick_template_value(["uno", "due"])
+    assert picked in {"uno", "due"}
+
+
+def test_pick_template_value_ignores_invalid_or_empty_list_entries() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._pick_template_value([]) == ""
+    assert service._pick_template_value([None, "", "  "]) == ""
+
+
+def test_render_barcello_transition_renders_placeholders_with_list_template() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    templates = {
+        "VERDE->GIALLO": [
+            "A {old}->{new} {new_score} #{state_count_today}",
+            "B {old}->{new} {new_score} #{state_count_today}",
+        ]
+    }
+    out = service._render_barcello_transition(
+        "VERDE",
+        "GIALLO",
+        70,
+        59,
+        templates=templates,
+        extra_placeholders={"state_count_today": "1"},
+    )
+    assert out in {
+        "A VERDE->GIALLO 59 #1",
+        "B VERDE->GIALLO 59 #1",
+    }
