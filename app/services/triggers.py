@@ -5,10 +5,12 @@ import difflib
 import json
 import logging
 import hashlib
+import random
 import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from typing import Any
 
 import discord
 
@@ -49,7 +51,6 @@ class TriggerEngineService:
         self._community_insights = community_insights or CommunityInsightsService(ai_service)
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
-        self._barcello_cooldown: dict[str, datetime] = {}
 
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
@@ -320,6 +321,12 @@ class TriggerEngineService:
         min_messages = config.get("min_messages")
         if not isinstance(min_messages, int) or min_messages <= 0:
             min_messages = 10
+        cooldown_minutes = config.get("cooldown_minutes")
+        if not isinstance(cooldown_minutes, int) or cooldown_minutes < 0:
+            cooldown_minutes = 0
+        min_score_delta_for_notify = config.get("min_score_delta_for_notify")
+        if not isinstance(min_score_delta_for_notify, int) or min_score_delta_for_notify < 0:
+            min_score_delta_for_notify = 0
         raw_templates = config.get("templates")
         templates = raw_templates if isinstance(raw_templates, dict) else {}
         rows = await self._database.list_enabled_trigger_channels("barcello")
@@ -350,27 +357,68 @@ class TriggerEngineService:
                 continue
             status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
             color = self._normalize_barcello_color(status.get("color"))
-            stored_color = color or ""
+            raw_color = color or ""
             score = int(status.get("score") or 0)
             prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
             prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
             prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
+            stable_color = self._apply_hysteresis(prev_color, raw_color, score)
             now = datetime.now(timezone.utc)
-            cooldown_key = f"{guild_id}:{channel_id}"
-            last_sent = self._barcello_cooldown.get(cooldown_key)
-            if last_sent and (now - last_sent) < timedelta(minutes=10):
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
+            now_iso = now.isoformat()
+
+            if prev_color is not None and stable_color == prev_color:
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
                 continue
-            if prev_color and prev_score is not None:
-                if color == prev_color and abs(score - prev_score) < 5:
-                    await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
-                    continue
-            msg = self._render_barcello_transition(prev_color, stored_color, prev_score, score, templates=templates)
+
+            if prev_score is not None and abs(score - prev_score) < min_score_delta_for_notify:
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
+                continue
+
+            if cooldown_minutes > 0:
+                last_notified_ts = await self._database.get_barcello_last_notified(guild_id, channel_id, stable_color)
+                if last_notified_ts:
+                    try:
+                        notified_dt = datetime.fromisoformat(last_notified_ts)
+                        if notified_dt.tzinfo is None:
+                            notified_dt = notified_dt.replace(tzinfo=timezone.utc)
+                        if (now - notified_dt) < timedelta(minutes=cooldown_minutes):
+                            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
+                            continue
+                    except ValueError:
+                        pass
+
+            day_date = datetime.now(ROME_TZ).date().isoformat()
+            last_seen_ts = await self._database.get_barcello_last_seen_for_color(guild_id, channel_id, stable_color)
+            daily = await self._database.get_barcello_daily_color_stats(guild_id, channel_id, day_date, stable_color)
+            state_count_today = int(daily.get("count", 0)) + 1
+            first_today_for_new = state_count_today == 1
+            extra_placeholders = {
+                "state_count_today": str(state_count_today),
+                "last_in_state_human": self._format_barcello_last_seen_human(last_seen_ts, now),
+                "last_in_state_dt": self._format_barcello_last_seen_dt(last_seen_ts),
+            }
+
+            msg = self._render_barcello_transition(
+                prev_color,
+                stable_color,
+                prev_score,
+                score,
+                templates=templates,
+                first_today_for_new=first_today_for_new,
+                extra_placeholders=extra_placeholders,
+            )
+            embed = discord.Embed(
+                title="🫛 AGGIORNAMENTO STATO BARCELLO",
+                description=msg,
+                color=self._barcello_embed_color(stable_color),
+            )
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and msg:
-                await channel.send(msg)
-                self._barcello_cooldown[cooldown_key] = now
-            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
+                await channel.send(embed=embed)
+                await self._database.set_barcello_last_notified(guild_id, channel_id, stable_color, now_iso)
+            await self._database.set_barcello_last_seen_for_color(guild_id, channel_id, stable_color, now_iso)
+            await self._database.increment_barcello_daily_color(guild_id, channel_id, day_date, stable_color, now_iso)
+            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
 
     async def _handle_phrases(self, envelope: EventEnvelope) -> None:
         assert envelope.guild_id and envelope.channel_id
@@ -442,27 +490,116 @@ class TriggerEngineService:
             return mapped
         return normalized
 
+    def _apply_hysteresis(self, prev_color: str | None, raw_color: str, score: int) -> str:
+        if prev_color is None:
+            return raw_color
+        if prev_color == raw_color:
+            return prev_color
+
+        thresholds: dict[tuple[str, str], int] = {
+            ("VERDE", "GIALLO"): 57,
+            ("GIALLO", "VERDE"): 63,
+            ("GIALLO", "ROSSO"): 37,
+            ("ROSSO", "GIALLO"): 43,
+            ("ROSSO", "NERO"): 17,
+            ("NERO", "ROSSO"): 23,
+        }
+        threshold = thresholds.get((prev_color, raw_color))
+        if threshold is None:
+            return raw_color
+
+        increase_transitions = {("GIALLO", "VERDE"), ("ROSSO", "GIALLO"), ("NERO", "ROSSO")}
+        if (prev_color, raw_color) in increase_transitions:
+            return raw_color if score >= threshold else prev_color
+        return raw_color if score <= threshold else prev_color
+
+    def _barcello_embed_color(self, color: str) -> discord.Color:
+        normalized_color = self._normalize_barcello_color(color) or ""
+        mapping = {
+            "VERDE": discord.Color.green(),
+            "GIALLO": discord.Color.gold(),
+            "ROSSO": discord.Color.red(),
+            "NERO": discord.Color.dark_grey(),
+        }
+        return mapping.get(normalized_color, discord.Color.blurple())
+
+    def _format_barcello_last_seen_dt(self, last_seen_ts: str | None) -> str:
+        if not last_seen_ts:
+            return "mai"
+        try:
+            dt = datetime.fromisoformat(last_seen_ts)
+        except ValueError:
+            return "mai"
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
+
+    def _format_barcello_last_seen_human(self, last_seen_ts: str | None, now_utc: datetime) -> str:
+        if not last_seen_ts:
+            return "mai"
+        try:
+            then = datetime.fromisoformat(last_seen_ts)
+        except ValueError:
+            return "mai"
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        delta_seconds = int((now_utc - then).total_seconds())
+        if delta_seconds < 0:
+            delta_seconds = 0
+        total_minutes = delta_seconds // 60
+        if total_minutes < 120:
+            return f"{total_minutes} minuti"
+        total_hours = total_minutes // 60
+        if total_hours < 48:
+            return f"{total_hours} ore"
+        total_days = total_hours // 24
+        return f"{total_days} giorni"
+
+    def _pick_template_value(self, value: Any) -> str:
+        if isinstance(value, list):
+            options = [v for v in value if isinstance(v, str) and v.strip()]
+            return random.choice(options) if options else ""
+        if isinstance(value, str):
+            return value
+        return ""
+
     def _render_barcello_transition(
         self,
         old: str | None,
         new: str,
         old_score: int | None,
         new_score: int,
-        templates: dict[str, str] | None = None,
+        templates: dict[str, Any] | None = None,
+        first_today_for_new: bool = False,
+        extra_placeholders: dict[str, str] | None = None,
     ) -> str:
         worsening = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
+        italian_to_english = {"VERDE": "GREEN", "GIALLO": "YELLOW", "ROSSO": "RED", "NERO": "BLACK"}
         template_dict = templates if isinstance(templates, dict) else {}
         values = {
             "old": old or "",
             "new": new,
             "old_score": "" if old_score is None else str(old_score),
             "new_score": str(new_score),
+            "state_count_today": "",
+            "last_in_state_human": "",
+            "last_in_state_dt": "",
         }
+        if isinstance(extra_placeholders, dict):
+            for key in ("state_count_today", "last_in_state_human", "last_in_state_dt"):
+                raw = extra_placeholders.get(key)
+                if raw is not None:
+                    values[key] = str(raw)
 
-        def render_template(message_template: str | None) -> str | None:
-            if not isinstance(message_template, str):
+        def render_template(message_template: Any) -> str | None:
+            selected_template = self._pick_template_value(message_template)
+            if not selected_template:
                 return None
-            return re.sub(r"\{(old|new|old_score|new_score)\}", lambda match: values[match.group(1)], message_template)
+            return re.sub(
+                r"\{(old|new|old_score|new_score|state_count_today|last_in_state_human|last_in_state_dt)\}",
+                lambda match: values[match.group(1)],
+                selected_template,
+            )
 
         if old is None:
             return render_template(template_dict.get("INIT")) or f"📌 Barcello ora {new} (score {new_score})"
@@ -471,7 +608,18 @@ class TriggerEngineService:
         severity_old = worsening.get(old, 99)
 
         if old != new:
+            if first_today_for_new:
+                first_today_template = render_template(template_dict.get(f"{new}_FIRST_TODAY"))
+                if not first_today_template:
+                    first_today_template = render_template(template_dict.get("FIRST_TODAY"))
+                if first_today_template:
+                    return first_today_template
+
             exact_template = render_template(template_dict.get(f"{old}->{new}"))
+            if not exact_template:
+                old_en = italian_to_english.get(old, old)
+                new_en = italian_to_english.get(new, new)
+                exact_template = render_template(template_dict.get(f"{old_en}->{new_en}"))
             if exact_template:
                 return exact_template
 

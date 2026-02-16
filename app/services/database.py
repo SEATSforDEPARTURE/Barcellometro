@@ -262,6 +262,33 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, channel_id)
             );
 
+            CREATE TABLE IF NOT EXISTS trigger_barcello_state_last_seen (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                color TEXT NOT NULL,
+                last_seen_ts TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, color)
+            );
+
+            CREATE TABLE IF NOT EXISTS trigger_barcello_daily_state_stats (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                day_date TEXT NOT NULL,
+                color TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                first_seen_ts TEXT NULL,
+                last_seen_ts TEXT NULL,
+                PRIMARY KEY (guild_id, channel_id, day_date, color)
+            );
+
+            CREATE TABLE IF NOT EXISTS trigger_barcello_notify_cooldown (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                color TEXT NOT NULL,
+                last_notified_ts TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, color)
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_phrases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
@@ -1029,6 +1056,112 @@ class DatabaseService:
                 last_ts = excluded.last_ts
             """,
             (guild_id, channel_id, last_color, last_score, last_ts),
+        )
+
+    async def get_barcello_last_seen_for_color(self, guild_id: str, channel_id: str, color: str) -> Optional[str]:
+        row = await self.fetchone(
+            """
+            SELECT last_seen_ts
+            FROM trigger_barcello_state_last_seen
+            WHERE guild_id = ? AND channel_id = ? AND color = ?
+            """,
+            (guild_id, channel_id, color),
+        )
+        return str(row["last_seen_ts"]) if row and row["last_seen_ts"] else None
+
+    async def set_barcello_last_seen_for_color(self, guild_id: str, channel_id: str, color: str, ts: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_barcello_state_last_seen (guild_id, channel_id, color, last_seen_ts)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, color) DO UPDATE SET
+                last_seen_ts = excluded.last_seen_ts
+            """,
+            (guild_id, channel_id, color, ts),
+        )
+
+    async def get_barcello_daily_color_stats(
+        self,
+        guild_id: str,
+        channel_id: str,
+        day_date: str,
+        color: str,
+    ) -> dict[str, Any]:
+        row = await self.fetchone(
+            """
+            SELECT count, first_seen_ts, last_seen_ts
+            FROM trigger_barcello_daily_state_stats
+            WHERE guild_id = ? AND channel_id = ? AND day_date = ? AND color = ?
+            """,
+            (guild_id, channel_id, day_date, color),
+        )
+        if not row:
+            return {"count": 0, "first_seen_ts": None, "last_seen_ts": None}
+        return {
+            "count": int(row["count"] or 0),
+            "first_seen_ts": row["first_seen_ts"],
+            "last_seen_ts": row["last_seen_ts"],
+        }
+
+    async def increment_barcello_daily_color(
+        self,
+        guild_id: str,
+        channel_id: str,
+        day_date: str,
+        color: str,
+        ts: str,
+    ) -> tuple[int, bool]:
+        existing = await self.fetchone(
+            """
+            SELECT count
+            FROM trigger_barcello_daily_state_stats
+            WHERE guild_id = ? AND channel_id = ? AND day_date = ? AND color = ?
+            """,
+            (guild_id, channel_id, day_date, color),
+        )
+        if not existing:
+            await self.execute(
+                """
+                INSERT INTO trigger_barcello_daily_state_stats (
+                    guild_id, channel_id, day_date, color, count, first_seen_ts, last_seen_ts
+                )
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+                """,
+                (guild_id, channel_id, day_date, color, ts, ts),
+            )
+            return 1, True
+
+        new_count = int(existing["count"] or 0) + 1
+        await self.execute(
+            """
+            UPDATE trigger_barcello_daily_state_stats
+            SET count = ?, last_seen_ts = ?
+            WHERE guild_id = ? AND channel_id = ? AND day_date = ? AND color = ?
+            """,
+            (new_count, ts, guild_id, channel_id, day_date, color),
+        )
+        return new_count, False
+
+    async def get_barcello_last_notified(self, guild_id: str, channel_id: str, color: str) -> Optional[str]:
+        row = await self.fetchone(
+            """
+            SELECT last_notified_ts
+            FROM trigger_barcello_notify_cooldown
+            WHERE guild_id = ? AND channel_id = ? AND color = ?
+            """,
+            (guild_id, channel_id, color),
+        )
+        return str(row["last_notified_ts"]) if row and row["last_notified_ts"] else None
+
+    async def set_barcello_last_notified(self, guild_id: str, channel_id: str, color: str, ts: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_barcello_notify_cooldown (guild_id, channel_id, color, last_notified_ts)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, color) DO UPDATE SET
+                last_notified_ts = excluded.last_notified_ts
+            """,
+            (guild_id, channel_id, color, ts),
         )
 
     async def add_trigger_phrase(
