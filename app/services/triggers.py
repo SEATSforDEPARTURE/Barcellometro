@@ -22,6 +22,18 @@ from app.utils.pii import contains_pii
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
+PHRASE_FALLBACK_TEMPLATES = {
+    "DEFAULT": "Questa frase è riapparsa! Ultima volta: {last_seen_human} fa ({last_seen_dt}). È la tua {count_user}ª volta.",
+    "FIRST": "Frase rilevata per la prima volta in questo trigger. È la tua {count_user}ª volta.",
+}
+PHRASE_PLACEHOLDERS = {
+    "{author}",
+    "{author_name}",
+    "{phrase}",
+    "{count_user}",
+    "{last_seen_human}",
+    "{last_seen_dt}",
+}
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 IT_STOPWORDS = {
     "a", "ad", "ai", "al", "all", "alla", "alle", "anche", "avete", "che", "chi", "ci", "coi", "col", "come",
@@ -410,18 +422,28 @@ class TriggerEngineService:
         channel = self._bot.get_channel(int(envelope.channel_id))
         if channel is None or not isinstance(channel, discord.TextChannel):
             return
+        phrase_id = int(phrase["id"])
         ts = datetime.now(timezone.utc).isoformat()
         message_id = str(envelope.meta.get("message_id") or "")
-        if phrase.get("last_seen_ts"):
-            try:
-                delta = datetime.now(timezone.utc) - datetime.fromisoformat(str(phrase["last_seen_ts"]))
-                total_min = int(delta.total_seconds() // 60)
-                human = f"{total_min} minuti" if total_min < 120 else f"{total_min // 60} ore"
-            except ValueError:
-                human = "un po' di tempo"
-            text = f"Questa frase è riapparsa! Ultima volta: {human} fa."
-        else:
-            text = "Frase rilevata per la prima volta in questo trigger."
+        author_id = str(envelope.author_id or "")
+        author_name = await self._resolve_phrase_author_name(envelope, channel)
+
+        state = await self._database.get_trigger_state(envelope.guild_id, envelope.channel_id, "frasi")
+
+        previous_seen = self._build_last_seen_values(phrase.get("last_seen_ts"))
+        template_kind = "DEFAULT" if phrase.get("last_seen_ts") else "FIRST"
+        template = self._resolve_phrase_template(state, author_id=author_id, kind=template_kind)
+
+        count_user = await self._database.increment_phrase_user_stats(phrase_id, author_id, ts, message_id)
+        values = {
+            "author": f"<@{author_id}>" if author_id else "",
+            "author_name": author_name,
+            "phrase": str(phrase.get("phrase") or ""),
+            "count_user": str(count_user),
+            "last_seen_human": previous_seen["human"],
+            "last_seen_dt": previous_seen["dt"],
+        }
+        text = self._render_phrase_template(template, values)
         if message_id:
             try:
                 target = await channel.fetch_message(int(message_id))
@@ -430,7 +452,61 @@ class TriggerEngineService:
                 await channel.send(text)
         else:
             await channel.send(text)
-        await self._database.update_phrase_last_seen(int(phrase["id"]), ts, message_id)
+        await self._database.update_phrase_last_seen(phrase_id, ts, message_id)
+
+    async def _resolve_phrase_author_name(self, envelope: EventEnvelope, channel: discord.TextChannel) -> str:
+        author_id = str(envelope.author_id or "")
+        if not author_id:
+            return "utente"
+        cached = await self._database.fetch_user_display_name(guild_id=str(channel.guild.id), user_id=author_id)
+        if cached:
+            return str(cached)
+        if author_id.isdigit():
+            member = channel.guild.get_member(int(author_id))
+            if member is not None:
+                return member.display_name
+        return author_id
+
+    def _resolve_phrase_template(self, state: dict[str, object], *, author_id: str, kind: str) -> str:
+        templates: dict[str, object] = {}
+        if isinstance(state.get("templates"), dict):
+            templates = dict(state["templates"])
+        per_user_templates: dict[str, object] = {}
+        if isinstance(state.get("per_user"), dict) and author_id:
+            raw = state["per_user"].get(author_id)
+            if isinstance(raw, dict):
+                per_user_templates = dict(raw)
+
+        selected = per_user_templates.get(kind) or templates.get(kind) or PHRASE_FALLBACK_TEMPLATES[kind]
+        return str(selected)
+
+    def _build_last_seen_values(self, last_seen_ts: object) -> dict[str, str]:
+        if not last_seen_ts:
+            return {"human": "mai", "dt": ""}
+        try:
+            last_seen = datetime.fromisoformat(str(last_seen_ts))
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            delta = max(now - last_seen, timedelta())
+            total_minutes = int(delta.total_seconds() // 60)
+            if total_minutes < 120:
+                human = f"{total_minutes} minuti"
+            elif total_minutes < 60 * 24 * 2:
+                human = f"{total_minutes // 60} ore"
+            else:
+                human = f"{total_minutes // (60 * 24)} giorni"
+            dt_text = last_seen.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
+            return {"human": human, "dt": dt_text}
+        except ValueError:
+            return {"human": "un po' di tempo", "dt": ""}
+
+    def _render_phrase_template(self, template: str, values: dict[str, str]) -> str:
+        rendered = template
+        for placeholder in PHRASE_PLACEHOLDERS:
+            key = placeholder[1:-1]
+            rendered = rendered.replace(placeholder, values.get(key, ""))
+        return rendered
 
     def _phrase_matches(self, content: str, phrase: dict[str, object]) -> bool:
         raw_phrase = str(phrase.get("phrase") or "")
