@@ -49,7 +49,6 @@ class TriggerEngineService:
         self._community_insights = community_insights or CommunityInsightsService(ai_service)
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
-        self._barcello_cooldown: dict[str, datetime] = {}
 
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
@@ -356,20 +355,20 @@ class TriggerEngineService:
             prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
             prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
             now = datetime.now(timezone.utc)
-            cooldown_key = f"{guild_id}:{channel_id}"
-            last_sent = self._barcello_cooldown.get(cooldown_key)
-            if last_sent and (now - last_sent) < timedelta(minutes=10):
+
+            if prev_color is not None and stored_color == prev_color:
                 await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
                 continue
-            if prev_color and prev_score is not None:
-                if color == prev_color and abs(score - prev_score) < 5:
-                    await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
-                    continue
+
             msg = self._render_barcello_transition(prev_color, stored_color, prev_score, score, templates=templates)
+            embed = discord.Embed(
+                title="🫛 AGGIORNAMENTO STATO BARCELLO",
+                description=msg,
+                color=self._barcello_embed_color(stored_color),
+            )
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and msg:
-                await channel.send(msg)
-                self._barcello_cooldown[cooldown_key] = now
+                await channel.send(embed=embed)
             await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
 
     async def _handle_phrases(self, envelope: EventEnvelope) -> None:
@@ -442,6 +441,16 @@ class TriggerEngineService:
             return mapped
         return normalized
 
+    def _barcello_embed_color(self, color: str) -> discord.Color:
+        normalized_color = self._normalize_barcello_color(color) or ""
+        mapping = {
+            "VERDE": discord.Color.green(),
+            "GIALLO": discord.Color.gold(),
+            "ROSSO": discord.Color.red(),
+            "NERO": discord.Color.dark_grey(),
+        }
+        return mapping.get(normalized_color, discord.Color.blurple())
+
     def _render_barcello_transition(
         self,
         old: str | None,
@@ -451,6 +460,7 @@ class TriggerEngineService:
         templates: dict[str, str] | None = None,
     ) -> str:
         worsening = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
+        italian_to_english = {"VERDE": "GREEN", "GIALLO": "YELLOW", "ROSSO": "RED", "NERO": "BLACK"}
         template_dict = templates if isinstance(templates, dict) else {}
         values = {
             "old": old or "",
@@ -472,6 +482,10 @@ class TriggerEngineService:
 
         if old != new:
             exact_template = render_template(template_dict.get(f"{old}->{new}"))
+            if not exact_template:
+                old_en = italian_to_english.get(old, old)
+                new_en = italian_to_english.get(new, new)
+                exact_template = render_template(template_dict.get(f"{old_en}->{new_en}"))
             if exact_template:
                 return exact_template
 
