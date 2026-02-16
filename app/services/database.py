@@ -275,6 +275,16 @@ class DatabaseService:
                 UNIQUE (guild_id, channel_id, phrase)
             );
 
+            CREATE TABLE IF NOT EXISTS trigger_phrase_user_stats (
+                phrase_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                last_seen_ts TEXT NULL,
+                last_seen_message_id TEXT NULL,
+                PRIMARY KEY (phrase_id, user_id),
+                FOREIGN KEY (phrase_id) REFERENCES trigger_phrases(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_state (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -1076,6 +1086,35 @@ class DatabaseService:
             "UPDATE trigger_phrases SET last_seen_ts = ?, last_seen_message_id = ? WHERE id = ?",
             (ts, message_id, phrase_id),
         )
+
+    async def get_phrase_user_stats(self, phrase_id: int, user_id: str) -> dict[str, Any]:
+        row = await self.fetchone(
+            """
+            SELECT phrase_id, user_id, count, last_seen_ts, last_seen_message_id
+            FROM trigger_phrase_user_stats
+            WHERE phrase_id = ? AND user_id = ?
+            """,
+            (phrase_id, user_id),
+        )
+        return dict(row) if row else {}
+
+    async def increment_phrase_user_stats(self, phrase_id: int, user_id: str, ts: str, message_id: str) -> int:
+        await self.execute(
+            """
+            INSERT INTO trigger_phrase_user_stats (phrase_id, user_id, count, last_seen_ts, last_seen_message_id)
+            VALUES (?, ?, 1, ?, ?)
+            ON CONFLICT(phrase_id, user_id) DO UPDATE SET
+                count = trigger_phrase_user_stats.count + 1,
+                last_seen_ts = excluded.last_seen_ts,
+                last_seen_message_id = excluded.last_seen_message_id
+            """,
+            (phrase_id, user_id, ts, message_id),
+        )
+        row = await self.fetchone(
+            "SELECT count FROM trigger_phrase_user_stats WHERE phrase_id = ? AND user_id = ?",
+            (phrase_id, user_id),
+        )
+        return int(row["count"]) if row else 0
 
     async def get_trigger_state(self, guild_id: str, channel_id: str, trigger_key: str) -> dict[str, Any]:
         row = await self.fetchone(
