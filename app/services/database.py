@@ -281,6 +281,14 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, channel_id, day_date, color)
             );
 
+            CREATE TABLE IF NOT EXISTS trigger_barcello_notify_cooldown (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                color TEXT NOT NULL,
+                last_notified_ts TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, color)
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_phrases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
@@ -1143,6 +1151,28 @@ class DatabaseService:
             (new_count, ts, guild_id, channel_id, day_date, color),
         )
         return new_count, False
+
+    async def get_barcello_last_notified(self, guild_id: str, channel_id: str, color: str) -> Optional[str]:
+        row = await self.fetchone(
+            """
+            SELECT last_notified_ts
+            FROM trigger_barcello_notify_cooldown
+            WHERE guild_id = ? AND channel_id = ? AND color = ?
+            """,
+            (guild_id, channel_id, color),
+        )
+        return str(row["last_notified_ts"]) if row and row["last_notified_ts"] else None
+
+    async def set_barcello_last_notified(self, guild_id: str, channel_id: str, color: str, ts: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_barcello_notify_cooldown (guild_id, channel_id, color, last_notified_ts)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, color) DO UPDATE SET
+                last_notified_ts = excluded.last_notified_ts
+            """,
+            (guild_id, channel_id, color, ts),
+        )
 
     async def add_trigger_phrase(
         self,

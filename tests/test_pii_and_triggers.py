@@ -313,3 +313,21 @@ def test_format_barcello_last_seen_helpers() -> None:
     last_seen = "2026-02-16T18:15:00+00:00"
     assert service._format_barcello_last_seen_human(last_seen, now) == "60 minuti"
     assert service._format_barcello_last_seen_dt(last_seen) == "16/02/2026 19:15"
+
+
+def test_apply_hysteresis_blocks_flapping_for_green_yellow_band() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._apply_hysteresis("VERDE", "GIALLO", 59) == "VERDE"
+    assert service._apply_hysteresis("GIALLO", "VERDE", 61) == "GIALLO"
+
+
+def test_apply_hysteresis_allows_real_transition_past_threshold() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._apply_hysteresis("VERDE", "GIALLO", 57) == "GIALLO"
+    assert service._apply_hysteresis("ROSSO", "NERO", 17) == "NERO"
+
+
+def test_apply_hysteresis_keeps_raw_when_prev_unknown_or_jump_transition() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._apply_hysteresis(None, "GIALLO", 50) == "GIALLO"
+    assert service._apply_hysteresis("VERDE", "ROSSO", 20) == "ROSSO"

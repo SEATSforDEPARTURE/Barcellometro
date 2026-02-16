@@ -331,6 +331,12 @@ class TriggerEngineService:
         min_messages = config.get("min_messages")
         if not isinstance(min_messages, int) or min_messages <= 0:
             min_messages = 10
+        cooldown_minutes = config.get("cooldown_minutes")
+        if not isinstance(cooldown_minutes, int) or cooldown_minutes < 0:
+            cooldown_minutes = 0
+        min_score_delta_for_notify = config.get("min_score_delta_for_notify")
+        if not isinstance(min_score_delta_for_notify, int) or min_score_delta_for_notify < 0:
+            min_score_delta_for_notify = 0
         raw_templates = config.get("templates")
         templates = raw_templates if isinstance(raw_templates, dict) else {}
         rows = await self._database.list_enabled_trigger_channels("barcello")
@@ -361,21 +367,39 @@ class TriggerEngineService:
                 continue
             status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
             color = self._normalize_barcello_color(status.get("color"))
-            stored_color = color or ""
+            raw_color = color or ""
             score = int(status.get("score") or 0)
             prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
             prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
             prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
+            stable_color = self._apply_hysteresis(prev_color, raw_color, score)
             now = datetime.now(timezone.utc)
             now_iso = now.isoformat()
 
-            if prev_color is not None and stored_color == prev_color:
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now_iso)
+            if prev_color is not None and stable_color == prev_color:
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
                 continue
 
+            if prev_score is not None and abs(score - prev_score) < min_score_delta_for_notify:
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
+                continue
+
+            if cooldown_minutes > 0:
+                last_notified_ts = await self._database.get_barcello_last_notified(guild_id, channel_id, stable_color)
+                if last_notified_ts:
+                    try:
+                        notified_dt = datetime.fromisoformat(last_notified_ts)
+                        if notified_dt.tzinfo is None:
+                            notified_dt = notified_dt.replace(tzinfo=timezone.utc)
+                        if (now - notified_dt) < timedelta(minutes=cooldown_minutes):
+                            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
+                            continue
+                    except ValueError:
+                        pass
+
             day_date = datetime.now(ROME_TZ).date().isoformat()
-            last_seen_ts = await self._database.get_barcello_last_seen_for_color(guild_id, channel_id, stored_color)
-            daily = await self._database.get_barcello_daily_color_stats(guild_id, channel_id, day_date, stored_color)
+            last_seen_ts = await self._database.get_barcello_last_seen_for_color(guild_id, channel_id, stable_color)
+            daily = await self._database.get_barcello_daily_color_stats(guild_id, channel_id, day_date, stable_color)
             state_count_today = int(daily.get("count", 0)) + 1
             first_today_for_new = state_count_today == 1
             extra_placeholders = {
@@ -386,7 +410,7 @@ class TriggerEngineService:
 
             msg = self._render_barcello_transition(
                 prev_color,
-                stored_color,
+                stable_color,
                 prev_score,
                 score,
                 templates=templates,
@@ -396,14 +420,15 @@ class TriggerEngineService:
             embed = discord.Embed(
                 title="🫛 AGGIORNAMENTO STATO BARCELLO",
                 description=msg,
-                color=self._barcello_embed_color(stored_color),
+                color=self._barcello_embed_color(stable_color),
             )
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and msg:
                 await channel.send(embed=embed)
-            await self._database.set_barcello_last_seen_for_color(guild_id, channel_id, stored_color, now_iso)
-            await self._database.increment_barcello_daily_color(guild_id, channel_id, day_date, stored_color, now_iso)
-            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now_iso)
+                await self._database.set_barcello_last_notified(guild_id, channel_id, stable_color, now_iso)
+            await self._database.set_barcello_last_seen_for_color(guild_id, channel_id, stable_color, now_iso)
+            await self._database.increment_barcello_daily_color(guild_id, channel_id, day_date, stable_color, now_iso)
+            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
 
     async def _handle_phrases(self, envelope: EventEnvelope) -> None:
         assert envelope.guild_id and envelope.channel_id
@@ -538,6 +563,29 @@ class TriggerEngineService:
         if mapped in canonical:
             return mapped
         return normalized
+
+    def _apply_hysteresis(self, prev_color: str | None, raw_color: str, score: int) -> str:
+        if prev_color is None:
+            return raw_color
+        if prev_color == raw_color:
+            return prev_color
+
+        thresholds: dict[tuple[str, str], int] = {
+            ("VERDE", "GIALLO"): 57,
+            ("GIALLO", "VERDE"): 63,
+            ("GIALLO", "ROSSO"): 37,
+            ("ROSSO", "GIALLO"): 43,
+            ("ROSSO", "NERO"): 17,
+            ("NERO", "ROSSO"): 23,
+        }
+        threshold = thresholds.get((prev_color, raw_color))
+        if threshold is None:
+            return raw_color
+
+        increase_transitions = {("GIALLO", "VERDE"), ("ROSSO", "GIALLO"), ("NERO", "ROSSO")}
+        if (prev_color, raw_color) in increase_transitions:
+            return raw_color if score >= threshold else prev_color
+        return raw_color if score <= threshold else prev_color
 
     def _barcello_embed_color(self, color: str) -> discord.Color:
         normalized_color = self._normalize_barcello_color(color) or ""

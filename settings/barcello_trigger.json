@@ -1,5 +1,7 @@
 {
   "window_minutes": 60,
+  "cooldown_minutes": 10,
+  "min_score_delta_for_notify": 3,
   "templates": {
     "INIT": "📌 Barcello ora {new} (score {new_score})",
     "GREEN->YELLOW": "🟡 Attenzione: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
