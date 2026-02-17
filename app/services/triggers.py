@@ -5,10 +5,12 @@ import difflib
 import json
 import logging
 import hashlib
+import random
 import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from typing import Any
 
 import discord
 
@@ -359,15 +361,21 @@ class TriggerEngineService:
                 continue
             status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
             color = self._normalize_barcello_color(status.get("color"))
-            stored_color = color or ""
+            raw_color = color or ""
             score = int(status.get("score") or 0)
             prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
             prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
             prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
+            stable_color = self._apply_hysteresis(prev_color, raw_color, score)
             now = datetime.now(timezone.utc)
+            now_iso = now.isoformat()
 
-            if prev_color is not None and stored_color == prev_color:
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
+            if prev_color is not None and stable_color == prev_color:
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
+                continue
+
+            if prev_score is not None and abs(score - prev_score) < min_score_delta_for_notify:
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
                 continue
 
             daily_state = await self._database.get_trigger_state(guild_id, channel_id, "barcello_daily")
@@ -421,7 +429,7 @@ class TriggerEngineService:
             embed = discord.Embed(
                 title="🫛 AGGIORNAMENTO STATO BARCELLO",
                 description=msg,
-                color=self._barcello_embed_color(stored_color),
+                color=self._barcello_embed_color(stable_color),
             )
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and msg:
@@ -568,6 +576,29 @@ class TriggerEngineService:
             return mapped
         return normalized
 
+    def _apply_hysteresis(self, prev_color: str | None, raw_color: str, score: int) -> str:
+        if prev_color is None:
+            return raw_color
+        if prev_color == raw_color:
+            return prev_color
+
+        thresholds: dict[tuple[str, str], int] = {
+            ("VERDE", "GIALLO"): 57,
+            ("GIALLO", "VERDE"): 63,
+            ("GIALLO", "ROSSO"): 37,
+            ("ROSSO", "GIALLO"): 43,
+            ("ROSSO", "NERO"): 17,
+            ("NERO", "ROSSO"): 23,
+        }
+        threshold = thresholds.get((prev_color, raw_color))
+        if threshold is None:
+            return raw_color
+
+        increase_transitions = {("GIALLO", "VERDE"), ("ROSSO", "GIALLO"), ("NERO", "ROSSO")}
+        if (prev_color, raw_color) in increase_transitions:
+            return raw_color if score >= threshold else prev_color
+        return raw_color if score <= threshold else prev_color
+
     def _barcello_embed_color(self, color: str) -> discord.Color:
         normalized_color = self._normalize_barcello_color(color) or ""
         mapping = {
@@ -577,6 +608,46 @@ class TriggerEngineService:
             "NERO": discord.Color.dark_grey(),
         }
         return mapping.get(normalized_color, discord.Color.blurple())
+
+    def _format_barcello_last_seen_dt(self, last_seen_ts: str | None) -> str:
+        if not last_seen_ts:
+            return "mai"
+        try:
+            dt = datetime.fromisoformat(last_seen_ts)
+        except ValueError:
+            return "mai"
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
+
+    def _format_barcello_last_seen_human(self, last_seen_ts: str | None, now_utc: datetime) -> str:
+        if not last_seen_ts:
+            return "mai"
+        try:
+            then = datetime.fromisoformat(last_seen_ts)
+        except ValueError:
+            return "mai"
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        delta_seconds = int((now_utc - then).total_seconds())
+        if delta_seconds < 0:
+            delta_seconds = 0
+        total_minutes = delta_seconds // 60
+        if total_minutes < 120:
+            return f"{total_minutes} minuti"
+        total_hours = total_minutes // 60
+        if total_hours < 48:
+            return f"{total_hours} ore"
+        total_days = total_hours // 24
+        return f"{total_days} giorni"
+
+    def _pick_template_value(self, value: Any) -> str:
+        if isinstance(value, list):
+            options = [v for v in value if isinstance(v, str) and v.strip()]
+            return random.choice(options) if options else ""
+        if isinstance(value, str):
+            return value
+        return ""
 
     def _render_barcello_transition(
         self,
