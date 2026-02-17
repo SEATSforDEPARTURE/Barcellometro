@@ -263,3 +263,41 @@ def test_bulletize_answer_no_target_evidence_has_no_links() -> None:
     out = service._bulletize_answer("è vero che Daniela ha detto live senza censura alle 20?", answer, evidence)
     assert out == "Non ho trovato prove dirette di un messaggio di Daniela nel periodo richiesto."
     assert "https://discord.com/channels/1/2/3" not in out
+
+
+def test_select_barcello_template_prefers_mood_and_time_override() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    cfg = {
+        "templates": {"VERDE->GIALLO": "base"},
+        "moods": {
+            "drama": {
+                "templates": {"VERDE->GIALLO": "mood"},
+                "time": {"night": {"templates": {"VERDE->GIALLO": "night"}}},
+            }
+        },
+    }
+    selected = service._select_barcello_template(cfg, "1", "drama", "night", "t1", "VERDE->GIALLO")
+    assert selected == "night"
+
+
+def test_select_barcello_template_prefers_channel_override() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    cfg = {
+        "templates": {"VERDE->GIALLO": "base"},
+        "moods": {"drama": {"templates": {"VERDE->GIALLO": "global-mood"}}},
+        "channels": {
+            "42": {
+                "moods": {"drama": {"templates": {"VERDE->GIALLO": "channel-mood"}}},
+            }
+        },
+    }
+    selected = service._select_barcello_template(cfg, "42", "drama", "night", "t1", "VERDE->GIALLO")
+    assert selected == "channel-mood"
+
+
+def test_resolve_template_value_handles_deterministic_list_choice() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    selected_a = service._resolve_template_value(["a", "b", "c"], seed_parts=("g", "c", "k", "m", "t", "d", "x"))
+    selected_b = service._resolve_template_value(["a", "b", "c"], seed_parts=("g", "c", "k", "m", "t", "d", "x"))
+    assert selected_a == selected_b
+    assert selected_a in {"a", "b", "c"}
