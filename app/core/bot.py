@@ -82,6 +82,9 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
 
     instance_mode = normalize_instance_mode(config.instance_mode)
     logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
+    logger.info("Configured GUILD_ID=%s", config.guild_id)
+    if config.guild_id <= 0:
+        logger.warning("GUILD_ID=%s: commands plugin will use global app command registration", config.guild_id)
     if instance_mode not in {"main", "worker"}:
         logger.warning("Unknown INSTANCE_MODE=%s; defaulting to main.", config.instance_mode)
         instance_mode = "main"

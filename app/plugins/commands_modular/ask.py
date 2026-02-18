@@ -42,7 +42,7 @@ async def _handle_ask_like(interaction: discord.Interaction, ctx: CommandContext
     await ctx.trigger_engine.handle_qna_question(interaction, text_value)
 
 
-def register_ask(tree: app_commands.CommandTree, guild: discord.Object, ctx: CommandContext) -> None:
+def register_ask(tree: app_commands.CommandTree, guild: discord.abc.Snowflake | None, ctx: CommandContext) -> None:
     @tree.command(name="ask", description="Fai una domanda al Q&A", guild=guild)
     @app_commands.describe(testo="Testo domanda (usa 'stato' per vedere quota)")
     async def ask(interaction: discord.Interaction, testo: str) -> None:
