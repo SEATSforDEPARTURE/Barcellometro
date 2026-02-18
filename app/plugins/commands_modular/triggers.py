@@ -18,7 +18,6 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     qna_group = app_commands.Group(name="qna", description="Trigger e limiti QnA")
     frasi_group = app_commands.Group(name="frasi", description="Trigger e regole frasi")
     barcello_group = app_commands.Group(name="barcello", description="Trigger Barcello")
-    barcello_mood_group = app_commands.Group(name="mood", description="Mood del personaggio Barcello")
     prompt_group = app_commands.Group(name="prompt", description="Trigger e campagne prompt")
     insights_group = app_commands.Group(name="insights", description="Trigger curiosità utenti")
 
@@ -27,7 +26,6 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     barcellometro_group.add_command(barcello_group)
     barcellometro_group.add_command(prompt_group)
     barcellometro_group.add_command(insights_group)
-    barcello_group.add_command(barcello_mood_group)
 
     async def _require_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
@@ -102,12 +100,11 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     async def barcello_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "barcello", "status")
 
-    @barcello_mood_group.command(name="status", description="Mostra mood attuale per il canale")
-    async def barcello_mood_status(interaction: discord.Interaction) -> None:
+    @barcello_group.command(name="mood", description="Mostra o imposta mood per il canale")
+    @app_commands.describe(value="Nuovo mood (se vuoto mostra lo status)")
+    async def barcello_mood(interaction: discord.Interaction, value: str | None = None) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
-            return
-        if not await _require_mod(interaction):
             return
         guild_id, channel_id = scope
         cfg = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
@@ -151,29 +148,25 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             if isinstance(minimum, int) and isinstance(label, str) and state_count_today >= minimum:
                 drama_label = label
 
-        await interaction.response.send_message(
-            "\n".join(
-                [
-                    f"Mood attuale: `{effective}`",
-                    f"Mood salvato: `{stored_mood or '-'}`",
-                    f"Mood default canale: `{channel_default or '-'}`",
-                    f"Mood default globale: `{cfg_default}`",
-                    f"Time bucket corrente: `{time_bucket}`",
-                    f"Drama label corrente: `{drama_label}` (count {state_count_today}, stato {current_color or '-'})",
-                ]
-            ),
-            ephemeral=True,
-        )
-
-    @barcello_mood_group.command(name="set", description="Imposta mood per il canale")
-    async def barcello_mood_set(interaction: discord.Interaction, mood: str) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
+        if value is None:
+            await interaction.response.send_message(
+                "\n".join(
+                    [
+                        f"Mood attuale: `{effective}`",
+                        f"Mood salvato: `{stored_mood or '-'}`",
+                        f"Mood default canale: `{channel_default or '-'}`",
+                        f"Mood default globale: `{cfg_default}`",
+                        f"Time bucket corrente: `{time_bucket}`",
+                        f"Drama label corrente: `{drama_label}` (count {state_count_today}, stato {current_color or '-'})",
+                    ]
+                ),
+                ephemeral=True,
+            )
             return
+
         if not await _require_mod(interaction):
             return
-        guild_id, channel_id = scope
-        normalized = mood.strip()
+        normalized = value.strip()
         if not normalized:
             await interaction.response.send_message("Inserisci un mood valido.", ephemeral=True)
             return
@@ -188,7 +181,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await ctx.database.set_trigger_state(guild_id, channel_id, "barcello_mood", {"mood": normalized})
         await interaction.response.send_message(f"Mood impostato a `{normalized}` per questo canale.", ephemeral=True)
 
-    @barcello_mood_group.command(name="reset", description="Reset mood del canale")
+    @barcello_group.command(name="mood_reset", description="Reset mood del canale")
     async def barcello_mood_reset(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
