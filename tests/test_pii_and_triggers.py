@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 import sys
 import types
-from unittest.mock import Mock
+import asyncio
+from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
 
 if "discord" not in sys.modules:
@@ -301,3 +302,93 @@ def test_resolve_template_value_handles_deterministic_list_choice() -> None:
     selected_b = service._resolve_template_value(["a", "b", "c"], seed_parts=("g", "c", "k", "m", "t", "d", "x"))
     assert selected_a == selected_b
     assert selected_a in {"a", "b", "c"}
+
+
+def _run_poll_with_config(config: dict[str, object]) -> tuple[AsyncMock, AsyncMock]:
+    database = Mock()
+    database.list_enabled_trigger_channels = AsyncMock(return_value=[{"guild_id": "1", "channel_id": "2"}])
+    database.fetchone = AsyncMock(return_value={"count": 30})
+    database.get_barcello_trigger_state = AsyncMock(return_value={"last_color": "VERDE", "last_score": 10})
+    database.get_trigger_state = AsyncMock(return_value={})
+    database.upsert_barcello_trigger_state = AsyncMock()
+    database.set_trigger_state = AsyncMock()
+
+    barcello = Mock()
+    barcello.get_current_status = AsyncMock(return_value={"color": "GIALLO", "score": 20})
+
+    service = TriggerEngineService(database, barcello, Mock(), Mock(), community_insights=Mock())
+
+    class FakeMessageable:
+        async def send(self, embed=None):
+            return None
+
+    class FakeBot:
+        def get_channel(self, channel_id: int):
+            _ = channel_id
+            return FakeMessageable()
+
+    service._bot = FakeBot()
+
+    triggers_discord = sys.modules["app.services.triggers"].discord
+    if not hasattr(triggers_discord, "abc"):
+        triggers_discord.abc = types.SimpleNamespace(Messageable=FakeMessageable)
+    else:
+        triggers_discord.abc.Messageable = FakeMessageable
+    if not hasattr(triggers_discord, "Embed"):
+        class FakeEmbed:
+            def __init__(self, title=None, description=None, color=None):
+                self.title = title
+                self.description = description
+                self.color = color
+        triggers_discord.Embed = FakeEmbed
+    if not hasattr(triggers_discord, "Color"):
+        class FakeColor:
+            @staticmethod
+            def green():
+                return 1
+
+            @staticmethod
+            def gold():
+                return 2
+
+            @staticmethod
+            def red():
+                return 3
+
+            @staticmethod
+            def dark_grey():
+                return 4
+
+            @staticmethod
+            def blurple():
+                return 5
+        triggers_discord.Color = FakeColor
+
+    with patch("app.services.triggers.load_json_file", return_value=config):
+        asyncio.run(service._poll_barcello())
+
+    return database.upsert_barcello_trigger_state, database.set_trigger_state
+
+
+def test_poll_barcello_no_crash_with_min_score_delta_in_config() -> None:
+    _, set_trigger_state = _run_poll_with_config(
+        {
+            "window_minutes": 60,
+            "min_messages": 1,
+            "min_score_delta_for_notify": 2,
+            "templates": {"VERDE->GIALLO": "x"},
+        }
+    )
+    assert set_trigger_state.await_count == 1
+
+
+def test_poll_barcello_no_crash_without_min_score_delta_in_config_and_stored_color_defined() -> None:
+    _, set_trigger_state = _run_poll_with_config(
+        {
+            "window_minutes": 60,
+            "min_messages": 1,
+            "templates": {"VERDE->GIALLO": "x"},
+        }
+    )
+    daily_payload = set_trigger_state.await_args_list[0].args[3]
+    assert daily_payload["counts"].get("GIALLO") == 1

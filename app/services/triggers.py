@@ -333,6 +333,9 @@ class TriggerEngineService:
         min_messages = config.get("min_messages")
         if not isinstance(min_messages, int) or min_messages <= 0:
             min_messages = 10
+        min_score_delta_for_notify = config.get("min_score_delta_for_notify")
+        if not isinstance(min_score_delta_for_notify, int) or min_score_delta_for_notify < 0:
+            min_score_delta_for_notify = 3
         rows = await self._database.list_enabled_trigger_channels("barcello")
         for row in rows:
             guild_id = str(row["guild_id"])
@@ -360,13 +363,13 @@ class TriggerEngineService:
                 )
                 continue
             status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
-            color = self._normalize_barcello_color(status.get("color"))
-            raw_color = color or ""
+            raw_color = self._normalize_barcello_color(status.get("color"))
             score = int(status.get("score") or 0)
             prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
             prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
             prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
             stable_color = self._apply_hysteresis(prev_color, raw_color, score)
+            stored_color = stable_color or ""
             now = datetime.now(timezone.utc)
             now_iso = now.isoformat()
 
@@ -374,8 +377,12 @@ class TriggerEngineService:
                 await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
                 continue
 
-            if prev_score is not None and abs(score - prev_score) < min_score_delta_for_notify:
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
+            if prev_score is not None and abs(score - prev_score) < min_score_delta_for_notify and prev_color == stored_color:
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
+                continue
+
+            if prev_color is not None and stored_color == prev_color:
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
                 continue
 
             daily_state = await self._database.get_trigger_state(guild_id, channel_id, "barcello_daily")
@@ -441,6 +448,10 @@ class TriggerEngineService:
                 "barcello_daily",
                 {"date": day_key, "counts": counts, "last_entered_ts": last_entered_ts},
             )
+
+    def _apply_hysteresis(self, prev_color: str | None, raw_color: str | None, score: int) -> str | None:
+        _ = (prev_color, score)
+        return raw_color
 
     async def _handle_phrases(self, envelope: EventEnvelope) -> None:
         assert envelope.guild_id and envelope.channel_id
