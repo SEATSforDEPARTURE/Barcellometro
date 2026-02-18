@@ -89,5 +89,19 @@
   },
   "mood_daily_random": false,
   "mood_daily_random_time_local": "06:00",
-  "mood_daily_random_avoid_repeat": true
+  "mood_daily_random_avoid_repeat": true,
+  "channel_overrides": {
+    "1457915873418416199": {
+      "window_minutes": 30
+    },
+    "1438670918191681679": {
+      "window_minutes": 45
+    },
+    "1438670281534214144": {
+      "window_minutes": 60
+    },
+    "1457910660775284758": {
+      "window_minutes": 90
+    }
+  }
 }

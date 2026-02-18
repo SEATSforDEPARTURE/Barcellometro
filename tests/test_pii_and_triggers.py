@@ -453,3 +453,75 @@ def test_daily_random_mood_avoid_repeat_from_yesterday() -> None:
 
     payload = database.set_trigger_state.await_args.args[3]
     assert payload["mood"] == "b"
+
+
+def test_poll_barcello_uses_channel_window_override() -> None:
+    database = Mock()
+    database.list_enabled_trigger_channels = AsyncMock(return_value=[{"guild_id": "1", "channel_id": "2"}])
+    database.fetchone = AsyncMock(return_value={"count": 30})
+    database.get_barcello_trigger_state = AsyncMock(return_value={"last_color": "VERDE", "last_score": 10})
+    database.get_trigger_state = AsyncMock(return_value={})
+    database.upsert_barcello_trigger_state = AsyncMock()
+    database.set_trigger_state = AsyncMock()
+
+    barcello = Mock()
+    barcello.get_current_status = AsyncMock(return_value={"color": "GIALLO", "score": 20})
+
+    service = TriggerEngineService(database, barcello, Mock(), Mock(), community_insights=Mock())
+
+    class FakeMessageable:
+        async def send(self, embed=None):
+            return None
+
+    class FakeBot:
+        def get_channel(self, channel_id: int):
+            _ = channel_id
+            return FakeMessageable()
+
+    service._bot = FakeBot()
+
+    triggers_discord = sys.modules["app.services.triggers"].discord
+    if not hasattr(triggers_discord, "abc"):
+        triggers_discord.abc = types.SimpleNamespace(Messageable=FakeMessageable)
+    else:
+        triggers_discord.abc.Messageable = FakeMessageable
+    if not hasattr(triggers_discord, "Embed"):
+        class FakeEmbed:
+            def __init__(self, title=None, description=None, color=None):
+                self.title = title
+                self.description = description
+                self.color = color
+        triggers_discord.Embed = FakeEmbed
+    if not hasattr(triggers_discord, "Color"):
+        class FakeColor:
+            @staticmethod
+            def green():
+                return 1
+
+            @staticmethod
+            def gold():
+                return 2
+
+            @staticmethod
+            def red():
+                return 3
+
+            @staticmethod
+            def dark_grey():
+                return 4
+
+            @staticmethod
+            def blurple():
+                return 5
+        triggers_discord.Color = FakeColor
+
+    config = {
+        "window_minutes": 60,
+        "min_messages": 1,
+        "templates": {"VERDE->GIALLO": "x"},
+        "channel_overrides": {"2": {"window_minutes": 25}},
+    }
+    with patch("app.services.triggers.load_json_file", return_value=config):
+        asyncio.run(service._poll_barcello())
+
+    assert barcello.get_current_status.await_args.kwargs["window_minutes"] == 25
