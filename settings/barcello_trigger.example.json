@@ -1,0 +1,107 @@
+{
+  "window_minutes": 60,
+  "cooldown_minutes": 10,
+  "min_score_delta_for_notify": 3,
+  "mood_default": "chill",
+  "time_buckets": {
+    "night": {
+      "start": 0,
+      "end": 6
+    },
+    "morning": {
+      "start": 6,
+      "end": 12
+    }
+  },
+  "dramatic_tiers": [
+    {
+      "min_count_today": 1,
+      "label": "t1"
+    },
+    {
+      "min_count_today": 3,
+      "label": "t3"
+    }
+  ],
+  "templates": {
+    "INIT": "📌 Barcello ora {new} (score {new_score})",
+    "WORSEN": "⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score}).",
+    "IMPROVE": "✅ Barcello migliora: {old} → {new} ({old_score}→{new_score}).",
+    "GREEN->YELLOW": "🟡 Attenzione: {old} → {new} ({old_score}→{new_score})."
+  },
+  "moods": {
+    "chill": {
+      "templates": {
+        "WORSEN": "😌 Piano piano: {old} → {new}."
+      },
+      "time": {
+        "morning": {
+          "templates": {
+            "WORSEN": "☕ Mattino delicato: {old} → {new}."
+          }
+        }
+      },
+      "drama": {
+        "t3": {
+          "templates": {
+            "WORSEN": "😬 Terza volta oggi ({state_count_today}): sta sfuggendo di mano."
+          }
+        }
+      }
+    },
+    "drama": {
+      "templates": {
+        "GREEN->YELLOW": [
+          "🎭 Inizia il drama: {old} → {new}.",
+          "🔥 Colpo di scena: da {old} a {new}."
+        ]
+      },
+      "time": {
+        "night": {
+          "templates": {
+            "GREEN->YELLOW": "🌙 Drama notturno: {old} → {new}."
+          }
+        }
+      },
+      "drama": {
+        "t3": {
+          "templates": {
+            "YELLOW->RED": "🚨 Terza+ volta oggi: {new} ({state_count_today}), ultima volta {last_in_state_human} fa."
+          }
+        }
+      }
+    }
+  },
+  "channels": {
+    "123456789012345678": {
+      "mood_default": "drama",
+      "templates": {
+        "WORSEN": "📣 Canale speciale: barometro giù ({old}→{new})."
+      },
+      "moods": {
+        "drama": {
+          "templates": {
+            "GREEN->YELLOW": "📣🎭 Questo canale vive il drama: {old} → {new}."
+          }
+        }
+      }
+    }
+  },
+  "mood_daily_random": false,
+  "mood_daily_random_time_local": "06:00",
+  "mood_daily_random_avoid_repeat": true,
+  "channel_overrides": {
+    "1457915873418416199": {
+      "window_minutes": 30
+    },
+    "1438670918191681679": {
+      "window_minutes": 45
+    },
+    "1438670281534214144": {
+      "window_minutes": 60
+    },
+    "1457910660775284758": {
+      "window_minutes": 90
+    }
+  }
+}

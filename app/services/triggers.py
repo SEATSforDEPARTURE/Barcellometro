@@ -15,6 +15,7 @@ from typing import Any
 import discord
 
 from app.services.barcello import BarcelloService
+from app.services.barcello_window import resolve_window_minutes
 from app.services.community_insights import CommunityInsightsService
 from app.services.config_file_loader import load_json_file
 from app.services.database import DatabaseService
@@ -397,9 +398,9 @@ class TriggerEngineService:
         if self._bot is None:
             return
         config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
-        window_minutes = config.get("window_minutes")
-        if not isinstance(window_minutes, int) or window_minutes <= 0:
-            window_minutes = 60
+        window_minutes_global = config.get("window_minutes")
+        if not isinstance(window_minutes_global, int) or window_minutes_global <= 0:
+            window_minutes_global = 60
         min_messages = config.get("min_messages")
         if not isinstance(min_messages, int) or min_messages <= 0:
             min_messages = 10
@@ -412,8 +413,15 @@ class TriggerEngineService:
             channel_id = str(row["channel_id"])
             now_rome = datetime.now(ROME_TZ)
             await self._maybe_set_daily_random_mood(guild_id, channel_id, config, now_rome)
+            window_minutes_effective = resolve_window_minutes(
+                channel_id,
+                default_window=window_minutes_global,
+                trigger_config=config,
+            )
+            if window_minutes_effective != window_minutes_global:
+                logger.info("barcello window override applied channel_id=%s window=%s", channel_id, window_minutes_effective)
             window_end = datetime.now(timezone.utc)
-            window_start = window_end - timedelta(minutes=window_minutes)
+            window_start = window_end - timedelta(minutes=window_minutes_effective)
             count_row = await self._database.fetchone(
                 """
                 SELECT COUNT(*) AS count
@@ -434,7 +442,11 @@ class TriggerEngineService:
                     extra={"channel_id": channel_id, "count": message_count, "min_messages": min_messages},
                 )
                 continue
-            status = await self._barcello.get_current_status(guild_id, channel_id=channel_id, window_minutes=window_minutes)
+            status = await self._barcello.get_current_status(
+                guild_id,
+                channel_id=channel_id,
+                window_minutes=window_minutes_effective,
+            )
             raw_color = self._normalize_barcello_color(status.get("color"))
             score = int(status.get("score") or 0)
             prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
@@ -505,9 +517,14 @@ class TriggerEngineService:
                 state_count_today=state_count_today,
                 last_in_state_human=last_in_state_human,
             )
+            message_text = (
+                f"{msg}\n\n🕒 Finestra: ultimi {window_minutes_effective} min"
+                if msg
+                else f"🕒 Finestra: ultimi {window_minutes_effective} min"
+            )
             embed = discord.Embed(
                 title="🫛 AGGIORNAMENTO STATO BARCELLO",
-                description=msg,
+                description=message_text,
                 color=self._barcello_embed_color(stable_color),
             )
             channel = self._bot.get_channel(int(channel_id))

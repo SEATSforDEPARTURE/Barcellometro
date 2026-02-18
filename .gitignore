@@ -58,3 +58,6 @@ node_modules/
 
 # === Docker / Compose local overrides ===
 docker-compose.override.yml
+
+# Runtime local config (do not version)
+settings/barcello_trigger.json

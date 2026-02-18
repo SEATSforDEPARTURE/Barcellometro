@@ -11,6 +11,8 @@ import discord
 from discord import app_commands
 
 from app.services.entitlements import EntitlementsService
+from app.services.config_file_loader import load_json_file
+from app.services.barcello_window import resolve_window_minutes
 from app.utils.embed_limits import _split_field_chunks
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
@@ -18,6 +20,8 @@ from app.plugins.commands_modular.settings import get_setting
 from app.utils.trend_render import normalize_trend, render_trend, render_trend_value
 
 logger = logging.getLogger(__name__)
+
+BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
 def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowflake | None, ctx: CommandContext) -> None:
@@ -532,7 +536,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             name="🫀 **PUNTI SALUTE**",
             value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
         )
-        embed.set_footer(text="Barcellometro")
+        embed.set_footer(text=f"Barcellometro • 🕒 Finestra: ultimi {window_minutes} min")
         return embed
 
     def _build_barcello_no_data_embed(
@@ -551,12 +555,13 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             description="\n".join(description_lines),
             color=0x95A5A6,
         )
-        embed.set_footer(text="Barcellometro")
+        embed.set_footer(text=f"Barcellometro • 🕒 Finestra: ultimi {window_minutes} min")
         return embed
 
     def _build_barcello_details_embed(
         *,
         result: Any,
+        window_minutes: int,
         output_flags: dict[str, Any],
         profile: str,
         tier_display_name: str,
@@ -625,7 +630,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             note_value = notes_by_profile.get(profile, "")
             if note_value:
                 _add_section(embed, name="📌 **NOTE**", value=_with_spacing(note_value))
-        embed.set_footer(text="Barcellometro")
+        embed.set_footer(text=f"Barcellometro • 🕒 Finestra: ultimi {window_minutes} min")
         return embed
 
     class _BarcelloFeedbackView(discord.ui.View):
@@ -955,9 +960,19 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             if window_minutes is None:
                 raw_default = await get_setting(ctx, "barcello.default_window_minutes", "30")
                 try:
-                    window_minutes = int(raw_default)
+                    default_window_minutes = int(raw_default)
                 except ValueError:
-                    window_minutes = 30
+                    default_window_minutes = 30
+                if default_window_minutes <= 0:
+                    default_window_minutes = 30
+                trigger_config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+                window_minutes = resolve_window_minutes(
+                    interaction.channel_id,
+                    default_window=default_window_minutes,
+                    trigger_config=trigger_config,
+                )
+                if window_minutes != default_window_minutes:
+                    logger.info("barcello window override applied channel_id=%s window=%s", interaction.channel_id, window_minutes)
             if window_minutes <= 0:
                 window_minutes = 30
 
@@ -1440,6 +1455,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             )
             details_embed = _build_barcello_details_embed(
                 result=result,
+                window_minutes=window_minutes,
                 output_flags=output_flags,
                 profile=profile,
                 tier_display_name=tier_display_name,

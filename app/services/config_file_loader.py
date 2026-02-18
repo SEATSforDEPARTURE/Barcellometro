@@ -54,7 +54,15 @@ def load_json_file(path: str) -> dict[str, Any]:
     if not path:
         return {}
     if not os.path.exists(path):
-        return {}
+        if path == "settings/barcello_trigger.json":
+            example_path = path.replace(".json", ".example.json")
+            if os.path.exists(example_path):
+                logger.warning("%s not found, using example config", path)
+                path = example_path
+            else:
+                return {}
+        else:
+            return {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
             raw = handle.read()
