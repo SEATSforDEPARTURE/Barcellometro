@@ -4,12 +4,24 @@
   "min_score_delta_for_notify": 3,
   "mood_default": "chill",
   "time_buckets": {
-    "night": {"start": 0, "end": 6},
-    "morning": {"start": 6, "end": 12}
+    "night": {
+      "start": 0,
+      "end": 6
+    },
+    "morning": {
+      "start": 6,
+      "end": 12
+    }
   },
   "dramatic_tiers": [
-    {"min_count_today": 1, "label": "t1"},
-    {"min_count_today": 3, "label": "t3"}
+    {
+      "min_count_today": 1,
+      "label": "t1"
+    },
+    {
+      "min_count_today": 3,
+      "label": "t3"
+    }
   ],
   "templates": {
     "INIT": "📌 Barcello ora {new} (score {new_score})",
@@ -74,5 +86,8 @@
         }
       }
     }
-  }
+  },
+  "mood_daily_random": false,
+  "mood_daily_random_time_local": "06:00",
+  "mood_daily_random_avoid_repeat": true
 }

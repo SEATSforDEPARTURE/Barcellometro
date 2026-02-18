@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,7 @@ def load_config() -> AppConfig:
     guild_id_raw = os.getenv("GUILD_ID", "").strip()
     if not guild_id_raw:
         guild_id = 0
+        logger.warning("GUILD_ID not set; defaulting to 0 (global app commands mode)")
     else:
         guild_id = int(guild_id_raw)
     db_path = os.getenv("DB_PATH", "bot.sqlite")
