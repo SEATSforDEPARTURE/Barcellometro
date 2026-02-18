@@ -63,6 +63,7 @@ class TriggerEngineService:
         self._community_insights = community_insights or CommunityInsightsService(ai_service)
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
+        self._barcello_moods_missing_warned = False
 
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
@@ -323,6 +324,75 @@ class TriggerEngineService:
                 logger.exception("Trigger barcello poll failed")
             await asyncio.sleep(60)
 
+
+    async def _maybe_set_daily_random_mood(
+        self,
+        guild_id: str,
+        channel_id: str,
+        cfg: dict[str, object],
+        now_rome: datetime,
+    ) -> None:
+        daily_random_enabled = bool(cfg.get("mood_daily_random", False))
+        if not daily_random_enabled:
+            return
+
+        channels_filter = cfg.get("mood_daily_random_channels")
+        if isinstance(channels_filter, list) and channels_filter:
+            allowed_channels = {str(item) for item in channels_filter if str(item).strip()}
+            if channel_id not in allowed_channels:
+                return
+
+        trigger_time_raw = cfg.get("mood_daily_random_time_local")
+        trigger_time_text = str(trigger_time_raw or "06:00")
+        try:
+            hour_text, minute_text = trigger_time_text.split(":", 1)
+            trigger_hour = int(hour_text)
+            trigger_minute = int(minute_text)
+            if not (0 <= trigger_hour <= 23 and 0 <= trigger_minute <= 59):
+                raise ValueError
+        except ValueError:
+            trigger_hour = 6
+            trigger_minute = 0
+
+        if (now_rome.hour, now_rome.minute) < (trigger_hour, trigger_minute):
+            return
+
+        moods_cfg = cfg.get("moods")
+        if not isinstance(moods_cfg, dict) or not moods_cfg:
+            if not self._barcello_moods_missing_warned:
+                logger.warning("Daily random mood enabled but cfg.moods is missing/empty; skipping")
+                self._barcello_moods_missing_warned = True
+            return
+
+        today = now_rome.date().isoformat()
+        state = await self._database.get_trigger_state(guild_id, channel_id, "barcello_mood")
+        if str(state.get("date") or "") == today:
+            return
+
+        mood_names = sorted(str(name) for name in moods_cfg.keys())
+        if not mood_names:
+            return
+
+        avoid_repeat = bool(cfg.get("mood_daily_random_avoid_repeat", True))
+        yesterday = (now_rome.date() - timedelta(days=1)).isoformat()
+        yesterday_mood = str(state.get("mood") or "") if str(state.get("date") or "") == yesterday else ""
+
+        candidates = mood_names
+        if avoid_repeat and yesterday_mood and len(mood_names) >= 2:
+            filtered = [name for name in mood_names if name != yesterday_mood]
+            if filtered:
+                candidates = filtered
+
+        seed = f"{today}:{guild_id}:{channel_id}"
+        chosen = random.Random(seed).choice(candidates)
+        await self._database.set_trigger_state(
+            guild_id,
+            channel_id,
+            "barcello_mood",
+            {"mood": chosen, "date": today, "mode": "daily_random"},
+        )
+        logger.info("Daily random mood set guild_id=%s channel_id=%s chosen=%s", guild_id, channel_id, chosen)
+
     async def _poll_barcello(self) -> None:
         if self._bot is None:
             return
@@ -340,6 +410,8 @@ class TriggerEngineService:
         for row in rows:
             guild_id = str(row["guild_id"])
             channel_id = str(row["channel_id"])
+            now_rome = datetime.now(ROME_TZ)
+            await self._maybe_set_daily_random_mood(guild_id, channel_id, config, now_rome)
             window_end = datetime.now(timezone.utc)
             window_start = window_end - timedelta(minutes=window_minutes)
             count_row = await self._database.fetchone(

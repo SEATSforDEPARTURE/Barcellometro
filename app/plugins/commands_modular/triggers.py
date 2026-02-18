@@ -178,7 +178,13 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
                 ephemeral=True,
             )
             return
-        await ctx.database.set_trigger_state(guild_id, channel_id, "barcello_mood", {"mood": normalized})
+        today = datetime.now(ctx.timezone).date().isoformat()
+        await ctx.database.set_trigger_state(
+            guild_id,
+            channel_id,
+            "barcello_mood",
+            {"mood": normalized, "date": today, "mode": "manual"},
+        )
         await interaction.response.send_message(f"Mood impostato a `{normalized}` per questo canale.", ephemeral=True)
 
     @barcello_group.command(name="mood_reset", description="Reset mood del canale")

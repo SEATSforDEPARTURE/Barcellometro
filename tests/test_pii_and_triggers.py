@@ -392,3 +392,64 @@ def test_poll_barcello_no_crash_without_min_score_delta_in_config_and_stored_col
     )
     daily_payload = set_trigger_state.await_args_list[0].args[3]
     assert daily_payload["counts"].get("GIALLO") == 1
+
+
+def test_daily_random_mood_sets_state_with_today_date() -> None:
+    database = Mock()
+    database.get_trigger_state = AsyncMock(return_value={})
+    database.set_trigger_state = AsyncMock()
+    service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+
+    cfg = {
+        "mood_daily_random": True,
+        "mood_daily_random_time_local": "06:00",
+        "mood_daily_random_avoid_repeat": True,
+        "moods": {"a": {}, "b": {}},
+    }
+    now_rome = datetime(2026, 2, 20, 7, 0, tzinfo=ZoneInfo("Europe/Rome"))
+
+    asyncio.run(service._maybe_set_daily_random_mood("1", "2", cfg, now_rome))
+
+    assert database.set_trigger_state.await_count == 1
+    payload = database.set_trigger_state.await_args.args[3]
+    assert payload["date"] == "2026-02-20"
+    assert payload["mode"] == "daily_random"
+    assert payload["mood"] in {"a", "b"}
+
+
+def test_daily_random_mood_does_not_change_twice_same_day() -> None:
+    database = Mock()
+    database.get_trigger_state = AsyncMock(return_value={"mood": "a", "date": "2026-02-20", "mode": "daily_random"})
+    database.set_trigger_state = AsyncMock()
+    service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+
+    cfg = {
+        "mood_daily_random": True,
+        "mood_daily_random_time_local": "06:00",
+        "moods": {"a": {}, "b": {}},
+    }
+    now_rome = datetime(2026, 2, 20, 8, 0, tzinfo=ZoneInfo("Europe/Rome"))
+
+    asyncio.run(service._maybe_set_daily_random_mood("1", "2", cfg, now_rome))
+
+    assert database.set_trigger_state.await_count == 0
+
+
+def test_daily_random_mood_avoid_repeat_from_yesterday() -> None:
+    database = Mock()
+    database.get_trigger_state = AsyncMock(return_value={"mood": "a", "date": "2026-02-19", "mode": "daily_random"})
+    database.set_trigger_state = AsyncMock()
+    service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+
+    cfg = {
+        "mood_daily_random": True,
+        "mood_daily_random_time_local": "06:00",
+        "mood_daily_random_avoid_repeat": True,
+        "moods": {"a": {}, "b": {}},
+    }
+    now_rome = datetime(2026, 2, 20, 9, 0, tzinfo=ZoneInfo("Europe/Rome"))
+
+    asyncio.run(service._maybe_set_daily_random_mood("1", "2", cfg, now_rome))
+
+    payload = database.set_trigger_state.await_args.args[3]
+    assert payload["mood"] == "b"
