@@ -19,7 +19,7 @@ def main() -> None:
     if not config.discord_token:
         raise RuntimeError("DISCORD_TOKEN is missing in environment.")
     if not config.guild_id:
-        raise RuntimeError("GUILD_ID is missing in environment.")
+        logger.warning("GUILD_ID is missing or invalid; app commands will be registered globally.")
 
     bot, registry = create_bot(config)
 

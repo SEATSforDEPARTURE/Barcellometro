@@ -20,7 +20,7 @@ from app.utils.trend_render import normalize_trend, render_trend, render_trend_v
 logger = logging.getLogger(__name__)
 
 
-def register_barcello(tree: app_commands.CommandTree, guild: discord.Object, ctx: CommandContext) -> None:
+def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowflake | None, ctx: CommandContext) -> None:
     response_format_supported: bool | None = None
 
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
