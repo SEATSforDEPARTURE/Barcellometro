@@ -31,8 +31,18 @@ def setup(registry: ServiceRegistry) -> None:
     ctx = CommandContext.from_registry(registry)
     bot = ctx.bot
     config = ctx.config
+    guild_id = int(config.guild_id or 0)
+    use_guild = guild_id > 0
+    guild = discord.Object(id=guild_id) if use_guild else None
 
-    guild = discord.Object(id=config.guild_id)
+    if not use_guild:
+        logger.warning("GUILD_ID missing/invalid; registering GLOBAL commands")
+
+    def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
+        if use_guild:
+            bot.tree.add_command(command, guild=guild)
+        else:
+            bot.tree.add_command(command)
 
     barcellometro_group = app_commands.Group(name="barcellometro", description="Controlli Barcellometro")
     role_group = app_commands.Group(name="role", description="Gestione permessi e limiti")
@@ -68,16 +78,39 @@ def setup(registry: ServiceRegistry) -> None:
     register_barcello(bot.tree, guild, ctx)
     register_ask(bot.tree, guild, ctx)
 
-    bot.tree.add_command(barcellometro_group, guild=guild)
-    bot.tree.add_command(riassunto_group, guild=guild)
-    bot.tree.add_command(status_group, guild=guild)
-    bot.tree.add_command(resoconto_group, guild=guild)
-    bot.tree.add_command(privacy_group, guild=guild)
+    add_tree_command(barcellometro_group)
+    add_tree_command(riassunto_group)
+    add_tree_command(status_group)
+    add_tree_command(resoconto_group)
+    add_tree_command(privacy_group)
+
+    @bot.tree.error
+    async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        if isinstance(error, app_commands.errors.CommandNotFound):
+            name = (interaction.data or {}).get("name")
+            logger.warning(
+                "CommandNotFound for /%s (interaction.guild_id=%s config.guild_id=%s). Likely stale/mismatched sync.",
+                name,
+                getattr(interaction, "guild_id", None),
+                config.guild_id,
+            )
+            return
+        logger.exception("App command error")
+        raise error
 
     async def handle_ready() -> None:
         try:
-            synced = await bot.tree.sync(guild=guild)
-            logger.info("Synced %s commands for guild %s", len(synced), config.guild_id)
+            command_scope = "guild" if use_guild else "global"
+            commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
+            command_names = ", ".join(command.name for command in commands) or "(none)"
+            logger.info("App commands registered (%s): %s", command_scope, command_names)
+            logger.info("Command sync mode=%s config.guild_id=%s", command_scope, config.guild_id)
+            if use_guild:
+                synced = await bot.tree.sync(guild=guild)
+                logger.info("Synced %s commands for guild %s", len(synced), config.guild_id)
+            else:
+                synced = await bot.tree.sync()
+                logger.info("Synced %s global commands", len(synced))
         except Exception:  # noqa: BLE001
             logger.exception("Failed to sync commands")
 
