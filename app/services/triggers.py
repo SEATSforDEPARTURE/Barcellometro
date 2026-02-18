@@ -333,14 +333,6 @@ class TriggerEngineService:
         min_messages = config.get("min_messages")
         if not isinstance(min_messages, int) or min_messages <= 0:
             min_messages = 10
-        cooldown_minutes = config.get("cooldown_minutes")
-        if not isinstance(cooldown_minutes, int) or cooldown_minutes < 0:
-            cooldown_minutes = 0
-        min_score_delta_for_notify = config.get("min_score_delta_for_notify")
-        if not isinstance(min_score_delta_for_notify, int) or min_score_delta_for_notify < 0:
-            min_score_delta_for_notify = 0
-        raw_templates = config.get("templates")
-        templates = raw_templates if isinstance(raw_templates, dict) else {}
         rows = await self._database.list_enabled_trigger_channels("barcello")
         for row in rows:
             guild_id = str(row["guild_id"])
@@ -386,38 +378,53 @@ class TriggerEngineService:
                 await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
                 continue
 
-            if cooldown_minutes > 0:
-                last_notified_ts = await self._database.get_barcello_last_notified(guild_id, channel_id, stable_color)
-                if last_notified_ts:
-                    try:
-                        notified_dt = datetime.fromisoformat(last_notified_ts)
-                        if notified_dt.tzinfo is None:
-                            notified_dt = notified_dt.replace(tzinfo=timezone.utc)
-                        if (now - notified_dt) < timedelta(minutes=cooldown_minutes):
-                            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
-                            continue
-                    except ValueError:
-                        pass
+            daily_state = await self._database.get_trigger_state(guild_id, channel_id, "barcello_daily")
+            day_key = datetime.now(ROME_TZ).date().isoformat()
+            if str(daily_state.get("date") or "") != day_key:
+                daily_state = {"date": day_key, "counts": {}, "last_entered_ts": {}}
+            counts = daily_state.get("counts") if isinstance(daily_state.get("counts"), dict) else {}
+            last_entered_ts = daily_state.get("last_entered_ts") if isinstance(daily_state.get("last_entered_ts"), dict) else {}
 
-            day_date = datetime.now(ROME_TZ).date().isoformat()
-            last_seen_ts = await self._database.get_barcello_last_seen_for_color(guild_id, channel_id, stable_color)
-            daily = await self._database.get_barcello_daily_color_stats(guild_id, channel_id, day_date, stable_color)
-            state_count_today = int(daily.get("count", 0)) + 1
-            first_today_for_new = state_count_today == 1
-            extra_placeholders = {
-                "state_count_today": str(state_count_today),
-                "last_in_state_human": self._format_barcello_last_seen_human(last_seen_ts, now),
-                "last_in_state_dt": self._format_barcello_last_seen_dt(last_seen_ts),
-            }
+            previous_same_state_ts = str(last_entered_ts.get(stored_color) or "")
+            state_count_today = int(counts.get(stored_color) or 0) + 1
+            counts[stored_color] = state_count_today
+            last_entered_ts[stored_color] = now.isoformat()
+
+            now_rome = now.astimezone(ROME_TZ)
+            time_bucket = self._get_time_bucket(now_rome, config)
+            drama_label = self._get_drama_label(state_count_today, config)
+            mood = await self._resolve_barcello_mood(guild_id, channel_id, config)
+
+            last_in_state_human = ""
+            if previous_same_state_ts:
+                try:
+                    prev_same_state = datetime.fromisoformat(previous_same_state_ts)
+                    if prev_same_state.tzinfo is None:
+                        prev_same_state = prev_same_state.replace(tzinfo=timezone.utc)
+                    delta = max(now - prev_same_state, timedelta())
+                    total_min = int(delta.total_seconds() // 60)
+                    if total_min < 120:
+                        last_in_state_human = f"{total_min} minuti"
+                    elif total_min < 60 * 24 * 2:
+                        last_in_state_human = f"{total_min // 60} ore"
+                    else:
+                        last_in_state_human = f"{total_min // (60 * 24)} giorni"
+                except ValueError:
+                    last_in_state_human = ""
 
             msg = self._render_barcello_transition(
-                prev_color,
-                stable_color,
-                prev_score,
-                score,
-                templates=templates,
-                first_today_for_new=first_today_for_new,
-                extra_placeholders=extra_placeholders,
+                old=prev_color,
+                new=stored_color,
+                old_score=prev_score,
+                new_score=score,
+                cfg=config,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                mood=mood,
+                time_bucket=time_bucket,
+                drama_label=drama_label,
+                state_count_today=state_count_today,
+                last_in_state_human=last_in_state_human,
             )
             embed = discord.Embed(
                 title="🫛 AGGIORNAMENTO STATO BARCELLO",
@@ -427,10 +434,13 @@ class TriggerEngineService:
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and msg:
                 await channel.send(embed=embed)
-                await self._database.set_barcello_last_notified(guild_id, channel_id, stable_color, now_iso)
-            await self._database.set_barcello_last_seen_for_color(guild_id, channel_id, stable_color, now_iso)
-            await self._database.increment_barcello_daily_color(guild_id, channel_id, day_date, stable_color, now_iso)
-            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
+            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
+            await self._database.set_trigger_state(
+                guild_id,
+                channel_id,
+                "barcello_daily",
+                {"date": day_key, "counts": counts, "last_entered_ts": last_entered_ts},
+            )
 
     async def _handle_phrases(self, envelope: EventEnvelope) -> None:
         assert envelope.guild_id and envelope.channel_id
@@ -645,65 +655,186 @@ class TriggerEngineService:
         new: str,
         old_score: int | None,
         new_score: int,
-        templates: dict[str, Any] | None = None,
-        first_today_for_new: bool = False,
-        extra_placeholders: dict[str, str] | None = None,
+        cfg: dict[str, object],
+        guild_id: str,
+        channel_id: str,
+        mood: str,
+        time_bucket: str,
+        drama_label: str,
+        state_count_today: int,
+        last_in_state_human: str,
     ) -> str:
         worsening = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
         italian_to_english = {"VERDE": "GREEN", "GIALLO": "YELLOW", "ROSSO": "RED", "NERO": "BLACK"}
-        template_dict = templates if isinstance(templates, dict) else {}
         values = {
             "old": old or "",
             "new": new,
             "old_score": "" if old_score is None else str(old_score),
             "new_score": str(new_score),
-            "state_count_today": "",
-            "last_in_state_human": "",
-            "last_in_state_dt": "",
+            "state_count_today": str(state_count_today),
+            "last_in_state_human": last_in_state_human,
+            "mood": mood,
+            "time_bucket": time_bucket,
+            "drama_label": drama_label,
         }
-        if isinstance(extra_placeholders, dict):
-            for key in ("state_count_today", "last_in_state_human", "last_in_state_dt"):
-                raw = extra_placeholders.get(key)
-                if raw is not None:
-                    values[key] = str(raw)
 
-        def render_template(message_template: Any) -> str | None:
-            selected_template = self._pick_template_value(message_template)
-            if not selected_template:
-                return None
-            return re.sub(
-                r"\{(old|new|old_score|new_score|state_count_today|last_in_state_human|last_in_state_dt)\}",
-                lambda match: values[match.group(1)],
-                selected_template,
+        minute_seed = datetime.now(ROME_TZ).strftime("%Y%m%d%H%M")
+
+        def render_key(key: str) -> str | None:
+            selected = self._select_barcello_template(cfg, channel_id, mood, time_bucket, drama_label, key)
+            message_template = self._resolve_template_value(
+                selected,
+                seed_parts=(guild_id, channel_id, key, mood, time_bucket, drama_label, minute_seed),
             )
+            if not message_template:
+                return None
+            return self._render_with_placeholders(message_template, values)
 
         if old is None:
-            return render_template(template_dict.get("INIT")) or f"📌 Barcello ora {new} (score {new_score})"
+            return render_key("INIT") or f"📌 Barcello ora {new} (score {new_score})"
 
         severity_new = worsening.get(new, 99)
         severity_old = worsening.get(old, 99)
 
         if old != new:
-            if first_today_for_new:
-                first_today_template = render_template(template_dict.get(f"{new}_FIRST_TODAY"))
-                if not first_today_template:
-                    first_today_template = render_template(template_dict.get("FIRST_TODAY"))
-                if first_today_template:
-                    return first_today_template
-
-            exact_template = render_template(template_dict.get(f"{old}->{new}"))
-            if not exact_template:
-                old_en = italian_to_english.get(old, old)
-                new_en = italian_to_english.get(new, new)
-                exact_template = render_template(template_dict.get(f"{old_en}->{new_en}"))
-            if exact_template:
-                return exact_template
+            key_candidates = [f"{old}->{new}"]
+            old_en = italian_to_english.get(old, old)
+            new_en = italian_to_english.get(new, new)
+            if f"{old_en}->{new_en}" not in key_candidates:
+                key_candidates.append(f"{old_en}->{new_en}")
+            if state_count_today == 1:
+                key_candidates.append(f"{new}_FIRST_TODAY")
+            for key in key_candidates:
+                exact_template = render_key(key)
+                if exact_template:
+                    return exact_template
 
         if severity_new > severity_old:
-            return render_template(template_dict.get("WORSEN")) or f"⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score})."
+            return render_key("WORSEN") or f"⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score})."
         if severity_new < severity_old:
-            return render_template(template_dict.get("IMPROVE")) or f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
-        return render_template(template_dict.get("SAME")) or f"Barcello aggiornato: {new_score}."
+            return render_key("IMPROVE") or f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
+        return render_key("SAME") or f"Barcello aggiornato: {new_score}."
+
+    def _render_with_placeholders(self, text: str, placeholders: dict[str, str]) -> str:
+        return re.sub(r"\{([a-zA-Z0-9_]+)\}", lambda match: placeholders.get(match.group(1), match.group(0)), text)
+
+    def _resolve_template_value(self, value: object, *, seed_parts: tuple[str, ...]) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            options = [item for item in value if isinstance(item, str) and item.strip()]
+            if not options:
+                return ""
+            seed = "|".join(seed_parts)
+            hashed = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+            index = int(hashed[:8], 16) % len(options)
+            return options[index]
+        return ""
+
+    def _get_time_bucket(self, now_rome: datetime, cfg: dict[str, object]) -> str:
+        default_buckets = {
+            "night": {"start": 0, "end": 6},
+            "morning": {"start": 6, "end": 12},
+            "afternoon": {"start": 12, "end": 18},
+            "evening": {"start": 18, "end": 24},
+        }
+        buckets = cfg.get("time_buckets") if isinstance(cfg.get("time_buckets"), dict) else default_buckets
+        hour = now_rome.hour
+        for name, payload in buckets.items():
+            if not isinstance(payload, dict):
+                continue
+            start = payload.get("start")
+            end = payload.get("end")
+            if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= 24 and start <= hour < end:
+                return str(name)
+        if buckets:
+            first_key = next(iter(buckets.keys()))
+            return str(first_key)
+        return "unknown"
+
+    def _get_drama_label(self, state_count_today: int, cfg: dict[str, object]) -> str:
+        raw_tiers = cfg.get("dramatic_tiers")
+        tiers = raw_tiers if isinstance(raw_tiers, list) else [{"min_count_today": 1, "label": "t1"}]
+        winner = "t1"
+        for tier in tiers:
+            if not isinstance(tier, dict):
+                continue
+            minimum = tier.get("min_count_today")
+            label = tier.get("label")
+            if isinstance(minimum, int) and isinstance(label, str) and state_count_today >= minimum:
+                winner = label
+        return winner
+
+    async def _resolve_barcello_mood(self, guild_id: str, channel_id: str, cfg: dict[str, object]) -> str:
+        default_mood = str(cfg.get("mood_default") or "chill")
+        channel_cfg = cfg.get("channels") if isinstance(cfg.get("channels"), dict) else {}
+        selected_channel = channel_cfg.get(channel_id) if isinstance(channel_cfg.get(channel_id), dict) else {}
+        channel_default = selected_channel.get("mood_default") if isinstance(selected_channel.get("mood_default"), str) else None
+        stored_state = await self._database.get_trigger_state(guild_id, channel_id, "barcello_mood")
+        stored_mood = stored_state.get("mood") if isinstance(stored_state.get("mood"), str) else None
+        return str(stored_mood or channel_default or default_mood)
+
+    def _select_barcello_template(
+        self,
+        cfg: dict[str, object],
+        channel_id: str,
+        mood: str,
+        time_bucket: str,
+        drama_label: str,
+        key: str,
+    ) -> object | None:
+        channels = cfg.get("channels") if isinstance(cfg.get("channels"), dict) else {}
+        channel_cfg = channels.get(channel_id) if isinstance(channels.get(channel_id), dict) else None
+        moods = cfg.get("moods") if isinstance(cfg.get("moods"), dict) else {}
+        mood_cfg = moods.get(mood) if isinstance(moods.get(mood), dict) else None
+
+        candidates: list[object] = []
+        if channel_cfg:
+            channel_moods = channel_cfg.get("moods") if isinstance(channel_cfg.get("moods"), dict) else {}
+            channel_mood_cfg = channel_moods.get(mood) if isinstance(channel_moods.get(mood), dict) else None
+            candidates.extend(
+                self._collect_barcello_candidates(channel_mood_cfg, key=key, time_bucket=time_bucket, drama_label=drama_label)
+            )
+            candidates.extend(self._collect_barcello_candidates(channel_cfg, key=key, time_bucket=time_bucket, drama_label=drama_label))
+
+        candidates.extend(self._collect_barcello_candidates(mood_cfg, key=key, time_bucket=time_bucket, drama_label=drama_label))
+        templates = cfg.get("templates") if isinstance(cfg.get("templates"), dict) else {}
+        candidates.append(templates.get(key))
+
+        for candidate in candidates:
+            if isinstance(candidate, str):
+                if candidate.strip():
+                    return candidate
+            elif isinstance(candidate, list):
+                if any(isinstance(item, str) and item.strip() for item in candidate):
+                    return candidate
+        return None
+
+    def _collect_barcello_candidates(self, base: object, *, key: str, time_bucket: str, drama_label: str) -> list[object]:
+        if not isinstance(base, dict):
+            return []
+
+        candidates: list[object] = []
+        templates = base.get("templates") if isinstance(base.get("templates"), dict) else {}
+        time = base.get("time") if isinstance(base.get("time"), dict) else {}
+        drama = base.get("drama") if isinstance(base.get("drama"), dict) else {}
+
+        time_bucket_cfg = time.get(time_bucket) if isinstance(time.get(time_bucket), dict) else {}
+        time_templates = time_bucket_cfg.get("templates") if isinstance(time_bucket_cfg.get("templates"), dict) else {}
+        time_drama = time_bucket_cfg.get("drama") if isinstance(time_bucket_cfg.get("drama"), dict) else {}
+        time_drama_cfg = time_drama.get(drama_label) if isinstance(time_drama.get(drama_label), dict) else {}
+        time_drama_templates = (
+            time_drama_cfg.get("templates") if isinstance(time_drama_cfg.get("templates"), dict) else {}
+        )
+
+        drama_cfg = drama.get(drama_label) if isinstance(drama.get(drama_label), dict) else {}
+        drama_templates = drama_cfg.get("templates") if isinstance(drama_cfg.get("templates"), dict) else {}
+
+        candidates.append(time_drama_templates.get(key))
+        candidates.append(drama_templates.get(key))
+        candidates.append(time_templates.get(key))
+        candidates.append(templates.get(key))
+        return candidates
 
     async def _poll_insights(self) -> None:
         if self._bot is None:

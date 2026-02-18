@@ -2,22 +2,77 @@
   "window_minutes": 60,
   "cooldown_minutes": 10,
   "min_score_delta_for_notify": 3,
+  "mood_default": "chill",
+  "time_buckets": {
+    "night": {"start": 0, "end": 6},
+    "morning": {"start": 6, "end": 12}
+  },
+  "dramatic_tiers": [
+    {"min_count_today": 1, "label": "t1"},
+    {"min_count_today": 3, "label": "t3"}
+  ],
   "templates": {
     "INIT": "📌 Barcello ora {new} (score {new_score})",
-    "GREEN->YELLOW": "🟡 Attenzione: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
-    "GREEN->RED": "🔴 Allerta: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
-    "GREEN->BLACK": "⚫ Critico: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
-    "YELLOW->GREEN": "🟢 Migliora: Barcello torna {new} ({old_score}→{new_score}).",
-    "YELLOW->RED": "🔴 Peggiora: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
-    "YELLOW->BLACK": "⚫ Peggiora: Barcello passa da {old} a {new} ({old_score}→{new_score}).",
-    "RED->GREEN": "🟢 Forte miglioramento: {old} → {new} ({old_score}→{new_score}).",
-    "RED->YELLOW": "🟡 Migliora: {old} → {new} ({old_score}→{new_score}).",
-    "RED->BLACK": "⚫ Peggiora: {old} → {new} ({old_score}→{new_score}).",
-    "BLACK->GREEN": "🟢 Recupero completo: {old} → {new} ({old_score}→{new_score}).",
-    "BLACK->YELLOW": "🟡 Migliora: {old} → {new} ({old_score}→{new_score}).",
-    "BLACK->RED": "🔴 Migliora ma resta critica: {old} → {new} ({old_score}→{new_score}).",
     "WORSEN": "⚠️ Barcello peggiora: {old} → {new} ({old_score}→{new_score}).",
     "IMPROVE": "✅ Barcello migliora: {old} → {new} ({old_score}→{new_score}).",
-    "SAME": "ℹ️ Barcello invariato: {new} (score {new_score})."
+    "GREEN->YELLOW": "🟡 Attenzione: {old} → {new} ({old_score}→{new_score})."
+  },
+  "moods": {
+    "chill": {
+      "templates": {
+        "WORSEN": "😌 Piano piano: {old} → {new}."
+      },
+      "time": {
+        "morning": {
+          "templates": {
+            "WORSEN": "☕ Mattino delicato: {old} → {new}."
+          }
+        }
+      },
+      "drama": {
+        "t3": {
+          "templates": {
+            "WORSEN": "😬 Terza volta oggi ({state_count_today}): sta sfuggendo di mano."
+          }
+        }
+      }
+    },
+    "drama": {
+      "templates": {
+        "GREEN->YELLOW": [
+          "🎭 Inizia il drama: {old} → {new}.",
+          "🔥 Colpo di scena: da {old} a {new}."
+        ]
+      },
+      "time": {
+        "night": {
+          "templates": {
+            "GREEN->YELLOW": "🌙 Drama notturno: {old} → {new}."
+          }
+        }
+      },
+      "drama": {
+        "t3": {
+          "templates": {
+            "YELLOW->RED": "🚨 Terza+ volta oggi: {new} ({state_count_today}), ultima volta {last_in_state_human} fa."
+          }
+        }
+      }
+    }
+  },
+  "channels": {
+    "123456789012345678": {
+      "mood_default": "drama",
+      "templates": {
+        "WORSEN": "📣 Canale speciale: barometro giù ({old}→{new})."
+      },
+      "moods": {
+        "drama": {
+          "templates": {
+            "GREEN->YELLOW": "📣🎭 Questo canale vive il drama: {old} → {new}."
+          }
+        }
+      }
+    }
   }
 }

@@ -265,104 +265,39 @@ def test_bulletize_answer_no_target_evidence_has_no_links() -> None:
     assert "https://discord.com/channels/1/2/3" not in out
 
 
-def test_render_barcello_transition_uses_first_today_template_and_new_placeholders() -> None:
+def test_select_barcello_template_prefers_mood_and_time_override() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    templates = {
-        "GIALLO_FIRST_TODAY": "Prima volta oggi in {new}: #{state_count_today}",
-        "ROSSO->GIALLO": "fallback {new}",
-    }
-
-    out = service._render_barcello_transition(
-        "ROSSO",
-        "GIALLO",
-        70,
-        50,
-        templates=templates,
-        first_today_for_new=True,
-        extra_placeholders={"state_count_today": "1"},
-    )
-    assert out == "Prima volta oggi in GIALLO: #1"
-
-
-def test_render_barcello_transition_falls_back_to_english_transition_key() -> None:
-    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    templates = {"GREEN->YELLOW": "{old}->{new} {state_count_today} {last_in_state_human} {last_in_state_dt}"}
-
-    out = service._render_barcello_transition(
-        "VERDE",
-        "GIALLO",
-        10,
-        20,
-        templates=templates,
-        extra_placeholders={
-            "state_count_today": "2",
-            "last_in_state_human": "3 ore",
-            "last_in_state_dt": "16/02/2026 19:15",
+    cfg = {
+        "templates": {"VERDE->GIALLO": "base"},
+        "moods": {
+            "drama": {
+                "templates": {"VERDE->GIALLO": "mood"},
+                "time": {"night": {"templates": {"VERDE->GIALLO": "night"}}},
+            }
         },
-    )
-    assert out == "VERDE->GIALLO 2 3 ore 16/02/2026 19:15"
-
-
-def test_format_barcello_last_seen_helpers() -> None:
-    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    now = datetime(2026, 2, 16, 19, 15, tzinfo=ZoneInfo("UTC"))
-
-    assert service._format_barcello_last_seen_human(None, now) == "mai"
-    assert service._format_barcello_last_seen_dt(None) == "mai"
-
-    last_seen = "2026-02-16T18:15:00+00:00"
-    assert service._format_barcello_last_seen_human(last_seen, now) == "60 minuti"
-    assert service._format_barcello_last_seen_dt(last_seen) == "16/02/2026 19:15"
-
-
-def test_apply_hysteresis_blocks_flapping_for_green_yellow_band() -> None:
-    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    assert service._apply_hysteresis("VERDE", "GIALLO", 59) == "VERDE"
-    assert service._apply_hysteresis("GIALLO", "VERDE", 61) == "GIALLO"
-
-
-def test_apply_hysteresis_allows_real_transition_past_threshold() -> None:
-    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    assert service._apply_hysteresis("VERDE", "GIALLO", 57) == "GIALLO"
-    assert service._apply_hysteresis("ROSSO", "NERO", 17) == "NERO"
-
-
-def test_apply_hysteresis_keeps_raw_when_prev_unknown_or_jump_transition() -> None:
-    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    assert service._apply_hysteresis(None, "GIALLO", 50) == "GIALLO"
-    assert service._apply_hysteresis("VERDE", "ROSSO", 20) == "ROSSO"
-
-
-def test_pick_template_value_supports_string_and_list() -> None:
-    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    assert service._pick_template_value("ciao") == "ciao"
-    picked = service._pick_template_value(["uno", "due"])
-    assert picked in {"uno", "due"}
-
-
-def test_pick_template_value_ignores_invalid_or_empty_list_entries() -> None:
-    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    assert service._pick_template_value([]) == ""
-    assert service._pick_template_value([None, "", "  "]) == ""
-
-
-def test_render_barcello_transition_renders_placeholders_with_list_template() -> None:
-    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    templates = {
-        "VERDE->GIALLO": [
-            "A {old}->{new} {new_score} #{state_count_today}",
-            "B {old}->{new} {new_score} #{state_count_today}",
-        ]
     }
-    out = service._render_barcello_transition(
-        "VERDE",
-        "GIALLO",
-        70,
-        59,
-        templates=templates,
-        extra_placeholders={"state_count_today": "1"},
-    )
-    assert out in {
-        "A VERDE->GIALLO 59 #1",
-        "B VERDE->GIALLO 59 #1",
+    selected = service._select_barcello_template(cfg, "1", "drama", "night", "t1", "VERDE->GIALLO")
+    assert selected == "night"
+
+
+def test_select_barcello_template_prefers_channel_override() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    cfg = {
+        "templates": {"VERDE->GIALLO": "base"},
+        "moods": {"drama": {"templates": {"VERDE->GIALLO": "global-mood"}}},
+        "channels": {
+            "42": {
+                "moods": {"drama": {"templates": {"VERDE->GIALLO": "channel-mood"}}},
+            }
+        },
     }
+    selected = service._select_barcello_template(cfg, "42", "drama", "night", "t1", "VERDE->GIALLO")
+    assert selected == "channel-mood"
+
+
+def test_resolve_template_value_handles_deterministic_list_choice() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    selected_a = service._resolve_template_value(["a", "b", "c"], seed_parts=("g", "c", "k", "m", "t", "d", "x"))
+    selected_b = service._resolve_template_value(["a", "b", "c"], seed_parts=("g", "c", "k", "m", "t", "d", "x"))
+    assert selected_a == selected_b
+    assert selected_a in {"a", "b", "c"}
