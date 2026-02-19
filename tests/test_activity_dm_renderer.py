@@ -1,7 +1,33 @@
 from __future__ import annotations
 
+import sys
+import types
+
+if "aiosqlite" not in sys.modules:
+    sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict, Connection=object)
+
 from app.renderers.activity_dm_renderer import build_activity_dm_embeds
 from app.services.activity_insights import ActivityScore, ChannelActivityDetails, UserActivityEntry
+
+
+class _Member:
+    def __init__(self, display_name: str) -> None:
+        self.display_name = display_name
+        self.global_name = None
+        self.name = display_name
+
+
+class _State:
+    def get_user(self, user_id: int):
+        return None
+
+
+class _Guild:
+    def __init__(self) -> None:
+        self._state = _State()
+
+    def get_member(self, user_id: int):
+        return _Member(f"User {user_id}")
 
 
 def _entry(user_id: int, count: int, *, with_range_last: bool = True) -> UserActivityEntry:
@@ -22,10 +48,7 @@ def _entry(user_id: int, count: int, *, with_range_last: bool = True) -> UserAct
 def test_build_activity_dm_embeds_respects_field_limits() -> None:
     top_users = [_entry(1000 + i, 100 - i, with_range_last=True) for i in range(20)]
     inactive = [_entry(2000 + i, 0 if i % 2 == 0 else 1, with_range_last=(i % 2 == 1)) for i in range(50)]
-    advice = [
-        "Consiglio molto lungo " + ("x" * 140) + f" #{i}"
-        for i in range(20)
-    ]
+    advice = ["Consiglio molto lungo " + ("x" * 140) + f" #{i}" for i in range(20)]
 
     details = ChannelActivityDetails(
         score=ActivityScore(
@@ -41,15 +64,11 @@ def test_build_activity_dm_embeds_respects_field_limits() -> None:
         top_active_users=top_users,
         inactive_users=inactive,
         advice_bullets=advice,
-        stats_lines=[
-            "• Messaggi: **500**",
-            "• Utenti attivi: **75**",
-            "• Ora di picco: **11:00**",
-            "• Continuità oraria: **18**",
-        ],
+        stats_lines=["• Messaggi: **500**", "• Utenti attivi: **75**", "• Ora di picco: **11:00**", "• Continuità oraria: **18**"],
     )
 
     embeds = build_activity_dm_embeds(
+        _Guild(),
         "123456789",
         "987654321",
         "generale",

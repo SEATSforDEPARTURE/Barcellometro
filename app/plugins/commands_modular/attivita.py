@@ -63,6 +63,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
         )
         channel_name = getattr(interaction.channel, "name", str(interaction.channel_id))
         embeds = build_activity_dm_embeds(
+            interaction.guild,
             str(interaction.guild_id),
             str(interaction.channel_id),
             channel_name,
@@ -71,6 +72,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             reference_ts=end_ts,
         )
         txt_payload = build_activity_details_txt(
+            interaction.guild,
             interaction.guild.name,
             str(interaction.guild_id),
             channel_name,
