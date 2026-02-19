@@ -22,9 +22,9 @@ def build_daily_activity_embeds(guild_name: str, channel_payloads: list[tuple[st
         embed.add_field(name="🫀 PUNTI ATTIVITÀ", value=f"{bar} **({s.score}/100)**", inline=False)
         embed.add_field(name="📈 TREND", value=s.trend_text, inline=False)
         embed.add_field(name="📌 STATISTICHE", value="\n".join(details.stats_lines) or "n/d", inline=False)
-        top = [f"• <@{uid}> — {cnt} msg" for uid, cnt in details.top_active_users] or ["• Nessun dato"]
+        top = [f"• <@{item.user_id}> — {item.count_in_range} msg" for item in details.top_active_users] or ["• Nessun dato"]
         embed.add_field(name="🏆 UTENTI PIÙ ATTIVI", value="\n".join(top), inline=False)
-        sleepy = [f"• <@{entry.user_id}> — {entry.days_inactive}g" for entry in details.inactive_users] or ["• Nessun inattivo"]
+        sleepy = [f"• <@{item.user_id}> — {item.count_in_range} msg" for item in details.inactive_users] or ["• Nessun inattivo"]
         embed.add_field(name="💤 UTENTI INATTIVI", value="\n".join(sleepy), inline=False)
         embed.add_field(name="💡 CONSIGLI", value="\n".join(f"• {row}" for row in details.advice_bullets), inline=False)
         embed.set_footer(text="Barcellometro")

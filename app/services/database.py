@@ -1810,6 +1810,117 @@ class DatabaseService:
         )
         return int(row["total"] or 0) if row else 0
 
+    async def fetch_user_counts_in_range_channel(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> dict[int, int]:
+        rows = await self.fetchall(
+            """
+            SELECT author_id, COUNT(*) AS c
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            GROUP BY author_id
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        result: dict[int, int] = {}
+        for row in rows:
+            try:
+                result[int(row["author_id"])] = int(row["c"])
+            except Exception:
+                continue
+        return result
+
+    async def fetch_user_last_message_in_range_channel(
+        self,
+        guild_id: str,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> dict[int, tuple[str, str | None]]:
+        rows = await self.fetchall(
+            """
+            SELECT m.author_id, m.ts, m.message_id
+            FROM messages m
+            JOIN (
+                SELECT author_id, MAX(ts) AS max_ts
+                FROM messages
+                WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+                GROUP BY author_id
+            ) x
+              ON x.author_id = m.author_id AND x.max_ts = m.ts
+            WHERE m.guild_id = ? AND m.channel_id = ? AND m.ts >= ? AND m.ts <= ? AND COALESCE(m.is_deleted, 0) = 0
+            """,
+            (guild_id, channel_id, start_ts, end_ts, guild_id, channel_id, start_ts, end_ts),
+        )
+        result: dict[int, tuple[str, str | None]] = {}
+        for row in rows:
+            try:
+                aid = int(row["author_id"])
+            except Exception:
+                continue
+            ts = str(row["ts"])
+            message_id = str(row["message_id"]) if row["message_id"] else None
+            prev = result.get(aid)
+            if prev is None or ts > prev[0]:
+                result[aid] = (ts, message_id)
+        return result
+
+    async def fetch_user_last_message_in_channel_since(
+        self,
+        guild_id: str,
+        channel_id: str,
+        since_ts: str,
+    ) -> dict[int, tuple[str, str | None]]:
+        rows = await self.fetchall(
+            """
+            SELECT m.author_id, m.ts, m.message_id
+            FROM messages m
+            JOIN (
+                SELECT author_id, MAX(ts) AS max_ts
+                FROM messages
+                WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND COALESCE(is_deleted, 0) = 0
+                GROUP BY author_id
+            ) x
+              ON x.author_id = m.author_id AND x.max_ts = m.ts
+            WHERE m.guild_id = ? AND m.channel_id = ? AND m.ts >= ? AND COALESCE(m.is_deleted, 0) = 0
+            """,
+            (guild_id, channel_id, since_ts, guild_id, channel_id, since_ts),
+        )
+        result: dict[int, tuple[str, str | None]] = {}
+        for row in rows:
+            try:
+                aid = int(row["author_id"])
+            except Exception:
+                continue
+            ts = str(row["ts"])
+            message_id = str(row["message_id"]) if row["message_id"] else None
+            prev = result.get(aid)
+            if prev is None or ts > prev[0]:
+                result[aid] = (ts, message_id)
+        return result
+
+    async def fetch_user_timestamps_in_range_channel(
+        self,
+        guild_id: str,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> list[tuple[int, str]]:
+        rows = await self.fetchall(
+            """
+            SELECT author_id, ts
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            ORDER BY ts ASC
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        result: list[tuple[int, str]] = []
+        for row in rows:
+            try:
+                result.append((int(row["author_id"]), str(row["ts"])))
+            except Exception:
+                continue
+        return result
+
     async def top_authors_in_channel_range(
         self,
         guild_id: str,
@@ -1818,24 +1929,9 @@ class DatabaseService:
         end_ts: str,
         limit: int,
     ) -> list[tuple[int, int]]:
-        rows = await self.fetchall(
-            """
-            SELECT author_id, COUNT(*) AS cnt
-            FROM messages
-            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
-            GROUP BY author_id
-            ORDER BY cnt DESC
-            LIMIT ?
-            """,
-            (guild_id, channel_id, start_ts, end_ts, max(1, int(limit))),
-        )
-        out: list[tuple[int, int]] = []
-        for row in rows:
-            try:
-                out.append((int(row["author_id"]), int(row["cnt"])))
-            except Exception:
-                continue
-        return out
+        counts = await self.fetch_user_counts_in_range_channel(guild_id, channel_id, start_ts, end_ts)
+        ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+        return ordered[: max(1, int(limit))]
 
     async def fetch_message_timestamps_in_range_single_channel(
         self,
@@ -1856,22 +1952,8 @@ class DatabaseService:
         return [str(row["ts"]) for row in rows if row and row["ts"]]
 
     async def last_seen_by_user_in_channel(self, guild_id: str, channel_id: str, since_ts: str) -> dict[int, str]:
-        rows = await self.fetchall(
-            """
-            SELECT author_id, MAX(ts) AS last_ts
-            FROM messages
-            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND COALESCE(is_deleted, 0) = 0
-            GROUP BY author_id
-            """,
-            (guild_id, channel_id, since_ts),
-        )
-        out: dict[int, str] = {}
-        for row in rows:
-            try:
-                out[int(row["author_id"])] = str(row["last_ts"])
-            except Exception:
-                continue
-        return out
+        latest = await self.fetch_user_last_message_in_channel_since(guild_id, channel_id, since_ts)
+        return {uid: item[0] for uid, item in latest.items()}
 
     async def upsert_activity_monitoring_config(
         self,
