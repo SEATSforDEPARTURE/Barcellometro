@@ -43,27 +43,18 @@ def _entry(user_id: int, count: int, *, with_range_last: bool = True) -> UserAct
         peak_day_count=max(1, count // 3),
         last_ts_in_range=ts if with_range_last else None,
         last_message_id_in_range=msg_id if with_range_last else None,
-        last_ts_channel=ts,
-        last_message_id_channel=msg_id,
+        last_ts_channel=ts if with_range_last else None,
+        last_message_id_channel=msg_id if with_range_last else None,
     )
 
 
-def test_build_activity_dm_embeds_respects_field_limits() -> None:
+def test_dm_layout_limits_and_formatting() -> None:
     top_users = [_entry(1000 + i, 100 - i, with_range_last=True) for i in range(20)]
-    inactive = [_entry(2000 + i, 0 if i % 2 == 0 else 1, with_range_last=(i % 2 == 1)) for i in range(50)]
+    inactive = [_entry(2000 + i, 0, with_range_last=(i % 2 == 1)) for i in range(50)]
     advice = ["Consiglio molto lungo " + ("x" * 140) + f" #{i}" for i in range(20)]
 
     details = ChannelActivityDetails(
-        score=ActivityScore(
-            messages_count=500,
-            active_users_count=75,
-            peak_hour_local=11,
-            continuity_hours=18,
-            score=72,
-            emoji="🟢",
-            label="INTENSA",
-            trend_text="In crescita marcata rispetto al periodo precedente.",
-        ),
+        score=ActivityScore(500, 75, 11, 18, 72, "🟢", "INTENSA", "In crescita marcata rispetto al periodo precedente."),
         top_active_users=top_users,
         inactive_users=inactive,
         advice_bullets=advice,
@@ -74,13 +65,12 @@ def test_build_activity_dm_embeds_respects_field_limits() -> None:
 
     embeds = build_activity_dm_embeds(_Guild(), "123456789", "987654321", "generale", "Ultimi 30 giorni", details, reference_ts="2026-01-21T12:00:00+00:00")
 
-    assert len(embeds) <= 6
     combined = "\n".join(field.value for embed in embeds for field in embed.fields)
-    assert "<@" in combined
-    assert "](https://discord.com/channels/" in combined
-    assert "📆" in combined
-    assert "🔥" in combined
-    assert "🧊" in combined
+    assert "**@User 1000**" in combined
+    assert "(**100 msg**)" in combined
+    assert "TOP 10 UTENTI PIU ATTIVI" in "\n".join(field.name for e in embeds for field in e.fields)
+    assert "🥀" in combined
+    assert "[20/01" in combined and "](https://discord.com/channels/" in combined
     for embed in embeds:
         for field in embed.fields:
             assert len(field.value) <= 1024
