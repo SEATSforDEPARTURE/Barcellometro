@@ -13,6 +13,7 @@ FIELD_VALUE_MAX = 1024
 FIELD_NAME_MAX = 256
 CHUNK_SUFFIX = "… (vedi .txt)"
 MAX_FIELDS_PER_EMBED = 25
+ZWSP = "​"
 
 
 def _display_name_for_id(*, guild: discord.Guild, user_id: int) -> str:
@@ -204,22 +205,26 @@ def _ensure_field(embeds: list[discord.Embed], title_base: str, value: str) -> N
     embeds[-1].add_field(name=title_base[:FIELD_NAME_MAX], value=safe_value, inline=False)
 
 
-def _add_chunked_field(embeds: list[discord.Embed], title: str, value: str) -> None:
+def _add_chunked_field(embeds: list[discord.Embed], title: str, value: str, *, continuation_name: str | None = None) -> None:
     parts = _chunk_lines([value]) if len(value) > FIELD_VALUE_MAX else [value]
     if len(parts) == 1:
         _ensure_field(embeds, title, parts[0])
         return
-    for idx, part in enumerate(parts, start=1):
-        _ensure_field(embeds, f"{title} ({idx}/{len(parts)})", part)
+    cont = continuation_name if continuation_name is not None else title
+    _ensure_field(embeds, title, parts[0])
+    for part in parts[1:]:
+        _ensure_field(embeds, cont, part)
 
 
-def _add_block_field(embeds: list[discord.Embed], title: str, blocks: list[str]) -> None:
+def _add_block_field(embeds: list[discord.Embed], title: str, blocks: list[str], *, continuation_name: str | None = None) -> None:
     chunks = _chunk_blocks(blocks)
     if len(chunks) == 1:
         _ensure_field(embeds, title, chunks[0])
         return
-    for idx, chunk in enumerate(chunks, start=1):
-        _ensure_field(embeds, f"{title} ({idx}/{len(chunks)})", chunk)
+    cont = continuation_name if continuation_name is not None else title
+    _ensure_field(embeds, title, chunks[0])
+    for chunk in chunks[1:]:
+        _ensure_field(embeds, cont, chunk)
 
 
 def _finalize_detail_titles(embeds: list[discord.Embed]) -> None:
@@ -309,7 +314,7 @@ def build_activity_dm_embeds(
     ]
     if top_over > 0:
         top_blocks.append(f"… + altri {top_over} utenti")
-    _add_block_field(embeds, "TOP 10 UTENTI PIU ATTIVI", top_blocks or ["—"])
+    _add_block_field(embeds, "TOP 10 UTENTI PIU ATTIVI", top_blocks or ["—"], continuation_name=ZWSP)
 
     inactive_items, inactive_over = _apply_limit(details.inactive_users)
     never_seen = [item for item in inactive_items if item.last_ts_channel is None]
@@ -327,7 +332,7 @@ def build_activity_dm_embeds(
         )
     if inactive_over > 0:
         inactive_lines.append(f"… + altri {inactive_over} utenti")
-    _add_chunked_field(embeds, "TOP 10 UTENTI INATTIVI", "\n\n".join(inactive_lines or ["—"]))
+    _add_chunked_field(embeds, "TOP 10 UTENTI INATTIVI", "\n\n".join(inactive_lines or ["—"]), continuation_name=ZWSP)
 
     _add_chunked_field(embeds, "💡 CONSIGLI", "\n".join(f"• {line}" for line in details.advice_bullets) or "• Nessun consiglio")
     _finalize_detail_titles(embeds)

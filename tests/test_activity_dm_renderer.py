@@ -74,3 +74,23 @@ def test_dm_layout_limits_and_formatting() -> None:
     for embed in embeds:
         for field in embed.fields:
             assert len(field.value) <= 1024
+
+
+def test_section_titles_not_numbered_when_chunked() -> None:
+    top_users = [_entry(3000 + i, 100 - i, with_range_last=True) for i in range(20)]
+    inactive = [_entry(4000 + i, 0, with_range_last=(i % 3 == 0)) for i in range(50)]
+    details = ChannelActivityDetails(
+        score=ActivityScore(500, 75, 11, 18, 72, "🟢", "INTENSA", "Trend"),
+        top_active_users=top_users,
+        inactive_users=inactive,
+        advice_bullets=["ok"],
+        stats_lines=["• Messaggi: **500**", "• Utenti attivi: **75/120**"],
+        range_spans_multiple_days=True,
+        candidates_total=120,
+    )
+    embeds = build_activity_dm_embeds(_Guild(), "123", "456", "g", "range", details, reference_ts="2026-01-21T12:00:00+00:00")
+    field_names = [f.name for e in embeds for f in e.fields]
+    assert "TOP 10 UTENTI PIU ATTIVI" in field_names
+    assert "TOP 10 UTENTI INATTIVI" in field_names
+    assert not any("(" in name and "/" in name and ")" in name for name in field_names)
+    assert "​" in field_names
