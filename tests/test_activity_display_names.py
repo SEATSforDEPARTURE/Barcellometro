@@ -59,7 +59,7 @@ def _entry(uid: int, count: int) -> UserActivityEntry:
     )
 
 
-def test_display_names_instead_of_raw_id_and_mentions_kept_clickable() -> None:
+def test_rendering_active_mentions_and_inactive_plain_names() -> None:
     details = ChannelActivityDetails(
         score=ActivityScore(
             messages_count=10,
@@ -71,26 +71,19 @@ def test_display_names_instead_of_raw_id_and_mentions_kept_clickable() -> None:
             label="MEDIOCRE",
             trend_text="Stabile",
         ),
-        top_active_users=[_entry(1, 5), _entry(2, 4), _entry(3, 3), _entry(9999, 2)],
-        inactive_users=[_entry(9999, 0)],
+        top_active_users=[_entry(1, 5)],
+        inactive_users=[_entry(2, 0), _entry(3, 0), _entry(9999, 0)],
         advice_bullets=["ok"],
-        stats_lines=["• Messaggi: **10**"],
+        stats_lines=["• Messaggi: **10**", "• Utenti attivi: **4/7**"],
         range_spans_multiple_days=True,
+        candidates_total=7,
     )
 
-    embeds = build_activity_dm_embeds(
-        _Guild(),
-        "111",
-        "222",
-        "canale",
-        "Oggi",
-        details,
-        reference_ts="2026-01-21T12:00:00+00:00",
-    )
-
+    embeds = build_activity_dm_embeds(_Guild(), "111", "222", "canale", "Oggi", details, reference_ts="2026-01-21T12:00:00+00:00")
     text = "\n".join(field.value for embed in embeds for field in embed.fields)
-    assert "<@1> — Nick Uno" in text
-    assert "<@2> — Global Due" in text
-    assert "<@3> — Cached Tre" in text
-    assert "<@9999>" in text
-    assert "](https://discord.com/channels/" in text
+    assert "<@1>" in text
+    assert "Global Due" in text
+    assert "Cached Tre" in text
+    assert "ID 9999" in text
+    assert "<@2>" not in text
+    assert "Utenti attivi: **4/7**" in text

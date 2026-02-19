@@ -46,6 +46,7 @@ class ChannelActivityDetails:
     advice_bullets: list[str]
     stats_lines: list[str]
     range_spans_multiple_days: bool
+    candidates_total: int
 
 
 class ActivityInsightsService:
@@ -222,9 +223,10 @@ class ActivityInsightsService:
         if not advice:
             advice.append("Buon ritmo: mantenete il tono attuale e valorizzate i contributi utili.")
 
+        candidates_total = len(candidate_ids)
         stats = [
             f"• Messaggi: **{messages}**",
-            f"• Utenti attivi: **{active_users}**",
+            f"• Utenti attivi: **{active_users}/{candidates_total}**",
             f"• Ora di picco: **{peak_hour:02d}:00**" if peak_hour is not None else "• Ora di picco: **n/d**",
             f"• Continuità oraria: **{continuity}** ore con attività",
         ]
@@ -245,4 +247,5 @@ class ActivityInsightsService:
             advice_bullets=advice,
             stats_lines=stats,
             range_spans_multiple_days=spans_multiple_days,
+            candidates_total=candidates_total,
         )

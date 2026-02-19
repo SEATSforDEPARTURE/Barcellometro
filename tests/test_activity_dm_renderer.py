@@ -67,26 +67,20 @@ def test_build_activity_dm_embeds_respects_field_limits() -> None:
         top_active_users=top_users,
         inactive_users=inactive,
         advice_bullets=advice,
-        stats_lines=["• Messaggi: **500**", "• Utenti attivi: **75**", "• Ora di picco: **11:00**", "• Continuità oraria: **18**"],
+        stats_lines=["• Messaggi: **500**", "• Utenti attivi: **75/120**", "• Ora di picco: **11:00**", "• Continuità oraria: **18**"],
         range_spans_multiple_days=True,
+        candidates_total=120,
     )
 
-    embeds = build_activity_dm_embeds(
-        _Guild(),
-        "123456789",
-        "987654321",
-        "generale",
-        "Ultimi 30 giorni",
-        details,
-        reference_ts="2026-01-21T12:00:00+00:00",
-    )
+    embeds = build_activity_dm_embeds(_Guild(), "123456789", "987654321", "generale", "Ultimi 30 giorni", details, reference_ts="2026-01-21T12:00:00+00:00")
 
-    assert len(embeds) <= 5
+    assert len(embeds) <= 6
     combined = "\n".join(field.value for embed in embeds for field in embed.fields)
     assert "<@" in combined
     assert "](https://discord.com/channels/" in combined
-    assert "picco giorno:" in combined
-    assert "picco ora:" in combined
+    assert "📆" in combined
+    assert "🔥" in combined
+    assert "🧊" in combined
     for embed in embeds:
         for field in embed.fields:
             assert len(field.value) <= 1024
