@@ -217,8 +217,17 @@ def _ensure_field(embeds: list[discord.Embed], title_base: str, value: str) -> N
     embeds[-1].add_field(name=title_base[:FIELD_NAME_MAX], value=safe_value, inline=False)
 
 
-def _add_chunked_field(embeds: list[discord.Embed], title: str, value: str, *, continuation_name: str | None = None) -> None:
+def _add_chunked_field(
+    embeds: list[discord.Embed],
+    title: str,
+    value: str,
+    *,
+    continuation_name: str | None = None,
+    leading_blank_first: bool = False,
+) -> None:
     parts = _chunk_lines([value]) if len(value) > FIELD_VALUE_MAX else [value]
+    if leading_blank_first and parts:
+        parts[0] = "\n" + parts[0]
     if len(parts) == 1:
         _ensure_field(embeds, title, parts[0])
         return
@@ -228,8 +237,17 @@ def _add_chunked_field(embeds: list[discord.Embed], title: str, value: str, *, c
         _ensure_field(embeds, cont, part)
 
 
-def _add_block_field(embeds: list[discord.Embed], title: str, blocks: list[str], *, continuation_name: str | None = None) -> None:
+def _add_block_field(
+    embeds: list[discord.Embed],
+    title: str,
+    blocks: list[str],
+    *,
+    continuation_name: str | None = None,
+    leading_blank_first: bool = False,
+) -> None:
     chunks = _chunk_blocks(blocks)
+    if leading_blank_first and chunks:
+        chunks[0] = "\n" + chunks[0]
     if len(chunks) == 1:
         _ensure_field(embeds, title, chunks[0])
         return
@@ -269,26 +287,27 @@ def build_activity_details_txt(
         f"Range Europe/Rome: {_fmt_ts(start_ts)} -> {_fmt_ts(end_ts)}",
         f"Generato il: {datetime.now(ROME_TZ).strftime('%d/%m/%Y %H:%M')}",
         "",
-        "SEZIONE A — TOP ATTIVI (tutti)",
+        f"SEZIONE A — TOP ATTIVI ({details.score.active_users_count} attivi su {details.candidates_total} utenti totali)",
     ]
-    for user in details.top_active_users:
+    for idx, user in enumerate(details.top_active_users, start=1):
         name = _display_name_for_id(guild=guild, user_id=user.user_id)
         lines.append(
-            f"<@{user.user_id}> ({name}, id={user.user_id}) — {user.count_in_range} msg | "
+            f"{idx}. <@{user.user_id}> ({name}, id={user.user_id}) — {user.count_in_range} msg | "
             f"ultimo: {_fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=False)} | "
             f"picco: {_fmt_ts_with_link(user.peak_hour_ts, guild_id, channel_id, user.peak_message_id, markdown=False, hour_bucket=True)} ({user.peak_count} msg)"
         )
-    lines.extend(["", "SEZIONE B — INATTIVI NEL PERIODO (tutti)"])
-    for user in details.inactive_users:
+    inactive_total = max(0, details.candidates_total - details.score.active_users_count)
+    lines.extend(["", f"SEZIONE B — INATTIVI NEL PERIODO ({inactive_total} inattivi su {details.candidates_total} utenti totali)"])
+    for idx, user in enumerate(details.inactive_users, start=1):
         name = _display_name_for_id(guild=guild, user_id=user.user_id)
         if user.last_ts_channel:
             lines.append(
-                f"<@{user.user_id}> ({name}, id={user.user_id}) — 0 msg | "
+                f"{idx}. <@{user.user_id}> ({name}, id={user.user_id}) — 0 msg | "
                 f"ultimo: {_fmt_ts_with_link(user.last_ts_channel, guild_id, channel_id, user.last_message_id_channel, markdown=False)} | "
                 f"{_human_delta(user.last_ts_channel, reference_ts)}"
             )
         else:
-            lines.append(f"<@{user.user_id}> ({name}, id={user.user_id}) — 0 msg | mai visto")
+            lines.append(f"{idx}. <@{user.user_id}> ({name}, id={user.user_id}) — 0 msg | mai visto")
     lines.append("")
     return "\n".join(lines)
 
@@ -326,7 +345,7 @@ def build_activity_dm_embeds(
     ]
     if top_over > 0:
         top_blocks.append(f"… + altri {top_over} utenti")
-    _add_block_field(embeds, "🏆 TOP 10 UTENTI PIÙ ATTIVI", top_blocks or ["—"], continuation_name=ZWSP)
+    _add_block_field(embeds, "🏆 TOP 10 UTENTI PIÙ ATTIVI", top_blocks or ["—"], continuation_name=ZWSP, leading_blank_first=True)
 
     inactive_items, inactive_over = _apply_limit(details.inactive_users)
     never_seen = [item for item in inactive_items if item.last_ts_channel is None]
@@ -344,7 +363,7 @@ def build_activity_dm_embeds(
         )
     if inactive_over > 0:
         inactive_lines.append(f"… + altri {inactive_over} utenti")
-    _add_chunked_field(embeds, "💤 TOP 10 UTENTI INATTIVI", "\n\n".join(inactive_lines or ["—"]), continuation_name=ZWSP)
+    _add_chunked_field(embeds, "💤 TOP 10 UTENTI INATTIVI", "\n\n".join(inactive_lines or ["—"]), continuation_name=ZWSP, leading_blank_first=True)
 
     _add_chunked_field(embeds, "💡 CONSIGLI", "\n".join(f"• {line}" for line in details.advice_bullets) or "• Nessun consiglio")
     _finalize_detail_titles(embeds)

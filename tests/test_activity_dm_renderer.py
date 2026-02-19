@@ -6,7 +6,7 @@ import types
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict, Connection=object)
 
-from app.renderers.activity_dm_renderer import build_activity_dm_embeds
+from app.renderers.activity_dm_renderer import build_activity_details_txt, build_activity_dm_embeds
 from app.services.activity_insights import ActivityScore, ChannelActivityDetails, UserActivityEntry
 
 
@@ -77,8 +77,10 @@ def test_dm_layout_limits_and_formatting() -> None:
     assert "🥀" in combined
     assert "[20/01" in combined and "](https://discord.com/channels/" in combined
     active_field = next(field for e in embeds for field in e.fields if field.name == "🏆 TOP 10 UTENTI PIÙ ATTIVI")
+    assert active_field.value.startswith("\n")
     assert "<@" in active_field.value
     inactive_field = next(field for e in embeds for field in e.fields if field.name == "💤 TOP 10 UTENTI INATTIVI")
+    assert inactive_field.value.startswith("\n")
     assert "<@" not in inactive_field.value
     for block in [b for b in active_field.value.split("\n\n") if b.strip() and not b.startswith("… + altri")]:
         assert "\n" in block
@@ -105,3 +107,33 @@ def test_section_titles_not_numbered_when_chunked() -> None:
     assert "💤 TOP 10 UTENTI INATTIVI" in field_names
     assert not any("(" in name for name in field_names)
     assert "​" in field_names
+
+
+def test_txt_is_numbered_and_shows_totals() -> None:
+    details = ChannelActivityDetails(
+        score=ActivityScore(120, 2, 11, 5, 62, "🟢", "INTENSA", "Trend"),
+        top_active_users=[_entry(10, 9, with_range_last=True), _entry(11, 7, with_range_last=True)],
+        inactive_users=[_entry(20, 0, with_range_last=False), _entry(21, 0, with_range_last=True)],
+        advice_bullets=["ok"],
+        stats_lines=["• Messaggi: **120**", "• Utenti attivi: **2/4**"],
+        range_spans_multiple_days=True,
+        candidates_total=4,
+    )
+    txt = build_activity_details_txt(
+        _Guild(),
+        "Guild",
+        "123",
+        "general",
+        "456",
+        "Ultimi 7 giorni",
+        "2026-01-14T00:00:00+00:00",
+        "2026-01-21T00:00:00+00:00",
+        details,
+        reference_ts="2026-01-21T12:00:00+00:00",
+    )
+    assert "SEZIONE A — TOP ATTIVI (2 attivi su 4 utenti totali)" in txt
+    assert "SEZIONE B — INATTIVI NEL PERIODO (2 inattivi su 4 utenti totali)" in txt
+    assert "\n1. <@10>" in txt
+    assert "\n2. <@11>" in txt
+    assert "\n1. <@20>" in txt
+    assert "\n2. <@21>" in txt
