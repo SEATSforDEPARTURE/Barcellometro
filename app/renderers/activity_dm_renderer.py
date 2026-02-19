@@ -39,6 +39,17 @@ def _label_inactive_dm(*, guild: discord.Guild, user_id: int) -> str:
     return _display_name_for_id(guild=guild, user_id=user_id)
 
 
+def _rank_badge(i: int) -> str:
+    if i == 1:
+        return "🥇"
+    if i == 2:
+        return "🥈"
+    if i == 3:
+        return "🥉"
+    mapping = {4: "4️⃣", 5: "5️⃣", 6: "6️⃣", 7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟"}
+    return mapping.get(i, f"{i}.")
+
+
 def _bar(score: int, emoji: str) -> str:
     filled = max(0, min(10, int(round(max(0, min(score, 100)) / 10))))
     return f"{emoji * filled}{'⚪' * (10 - filled)}"
@@ -163,13 +174,14 @@ def _format_active_block(
     include_peak_day: bool,
 ) -> str:
     name = _display_name_for_id(guild=guild, user_id=user.user_id)
+    badge = _rank_badge(idx)
     first = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=True)
-    row1 = f"{idx}. **@{name}** (**{user.count_in_range} msg**) | 💬 Ultimo msg: {first} 🕒 {_human_delta(user.last_ts_in_range, reference_ts)}"
+    row1 = f"{badge} **@{name}** (**{user.count_in_range} msg**) | 💬 Ultimo: {first} 🕒 {_human_delta(user.last_ts_in_range, reference_ts)}"
 
     peak_link = _fmt_ts_with_link(user.peak_hour_ts, guild_id, channel_id, user.peak_message_id, markdown=True, hour_bucket=True)
-    row2 = f" -🔥 Picco attività: {peak_link} ({user.peak_count} msg)"
+    row2 = f"  🔥 Picco: {peak_link} ({user.peak_count} msg)"
     if include_peak_day and user.peak_day_date_local and user.peak_day_count > 0:
-        row2 += f" | 📆 Giorno più attivo: {user.peak_day_date_local} ({user.peak_day_count} msg)"
+        row2 += f" | 📆 Giorno: {user.peak_day_date_local} ({user.peak_day_count} msg)"
     return f"{row1}\n{row2}"
 
 
@@ -183,10 +195,11 @@ def _format_inactive_line(
     reference_ts: str,
 ) -> str:
     name = _display_name_for_id(guild=guild, user_id=user.user_id)
+    badge = _rank_badge(idx)
     if user.last_ts_channel:
         last = _fmt_ts_with_link(user.last_ts_channel, guild_id, channel_id, user.last_message_id_channel, markdown=True)
-        return f"{idx}. **{name}** (0 msg) | 💬 Ultimo msg: {last} - {_human_delta(user.last_ts_channel, reference_ts)}"
-    return f"{idx}. {name} (0 msg) (mai partecipato dall'ingresso 🥀)"
+        return f"{badge} **{name}** (**0 msg**) | 💬 Ultimo: {last} 🕒 {_human_delta(user.last_ts_channel, reference_ts)}"
+    return f"{badge} **{name}** (**0 msg**) (mai partecipato dall'ingresso 🥀)"
 
 
 def _apply_limit(items: list[UserActivityEntry]) -> tuple[list[UserActivityEntry], int]:
@@ -322,7 +335,7 @@ def build_activity_dm_embeds(
     inactive_lines: list[str] = []
     if never_seen:
         names = ", ".join(_label_inactive_dm(guild=guild, user_id=item.user_id) for item in never_seen)
-        inactive_lines.append(f"1. {names} (0 msg) (mai partecipato dall'ingresso 🥀)")
+        inactive_lines.append(f"{_rank_badge(1)} {names}\n(**0 msg**) (mai partecipato dall'ingresso 🥀)")
         base_idx = 2
     else:
         base_idx = 1

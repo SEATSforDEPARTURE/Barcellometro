@@ -69,8 +69,15 @@ def test_dm_layout_limits_and_formatting() -> None:
     assert "**@User 1000**" in combined
     assert "(**100 msg**)" in combined
     assert "TOP 10 UTENTI PIU ATTIVI" in "\n".join(field.name for e in embeds for field in e.fields)
+    assert "🥇" in combined and "🥈" in combined and "🥉" in combined and "4️⃣" in combined
+    assert "\n  🔥 Picco:" in combined
+    assert "(**0 msg**)" in combined
     assert "🥀" in combined
     assert "[20/01" in combined and "](https://discord.com/channels/" in combined
+    active_field = next(field for e in embeds for field in e.fields if field.name == "TOP 10 UTENTI PIU ATTIVI")
+    assert "1. **@" not in active_field.value
+    for block in [b for b in active_field.value.split("\n\n") if b.strip() and not b.startswith("… + altri")]:
+        assert "\n" in block
     for embed in embeds:
         for field in embed.fields:
             assert len(field.value) <= 1024
