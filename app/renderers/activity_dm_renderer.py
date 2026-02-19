@@ -323,7 +323,7 @@ def build_activity_dm_embeds(
     reference_ts: str,
 ) -> list[discord.Embed]:
     s = details.score
-    status = discord.Embed(title=f"🫛 STATO ATTIVITÀ “#{channel_name}”", color=_color_for_label(s.label))
+    status = discord.Embed(title=f"🗣️ STATO ATTIVITÀ “#{channel_name}”", color=_color_for_label(s.label))
     status.description = (
         f"🕒 **{label_periodo}**\n\n{s.emoji} **ATTIVITÀ {s.label}**\n"
         f"*Ritmo del canale valutato su volume, persone attive e continuità.*\n\n"
