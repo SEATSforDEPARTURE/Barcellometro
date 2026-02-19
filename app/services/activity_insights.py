@@ -64,8 +64,6 @@ class ActivityInsightsService:
         *,
         candidate_user_ids: list[int] | None = None,
         inactive_threshold: int = 1,
-        top_limit: int = 10,
-        inactive_limit: int = 10,
         lookback_days: int = 90,
         tz: ZoneInfo = ROME_TZ,
     ) -> ChannelActivityDetails:
@@ -131,7 +129,7 @@ class ActivityInsightsService:
 
         ordered_active = sorted(per_user_counts.items(), key=lambda item: item[1], reverse=True)
         top_users: list[UserActivityEntry] = []
-        for user_id, count in ordered_active[: max(1, top_limit)]:
+        for user_id, count in ordered_active:
             peak_count, peak_ts = per_user_peak.get(user_id, (0, None))
             last = per_user_last_in_range.get(user_id)
             top_users.append(
@@ -152,7 +150,8 @@ class ActivityInsightsService:
 
         inactive_users: list[UserActivityEntry] = []
         candidate_ids = candidate_user_ids or list(per_user_counts.keys())
-        excluded_not_candidates = 0
+        candidate_set = set(candidate_ids)
+        excluded_not_candidates = max(0, len([uid for uid in per_user_counts if uid not in candidate_set]))
         for user_id in candidate_ids:
             count_in_range = int(per_user_counts.get(user_id, 0))
             if count_in_range > inactive_threshold:
@@ -173,10 +172,8 @@ class ActivityInsightsService:
                 )
             )
 
-        if candidate_user_ids is not None:
-            excluded_not_candidates = max(0, len(per_user_counts) - len([uid for uid in per_user_counts if uid in set(candidate_ids)]))
-        inactive_users.sort(key=lambda item: item.last_ts_channel or "", reverse=False)
-        inactive_users = inactive_users[: max(1, inactive_limit)]
+        # Più critici prima: "mai visto" in cima, poi ultimo messaggio più vecchio
+        inactive_users.sort(key=lambda item: (item.last_ts_channel is not None, item.last_ts_channel or ""), reverse=False)
 
         logger.info(
             "attivita self-check guild=%s channel=%s active_count=%s inactive_count=%s excluded_not_candidates=%s",

@@ -8,6 +8,7 @@ import discord
 from app.services.activity_insights import ChannelActivityDetails, UserActivityEntry
 
 ROME_TZ = ZoneInfo("Europe/Rome")
+MAX_LIST_ROWS = 10
 
 
 def _bar(score: int, emoji: str) -> str:
@@ -68,53 +69,78 @@ def _jump_link(guild_id: str, channel_id: str, message_id: str | None) -> str | 
     return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
 
-def _format_active_row(user: UserActivityEntry, *, guild_id: str, channel_id: str, reference_ts: str) -> str:
-    peak_part = "picco: —"
-    if user.peak_count > 0 and user.peak_hour_ts:
-        peak_part = f"picco: {user.peak_count} msg alle {_fmt_ts(user.peak_hour_ts)}"
-    elif user.peak_count == 0:
-        peak_part = "picco: 0"
+def _fmt_ts_with_link(ts: str | None, guild_id: str, channel_id: str, message_id: str | None, *, markdown: bool) -> str:
+    label = _fmt_ts(ts)
+    url = _jump_link(guild_id, channel_id, message_id)
+    if url:
+        return f"[{label}]({url})" if markdown else f"{label} ({url})"
+    return label
 
-    last_ts = user.last_ts_in_range
-    last_mid = user.last_message_id_in_range
-    if last_ts:
-        label = _fmt_ts(last_ts)
-        url = _jump_link(guild_id, channel_id, last_mid)
-        if url:
-            last_part = f"ultimo: [{label}]({url}) — {_human_delta(last_ts, reference_ts)}"
-        else:
-            last_part = f"ultimo: {label} — {_human_delta(last_ts, reference_ts)}"
-    else:
-        last_part = "ultimo: —"
+
+def _format_active_row(user: UserActivityEntry, *, guild_id: str, channel_id: str, reference_ts: str, markdown: bool) -> str:
+    peak_part = f"picco: {user.peak_count} msg alle {_fmt_ts(user.peak_hour_ts)}" if user.peak_count > 0 else "picco: 0 @ —"
+    last_part = "ultimo: —"
+    if user.last_ts_in_range:
+        linked = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=markdown)
+        last_part = f"ultimo: {linked} — {_human_delta(user.last_ts_in_range, reference_ts)}"
     return f"<@{user.user_id}> — {user.count_in_range} msg | {peak_part} | {last_part}"
 
 
-def _format_inactive_row(user: UserActivityEntry, *, guild_id: str, channel_id: str, reference_ts: str) -> str:
-    peak_part = "picco: —"
-    if user.peak_count > 0 and user.peak_hour_ts:
-        peak_part = f"picco: {user.peak_count} msg alle {_fmt_ts(user.peak_hour_ts)}"
-    elif user.peak_count == 0:
-        peak_part = "picco: 0"
+def _format_inactive_row(user: UserActivityEntry, *, guild_id: str, channel_id: str, reference_ts: str, markdown: bool) -> str:
+    peak_part = f"picco: {user.peak_count} msg alle {_fmt_ts(user.peak_hour_ts)}" if user.peak_count > 0 else "picco: 0 @ —"
 
-    if user.count_in_range > 0 and user.last_ts_in_range:
-        label = _fmt_ts(user.last_ts_in_range)
-        url = _jump_link(guild_id, channel_id, user.last_message_id_in_range)
-        if url:
-            last_part = f"ultimo: [{label}]({url}) — {_human_delta(user.last_ts_in_range, reference_ts)}"
-        else:
-            last_part = f"ultimo: {label} — {_human_delta(user.last_ts_in_range, reference_ts)}"
-        return f"<@{user.user_id}> — {user.count_in_range} msg | {peak_part} | {last_part}"
+    if user.count_in_range >= 1 and user.last_ts_in_range:
+        linked = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=markdown)
+        last_part = f"ultimo nel periodo: {linked} — {_human_delta(user.last_ts_in_range, reference_ts)}"
+        return f"<@{user.user_id}> — {user.count_in_range} msg nel periodo | {peak_part} | {last_part}"
 
     if user.last_ts_channel:
-        label = _fmt_ts(user.last_ts_channel)
-        url = _jump_link(guild_id, channel_id, user.last_message_id_channel)
-        if url:
-            last_channel = f"ultimo nel canale: [{label}]({url}) — {_human_delta(user.last_ts_channel, reference_ts)}"
-        else:
-            last_channel = f"ultimo nel canale: {label} — {_human_delta(user.last_ts_channel, reference_ts)}"
-        return f"<@{user.user_id}> — nel periodo: 0 msg | {peak_part} | {last_channel}"
+        linked = _fmt_ts_with_link(user.last_ts_channel, guild_id, channel_id, user.last_message_id_channel, markdown=markdown)
+        last_part = f"ultimo nel canale: {linked} — {_human_delta(user.last_ts_channel, reference_ts)}"
+        return f"<@{user.user_id}> — 0 msg nel periodo | {peak_part} | {last_part}"
 
-    return f"<@{user.user_id}> — nel periodo: 0 msg | {peak_part} | ultimo nel canale: mai visto"
+    return f"<@{user.user_id}> — 0 msg nel periodo | {peak_part} | ultimo nel canale: mai visto"
+
+
+def _apply_limit(lines: list[str]) -> list[str]:
+    if len(lines) <= MAX_LIST_ROWS:
+        return lines
+    return [*lines[:MAX_LIST_ROWS], f"… + altri {len(lines) - MAX_LIST_ROWS} utenti"]
+
+
+def build_activity_details_txt(
+    guild_name: str,
+    guild_id: str,
+    channel_name: str,
+    channel_id: str,
+    label_periodo: str,
+    start_ts: str,
+    end_ts: str,
+    details: ChannelActivityDetails,
+    *,
+    reference_ts: str,
+) -> str:
+    start_local = _fmt_ts(start_ts)
+    end_local = _fmt_ts(end_ts)
+    generated = datetime.now(ROME_TZ).strftime("%d/%m/%Y %H:%M")
+    lines: list[str] = [
+        "BARCELLOMETRO — DETTAGLI ATTIVITÀ",
+        f"Server: {guild_name} ({guild_id})",
+        f"Canale: #{channel_name} ({channel_id})",
+        f"Periodo: {label_periodo}",
+        f"Range Europe/Rome: {start_local} -> {end_local}",
+        f"Generato il: {generated}",
+        "",
+        "SEZIONE A — TOP ATTIVI (tutti)",
+    ]
+    for user in details.top_active_users:
+        lines.append(_format_active_row(user, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts, markdown=False))
+
+    lines.extend(["", "SEZIONE B — INATTIVI NEL PERIODO (tutti)"])
+    for user in details.inactive_users:
+        lines.append(_format_inactive_row(user, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts, markdown=False))
+    lines.append("")
+    return "\n".join(lines)
 
 
 def build_activity_dm_embeds(
@@ -145,16 +171,18 @@ def build_activity_dm_embeds(
     details_embed.add_field(name="📌 STATISTICHE CANALE", value="\n".join(details.stats_lines) or "n/d", inline=False)
     details_embed.add_field(name="📈 TREND", value=details.score.trend_text, inline=False)
 
-    top_lines = [
-        _format_active_row(item, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts)
+    all_top_lines = [
+        _format_active_row(item, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts, markdown=True)
         for item in details.top_active_users
-    ] or ["• Nessun dato"]
+    ]
+    top_lines = _apply_limit(all_top_lines) if all_top_lines else ["• Nessun dato"]
     details_embed.add_field(name="🏆 UTENTI PIÙ ATTIVI", value="\n".join(top_lines), inline=False)
 
-    inactive_lines = [
-        _format_inactive_row(item, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts)
+    all_inactive_lines = [
+        _format_inactive_row(item, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts, markdown=True)
         for item in details.inactive_users
-    ] or ["• Nessun inattivo rilevante"]
+    ]
+    inactive_lines = _apply_limit(all_inactive_lines) if all_inactive_lines else ["• Nessun inattivo rilevante"]
     details_embed.add_field(name="💤 UTENTI INATTIVI", value="\n".join(inactive_lines), inline=False)
     details_embed.add_field(name="💡 CONSIGLI", value="\n".join(f"• {line}" for line in details.advice_bullets), inline=False)
     details_embed.set_footer(text="Barcellometro")

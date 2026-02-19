@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 from datetime import timezone
 
@@ -9,9 +10,14 @@ from discord import Forbidden, app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
-from app.renderers.activity_dm_renderer import build_activity_dm_embeds
+from app.renderers.activity_dm_renderer import build_activity_details_txt, build_activity_dm_embeds
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_filename(value: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value.lower())
+    return safe.strip("_") or "canale"
 
 
 def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -54,8 +60,6 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             end_ts,
             candidate_user_ids=candidate_user_ids,
             inactive_threshold=1,
-            top_limit=10,
-            inactive_limit=10,
         )
         channel_name = getattr(interaction.channel, "name", str(interaction.channel_id))
         embeds = build_activity_dm_embeds(
@@ -66,8 +70,21 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             details,
             reference_ts=end_ts,
         )
+        txt_payload = build_activity_details_txt(
+            interaction.guild.name,
+            str(interaction.guild_id),
+            channel_name,
+            str(interaction.channel_id),
+            window.label_periodo,
+            start_ts,
+            end_ts,
+            details,
+            reference_ts=end_ts,
+        )
+        filename = f"attivita_dettagli_{_safe_filename(channel_name)}_{window.start_dt.strftime('%Y%m%d_%H%M')}_{window.end_dt.strftime('%Y%m%d_%H%M')}.txt"
+        txt_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=filename)
         try:
-            await interaction.user.send(embeds=embeds)
+            await interaction.user.send(embeds=embeds, file=txt_file)
             await interaction.response.send_message("Ti ho inviato il resoconto attività in DM ✅", ephemeral=True)
         except Forbidden:
             await interaction.response.send_message("DM chiusi, non posso inviarti il report.", ephemeral=True)
