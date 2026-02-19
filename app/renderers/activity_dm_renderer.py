@@ -9,6 +9,10 @@ from app.services.activity_insights import ChannelActivityDetails, UserActivityE
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MAX_LIST_ROWS = 10
+FIELD_VALUE_MAX = 1024
+FIELD_NAME_MAX = 256
+CHUNK_SUFFIX = "… (vedi .txt)"
+MAX_FIELDS_PER_EMBED = 25
 
 
 def _bar(score: int, emoji: str) -> str:
@@ -77,6 +81,37 @@ def _fmt_ts_with_link(ts: str | None, guild_id: str, channel_id: str, message_id
     return label
 
 
+def _truncate_line(line: str, max_len: int, suffix: str) -> str:
+    if len(line) <= max_len:
+        return line
+    if max_len <= len(suffix):
+        return suffix[:max_len]
+    return line[: max_len - len(suffix)].rstrip() + suffix
+
+
+def _chunk_lines(lines: list[str], *, max_len: int = FIELD_VALUE_MAX, suffix: str = CHUNK_SUFFIX) -> list[str]:
+    if not lines:
+        return ["—"]
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for raw in lines:
+        line = _truncate_line(str(raw), max_len, suffix)
+        add_len = len(line) + (1 if current else 0)
+        if current and current_len + add_len > max_len:
+            chunks.append("\n".join(current))
+            current = [line]
+            current_len = len(line)
+            continue
+        current.append(line)
+        current_len += add_len
+
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
 def _format_active_row(user: UserActivityEntry, *, guild_id: str, channel_id: str, reference_ts: str, markdown: bool) -> str:
     peak_part = f"picco: {user.peak_count} msg alle {_fmt_ts(user.peak_hour_ts)}" if user.peak_count > 0 else "picco: 0 @ —"
     last_part = "ultimo: —"
@@ -102,10 +137,64 @@ def _format_inactive_row(user: UserActivityEntry, *, guild_id: str, channel_id: 
     return f"<@{user.user_id}> — 0 msg nel periodo | {peak_part} | ultimo nel canale: mai visto"
 
 
+def _format_active_row_compact(user: UserActivityEntry, *, guild_id: str, channel_id: str, reference_ts: str) -> str:
+    last_part = "ultimo: —"
+    if user.last_ts_in_range:
+        linked = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=True)
+        last_part = f"ultimo: {linked} — {_human_delta(user.last_ts_in_range, reference_ts)}"
+    return f"<@{user.user_id}> — {user.count_in_range} msg | {last_part} | picco: {user.peak_count}"
+
+
+def _format_inactive_row_compact(user: UserActivityEntry, *, guild_id: str, channel_id: str, reference_ts: str) -> str:
+    if user.count_in_range >= 1 and user.last_ts_in_range:
+        linked = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=True)
+        return (
+            f"<@{user.user_id}> — {user.count_in_range} msg nel periodo | "
+            f"ultimo nel periodo: {linked} — {_human_delta(user.last_ts_in_range, reference_ts)} | picco: {user.peak_count}"
+        )
+    if user.last_ts_channel:
+        linked = _fmt_ts_with_link(user.last_ts_channel, guild_id, channel_id, user.last_message_id_channel, markdown=True)
+        return (
+            f"<@{user.user_id}> — 0 msg nel periodo | "
+            f"ultimo nel canale: {linked} — {_human_delta(user.last_ts_channel, reference_ts)} | picco: {user.peak_count}"
+        )
+    return f"<@{user.user_id}> — 0 msg nel periodo | ultimo nel canale: mai visto | picco: {user.peak_count}"
+
+
 def _apply_limit(lines: list[str]) -> list[str]:
     if len(lines) <= MAX_LIST_ROWS:
         return lines
     return [*lines[:MAX_LIST_ROWS], f"… + altri {len(lines) - MAX_LIST_ROWS} utenti"]
+
+
+def _ensure_field(embeds: list[discord.Embed], title_base: str, value: str) -> None:
+    safe_value = value if len(value) <= FIELD_VALUE_MAX else _truncate_line(value, FIELD_VALUE_MAX, CHUNK_SUFFIX)
+    if len(embeds[-1].fields) >= MAX_FIELDS_PER_EMBED:
+        idx = len([e for e in embeds if e.title.startswith("📄 DETTAGLI ATTIVITÀ — Staff")]) + 1
+        new_embed = discord.Embed(title=f"📄 DETTAGLI ATTIVITÀ — Staff ({idx}/?)", color=discord.Color.dark_grey())
+        new_embed.set_footer(text="Barcellometro")
+        embeds.append(new_embed)
+    embeds[-1].add_field(name=title_base[:FIELD_NAME_MAX], value=safe_value, inline=False)
+
+
+def _add_chunked_field(embeds: list[discord.Embed], title: str, lines: list[str]) -> None:
+    chunks = _chunk_lines(lines)
+    if len(chunks) == 1:
+        _ensure_field(embeds, title, chunks[0])
+        return
+    total = len(chunks)
+    for idx, chunk in enumerate(chunks, start=1):
+        _ensure_field(embeds, f"{title} ({idx}/{total})", chunk)
+
+
+def _finalize_detail_titles(embeds: list[discord.Embed]) -> None:
+    detail_embeds = [e for e in embeds if e.title.startswith("📄 DETTAGLI ATTIVITÀ — Staff")]
+    total = len(detail_embeds)
+    if total <= 1:
+        detail_embeds[0].title = "📄 DETTAGLI ATTIVITÀ — Staff"
+        return
+    for idx, embed in enumerate(detail_embeds, start=1):
+        embed.title = f"📄 DETTAGLI ATTIVITÀ — Staff ({idx}/{total})"
 
 
 def build_activity_details_txt(
@@ -167,23 +256,31 @@ def build_activity_dm_embeds(
     )
     status.set_footer(text="Barcellometro")
 
-    details_embed = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
-    details_embed.add_field(name="📌 STATISTICHE CANALE", value="\n".join(details.stats_lines) or "n/d", inline=False)
-    details_embed.add_field(name="📈 TREND", value=details.score.trend_text, inline=False)
+    detail_1 = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
+    detail_1.set_footer(text="Barcellometro")
+    detail_embeds = [detail_1]
+
+    _add_chunked_field(detail_embeds, "📌 STATISTICHE CANALE", details.stats_lines or ["n/d"])
+    _add_chunked_field(detail_embeds, "📈 TREND", [details.score.trend_text or "n/d"])
 
     all_top_lines = [
-        _format_active_row(item, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts, markdown=True)
+        _format_active_row_compact(item, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts)
         for item in details.top_active_users
     ]
-    top_lines = _apply_limit(all_top_lines) if all_top_lines else ["• Nessun dato"]
-    details_embed.add_field(name="🏆 UTENTI PIÙ ATTIVI", value="\n".join(top_lines), inline=False)
+    _add_chunked_field(detail_embeds, "🏆 UTENTI PIÙ ATTIVI", _apply_limit(all_top_lines) if all_top_lines else ["• Nessun dato"])
 
     all_inactive_lines = [
-        _format_inactive_row(item, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts, markdown=True)
+        _format_inactive_row_compact(item, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts)
         for item in details.inactive_users
     ]
-    inactive_lines = _apply_limit(all_inactive_lines) if all_inactive_lines else ["• Nessun inattivo rilevante"]
-    details_embed.add_field(name="💤 UTENTI INATTIVI", value="\n".join(inactive_lines), inline=False)
-    details_embed.add_field(name="💡 CONSIGLI", value="\n".join(f"• {line}" for line in details.advice_bullets), inline=False)
-    details_embed.set_footer(text="Barcellometro")
-    return [status, details_embed]
+    _add_chunked_field(
+        detail_embeds,
+        "💤 UTENTI INATTIVI",
+        _apply_limit(all_inactive_lines) if all_inactive_lines else ["• Nessun inattivo rilevante"],
+    )
+
+    advice_lines = [f"• {line}" for line in details.advice_bullets] or ["• Nessun consiglio"]
+    _add_chunked_field(detail_embeds, "💡 CONSIGLI", advice_lines)
+    _finalize_detail_titles(detail_embeds)
+
+    return [status, *detail_embeds]
