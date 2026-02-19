@@ -1903,20 +1903,20 @@ class DatabaseService:
         channel_id: str,
         start_ts: str,
         end_ts: str,
-    ) -> list[tuple[int, str]]:
+    ) -> list[tuple[int, str, str | None]]:
         rows = await self.fetchall(
             """
-            SELECT author_id, ts
+            SELECT author_id, ts, message_id
             FROM messages
             WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
             ORDER BY ts ASC
             """,
             (guild_id, channel_id, start_ts, end_ts),
         )
-        result: list[tuple[int, str]] = []
+        result: list[tuple[int, str, str | None]] = []
         for row in rows:
             try:
-                result.append((int(row["author_id"]), str(row["ts"])))
+                result.append((int(row["author_id"]), str(row["ts"]), str(row["message_id"]) if row["message_id"] else None))
             except Exception:
                 continue
         return result

@@ -29,6 +29,9 @@ class UserActivityEntry:
     count_in_range: int
     peak_count: int
     peak_hour_ts: str | None
+    peak_message_id: str | None
+    peak_day_date_local: str | None
+    peak_day_count: int
     last_ts_in_range: str | None
     last_message_id_in_range: str | None
     last_ts_channel: str | None = None
@@ -42,6 +45,7 @@ class ChannelActivityDetails:
     inactive_users: list[UserActivityEntry]
     advice_bullets: list[str]
     stats_lines: list[str]
+    range_spans_multiple_days: bool
 
 
 class ActivityInsightsService:
@@ -72,30 +76,47 @@ class ActivityInsightsService:
 
         per_user_counts = await self._database.fetch_user_counts_in_range_channel(guild_id, channel_id, start_ts, end_ts)
         per_user_last_in_range = await self._database.fetch_user_last_message_in_range_channel(guild_id, channel_id, start_ts, end_ts)
-        user_ts_rows = await self._database.fetch_user_timestamps_in_range_channel(guild_id, channel_id, start_ts, end_ts)
+        user_rows = await self._database.fetch_user_timestamps_in_range_channel(guild_id, channel_id, start_ts, end_ts)
 
-        per_user_hourly: dict[int, dict[datetime, int]] = {}
+        per_user_hourly: dict[int, dict[datetime, tuple[int, str | None]]] = {}
+        per_user_daily: dict[int, dict[str, int]] = {}
         hourly_channel: dict[int, int] = {}
-        for user_id, ts in user_ts_rows:
+        for user_id, ts, message_id in user_rows:
             dt_local = self._parse_ts(ts).astimezone(tz)
             hour_bucket = dt_local.replace(minute=0, second=0, microsecond=0)
             user_map = per_user_hourly.setdefault(user_id, {})
-            user_map[hour_bucket] = user_map.get(hour_bucket, 0) + 1
+            curr_count, curr_msg = user_map.get(hour_bucket, (0, None))
+            user_map[hour_bucket] = (curr_count + 1, curr_msg or message_id)
+            day_label = dt_local.strftime("%d/%m")
+            day_map = per_user_daily.setdefault(user_id, {})
+            day_map[day_label] = day_map.get(day_label, 0) + 1
             hourly_channel[dt_local.hour] = hourly_channel.get(dt_local.hour, 0) + 1
 
-        per_user_peak: dict[int, tuple[int, str | None]] = {}
+        per_user_peak: dict[int, tuple[int, str | None, str | None]] = {}
         for user_id, bucket_map in per_user_hourly.items():
             if not bucket_map:
-                per_user_peak[user_id] = (0, None)
+                per_user_peak[user_id] = (0, None, None)
                 continue
-            peak_dt, peak_count = max(bucket_map.items(), key=lambda item: item[1])
-            per_user_peak[user_id] = (int(peak_count), peak_dt.astimezone(timezone.utc).isoformat())
+            peak_dt, (peak_count, peak_msg) = max(bucket_map.items(), key=lambda item: item[1][0])
+            per_user_peak[user_id] = (int(peak_count), peak_dt.astimezone(timezone.utc).isoformat(), peak_msg)
+
+        per_user_peak_day: dict[int, tuple[str | None, int]] = {}
+        for user_id, day_map in per_user_daily.items():
+            if not day_map:
+                per_user_peak_day[user_id] = (None, 0)
+                continue
+            day_label, day_count = max(day_map.items(), key=lambda item: item[1])
+            per_user_peak_day[user_id] = (day_label, int(day_count))
 
         peak_hour = max(hourly_channel.items(), key=lambda item: item[1])[0] if hourly_channel else None
         continuity = len(hourly_channel)
 
         start_dt = self._parse_ts(start_ts)
         end_dt = self._parse_ts(end_ts)
+        start_local = start_dt.astimezone(tz)
+        end_local = end_dt.astimezone(tz)
+        spans_multiple_days = start_local.date() != end_local.date()
+
         duration_hours = max(1, int((end_dt - start_dt).total_seconds() // 3600))
         continuity_ratio = min(1.0, continuity / max(1, min(24, duration_hours)))
 
@@ -130,7 +151,8 @@ class ActivityInsightsService:
         ordered_active = sorted(per_user_counts.items(), key=lambda item: item[1], reverse=True)
         top_users: list[UserActivityEntry] = []
         for user_id, count in ordered_active:
-            peak_count, peak_ts = per_user_peak.get(user_id, (0, None))
+            peak_count, peak_ts, peak_msg = per_user_peak.get(user_id, (0, None, None))
+            peak_day_label, peak_day_count = per_user_peak_day.get(user_id, (None, 0))
             last = per_user_last_in_range.get(user_id)
             top_users.append(
                 UserActivityEntry(
@@ -138,6 +160,9 @@ class ActivityInsightsService:
                     count_in_range=int(count),
                     peak_count=int(peak_count),
                     peak_hour_ts=peak_ts,
+                    peak_message_id=peak_msg,
+                    peak_day_date_local=peak_day_label,
+                    peak_day_count=int(peak_day_count),
                     last_ts_in_range=last[0] if last else None,
                     last_message_id_in_range=last[1] if last else None,
                     last_ts_channel=last[0] if last else None,
@@ -156,7 +181,8 @@ class ActivityInsightsService:
             count_in_range = int(per_user_counts.get(user_id, 0))
             if count_in_range > inactive_threshold:
                 continue
-            peak_count, peak_ts = per_user_peak.get(user_id, (0, None))
+            peak_count, peak_ts, peak_msg = per_user_peak.get(user_id, (0, None, None))
+            peak_day_label, peak_day_count = per_user_peak_day.get(user_id, (None, 0))
             in_range_last = per_user_last_in_range.get(user_id)
             lookback_last = per_user_last_lookback.get(user_id)
             inactive_users.append(
@@ -165,6 +191,9 @@ class ActivityInsightsService:
                     count_in_range=count_in_range,
                     peak_count=int(peak_count),
                     peak_hour_ts=peak_ts,
+                    peak_message_id=peak_msg,
+                    peak_day_date_local=peak_day_label,
+                    peak_day_count=int(peak_day_count),
                     last_ts_in_range=in_range_last[0] if in_range_last else None,
                     last_message_id_in_range=in_range_last[1] if in_range_last else None,
                     last_ts_channel=lookback_last[0] if lookback_last else None,
@@ -172,7 +201,6 @@ class ActivityInsightsService:
                 )
             )
 
-        # Più critici prima: "mai visto" in cima, poi ultimo messaggio più vecchio
         inactive_users.sort(key=lambda item: (item.last_ts_channel is not None, item.last_ts_channel or ""), reverse=False)
 
         logger.info(
@@ -216,4 +244,5 @@ class ActivityInsightsService:
             inactive_users=inactive_users,
             advice_bullets=advice,
             stats_lines=stats,
+            range_spans_multiple_days=spans_multiple_days,
         )

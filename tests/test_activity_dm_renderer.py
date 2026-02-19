@@ -38,6 +38,9 @@ def _entry(user_id: int, count: int, *, with_range_last: bool = True) -> UserAct
         count_in_range=count,
         peak_count=max(0, count // 2),
         peak_hour_ts=ts,
+        peak_message_id=msg_id,
+        peak_day_date_local="20/01",
+        peak_day_count=max(1, count // 3),
         last_ts_in_range=ts if with_range_last else None,
         last_message_id_in_range=msg_id if with_range_last else None,
         last_ts_channel=ts,
@@ -65,6 +68,7 @@ def test_build_activity_dm_embeds_respects_field_limits() -> None:
         inactive_users=inactive,
         advice_bullets=advice,
         stats_lines=["• Messaggi: **500**", "• Utenti attivi: **75**", "• Ora di picco: **11:00**", "• Continuità oraria: **18**"],
+        range_spans_multiple_days=True,
     )
 
     embeds = build_activity_dm_embeds(
@@ -78,6 +82,11 @@ def test_build_activity_dm_embeds_respects_field_limits() -> None:
     )
 
     assert len(embeds) <= 5
+    combined = "\n".join(field.value for embed in embeds for field in embed.fields)
+    assert "<@" in combined
+    assert "](https://discord.com/channels/" in combined
+    assert "picco giorno:" in combined
+    assert "picco ora:" in combined
     for embed in embeds:
         for field in embed.fields:
             assert len(field.value) <= 1024

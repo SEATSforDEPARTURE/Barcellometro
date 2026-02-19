@@ -36,6 +36,14 @@ def _display_name_for_id(*, guild: discord.Guild, user_id: int) -> str:
     return f"ID {user_id}"
 
 
+def _mention_label(*, guild: discord.Guild, user_id: int) -> str:
+    mention = f"<@{user_id}>"
+    name = _display_name_for_id(guild=guild, user_id=user_id)
+    if name.startswith("ID "):
+        return mention
+    return f"{mention} — {name}"
+
+
 def _bar(score: int, emoji: str) -> str:
     filled = max(0, min(10, int(round(max(0, min(score, 100)) / 10))))
     return f"{emoji * filled}{'⚪' * (10 - filled)}"
@@ -63,11 +71,14 @@ def _parse_iso(ts: str | None) -> datetime | None:
     return dt
 
 
-def _fmt_ts(ts: str | None) -> str:
+def _fmt_ts(ts: str | None, *, hour_bucket: bool = False) -> str:
     dt = _parse_iso(ts)
     if not dt:
         return "—"
-    return dt.astimezone(ROME_TZ).strftime("%d/%m %H:%M")
+    local = dt.astimezone(ROME_TZ)
+    if hour_bucket:
+        local = local.replace(minute=0, second=0, microsecond=0)
+    return local.strftime("%d/%m %H:%M")
 
 
 def _human_delta(ts: str | None, reference_ts: str | None) -> str:
@@ -94,8 +105,8 @@ def _jump_link(guild_id: str, channel_id: str, message_id: str | None) -> str | 
     return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
 
-def _fmt_ts_with_link(ts: str | None, guild_id: str, channel_id: str, message_id: str | None, *, markdown: bool) -> str:
-    label = _fmt_ts(ts)
+def _fmt_ts_with_link(ts: str | None, guild_id: str, channel_id: str, message_id: str | None, *, markdown: bool, hour_bucket: bool = False) -> str:
+    label = _fmt_ts(ts, hour_bucket=hour_bucket)
     url = _jump_link(guild_id, channel_id, message_id)
     if url:
         return f"[{label}]({url})" if markdown else f"{label} ({url})"
@@ -116,7 +127,6 @@ def _chunk_lines(lines: list[str], *, max_len: int = FIELD_VALUE_MAX, suffix: st
     chunks: list[str] = []
     current: list[str] = []
     current_len = 0
-
     for raw in lines:
         line = _truncate_line(str(raw), max_len, suffix)
         add_len = len(line) + (1 if current else 0)
@@ -127,67 +137,82 @@ def _chunk_lines(lines: list[str], *, max_len: int = FIELD_VALUE_MAX, suffix: st
             continue
         current.append(line)
         current_len += add_len
-
     if current:
         chunks.append("\n".join(current))
     return chunks
 
 
-def _format_active_row(user: UserActivityEntry, *, guild: discord.Guild, guild_id: str, channel_id: str, reference_ts: str, markdown: bool) -> str:
-    peak_part = f"picco: {user.peak_count} msg alle {_fmt_ts(user.peak_hour_ts)}" if user.peak_count > 0 else "picco: 0 @ —"
-    last_part = "ultimo: —"
-    if user.last_ts_in_range:
-        linked = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=markdown)
-        last_part = f"ultimo: {linked} — {_human_delta(user.last_ts_in_range, reference_ts)}"
-    name = _display_name_for_id(guild=guild, user_id=user.user_id)
-    return f"{name} — {user.count_in_range} msg | {peak_part} | {last_part}"
+def _peak_segment(user: UserActivityEntry, guild_id: str, channel_id: str, *, markdown: bool, include_peak_day: bool) -> str:
+    if user.peak_count <= 0 or not user.peak_hour_ts:
+        return "picco ora: — (0 msg)"
+    peak_when = _fmt_ts_with_link(
+        user.peak_hour_ts,
+        guild_id,
+        channel_id,
+        user.peak_message_id,
+        markdown=markdown,
+        hour_bucket=True,
+    )
+    out = f"picco ora: {peak_when} ({user.peak_count} msg)"
+    if include_peak_day and user.peak_day_date_local and user.peak_day_count > 0:
+        out += f" | picco giorno: {user.peak_day_date_local} ({user.peak_day_count} msg)"
+    return out
 
 
-def _format_inactive_row(user: UserActivityEntry, *, guild: discord.Guild, guild_id: str, channel_id: str, reference_ts: str, markdown: bool) -> str:
-    peak_part = f"picco: {user.peak_count} msg alle {_fmt_ts(user.peak_hour_ts)}" if user.peak_count > 0 else "picco: 0 @ —"
+def _last_prefix(ts: str | None, guild_id: str, channel_id: str, message_id: str | None, *, markdown: bool, label_if_missing: str = "(mai visto)") -> str:
+    if not ts:
+        return label_if_missing
+    return _fmt_ts_with_link(ts, guild_id, channel_id, message_id, markdown=markdown)
 
+
+def _format_active_row_compact(user: UserActivityEntry, *, guild: discord.Guild, guild_id: str, channel_id: str, reference_ts: str, include_peak_day: bool) -> str:
+    mention = _mention_label(guild=guild, user_id=user.user_id)
+    last_link = _last_prefix(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=True)
+    last_delta = _human_delta(user.last_ts_in_range, reference_ts)
+    peak = _peak_segment(user, guild_id, channel_id, markdown=True, include_peak_day=include_peak_day)
+    return f"• {last_link} {mention} — {user.count_in_range} msg | {peak} | Δ {last_delta}"
+
+
+def _format_inactive_row_compact(user: UserActivityEntry, *, guild: discord.Guild, guild_id: str, channel_id: str, reference_ts: str, include_peak_day: bool) -> str:
+    mention = _mention_label(guild=guild, user_id=user.user_id)
     if user.count_in_range >= 1 and user.last_ts_in_range:
-        linked = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=markdown)
-        last_part = f"ultimo nel periodo: {linked} — {_human_delta(user.last_ts_in_range, reference_ts)}"
-        name = _display_name_for_id(guild=guild, user_id=user.user_id)
-        return f"{name} — {user.count_in_range} msg nel periodo | {peak_part} | {last_part}"
+        last_link = _last_prefix(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=True)
+        last_delta = _human_delta(user.last_ts_in_range, reference_ts)
+        peak = _peak_segment(user, guild_id, channel_id, markdown=True, include_peak_day=include_peak_day)
+        return f"• {last_link} {mention} — {user.count_in_range} msg | {peak} | Δ {last_delta}"
 
     if user.last_ts_channel:
-        linked = _fmt_ts_with_link(user.last_ts_channel, guild_id, channel_id, user.last_message_id_channel, markdown=markdown)
-        last_part = f"ultimo nel canale: {linked} — {_human_delta(user.last_ts_channel, reference_ts)}"
-        name = _display_name_for_id(guild=guild, user_id=user.user_id)
-        return f"{name} — 0 msg nel periodo | {peak_part} | {last_part}"
+        last_link = _last_prefix(user.last_ts_channel, guild_id, channel_id, user.last_message_id_channel, markdown=True)
+        last_delta = _human_delta(user.last_ts_channel, reference_ts)
+        peak = _peak_segment(user, guild_id, channel_id, markdown=True, include_peak_day=include_peak_day)
+        return f"• {last_link} {mention} — 0 msg | {peak} | Δ {last_delta}"
 
-    name = _display_name_for_id(guild=guild, user_id=user.user_id)
-    return f"{name} — 0 msg nel periodo | {peak_part} | ultimo nel canale: mai visto"
-
-
-def _format_active_row_compact(user: UserActivityEntry, *, guild: discord.Guild, guild_id: str, channel_id: str, reference_ts: str) -> str:
-    last_part = "ultimo: —"
-    if user.last_ts_in_range:
-        linked = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=True)
-        last_part = f"ultimo: {linked} — {_human_delta(user.last_ts_in_range, reference_ts)}"
-    name = _display_name_for_id(guild=guild, user_id=user.user_id)
-    return f"{name} — {user.count_in_range} msg | {last_part} | picco: {user.peak_count}"
+    peak = _peak_segment(user, guild_id, channel_id, markdown=True, include_peak_day=include_peak_day)
+    return f"• (mai visto) {mention} — 0 msg | {peak}"
 
 
-def _format_inactive_row_compact(user: UserActivityEntry, *, guild: discord.Guild, guild_id: str, channel_id: str, reference_ts: str) -> str:
+def _format_active_row(user: UserActivityEntry, *, guild: discord.Guild, guild_id: str, channel_id: str, reference_ts: str, include_peak_day: bool) -> str:
+    mention = _mention_label(guild=guild, user_id=user.user_id)
+    last_link = _last_prefix(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=False)
+    last_delta = _human_delta(user.last_ts_in_range, reference_ts)
+    peak = _peak_segment(user, guild_id, channel_id, markdown=False, include_peak_day=include_peak_day)
+    return f"{last_link} {mention} — {user.count_in_range} msg | {peak} | Δ {last_delta}"
+
+
+def _format_inactive_row(user: UserActivityEntry, *, guild: discord.Guild, guild_id: str, channel_id: str, reference_ts: str, include_peak_day: bool) -> str:
+    mention = _mention_label(guild=guild, user_id=user.user_id)
     if user.count_in_range >= 1 and user.last_ts_in_range:
-        linked = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=True)
-        name = _display_name_for_id(guild=guild, user_id=user.user_id)
-        return (
-            f"{name} — {user.count_in_range} msg nel periodo | "
-            f"ultimo nel periodo: {linked} — {_human_delta(user.last_ts_in_range, reference_ts)} | picco: {user.peak_count}"
-        )
+        last_link = _last_prefix(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=False)
+        last_delta = _human_delta(user.last_ts_in_range, reference_ts)
+        peak = _peak_segment(user, guild_id, channel_id, markdown=False, include_peak_day=include_peak_day)
+        return f"{last_link} {mention} — {user.count_in_range} msg | {peak} | Δ {last_delta}"
     if user.last_ts_channel:
-        linked = _fmt_ts_with_link(user.last_ts_channel, guild_id, channel_id, user.last_message_id_channel, markdown=True)
-        name = _display_name_for_id(guild=guild, user_id=user.user_id)
-        return (
-            f"{name} — 0 msg nel periodo | "
-            f"ultimo nel canale: {linked} — {_human_delta(user.last_ts_channel, reference_ts)} | picco: {user.peak_count}"
-        )
-    name = _display_name_for_id(guild=guild, user_id=user.user_id)
-    return f"{name} — 0 msg nel periodo | ultimo nel canale: mai visto | picco: {user.peak_count}"
+        last_link = _last_prefix(user.last_ts_channel, guild_id, channel_id, user.last_message_id_channel, markdown=False)
+        last_delta = _human_delta(user.last_ts_channel, reference_ts)
+        peak = _peak_segment(user, guild_id, channel_id, markdown=False, include_peak_day=include_peak_day)
+        return f"{last_link} {mention} — 0 msg | {peak} | Δ {last_delta}"
+    peak = _peak_segment(user, guild_id, channel_id, markdown=False, include_peak_day=include_peak_day)
+    return f"(mai visto) {mention} — 0 msg | {peak}"
 
 
 def _apply_limit(lines: list[str]) -> list[str]:
@@ -254,14 +279,28 @@ def build_activity_details_txt(
     ]
     for user in details.top_active_users:
         name = _display_name_for_id(guild=guild, user_id=user.user_id)
-        row = _format_active_row(user, guild=guild, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts, markdown=False)
-        lines.append(row.replace(name, f"{name} ({user.user_id})", 1))
+        row = _format_active_row(
+            user,
+            guild=guild,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            reference_ts=reference_ts,
+            include_peak_day=details.range_spans_multiple_days,
+        )
+        lines.append(row.replace(name if not name.startswith("ID ") else f"<@{user.user_id}>", f"{name} ({user.user_id})", 1))
 
     lines.extend(["", "SEZIONE B — INATTIVI NEL PERIODO (tutti)"])
     for user in details.inactive_users:
         name = _display_name_for_id(guild=guild, user_id=user.user_id)
-        row = _format_inactive_row(user, guild=guild, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts, markdown=False)
-        lines.append(row.replace(name, f"{name} ({user.user_id})", 1))
+        row = _format_inactive_row(
+            user,
+            guild=guild,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            reference_ts=reference_ts,
+            include_peak_day=details.range_spans_multiple_days,
+        )
+        lines.append(row.replace(name if not name.startswith("ID ") else f"<@{user.user_id}>", f"{name} ({user.user_id})", 1))
     lines.append("")
     return "\n".join(lines)
 
@@ -299,13 +338,27 @@ def build_activity_dm_embeds(
     _add_chunked_field(detail_embeds, "📈 TREND", [details.score.trend_text or "n/d"])
 
     all_top_lines = [
-        _format_active_row_compact(item, guild=guild, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts)
+        _format_active_row_compact(
+            item,
+            guild=guild,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            reference_ts=reference_ts,
+            include_peak_day=details.range_spans_multiple_days,
+        )
         for item in details.top_active_users
     ]
     _add_chunked_field(detail_embeds, "🏆 UTENTI PIÙ ATTIVI", _apply_limit(all_top_lines) if all_top_lines else ["• Nessun dato"])
 
     all_inactive_lines = [
-        _format_inactive_row_compact(item, guild=guild, guild_id=guild_id, channel_id=channel_id, reference_ts=reference_ts)
+        _format_inactive_row_compact(
+            item,
+            guild=guild,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            reference_ts=reference_ts,
+            include_peak_day=details.range_spans_multiple_days,
+        )
         for item in details.inactive_users
     ]
     _add_chunked_field(

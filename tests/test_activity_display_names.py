@@ -49,6 +49,9 @@ def _entry(uid: int, count: int) -> UserActivityEntry:
         count_in_range=count,
         peak_count=1,
         peak_hour_ts="2026-01-20T10:58:00+00:00",
+        peak_message_id="123456789012345678",
+        peak_day_date_local="20/01",
+        peak_day_count=2,
         last_ts_in_range="2026-01-20T10:58:00+00:00",
         last_message_id_in_range="123456789012345678",
         last_ts_channel="2026-01-20T10:58:00+00:00",
@@ -56,7 +59,7 @@ def _entry(uid: int, count: int) -> UserActivityEntry:
     )
 
 
-def test_display_names_instead_of_mentions_and_fallback_id() -> None:
+def test_display_names_instead_of_raw_id_and_mentions_kept_clickable() -> None:
     details = ChannelActivityDetails(
         score=ActivityScore(
             messages_count=10,
@@ -72,6 +75,7 @@ def test_display_names_instead_of_mentions_and_fallback_id() -> None:
         inactive_users=[_entry(9999, 0)],
         advice_bullets=["ok"],
         stats_lines=["• Messaggi: **10**"],
+        range_spans_multiple_days=True,
     )
 
     embeds = build_activity_dm_embeds(
@@ -85,8 +89,8 @@ def test_display_names_instead_of_mentions_and_fallback_id() -> None:
     )
 
     text = "\n".join(field.value for embed in embeds for field in embed.fields)
-    assert "Nick Uno" in text
-    assert "Global Due" in text
-    assert "Cached Tre" in text
-    assert "ID 9999" in text
-    assert "<@" not in text
+    assert "<@1> — Nick Uno" in text
+    assert "<@2> — Global Due" in text
+    assert "<@3> — Cached Tre" in text
+    assert "<@9999>" in text
+    assert "](https://discord.com/channels/" in text
