@@ -1,5 +1,6 @@
 {
   "window_minutes": 60,
+  "min_messages": 10,
   "cooldown_minutes": 10,
   "min_score_delta_for_notify": 3,
 
@@ -326,6 +327,7 @@
   "mood_daily_random": false,
   "mood_daily_random_time_local": "06:00",
   "mood_daily_random_avoid_repeat": true,
+  "mood_daily_random_channels": [],
   "channel_overrides": {
     "1457915873418416199": {
       "window_minutes": 30
