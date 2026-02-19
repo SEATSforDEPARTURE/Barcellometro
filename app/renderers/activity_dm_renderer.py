@@ -154,7 +154,7 @@ def build_activity_dm_embeds(
 ) -> list[discord.Embed]:
     s = details.score
     status = discord.Embed(
-        title=f"🫛 STATO ATTIVITÀ “#{channel_name}”",
+        title=f"🗣️ STATO ATTIVITÀ “#{channel_name}”",
         color=_color_for_label(s.label),
     )
     status.description = (
