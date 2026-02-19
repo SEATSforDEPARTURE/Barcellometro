@@ -32,6 +32,9 @@ class CommandContext:
     voice_ingest: Any
     daily_resoconto: Any
     trigger_engine: Any
+    activity_insights: Any
+    inactivity: Any
+    daily_activity_report: Any
     timezone: ZoneInfo
 
     @classmethod
@@ -57,6 +60,9 @@ class CommandContext:
         voice_ingest = registry.get("voice_ingest") if registry.has("voice_ingest") else None
         daily_resoconto = registry.get("daily_resoconto") if registry.has("daily_resoconto") else None
         trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
+        activity_insights = registry.get("activity_insights") if registry.has("activity_insights") else None
+        inactivity = registry.get("inactivity") if registry.has("inactivity") else None
+        daily_activity_report = registry.get("daily_activity_report") if registry.has("daily_activity_report") else None
         ingest: IngestService = registry.get("ingest")
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
@@ -77,5 +83,8 @@ class CommandContext:
             voice_ingest=voice_ingest,
             daily_resoconto=daily_resoconto,
             trigger_engine=trigger_engine,
+            activity_insights=activity_insights,
+            inactivity=inactivity,
+            daily_activity_report=daily_activity_report,
             timezone=timezone,
         )
