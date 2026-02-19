@@ -25,6 +25,13 @@ from app.utils.embed_limits import (
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
+from app.plugins.commands_modular.time_windows import (
+    parse_italian_datetime,
+    resolve_ieri_window,
+    resolve_oggi_window,
+    resolve_range_window,
+    resolve_ultimi_window,
+)
 from app.utils.summary_render import build_summary_detail_embeds
 
 logger = logging.getLogger(__name__)
@@ -1782,76 +1789,38 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         quantita: int,
         unita: app_commands.Choice[str],
     ) -> None:
-        if quantita <= 0:
-            await send_ephemeral(interaction, "Specifica una quantità valida.")
+        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+        if error:
+            await send_ephemeral(interaction, error)
             return
-        if unita.value == "minuti" and quantita > ctx.config.riassunto_max_minutes:
-            await send_ephemeral(
-                interaction,
-                "❌ Limite massimo: ultimi 60 minuti. Prova con le ore (es: /riassunto ultimi 2 ore).",
-            )
-            return
-        if unita.value == "ore" and quantita > ctx.config.riassunto_max_hours:
-            await send_ephemeral(
-                interaction,
-                "❌ Limite massimo: ultime 24 ore. Prova con i giorni (es: /riassunto ultimi 2 giorni).",
-            )
-            return
-        if unita.value == "giorni" and quantita > ctx.config.riassunto_max_days:
-            await send_ephemeral(
-                interaction,
-                "❌ Limite massimo: ultimi 30 giorni. Prova con le settimane (es: /riassunto ultimi 2 settimane).",
-            )
-            return
-        if unita.value == "settimane" and quantita > ctx.config.riassunto_max_weeks:
-            await send_ephemeral(interaction, "❌ Limite massimo: ultime 4 settimane. Riduci la finestra temporale.")
-            return
-        now = datetime.now(ROME_TZ)
-        delta_map = {
-            "minuti": timedelta(minutes=quantita),
-            "ore": timedelta(hours=quantita),
-            "giorni": timedelta(days=quantita),
-            "settimane": timedelta(weeks=quantita),
-        }
-        start_dt = now - delta_map.get(unita.value, timedelta(minutes=quantita))
+        assert window is not None
         await _run_riassunto(
             interaction,
-            start_dt=start_dt,
-            end_dt=now,
+            start_dt=window.start_dt,
+            end_dt=window.end_dt,
             period_label="ultimi",
             granularity_hint=_granularity_hint_for_period("ultimi", unita.value),
         )
 
     @riassunto_group.command(name="oggi", description="Riassunto della giornata di oggi")
     async def riassunto_oggi(interaction: discord.Interaction) -> None:
-        now = datetime.now(ROME_TZ)
-        start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=now, period_label="oggi", granularity_hint="hours")
+        window = resolve_oggi_window()
+        await _run_riassunto(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="oggi", granularity_hint="hours")
 
     @riassunto_group.command(name="ieri", description="Riassunto della giornata di ieri")
     async def riassunto_ieri(interaction: discord.Interaction) -> None:
-        now = datetime.now(ROME_TZ)
-        end_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_dt = end_dt - timedelta(days=1)
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="ieri", granularity_hint="days")
+        window = resolve_ieri_window()
+        await _run_riassunto(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ieri", granularity_hint="days")
 
     @riassunto_group.command(name="range", description="Riassunto di un range custom (data+ora italiane)")
     @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)")
     async def riassunto_range(interaction: discord.Interaction, da: str, a: str) -> None:
-        start_dt = _parse_italian_datetime(da)
-        end_dt = _parse_italian_datetime(a)
-        if not start_dt or not end_dt:
-            await send_ephemeral(interaction, "Formato data/ora non valido. Usa DD/MM/YYYY HH:MM.")
+        window, error = resolve_range_window(da, a, ctx.config)
+        if error:
+            await send_ephemeral(interaction, error)
             return
-        start_utc = start_dt.astimezone(timezone.utc)
-        end_utc = end_dt.astimezone(timezone.utc)
-        if end_utc < start_utc:
-            start_utc, end_utc = end_utc, start_utc
-        duration_days = (end_utc - start_utc).total_seconds() / 86400
-        if duration_days > ctx.config.riassunto_range_max_days:
-            await send_ephemeral(interaction, "❌ Range troppo elevato (max 30 giorni). Riduci la finestra temporale.")
-            return
-        await _run_riassunto(interaction, start_dt=start_dt, end_dt=end_dt, period_label="range", granularity_hint="days")
+        assert window is not None
+        await _run_riassunto(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range", granularity_hint="days")
 
     def _clean_bullets(lines: list[str] | None) -> list[str]:
         if not lines:
