@@ -10,8 +10,10 @@ from app.plugins.commands_modular import (
     CommandContext,
     register_admin,
     register_audio_notes,
+    register_attivita,
     register_ask,
     register_barcello,
+    register_barcellometro_attivita,
     register_messaggi,
     register_privacy,
     register_riassunto,
@@ -54,6 +56,8 @@ def setup(registry: ServiceRegistry) -> None:
     privacy_group = app_commands.Group(name="privacy", description="Privacy per voice ingest")
     status_group = app_commands.Group(name="status", description="Stato servizi")
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunto conversazione")
+    attivita_group = app_commands.Group(name="attivita", description="Report attività canale (staff)")
+    activity_config_group = app_commands.Group(name="attivita", description="Monitorazione attività")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
 
     barcellometro_group.add_command(role_group)
@@ -62,6 +66,7 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group.add_command(audio_notes_group)
     barcellometro_group.add_command(messaggi_group)
     barcellometro_group.add_command(voice_ingest_group)
+    barcellometro_group.add_command(activity_config_group)
 
     register_admin(barcellometro_group, ctx)
     register_roles(role_group, ctx)
@@ -73,6 +78,8 @@ def setup(registry: ServiceRegistry) -> None:
     register_privacy(privacy_group, ctx)
     register_status(status_group, ctx)
     register_riassunto(riassunto_group, ctx)
+    register_attivita(attivita_group, ctx)
+    register_barcellometro_attivita(activity_config_group, ctx)
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
     register_barcello(bot.tree, guild, ctx)
@@ -80,6 +87,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     add_tree_command(barcellometro_group)
     add_tree_command(riassunto_group)
+    add_tree_command(attivita_group)
     add_tree_command(status_group)
     add_tree_command(resoconto_group)
     add_tree_command(privacy_group)

@@ -361,6 +361,16 @@ class DatabaseService:
                 expires_at TEXT NOT NULL,
                 PRIMARY KEY (guild_id, channel_id, user_id)
             );
+
+            CREATE TABLE IF NOT EXISTS activity_monitoring_config (
+                guild_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                mod_channel_id TEXT NULL,
+                send_time_local TEXT NOT NULL DEFAULT '09:00',
+                last_sent_local_date TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         await self._ensure_message_campaign_columns()
@@ -1777,6 +1787,132 @@ class DatabaseService:
             (guild_id,),
         )
         return [row["channel_id"] for row in rows]
+
+    async def count_messages_in_range_single_channel(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> int:
+        row = await self.fetchone(
+            """
+            SELECT COUNT(*) AS total
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        return int(row["total"] or 0) if row else 0
+
+    async def count_active_users_in_range_single_channel(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> int:
+        row = await self.fetchone(
+            """
+            SELECT COUNT(DISTINCT author_id) AS total
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        return int(row["total"] or 0) if row else 0
+
+    async def top_authors_in_channel_range(
+        self,
+        guild_id: str,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+        limit: int,
+    ) -> list[tuple[int, int]]:
+        rows = await self.fetchall(
+            """
+            SELECT author_id, COUNT(*) AS cnt
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            GROUP BY author_id
+            ORDER BY cnt DESC
+            LIMIT ?
+            """,
+            (guild_id, channel_id, start_ts, end_ts, max(1, int(limit))),
+        )
+        out: list[tuple[int, int]] = []
+        for row in rows:
+            try:
+                out.append((int(row["author_id"]), int(row["cnt"])))
+            except Exception:
+                continue
+        return out
+
+    async def fetch_message_timestamps_in_range_single_channel(
+        self,
+        guild_id: str,
+        channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> list[str]:
+        rows = await self.fetchall(
+            """
+            SELECT ts
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            ORDER BY ts ASC
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        return [str(row["ts"]) for row in rows if row and row["ts"]]
+
+    async def last_seen_by_user_in_channel(self, guild_id: str, channel_id: str, since_ts: str) -> dict[int, str]:
+        rows = await self.fetchall(
+            """
+            SELECT author_id, MAX(ts) AS last_ts
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND COALESCE(is_deleted, 0) = 0
+            GROUP BY author_id
+            """,
+            (guild_id, channel_id, since_ts),
+        )
+        out: dict[int, str] = {}
+        for row in rows:
+            try:
+                out[int(row["author_id"])] = str(row["last_ts"])
+            except Exception:
+                continue
+        return out
+
+    async def upsert_activity_monitoring_config(
+        self,
+        guild_id: str,
+        *,
+        enabled: bool,
+        mod_channel_id: str | None,
+        send_time_local: str,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        safe_time = self._validate_hhmm(send_time_local)
+        await self.execute(
+            """
+            INSERT INTO activity_monitoring_config (guild_id, enabled, mod_channel_id, send_time_local, last_sent_local_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                mod_channel_id = excluded.mod_channel_id,
+                send_time_local = excluded.send_time_local,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, 1 if enabled else 0, mod_channel_id, safe_time, now, now),
+        )
+
+    async def get_activity_monitoring_config(self, guild_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            "SELECT guild_id, enabled, mod_channel_id, send_time_local, last_sent_local_date FROM activity_monitoring_config WHERE guild_id = ?",
+            (guild_id,),
+        )
+
+    async def list_enabled_activity_monitoring_configs(self) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT guild_id, enabled, mod_channel_id, send_time_local, last_sent_local_date FROM activity_monitoring_config WHERE enabled = 1"
+        )
+
+    async def mark_activity_monitoring_sent(self, guild_id: str, local_date_str: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            "UPDATE activity_monitoring_config SET last_sent_local_date = ?, updated_at = ? WHERE guild_id = ?",
+            (local_date_str, now, guild_id),
+        )
 
     async def create_message_campaign(
         self,
