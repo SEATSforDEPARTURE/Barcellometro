@@ -20,7 +20,10 @@ from app.services.message_scheduler import MessageSchedulerService
 from app.services.status import StatusService
 from app.services.summary import SummaryService
 from app.services.daily_resoconto import DailyResocontoService
+from app.services.daily_activity_report import DailyActivityReportService
 from app.services.entitlements import EntitlementsService
+from app.services.inactivity import InactivityService
+from app.services.activity_insights import ActivityInsightsService
 from app.services.stt.ai_stt import AiSttService
 from app.services.stt.faster_whisper import FasterWhisperSttService
 from app.services.triggers import TriggerEngineService
@@ -79,6 +82,9 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     community_insights = None
     daily_resoconto = None
     trigger_engine = None
+    inactivity_service = None
+    activity_insights = None
+    daily_activity_report = None
 
     instance_mode = normalize_instance_mode(config.instance_mode)
     logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
@@ -110,6 +116,9 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         daily_resoconto = DailyResocontoService(database_service, bot, summary_service, barcello_service, ai_service=ai_service)
         entitlements_service = EntitlementsService(database_service)
         trigger_engine = TriggerEngineService(database_service, barcello_service, entitlements_service, ai_service, community_insights)
+        inactivity_service = InactivityService(database_service)
+        activity_insights = ActivityInsightsService(database_service)
+        daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights)
 
     registry.register("config", config)
     registry.register("bot", bot)
@@ -127,6 +136,9 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("message_scheduler", message_scheduler)
         registry.register("daily_resoconto", daily_resoconto)
         registry.register("trigger_engine", trigger_engine)
+        registry.register("inactivity", inactivity_service)
+        registry.register("activity_insights", activity_insights)
+        registry.register("daily_activity_report", daily_activity_report)
         registry.register("stt.ai", stt_ai_service)
         registry.register("translate.local", translate_local_service)
         registry.register("translate.ai", translate_ai_service)
@@ -156,6 +168,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         status_service.register_component("message_scheduler", message_scheduler)
         status_service.register_component("daily_resoconto", daily_resoconto)
         status_service.register_component("trigger_engine", trigger_engine)
+        status_service.register_component("daily_activity_report", daily_activity_report)
         status_service.register_component("stt.local", stt_local_service)
         status_service.register_component("stt.ai", stt_ai_service)
         status_service.register_component("translate.local", translate_local_service)
@@ -165,6 +178,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     if instance_mode == "main" and message_scheduler is not None:
         async def handle_ready() -> None:
             message_scheduler.start()
+            if daily_activity_report is not None:
+                daily_activity_report.start()
 
         bot.add_listener(handle_ready, "on_ready")
 
