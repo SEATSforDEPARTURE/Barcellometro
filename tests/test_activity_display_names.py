@@ -56,7 +56,7 @@ def _entry(uid: int, count: int, last: bool = True) -> UserActivityEntry:
     )
 
 
-def test_active_no_tag_and_inactive_plain_names() -> None:
+def test_active_mentions_and_inactive_plain_names() -> None:
     details = ChannelActivityDetails(
         score=ActivityScore(10, 4, 10, 3, 55, "🟡", "MEDIOCRE", "Stabile"),
         top_active_users=[_entry(1, 5)],
@@ -69,9 +69,10 @@ def test_active_no_tag_and_inactive_plain_names() -> None:
 
     embeds = build_activity_dm_embeds(_Guild(), "111", "222", "canale", "Oggi", details, reference_ts="2026-01-21T12:00:00+00:00")
     text = "\n".join(field.value for embed in embeds for field in embed.fields)
-    assert "**@Nick Uno**" in text
-    assert "<@" not in text
-    assert "Global Due" in text
-    assert "Cached Tre" in text
-    assert "ID 9999" in text
+    assert "**<@1>**" in text
+    inactive_field = next(field for embed in embeds for field in embed.fields if field.name == "💤 TOP 10 UTENTI INATTIVI")
+    assert "<@" not in inactive_field.value
+    assert "Global Due" in inactive_field.value
+    assert "Cached Tre" in inactive_field.value
+    assert "ID 9999" in inactive_field.value
     assert "Utenti attivi: **4/7**" in text

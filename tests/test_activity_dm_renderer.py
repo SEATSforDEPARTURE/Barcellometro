@@ -66,16 +66,20 @@ def test_dm_layout_limits_and_formatting() -> None:
     embeds = build_activity_dm_embeds(_Guild(), "123456789", "987654321", "generale", "Ultimi 30 giorni", details, reference_ts="2026-01-21T12:00:00+00:00")
 
     combined = "\n".join(field.value for embed in embeds for field in embed.fields)
-    assert "**@User 1000**" in combined
+    assert "**<@1000>**" in combined
     assert "(**100 msg**)" in combined
-    assert "TOP 10 UTENTI PIU ATTIVI" in "\n".join(field.name for e in embeds for field in e.fields)
+    names = "\n".join(field.name for e in embeds for field in e.fields)
+    assert "🏆 TOP 10 UTENTI PIÙ ATTIVI" in names
+    assert "💤 TOP 10 UTENTI INATTIVI" in names
     assert "🥇" in combined and "🥈" in combined and "🥉" in combined and "4️⃣" in combined
     assert "\n  🔥 Picco:" in combined
     assert "(**0 msg**)" in combined
     assert "🥀" in combined
     assert "[20/01" in combined and "](https://discord.com/channels/" in combined
-    active_field = next(field for e in embeds for field in e.fields if field.name == "TOP 10 UTENTI PIU ATTIVI")
-    assert "1. **@" not in active_field.value
+    active_field = next(field for e in embeds for field in e.fields if field.name == "🏆 TOP 10 UTENTI PIÙ ATTIVI")
+    assert "<@" in active_field.value
+    inactive_field = next(field for e in embeds for field in e.fields if field.name == "💤 TOP 10 UTENTI INATTIVI")
+    assert "<@" not in inactive_field.value
     for block in [b for b in active_field.value.split("\n\n") if b.strip() and not b.startswith("… + altri")]:
         assert "\n" in block
     for embed in embeds:
@@ -97,7 +101,7 @@ def test_section_titles_not_numbered_when_chunked() -> None:
     )
     embeds = build_activity_dm_embeds(_Guild(), "123", "456", "g", "range", details, reference_ts="2026-01-21T12:00:00+00:00")
     field_names = [f.name for e in embeds for f in e.fields]
-    assert "TOP 10 UTENTI PIU ATTIVI" in field_names
-    assert "TOP 10 UTENTI INATTIVI" in field_names
-    assert not any("(" in name and "/" in name and ")" in name for name in field_names)
+    assert "🏆 TOP 10 UTENTI PIÙ ATTIVI" in field_names
+    assert "💤 TOP 10 UTENTI INATTIVI" in field_names
+    assert not any("(" in name for name in field_names)
     assert "​" in field_names

@@ -173,10 +173,9 @@ def _format_active_block(
     reference_ts: str,
     include_peak_day: bool,
 ) -> str:
-    name = _display_name_for_id(guild=guild, user_id=user.user_id)
     badge = _rank_badge(idx)
     first = _fmt_ts_with_link(user.last_ts_in_range, guild_id, channel_id, user.last_message_id_in_range, markdown=True)
-    row1 = f"{badge} **@{name}** (**{user.count_in_range} msg**) | 💬 Ultimo: {first} 🕒 {_human_delta(user.last_ts_in_range, reference_ts)}"
+    row1 = f"{badge} **<@{user.user_id}>** (**{user.count_in_range} msg**) | 💬 Ultimo: {first} 🕒 {_human_delta(user.last_ts_in_range, reference_ts)}"
 
     peak_link = _fmt_ts_with_link(user.peak_hour_ts, guild_id, channel_id, user.peak_message_id, markdown=True, hour_bucket=True)
     row2 = f"  🔥 Picco: {peak_link} ({user.peak_count} msg)"
@@ -327,7 +326,7 @@ def build_activity_dm_embeds(
     ]
     if top_over > 0:
         top_blocks.append(f"… + altri {top_over} utenti")
-    _add_block_field(embeds, "TOP 10 UTENTI PIU ATTIVI", top_blocks or ["—"], continuation_name=ZWSP)
+    _add_block_field(embeds, "🏆 TOP 10 UTENTI PIÙ ATTIVI", top_blocks or ["—"], continuation_name=ZWSP)
 
     inactive_items, inactive_over = _apply_limit(details.inactive_users)
     never_seen = [item for item in inactive_items if item.last_ts_channel is None]
@@ -345,7 +344,7 @@ def build_activity_dm_embeds(
         )
     if inactive_over > 0:
         inactive_lines.append(f"… + altri {inactive_over} utenti")
-    _add_chunked_field(embeds, "TOP 10 UTENTI INATTIVI", "\n\n".join(inactive_lines or ["—"]), continuation_name=ZWSP)
+    _add_chunked_field(embeds, "💤 TOP 10 UTENTI INATTIVI", "\n\n".join(inactive_lines or ["—"]), continuation_name=ZWSP)
 
     _add_chunked_field(embeds, "💡 CONSIGLI", "\n".join(f"• {line}" for line in details.advice_bullets) or "• Nessun consiglio")
     _finalize_detail_titles(embeds)
