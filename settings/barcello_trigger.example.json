@@ -3,165 +3,188 @@
   "min_messages": 10,
   "cooldown_minutes": 10,
   "min_score_delta_for_notify": 3,
-
   "mood_default": "chill",
-
   "time_buckets": {
-    "night": { "start": 0, "end": 6 },
-    "morning": { "start": 6, "end": 12 },
-    "afternoon": { "start": 12, "end": 18 },
-    "evening": { "start": 18, "end": 24 }
+    "night": {
+      "start": 0,
+      "end": 6
+    },
+    "morning": {
+      "start": 6,
+      "end": 12
+    },
+    "afternoon": {
+      "start": 12,
+      "end": 18
+    },
+    "evening": {
+      "start": 18,
+      "end": 24
+    }
   },
-
   "dramatic_tiers": {
     "red": [
-      { "min_count_today": 2, "label": "t2" },
-      { "min_count_today": 3, "label": "t3" }
+      {
+        "min_count_today": 2,
+        "label": "t2"
+      },
+      {
+        "min_count_today": 3,
+        "label": "t3"
+      }
     ],
     "black": [
-      { "min_count_today": 2, "label": "n2" },
-      { "min_count_today": 3, "label": "n3" }
+      {
+        "min_count_today": 2,
+        "label": "n2"
+      },
+      {
+        "min_count_today": 3,
+        "label": "n3"
+      }
     ]
   },
-
   "placeholders": {
     "state_count_today": "Quante volte oggi (da mezzanotte) il barcello è diventato {new} in questa stanza",
     "last_in_state_human": "Quanto tempo fa (oggi) il barcello era l'ultima volta nello stato {new}",
     "red_count_today": "Quante volte oggi il barcello è diventato ROSSO in questa stanza",
     "black_count_today": "Quante volte oggi il barcello è diventato NERO in questa stanza"
   },
-
   "templates": {
     "INIT": [
-      "📌 Il barcello è {new} ora.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "📌 Update barcello: ora è {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "📌 Stato barcello aggiornato: {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100"
+      "📌 Il barcello è {new} ora.",
+      "📌 Update barcello: ora è {new}.",
+      "📌 Stato barcello aggiornato: {new}."
     ],
-
     "VERDE_FIRST_TODAY": [
-      "🟢 Clima migliorato! Il Barcy torna {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "🟢 Si respira aria migliore. Il Barcy è di nuovo {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "🟢 Tornati in zona chill. Il Barcy {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100"
+      "🟢 Clima migliorato! Il Barcy torna {new}.",
+      "🟢 Si respira aria migliore. Il Barcy è di nuovo {new}.",
+      "🟢 Tornati in zona chill. Il Barcy {new}."
     ],
     "GIALLO_FIRST_TODAY": [
-      "🟡 Sento odore di barcello... 🫛\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "🟡 Mmm… La situa si ingiallisce.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "🟡 Occhio, il Barcy sta maturando.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100"
+      "🟡 Sento odore di barcello... 🫛",
+      "🟡 Mmm… La situa si ingiallisce.",
+      "🟡 Occhio, il Barcy sta maturando."
     ],
     "ROSSO_FIRST_TODAY": [
-      "🔴 Allerta rossa! Il barcello matura da {old} a {new}! 👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "🔴 Houston abbiamo un problema. Da {old} il Barcy passa a {new}. 👮 Chiamo i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "🔴 Situazione calda. Il Barcy passa da {old} a {new}. 👮 Servono i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100"
+      "🔴 Allerta rossa! Il barcello matura da {old} a {new}",
+      "🔴 Houston abbiamo un problema. Da {old} il Barcy passa a {new}",
+      "🔴 Situazione calda. Il Barcy passa da {old} a {new}"
     ],
     "NERO_FIRST_TODAY": [
-      "⚫ ALLERTA NERA! Il barcello è marcito SUBITO da {old} a {new}!! 👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "⚫ La situazione è nera. Da {old} a {new} di colpo. 👮 Dove sono i <@&1379593668645883934>?\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "⚫ Rega è crollato tutto. Il Barcy passa da {old} a {new}. 👮 Intervengano i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100"
+      "⚫ ALLERTA NERA! Il barcello è marcito SUBITO da {old} a {new}",
+      "⚫ La situazione è nera. Da {old} a {new} di colpo",
+      "⚫ Rega è crollato tutto. Il Barcy passa da {old} a {new}"
     ],
-
     "VERDE->GIALLO": [
-      "🟡 Sento odore di barcello... 🫛\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟡 La situa si sta ingiallendo.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟡 Il Barcy è in modalità sospetta…\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🟡 Sento odore di barcello... 🫛",
+      "🟡 La situa si sta ingiallendo.",
+      "🟡 Il Barcy è in modalità sospetta…"
     ],
-
     "VERDE->ROSSO": [
-      "🔴 Allerta rossa! Il barcello matura da {old} a {new}! 👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🔴 La situa sta degenerando. Il Barcy passa da {old} a {new}. 👮 Servono i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🔴 Qui si va sul pesante. Il Barcy passa subito da {old} a {new}. 👮 Serve l'intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🔴 Allerta rossa! Il barcello matura da {old} a {new}",
+      "🔴 La situa sta degenerando. Il Barcy passa da {old} a {new}",
+      "🔴 Qui si va sul pesante. Il Barcy passa subito da {old} a {new}"
     ],
-
     "VERDE->NERO": [
-      "⚫ ALLERTA NERA! Il barcello è marcito SUBITO da {old} a {new}!! 👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "⚫ Sta collassato tutto. Il Barcy è passato da {old} a {new}. 👮 Chiamo i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "⚫ Non mi piace per niente. Il Barcy è {new} di colpo. 👮 URGENTE! VENITE <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "⚫ ALLERTA NERA! Il barcello è marcito SUBITO da {old} a {new}",
+      "⚫ Sta collassato tutto. Il Barcy è passato da {old} a {new}",
+      "⚫ Non mi piace per niente. Il Barcy è {new} di colpo"
     ],
-
     "GIALLO->VERDE": [
-      "🟢 Clima migliorato! Il Barcy torna {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟢 Ok, si rientra nel verde.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟢 Bravi, avete ringalluzzito il Barcy: {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🟢 Clima migliorato! Il Barcy torna {new}.",
+      "🟢 Ok, si rientra nel verde.",
+      "🟢 Bravi, avete ringalluzzito il Barcy: {new}."
     ],
-
     "GIALLO->ROSSO": [
-      "🔴 Il barcello sta arrossendo. Passa da {old} a {new}... Aiuto. 👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🔴 Sta salendo la tensione. Il Barcy passa da {old} a {new}. 👮 <@&1379593668645883934> venite subito!\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🔴 Qui si arrossisce male. 👮 Servono i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🔴 Il barcello sta arrossendo. Passa da {old} a {new}... Aiuto",
+      "🔴 Sta salendo la tensione. Il Barcy passa da {old} a {new}",
+      "🔴 Qui si arrossisce male"
     ],
-
     "GIALLO->NERO": [
-      "⚫ ALLERTA NERA! Il barcello ha skippato l'arrossimento e passa da {old} a {new}!! 👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "⚫ Skippone letale. Da {old} il Barcy è passato a {new}. 👮 Dove sono i <@&1379593668645883934>?\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "⚫ È precipitato tutto senza preavviso. Il Barcy è passato a {new}. 👮 <@&1379593668645883934> urgenti\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "⚫ ALLERTA NERA! Il barcello ha skippato l'arrossimento e passa da {old} a {new}",
+      "⚫ Skippone letale. Da {old} il Barcy è passato a {new}",
+      "⚫ È precipitato tutto senza preavviso. Il Barcy è passato a {new}"
     ],
-
     "ROSSO->VERDE": [
-      "🟢 Forte miglioramento del Barcy! Passa da {old} a {new} subito! Adoro.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟢 Recupero clamoroso. Da {old} è passato a {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟢 Avete salvato il Barcy al volo. È tornato {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🟢 Forte miglioramento del Barcy! Passa da {old} a {new} subito! Adoro.",
+      "🟢 Recupero clamoroso. Da {old} è passato a {new}.",
+      "🟢 Avete salvato il Barcy al volo. È tornato {new}."
     ],
-
     "ROSSO->GIALLO": [
-      "🟡 La situa si sbollisce! Il Barcy passa da {old} a {new} per fortuna...\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟡 Ok, la situa rientra un filo. Passa da {old} a {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟡 Meno male, il Barcy si sta raffreddando. È tornato {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🟡 La situa si sbollisce! Il Barcy passa da {old} a {new} per fortuna...",
+      "🟡 Ok, la situa rientra un filo. Passa da {old} a {new}.",
+      "🟡 Meno male, il Barcy si sta raffreddando. È tornato {new}."
     ],
-
     "ROSSO->NERO": [
-      "⚫ ALLERTA NERA! Il barcello marcisce inevitabilmente e passa da {old} a {new}! Ahia... 👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "⚫ È finita malissimo. Il Barcy passa da {old} a {new}. 👮 <@&1379593668645883934> VENITE ORA!\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "⚫ Qui si è rotto tutto. Il Barcy è diventato {new}. 👮 Intervengano i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "⚫ ALLERTA NERA! Il barcello marcisce inevitabilmente e passa da {old} a {new}! Ahia",
+      "⚫ È finita malissimo. Il Barcy passa da {old} a {new}",
+      "⚫ Qui si è rotto tutto. Il Barcy è diventato {new}"
     ],
-
     "NERO->VERDE": [
-      "🟢 Il Barcy è tornato splendido splendente subito. Da {old} è ora {new}, che bellezza.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟢 Miracolo. Dal {old} al {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟢 Ritorno pazzesco del Barcy. Il Barcy passa da {old} a {new} fortunatamente.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🟢 Il Barcy è tornato splendido splendente subito. Da {old} è ora {new}, che bellezza.",
+      "🟢 Miracolo. Dal {old} al {new}.",
+      "🟢 Ritorno pazzesco del Barcy. Il Barcy passa da {old} a {new} fortunatamente."
     ],
-
     "NERO->GIALLO": [
-      "🟡 La situazione migliora ma sempre un po' critica. Da {old} è ora {new}. Si può fare di più.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟡 Ok, un passo avanti. Si sbollisce e da {old} torna {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🟡 Si risale, ma non cantiamo vittoria.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🟡 La situazione migliora ma sempre un po' critica. Da {old} è ora {new}. Si può fare di più.",
+      "🟡 Ok, un passo avanti. Si sbollisce e da {old} torna {new}.",
+      "🟡 Si risale, ma non cantiamo vittoria."
     ],
-
     "NERO->ROSSO": [
-      "🔴 Lo stato del Barcy migliora ma resta critica: Da {old} è ora {new}. Meglio di niente...\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🔴 Meglio, ma siamo ancora messi male. Da {old} è passato a {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-      "🔴 Si risale dal nero, ma occhio. Il Barcy è passato da {old} è passato a {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+      "🔴 Lo stato del Barcy migliora ma resta critica: Da {old} è ora {new}. Meglio di niente...",
+      "🔴 Meglio, ma siamo ancora messi male. Da {old} è passato a {new}.",
+      "🔴 Si risale dal nero, ma occhio. Il Barcy è passato da {old} è passato a {new}."
     ],
-
     "WORSEN": [
-      "⚠️ Il barcello sta peggiorando: da {old} è ora {new}. 👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "⚠️ Si sta mettendo male: da {old} il Barcy passa da {new}. 👮 I <@&1379593668645883934> sono desiderati in stanza.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "⚠️ Clima in discesa: il Barcy è ora {new}. 👮 Servono i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100"
+      "⚠️ Il barcello sta peggiorando: da {old} è ora {new}",
+      "⚠️ Si sta mettendo male: da {old} il Barcy passa da {new}",
+      "⚠️ Clima in discesa: il Barcy è ora {new}"
     ],
-
     "IMPROVE": [
-      "✅ Il barcello sta migliorando: da {old} il Barcy è ora {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "✅ Si respira meglio: da {old} il Barcy passa a {new}\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100",
-      "✅ Recupero climatico: ora il Barcy è {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100"
+      "✅ Il barcello sta migliorando: da {old} il Barcy è ora {new}.",
+      "✅ Si respira meglio: da {old} il Barcy passa a {new}",
+      "✅ Recupero climatico: ora il Barcy è {new}."
+    ],
+    "MOD_PING_ROSSO": [
+      "👮 Moderazione richiesta in stato ROSSO. {mod_mention}",
+      "👮 Stato ROSSO rilevato: serve un check staff. {mod_mention}",
+      "👮 Barcy ROSSO, date un occhio qui. {mod_mention}"
+    ],
+    "MOD_PING_NERO": [
+      "👮 Moderazione urgente: stato NERO. {mod_mention}",
+      "👮 Stato NERO rilevato, intervento immediato. {mod_mention}",
+      "👮 Barcy NERO, servono mod ora. {mod_mention}"
     ]
   },
-
   "moods": {
     "chill": {
       "time": {
         "night": {
           "templates": {
             "VERDE->GIALLO": [
-              "🌙🟡 Ragazze, è tardi… restiamo morbide. Il Barcy vira {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🌙🟡 Notte calma pls: niente caos. Il Barcy si fa {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🌙🟡 È notte… e già si sente tensione. Barcy {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🌙🟡 Ragazze, è tardi… restiamo morbide. Il Barcy vira {new}.",
+              "🌙🟡 Notte calma pls: niente caos. Il Barcy si fa {new}.",
+              "🌙🟡 È notte… e già si sente tensione. Barcy {new}."
+            ],
+            "GIALLO_FIRST_TODAY": [
+              "🌙🟡 Ragazze, è tardi… restiamo morbide. Il Barcy vira {new}.",
+              "🌙🟡 Notte calma pls: niente caos. Il Barcy si fa {new}.",
+              "🌙🟡 È notte… e già si sente tensione. Barcy {new}."
             ]
           }
         },
         "morning": {
           "templates": {
             "VERDE->GIALLO": [
-              "☀️🟡 Buongiorno… e già mi fate ingiallire? Barcy {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "☀️🟡 Caffè e… barcello {new}. Piano piano, eh.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "☀️🟡 Mattina iniziata frizzante: Barcy vira {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "☀️🟡 Buongiorno… e già mi fate ingiallire? Barcy {new}.",
+              "☀️🟡 Caffè e… barcello {new}. Piano piano, eh.",
+              "☀️🟡 Mattina iniziata frizzante: Barcy vira {new}."
+            ],
+            "GIALLO_FIRST_TODAY": [
+              "☀️🟡 Buongiorno… e già mi fate ingiallire? Barcy {new}.",
+              "☀️🟡 Caffè e… barcello {new}. Piano piano, eh.",
+              "☀️🟡 Mattina iniziata frizzante: Barcy vira {new}."
             ]
           }
         }
@@ -170,42 +193,66 @@
         "t2": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 Secondo rosso oggi… respirate un attimo.\n👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🔴 Ancora rosso. State tirando troppo la corda oggi.\n👮 Servono i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🔴 Di nuovo tensione: secondo rosso della giornata.\n👮 Intervento richiesto ai <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🔴 Secondo rosso oggi… respirate un attimo.",
+              "🔴 Ancora rosso. State tirando troppo la corda oggi.",
+              "🔴 Di nuovo tensione: secondo rosso della giornata."
             ],
             "VERDE->NERO": [
-              "⚫ Secondo nero oggi… ok basta, stop.\n👮 Urgente <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "⚫ Nero di nuovo. Seconda volta oggi e non va bene.\n👮 Dove sono i <@&1379593668645883934>?\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "⚫ Altro nero oggi. Serve una pausa vera.\n👮 Intervengano i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "⚫ Secondo nero oggi… ok basta, stop.",
+              "⚫ Nero di nuovo. Seconda volta oggi e non va bene.",
+              "⚫ Altro nero oggi. Serve una pausa vera."
+            ],
+            "ROSSO_FIRST_TODAY": [
+              "🔴 Secondo rosso oggi… respirate un attimo.",
+              "🔴 Ancora rosso. State tirando troppo la corda oggi.",
+              "🔴 Di nuovo tensione: secondo rosso della giornata."
+            ],
+            "NERO_FIRST_TODAY": [
+              "⚫ Secondo nero oggi… ok basta, stop.",
+              "⚫ Nero di nuovo. Seconda volta oggi e non va bene.",
+              "⚫ Altro nero oggi. Serve una pausa vera."
             ]
           }
         },
         "t3": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 Terzo rosso oggi. Il Barcy è stanco.\n👮 Chiamo i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🔴 Siamo di nuovo al limite: terzo rosso della giornata.\n👮 Intervengano i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🔴 La pazienza è quasi finita. Rosso per la terza volta oggi.\n👮 Urge <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🔴 Terzo rosso oggi. Il Barcy è stanco.",
+              "🔴 Siamo di nuovo al limite: terzo rosso della giornata.",
+              "🔴 La pazienza è quasi finita. Rosso per la terza volta oggi."
             ],
             "VERDE->NERO": [
-              "⚫ Terzo nero oggi… questo è serio.\n👮 <@&1379593668645883934> ORA.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "⚫ Nero per la terza volta oggi. Non si scherza più.\n👮 Intervento immediato <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "⚫ Terzo crollo nel nero oggi. Fermiamoci.\n👮 Urgente presenza dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "⚫ Terzo nero oggi… questo è serio.",
+              "⚫ Nero per la terza volta oggi. Non si scherza più.",
+              "⚫ Terzo crollo nel nero oggi. Fermiamoci."
+            ],
+            "ROSSO_FIRST_TODAY": [
+              "🔴 Terzo rosso oggi. Il Barcy è stanco.",
+              "🔴 Siamo di nuovo al limite: terzo rosso della giornata.",
+              "🔴 La pazienza è quasi finita. Rosso per la terza volta oggi."
+            ],
+            "NERO_FIRST_TODAY": [
+              "⚫ Terzo nero oggi… questo è serio.",
+              "⚫ Nero per la terza volta oggi. Non si scherza più.",
+              "⚫ Terzo crollo nel nero oggi. Fermiamoci."
             ]
           }
         }
       }
     },
-
     "drama": {
       "time": {
         "night": {
           "templates": {
             "GIALLO->ROSSO": [
-              "🌙🔴 Di notte si doveva dormire… invece rosso. {old}→{new}. 👮 Urge <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🌙🔴 Notte e già si litiga? Rosso. 👮 Chiamo i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🌙🔴 Un’altra notte rossa… raga no. 👮 <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🌙🔴 Di notte si doveva dormire… invece rosso. {old}→{new}",
+              "🌙🔴 Notte e già si litiga? Rosso",
+              "🌙🔴 Un’altra notte rossa… raga no"
+            ],
+            "ROSSO_FIRST_TODAY": [
+              "🌙🔴 Di notte si doveva dormire… invece rosso. {old}→{new}",
+              "🌙🔴 Notte e già si litiga? Rosso",
+              "🌙🔴 Un’altra notte rossa… raga no"
             ]
           }
         }
@@ -214,35 +261,54 @@
         "t2": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 *Seconda volta oggi.* Io sto per impazzire.\n👮 Servono i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🔴 Secondo rosso oggi: state testando il Barcy.\n👮 <@&1379593668645883934> venite subito\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🔴 Eccoci di nuovo… secondo rosso oggi.\n👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🔴 *Seconda volta oggi.* Io sto per impazzire.",
+              "🔴 Secondo rosso oggi: state testando il Barcy.",
+              "🔴 Eccoci di nuovo… secondo rosso oggi."
             ],
             "VERDE->NERO": [
-              "⚫ *Seconda volta oggi nel nero.* È troppo.\n👮 Urgente <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "⚫ Nero di nuovo, seconda volta oggi. Stop.\n👮 <@&1379593668645883934> ORA\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "⚫ Secondo nero oggi. Qui si fa male qualcuno.\n👮 Intervento immediato <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "⚫ *Seconda volta oggi nel nero.* È troppo.",
+              "⚫ Nero di nuovo, seconda volta oggi. Stop.",
+              "⚫ Secondo nero oggi. Qui si fa male qualcuno."
+            ],
+            "ROSSO_FIRST_TODAY": [
+              "🔴 *Seconda volta oggi.* Io sto per impazzire.",
+              "🔴 Secondo rosso oggi: state testando il Barcy.",
+              "🔴 Eccoci di nuovo… secondo rosso oggi."
+            ],
+            "NERO_FIRST_TODAY": [
+              "⚫ *Seconda volta oggi nel nero.* È troppo.",
+              "⚫ Nero di nuovo, seconda volta oggi. Stop.",
+              "⚫ Secondo nero oggi. Qui si fa male qualcuno."
             ]
           }
         },
         "t3": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 Terzo rosso oggi. Io sto urlando dentro.\n👮 <@&1379593668645883934> subito\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🔴 Terzo rosso della giornata. È diventato un episodio.\n👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🔴 Rosso per la terza volta oggi. Ok, basta.\n👮 Chiamo i <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🔴 Terzo rosso oggi. Io sto urlando dentro.",
+              "🔴 Terzo rosso della giornata. È diventato un episodio.",
+              "🔴 Rosso per la terza volta oggi. Ok, basta."
             ],
             "VERDE->NERO": [
-              "⚫ Terzo nero oggi. Questo è un disastro.\n👮 <@&1379593668645883934> ORA.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "⚫ Nero per la terza volta oggi. Mi viene da piangere.\n👮 Intervento immediato <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "⚫ Terza caduta nel nero oggi. Pausa, adesso.\n👮 Urge intervento dei <@&1379593668645883934>\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "⚫ Terzo nero oggi. Questo è un disastro.",
+              "⚫ Nero per la terza volta oggi. Mi viene da piangere.",
+              "⚫ Terza caduta nel nero oggi. Pausa, adesso."
+            ],
+            "ROSSO_FIRST_TODAY": [
+              "🔴 Terzo rosso oggi. Io sto urlando dentro.",
+              "🔴 Terzo rosso della giornata. È diventato un episodio.",
+              "🔴 Rosso per la terza volta oggi. Ok, basta."
+            ],
+            "NERO_FIRST_TODAY": [
+              "⚫ Terzo nero oggi. Questo è un disastro.",
+              "⚫ Nero per la terza volta oggi. Mi viene da piangere.",
+              "⚫ Terza caduta nel nero oggi. Pausa, adesso."
             ]
           }
         }
       }
     }
   },
-
   "channels": {
     "1457910660775284758": {
       "vibe": "POLLAIO",
@@ -251,15 +317,19 @@
         "chill": {
           "templates": {
             "VERDE->GIALLO": [
-              "🐔🟡 Pollaio in agitazione… polle, piano. Barcy {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🐔🟡 Sento schiamazzi nel pollaio… vira {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🐔🟡 Occhio alle fake vibes: il Barcy si fa {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🐔🟡 Pollaio in agitazione… polle, piano. Barcy {new}.",
+              "🐔🟡 Sento schiamazzi nel pollaio… vira {new}.",
+              "🐔🟡 Occhio alle fake vibes: il Barcy si fa {new}."
+            ],
+            "GIALLO_FIRST_TODAY": [
+              "🐔🟡 Pollaio in agitazione… polle, piano. Barcy {new}.",
+              "🐔🟡 Sento schiamazzi nel pollaio… vira {new}.",
+              "🐔🟡 Occhio alle fake vibes: il Barcy si fa {new}."
             ]
           }
         }
       }
     },
-
     "1457915873418416199": {
       "vibe": "PASCOLO",
       "mood_default": "chill",
@@ -267,15 +337,19 @@
         "chill": {
           "templates": {
             "VERDE->GIALLO": [
-              "🐄🟡 Pascolo: si alza il tono… tenetevi morbide. {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🐄🟡 Nel pascolo si sente frizione. Barcy vira {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🐄🟡 Vocine calde in pascolo… occhio: {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🐄🟡 Pascolo: si alza il tono… tenetevi morbide. {new}.",
+              "🐄🟡 Nel pascolo si sente frizione. Barcy vira {new}.",
+              "🐄🟡 Vocine calde in pascolo… occhio: {new}."
+            ],
+            "GIALLO_FIRST_TODAY": [
+              "🐄🟡 Pascolo: si alza il tono… tenetevi morbide. {new}.",
+              "🐄🟡 Nel pascolo si sente frizione. Barcy vira {new}.",
+              "🐄🟡 Vocine calde in pascolo… occhio: {new}."
             ]
           }
         }
       }
     },
-
     "1438670281534214144": {
       "vibe": "SALOTTINO",
       "mood_default": "chill",
@@ -283,15 +357,19 @@
         "chill": {
           "templates": {
             "VERDE->GIALLO": [
-              "🛋️🟡 Salottino: sento tensione. Restiamo soft. {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🛋️🟡 Ragazze… piano. Il Barcy vira {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🛋️🟡 Qui siamo di qualità: niente scosse. {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🛋️🟡 Salottino: sento tensione. Restiamo soft. {new}.",
+              "🛋️🟡 Ragazze… piano. Il Barcy vira {new}.",
+              "🛋️🟡 Qui siamo di qualità: niente scosse. {new}."
+            ],
+            "GIALLO_FIRST_TODAY": [
+              "🛋️🟡 Salottino: sento tensione. Restiamo soft. {new}.",
+              "🛋️🟡 Ragazze… piano. Il Barcy vira {new}.",
+              "🛋️🟡 Qui siamo di qualità: niente scosse. {new}."
             ]
           }
         }
       }
     },
-
     "1438670918191681679": {
       "vibe": "AUDITORIUM",
       "mood_default": "chill",
@@ -299,16 +377,20 @@
         "chill": {
           "templates": {
             "VERDE->GIALLO": [
-              "🎭🟡 Auditorium: clima delicato. Vi ascolto. {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🎭🟡 In auditorium teniamo il cuore morbido… {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa.",
-              "🎭🟡 Sento fragilità nell’aria. Barcy {new}.\n🫀 PUNTI SALUTE: {old_score}→{new_score}/100\n📊 Oggi è la {state_count_today}ª volta che il Barcy diventa {new} qui. \n⏱️ L’ultima: {last_in_state_human} fa."
+              "🎭🟡 Auditorium: clima delicato. Vi ascolto. {new}.",
+              "🎭🟡 In auditorium teniamo il cuore morbido… {new}.",
+              "🎭🟡 Sento fragilità nell’aria. Barcy {new}."
+            ],
+            "GIALLO_FIRST_TODAY": [
+              "🎭🟡 Auditorium: clima delicato. Vi ascolto. {new}.",
+              "🎭🟡 In auditorium teniamo il cuore morbido… {new}.",
+              "🎭🟡 Sento fragilità nell’aria. Barcy {new}."
             ]
           }
         }
       }
     }
   },
-
   "selection_hints": {
     "priority": [
       "channels[channel_id].moods[mood].time[time_bucket].drama[tier]",
@@ -341,7 +423,6 @@
     "1457910660775284758": {
       "window_minutes": 90
     }
-  }
-
+  },
+  "mod_role_id": "1379593668645883934"
 }
-

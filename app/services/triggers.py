@@ -482,6 +482,7 @@ class TriggerEngineService:
             last_entered_ts[stored_color] = now.isoformat()
 
             now_rome = now.astimezone(ROME_TZ)
+            minute_seed = now_rome.strftime("%Y%m%d%H%M")
             time_bucket = self._get_time_bucket(now_rome, config)
             drama_label = self._get_drama_label(state_count_today, config)
             mood = await self._resolve_barcello_mood(guild_id, channel_id, config)
@@ -503,7 +504,7 @@ class TriggerEngineService:
                 except ValueError:
                     last_in_state_human = ""
 
-            msg = self._render_barcello_transition(
+            main_msg = self._render_barcello_transition(
                 old=prev_color,
                 new=stored_color,
                 old_score=prev_score,
@@ -517,18 +518,47 @@ class TriggerEngineService:
                 state_count_today=state_count_today,
                 last_in_state_human=last_in_state_human,
             )
-            message_text = (
-                f"{msg}\n\n🕒 Finestra: ultimi {window_minutes_effective} min"
-                if msg
-                else f"🕒 Finestra: ultimi {window_minutes_effective} min"
+            mod_block_text = ""
+            if stored_color in {"ROSSO", "NERO"} and prev_color != stored_color:
+                mod_key = "MOD_PING_ROSSO" if stored_color == "ROSSO" else "MOD_PING_NERO"
+                selected_mod_template = self._select_barcello_template(
+                    config,
+                    channel_id,
+                    mood,
+                    time_bucket,
+                    drama_label,
+                    mod_key,
+                )
+                mod_template = self._resolve_template_value(
+                    selected_mod_template,
+                    seed_parts=(guild_id, channel_id, mod_key, mood, time_bucket, drama_label, minute_seed),
+                )
+                mod_role_id = str(config.get("mod_role_id") or "").strip()
+                mod_mention = f"<@&{mod_role_id}>" if mod_role_id else ""
+                mod_block_text = self._render_with_placeholders(mod_template, {"mod_mention": mod_mention}) if mod_template else mod_mention
+
+            message_text = self._build_barcello_status_embed_description(
+                main_msg=main_msg,
+                old_score=prev_score,
+                new_score=score,
+                state_count_today=state_count_today,
+                last_in_state_human=last_in_state_human,
+                new=stored_color,
+                mod_block_text=mod_block_text,
             )
             embed = discord.Embed(
                 title="🫛 AGGIORNAMENTO STATO BARCELLO",
                 description=message_text,
                 color=self._barcello_embed_color(stable_color),
             )
+            embed.set_footer(
+                text=(
+                    f"Dati elaborati in loco sulla base degli ultimi {window_minutes_effective} minuti. "
+                    "Risultati variabili."
+                )
+            )
             channel = self._bot.get_channel(int(channel_id))
-            if channel and isinstance(channel, discord.abc.Messageable) and msg:
+            if channel and isinstance(channel, discord.abc.Messageable) and main_msg:
                 await channel.send(embed=embed)
             await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
             await self._database.set_trigger_state(
@@ -814,6 +844,39 @@ class TriggerEngineService:
         if severity_new < severity_old:
             return render_key("IMPROVE") or f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
         return render_key("SAME") or f"Barcello aggiornato: {new_score}."
+
+    def _build_barcello_status_embed_description(
+        self,
+        *,
+        main_msg: str,
+        old_score: int | None,
+        new_score: int,
+        state_count_today: int,
+        last_in_state_human: str,
+        new: str,
+        mod_block_text: str,
+    ) -> str:
+        sections: list[str] = []
+        if main_msg:
+            sections.append(main_msg)
+
+        if mod_block_text and new in {"ROSSO", "NERO"}:
+            sections.append(mod_block_text)
+
+        if old_score is None:
+            sections.append(f"🫀 **PUNTI SALUTE:** {new_score}/100")
+        else:
+            sections.append(f"🫀 **PUNTI SALUTE:** {old_score}→{new_score}/100")
+
+        if state_count_today >= 2 and last_in_state_human:
+            sections.append(
+                (
+                    f"📊 **Oggi:** {state_count_today}ª volta che il Barcy diventa {new} qui.\n"
+                    f"⏱️ **Ultima:** {last_in_state_human} fa."
+                )
+            )
+
+        return "\n\n".join(section for section in sections if section.strip())
 
     def _render_with_placeholders(self, text: str, placeholders: dict[str, str]) -> str:
         return re.sub(r"\{([a-zA-Z0-9_]+)\}", lambda match: placeholders.get(match.group(1), match.group(0)), text)
