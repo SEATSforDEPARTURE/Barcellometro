@@ -114,6 +114,10 @@ class DatabaseService:
             CREATE INDEX IF NOT EXISTS idx_voice_sessions_channel
             ON voice_sessions (guild_id, voice_channel_id, started_ts);
 
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_voice_session_per_channel
+            ON voice_sessions (guild_id, voice_channel_id)
+            WHERE ended_ts IS NULL;
+
             CREATE TABLE IF NOT EXISTS role_policies (
                 guild_id TEXT,
                 role_id TEXT,
@@ -1562,7 +1566,7 @@ class DatabaseService:
         where_clauses = ["ended_ts IS NULL"]
         params: list[str] = [ended_ts]
         if source:
-            where_clauses.append("meta_json LIKE ?")
+            where_clauses.append("(meta_json IS NOT NULL AND meta_json LIKE ?)")
             params.append(f'%"source"%{source}%')
         if started_before_ts:
             where_clauses.append("started_ts < ?")
