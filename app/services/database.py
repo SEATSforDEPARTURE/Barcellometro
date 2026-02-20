@@ -1966,6 +1966,23 @@ class DatabaseService:
                 continue
         return result
 
+    async def fetch_distinct_authors_in_range_channel(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> set[int]:
+        rows = await self.fetchall(
+            """
+            SELECT DISTINCT author_id
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        result: set[int] = set()
+        for row in rows:
+            try:
+                result.add(int(row["author_id"]))
+            except Exception:
+                continue
+        return result
+
     async def fetch_user_last_message_in_range_channel(
         self,
         guild_id: str,
