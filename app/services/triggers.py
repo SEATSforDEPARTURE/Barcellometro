@@ -547,7 +547,7 @@ class TriggerEngineService:
                 mod_block_text=mod_block_text,
             )
             embed = discord.Embed(
-                title="🫛 AGGIORNAMENTO STATO BARCELLO",
+                title="🫛 STATO BARCELLO",
                 description=message_text,
                 color=self._barcello_embed_color(stable_color),
             )
@@ -871,7 +871,7 @@ class TriggerEngineService:
         if state_count_today >= 2 and last_in_state_human:
             sections.append(
                 (
-                    f"📊 **Oggi:** {state_count_today}ª volta che il Barcy diventa {new} qui.\n"
+                    f"📊 **Oggi:** {state_count_today}ª volta che il Barcy diventa {new}.\n"
                     f"⏱️ **Ultima:** {last_in_state_human} fa."
                 )
             )
