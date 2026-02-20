@@ -214,6 +214,15 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, channel_id)
             );
 
+            CREATE TABLE IF NOT EXISTS activity_channels (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id)
+            );
+
             CREATE TABLE IF NOT EXISTS message_campaigns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
@@ -1890,6 +1899,33 @@ class DatabaseService:
         )
         return [row["channel_id"] for row in rows]
 
+    async def set_activity_channel_enabled(self, guild_id: str, channel_id: str, enabled: bool) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO activity_channels (guild_id, channel_id, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, channel_id, 1 if enabled else 0, now, now),
+        )
+
+    async def get_activity_channel_status(self, guild_id: str, channel_id: str) -> bool:
+        row = await self.fetchone(
+            "SELECT enabled FROM activity_channels WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        )
+        return bool(row["enabled"]) if row else False
+
+    async def list_enabled_activity_channels(self, guild_id: str) -> list[str]:
+        rows = await self.fetchall(
+            "SELECT channel_id FROM activity_channels WHERE guild_id = ? AND enabled = 1",
+            (guild_id,),
+        )
+        return [str(row["channel_id"]) for row in rows]
+
     async def count_messages_in_range_single_channel(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> int:
         row = await self.fetchone(
             """
@@ -1926,6 +1962,23 @@ class DatabaseService:
         for row in rows:
             try:
                 result[int(row["author_id"])] = int(row["c"])
+            except Exception:
+                continue
+        return result
+
+    async def fetch_distinct_authors_in_range_channel(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> set[int]:
+        rows = await self.fetchall(
+            """
+            SELECT DISTINCT author_id
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        result: set[int] = set()
+        for row in rows:
+            try:
+                result.add(int(row["author_id"]))
             except Exception:
                 continue
         return result

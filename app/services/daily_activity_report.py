@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from datetime import datetime, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import discord
 
-from app.renderers.activity_daily_report_renderer import build_daily_activity_embeds
-from app.services.activity_insights import ActivityInsightsService
+from app.renderers.activity_daily_report_renderer import build_daily_activity_details_txt, build_daily_activity_embeds
+from app.services.activity_insights import ActivityInsightsService, ChannelActivityDetails
 from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,35 @@ class DailyActivityReportService:
             await self._send_daily_report(guild_id=guild_id, mod_channel_id=str(row["mod_channel_id"] or ""))
             await self._database.mark_activity_monitoring_sent(guild_id, now_local.date().isoformat())
 
+    async def send_now(self, *, guild_id: str, mod_channel_id: str) -> None:
+        logger.info("daily_activity_report: manual send guild=%s channel=%s", guild_id, mod_channel_id)
+        await self._send_daily_report(guild_id=guild_id, mod_channel_id=mod_channel_id)
+
+    async def _count_non_bot_members(self, guild: discord.Guild) -> int | None:
+        if guild.members:
+            return sum(1 for m in guild.members if not m.bot)
+        logger.warning("daily_activity_report: guild members cache not populated for guild=%s", guild.id)
+        return None
+
+    async def _count_members_with_access(self, guild: discord.Guild, channel: discord.abc.GuildChannel | discord.Thread) -> int | None:
+        if not guild.members:
+            return None
+        try:
+            everyone_can_view = channel.permissions_for(guild.default_role).view_channel
+        except Exception:
+            everyone_can_view = False
+        non_bot_members = [m for m in guild.members if not m.bot]
+        if everyone_can_view:
+            return len(non_bot_members)
+        count = 0
+        for member in non_bot_members:
+            try:
+                if channel.permissions_for(member).view_channel:
+                    count += 1
+            except Exception:
+                continue
+        return count
+
     async def _send_daily_report(self, *, guild_id: str, mod_channel_id: str) -> None:
         if not mod_channel_id:
             return
@@ -66,12 +97,76 @@ class DailyActivityReportService:
         start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         start_ts = start_local.astimezone(timezone.utc).isoformat()
         end_ts = now_local.astimezone(timezone.utc).isoformat()
-        channel_ids = await self._database.list_enabled_message_channels(guild_id)
-        payloads: list[tuple[str, object]] = []
+
+        total_non_bot_members = await self._count_non_bot_members(guild)
+        non_bot_ids = {m.id for m in guild.members if not m.bot} if guild.members else set()
+
+        channel_ids = await self._database.list_enabled_activity_channels(guild_id)
+        payloads: list[dict[str, Any]] = []
+        server_active_non_bot: set[int] = set()
         for channel_id in channel_ids:
+            try:
+                dc = guild.get_channel(int(channel_id))
+            except Exception:
+                dc = None
+            if dc is None:
+                continue
             details = await self._activity.compute_activity_for_channel(guild_id, str(channel_id), start_ts, end_ts)
-            dc = guild.get_channel(int(channel_id))
-            payloads.append((getattr(dc, "name", str(channel_id)), details))
-        embeds = build_daily_activity_embeds(guild.name, payloads)
+
+            distinct_authors = await self._database.fetch_distinct_authors_in_range_channel(guild_id, str(channel_id), start_ts, end_ts)
+            active_non_bot_ids = {uid for uid in distinct_authors if not non_bot_ids or uid in non_bot_ids}
+            server_active_non_bot.update(active_non_bot_ids)
+
+            member_access_count = await self._count_members_with_access(guild, dc)
+
+            is_voice = isinstance(dc, discord.VoiceChannel)
+            voice_sessions_count = 0
+            voice_total_seconds = 0
+            voice_details: list[str] = []
+            if is_voice:
+                sessions = await self._database.fetch_voice_sessions_in_range(
+                    guild_id=guild_id,
+                    voice_channel_id=str(channel_id),
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                )
+                for row in sessions:
+                    started = datetime.fromisoformat(str(row["started_ts"]).replace("Z", "+00:00"))
+                    ended_raw = row["ended_ts"]
+                    ended = datetime.fromisoformat(str(ended_raw).replace("Z", "+00:00")) if ended_raw else datetime.now(timezone.utc)
+                    duration = max(0, int((ended - started).total_seconds()))
+                    voice_total_seconds += duration
+                    voice_sessions_count += 1
+                    voice_details.append(f"- {started.astimezone(ROME_TZ).strftime('%H:%M')} → {ended.astimezone(ROME_TZ).strftime('%H:%M')} ({duration // 60}m)")
+
+            payloads.append(
+                {
+                    "channel": dc,
+                    "details": details,
+                    "active_non_bot": len(active_non_bot_ids),
+                    "members_with_access": member_access_count,
+                    "is_voice": is_voice,
+                    "voice_sessions_count": voice_sessions_count,
+                    "voice_total_seconds": voice_total_seconds,
+                    "voice_details": voice_details,
+                }
+            )
+
+        server_summary = {
+            "active_non_bot": len(server_active_non_bot),
+            "total_non_bot_members": total_non_bot_members,
+        }
+        embeds = build_daily_activity_embeds(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)
+        txt_payload = build_daily_activity_details_txt(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)
+        txt_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename="attivita_dettagli_giornalieri.txt")
+
         for idx in range(0, len(embeds), 10):
-            await channel.send(embeds=embeds[idx : idx + 10])
+            batch = embeds[idx : idx + 10]
+            if idx == 0:
+                try:
+                    await channel.send(embeds=batch, file=txt_file)
+                except Exception:
+                    logger.warning("daily_activity_report: failed sending txt attachment guild=%s channel=%s", guild_id, mod_channel_id)
+                    await channel.send(embeds=batch)
+            else:
+                await channel.send(embeds=batch)
