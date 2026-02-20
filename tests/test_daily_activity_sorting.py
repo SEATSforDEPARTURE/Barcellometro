@@ -15,13 +15,23 @@ def test_sort_channels_like_discord_visual_order() -> None:
     cat_a = SimpleNamespace(id=10, position=1)
     cat_b = SimpleNamespace(id=20, position=2)
 
-    ch_a2 = SimpleNamespace(id=102, position=2, category=cat_a, name="a2")
-    ch_b1 = SimpleNamespace(id=201, position=1, category=cat_b, name="b1")
-    ch_a1 = SimpleNamespace(id=101, position=1, category=cat_a, name="a1")
-    ch_no_cat = SimpleNamespace(id=999, position=0, category=None, name="zz")
+    ch_a2 = SimpleNamespace(id=102, position=2, category=cat_a, name="a2", type="text")
+    ch_b1 = SimpleNamespace(id=201, position=1, category=cat_b, name="b1", type="voice")
+    ch_a1 = SimpleNamespace(id=101, position=1, category=cat_a, name="a1", type="text")
+    ch_no_cat = SimpleNamespace(id=999, position=0, category=None, name="zz", type="text")
 
     ordered = mod.sort_channels_like_discord([ch_a2, ch_b1, ch_no_cat, ch_a1])
     assert [c.id for c in ordered] == [101, 102, 201, 999]
+
+
+def test_sort_channels_like_discord_type_rank_with_same_position() -> None:
+    cat = SimpleNamespace(id=10, position=1)
+    text_pos1 = SimpleNamespace(id=11, position=1, category=cat, name="text-1", type="text")
+    voice_pos0 = SimpleNamespace(id=12, position=0, category=cat, name="voice-0", type="voice")
+    text_pos0 = SimpleNamespace(id=13, position=0, category=cat, name="text-0", type="text")
+
+    ordered = mod.sort_channels_like_discord([text_pos1, voice_pos0, text_pos0])
+    assert [c.id for c in ordered] == [13, 12, 11]
 
 
 def test_sort_inactive_entries_by_recency_then_never_written() -> None:

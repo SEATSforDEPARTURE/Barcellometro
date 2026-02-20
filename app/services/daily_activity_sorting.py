@@ -4,19 +4,35 @@ from datetime import datetime
 from typing import Any
 
 
+def _channel_type_rank(channel: Any) -> int:
+    channel_type = getattr(channel, "type", None)
+    name = str(getattr(channel_type, "name", channel_type)).lower()
+
+    text_like = {"text", "news", "forum", "announcement"}
+    voice_like = {"voice", "stage_voice", "stage"}
+
+    if name in text_like:
+        return 0
+    if name in voice_like:
+        return 1
+    return 2
+
+
 def sort_channels_like_discord(channels: list[Any]) -> list[Any]:
     inf = 10**9
 
-    def _key(channel: Any) -> tuple[int, int, int, int]:
+    def _key(channel: Any) -> tuple[int, int, int, int, int]:
         category = getattr(channel, "category", None)
         channel_pos = int(getattr(channel, "position", 0))
         channel_id = int(getattr(channel, "id", 0))
+        type_rank = _channel_type_rank(channel)
         if category is None:
-            return (inf, 0, channel_pos, channel_id)
+            return (inf, 0, channel_pos, type_rank, channel_id)
         return (
             int(getattr(category, "position", inf)),
             int(getattr(category, "id", 0)),
             channel_pos,
+            type_rank,
             channel_id,
         )
 
