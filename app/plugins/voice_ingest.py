@@ -318,6 +318,14 @@ def setup(registry: ServiceRegistry) -> None:
     async def _start_session(guild_id: int, voice_channel_id: int) -> None:
         nonlocal active_session_id, active_session_started
         nonlocal current_guild_id, active_session_started_epoch
+        existing_session = await database.get_active_voice_session(str(guild_id), str(voice_channel_id))
+        if existing_session is not None:
+            existing_session_id = existing_session["voice_session_id"]
+            await database.end_voice_session(existing_session_id, _now_iso())
+            logger.warning(
+                "Found existing active voice_session_id=%s; closed before starting a new one.",
+                existing_session_id,
+            )
         session_id = str(uuid4())
         active_session_id = session_id
         active_session_started = datetime.now(timezone.utc)
@@ -877,6 +885,11 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal worker_task
         nonlocal controller_registered
         nonlocal enforcer_task
+        closed_count = await database.close_open_voice_sessions(
+            ended_ts=_now_iso(),
+            source="voice_ingest",
+        )
+        logger.warning("Closed %s stale voice sessions (ended_ts was NULL) at startup.", closed_count)
         if worker_task is None:
             worker_task = asyncio.create_task(_worker())
             def _log_worker_result(task_future: Any) -> None:
