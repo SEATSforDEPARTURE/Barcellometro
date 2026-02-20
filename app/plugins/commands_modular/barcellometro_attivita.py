@@ -14,17 +14,6 @@ def _validate_hhmm(value: str) -> str | None:
     return validate_hhmm(value)
 
 
-def _validate_hhmm(value: str) -> str | None:
-    if not re.fullmatch(r"\d{2}:\d{2}", value or ""):
-        return "invalid"
-    hh, mm = value.split(":", 1)
-    hour = int(hh)
-    minute = int(mm)
-    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
-        return "invalid"
-    return None
-
-
 def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: CommandContext) -> None:
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, "barcellometro.attivita.config", ctx)
