@@ -124,6 +124,7 @@ def build_daily_activity_embeds(
         embed.add_field(name="📈 TREND", value=_truncate_field(s.trend_text or "n/d"), inline=False)
         embed.set_footer(text="Barcellometro")
         embeds.append(embed)
+
     return embeds
 
 
