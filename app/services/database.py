@@ -114,6 +114,10 @@ class DatabaseService:
             CREATE INDEX IF NOT EXISTS idx_voice_sessions_channel
             ON voice_sessions (guild_id, voice_channel_id, started_ts);
 
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_voice_session_per_channel
+            ON voice_sessions (guild_id, voice_channel_id)
+            WHERE ended_ts IS NULL;
+
             CREATE TABLE IF NOT EXISTS role_policies (
                 guild_id TEXT,
                 role_id TEXT,
@@ -1550,6 +1554,27 @@ class DatabaseService:
             "UPDATE voice_sessions SET ended_ts = ? WHERE voice_session_id = ?",
             (ended_ts, voice_session_id),
         )
+
+    async def close_open_voice_sessions(
+        self,
+        *,
+        ended_ts: str,
+        source: str | None = None,
+        started_before_ts: str | None = None,
+    ) -> int:
+        assert self._conn is not None
+        where_clauses = ["ended_ts IS NULL"]
+        params: list[str] = [ended_ts]
+        if source:
+            where_clauses.append("(meta_json IS NOT NULL AND meta_json LIKE ?)")
+            params.append(f'%"source"%{source}%')
+        if started_before_ts:
+            where_clauses.append("started_ts < ?")
+            params.append(started_before_ts)
+        query = f"UPDATE voice_sessions SET ended_ts = ? WHERE {' AND '.join(where_clauses)}"
+        cursor = await self._conn.execute(query, tuple(params))
+        await self._conn.commit()
+        return cursor.rowcount
 
     async def get_active_voice_session(self, guild_id: str, voice_channel_id: str) -> Optional[aiosqlite.Row]:
         return await self.fetchone(

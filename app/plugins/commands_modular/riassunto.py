@@ -1012,16 +1012,6 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         return f"{hours}h"
                     return f"{minutes}m"
 
-                def _describe_call_start(started: datetime, ended: datetime | None) -> str:
-                    if ended:
-                        return f"Parte una chiamata di circa {_describe_duration(started, ended)} che sposta il ritmo sul vocale."
-                    return "Parte una chiamata che prosegue oltre il periodo considerato."
-
-                def _describe_call_end(started: datetime, ended: datetime | None) -> str:
-                    if ended:
-                        return f"La chiamata si chiude dopo {_describe_duration(started, ended)} di confronto."
-                    return "Verso la fine del periodo la chiamata risulta ancora in corso."
-
                 def _build_privacy_disclaimer(
                     started: datetime,
                     ended: datetime | None,
@@ -1055,12 +1045,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     voice_session_ranges.append((started, ended or end_dt_utc))
                     overlap_seconds = max(0.0, (overlap_end - overlap_start).total_seconds())
                     overlap_label = _describe_duration(overlap_seconds) if overlap_seconds else "~1m"
-                    if start_dt_utc <= started <= end_dt_utc:
-                        text = f"Parte una chiamata ({overlap_label}) che sposta il ritmo sul vocale."
-                        ts_value = started
+                    started_local = _format_italian_time(started.isoformat())
+                    if started < start_dt_utc:
+                        text = f"Sessione già in corso (iniziata prima della finestra): iniziata alle {started_local}"
                     else:
-                        text = f"Chiamata già in corso all'inizio del periodo ({overlap_label})."
-                        ts_value = start_dt_utc
+                        text = f"Inizia una sessione vocale (durata nella finestra: {overlap_label})."
+                    ts_value = started
                     supplemental_moments.append(
                         SummaryItem(
                             ts=ts_value.isoformat(),
@@ -1073,7 +1063,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     _append_event(ts_value, text, kind="call")
                     call_entries += 1
                     if ended and start_dt_utc <= ended <= end_dt_utc:
-                        end_text = f"Termina la chiamata dopo {overlap_label} di confronto."
+                        end_text = f"Termina la sessione vocale (durata nella finestra: {overlap_label})."
                         supplemental_moments.append(
                             SummaryItem(
                                 ts=ended.isoformat(),
@@ -1086,7 +1076,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         _append_event(ended, end_text, kind="call")
                         call_entries += 1
                     if not ended or ended > end_dt_utc:
-                        continue_text = f"La chiamata prosegue oltre il periodo ({overlap_label})."
+                        continue_text = f"La sessione vocale prosegue oltre il periodo (durata nella finestra: {overlap_label})."
                         supplemental_moments.append(
                             SummaryItem(
                                 ts=end_dt_utc.isoformat(),
