@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable, Optional
 from uuid import uuid4
 
 import discord
+import aiosqlite
 
 from app.core.service_registry import ServiceRegistry
 from app.services.ingest import EventEnvelope, IngestService
@@ -318,6 +319,14 @@ def setup(registry: ServiceRegistry) -> None:
     async def _start_session(guild_id: int, voice_channel_id: int) -> None:
         nonlocal active_session_id, active_session_started
         nonlocal current_guild_id, active_session_started_epoch
+        existing_session = await database.get_active_voice_session(str(guild_id), str(voice_channel_id))
+        if existing_session is not None:
+            existing_session_id = existing_session["voice_session_id"]
+            await database.end_voice_session(existing_session_id, _now_iso())
+            logger.warning(
+                "Found existing active voice_session_id=%s; closed before starting a new one.",
+                existing_session_id,
+            )
         session_id = str(uuid4())
         active_session_id = session_id
         active_session_started = datetime.now(timezone.utc)
@@ -325,13 +334,29 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal current_voice_channel_id
         current_voice_channel_id = voice_channel_id
         current_guild_id = guild_id
-        await database.start_voice_session(
-            voice_session_id=session_id,
-            guild_id=str(guild_id),
-            voice_channel_id=str(voice_channel_id),
-            started_ts=_now_iso(),
-            meta={"source": "voice_ingest"},
-        )
+        try:
+            await database.start_voice_session(
+                voice_session_id=session_id,
+                guild_id=str(guild_id),
+                voice_channel_id=str(voice_channel_id),
+                started_ts=_now_iso(),
+                meta={"source": "voice_ingest"},
+            )
+        except aiosqlite.IntegrityError:
+            existing_session = await database.get_active_voice_session(str(guild_id), str(voice_channel_id))
+            if existing_session is not None:
+                active_session_id = existing_session["voice_session_id"]
+                existing_started = datetime.fromisoformat(existing_session["started_ts"])
+                if existing_started.tzinfo is None:
+                    existing_started = existing_started.replace(tzinfo=timezone.utc)
+                active_session_started = existing_started
+                active_session_started_epoch = active_session_started.timestamp()
+                logger.warning(
+                    "IntegrityError starting voice session; reusing existing active voice_session_id=%s",
+                    active_session_id,
+                )
+                return
+            raise
         await ingest.emit(
             EventEnvelope(
                 event_id=str(uuid4()),
@@ -877,6 +902,24 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal worker_task
         nonlocal controller_registered
         nonlocal enforcer_task
+        before = await database.fetchone(
+            "SELECT COUNT(*) AS c FROM voice_sessions WHERE ended_ts IS NULL",
+            (),
+        )
+        closed_count = await database.close_open_voice_sessions(
+            ended_ts=_now_iso(),
+            source=None,
+        )
+        after = await database.fetchone(
+            "SELECT COUNT(*) AS c FROM voice_sessions WHERE ended_ts IS NULL",
+            (),
+        )
+        logger.warning(
+            "Voice sessions cleanup on startup: before=%s closed=%s after=%s",
+            (before["c"] if before else None),
+            closed_count,
+            (after["c"] if after else None),
+        )
         if worker_task is None:
             worker_task = asyncio.create_task(_worker())
             def _log_worker_result(task_future: Any) -> None:
