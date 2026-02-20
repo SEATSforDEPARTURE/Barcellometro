@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import re
+
 import discord
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+
+
+def _validate_hhmm(value: str) -> str | None:
+    if not re.fullmatch(r"\d{2}:\d{2}", value or ""):
+        return "invalid"
+    hh, mm = value.split(":", 1)
+    hour = int(hh)
+    minute = int(mm)
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return "invalid"
+    return None
 
 
 def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -55,8 +68,11 @@ def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: Com
             ephemeral=True,
         )
 
-    @activity_group.command(name="ora", description="Imposta l'orario di pubblicazione del resoconto")
-    @app_commands.describe(hhmm="Orario locale Europe/Rome in formato HH:MM (es. 09:00)")
+    @activity_group.command(
+        name="ora",
+        description="Imposta orario invio resoconto (HH:MM). Se eseguito nel canale mod, invia subito per test.",
+    )
+    @app_commands.describe(hhmm="Orario locale Europe/Rome in formato HH:MM (es. 20:30)")
     async def attivita_ora(interaction: discord.Interaction, hhmm: str) -> None:
         if not await _ensure(interaction):
             return
@@ -64,23 +80,43 @@ def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: Com
             await interaction.response.send_message("❌ Gilda non valida.", ephemeral=True)
             return
 
-        try:
-            safe_time = ctx.database._validate_hhmm(hhmm)
-        except ValueError:
-            await interaction.response.send_message("❌ Formato ora non valido. Usa HH:MM (es. 09:00).", ephemeral=True)
+        if _validate_hhmm(hhmm) is not None:
+            await interaction.response.send_message("❌ Orario non valido. Usa HH:MM (es. 20:30).", ephemeral=True)
             return
 
         guild_id = str(interaction.guild_id)
-        current = await ctx.database.get_activity_monitoring_config(guild_id)
-        mod_channel_id = str(current["mod_channel_id"]) if current and current["mod_channel_id"] else None
-        enabled = bool(current["enabled"]) if current else True
+        cfg = await ctx.database.get_activity_monitoring_config(guild_id)
+        enabled = bool(cfg["enabled"]) if cfg else True
+        mod_channel_id = str(cfg["mod_channel_id"]) if cfg and cfg["mod_channel_id"] else None
+
         await ctx.database.upsert_activity_monitoring_config(
             guild_id,
             enabled=enabled,
             mod_channel_id=mod_channel_id,
-            send_time_local=safe_time,
+            send_time_local=hhmm,
         )
-        await interaction.response.send_message(f"✅ Orario impostato a **{safe_time}** (Europe/Rome).", ephemeral=True)
+        await interaction.response.send_message(f"✅ Orario aggiornato: **{hhmm}**.", ephemeral=True)
+
+        if not mod_channel_id:
+            await interaction.followup.send(
+                "Imposta prima il canale mod con /barcellometro attivita canale …",
+                ephemeral=True,
+            )
+            return
+
+        if interaction.channel_id != int(mod_channel_id):
+            await interaction.followup.send(
+                f"ℹ️ Per invio di test esegui questo comando nel canale mod <#{mod_channel_id}>.",
+                ephemeral=True,
+            )
+            return
+
+        if ctx.daily_activity_report is None:
+            await interaction.followup.send("❌ Servizio daily_activity_report non disponibile.", ephemeral=True)
+            return
+
+        await ctx.daily_activity_report.send_now(guild_id=guild_id, mod_channel_id=mod_channel_id)
+        await interaction.followup.send("📨 Test inviato nel canale mod.", ephemeral=True)
 
     @activity_group.command(name="stato", description="Stato monitorazione attività")
     async def attivita_stato(interaction: discord.Interaction) -> None:

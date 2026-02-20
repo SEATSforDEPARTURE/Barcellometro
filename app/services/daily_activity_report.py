@@ -55,6 +55,11 @@ class DailyActivityReportService:
             await self._send_daily_report(guild_id=guild_id, mod_channel_id=str(row["mod_channel_id"] or ""))
             await self._database.mark_activity_monitoring_sent(guild_id, now_local.date().isoformat())
 
+
+    async def send_now(self, *, guild_id: str, mod_channel_id: str) -> None:
+        logger.info("daily_activity_report: manual send guild=%s channel=%s", guild_id, mod_channel_id)
+        await self._send_daily_report(guild_id=guild_id, mod_channel_id=mod_channel_id)
+
     async def _send_daily_report(self, *, guild_id: str, mod_channel_id: str) -> None:
         if not mod_channel_id:
             return
