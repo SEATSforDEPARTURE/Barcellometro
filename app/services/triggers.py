@@ -5,6 +5,7 @@ import difflib
 import json
 import logging
 import hashlib
+import os
 import random
 import re
 import unicodedata
@@ -65,6 +66,13 @@ class TriggerEngineService:
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
         self._barcello_moods_missing_warned = False
+        self._barcello_trigger_cfg: dict[str, Any] | None = None
+        self._barcello_trigger_cfg_mtime: float | None = None
+        self._barcello_trigger_cfg_path = BARCELLO_TRIGGER_CONFIG_PATH
+        self._barcello_trigger_cfg_missing_warned = False
+        self._barcello_window_override_cache: dict[str, int] = {}
+        self._barcello_window_override_cache_fingerprint: str | None = None
+        self._barcello_last_applied_window: dict[str, int] = {}
 
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
@@ -397,7 +405,7 @@ class TriggerEngineService:
     async def _poll_barcello(self) -> None:
         if self._bot is None:
             return
-        config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        config = self._load_barcello_trigger_cfg_cached()
         window_minutes_global = config.get("window_minutes")
         if not isinstance(window_minutes_global, int) or window_minutes_global <= 0:
             window_minutes_global = 60
@@ -408,18 +416,28 @@ class TriggerEngineService:
         if not isinstance(min_score_delta_for_notify, int) or min_score_delta_for_notify < 0:
             min_score_delta_for_notify = 3
         rows = await self._database.list_enabled_trigger_channels("barcello")
+        changed_count = 0
         for row in rows:
             guild_id = str(row["guild_id"])
             channel_id = str(row["channel_id"])
             now_rome = datetime.now(ROME_TZ)
             await self._maybe_set_daily_random_mood(guild_id, channel_id, config, now_rome)
-            window_minutes_effective = resolve_window_minutes(
-                channel_id,
+            window_minutes_effective = self._get_effective_window_minutes(
+                cfg=config,
+                channel_id=channel_id,
                 default_window=window_minutes_global,
-                trigger_config=config,
             )
             if window_minutes_effective != window_minutes_global:
-                logger.info("barcello window override applied channel_id=%s window=%s", channel_id, window_minutes_effective)
+                previous_window = self._barcello_last_applied_window.get(channel_id)
+                if previous_window != window_minutes_effective:
+                    self._barcello_last_applied_window[channel_id] = window_minutes_effective
+                    changed_count += 1
+                    logger.info(
+                        "barcello window override applied channel_id=%s window=%s (prev=%s)",
+                        channel_id,
+                        window_minutes_effective,
+                        previous_window,
+                    )
             window_end = datetime.now(timezone.utc)
             window_start = window_end - timedelta(minutes=window_minutes_effective)
             count_row = await self._database.fetchone(
@@ -567,6 +585,52 @@ class TriggerEngineService:
                 "barcello_daily",
                 {"date": day_key, "counts": counts, "last_entered_ts": last_entered_ts},
             )
+
+        logger.debug("barcello overrides checked: channels=%d, changed=%d", len(rows), changed_count)
+
+    def _load_barcello_trigger_cfg_cached(self) -> dict[str, Any]:
+        path = self._barcello_trigger_cfg_path
+        try:
+            mtime = os.stat(path).st_mtime
+            self._barcello_trigger_cfg_missing_warned = False
+        except FileNotFoundError:
+            if self._barcello_trigger_cfg is None:
+                cfg = load_json_file(path)
+                self._barcello_trigger_cfg = cfg
+                self._refresh_barcello_window_override_cache(cfg)
+                return cfg
+            if not self._barcello_trigger_cfg_missing_warned:
+                logger.warning("barcello trigger config missing path=%s, using last valid config", path)
+                self._barcello_trigger_cfg_missing_warned = True
+            return self._barcello_trigger_cfg
+
+        if self._barcello_trigger_cfg is None or self._barcello_trigger_cfg_mtime != mtime:
+            cfg = load_json_file(path)
+            if not cfg and self._barcello_trigger_cfg is not None:
+                logger.warning("barcello trigger config invalid/empty path=%s, keeping last valid config", path)
+                return self._barcello_trigger_cfg
+            self._barcello_trigger_cfg = cfg
+            self._barcello_trigger_cfg_mtime = mtime
+            self._refresh_barcello_window_override_cache(cfg)
+        return self._barcello_trigger_cfg or {}
+
+    def _refresh_barcello_window_override_cache(self, cfg: dict[str, Any]) -> None:
+        raw = json.dumps(cfg, ensure_ascii=False, sort_keys=True)
+        fingerprint = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+        if self._barcello_window_override_cache_fingerprint != fingerprint:
+            self._barcello_window_override_cache.clear()
+            self._barcello_window_override_cache_fingerprint = fingerprint
+
+    def _get_effective_window_minutes(self, *, cfg: dict[str, Any], channel_id: str, default_window: int) -> int:
+        if channel_id in self._barcello_window_override_cache:
+            return self._barcello_window_override_cache[channel_id]
+        window = resolve_window_minutes(
+            channel_id,
+            default_window=default_window,
+            trigger_config=cfg,
+        )
+        self._barcello_window_override_cache[channel_id] = window
+        return window
 
     def _apply_hysteresis(self, prev_color: str | None, raw_color: str | None, score: int) -> str | None:
         _ = (prev_color, score)
