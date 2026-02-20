@@ -114,6 +114,30 @@ class DatabaseService:
             CREATE INDEX IF NOT EXISTS idx_voice_sessions_channel
             ON voice_sessions (guild_id, voice_channel_id, started_ts);
 
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_voice_session_per_channel
+            ON voice_sessions (guild_id, voice_channel_id)
+            WHERE ended_ts IS NULL;
+
+
+            CREATE TABLE IF NOT EXISTS voice_participant_events (
+                event_id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                voice_channel_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                username TEXT,
+                event_type TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                from_channel_id TEXT,
+                to_channel_id TEXT,
+                meta_json TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_vpe_guild_channel_ts
+            ON voice_participant_events (guild_id, voice_channel_id, ts);
+
+            CREATE INDEX IF NOT EXISTS idx_vpe_guild_user_ts
+            ON voice_participant_events (guild_id, user_id, ts);
+
             CREATE TABLE IF NOT EXISTS role_policies (
                 guild_id TEXT,
                 role_id TEXT,
@@ -985,6 +1009,63 @@ class DatabaseService:
             (guild_id, voice_channel_id, end_ts, start_ts),
         )
 
+
+    async def insert_voice_participant_event(
+        self,
+        *,
+        event_id: str,
+        guild_id: str,
+        voice_channel_id: str,
+        user_id: str,
+        username: str | None,
+        event_type: str,
+        ts: str,
+        from_channel_id: str | None = None,
+        to_channel_id: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO voice_participant_events (
+                event_id, guild_id, voice_channel_id, user_id, username,
+                event_type, ts, from_channel_id, to_channel_id, meta_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                guild_id,
+                voice_channel_id,
+                user_id,
+                username,
+                event_type,
+                ts,
+                from_channel_id,
+                to_channel_id,
+                json.dumps(meta) if meta is not None else None,
+            ),
+        )
+
+    async def fetch_voice_participant_events_in_range(
+        self,
+        guild_id: str,
+        voice_channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT event_id, guild_id, voice_channel_id, user_id, username, event_type, ts,
+                   from_channel_id, to_channel_id, meta_json
+            FROM voice_participant_events
+            WHERE guild_id = ? AND voice_channel_id = ?
+              AND ts >= ? AND ts <= ?
+            ORDER BY ts ASC
+            """,
+            (guild_id, voice_channel_id, start_ts, end_ts),
+        )
+        return [dict(row) for row in rows]
+
     async def fetch_last_privacy_event_before(
         self,
         *,
@@ -1550,6 +1631,27 @@ class DatabaseService:
             "UPDATE voice_sessions SET ended_ts = ? WHERE voice_session_id = ?",
             (ended_ts, voice_session_id),
         )
+
+    async def close_open_voice_sessions(
+        self,
+        *,
+        ended_ts: str,
+        source: str | None = None,
+        started_before_ts: str | None = None,
+    ) -> int:
+        assert self._conn is not None
+        where_clauses = ["ended_ts IS NULL"]
+        params: list[str] = [ended_ts]
+        if source:
+            where_clauses.append("(meta_json IS NOT NULL AND meta_json LIKE ?)")
+            params.append(f'%"source"%{source}%')
+        if started_before_ts:
+            where_clauses.append("started_ts < ?")
+            params.append(started_before_ts)
+        query = f"UPDATE voice_sessions SET ended_ts = ? WHERE {' AND '.join(where_clauses)}"
+        cursor = await self._conn.execute(query, tuple(params))
+        await self._conn.commit()
+        return cursor.rowcount
 
     async def get_active_voice_session(self, guild_id: str, voice_channel_id: str) -> Optional[aiosqlite.Row]:
         return await self.fetchone(
