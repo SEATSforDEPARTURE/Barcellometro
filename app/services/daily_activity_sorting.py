@@ -27,12 +27,12 @@ def sort_channels_like_discord(channels: list[Any]) -> list[Any]:
         channel_id = int(getattr(channel, "id", 0))
         type_rank = _channel_type_rank(channel)
         if category is None:
-            return (inf, 0, channel_pos, type_rank, channel_id)
+            return (inf, 0, type_rank, channel_pos, channel_id)
         return (
             int(getattr(category, "position", inf)),
             int(getattr(category, "id", 0)),
-            channel_pos,
             type_rank,
+            channel_pos,
             channel_id,
         )
 
