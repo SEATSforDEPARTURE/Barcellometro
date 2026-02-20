@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.renderers.activity_daily_report_renderer import _format_italian_date, build_daily_activity_embeds
+from app.renderers.activity_daily_report_renderer import _format_italian_date, build_daily_activity_details_txt, build_daily_activity_embeds
 
 
 class _Guild:
@@ -33,59 +33,88 @@ def _details() -> SimpleNamespace:
         top_active_users=[],
         inactive_users=[],
         advice_bullets=["Coinvolgere utenti nuovi"],
-        stats_lines=["• Messaggi: 30"],
     )
+
+
+def _payloads() -> list[dict]:
+    return [
+        {
+            "channel": SimpleNamespace(name="general", id=99),
+            "details": _details(),
+            "active_non_bot": 2,
+            "members_with_access": 10,
+            "inactive_non_bot": 8,
+            "peak_hour": 21,
+            "silence_hour": 5,
+            "continuity_hours": 7,
+            "is_voice": False,
+            "voice_sessions_count": 0,
+            "voice_total_seconds": 0,
+            "voice_details": [],
+            "active_lines": ["1) <@1> (Mario) (10 msg) | 💬 Ultimo: 20/02 10:00 🕒 1h fa | 🔥 Picco: 20/02 10:00 (4 msg)"],
+            "inactive_lines": ["1) <@2> (Luigi) (0 msg) (mai partecipato dall'ingresso 🥀)"],
+        }
+    ]
 
 
 def test_format_italian_date() -> None:
     assert _format_italian_date("2026-02-19T10:00:00+00:00") == "Giovedì, 19 Febbraio 2026"
 
 
-def test_daily_renderer_short_channel_embeds_and_overview_sections() -> None:
+def test_daily_renderer_embeds_include_silence_and_overview_sections() -> None:
     guild = _Guild()
-    payloads = [
-        {
-            "channel": SimpleNamespace(name="general", id=99),
-            "details": _details(),
-            "active_non_bot": 2,
-            "members_with_access": 10,
-            "is_voice": False,
-            "voice_sessions_count": 0,
-            "voice_total_seconds": 0,
-            "voice_details": [],
-        },
-        {
-            "channel": SimpleNamespace(name="pascolo", id=100),
-            "details": _details(),
-            "active_non_bot": 1,
-            "members_with_access": 8,
-            "is_voice": True,
-            "voice_sessions_count": 2,
-            "voice_total_seconds": 5400,
-            "voice_details": ["- 10:00 → 10:30 (30m)"],
-        },
-    ]
-
     embeds = build_daily_activity_embeds(
         guild,
         "Test Server",
-        payloads,
-        server_summary={"active_non_bot": 3, "total_non_bot_members": 12},
-        reference_ts="2026-02-19T10:00:00+00:00",
+        _payloads(),
+        server_summary={
+            "active_non_bot": 3,
+            "total_non_bot_members": 12,
+            "inactive_non_bot": 9,
+            "peak_hour": 22,
+            "silence_hour": 4,
+            "continuity_hours": 8,
+            "label": "INTENSA",
+            "score": 74,
+            "trend_text": "Messaggi in crescita (+40% vs finestra precedente).",
+            "window_end_local": "20:28",
+            "global_active_rows": ["1) ..."],
+            "global_inactive_rows": ["1) ..."],
+        },
+        reference_ts="2026-02-20T10:00:00+00:00",
     )
 
-    assert "🗣️ RESOCONTO ATTIVITÀ" in (embeds[0].title or "")
-    assert "🗓️ Giovedì, 19 Febbraio 2026" in (embeds[0].description or "")
+    assert "🗓️ Venerdì, 20 Febbraio 2026" in (embeds[0].description or "")
     first_names = [f.name for f in embeds[0].fields]
     assert "📈 TREND" in first_names
-    assert "💡 CONSIGLI" in first_names
     stats_server = next(f.value for f in embeds[0].fields if f.name == "📌 STATISTICHE SERVER")
-    assert "Utenti attivi: **3/12**" in stats_server
+    assert "Ora di silenzio generale" in stats_server
+    channel_stats = next(f.value for f in embeds[1].fields if f.name == "📌 STATISTICHE CANALE")
+    assert "Ora di silenzio" in channel_stats
 
-    for emb in embeds[1:]:
-        names = [f.name for f in emb.fields]
-        assert not any("TOP 3" in n for n in names)
-        assert not any("CONSIGLI" in n for n in names)
 
-    voice_stats = next(f.value for f in embeds[2].fields if f.name == "📌 STATISTICHE CANALE")
-    assert "Chiamate:" in voice_stats
+def test_daily_renderer_txt_contains_required_headers_and_silence() -> None:
+    guild = _Guild()
+    txt = build_daily_activity_details_txt(
+        guild,
+        "Test Server",
+        _payloads(),
+        server_summary={
+            "active_non_bot": 3,
+            "total_non_bot_members": 12,
+            "inactive_non_bot": 9,
+            "peak_hour": 22,
+            "silence_hour": 4,
+            "continuity_hours": 8,
+            "label": "INTENSA",
+            "score": 74,
+            "trend_text": "Messaggi in crescita (+40% vs finestra precedente).",
+            "window_end_local": "20:28",
+            "global_active_rows": ["1) <@1> ..."],
+            "global_inactive_rows": ["1) <@2> ..."],
+        },
+        reference_ts="2026-02-20T10:00:00+00:00",
+    )
+    assert "RESOCONTO ATTIVITÀ SERVER —" in txt
+    assert "Ora di silenzio generale" in txt
+    assert "• Ora di silenzio:" in txt
