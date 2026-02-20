@@ -1,6 +1,10 @@
 import asyncio
 import json
 
+import pytest
+
+aiosqlite = pytest.importorskip("aiosqlite")
+
 from app.services.database import DatabaseService
 
 
@@ -101,6 +105,50 @@ def test_close_open_voice_sessions_without_source_closes_all() -> None:
         remaining = await db.fetchone("SELECT COUNT(*) AS c FROM voice_sessions WHERE ended_ts IS NULL")
         assert remaining is not None
         assert remaining["c"] == 0
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_unique_active_voice_session_per_channel() -> None:
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+
+        await db.start_voice_session(
+            voice_session_id="session-a",
+            guild_id="guild-1",
+            voice_channel_id="voice-1",
+            started_ts="2026-01-01T10:00:00+00:00",
+            meta={"source": "voice_ingest"},
+        )
+
+        duplicate_failed = False
+        try:
+            await db.start_voice_session(
+                voice_session_id="session-b",
+                guild_id="guild-1",
+                voice_channel_id="voice-1",
+                started_ts="2026-01-01T10:05:00+00:00",
+                meta={"source": "voice_ingest"},
+            )
+        except aiosqlite.IntegrityError:
+            duplicate_failed = True
+
+        assert duplicate_failed is True
+
+        active_count = await db.fetchone(
+            """
+            SELECT COUNT(*) AS c
+            FROM voice_sessions
+            WHERE guild_id = ? AND voice_channel_id = ? AND ended_ts IS NULL
+            """,
+            ("guild-1", "voice-1"),
+        )
+        assert active_count is not None
+        assert active_count["c"] == 1
 
         await db.close()
 

@@ -118,6 +118,26 @@ class DatabaseService:
             ON voice_sessions (guild_id, voice_channel_id)
             WHERE ended_ts IS NULL;
 
+
+            CREATE TABLE IF NOT EXISTS voice_participant_events (
+                event_id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                voice_channel_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                username TEXT,
+                event_type TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                from_channel_id TEXT,
+                to_channel_id TEXT,
+                meta_json TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_vpe_guild_channel_ts
+            ON voice_participant_events (guild_id, voice_channel_id, ts);
+
+            CREATE INDEX IF NOT EXISTS idx_vpe_guild_user_ts
+            ON voice_participant_events (guild_id, user_id, ts);
+
             CREATE TABLE IF NOT EXISTS role_policies (
                 guild_id TEXT,
                 role_id TEXT,
@@ -988,6 +1008,63 @@ class DatabaseService:
             """,
             (guild_id, voice_channel_id, end_ts, start_ts),
         )
+
+
+    async def insert_voice_participant_event(
+        self,
+        *,
+        event_id: str,
+        guild_id: str,
+        voice_channel_id: str,
+        user_id: str,
+        username: str | None,
+        event_type: str,
+        ts: str,
+        from_channel_id: str | None = None,
+        to_channel_id: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO voice_participant_events (
+                event_id, guild_id, voice_channel_id, user_id, username,
+                event_type, ts, from_channel_id, to_channel_id, meta_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                guild_id,
+                voice_channel_id,
+                user_id,
+                username,
+                event_type,
+                ts,
+                from_channel_id,
+                to_channel_id,
+                json.dumps(meta) if meta is not None else None,
+            ),
+        )
+
+    async def fetch_voice_participant_events_in_range(
+        self,
+        guild_id: str,
+        voice_channel_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT event_id, guild_id, voice_channel_id, user_id, username, event_type, ts,
+                   from_channel_id, to_channel_id, meta_json
+            FROM voice_participant_events
+            WHERE guild_id = ? AND voice_channel_id = ?
+              AND ts >= ? AND ts <= ?
+            ORDER BY ts ASC
+            """,
+            (guild_id, voice_channel_id, start_ts, end_ts),
+        )
+        return [dict(row) for row in rows]
 
     async def fetch_last_privacy_event_before(
         self,

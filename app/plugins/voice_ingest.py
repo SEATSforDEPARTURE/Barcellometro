@@ -316,22 +316,30 @@ def setup(registry: ServiceRegistry) -> None:
         value = await _get_setting("target_text_channel_id", "")
         return int(value) if value else None
 
-    async def _start_session(guild_id: int, voice_channel_id: int) -> None:
+    async def _start_session(guild_id: int, voice_channel_id: int) -> str:
         nonlocal active_session_id, active_session_started
-        nonlocal current_guild_id, active_session_started_epoch
+        nonlocal current_guild_id, active_session_started_epoch, current_voice_channel_id
         existing_session = await database.get_active_voice_session(str(guild_id), str(voice_channel_id))
         if existing_session is not None:
-            existing_session_id = existing_session["voice_session_id"]
-            await database.end_voice_session(existing_session_id, _now_iso())
-            logger.warning(
-                "Found existing active voice_session_id=%s; closed before starting a new one.",
+            existing_session_id = str(existing_session["voice_session_id"])
+            existing_started = datetime.fromisoformat(existing_session["started_ts"])
+            if existing_started.tzinfo is None:
+                existing_started = existing_started.replace(tzinfo=timezone.utc)
+            active_session_id = existing_session_id
+            active_session_started = existing_started
+            active_session_started_epoch = existing_started.timestamp()
+            current_voice_channel_id = voice_channel_id
+            current_guild_id = guild_id
+            logger.info(
+                "Active voice session already exists for channel=%s id=%s; reusing",
+                voice_channel_id,
                 existing_session_id,
             )
+            return existing_session_id
         session_id = str(uuid4())
         active_session_id = session_id
         active_session_started = datetime.now(timezone.utc)
         active_session_started_epoch = time.time()
-        nonlocal current_voice_channel_id
         current_voice_channel_id = voice_channel_id
         current_guild_id = guild_id
         try:
@@ -351,11 +359,13 @@ def setup(registry: ServiceRegistry) -> None:
                     existing_started = existing_started.replace(tzinfo=timezone.utc)
                 active_session_started = existing_started
                 active_session_started_epoch = active_session_started.timestamp()
+                current_voice_channel_id = voice_channel_id
+                current_guild_id = guild_id
                 logger.warning(
                     "IntegrityError starting voice session; reusing existing active voice_session_id=%s",
                     active_session_id,
                 )
-                return
+                return str(active_session_id)
             raise
         await ingest.emit(
             EventEnvelope(
@@ -371,6 +381,7 @@ def setup(registry: ServiceRegistry) -> None:
                 meta={"voice_session_id": session_id},
             )
         )
+        return session_id
 
     async def _end_session() -> None:
         nonlocal active_session_id, active_session_started, current_voice_channel_id, current_guild_id, active_session_started_epoch
@@ -410,6 +421,7 @@ def setup(registry: ServiceRegistry) -> None:
                     logger.info("Voice ingest already connected to channel %s", channel.id)
                     return
                 logger.info("Voice ingest moving to channel %s", channel.id)
+                await _end_session()
                 await existing.move_to(channel)
                 voice_client = existing
                 await _start_session(guild.id, channel.id)
@@ -781,6 +793,10 @@ def setup(registry: ServiceRegistry) -> None:
                 await asyncio.sleep(5)
 
     async def _handle_voice_state(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
+        if member.bot:
+            return
+        if config.guild_id > 0 and member.guild.id != config.guild_id:
+            return
         if not await _enabled():
             return
         if await _privacy_mode():
@@ -788,6 +804,46 @@ def setup(registry: ServiceRegistry) -> None:
         before_channel = before.channel
         after_channel = after.channel
         if before_channel != after_channel:
+            now_ts = _now_iso()
+            if before_channel is None and after_channel is not None:
+                await database.insert_voice_participant_event(
+                    event_id=str(uuid4()),
+                    guild_id=str(member.guild.id),
+                    voice_channel_id=str(after_channel.id),
+                    user_id=str(member.id),
+                    username=member.display_name,
+                    event_type="join",
+                    ts=now_ts,
+                    from_channel_id=None,
+                    to_channel_id=str(after_channel.id),
+                    meta={"source": "voice_state_update"},
+                )
+            elif before_channel is not None and after_channel is None:
+                await database.insert_voice_participant_event(
+                    event_id=str(uuid4()),
+                    guild_id=str(member.guild.id),
+                    voice_channel_id=str(before_channel.id),
+                    user_id=str(member.id),
+                    username=member.display_name,
+                    event_type="leave",
+                    ts=now_ts,
+                    from_channel_id=str(before_channel.id),
+                    to_channel_id=None,
+                    meta={"source": "voice_state_update"},
+                )
+            elif before_channel is not None and after_channel is not None and before_channel.id != after_channel.id:
+                await database.insert_voice_participant_event(
+                    event_id=str(uuid4()),
+                    guild_id=str(member.guild.id),
+                    voice_channel_id=str(after_channel.id),
+                    user_id=str(member.id),
+                    username=member.display_name,
+                    event_type="move",
+                    ts=now_ts,
+                    from_channel_id=str(before_channel.id),
+                    to_channel_id=str(after_channel.id),
+                    meta={"source": "voice_state_update"},
+                )
             async def _resolve_session_id(guild_id: int, channel_id: int) -> tuple[Optional[str], bool]:
                 if (
                     active_session_id
