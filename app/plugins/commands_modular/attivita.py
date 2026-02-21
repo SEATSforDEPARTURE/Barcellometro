@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import discord
@@ -24,11 +24,147 @@ STOPWORDS_IT = {
     "che", "per", "con", "non", "una", "del", "della", "delle", "degli", "sono", "alla", "dopo", "come", "anche", "solo", "sono",
     "nel", "nella", "nelle", "degli", "gli", "dei", "dai", "dalle", "all", "questo", "quello", "quella", "oggi", "ieri", "domani",
 }
+MAX_FIELD_VALUE = 1024
+MAX_FIELD_NAME = 256
+MAX_EMBED_TOTAL = 6000
+MAX_EMBED_FIELDS = 25
+FALLBACK_EMBED_THRESHOLD = 5500
 
 
 def _safe_filename(value: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value.lower())
     return safe.strip("_") or "canale"
+
+
+def _truncate(text: str, limit: int) -> str:
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
+
+
+def _split_chunks(text: str, limit: int) -> list[str]:
+    if not text:
+        return ["—"]
+    lines = text.split("\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for line in lines:
+        safe_line = _truncate(line, limit)
+        add_len = len(safe_line) + (1 if current else 0)
+        if current and current_len + add_len > limit:
+            chunks.append("\n".join(current))
+            current = [safe_line]
+            current_len = len(safe_line)
+            continue
+        current.append(safe_line)
+        current_len += add_len
+    if current:
+        chunks.append("\n".join(current))
+    return chunks or ["—"]
+
+
+def add_field_safe(embed: discord.Embed, *, name: str, value: str, inline: bool = False) -> None:
+    safe_name = _truncate(name, MAX_FIELD_NAME)
+    chunks = _split_chunks(value, MAX_FIELD_VALUE)
+    for idx, chunk in enumerate(chunks):
+        if len(embed.fields) >= MAX_EMBED_FIELDS:
+            break
+        field_name = safe_name if idx == 0 else _truncate(f"{safe_name} (cont.)", MAX_FIELD_NAME)
+        embed.add_field(name=field_name, value=_truncate(chunk or "—", MAX_FIELD_VALUE), inline=inline)
+
+
+def embed_total_len(embed: discord.Embed) -> int:
+    total = len(embed.title or "") + len(embed.description or "")
+    total += len(embed.footer.text) if embed.footer and embed.footer.text else 0
+    total += len(embed.author.name) if embed.author and embed.author.name else 0
+    for field in embed.fields:
+        total += len(field.name or "") + len(field.value or "")
+    return total
+
+
+def _join_limited(items: list[str], *, max_items: int, max_chars: int) -> str:
+    raw = [str(item).strip() for item in items if str(item).strip()][:max_items]
+    if not raw:
+        return "—"
+    return _truncate(", ".join(raw), max_chars)
+
+
+def _make_user_report_txt(display_name: str, period_label: str, stats: list[str], interactions: list[str], topics: list[str], advice: list[str]) -> str:
+    return "\n".join(
+        [
+            f"BARCELLOMETRO — REPORT ATTIVITÀ UTENTE ({display_name})",
+            f"Periodo: {period_label}",
+            "",
+            "[STATISTICHE]",
+            *stats,
+            "",
+            "[INTERAZIONI]",
+            *interactions,
+            "",
+            "[TEMI E PAROLE]",
+            *topics,
+            "",
+            "[CONSIGLI]",
+            *[f"• {line}" for line in advice],
+        ]
+    )
+
+
+def _build_user_activity_embeds_safe(
+    *,
+    display_name: str,
+    period_label: str,
+    emoji: str,
+    label: str,
+    score: int,
+    trend_text: str,
+    stats_lines: list[str],
+    interaction_lines: list[str],
+    topics_lines: list[str],
+    advice_lines: list[str],
+) -> tuple[list[discord.Embed], bool]:
+    color_map = {"ASSENTE": 0x2F3136, "SCARSA": 0xE74C3C, "MEDIOCRE": 0xF1C40F, "INTENSA": 0x2ECC71}
+    filled = max(0, min(10, int(round(max(0, min(score, 100)) / 10))))
+    bar = f"{emoji * filled}{'⚪' * (10 - filled)}"
+
+    embed1 = discord.Embed(title=f"🗣️ STATO ATTIVITÀ “{display_name}”", color=color_map.get(label, 0x95A5A6))
+    embed1.description = _truncate(
+        (
+            f"🕒 **{period_label}**\n\n"
+            f"{emoji} **ATTIVITÀ {label}**\n"
+            "*Ritmo dell'utente valutato su volume, continuità e presenza nei canali.*\n\n"
+            f"🫀 **PUNTI ATTIVITÀ**\n{bar} **({score}/100)**\n"
+            f"*{trend_text}*\n\n"
+            f"📈 **TREND**\n• 📨 {trend_text}"
+        ),
+        4000,
+    )
+    embed1.set_footer(text="Barcellometro")
+
+    embed2 = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
+    add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value="\n".join(stats_lines))
+    add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI", value="\n".join(interaction_lines))
+    add_field_safe(embed2, name="🔍 TEMI E PAROLE", value="\n".join(topics_lines))
+    add_field_safe(embed2, name="💡 CONSIGLI PER LA MODERAZIONE", value="\n".join(f"• {line}" for line in advice_lines[:4]))
+    embed2.set_footer(text="Barcellometro")
+
+    too_long = (
+        embed_total_len(embed1) > MAX_EMBED_TOTAL
+        or embed_total_len(embed2) > MAX_EMBED_TOTAL
+        or embed_total_len(embed1) + embed_total_len(embed2) > FALLBACK_EMBED_THRESHOLD
+        or len(embed1.fields) > MAX_EMBED_FIELDS
+        or len(embed2.fields) > MAX_EMBED_FIELDS
+    )
+    if too_long:
+        embed2.clear_fields()
+        add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value="\n".join(stats_lines[:6]))
+        add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI", value="\n".join(interaction_lines))
+        add_field_safe(embed2, name="🔍 TEMI E PAROLE", value="Dettagli completi nel file allegato.")
+        add_field_safe(embed2, name="💡 CONSIGLI PER LA MODERAZIONE", value="Dettagli completi nel file allegato.")
+    return [embed1, embed2], too_long
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -161,7 +297,7 @@ def _build_interactions(messages: list[dict[str, str | None]], reply_author_map:
     return interactions
 
 
-def _format_interactions(interactions: dict[int, dict[str, object]], guild: discord.Guild, bottom: bool = False) -> str:
+def _format_interactions(interactions: dict[int, dict[str, object]], bottom: bool = False) -> str:
     if not interactions:
         return "—"
     ordered = sorted(interactions.items(), key=lambda item: (item[1]["count"], item[0]))
@@ -170,10 +306,7 @@ def _format_interactions(interactions: dict[int, dict[str, object]], guild: disc
     lines: list[str] = []
     for uid, payload in ordered[:3]:
         channels = payload["channels"].most_common(2)  # type: ignore[union-attr]
-        channel_names = []
-        for ch_id, _ in channels:
-            ch = guild.get_channel(int(ch_id)) if str(ch_id).isdigit() else None
-            channel_names.append(f"#{getattr(ch, 'name', ch_id)}")
+        channel_names = [f"<#{ch_id}>" for ch_id, _ in channels]
         lines.append(f"{payload['count']} msg → <@{uid}> (in {', '.join(channel_names) if channel_names else '—'})")
     return ", ".join(lines)
 
@@ -240,9 +373,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
         messages = await ctx.database.fetch_user_messages_in_range(str(interaction.guild_id), str(utente.id), start_ts, end_ts, channel_ids=channel_ids)
         prev_start = (window.start_dt - (window.end_dt - window.start_dt)).astimezone(timezone.utc).isoformat()
         curr_count = len(messages)
-        prev_count = await ctx.database.count_user_messages_in_range(
-            str(interaction.guild_id), str(utente.id), prev_start, start_ts, channel_ids=channel_ids
-        )
+        prev_count = await ctx.database.count_user_messages_in_range(str(interaction.guild_id), str(utente.id), prev_start, start_ts, channel_ids=channel_ids)
         distinct_hours = len({_parse_ts(m["ts"]).astimezone(ROME_TZ).replace(minute=0, second=0, microsecond=0) for m in messages if _parse_ts(m["ts"])})
         distinct_channels = len({m["channel_id"] for m in messages if m.get("channel_id")})
         score = min(100, int(round(min(1.0, curr_count / max(1, prev_count or 10)) * 60 + min(1.0, distinct_hours / 24) * 30 + min(1.0, distinct_channels / 5) * 10)))
@@ -251,15 +382,12 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
 
         last = messages[-1] if messages else None
         last_dt = _parse_ts(last["ts"]) if last else None
-        last_channel = interaction.guild.get_channel(int(last["channel_id"])) if last and last.get("channel_id") else None
 
         multi_day = window.start_dt.astimezone(ROME_TZ).date() != window.end_dt.astimezone(ROME_TZ).date()
         peak_label, peak_channel_id, peak_message_id = _compute_peak(messages, multi_day)
-        peak_channel = interaction.guild.get_channel(int(peak_channel_id)) if peak_channel_id and peak_channel_id.isdigit() else None
 
         channel_counts = Counter([m["channel_id"] for m in messages if m.get("channel_id")])
         top_channel_id = sorted(channel_counts.items(), key=lambda item: (-item[1], item[0]))[0][0] if channel_counts else None
-        top_channel = interaction.guild.get_channel(int(top_channel_id)) if top_channel_id and top_channel_id.isdigit() else None
 
         channel_hours: dict[str, set[str]] = defaultdict(set)
         for m in messages:
@@ -271,7 +399,6 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
         if channel_hours:
             combo_channel_id, combo_set = sorted(channel_hours.items(), key=lambda item: (-len(item[1]), item[0]))[0]
             combo_hours = len(combo_set)
-        combo_channel = interaction.guild.get_channel(int(combo_channel_id)) if combo_channel_id and combo_channel_id.isdigit() else None
 
         visible_ids: set[str] = set()
         for channel in interaction.guild.channels:
@@ -290,61 +417,92 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             if author and str(author).isdigit():
                 reply_author_map[ref] = int(author)
         interactions = _build_interactions(messages, reply_author_map, bot_ids, utente.id)
-        top_interactions = _format_interactions(interactions, interaction.guild, bottom=False)
-        bottom_interactions = _format_interactions(interactions, interaction.guild, bottom=True)
+        top_interactions = _format_interactions(interactions, bottom=False)
+        bottom_interactions = _format_interactions(interactions, bottom=True)
 
         themes, top_words = _words_and_themes(messages)
         advice = [
-            f"Punta su {getattr(top_channel, 'name', '—')} nelle fasce in cui è più attivo.",
+            f"Punta su <#{top_channel_id}> nelle fasce in cui è più attivo." if top_channel_id else "Punta sui canali in cui è già più attivo.",
             "Stimola reply/mention verso utenti poco coinvolti per ampliare il network.",
             f"Trend attuale: {trend_text.lower()}",
-        ][:3]
+        ][:4]
+        advice = [_truncate(line, 500) for line in advice]
 
         def jump(channel_id: str | None, message_id: str | None) -> str | None:
             if not channel_id or not message_id:
                 return None
             return f"https://discord.com/channels/{interaction.guild_id}/{channel_id}/{message_id}"
 
-        stats = [
+        stats_lines = [
             (
                 f"• 💬 Ultimo messaggio: [{last_dt.astimezone(ROME_TZ).strftime('%d/%m %H:%M')}]({jump(last.get('channel_id') if last else None, last.get('message_id') if last else None)}) "
-                f"🕒 <t:{int(last_dt.timestamp())}:R> in \"{getattr(last_channel, 'name', '—')}\""
+                f"🕒 <t:{int(last_dt.timestamp())}:R> in <#{last.get('channel_id') if last else ''}>"
             )
             if last and last_dt
             else "• 💬 Ultimo messaggio: —",
             (
-                f"• 🔥 Momento di maggiore attività: [{peak_label}]({jump(peak_channel_id, peak_message_id)}) in \"{getattr(peak_channel, 'name', '—')}\""
+                f"• 🔥 Momento di maggiore attività: [{peak_label}]({jump(peak_channel_id, peak_message_id)}) in <#{peak_channel_id}>"
                 if peak_label != "—"
                 else "• 🔥 Momento di maggiore attività: —"
             ),
             f"• 💤 Momento di maggior silenzio: {_silent_hour(messages)}",
-            f"• 👥 Canale in cui partecipa maggiormente: \"{getattr(top_channel, 'name', '—')}\"",
-            f"• 🌡️ Combo oraria: {combo_hours} ore di attività in \"{getattr(combo_channel, 'name', '—')}\"",
-            f"• 💘 Preferisce maggiormente: \"{getattr(top_channel, 'name', '—')}\" + frequenta {len(channel_hours.get(top_channel_id, set())) if top_channel_id else 0} ore",
-            f"• 💔 Frequenta di meno: \"{getattr(interaction.guild.get_channel(int(bottom_channel_id)), 'name', '—') if bottom_channel_id and bottom_channel_id.isdigit() else '—'}\"",
-            f"• 🧑‍🤝‍🧑 Con chi interagisce di più: {top_interactions}",
-            f"• 🤼 Con chi interagisce di meno: {bottom_interactions}",
-            f"• 🔍 Temi discussi di più: {', '.join(themes[:5]) if themes else '—'}",
-            f"• 👁️‍🗨️ Parole usate di più: {', '.join(top_words[:10]) if top_words else '—'}",
+            f"• 👥 Canale in cui partecipa maggiormente: <#{top_channel_id}>" if top_channel_id else "• 👥 Canale in cui partecipa maggiormente: —",
+            f"• 🌡️ Combo oraria: {combo_hours} ore di attività in <#{combo_channel_id}>" if combo_channel_id else "• 🌡️ Combo oraria: —",
+            f"• 💘 Preferisce maggiormente: <#{top_channel_id}> + frequenta {len(channel_hours.get(top_channel_id, set())) if top_channel_id else 0} ore" if top_channel_id else "• 💘 Preferisce maggiormente: —",
+            f"• 💔 Frequenta di meno: <#{bottom_channel_id}>" if bottom_channel_id else "• 💔 Frequenta di meno: —",
+        ]
+        interaction_lines = [
+            f"• 🧑‍🤝‍🧑 Con chi interagisce di più: {_truncate(top_interactions, 450)}",
+            f"• 🤼 Con chi interagisce di meno: {_truncate(bottom_interactions, 450)}",
+        ]
+        topics_lines = [
+            f"• Temi: {_join_limited(themes, max_items=5, max_chars=250)}",
+            f"• Parole: {_join_limited(top_words, max_items=10, max_chars=200)}",
         ]
 
-        embeds = build_user_activity_embeds(
-            guild_id=str(interaction.guild_id),
+        embeds, should_attach_txt = _build_user_activity_embeds_safe(
             display_name=utente.display_name,
             period_label=window.label_periodo,
-            activity_label=label,
-            activity_emoji=emoji,
+            emoji=emoji,
+            label=label,
             score=score,
             trend_text=trend_text,
-            overview_description="Ritmo dell'utente valutato su volume, continuità e presenza nei canali.",
-            stats_lines=stats,
+            stats_lines=stats_lines,
+            interaction_lines=interaction_lines,
+            topics_lines=topics_lines,
             advice_lines=advice,
         )
+        txt_payload = _make_user_report_txt(utente.display_name, window.label_periodo, stats_lines, interaction_lines, topics_lines, advice)
+        txt_file = None
+        if should_attach_txt:
+            period_slug = _safe_filename(window.label_periodo)
+            txt_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=f"attivita_{utente.id}_{period_slug}.txt")
+
         try:
             await interaction.user.send(embeds=embeds)
             await interaction.response.send_message("Ti ho inviato il resoconto attività in DM ✅", ephemeral=True)
         except Forbidden:
             await interaction.response.send_message("❌ Non posso inviarti DM. Abilita i DM dal server e riprova.", ephemeral=True)
+        except discord.HTTPException as exc:
+            logger.exception("Errore invio DM report utente attivita guild=%s user=%s", interaction.guild_id, utente.id)
+            if exc.status == 400 and ("50035" in str(exc) or "Invalid Form Body" in str(exc)):
+                fallback = discord.Embed(title=f"🗣️ STATO ATTIVITÀ “{utente.display_name}”", color=discord.Color.dark_grey())
+                fallback.description = _truncate(
+                    f"🕒 **{window.label_periodo}**\n\n{emoji} **ATTIVITÀ {label}**\n🫀 **PUNTI ATTIVITÀ** {score}/100\n📈 {trend_text}\n\nDettagli completi nel file allegato.",
+                    3000,
+                )
+                fallback.set_footer(text="Barcellometro")
+                try:
+                    period_slug = _safe_filename(window.label_periodo)
+                    fallback_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=f"attivita_{utente.id}_{period_slug}.txt")
+                    await interaction.user.send(embed=fallback, file=fallback_file)
+                    await interaction.response.send_message("Ti ho inviato il resoconto attività in DM ✅", ephemeral=True)
+                except Forbidden:
+                    await interaction.response.send_message("❌ Non posso inviarti DM. Abilita i DM dal server e riprova.", ephemeral=True)
+                except discord.HTTPException:
+                    await interaction.response.send_message("❌ Non riesco a inviarti il report in DM al momento. Riprova tra poco.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Non riesco a inviarti il report in DM al momento. Riprova tra poco.", ephemeral=True)
 
     @attivita_group.command(name="oggi", description="Report attività di oggi (DM staff)")
     @app_commands.describe(utente="Utente da analizzare (opzionale)")

@@ -23,6 +23,10 @@ spec.loader.exec_module(attivita_module)
 _build_interactions = attivita_module._build_interactions
 _compute_peak = attivita_module._compute_peak
 _silent_hour = attivita_module._silent_hour
+_split_chunks = attivita_module._split_chunks
+add_field_safe = attivita_module.add_field_safe
+embed_total_len = attivita_module.embed_total_len
+_build_user_activity_embeds_safe = attivita_module._build_user_activity_embeds_safe
 register_attivita = attivita_module.register_attivita
 
 
@@ -65,6 +69,41 @@ def test_interactions_reply_and_mentions() -> None:
     assert interactions[2]["count"] == 3
     assert interactions[2]["channels"]["10"] == 2
     assert interactions[2]["channels"]["11"] == 1
+
+
+def test_split_chunks_stays_under_1024() -> None:
+    text = "\n".join(["x" * 300 for _ in range(10)])
+    chunks = _split_chunks(text, 1024)
+    assert len(chunks) >= 2
+    assert all(len(chunk) <= 1024 for chunk in chunks)
+
+
+def test_add_field_safe_creates_continuation() -> None:
+    embed = discord.Embed(title="t")
+    add_field_safe(embed, name="N", value="\n".join(["x" * 300 for _ in range(10)]))
+    assert len(embed.fields) >= 2
+    assert embed.fields[1].name.endswith("(cont.)")
+    assert all(len(f.value) <= 1024 for f in embed.fields)
+
+
+def test_long_embed_triggers_txt_fallback_flag() -> None:
+    huge_stats = [f"• Riga {i}: " + ("x" * 300) for i in range(40)]
+    embeds, fallback = _build_user_activity_embeds_safe(
+        display_name="User",
+        period_label="Ultimi 30 giorni",
+        emoji="🟡",
+        label="MEDIOCRE",
+        score=55,
+        trend_text="Messaggi stabile (+0% vs finestra precedente).",
+        stats_lines=huge_stats,
+        interaction_lines=["• top", "• bottom"],
+        topics_lines=["• temi", "• parole"],
+        advice_lines=["a", "b", "c", "d"],
+    )
+    assert fallback is True
+    assert len(embeds) == 2
+    assert embed_total_len(embeds[0]) <= 6000
+    assert embed_total_len(embeds[1]) <= 6000
 
 
 class _Perms:
