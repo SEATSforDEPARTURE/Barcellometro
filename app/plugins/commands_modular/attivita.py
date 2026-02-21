@@ -23,6 +23,10 @@ MENTION_RE = re.compile(r"<@!?(\d+)>")
 STOPWORDS_IT = {
     "che", "per", "con", "non", "una", "del", "della", "delle", "degli", "sono", "alla", "dopo", "come", "anche", "solo", "sono",
     "nel", "nella", "nelle", "degli", "gli", "dei", "dai", "dalle", "all", "questo", "quello", "quella", "oggi", "ieri", "domani",
+    "era", "pero", "però", "mia", "mio", "miei", "mie", "tuo", "tua", "tuoi", "tue", "suoi", "loro", "noi", "voi", "lui", "lei",
+    "quindi", "allora", "sempre", "mai", "gia", "già", "poi", "qui", "lì", "li", "ciao", "buongiorno", "buonasera", "ok", "si", "sì",
+    "no", "ah", "eh", "boh", "e", "o", "ma", "di", "a", "da", "in", "su", "per", "tra", "fra", "un", "una", "uno", "sei", "è",
+    "ero", "sara", "sarà", "essere", "avere", "ho", "hai", "ha", "hanno", "avevo", "sono", "come", "solo", "anche",
 }
 MAX_FIELD_VALUE = 1024
 MAX_FIELD_NAME = 256
@@ -34,6 +38,10 @@ FALLBACK_EMBED_THRESHOLD = 5500
 def _safe_filename(value: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value.lower())
     return safe.strip("_") or "canale"
+
+
+def b(value: str) -> str:
+    return f"**{value}**"
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -136,7 +144,7 @@ def _build_user_activity_embeds_safe(
             f"🕒 **{period_label}**\n\n"
             f"{emoji} **ATTIVITÀ {label}**\n"
             "*Ritmo dell'utente valutato su volume, continuità e presenza nei canali.*\n\n"
-            f"🫀 **PUNTI ATTIVITÀ**\n{bar} **({score}/100)**\n"
+            f"🫀 **PUNTI ATTIVITÀ**\n{bar} {b(f'({score}/100)')}\n"
             f"*{trend_text}*\n\n"
             f"📈 **TREND**\n• 📨 {trend_text}"
         ),
@@ -194,7 +202,7 @@ def _trend(curr: int, prev: int) -> str:
         direction = "in crescita"
     else:
         direction = "in calo"
-    return f"Messaggi {direction} ({percent:+d}% vs finestra precedente)."
+    return f"Messaggi {direction} ({b(f'{percent:+d}%')} vs finestra precedente)."
 
 
 def _extract_mentions(mentions_json: str | None, content: str) -> set[int]:
@@ -262,13 +270,24 @@ def _silent_hour(messages: list[dict[str, str | None]]) -> str:
 
 def _words_and_themes(messages: list[dict[str, str | None]]) -> tuple[list[str], list[str]]:
     words: Counter[str] = Counter()
+    presence: Counter[str] = Counter()
+    msg_count = max(1, len(messages))
     for m in messages:
         content = (m.get("content") or "").lower()
         tokens = re.findall(r"[a-zàèéìòù0-9]{3,}", content)
+        seen_in_message: set[str] = set()
         for tok in tokens:
+            if tok.isnumeric() or len(tok) < 3:
+                continue
             if tok in STOPWORDS_IT:
                 continue
             words[tok] += 1
+            seen_in_message.add(tok)
+        for tok in seen_in_message:
+            presence[tok] += 1
+    for tok in list(words.keys()):
+        if presence.get(tok, 0) / msg_count > 0.6:
+            words.pop(tok, None)
     top_words = [w for w, _ in words.most_common(10)]
     themes = [w.title() for w, _ in words.most_common(5)]
     return themes, top_words
@@ -297,17 +316,14 @@ def _build_interactions(messages: list[dict[str, str | None]], reply_author_map:
     return interactions
 
 
-def _format_interactions(interactions: dict[int, dict[str, object]], bottom: bool = False) -> str:
+def _format_interactions(interactions: dict[int, dict[str, object]]) -> str:
     if not interactions:
         return "—"
-    ordered = sorted(interactions.items(), key=lambda item: (item[1]["count"], item[0]))
-    if not bottom:
-        ordered = sorted(interactions.items(), key=lambda item: (-item[1]["count"], item[0]))
+    ordered = sorted(interactions.items(), key=lambda item: (-item[1]["count"], item[0]))
     lines: list[str] = []
     for uid, payload in ordered[:3]:
-        channels = payload["channels"].most_common(2)  # type: ignore[union-attr]
-        channel_names = [f"<#{ch_id}>" for ch_id, _ in channels]
-        lines.append(f"{payload['count']} msg → <@{uid}> (in {', '.join(channel_names) if channel_names else '—'})")
+        count_label = b(f"{payload['count']} msg")
+        lines.append(f"{count_label} → <@{uid}>")
     return ", ".join(lines)
 
 
@@ -417,8 +433,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             if author and str(author).isdigit():
                 reply_author_map[ref] = int(author)
         interactions = _build_interactions(messages, reply_author_map, bot_ids, utente.id)
-        top_interactions = _format_interactions(interactions, bottom=False)
-        bottom_interactions = _format_interactions(interactions, bottom=True)
+        top_interactions = _format_interactions(interactions)
 
         themes, top_words = _words_and_themes(messages)
         advice = [
@@ -435,29 +450,28 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
 
         stats_lines = [
             (
-                f"• 💬 Ultimo messaggio: [{last_dt.astimezone(ROME_TZ).strftime('%d/%m %H:%M')}]({jump(last.get('channel_id') if last else None, last.get('message_id') if last else None)}) "
+                f"• 💬 Ultimo messaggio: [{b(last_dt.astimezone(ROME_TZ).strftime('%d/%m %H:%M'))}]({jump(last.get('channel_id') if last else None, last.get('message_id') if last else None)}) "
                 f"🕒 <t:{int(last_dt.timestamp())}:R> in <#{last.get('channel_id') if last else ''}>"
             )
             if last and last_dt
             else "• 💬 Ultimo messaggio: —",
             (
-                f"• 🔥 Momento di maggiore attività: [{peak_label}]({jump(peak_channel_id, peak_message_id)}) in <#{peak_channel_id}>"
+                f"• 🔥 Momento di maggiore attività: [{b(peak_label)}]({jump(peak_channel_id, peak_message_id)}) in <#{peak_channel_id}>"
                 if peak_label != "—"
                 else "• 🔥 Momento di maggiore attività: —"
             ),
-            f"• 💤 Momento di maggior silenzio: {_silent_hour(messages)}",
+            f"• 💤 Momento di maggior silenzio: {b(_silent_hour(messages))}",
             f"• 👥 Canale in cui partecipa maggiormente: <#{top_channel_id}>" if top_channel_id else "• 👥 Canale in cui partecipa maggiormente: —",
-            f"• 🌡️ Combo oraria: {combo_hours} ore di attività in <#{combo_channel_id}>" if combo_channel_id else "• 🌡️ Combo oraria: —",
-            f"• 💘 Preferisce maggiormente: <#{top_channel_id}> + frequenta {len(channel_hours.get(top_channel_id, set())) if top_channel_id else 0} ore" if top_channel_id else "• 💘 Preferisce maggiormente: —",
+            f"• 🌡️ Combo oraria: {b(f'{combo_hours} ore')} di attività in <#{combo_channel_id}>" if combo_channel_id else "• 🌡️ Combo oraria: —",
+            f"• 💘 Preferisce maggiormente: <#{top_channel_id}> + frequenta {b(f'{len(channel_hours.get(top_channel_id, set())) if top_channel_id else 0} ore')}" if top_channel_id else "• 💘 Preferisce maggiormente: —",
             f"• 💔 Frequenta di meno: <#{bottom_channel_id}>" if bottom_channel_id else "• 💔 Frequenta di meno: —",
         ]
         interaction_lines = [
             f"• 🧑‍🤝‍🧑 Con chi interagisce di più: {_truncate(top_interactions, 450)}",
-            f"• 🤼 Con chi interagisce di meno: {_truncate(bottom_interactions, 450)}",
         ]
         topics_lines = [
-            f"• Temi: {_join_limited(themes, max_items=5, max_chars=250)}",
-            f"• Parole: {_join_limited(top_words, max_items=10, max_chars=200)}",
+            f"- Temi: {_join_limited(themes, max_items=5, max_chars=250)}",
+            f"- Parole: {_join_limited(top_words, max_items=10, max_chars=200)}",
         ]
 
         embeds, should_attach_txt = _build_user_activity_embeds_safe(
@@ -488,7 +502,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             if exc.status == 400 and ("50035" in str(exc) or "Invalid Form Body" in str(exc)):
                 fallback = discord.Embed(title=f"🗣️ STATO ATTIVITÀ “{utente.display_name}”", color=discord.Color.dark_grey())
                 fallback.description = _truncate(
-                    f"🕒 **{window.label_periodo}**\n\n{emoji} **ATTIVITÀ {label}**\n🫀 **PUNTI ATTIVITÀ** {score}/100\n📈 {trend_text}\n\nDettagli completi nel file allegato.",
+                    f"🕒 **{window.label_periodo}**\n\n{emoji} **ATTIVITÀ {label}**\n🫀 **PUNTI ATTIVITÀ** {b(f'{score}/100')}\n📈 {trend_text}\n\nDettagli completi nel file allegato.",
                     3000,
                 )
                 fallback.set_footer(text="Barcellometro")
