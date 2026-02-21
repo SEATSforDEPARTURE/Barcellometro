@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -27,7 +28,10 @@ STOPWORDS_IT = {
     "quindi", "allora", "sempre", "mai", "gia", "già", "poi", "qui", "lì", "li", "ciao", "buongiorno", "buonasera", "ok", "si", "sì",
     "no", "ah", "eh", "boh", "e", "o", "ma", "di", "a", "da", "in", "su", "per", "tra", "fra", "un", "una", "uno", "sei", "è",
     "ero", "sara", "sarà", "essere", "avere", "ho", "hai", "ha", "hanno", "avevo", "sono", "come", "solo", "anche",
+    "dalla", "dallo", "dagli", "delle", "della", "dello", "dell", "alla", "alle", "allo", "al", "tutto", "tutti", "tutta", "tutte",
+    "cosi", "così", "cioe", "cioè", "tipo", "suo", "sua", "suo", "sue", "sui",
 }
+STOPWORDS_IT_NORMALIZED = {re.sub(r"[^a-z0-9]", "", "".join(ch for ch in unicodedata.normalize("NFKD", w.lower()) if not unicodedata.combining(ch))) for w in STOPWORDS_IT}
 MAX_FIELD_VALUE = 1024
 MAX_FIELD_NAME = 256
 MAX_EMBED_TOTAL = 6000
@@ -42,6 +46,36 @@ def _safe_filename(value: str) -> str:
 
 def b(value: str) -> str:
     return f"**{value}**"
+
+
+def fmt_channel_compact(guild: discord.Guild, channel_id: str | None) -> str:
+    if not channel_id or not str(channel_id).isdigit():
+        return "—"
+    channel = guild.get_channel(int(channel_id))
+    if channel is None:
+        return "—"
+    name = getattr(channel, "name", None)
+    if not name:
+        return "—"
+    channel_type = str(getattr(channel, "type", ""))
+    if channel_type in {"text", "news", "forum"}:
+        return f"#{name}"
+    return str(name).upper() if str(name).islower() else str(name)
+
+
+def _normalize_token(token: str) -> str:
+    normalized = unicodedata.normalize("NFKD", token.lower())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = re.sub(r"[^a-z0-9]", "", normalized)
+    return normalized
+
+
+def _with_blank_lines(lines: list[str]) -> str:
+    out: list[str] = []
+    for line in lines:
+        out.append(line)
+        out.append("")
+    return "\n".join(out).rstrip()
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -153,9 +187,9 @@ def _build_user_activity_embeds_safe(
     embed1.set_footer(text="Barcellometro")
 
     embed2 = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
-    add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value="\n".join(stats_lines))
-    add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI", value="\n".join(interaction_lines))
-    add_field_safe(embed2, name="🔍 TEMI E PAROLE", value="\n".join(topics_lines))
+    add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value=_with_blank_lines(stats_lines))
+    add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI MAGGIORI", value="\n".join(interaction_lines))
+    add_field_safe(embed2, name="🔎 TEMI E PAROLE PIÙ USATE", value="\n".join(topics_lines))
     add_field_safe(embed2, name="💡 CONSIGLI PER LA MODERAZIONE", value="\n".join(f"• {line}" for line in advice_lines[:4]))
     embed2.set_footer(text="Barcellometro")
 
@@ -168,9 +202,9 @@ def _build_user_activity_embeds_safe(
     )
     if too_long:
         embed2.clear_fields()
-        add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value="\n".join(stats_lines[:6]))
-        add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI", value="\n".join(interaction_lines))
-        add_field_safe(embed2, name="🔍 TEMI E PAROLE", value="Dettagli completi nel file allegato.")
+        add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value=_with_blank_lines(stats_lines[:6]))
+        add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI MAGGIORI", value="\n".join(interaction_lines))
+        add_field_safe(embed2, name="🔎 TEMI E PAROLE PIÙ USATE", value="Dettagli completi nel file allegato.")
         add_field_safe(embed2, name="💡 CONSIGLI PER LA MODERAZIONE", value="Dettagli completi nel file allegato.")
     return [embed1, embed2], too_long
 
@@ -274,15 +308,20 @@ def _words_and_themes(messages: list[dict[str, str | None]]) -> tuple[list[str],
     msg_count = max(1, len(messages))
     for m in messages:
         content = (m.get("content") or "").lower()
-        tokens = re.findall(r"[a-zàèéìòù0-9]{3,}", content)
+        tokens = re.findall(r"[a-zàèéìòù0-9']{2,}", content)
         seen_in_message: set[str] = set()
         for tok in tokens:
-            if tok.isnumeric() or len(tok) < 3:
+            tok_n = _normalize_token(tok)
+            if not tok_n or tok_n.isnumeric() or len(tok_n) < 4:
                 continue
-            if tok in STOPWORDS_IT:
+            if tok_n in STOPWORDS_IT_NORMALIZED:
                 continue
-            words[tok] += 1
-            seen_in_message.add(tok)
+            if tok.startswith("'"):
+                continue
+            if len(set(tok_n)) == 1:
+                continue
+            words[tok_n] += 1
+            seen_in_message.add(tok_n)
         for tok in seen_in_message:
             presence[tok] += 1
     for tok in list(words.keys()):
@@ -323,8 +362,8 @@ def _format_interactions(interactions: dict[int, dict[str, object]]) -> str:
     lines: list[str] = []
     for uid, payload in ordered[:3]:
         count_label = b(f"{payload['count']} msg")
-        lines.append(f"{count_label} → <@{uid}>")
-    return ", ".join(lines)
+        lines.append(f"• {count_label} → <@{uid}>")
+    return "\n".join(lines)
 
 
 def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -437,7 +476,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
 
         themes, top_words = _words_and_themes(messages)
         advice = [
-            f"Punta su <#{top_channel_id}> nelle fasce in cui è più attivo." if top_channel_id else "Punta sui canali in cui è già più attivo.",
+            f"Punta su {fmt_channel_compact(interaction.guild, top_channel_id)} nelle fasce in cui è più attivo." if top_channel_id else "Punta sui canali in cui è già più attivo.",
             "Stimola reply/mention verso utenti poco coinvolti per ampliare il network.",
             f"Trend attuale: {trend_text.lower()}",
         ][:4]
@@ -451,24 +490,22 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
         stats_lines = [
             (
                 f"• 💬 Ultimo messaggio: [{b(last_dt.astimezone(ROME_TZ).strftime('%d/%m %H:%M'))}]({jump(last.get('channel_id') if last else None, last.get('message_id') if last else None)}) "
-                f"🕒 <t:{int(last_dt.timestamp())}:R> in <#{last.get('channel_id') if last else ''}>"
+                f"🕒 <t:{int(last_dt.timestamp())}:R> in {fmt_channel_compact(interaction.guild, last.get('channel_id') if last else None)}"
             )
             if last and last_dt
             else "• 💬 Ultimo messaggio: —",
             (
-                f"• 🔥 Momento di maggiore attività: [{b(peak_label)}]({jump(peak_channel_id, peak_message_id)}) in <#{peak_channel_id}>"
+                f"• 🔥 Momento di maggiore attività: [{b(peak_label)}]({jump(peak_channel_id, peak_message_id)}) in {fmt_channel_compact(interaction.guild, peak_channel_id)}"
                 if peak_label != "—"
                 else "• 🔥 Momento di maggiore attività: —"
             ),
             f"• 💤 Momento di maggior silenzio: {b(_silent_hour(messages))}",
-            f"• 👥 Canale in cui partecipa maggiormente: <#{top_channel_id}>" if top_channel_id else "• 👥 Canale in cui partecipa maggiormente: —",
-            f"• 🌡️ Combo oraria: {b(f'{combo_hours} ore')} di attività in <#{combo_channel_id}>" if combo_channel_id else "• 🌡️ Combo oraria: —",
-            f"• 💘 Preferisce maggiormente: <#{top_channel_id}> + frequenta {b(f'{len(channel_hours.get(top_channel_id, set())) if top_channel_id else 0} ore')}" if top_channel_id else "• 💘 Preferisce maggiormente: —",
-            f"• 💔 Frequenta di meno: <#{bottom_channel_id}>" if bottom_channel_id else "• 💔 Frequenta di meno: —",
+            f"• 👥 Canale in cui partecipa maggiormente: {fmt_channel_compact(interaction.guild, top_channel_id)}" if top_channel_id else "• 👥 Canale in cui partecipa maggiormente: —",
+            f"• 🌡️ Combo oraria: {b(f'{combo_hours} ore')} di attività in {fmt_channel_compact(interaction.guild, combo_channel_id)}" if combo_channel_id else "• 🌡️ Combo oraria: —",
+            f"• 💘 Preferisce maggiormente: {fmt_channel_compact(interaction.guild, top_channel_id)} + frequenta {b(f'{len(channel_hours.get(top_channel_id, set())) if top_channel_id else 0} ore')}" if top_channel_id else "• 💘 Preferisce maggiormente: —",
+            f"• 💔 Frequenta di meno: {fmt_channel_compact(interaction.guild, bottom_channel_id)}" if bottom_channel_id else "• 💔 Frequenta di meno: —",
         ]
-        interaction_lines = [
-            f"• 🧑‍🤝‍🧑 Con chi interagisce di più: {_truncate(top_interactions, 450)}",
-        ]
+        interaction_lines = [_truncate(top_interactions, 700)]
         topics_lines = [
             f"- Temi: {_join_limited(themes, max_items=5, max_chars=250)}",
             f"- Parole: {_join_limited(top_words, max_items=10, max_chars=200)}",

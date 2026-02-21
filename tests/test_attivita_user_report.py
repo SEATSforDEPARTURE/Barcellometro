@@ -27,6 +27,9 @@ _split_chunks = attivita_module._split_chunks
 add_field_safe = attivita_module.add_field_safe
 embed_total_len = attivita_module.embed_total_len
 _build_user_activity_embeds_safe = attivita_module._build_user_activity_embeds_safe
+_format_interactions = attivita_module._format_interactions
+_words_and_themes = attivita_module._words_and_themes
+fmt_channel_compact = attivita_module.fmt_channel_compact
 register_attivita = attivita_module.register_attivita
 
 
@@ -69,6 +72,44 @@ def test_interactions_reply_and_mentions() -> None:
     assert interactions[2]["count"] == 3
     assert interactions[2]["channels"]["10"] == 2
     assert interactions[2]["channels"]["11"] == 1
+
+
+def test_interactions_format_only_top_bullets() -> None:
+    interactions = {
+        10: {"count": 8, "channels": {}},
+        11: {"count": 4, "channels": {}},
+        12: {"count": 2, "channels": {}},
+    }
+    text = _format_interactions(interactions)
+    assert "• **8 msg** → <@10>" in text
+    assert "\n" in text
+    assert "in #" not in text
+
+
+def test_words_and_themes_filter_functional_words() -> None:
+    messages = [
+        _msg("2026-02-20T10:00:00+00:00", "10", "1", content="Dalla chat era tutto ok però progetto backend deploy"),
+        _msg("2026-02-20T10:10:00+00:00", "10", "2", content="Backend deploy fix performance"),
+    ]
+    themes, words = _words_and_themes(messages)
+    joined = " ".join(words).lower()
+    assert "dalla" not in joined
+    assert "pero" not in joined
+    assert "performance" in joined
+    assert len(themes) <= 5 and len(words) <= 10
+
+
+def test_fmt_channel_compact_no_server_prefix() -> None:
+    class _Ch:
+        id = 55
+        name = "salottino"
+        type = "text"
+
+    class _GuildMock:
+        def get_channel(self, channel_id: int):
+            return _Ch() if channel_id == 55 else None
+
+    assert fmt_channel_compact(_GuildMock(), "55") == "#salottino"
 
 
 def test_split_chunks_stays_under_1024() -> None:
