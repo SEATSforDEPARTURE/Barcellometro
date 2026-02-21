@@ -1937,6 +1937,71 @@ class DatabaseService:
         )
         return int(row["total"] or 0) if row else 0
 
+    async def count_user_messages_in_range(
+        self,
+        guild_id: str,
+        user_id: str,
+        start_ts: str,
+        end_ts: str,
+        *,
+        channel_ids: list[str] | None = None,
+    ) -> int:
+        query = (
+            "SELECT COUNT(*) AS total FROM messages "
+            "WHERE guild_id = ? AND author_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0"
+        )
+        params: list[str] = [guild_id, user_id, start_ts, end_ts]
+        if channel_ids:
+            placeholders = ",".join("?" for _ in channel_ids)
+            query += f" AND channel_id IN ({placeholders})"
+            params.extend(channel_ids)
+        row = await self.fetchone(query, tuple(params))
+        return int(row["total"] or 0) if row else 0
+
+    async def fetch_user_messages_in_range(
+        self,
+        guild_id: str,
+        user_id: str,
+        start_ts: str,
+        end_ts: str,
+        *,
+        channel_ids: list[str] | None = None,
+    ) -> list[dict[str, str | None]]:
+        query = (
+            "SELECT message_id, channel_id, ts, content, reply_to_message_id, mentions_json "
+            "FROM messages WHERE guild_id = ? AND author_id = ? AND ts >= ? AND ts <= ? "
+            "AND COALESCE(is_deleted, 0) = 0"
+        )
+        params: list[str] = [guild_id, user_id, start_ts, end_ts]
+        if channel_ids:
+            placeholders = ",".join("?" for _ in channel_ids)
+            query += f" AND channel_id IN ({placeholders})"
+            params.extend(channel_ids)
+        query += " ORDER BY ts ASC"
+        rows = await self.fetchall(query, tuple(params))
+        out: list[dict[str, str | None]] = []
+        for row in rows:
+            out.append(
+                {
+                    "message_id": str(row["message_id"]) if row["message_id"] else None,
+                    "channel_id": str(row["channel_id"]) if row["channel_id"] else None,
+                    "ts": str(row["ts"]) if row["ts"] else None,
+                    "content": str(row["content"]) if row["content"] else "",
+                    "reply_to_message_id": str(row["reply_to_message_id"]) if row["reply_to_message_id"] else None,
+                    "mentions_json": str(row["mentions_json"]) if row["mentions_json"] else None,
+                }
+            )
+        return out
+
+    async def fetch_message_author_id(self, guild_id: str, message_id: str) -> str | None:
+        row = await self.fetchone(
+            "SELECT author_id FROM messages WHERE guild_id = ? AND message_id = ? AND COALESCE(is_deleted, 0) = 0",
+            (guild_id, message_id),
+        )
+        if not row or not row["author_id"]:
+            return None
+        return str(row["author_id"])
+
     async def count_active_users_in_range_single_channel(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> int:
         row = await self.fetchone(
             """
