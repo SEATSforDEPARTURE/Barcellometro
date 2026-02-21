@@ -16,6 +16,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
 from app.renderers.activity_dm_renderer import build_activity_details_txt, build_activity_dm_embeds
+from app.renderers.user_activity_renderer import build_user_activity_embeds
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -529,7 +530,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             txt_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=f"attivita_{utente.id}_{period_slug}.txt")
 
         try:
-            await interaction.user.send(embeds=embeds, file=txt_file)
+            await interaction.user.send(embeds=embeds)
             await interaction.response.send_message("Ti ho inviato il resoconto attività in DM ✅", ephemeral=True)
         except Forbidden:
             await interaction.response.send_message("❌ Non posso inviarti DM. Abilita i DM dal server e riprova.", ephemeral=True)
