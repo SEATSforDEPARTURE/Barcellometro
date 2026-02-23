@@ -1496,4 +1496,9 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             logger.exception("barcello: unexpected error")
             await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
 
-    tree.add_command(barcello_command, guild=guild)
+    if guild is not None:
+        tree.add_command(barcello_command, guild=guild)
+        logger.info("Registered /barcello scope=guild guild_id=%s", getattr(guild, "id", None))
+    else:
+        tree.add_command(barcello_command)
+        logger.info("Registered /barcello scope=global")
