@@ -187,6 +187,9 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     plugin_loader.load(rest, strict=False)
 
     logger.info("Plugins loaded: %s", plugin_loader.loaded)
+    if instance_mode == "main" and "app.plugins.commands" not in plugin_loader.loaded:
+        logger.error("Commands plugin not loaded; slash commands will not work.")
+        logger.error("Check PLUGIN_ALLOWLIST / GUILD_ID / INSTANCE_MODE")
     registry.register("plugins", plugin_loader)
 
     if instance_mode == "main" and status_service is not None:
