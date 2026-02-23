@@ -70,6 +70,7 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group.add_command(messaggi_group)
     barcellometro_group.add_command(voice_ingest_group)
     barcellometro_group.add_command(activity_config_group)
+    barcellometro_group.add_command(inattivi_group)
 
     register_admin(barcellometro_group, ctx)
     register_roles(role_group, ctx)
