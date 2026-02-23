@@ -35,6 +35,7 @@ class CommandContext:
     activity_insights: Any
     inactivity: Any
     daily_activity_report: Any
+    inactive_members_moderation: Any
     timezone: ZoneInfo
 
     @classmethod
@@ -63,6 +64,7 @@ class CommandContext:
         activity_insights = registry.get("activity_insights") if registry.has("activity_insights") else None
         inactivity = registry.get("inactivity") if registry.has("inactivity") else None
         daily_activity_report = registry.get("daily_activity_report") if registry.has("daily_activity_report") else None
+        inactive_members_moderation = registry.get("inactive_members_moderation") if registry.has("inactive_members_moderation") else None
         ingest: IngestService = registry.get("ingest")
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
@@ -86,5 +88,6 @@ class CommandContext:
             activity_insights=activity_insights,
             inactivity=inactivity,
             daily_activity_report=daily_activity_report,
+            inactive_members_moderation=inactive_members_moderation,
             timezone=timezone,
         )
