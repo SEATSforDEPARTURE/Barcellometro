@@ -21,11 +21,18 @@ DUE_WINDOW_SECONDS = 600
 
 
 class DailyActivityReportService:
-    def __init__(self, database: DatabaseService, bot: discord.Client, activity_service: ActivityInsightsService) -> None:
+    def __init__(
+        self,
+        database: DatabaseService,
+        bot: discord.Client,
+        activity_service: ActivityInsightsService,
+        inactive_members_moderation: Any | None = None,
+    ) -> None:
         self._database = database
         self._bot = bot
         self._activity = activity_service
         self._task: asyncio.Task[None] | None = None
+        self._inactive_moderation = inactive_members_moderation
 
     def start(self) -> None:
         if self._task is None:
@@ -414,3 +421,9 @@ class DailyActivityReportService:
                     await channel.send(embeds=batch)
             else:
                 await channel.send(embeds=batch)
+
+        if self._inactive_moderation is not None:
+            try:
+                await self._inactive_moderation.handle_post_activity_report(guild_id, mod_channel_id)
+            except Exception:
+                logger.exception("daily_activity_report: inactive moderation post-processing failed guild=%s", guild_id)

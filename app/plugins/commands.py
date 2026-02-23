@@ -14,6 +14,7 @@ from app.plugins.commands_modular import (
     register_ask,
     register_barcello,
     register_barcellometro_attivita,
+    register_inattivi,
     register_messaggi,
     register_privacy,
     register_riassunto,
@@ -58,6 +59,7 @@ def setup(registry: ServiceRegistry) -> None:
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunto conversazione")
     attivita_group = app_commands.Group(name="attivita", description="Report attività canale (staff)")
     activity_config_group = app_commands.Group(name="attivita", description="Monitorazione attività")
+    inattivi_group = app_commands.Group(name="inattivi", description="Gestione inattivi server-wide")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
 
     barcellometro_group.add_command(role_group)
@@ -67,6 +69,7 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group.add_command(messaggi_group)
     barcellometro_group.add_command(voice_ingest_group)
     barcellometro_group.add_command(activity_config_group)
+    barcellometro_group.add_command(inattivi_group)
 
     register_admin(barcellometro_group, ctx)
     register_roles(role_group, ctx)
@@ -80,6 +83,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_riassunto(riassunto_group, ctx)
     register_attivita(attivita_group, ctx)
     register_barcellometro_attivita(activity_config_group, ctx)
+    register_inattivi(inattivi_group, ctx)
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
     register_barcello(bot.tree, guild, ctx)
