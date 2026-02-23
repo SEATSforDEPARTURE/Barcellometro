@@ -24,6 +24,7 @@ from app.services.daily_activity_report import DailyActivityReportService
 from app.services.entitlements import EntitlementsService
 from app.services.inactivity import InactivityService
 from app.services.activity_insights import ActivityInsightsService
+from app.services.inactive_members_moderation import InactiveMembersModerationService
 from app.services.stt.ai_stt import AiSttService
 from app.services.stt.faster_whisper import FasterWhisperSttService
 from app.services.triggers import TriggerEngineService
@@ -85,6 +86,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     inactivity_service = None
     activity_insights = None
     daily_activity_report = None
+    inactive_members_moderation = None
 
     instance_mode = normalize_instance_mode(config.instance_mode)
     logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
@@ -118,7 +120,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         trigger_engine = TriggerEngineService(database_service, barcello_service, entitlements_service, ai_service, community_insights)
         inactivity_service = InactivityService(database_service)
         activity_insights = ActivityInsightsService(database_service)
-        daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights)
+        inactive_members_moderation = InactiveMembersModerationService(database_service, bot)
+        daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights, inactive_members_moderation=inactive_members_moderation)
 
     registry.register("config", config)
     registry.register("bot", bot)
@@ -139,6 +142,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("inactivity", inactivity_service)
         registry.register("activity_insights", activity_insights)
         registry.register("daily_activity_report", daily_activity_report)
+        registry.register("inactive_members_moderation", inactive_members_moderation)
         registry.register("stt.ai", stt_ai_service)
         registry.register("translate.local", translate_local_service)
         registry.register("translate.ai", translate_ai_service)
@@ -180,6 +184,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
             message_scheduler.start()
             if daily_activity_report is not None:
                 daily_activity_report.start()
+            if inactive_members_moderation is not None:
+                inactive_members_moderation.start()
 
         bot.add_listener(handle_ready, "on_ready")
 
