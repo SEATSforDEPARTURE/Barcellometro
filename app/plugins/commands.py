@@ -38,7 +38,7 @@ def setup(registry: ServiceRegistry) -> None:
     config = ctx.config
     guild_id = int(config.guild_id or 0)
     use_guild = guild_id > 0
-    guild = discord.Object(id=guild_id) if use_guild else None
+    guild_obj = discord.Object(id=guild_id) if use_guild else None
 
     if not use_guild:
         logger.warning("GUILD_ID missing/invalid; registering GLOBAL commands")
@@ -97,8 +97,11 @@ def setup(registry: ServiceRegistry) -> None:
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
     logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
-    register_barcello(bot.tree, guild, ctx)
-    register_ask(bot.tree, guild, ctx)
+    register_barcello(bot.tree, guild_obj, ctx)
+    register_ask(bot.tree, guild_obj, ctx)
+    scope_label = "guild" if guild_obj else "global"
+    top_level = bot.tree.get_commands(guild=guild_obj) if guild_obj else bot.tree.get_commands()
+    logger.info("Registered commands scope=%s top_level=%s", scope_label, [c.qualified_name for c in top_level])
 
     root_commands: list[app_commands.Command | app_commands.Group] = [
         barcellometro_group,
@@ -111,7 +114,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
         if use_guild:
-            bot.tree.add_command(command, guild=guild)
+            bot.tree.add_command(command, guild=guild_obj)
         else:
             bot.tree.add_command(command)
 
@@ -133,7 +136,7 @@ def setup(registry: ServiceRegistry) -> None:
                 config.guild_id,
             )
             if not logged_tree_once:
-                guild_commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
+                guild_commands = bot.tree.get_commands(guild=guild_obj) if use_guild else bot.tree.get_commands()
                 known = ",".join(cmd.name for cmd in guild_commands) or "(none)"
                 logger.warning("Known commands in tree: %s", known)
                 logged_tree_once = True
@@ -144,25 +147,19 @@ def setup(registry: ServiceRegistry) -> None:
     async def handle_ready() -> None:
         try:
             command_scope = "guild" if use_guild else "global"
-            if use_guild:
-                bot.tree.clear_commands(guild=guild)
-                logger.info("Cleared guild app commands before sync to force refresh")
-                register_root_commands()
-            commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
+            commands = bot.tree.get_commands(guild=guild_obj) if use_guild else bot.tree.get_commands()
             names = [command.qualified_name for command in commands]
             logger.info("Command tree pre-sync (%s) count=%d names=%s", command_scope, len(names), names)
             logger.info("Pre-sync check /barcello presente=%s scope=%s", "barcello" in names, command_scope)
             if use_guild:
-                bot.tree.clear_commands(guild=None)
-                logger.info("Cleared global app commands from local tree before guild sync to avoid scope mismatch")
-                synced = await bot.tree.sync(guild=guild)
-                logger.info("Synced %s commands for guild %s", len(synced), config.guild_id)
+                synced = await bot.tree.sync(guild=guild_obj)
+                logger.info("Synced %d commands for %s", len(synced), "guild")
             else:
                 logger.warning(
                     "Global command sync selected (GUILD_ID not set). Global propagation can take time; set GUILD_ID for immediate testing."
                 )
                 synced = await bot.tree.sync()
-                logger.info("Synced %s global commands", len(synced))
+                logger.info("Synced %d commands for %s", len(synced), "global")
         except Exception:  # noqa: BLE001
             logger.exception("Failed to sync commands")
 
