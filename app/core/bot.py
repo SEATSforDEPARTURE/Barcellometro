@@ -46,6 +46,17 @@ def _parse_plugin_allowlist(raw: str) -> list[str]:
     return [entry.strip() for entry in raw.split(",") if entry.strip()]
 
 
+def _unique(seq: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in seq:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
 def normalize_instance_mode(raw: str | None) -> str:
     value = (raw or "main").strip().lower()
     if not value or value == "main":
@@ -148,34 +159,33 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("translate.ai", translate_ai_service)
 
     plugin_loader = PluginLoader(registry)
+    mandatory_plugins = ["app.plugins.discord_adapter"]
+    if instance_mode == "main":
+        mandatory_plugins.append("app.plugins.commands")
+
     allowlist_raw = config.plugin_allowlist
     if allowlist_raw:
         allowlist = _parse_plugin_allowlist(allowlist_raw)
-        required_plugins = ["app.plugins.discord_adapter"]
-        if instance_mode == "main":
-            required_plugins.append("app.plugins.commands")
-        logger.info(
-            "PLUGIN_ALLOWLIST raw=%s parsed=%s instance_mode=%s",
-            allowlist_raw,
-            allowlist,
-            instance_mode,
-        )
-        allowlist_final = list(allowlist)
-        for plugin in required_plugins:
-            if plugin not in allowlist_final:
-                if plugin == "app.plugins.commands":
-                    logger.warning(
-                        "PLUGIN_ALLOWLIST missing required plugin %s for main mode; auto-adding (commands plugin enforced).",
-                        plugin,
-                    )
-                else:
-                    logger.warning("PLUGIN_ALLOWLIST missing required plugin %s; auto-adding.", plugin)
-                allowlist_final.append(plugin)
-        logger.info("Loading plugins with enforced allowlist_final=%s (strict=%s)", allowlist_final, False)
-        plugin_loader.load(allowlist_final, strict=False)
+        plugin_list_final = _unique(allowlist + DEFAULT_PLUGINS)
     else:
-        logger.info("PLUGIN_ALLOWLIST empty; loading default plugins=%s (strict=%s)", DEFAULT_PLUGINS, True)
-        plugin_loader.load(DEFAULT_PLUGINS, strict=True)
+        allowlist = []
+        plugin_list_final = list(DEFAULT_PLUGINS)
+
+    logger.info(
+        "Plugin loading plan: instance_mode=%s allowlist_raw=%s parsed_allowlist=%s plugin_list_final=%s",
+        instance_mode,
+        allowlist_raw,
+        allowlist,
+        plugin_list_final,
+    )
+
+    logger.info("Loading mandatory plugins strict=True: %s", mandatory_plugins)
+    plugin_loader.load(mandatory_plugins, strict=True)
+
+    rest = [p for p in plugin_list_final if p not in mandatory_plugins]
+    logger.info("Loading remaining plugins strict=False: %s", rest)
+    plugin_loader.load(rest, strict=False)
+
     logger.info("Plugins loaded: %s", plugin_loader.loaded)
     if instance_mode == "main" and "app.plugins.commands" not in plugin_loader.loaded:
         logger.error("Commands plugin not loaded; slash commands will not work.")

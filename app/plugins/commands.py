@@ -84,7 +84,15 @@ def setup(registry: ServiceRegistry) -> None:
     register_riassunto(riassunto_group, ctx)
     register_attivita(attivita_group, ctx)
     register_barcellometro_attivita(activity_config_group, ctx)
-    register_inattivi(inattivi_group, ctx)
+    inattivi_registered = True
+    try:
+        register_inattivi(inattivi_group, ctx)
+    except Exception:
+        inattivi_registered = False
+        logger.exception("Failed to register inattivi commands; disabling /barcellometro inattivi only")
+        logger.warning("/barcellometro inattivi disabled due to registration failure")
+    if inattivi_registered:
+        barcellometro_group.add_command(inattivi_group)
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
     register_barcello(bot.tree, guild, ctx)
@@ -121,15 +129,14 @@ def setup(registry: ServiceRegistry) -> None:
         try:
             command_scope = "guild" if use_guild else "global"
             commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
-            command_names = ", ".join(command.name for command in commands) or "(none)"
+            names = [command.qualified_name for command in commands]
             logger.info(
-                "App commands pre-sync: mode=%s guild_id=%s use_guild=%s count=%s names=%s",
+                "App commands pre-sync: mode=%s guild_id=%s use_guild=%s",
                 command_scope,
                 guild_id,
                 use_guild,
-                len(commands),
-                command_names,
             )
+            logger.info("Command tree pre-sync count=%d names=%s", len(names), names)
             if use_guild:
                 bot.tree.clear_commands(guild=None)
                 logger.info("Cleared global app commands from local tree before guild sync to avoid scope mismatch")
