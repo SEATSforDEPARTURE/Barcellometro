@@ -151,10 +151,7 @@ def setup(registry: ServiceRegistry) -> None:
             commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
             names = [command.qualified_name for command in commands]
             logger.info("Command tree pre-sync (%s) count=%d names=%s", command_scope, len(names), names)
-            if "barcello" in names:
-                logger.info("Pre-sync check: /barcello presente nello scope %s", command_scope)
-            else:
-                logger.warning("Pre-sync check: /barcello NON presente nello scope %s", command_scope)
+            logger.info("Pre-sync check /barcello presente=%s scope=%s", "barcello" in names, command_scope)
             if use_guild:
                 bot.tree.clear_commands(guild=None)
                 logger.info("Cleared global app commands from local tree before guild sync to avoid scope mismatch")
