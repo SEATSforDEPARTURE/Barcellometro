@@ -64,6 +64,7 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group.add_command(messaggi_group)
     barcellometro_group.add_command(voice_ingest_group)
     barcellometro_group.add_command(activity_config_group)
+    barcellometro_group.add_command(inattivi_group)
 
     register_admin(barcellometro_group, ctx)
     register_roles(role_group, ctx)
@@ -155,6 +156,8 @@ def setup(registry: ServiceRegistry) -> None:
             )
             logger.info("Command tree pre-sync count=%d names=%s", len(names), names)
             if use_guild:
+                bot.tree.clear_commands(guild=None)
+                logger.info("Cleared global app commands from local tree before guild sync to avoid scope mismatch")
                 synced = await bot.tree.sync(guild=guild)
                 logger.info("Synced %s commands for guild %s", len(synced), config.guild_id)
             else:
