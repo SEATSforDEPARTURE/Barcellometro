@@ -11,6 +11,7 @@ from .resoconto import register_resoconto
 from .riassunto import register_riassunto
 from .roles import register_roles
 from .messaggi import register_messaggi
+from .inattivi import register_inattivi
 from .settings import get_setting, set_setting
 from .status import register_status
 from .stt import register_stt
@@ -35,6 +36,7 @@ __all__ = [
     "register_riassunto",
     "register_roles",
     "register_messaggi",
+    "register_inattivi",
     "register_status",
     "register_stt",
     "register_translate",
