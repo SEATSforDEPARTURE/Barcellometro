@@ -144,6 +144,7 @@ def setup(registry: ServiceRegistry) -> None:
             command_scope = "guild" if use_guild else "global"
             if use_guild:
                 bot.tree.clear_commands(guild=guild)
+                logger.info("Cleared guild app commands before sync to force refresh")
                 register_root_commands()
             commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
             names = [command.qualified_name for command in commands]

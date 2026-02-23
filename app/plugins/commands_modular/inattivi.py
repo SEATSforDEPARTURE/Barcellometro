@@ -71,9 +71,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
             ephemeral=True,
         )
 
-    auto_group = app_commands.Group(name="auto", description="Modalità automatica")
-
-    @auto_group.command(name="on", description="Abilita modalità automatica")
+    @inattivi_group.command(name="auto_on", description="Abilita modalità automatica inattivi")
     async def inattivi_auto_on(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
@@ -81,66 +79,54 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.set_inactivity_auto_enabled(str(interaction.guild_id), True)
         await interaction.response.send_message("✅ Auto inattivi ON.", ephemeral=True)
 
-    @auto_group.command(name="off", description="Disabilita modalità automatica")
+    @inattivi_group.command(name="auto_off", description="Disabilita modalità automatica inattivi")
     async def inattivi_auto_off(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.set_inactivity_auto_enabled(str(interaction.guild_id), False)
         await interaction.response.send_message("🛑 Auto inattivi OFF.", ephemeral=True)
 
-    inattivi_group.add_command(auto_group)
-
-    @inattivi_group.command(name="grace", description="Imposta grace days")
-    async def inattivi_grace(interaction: discord.Interaction, giorni: app_commands.Range[int, 1, 365]) -> None:
+    @inattivi_group.command(name="set_grace", description="Imposta giorni grace dopo reminder")
+    async def inattivi_set_grace(interaction: discord.Interaction, giorni: app_commands.Range[int, 1, 365]) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await _ensure_cfg(ctx, str(interaction.guild_id))
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), grace_days_after_reminder=int(giorni))
-        await interaction.response.send_message("✅ Aggiornato.", ephemeral=True)
+        await interaction.response.send_message("✅ grace aggiornato.", ephemeral=True)
 
-    @inattivi_group.command(name="reminder-cooldown", description="Imposta reminder cooldown")
-    async def inattivi_reminder_cooldown(interaction: discord.Interaction, giorni: app_commands.Range[int, 1, 365]) -> None:
+    @inattivi_group.command(name="set_reminder_cooldown", description="Imposta cooldown reminder")
+    async def inattivi_set_reminder_cooldown(interaction: discord.Interaction, giorni: app_commands.Range[int, 1, 365]) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await _ensure_cfg(ctx, str(interaction.guild_id))
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), reminder_cooldown_days=int(giorni))
-        await interaction.response.send_message("✅ Aggiornato.", ephemeral=True)
+        await interaction.response.send_message("✅ reminder cooldown aggiornato.", ephemeral=True)
 
-    @inattivi_group.command(name="ban-days", description="Imposta durata ban")
-    async def inattivi_ban_days(interaction: discord.Interaction, giorni: app_commands.Range[int, 1, 365]) -> None:
+    @inattivi_group.command(name="set_ban_days", description="Imposta durata ban temporaneo")
+    async def inattivi_set_ban_days(interaction: discord.Interaction, giorni: app_commands.Range[int, 1, 365]) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await _ensure_cfg(ctx, str(interaction.guild_id))
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), ban_days=int(giorni))
-        await interaction.response.send_message("✅ Aggiornato.", ephemeral=True)
+        await interaction.response.send_message("✅ ban_days aggiornato.", ephemeral=True)
 
-    invite_group = app_commands.Group(name="invite", description="Gestione invite")
-    atrio_group = app_commands.Group(name="atrio", description="Gestione atrio")
-    exclude_role_group = app_commands.Group(name="exclude-role", description="Ruoli esclusi")
-    default_group = app_commands.Group(name="default", description="Policy default")
-    role_group = app_commands.Group(name="role", description="Policy ruoli")
-    template_group = app_commands.Group(name="template", description="Template messaggi")
-    reminder_group = app_commands.Group(name="reminder", description="Template reminder")
-    kick_group = app_commands.Group(name="kick", description="Template kick")
-    atrio_template_group = app_commands.Group(name="atrio", description="Template atrio")
-
-    @invite_group.command(name="set", description="Imposta invite url")
-    async def inattivi_invite_set(interaction: discord.Interaction, url: str) -> None:
+    @inattivi_group.command(name="set_invite", description="Imposta link invito per rientro")
+    async def inattivi_set_invite(interaction: discord.Interaction, url: str) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await _ensure_cfg(ctx, str(interaction.guild_id))
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), invite_url=url)
         await interaction.response.send_message("✅ Invite impostato.", ephemeral=True)
 
-    @atrio_group.command(name="set", description="Imposta canale atrio")
-    async def inattivi_atrio_set(interaction: discord.Interaction, canale: discord.TextChannel) -> None:
+    @inattivi_group.command(name="set_atrio", description="Imposta canale atrio")
+    async def inattivi_set_atrio(interaction: discord.Interaction, canale: discord.TextChannel) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await _ensure_cfg(ctx, str(interaction.guild_id))
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), atrio_channel_id=str(canale.id))
-        await interaction.response.send_message("✅ Atrio impostato.", ephemeral=True)
+        await interaction.response.send_message("✅ Canale atrio impostato.", ephemeral=True)
 
-    @exclude_role_group.command(name="add", description="Aggiungi ruolo escluso")
+    @inattivi_group.command(name="exclude_role_add", description="Aggiungi ruolo escluso da inattività")
     async def inattivi_exclude_role_add(interaction: discord.Interaction, ruolo: discord.Role) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
@@ -152,7 +138,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.upsert_inactivity_config(guild_id, excluded_role_ids_json=json.dumps(sorted(current)))
         await interaction.response.send_message("✅ Ruolo escluso.", ephemeral=True)
 
-    @exclude_role_group.command(name="remove", description="Rimuovi ruolo escluso")
+    @inattivi_group.command(name="exclude_role_remove", description="Rimuovi ruolo escluso da inattività")
     async def inattivi_exclude_role_remove(interaction: discord.Interaction, ruolo: discord.Role) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
@@ -162,10 +148,17 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         current = set(json.loads(cfg["excluded_role_ids_json"] or "[]")) if cfg else set()
         current.discard(str(ruolo.id))
         await ctx.database.upsert_inactivity_config(guild_id, excluded_role_ids_json=json.dumps(sorted(current)))
-        await interaction.response.send_message("✅ Ruolo rimosso.", ephemeral=True)
+        await interaction.response.send_message("✅ Ruolo rimosso da esclusioni.", ephemeral=True)
 
-    @default_group.command(name="set", description="Imposta policy default")
-    async def inattivi_default_set(interaction: discord.Interaction, inactive_days: int, window_days: int, min_messages: int, mode: str, min_account_age_days: int = 0) -> None:
+    @inattivi_group.command(name="default_set", description="Imposta policy default inattivi")
+    async def inattivi_default_set(
+        interaction: discord.Interaction,
+        inactive_days: int,
+        window_days: int,
+        min_messages: int,
+        mode: str,
+        min_account_age_days: int = 0,
+    ) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         try:
@@ -177,8 +170,17 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), default_policy_json=payload)
         await interaction.response.send_message("✅ Policy default aggiornata.", ephemeral=True)
 
-    @role_group.command(name="set", description="Imposta policy ruolo")
-    async def inattivi_role_set(interaction: discord.Interaction, role: discord.Role, inactive_days: int, window_days: int, min_messages: int, mode: str, min_account_age_days: int = 0, priority: int = 0) -> None:
+    @inattivi_group.command(name="role_set", description="Imposta policy per ruolo")
+    async def inattivi_role_set(
+        interaction: discord.Interaction,
+        role: discord.Role,
+        inactive_days: int,
+        window_days: int,
+        min_messages: int,
+        mode: str,
+        min_account_age_days: int = 0,
+        priority: int = 0,
+    ) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         try:
@@ -189,14 +191,14 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.upsert_inactivity_role_policy(str(interaction.guild_id), str(role.id), payload, int(priority))
         await interaction.response.send_message("✅ Policy ruolo aggiornata.", ephemeral=True)
 
-    @role_group.command(name="del", description="Rimuovi policy ruolo")
+    @inattivi_group.command(name="role_del", description="Rimuovi policy per ruolo")
     async def inattivi_role_del(interaction: discord.Interaction, role: discord.Role) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.delete_inactivity_role_policy(str(interaction.guild_id), str(role.id))
         await interaction.response.send_message("✅ Policy ruolo rimossa.", ephemeral=True)
 
-    @reminder_group.command(name="set", description="Template reminder")
+    @inattivi_group.command(name="template_reminder_set", description="Imposta template reminder DM")
     async def inattivi_template_reminder_set(interaction: discord.Interaction, testo: str) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
@@ -204,7 +206,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_reminder_template=testo)
         await interaction.response.send_message("✅ Template reminder aggiornato.", ephemeral=True)
 
-    @kick_group.command(name="set", description="Template kick")
+    @inattivi_group.command(name="template_kick_set", description="Imposta template DM kick")
     async def inattivi_template_kick_set(interaction: discord.Interaction, testo: str) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
@@ -212,7 +214,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_kick_template=testo)
         await interaction.response.send_message("✅ Template kick aggiornato.", ephemeral=True)
 
-    @atrio_template_group.command(name="set", description="Template atrio")
+    @inattivi_group.command(name="template_atrio_set", description="Imposta template messaggio atrio")
     async def inattivi_template_atrio_set(interaction: discord.Interaction, testo: str) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
@@ -220,7 +222,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), atrio_template=testo)
         await interaction.response.send_message("✅ Template atrio aggiornato.", ephemeral=True)
 
-    @inattivi_group.command(name="run", description="Esegui subito gestione inattivi")
+    @inattivi_group.command(name="run", description="Esegui subito scansione inattivi")
     async def inattivi_run(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
@@ -231,13 +233,3 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         mod_channel_id = str(cfg["mod_channel_id"]) if cfg and cfg["mod_channel_id"] else str(interaction.channel_id)
         await ctx.inactive_members_moderation.handle_post_activity_report(str(interaction.guild_id), mod_channel_id)
         await interaction.response.send_message("✅ Esecuzione completata.", ephemeral=True)
-
-    template_group.add_command(reminder_group)
-    template_group.add_command(kick_group)
-    template_group.add_command(atrio_template_group)
-    inattivi_group.add_command(invite_group)
-    inattivi_group.add_command(atrio_group)
-    inattivi_group.add_command(exclude_role_group)
-    inattivi_group.add_command(default_group)
-    inattivi_group.add_command(role_group)
-    inattivi_group.add_command(template_group)
