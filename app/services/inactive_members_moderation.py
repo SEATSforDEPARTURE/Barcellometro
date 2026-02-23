@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 from dataclasses import dataclass
@@ -206,23 +207,45 @@ class InactiveMembersModerationService:
         return candidates, considered, cfg
 
     @staticmethod
-    def _fmt_last_message(ts: str | None) -> str:
+    def _parse_last_message_dt(ts: str | None) -> datetime | None:
         if not ts:
-            return "mai"
+            return None
         try:
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            return dt.astimezone().strftime("%d/%m %H:%M")
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         except Exception:
-            return "mai"
+            return None
+
+    @classmethod
+    def _inactive_sort_key(cls, candidate: InactiveCandidate) -> tuple[int, datetime]:
+        dt = cls._parse_last_message_dt(candidate.last_message_ts)
+        if dt is None:
+            return (0, datetime.min.replace(tzinfo=timezone.utc))
+        return (1, dt)
+
+    @classmethod
+    def _format_inactive_preview_line(cls, candidate: InactiveCandidate) -> str:
+        dt = cls._parse_last_message_dt(candidate.last_message_ts)
+        if dt is None:
+            return f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | 💬 Ultimo: mai"
+        local = dt.astimezone()
+        last_fmt = local.strftime("%d/%m %H:%M")
+        unix_ts = int(dt.timestamp())
+        return (
+            f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+            f"💬 Ultimo: {last_fmt} (UNIX: {unix_ts}) 🕒 {candidate.days_inactive}g fa"
+        )
 
     def _format_policy_default(self, policy: dict[str, Any]) -> str:
         mode = str(policy.get("mode", "OR")).upper()
         return (
-            "🧾 **Policy di base**\n"
+            "📄 **Policy di base**\n"
             f"• Inattività: **{policy.get('inactive_days', 30)} giorni**\n"
             f"• Finestra analisi: **{policy.get('window_days', 30)} giorni**\n"
             f"• Min messaggi: **{policy.get('min_messages', 1)}**\n"
-            f"• Logica: **{mode}** (OR = basta una condizione / AND = entrambe)"
+            f"• Logica: **{mode}**\n"
+            "  ↳ OR: basta 1 condizione (pochi msg OPPURE assenza lunga)\n"
+            "  ↳ AND: servono entrambe (pochi msg E assenza lunga)"
         )
 
     def _format_role_policies(self, guild: discord.Guild, rows: list[Any]) -> str:
@@ -268,26 +291,30 @@ class InactiveMembersModerationService:
         embed = discord.Embed(title="✏️ INATTIVI (SERVER-WIDE)", colour=discord.Colour.blue())
         embed.add_field(name="Membri analizzati", value=str(considered), inline=True)
         embed.add_field(name="Inattivi trovati", value=str(len(inactive)), inline=True)
-        embed.add_field(
-            name="Policy",
-            value=self._format_policy_default(policy) + "\n\n" + self._format_role_policies(guild, role_policy_rows),
-            inline=False,
-        )
+        embed.add_field(name="📄 Policy di base", value=self._format_policy_default(policy), inline=False)
+        embed.add_field(name="🏷️ Policy per ruoli", value=self._format_role_policies(guild, role_policy_rows), inline=False)
 
-        ordered = sorted(inactive, key=lambda c: c.days_inactive, reverse=True)
-        preview: list[str] = []
-        for c in ordered[:15]:
-            last_fmt = self._fmt_last_message(c.last_message_ts)
-            if c.last_message_ts is None:
-                preview.append(f"• {c.member.mention} — ({c.count_in_window} msg) | 💬 Ultimo: mai")
-            else:
-                preview.append(f"• {c.member.mention} — ({c.count_in_window} msg) | 💬 Ultimo: {last_fmt} 🕒 {c.days_inactive}g fa")
-        if len(ordered) > 15:
-            preview.append(f"+ altri {len(ordered) - 15} inattivi…")
-        embed.add_field(name="Preview inattivi", value="\n".join(preview) if preview else "Nessun inattivo.", inline=False)
+        ordered = sorted(inactive, key=self._inactive_sort_key)
+        preview_limit = 15
+        preview_lines = [self._format_inactive_preview_line(c) for c in ordered[:preview_limit]]
+        extra_count = max(0, len(ordered) - preview_limit)
+        if extra_count > 0:
+            preview_lines.append(f"+ altri {extra_count} inattivi…")
+        embed.add_field(name="Preview inattivi", value="\n".join(preview_lines) if preview_lines else "Nessun inattivo.", inline=False)
+
+        extra_file: discord.File | None = None
+        if extra_count > 0:
+            extra_lines = [self._format_inactive_preview_line(c) for c in ordered[preview_limit:]]
+            ts_name = datetime.now().strftime("%Y%m%d_%H%M")
+            filename = f"inattivi_extra_{ts_name}.txt"
+            payload = "\n".join(extra_lines).encode("utf-8")
+            extra_file = discord.File(io.BytesIO(payload), filename=filename)
 
         view = InactivityActionsView(self, guild_id, mod_channel_id)
-        message = await channel.send(embed=embed, view=view)
+        if extra_file is not None:
+            message = await channel.send(embed=embed, view=view, file=extra_file)
+        else:
+            message = await channel.send(embed=embed, view=view)
         view.message = message
 
     def _render_template(self, template: str, *, member: discord.Member, guild: discord.Guild, days_inactive: int, policy: dict[str, Any], cfg: dict[str, Any]) -> str:
