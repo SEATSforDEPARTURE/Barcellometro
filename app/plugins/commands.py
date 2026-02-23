@@ -42,12 +42,6 @@ def setup(registry: ServiceRegistry) -> None:
     if not use_guild:
         logger.warning("GUILD_ID missing/invalid; registering GLOBAL commands")
 
-    def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
-        if use_guild:
-            bot.tree.add_command(command, guild=guild)
-        else:
-            bot.tree.add_command(command)
-
     barcellometro_group = app_commands.Group(name="barcellometro", description="Controlli Barcellometro")
     role_group = app_commands.Group(name="role", description="Gestione permessi e limiti")
     stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
@@ -84,26 +78,46 @@ def setup(registry: ServiceRegistry) -> None:
     register_riassunto(riassunto_group, ctx)
     register_attivita(attivita_group, ctx)
     register_barcellometro_attivita(activity_config_group, ctx)
+
     inattivi_registered = True
     try:
         register_inattivi(inattivi_group, ctx)
+        inattivi_subcommands = [cmd.qualified_name for cmd in inattivi_group.walk_commands()]
+        logger.info("register_inattivi ok: subcommands=%s", inattivi_subcommands)
     except Exception:
         inattivi_registered = False
+        partial = [cmd.qualified_name for cmd in inattivi_group.walk_commands()]
         logger.exception("Failed to register inattivi commands; disabling /barcellometro inattivi only")
+        logger.error("Partial inattivi subcommands before failure: %s", partial)
         logger.warning("/barcellometro inattivi disabled due to registration failure")
     if inattivi_registered:
         barcellometro_group.add_command(inattivi_group)
+
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
     register_barcello(bot.tree, guild, ctx)
     register_ask(bot.tree, guild, ctx)
 
-    add_tree_command(barcellometro_group)
-    add_tree_command(riassunto_group)
-    add_tree_command(attivita_group)
-    add_tree_command(status_group)
-    add_tree_command(resoconto_group)
-    add_tree_command(privacy_group)
+    root_commands: list[app_commands.Command | app_commands.Group] = [
+        barcellometro_group,
+        riassunto_group,
+        attivita_group,
+        status_group,
+        resoconto_group,
+        privacy_group,
+    ]
+
+    def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
+        if use_guild:
+            bot.tree.add_command(command, guild=guild)
+        else:
+            bot.tree.add_command(command)
+
+    def register_root_commands() -> None:
+        for command in root_commands:
+            add_tree_command(command)
+
+    register_root_commands()
 
     @bot.tree.error
     async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
@@ -128,6 +142,9 @@ def setup(registry: ServiceRegistry) -> None:
     async def handle_ready() -> None:
         try:
             command_scope = "guild" if use_guild else "global"
+            if use_guild:
+                bot.tree.clear_commands(guild=guild)
+                register_root_commands()
             commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
             names = [command.qualified_name for command in commands]
             logger.info(
