@@ -38,6 +38,15 @@ def _fmt_duration_hhmm(seconds: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def _fmt_active_ratio(active: int, total: int | None, *, fallback_label: str) -> str:
+    if total is None:
+        return f"{active}/{fallback_label}"
+    if total <= 0:
+        return f"{active}/{fallback_label}"
+    pct = int(round((active / total) * 100))
+    return f"{active}/{fallback_label} ({pct}%)"
+
+
 def build_daily_activity_embeds(
     guild: discord.Guild,
     guild_name: str,
@@ -80,7 +89,7 @@ def build_daily_activity_embeds(
         name="📌 STATISTICHE SERVER",
         value=_truncate_field(
             f"• Messaggi: **{total_messages}**\n"
-            f"• Utenti attivi: **{active_x}/{total_y_label}**\n"
+            f"• Utenti attivi: **{_fmt_active_ratio(active_x, total_y, fallback_label=total_y_label)}**\n"
             f"• Ora di picco generale: **{_fmt_hour(server_summary.get('peak_hour'))}**\n"
             f"• Ora di silenzio generale: **{_fmt_hour(server_summary.get('silence_hour'))}**\n"
             f"• Continuità oraria generale: **{int(server_summary.get('continuity_hours', 0))}** ore con attività\n"
@@ -100,7 +109,7 @@ def build_daily_activity_embeds(
         b_label = str(b) if b is not None else "?"
         stats_lines = [
             f"• Messaggi: **{s.messages_count}**",
-            f"• Utenti attivi: **{item.get('active_non_bot', 0)}/{b_label}**",
+            f"• Utenti attivi: **{_fmt_active_ratio(int(item.get('active_non_bot', 0)), b if isinstance(b, int) else None, fallback_label=b_label)}**",
             f"• Ora di picco: **{_fmt_hour(item.get('peak_hour'))}**",
             f"• Ora di silenzio: **{_fmt_hour(item.get('silence_hour'))}**",
             f"• Continuità oraria: **{item.get('continuity_hours', s.continuity_hours)}** ore con attività",
@@ -153,7 +162,7 @@ def build_daily_activity_details_txt(
         f"• Punti attività generali: {server_summary.get('score', 0)}/100",
         f"• Trend generale: {server_summary.get('trend_text', 'n/d')}",
         f"• Messaggi totali: {total_messages}",
-        f"• Utenti attivi totali: {active_total}/{total_members_label}",
+        f"• Utenti attivi totali: {_fmt_active_ratio(active_total, total_members if isinstance(total_members, int) else None, fallback_label=total_members_label)}",
         f"• Utenti inattivi totali: {inactive_total_label}/{total_members_label}",
         f"• Ora di picco generale: {_fmt_hour(server_summary.get('peak_hour'))}",
         f"• Ora di silenzio generale: {_fmt_hour(server_summary.get('silence_hour'))}",
@@ -193,7 +202,7 @@ def build_daily_activity_details_txt(
                 f"• Punti attività: {s.score}/100",
                 f"• Trend: {s.trend_text}",
                 f"• Messaggi: {s.messages_count}",
-                f"• Utenti attivi: {item.get('active_non_bot', 0)}/{b_label}",
+                f"• Utenti attivi: {_fmt_active_ratio(int(item.get('active_non_bot', 0)), b if isinstance(b, int) else None, fallback_label=b_label)}",
                 f"• Utenti inattivi: {inactive_ch_label}/{b_label}",
                 f"• Ora di picco: {_fmt_hour(item.get('peak_hour'))}",
                 f"• Ora di silenzio: {_fmt_hour(item.get('silence_hour'))}",
