@@ -96,6 +96,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
+    logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
     register_barcello(bot.tree, guild, ctx)
     register_ask(bot.tree, guild, ctx)
 
@@ -149,13 +150,11 @@ def setup(registry: ServiceRegistry) -> None:
                 register_root_commands()
             commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
             names = [command.qualified_name for command in commands]
-            logger.info(
-                "App commands pre-sync: mode=%s guild_id=%s use_guild=%s",
-                command_scope,
-                guild_id,
-                use_guild,
-            )
-            logger.info("Command tree pre-sync count=%d names=%s", len(names), names)
+            logger.info("Command tree pre-sync (%s) count=%d names=%s", command_scope, len(names), names)
+            if "barcello" in names:
+                logger.info("Pre-sync check: /barcello presente nello scope %s", command_scope)
+            else:
+                logger.warning("Pre-sync check: /barcello NON presente nello scope %s", command_scope)
             if use_guild:
                 bot.tree.clear_commands(guild=None)
                 logger.info("Cleared global app commands from local tree before guild sync to avoid scope mismatch")
