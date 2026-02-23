@@ -14,6 +14,7 @@ from app.plugins.commands_modular import (
     register_ask,
     register_barcello,
     register_barcellometro_attivita,
+    register_inattivi,
     register_messaggi,
     register_privacy,
     register_riassunto,
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def setup(registry: ServiceRegistry) -> None:
+    logged_tree_once = False
     ctx = CommandContext.from_registry(registry)
     bot = ctx.bot
     config = ctx.config
@@ -58,6 +60,7 @@ def setup(registry: ServiceRegistry) -> None:
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunto conversazione")
     attivita_group = app_commands.Group(name="attivita", description="Report attività canale (staff)")
     activity_config_group = app_commands.Group(name="attivita", description="Monitorazione attività")
+    inattivi_group = app_commands.Group(name="inattivi", description="Gestione inattivi server-wide")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
 
     barcellometro_group.add_command(role_group)
@@ -67,6 +70,7 @@ def setup(registry: ServiceRegistry) -> None:
     barcellometro_group.add_command(messaggi_group)
     barcellometro_group.add_command(voice_ingest_group)
     barcellometro_group.add_command(activity_config_group)
+    barcellometro_group.add_command(inattivi_group)
 
     register_admin(barcellometro_group, ctx)
     register_roles(role_group, ctx)
@@ -80,6 +84,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_riassunto(riassunto_group, ctx)
     register_attivita(attivita_group, ctx)
     register_barcellometro_attivita(activity_config_group, ctx)
+    register_inattivi(inattivi_group, ctx)
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
     register_barcello(bot.tree, guild, ctx)
@@ -94,6 +99,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     @bot.tree.error
     async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        nonlocal logged_tree_once
         if isinstance(error, app_commands.errors.CommandNotFound):
             name = (interaction.data or {}).get("name")
             logger.warning(
@@ -102,6 +108,11 @@ def setup(registry: ServiceRegistry) -> None:
                 getattr(interaction, "guild_id", None),
                 config.guild_id,
             )
+            if not logged_tree_once:
+                guild_commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
+                known = ",".join(cmd.name for cmd in guild_commands) or "(none)"
+                logger.warning("Known commands in tree: %s", known)
+                logged_tree_once = True
             return
         logger.exception("App command error")
         raise error
@@ -111,12 +122,23 @@ def setup(registry: ServiceRegistry) -> None:
             command_scope = "guild" if use_guild else "global"
             commands = bot.tree.get_commands(guild=guild) if use_guild else bot.tree.get_commands()
             command_names = ", ".join(command.name for command in commands) or "(none)"
-            logger.info("App commands registered (%s): %s", command_scope, command_names)
-            logger.info("Command sync mode=%s config.guild_id=%s", command_scope, config.guild_id)
+            logger.info(
+                "App commands pre-sync: mode=%s guild_id=%s use_guild=%s count=%s names=%s",
+                command_scope,
+                guild_id,
+                use_guild,
+                len(commands),
+                command_names,
+            )
             if use_guild:
+                bot.tree.clear_commands(guild=None)
+                logger.info("Cleared global app commands from local tree before guild sync to avoid scope mismatch")
                 synced = await bot.tree.sync(guild=guild)
                 logger.info("Synced %s commands for guild %s", len(synced), config.guild_id)
             else:
+                logger.warning(
+                    "Global command sync selected (GUILD_ID not set). Global propagation can take time; set GUILD_ID for immediate testing."
+                )
                 synced = await bot.tree.sync()
                 logger.info("Synced %s global commands", len(synced))
         except Exception:  # noqa: BLE001

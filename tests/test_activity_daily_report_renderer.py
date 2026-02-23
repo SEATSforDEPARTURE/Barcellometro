@@ -89,8 +89,10 @@ def test_daily_renderer_embeds_include_silence_and_overview_sections() -> None:
     assert "📈 TREND" in first_names
     stats_server = next(f.value for f in embeds[0].fields if f.name == "📌 STATISTICHE SERVER")
     assert "Ora di silenzio generale" in stats_server
+    assert "Utenti attivi: **3/12 (25%)**" in stats_server
     channel_stats = next(f.value for f in embeds[1].fields if f.name == "📌 STATISTICHE CANALE")
     assert "Ora di silenzio" in channel_stats
+    assert "Utenti attivi: **2/10 (20%)**" in channel_stats
 
 
 def test_daily_renderer_txt_contains_required_headers_and_silence() -> None:
