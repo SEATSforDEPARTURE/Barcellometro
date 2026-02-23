@@ -151,13 +151,35 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     allowlist_raw = config.plugin_allowlist
     if allowlist_raw:
         allowlist = _parse_plugin_allowlist(allowlist_raw)
-        logger.info("PLUGIN_ALLOWLIST active: %s", allowlist)
-        logger.info("Loading plugins: %s (strict=%s)", allowlist, False)
-        plugin_loader.load(allowlist, strict=False)
+        required_plugins = ["app.plugins.discord_adapter"]
+        if instance_mode == "main":
+            required_plugins.append("app.plugins.commands")
+        logger.info(
+            "PLUGIN_ALLOWLIST raw=%s parsed=%s instance_mode=%s",
+            allowlist_raw,
+            allowlist,
+            instance_mode,
+        )
+        allowlist_final = list(allowlist)
+        for plugin in required_plugins:
+            if plugin not in allowlist_final:
+                if plugin == "app.plugins.commands":
+                    logger.warning(
+                        "PLUGIN_ALLOWLIST missing required plugin %s for main mode; auto-adding (commands plugin enforced).",
+                        plugin,
+                    )
+                else:
+                    logger.warning("PLUGIN_ALLOWLIST missing required plugin %s; auto-adding.", plugin)
+                allowlist_final.append(plugin)
+        logger.info("Loading plugins with enforced allowlist_final=%s (strict=%s)", allowlist_final, False)
+        plugin_loader.load(allowlist_final, strict=False)
     else:
-        logger.info("Loading plugins: %s (strict=%s)", DEFAULT_PLUGINS, True)
+        logger.info("PLUGIN_ALLOWLIST empty; loading default plugins=%s (strict=%s)", DEFAULT_PLUGINS, True)
         plugin_loader.load(DEFAULT_PLUGINS, strict=True)
     logger.info("Plugins loaded: %s", plugin_loader.loaded)
+    if instance_mode == "main" and "app.plugins.commands" not in plugin_loader.loaded:
+        logger.error("Commands plugin not loaded; slash commands will not work.")
+        logger.error("Check PLUGIN_ALLOWLIST / GUILD_ID / INSTANCE_MODE")
     registry.register("plugins", plugin_loader)
 
     if instance_mode == "main" and status_service is not None:
