@@ -23,8 +23,10 @@ class PluginLoader:
                 module.setup(self._registry)
             except Exception:
                 if strict:
+                    logger.exception("PLUGIN LOAD FAILED (FATAL) %s", module_path)
                     raise
                 logger.exception("Failed to load plugin %s", module_path)
+                logger.error("PLUGIN LOAD FAILED (non-fatal) %s", module_path)
                 continue
             self._loaded.append(module_path)
             logger.info("Loaded plugin %s", module_path)
