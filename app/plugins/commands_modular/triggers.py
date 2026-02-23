@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 import json
 from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
 
+from app.plugins.commands_modular.command_helpers import add_group_once
 from app.plugins.commands_modular.ctx import CommandContext
 from app.services.config_file_loader import load_json_file
 from app.services.message_scheduler import calculate_initial_next_run
+
+logger = logging.getLogger(__name__)
 
 
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
@@ -21,11 +25,11 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     prompt_group = app_commands.Group(name="prompt", description="Trigger e campagne prompt")
     insights_group = app_commands.Group(name="insights", description="Trigger curiosità utenti")
 
-    barcellometro_group.add_command(qna_group)
-    barcellometro_group.add_command(frasi_group)
-    barcellometro_group.add_command(barcello_group)
-    barcellometro_group.add_command(prompt_group)
-    barcellometro_group.add_command(insights_group)
+    add_group_once(barcellometro_group, qna_group, logger)
+    add_group_once(barcellometro_group, frasi_group, logger)
+    add_group_once(barcellometro_group, barcello_group, logger)
+    add_group_once(barcellometro_group, prompt_group, logger)
+    add_group_once(barcellometro_group, insights_group, logger)
 
     async def _require_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
