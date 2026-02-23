@@ -10,6 +10,7 @@ from typing import Any
 
 import discord
 
+from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description, truncate
 from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)
@@ -289,22 +290,50 @@ class InactiveMembersModerationService:
         role_policy_rows = await self._database.list_inactivity_role_policies(guild_id)
 
         embed = discord.Embed(title="✏️ INATTIVI (SERVER-WIDE)", colour=discord.Colour.blue())
-        embed.add_field(name="Membri analizzati", value=str(considered), inline=True)
-        embed.add_field(name="Inattivi trovati", value=str(len(inactive)), inline=True)
-        embed.add_field(name="📄 Policy di base", value=self._format_policy_default(policy), inline=False)
-        embed.add_field(name="🏷️ Policy per ruoli", value=self._format_role_policies(guild, role_policy_rows), inline=False)
+        safe_add_field(embed, name="Membri analizzati", value=str(considered), inline=True)
+        safe_add_field(embed, name="Inattivi trovati", value=str(len(inactive)), inline=True)
+        safe_add_field(embed, name="📄 Policy di base", value=self._format_policy_default(policy), inline=False)
+        safe_add_field(embed, name="🏷️ Policy per ruoli", value=self._format_role_policies(guild, role_policy_rows), inline=False)
 
         ordered = sorted(inactive, key=self._inactive_sort_key)
+        all_lines = [self._format_inactive_preview_line(candidate) for candidate in ordered]
+        preview_lines: list[str] = []
+        extra_lines: list[str] = []
         preview_limit = 15
-        preview_lines = [self._format_inactive_preview_line(c) for c in ordered[:preview_limit]]
-        extra_count = max(0, len(ordered) - preview_limit)
-        if extra_count > 0:
-            preview_lines.append(f"+ altri {extra_count} inattivi…")
-        embed.add_field(name="Preview inattivi", value="\n".join(preview_lines) if preview_lines else "Nessun inattivo.", inline=False)
+        for idx, line in enumerate(all_lines):
+            if idx >= preview_limit:
+                extra_lines.append(line)
+                continue
+            candidate_preview = "\n".join([*preview_lines, line])
+            if len(candidate_preview) > FIELD_MAX:
+                extra_lines.extend(all_lines[idx:])
+                break
+            preview_lines.append(line)
+
+        if preview_lines:
+            preview_value = "\n".join(preview_lines)
+        else:
+            preview_value = "Nessun inattivo."
+
+        if extra_lines:
+            summary_line = f"+ altri {len(extra_lines)} inattivi… (vedi allegato .txt)"
+            if preview_lines:
+                candidate_with_summary = f"{preview_value}\n{summary_line}"
+                if len(candidate_with_summary) <= FIELD_MAX:
+                    preview_value = candidate_with_summary
+                else:
+                    allowed = FIELD_MAX - len(summary_line) - 1
+                    if allowed > 0:
+                        preview_value = f"{truncate(preview_value, allowed)}\n{summary_line}"
+                    else:
+                        preview_value = truncate(summary_line, FIELD_MAX)
+            else:
+                preview_value = truncate(summary_line, FIELD_MAX)
+
+        safe_add_field(embed, name="Preview inattivi", value=preview_value, inline=False)
 
         extra_file: discord.File | None = None
-        if extra_count > 0:
-            extra_lines = [self._format_inactive_preview_line(c) for c in ordered[preview_limit:]]
+        if extra_lines:
             ts_name = datetime.now().strftime("%Y%m%d_%H%M")
             filename = f"inattivi_extra_{ts_name}.txt"
             payload = "\n".join(extra_lines).encode("utf-8")
@@ -443,5 +472,5 @@ class InactiveMembersModerationService:
         errors = merged.get("errors") or []
         if errors:
             lines.append("Errori: " + "; ".join(errors[:10]))
-        embed.description = "\n".join(lines)
+        safe_set_description(embed, "\n".join(lines))
         return embed

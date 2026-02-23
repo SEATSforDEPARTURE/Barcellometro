@@ -141,8 +141,18 @@ def setup(registry: ServiceRegistry) -> None:
                 logger.warning("Known commands in tree: %s", known)
                 logged_tree_once = True
             return
-        logger.exception("App command error")
-        raise error
+        logger.exception("App command error", exc_info=error)
+        message = (
+            "⚠️ Ho avuto un problema a costruire l’embed (limite Discord). "
+            "Ho allegato un .txt se disponibile. Riprova o riduci la finestra."
+        )
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except Exception:
+            logger.exception("Failed to deliver app command error response")
 
     async def handle_ready() -> None:
         try:
