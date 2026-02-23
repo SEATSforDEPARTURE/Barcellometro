@@ -205,6 +205,43 @@ class InactiveMembersModerationService:
 
         return candidates, considered, cfg
 
+    @staticmethod
+    def _fmt_last_message(ts: str | None) -> str:
+        if not ts:
+            return "mai"
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return dt.astimezone().strftime("%d/%m %H:%M")
+        except Exception:
+            return "mai"
+
+    def _format_policy_default(self, policy: dict[str, Any]) -> str:
+        mode = str(policy.get("mode", "OR")).upper()
+        return (
+            "🧾 **Policy di base**\n"
+            f"• Inattività: **{policy.get('inactive_days', 30)} giorni**\n"
+            f"• Finestra analisi: **{policy.get('window_days', 30)} giorni**\n"
+            f"• Min messaggi: **{policy.get('min_messages', 1)}**\n"
+            f"• Logica: **{mode}** (OR = basta una condizione / AND = entrambe)"
+        )
+
+    def _format_role_policies(self, guild: discord.Guild, rows: list[Any]) -> str:
+        if not rows:
+            return "🏷️ **Policy per ruoli**\n• Nessuna policy ruolo configurata."
+        lines = ["🏷️ **Policy per ruoli**"]
+        for row in rows[:8]:
+            policy = self._parse_policy_json(row["policy_json"])
+            role_id = int(str(row["role_id"]))
+            role = guild.get_role(role_id)
+            role_label = role.mention if role else f"ruolo {role_id}"
+            lines.append(
+                f"• **{role_label}** (prio {int(row['priority'])}): inattività {policy.get('inactive_days', 30)}g · "
+                f"finestra {policy.get('window_days', 30)}g · min {policy.get('min_messages', 1)} · {str(policy.get('mode', 'OR')).upper()}"
+            )
+        if len(rows) > 8:
+            lines.append(f"• …altre {len(rows) - 8} policy ruolo")
+        return "\n".join(lines)
+
     async def handle_post_activity_report(self, guild_id: str, mod_channel_id: str) -> None:
         cfg = await self._get_config(guild_id)
         if not cfg or not bool(cfg.get("enabled")):
@@ -226,18 +263,29 @@ class InactiveMembersModerationService:
             return
         inactive, considered, cfg = await self.scan_inactive_members(guild_id)
         policy = cfg.get("default_policy", {}) if cfg else {}
-        embed = discord.Embed(title="🧹 INATTIVI (SERVER-WIDE)", color=0xFEE75C)
-        embed.add_field(name="Membri considerati", value=str(considered), inline=True)
-        embed.add_field(name="Inattivi rilevati", value=str(len(inactive)), inline=True)
+        role_policy_rows = await self._database.list_inactivity_role_policies(guild_id)
+
+        embed = discord.Embed(title="✏️ INATTIVI (SERVER-WIDE)", colour=discord.Colour.blue())
+        embed.add_field(name="Membri analizzati", value=str(considered), inline=True)
+        embed.add_field(name="Inattivi trovati", value=str(len(inactive)), inline=True)
         embed.add_field(
-            name="Policy default",
-            value=f"inactive_days={policy.get('inactive_days')} window_days={policy.get('window_days')} min_messages={policy.get('min_messages')} mode={policy.get('mode')}",
+            name="Policy",
+            value=self._format_policy_default(policy) + "\n\n" + self._format_role_policies(guild, role_policy_rows),
             inline=False,
         )
-        preview = []
-        for c in inactive[:15]:
-            preview.append(f"• {c.member.mention} — inattivo da {c.days_inactive}g, msg finestra: {c.count_in_window}")
-        embed.add_field(name="Preview", value="\n".join(preview) if preview else "Nessun inattivo.", inline=False)
+
+        ordered = sorted(inactive, key=lambda c: c.days_inactive, reverse=True)
+        preview: list[str] = []
+        for c in ordered[:15]:
+            last_fmt = self._fmt_last_message(c.last_message_ts)
+            if c.last_message_ts is None:
+                preview.append(f"• {c.member.mention} — ({c.count_in_window} msg) | 💬 Ultimo: mai")
+            else:
+                preview.append(f"• {c.member.mention} — ({c.count_in_window} msg) | 💬 Ultimo: {last_fmt} 🕒 {c.days_inactive}g fa")
+        if len(ordered) > 15:
+            preview.append(f"+ altri {len(ordered) - 15} inattivi…")
+        embed.add_field(name="Preview inattivi", value="\n".join(preview) if preview else "Nessun inattivo.", inline=False)
+
         view = InactivityActionsView(self, guild_id, mod_channel_id)
         message = await channel.send(embed=embed, view=view)
         view.message = message

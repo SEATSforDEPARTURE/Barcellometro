@@ -26,6 +26,7 @@ from app.plugins.commands_modular import (
     register_triggers,
     register_voice_ingest,
 )
+from app.plugins.commands_modular.command_helpers import add_group_once
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +58,13 @@ def setup(registry: ServiceRegistry) -> None:
     inattivi_group = app_commands.Group(name="inattivi", description="Gestione inattivi server-wide")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
 
-    barcellometro_group.add_command(role_group)
-    barcellometro_group.add_command(stt_group)
-    barcellometro_group.add_command(translate_group)
-    barcellometro_group.add_command(audio_notes_group)
-    barcellometro_group.add_command(messaggi_group)
-    barcellometro_group.add_command(voice_ingest_group)
-    barcellometro_group.add_command(activity_config_group)
-    barcellometro_group.add_command(inattivi_group)
+    add_group_once(barcellometro_group, role_group, logger)
+    add_group_once(barcellometro_group, stt_group, logger)
+    add_group_once(barcellometro_group, translate_group, logger)
+    add_group_once(barcellometro_group, audio_notes_group, logger)
+    add_group_once(barcellometro_group, messaggi_group, logger)
+    add_group_once(barcellometro_group, voice_ingest_group, logger)
+    add_group_once(barcellometro_group, activity_config_group, logger)
 
     register_admin(barcellometro_group, ctx)
     register_roles(role_group, ctx)
@@ -92,11 +92,7 @@ def setup(registry: ServiceRegistry) -> None:
         logger.error("Partial inattivi subcommands before failure: %s", partial)
         logger.warning("/barcellometro inattivi disabled due to registration failure")
     if inattivi_registered:
-        existing_names = {c.name for c in barcellometro_group.commands}
-        if inattivi_group.name not in existing_names:
-            barcellometro_group.add_command(inattivi_group)
-        else:
-            logger.warning("Skipping duplicate registration of subgroup %r under /barcellometro", inattivi_group.name)
+        add_group_once(barcellometro_group, inattivi_group, logger)
 
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
