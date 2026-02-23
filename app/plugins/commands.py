@@ -84,6 +84,7 @@ def setup(registry: ServiceRegistry) -> None:
         register_inattivi(inattivi_group, ctx)
         inattivi_subcommands = [cmd.qualified_name for cmd in inattivi_group.walk_commands()]
         logger.info("register_inattivi ok: subcommands=%s", inattivi_subcommands)
+        logger.info("inattivi group commands=%s", [c.qualified_name for c in inattivi_group.walk_commands()])
     except Exception:
         inattivi_registered = False
         partial = [cmd.qualified_name for cmd in inattivi_group.walk_commands()]
@@ -91,7 +92,11 @@ def setup(registry: ServiceRegistry) -> None:
         logger.error("Partial inattivi subcommands before failure: %s", partial)
         logger.warning("/barcellometro inattivi disabled due to registration failure")
     if inattivi_registered:
-        barcellometro_group.add_command(inattivi_group)
+        existing_names = {c.name for c in barcellometro_group.commands}
+        if inattivi_group.name not in existing_names:
+            barcellometro_group.add_command(inattivi_group)
+        else:
+            logger.warning("Skipping duplicate registration of subgroup %r under /barcellometro", inattivi_group.name)
 
     register_resoconto(resoconto_group, ctx)
     register_triggers(barcellometro_group, ctx)
