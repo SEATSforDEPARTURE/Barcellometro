@@ -345,50 +345,32 @@ class InactiveMembersModerationService:
             return "scaduto"
         total_seconds = int(delta.total_seconds())
         days = total_seconds // 86400
-        if days > 0:
-            return f"-{days}g"
         hours = (total_seconds % 86400) // 3600
-        if hours > 0:
-            return f"-{hours}h"
         minutes = max(1, (total_seconds % 3600) // 60)
+        if days > 0:
+            return f"-{days}g {hours}h"
+        if hours > 0:
+            return f"-{hours}h {minutes}m"
         return f"-{minutes}m"
 
     def _format_inactive_preview_line(self, idx: int, candidate: InactiveCandidate, *, state: aiosqlite.Row | None, cfg: dict[str, Any]) -> str:
         grace_days = int(cfg.get("grace_days_after_reminder", 7)) if cfg else 7
         reminder_dt = self._parse_state_reminder_dt(state)
         if reminder_dt is None:
-            prefix = f"{idx}) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+            prefix = ""
         else:
-            reminder_local = self._to_rome(reminder_dt)
-            date_fmt = reminder_local.strftime("%d/%m %H:%M")
-            deadline = reminder_dt + timedelta(days=grace_days)
-            delta = deadline - datetime.now(timezone.utc)
-            if delta.total_seconds() <= 0:
-                remaining = "scaduto"
-            else:
-                total_seconds = int(delta.total_seconds())
-                days = total_seconds // 86400
-                hours = (total_seconds % 86400) // 3600
-                minutes = max(1, (total_seconds % 3600) // 60)
-                if days > 0:
-                    remaining = f"-{days}g {hours}h"
-                elif hours > 0:
-                    remaining = f"-{hours}h {minutes}m"
-                else:
-                    remaining = f"-{minutes}m"
-            if remaining == "scaduto":
-                prefix = f"{idx}) 🔔 {date_fmt} (⌛scaduto) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
-            else:
-                prefix = f"{idx}) 🔔 {date_fmt} (⌛{remaining}) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+            remaining = self._format_grace_remaining(reminder_dt, grace_days)
+            prefix = f"⌛{remaining} " if remaining != "scaduto" else ""
+        head = f"{idx}) {prefix}{candidate.member.mention} ({candidate.count_in_window} msg) | "
         dt = self._parse_last_message_dt(candidate.last_message_ts)
         if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
-            return f"{prefix}💬 Ultimo: mai"
+            return f"{head}💬 Ultimo: mai"
         local = self._to_rome(dt)
         last_fmt = local.strftime("%d/%m %H:%M")
         jump_url = (
             f"https://discord.com/channels/{candidate.member.guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
         )
-        return f"{prefix}💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
+        return f"{head}💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
 
     def _format_inactive_txt_line(
         self,
@@ -409,7 +391,7 @@ class InactiveMembersModerationService:
         else:
             data_fmt = self._to_rome(reminder_dt).strftime("%d/%m %H:%M")
             remaining = self._format_grace_remaining(reminder_dt, grace_days)
-            grace_text = "scaduto" if remaining == "scaduto" else f"{remaining} alla scad."
+            grace_text = f"⌛{remaining}"
             prefix = f"{idx}) 🔔 Avv. il {data_fmt} ({grace_text}) | {mention} ({display}) ({count} msg totali) | "
         dt = self._parse_last_message_dt(candidate.last_message_ts)
         if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
