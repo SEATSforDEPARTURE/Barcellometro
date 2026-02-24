@@ -433,6 +433,16 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         if not campaign:
             await interaction.response.send_message("Campagna non trovata.", ephemeral=True)
             return
+        if not isinstance(campaign, dict) and hasattr(campaign, "keys"):
+            campaign = dict(campaign)
+
+        logger.info(
+            "prompt_test campaign_id=%s type=%s user=%s channel=%s",
+            id,
+            campaign.get("type"),
+            interaction.user.id,
+            interaction.channel_id,
+        )
         if str(campaign.get("type")) != "AI_PROMPT":
             await interaction.response.send_message("Questo test è solo per AI_PROMPT.", ephemeral=True)
             return
