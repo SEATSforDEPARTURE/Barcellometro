@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 
 from openai import AsyncOpenAI
@@ -52,6 +53,58 @@ class AiService:
             "state": "running" if self._enabled else "disabled",
             "metrics": {"models": dict(self._model_map), **self._metrics},
         }
+
+
+    def _build_general_messages(self, question: str, persona_system: str, history: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = [{"role": "system", "content": persona_system}]
+        if history:
+            messages.extend(history)
+        else:
+            messages.append({"role": "user", "content": question})
+        return messages
+
+    async def ask_general(
+        self,
+        question: str,
+        persona_system: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        timeout_seconds: float = 25.0,
+    ) -> str | None:
+        if not self._enabled or self._client is None:
+            return None
+        model = self.get_model("summary") or "gpt-4o-mini"
+        messages = self._build_general_messages(question, persona_system, history)
+        response = await asyncio.wait_for(self._client.responses.create(model=model, input=messages), timeout=timeout_seconds)
+        text = str(getattr(response, "output_text", "") or "").strip()
+        return text or None
+
+    async def ask_general_with_web(
+        self,
+        question: str,
+        persona_system: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        timeout_seconds: float = 35.0,
+    ) -> str | None:
+        if not self._enabled or self._client is None:
+            return None
+        model = self.get_model("summary") or "gpt-4o-mini"
+        system_with_sources = (
+            f"{persona_system}\n"
+            "Quando usi il web, cita esplicitamente le fonti consultate con link o nome testata/sito."
+        )
+        messages = self._build_general_messages(question, system_with_sources, history)
+        response = await asyncio.wait_for(
+            self._client.responses.create(
+                model=model,
+                input=messages,
+                tools=[{"type": "web_search"}],
+            ),
+            timeout=timeout_seconds,
+        )
+        text = str(getattr(response, "output_text", "") or "").strip()
+        return text or None
 
     async def _load_model_map(self) -> dict[str, str]:
         return {
