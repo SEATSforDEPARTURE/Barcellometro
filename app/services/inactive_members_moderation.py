@@ -338,11 +338,19 @@ class InactiveMembersModerationService:
         )
         return f"{prefix}💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
 
-    def _format_inactive_txt_line(self, idx: int, candidate: InactiveCandidate, *, state: aiosqlite.Row | None, cfg: dict[str, Any], guild: discord.Guild) -> str:
+    def _format_inactive_txt_line(
+        self,
+        idx: int,
+        candidate: InactiveCandidate,
+        *,
+        state: aiosqlite.Row | None = None,
+        cfg: dict[str, Any] | None = None,
+        guild: discord.Guild | None = None,
+    ) -> str:
         mention = candidate.member.mention
         display = getattr(candidate.member, "display_name", getattr(candidate.member, "name", "sconosciuto"))
         count = candidate.count_in_window
-        grace_days = int(cfg.get("grace_days_after_reminder", 7)) if cfg else 7
+        grace_days = int((cfg or {}).get("grace_days_after_reminder", 7))
         reminder_dt = self._parse_state_reminder_dt(state)
         if reminder_dt is None:
             prefix = f"{idx}) {mention} ({display}) ({count} msg totali) | "
@@ -358,31 +366,11 @@ class InactiveMembersModerationService:
         local = self._to_rome(dt)
         last_fmt = local.strftime("%d/%m %H:%M")
         channel_id = int(candidate.last_channel_id)
-        ch = guild.get_channel(channel_id) or self._bot.get_channel(channel_id)
+        ch = (guild.get_channel(channel_id) if guild is not None else None) or self._bot.get_channel(channel_id)
         channel_name = ch.name if ch and hasattr(ch, "name") else "canale_sconosciuto"
-        jump_url = f"https://discord.com/channels/{guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
+        guild_id = guild.id if guild is not None else candidate.member.guild.id
+        jump_url = f"https://discord.com/channels/{guild_id}/{candidate.last_channel_id}/{candidate.last_message_id}"
         return f"{prefix}💬 Ultimo: {last_fmt} in \"{channel_name}\" 🕒 {candidate.days_inactive}g fa ({jump_url})"
-
-    def _format_inactive_txt_line(self, idx: int, candidate: InactiveCandidate, *, state: aiosqlite.Row | None, guild: discord.Guild) -> str:
-        mention = candidate.member.mention
-        display = getattr(candidate.member, "display_name", getattr(candidate.member, "name", "sconosciuto"))
-        count = candidate.count_in_window
-        reminder_marker = self._reminder_marker(state)
-        prefix = f"{idx}) {reminder_marker} {mention}" if reminder_marker else f"{idx}) {mention}"
-        dt = self._parse_last_message_dt(candidate.last_message_ts)
-        if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
-            return f"{prefix} ({display}) ({count} msg totali) | 💬 Ultimo: mai"
-
-        local = self._to_rome(dt)
-        last_fmt = local.strftime("%d/%m %H:%M")
-        channel_id = int(candidate.last_channel_id)
-        ch = guild.get_channel(channel_id) or self._bot.get_channel(channel_id)
-        channel_name = ch.name if ch and hasattr(ch, "name") else "canale_sconosciuto"
-        jump_url = f"https://discord.com/channels/{guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
-        return (
-            f"{prefix} ({display}) ({count} msg totali) | "
-            f"💬 Ultimo: {last_fmt} in \"{channel_name}\" 🕒 {candidate.days_inactive}g fa ({jump_url})"
-        )
 
     def _format_policy_default(self, policy: dict[str, Any]) -> str:
         mode = str(policy.get("mode", "OR")).upper()
