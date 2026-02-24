@@ -24,6 +24,7 @@ from app.services.daily_activity_report import DailyActivityReportService
 from app.services.entitlements import EntitlementsService
 from app.services.inactivity import InactivityService
 from app.services.activity_insights import ActivityInsightsService
+from app.services.inactive_members_moderation import InactiveMembersModerationService
 from app.services.stt.ai_stt import AiSttService
 from app.services.stt.faster_whisper import FasterWhisperSttService
 from app.services.triggers import TriggerEngineService
@@ -43,6 +44,17 @@ DEFAULT_PLUGINS = [
 
 def _parse_plugin_allowlist(raw: str) -> list[str]:
     return [entry.strip() for entry in raw.split(",") if entry.strip()]
+
+
+def _unique(seq: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in seq:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
 
 
 def normalize_instance_mode(raw: str | None) -> str:
@@ -85,6 +97,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     inactivity_service = None
     activity_insights = None
     daily_activity_report = None
+    inactive_members_moderation = None
 
     instance_mode = normalize_instance_mode(config.instance_mode)
     logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
@@ -118,7 +131,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         trigger_engine = TriggerEngineService(database_service, barcello_service, entitlements_service, ai_service, community_insights)
         inactivity_service = InactivityService(database_service)
         activity_insights = ActivityInsightsService(database_service)
-        daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights)
+        inactive_members_moderation = InactiveMembersModerationService(database_service, bot)
+        daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights, inactive_members_moderation=inactive_members_moderation)
 
     registry.register("config", config)
     registry.register("bot", bot)
@@ -139,20 +153,39 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("inactivity", inactivity_service)
         registry.register("activity_insights", activity_insights)
         registry.register("daily_activity_report", daily_activity_report)
+        registry.register("inactive_members_moderation", inactive_members_moderation)
         registry.register("stt.ai", stt_ai_service)
         registry.register("translate.local", translate_local_service)
         registry.register("translate.ai", translate_ai_service)
 
     plugin_loader = PluginLoader(registry)
+    mandatory_plugins = ["app.plugins.discord_adapter"]
+    if instance_mode == "main":
+        mandatory_plugins.append("app.plugins.commands")
+
     allowlist_raw = config.plugin_allowlist
     if allowlist_raw:
         allowlist = _parse_plugin_allowlist(allowlist_raw)
-        logger.info("PLUGIN_ALLOWLIST active: %s", allowlist)
-        logger.info("Loading plugins: %s (strict=%s)", allowlist, False)
-        plugin_loader.load(allowlist, strict=False)
+        plugin_list_final = _unique(allowlist + DEFAULT_PLUGINS)
     else:
-        logger.info("Loading plugins: %s (strict=%s)", DEFAULT_PLUGINS, True)
-        plugin_loader.load(DEFAULT_PLUGINS, strict=True)
+        allowlist = []
+        plugin_list_final = list(DEFAULT_PLUGINS)
+
+    logger.info(
+        "Plugin loading plan: instance_mode=%s allowlist_raw=%s parsed_allowlist=%s plugin_list_final=%s",
+        instance_mode,
+        allowlist_raw,
+        allowlist,
+        plugin_list_final,
+    )
+
+    logger.info("Loading mandatory plugins strict=True: %s", mandatory_plugins)
+    plugin_loader.load(mandatory_plugins, strict=True)
+
+    rest = [p for p in plugin_list_final if p not in mandatory_plugins]
+    logger.info("Loading remaining plugins strict=False: %s", rest)
+    plugin_loader.load(rest, strict=False)
+
     logger.info("Plugins loaded: %s", plugin_loader.loaded)
     registry.register("plugins", plugin_loader)
 
@@ -180,6 +213,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
             message_scheduler.start()
             if daily_activity_report is not None:
                 daily_activity_report.start()
+            if inactive_members_moderation is not None:
+                inactive_members_moderation.start()
 
         bot.add_listener(handle_ready, "on_ready")
 
