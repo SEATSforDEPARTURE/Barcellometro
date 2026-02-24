@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
-from typing import Any
+from typing import Any, Optional
 
 import discord
 
@@ -37,6 +37,7 @@ class CommandContext:
     daily_activity_report: Any
     inactive_members_moderation: Any
     timezone: ZoneInfo
+    message_scheduler: Optional[Any] = None
 
     @classmethod
     def from_registry(cls, registry: ServiceRegistry) -> "CommandContext":
@@ -65,6 +66,7 @@ class CommandContext:
         inactivity = registry.get("inactivity") if registry.has("inactivity") else None
         daily_activity_report = registry.get("daily_activity_report") if registry.has("daily_activity_report") else None
         inactive_members_moderation = registry.get("inactive_members_moderation") if registry.has("inactive_members_moderation") else None
+        message_scheduler = registry.get("message_scheduler") if registry.has("message_scheduler") else None
         ingest: IngestService = registry.get("ingest")
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
@@ -89,5 +91,6 @@ class CommandContext:
             inactivity=inactivity,
             daily_activity_report=daily_activity_report,
             inactive_members_moderation=inactive_members_moderation,
+            message_scheduler=message_scheduler,
             timezone=timezone,
         )

@@ -4,6 +4,7 @@ import logging
 
 import discord
 from discord import app_commands
+from discord.errors import NotFound
 
 from app.core.service_registry import ServiceRegistry
 from app.plugins.commands_modular import (
@@ -151,6 +152,8 @@ def setup(registry: ServiceRegistry) -> None:
                 await interaction.followup.send(message, ephemeral=True)
             else:
                 await interaction.response.send_message(message, ephemeral=True)
+        except NotFound:
+            logger.warning("Unable to deliver app command error response: interaction expired")
         except Exception:
             logger.exception("Failed to deliver app command error response")
 
