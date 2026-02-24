@@ -375,49 +375,52 @@ class InactiveMembersModerationService:
     def _format_policy_default(self, policy: dict[str, Any], cfg: dict[str, Any]) -> str:
         mode = str(policy.get("mode", "OR")).upper()
         auto_enabled = "ON" if bool(cfg.get("auto_enabled")) else "OFF"
-        invite_set = "sì" if bool(cfg.get("invite_url")) else "no"
-        atrio_set = "sì" if bool(cfg.get("atrio_channel_id") or cfg.get("atrio_template")) else "no"
+        invite_set = "si" if bool(cfg.get("invite_url")) else "no"
+        atrio_set = "si" if bool(cfg.get("atrio_channel_id") or cfg.get("atrio_template")) else "no"
+        min_account_age_days = int(policy.get("min_account_age_days", 0))
         return (
-            f"• Inattività: **{policy.get('inactive_days', 30)} giorni**\n"
-            f"• Finestra analisi: **{policy.get('window_days', 30)} giorni**\n"
-            f"• Min messaggi: **{policy.get('min_messages', 1)}**\n"
-            f"• Logica: **{mode}**\n"
-            "  ↳ OR: basta 1 condizione (pochi msg OPPURE assenza lunga)\n"
-            "  ↳ AND: servono entrambe (pochi msg E assenza lunga)\n"
-            f"• Grace period: **{cfg.get('grace_days_after_reminder', 7)} giorni**\n"
-            f"• Ban temporaneo: **{cfg.get('ban_days', 7)} giorni**\n"
-            f"• Nuovi utenti ignorati per: **{cfg.get('new_user_ignore_days', 0)} giorni**\n"
-            f"• Modalità auto kick: **{auto_enabled}**\n"
-            f"• Reminder cooldown: **{cfg.get('reminder_cooldown_days', 14)} giorni**\n"
-            f"• Invite link impostato: **{invite_set}**\n"
-            f"• Atrio/template uscita configurati: **{atrio_set}**"
+            f"- Inattivita: {policy.get('inactive_days', 30)} giorni\n"
+            f"- Finestra analisi: {policy.get('window_days', 30)} giorni\n"
+            f"- Min messaggi: {policy.get('min_messages', 1)}\n"
+            f"- Logica: {mode}\n"
+            "  OR: basta 1 condizione (pochi msg OPPURE assenza lunga)\n"
+            "  AND: servono entrambe (pochi msg E assenza lunga)\n"
+            f"- Grace period: {cfg.get('grace_days_after_reminder', 7)} giorni\n"
+            f"- Ban temporaneo: {cfg.get('ban_days', 7)} giorni\n"
+            f"- Nuovi utenti ignorati per: {min_account_age_days} giorni\n"
+            f"- Modalita auto kick: {auto_enabled}\n"
+            f"- Reminder cooldown: {cfg.get('reminder_cooldown_days', 14)} giorni\n"
+            f"- Invite link impostato: {invite_set}\n"
+            f"- Atrio/template uscita configurati: {atrio_set}"
         )
 
     def _format_excluded_roles(self, guild: discord.Guild, cfg: dict[str, Any]) -> str:
         role_ids = cfg.get("excluded_role_ids") or []
         if not role_ids:
-            return "Nessuno"
-        labels: list[str] = []
+            return "- Nessuno"
+        lines: list[str] = []
         for role_id in sorted(int(r) for r in role_ids):
             role = guild.get_role(role_id)
-            labels.append(role.mention if role else f"ID:{role_id}")
-        return "\n".join(f"• {label}" for label in labels)
+            if role:
+                lines.append(f"- {role.name} (<@&{role_id}>)")
+            else:
+                lines.append(f"- ruolo_sconosciuto (ID:{role_id})")
+        return "\n".join(lines)
 
     def _format_role_policies(self, guild: discord.Guild, rows: list[Any]) -> str:
         if not rows:
-            return "• Nessuna policy ruolo configurata."
+            return "- Nessuna policy ruolo configurata."
         lines: list[str] = []
-        for row in rows[:8]:
+        for row in rows:
             policy = self._parse_policy_json(row["policy_json"])
             role_id = int(str(row["role_id"]))
             role = guild.get_role(role_id)
-            role_label = role.mention if role else f"ruolo {role_id}"
+            role_label = f"{role.name} (<@&{role_id}>)" if role else f"ruolo_sconosciuto (ID:{role_id})"
             lines.append(
-                f"• **{role_label}** (prio {int(row['priority'])}): inattività {policy.get('inactive_days', 30)}g · "
-                f"finestra {policy.get('window_days', 30)}g · min {policy.get('min_messages', 1)} · {str(policy.get('mode', 'OR')).upper()}"
+                f"- {role_label}: prio {int(row['priority'])}, inattivita {policy.get('inactive_days', 30)}g, "
+                f"finestra {policy.get('window_days', 30)}g, min {policy.get('min_messages', 1)}, "
+                f"{str(policy.get('mode', 'OR')).upper()}, min_age {policy.get('min_account_age_days', 0)}g"
             )
-        if len(rows) > 8:
-            lines.append(f"• …altre {len(rows) - 8} policy ruolo")
         return "\n".join(lines)
 
     async def _collect_expired_grace_users(
