@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import discord
+from zoneinfo import ZoneInfo
 from discord import app_commands
 
 from app.plugins.commands_modular.command_helpers import describe_placeholders
@@ -13,8 +14,8 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.services.discord_embed_utils import FIELD_MAX, truncate
 
 PERM = "barcellometro.inattivi.config"
-TEMPLATE_HELP = "Placeholder: {user},{username},{display_name},...,{reason}. Es: {display_name}, {days_inactive}g."
-_ = describe_placeholders()
+TEMPLATE_HELP = f"Placeholder supportati: {describe_placeholders()} Es: {{display_name}}, {{days_inactive}}g."
+ROME = ZoneInfo("Europe/Rome")
 
 
 def _normalize_mode(mode: str) -> str:
@@ -324,6 +325,49 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
             await interaction.response.send_message(embed=embed, ephemeral=True)
         else:
             await interaction.response.send_message(embed=embed, ephemeral=True, file=extra_file)
+
+    @inattivi_group.command(name="grace_users", description="Mostra utenti avvisati ancora in grace period")
+    async def inattivi_grace_users(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        if ctx.inactive_members_moderation is None:
+            await interaction.response.send_message("❌ Servizio inattivi non disponibile.", ephemeral=True)
+            return
+        guild_id = str(interaction.guild_id)
+        inactive, _, cfg = await ctx.inactive_members_moderation.scan_inactive_members(guild_id)
+        states = await ctx.database.fetch_inactivity_user_states(guild_id, [str(c.member.id) for c in inactive])
+        grace_days = int((cfg or {}).get("grace_days_after_reminder", 7))
+        now = datetime.now(timezone.utc)
+        lines: list[str] = []
+
+        for candidate in inactive:
+            state = states.get(str(candidate.member.id))
+            if not state or not state["last_reminder_at"]:
+                continue
+            try:
+                reminder_at = datetime.fromisoformat(str(state["last_reminder_at"]).replace("Z", "+00:00"))
+                if reminder_at.tzinfo is None:
+                    reminder_at = reminder_at.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            if candidate.last_message_ts and candidate.last_message_ts > str(state["last_reminder_at"]):
+                continue
+            delta = now - reminder_at
+            if delta >= timedelta(days=grace_days):
+                continue
+            remaining = timedelta(days=grace_days) - delta
+            remaining_days = int(remaining.total_seconds() // 86400)
+            remaining_hours = int((remaining.total_seconds() % 86400) // 3600)
+            reminded_fmt = reminder_at.astimezone(ROME).strftime("%d/%m %H:%M")
+            display = getattr(candidate.member, "display_name", getattr(candidate.member, "name", "sconosciuto"))
+            lines.append(
+                f"• {candidate.member.mention} ({display}) — 🔔 {reminded_fmt} · restano {remaining_days}g {remaining_hours}h"
+            )
+
+        embed = discord.Embed(title="⏳ Utenti in grace period", colour=discord.Colour.blue())
+        embed.add_field(name="Totale", value=str(len(lines)), inline=True)
+        embed.add_field(name="Dettaglio", value="\n".join(lines)[:FIELD_MAX] if lines else "Nessun utente in grace.", inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @inattivi_group.command(name="run", description="Esegui subito scansione inattivi e pannello moderazione")
     async def inattivi_run(interaction: discord.Interaction) -> None:
