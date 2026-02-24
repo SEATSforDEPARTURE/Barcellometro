@@ -429,9 +429,10 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         if interaction.guild_id is None or interaction.channel is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         campaign = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
         if not campaign:
-            await interaction.response.send_message("Campagna non trovata.", ephemeral=True)
+            await interaction.followup.send("Campagna non trovata.", ephemeral=True)
             return
         if not isinstance(campaign, dict) and hasattr(campaign, "keys"):
             campaign = dict(campaign)
@@ -444,11 +445,11 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             interaction.channel_id,
         )
         if str(campaign.get("type")) != "AI_PROMPT":
-            await interaction.response.send_message("Questo test è solo per AI_PROMPT.", ephemeral=True)
+            await interaction.followup.send("Questo test è solo per AI_PROMPT.", ephemeral=True)
             return
 
         if ctx.message_scheduler is None:
-            await interaction.response.send_message("Servizio scheduler non disponibile.", ephemeral=True)
+            await interaction.followup.send("Servizio scheduler non disponibile.", ephemeral=True)
             return
 
         logger.info("prompt_test campaign_id=%s used_service=%s", id, "message_scheduler")
@@ -465,13 +466,13 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             reason,
         )
         if not rendered_text:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"Impossibile generare il test ({reason or 'no_text'}).",
                 ephemeral=True,
             )
             return
 
-        await interaction.response.send_message("Test inviato.", ephemeral=True)
+        await interaction.followup.send("Test inviato.", ephemeral=True)
         if isinstance(interaction.channel, discord.abc.Messageable):
             await interaction.channel.send(content=rendered_text)
 
