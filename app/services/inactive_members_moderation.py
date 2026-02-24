@@ -372,16 +372,36 @@ class InactiveMembersModerationService:
         jump_url = f"https://discord.com/channels/{guild_id}/{candidate.last_channel_id}/{candidate.last_message_id}"
         return f"{prefix}💬 Ultimo: {last_fmt} in \"{channel_name}\" 🕒 {candidate.days_inactive}g fa ({jump_url})"
 
-    def _format_policy_default(self, policy: dict[str, Any]) -> str:
+    def _format_policy_default(self, policy: dict[str, Any], cfg: dict[str, Any]) -> str:
         mode = str(policy.get("mode", "OR")).upper()
+        auto_enabled = "ON" if bool(cfg.get("auto_enabled")) else "OFF"
+        invite_set = "sì" if bool(cfg.get("invite_url")) else "no"
+        atrio_set = "sì" if bool(cfg.get("atrio_channel_id") or cfg.get("atrio_template")) else "no"
         return (
             f"• Inattività: **{policy.get('inactive_days', 30)} giorni**\n"
             f"• Finestra analisi: **{policy.get('window_days', 30)} giorni**\n"
             f"• Min messaggi: **{policy.get('min_messages', 1)}**\n"
             f"• Logica: **{mode}**\n"
             "  ↳ OR: basta 1 condizione (pochi msg OPPURE assenza lunga)\n"
-            "  ↳ AND: servono entrambe (pochi msg E assenza lunga)"
+            "  ↳ AND: servono entrambe (pochi msg E assenza lunga)\n"
+            f"• Grace period: **{cfg.get('grace_days_after_reminder', 7)} giorni**\n"
+            f"• Ban temporaneo: **{cfg.get('ban_days', 7)} giorni**\n"
+            f"• Nuovi utenti ignorati per: **{cfg.get('new_user_ignore_days', 0)} giorni**\n"
+            f"• Modalità auto kick: **{auto_enabled}**\n"
+            f"• Reminder cooldown: **{cfg.get('reminder_cooldown_days', 14)} giorni**\n"
+            f"• Invite link impostato: **{invite_set}**\n"
+            f"• Atrio/template uscita configurati: **{atrio_set}**"
         )
+
+    def _format_excluded_roles(self, guild: discord.Guild, cfg: dict[str, Any]) -> str:
+        role_ids = cfg.get("excluded_role_ids") or []
+        if not role_ids:
+            return "Nessuno"
+        labels: list[str] = []
+        for role_id in sorted(int(r) for r in role_ids):
+            role = guild.get_role(role_id)
+            labels.append(role.mention if role else f"ID:{role_id}")
+        return "\n".join(f"• {label}" for label in labels)
 
     def _format_role_policies(self, guild: discord.Guild, rows: list[Any]) -> str:
         if not rows:
@@ -504,8 +524,9 @@ class InactiveMembersModerationService:
         safe_add_field(embed, name="Membri analizzati", value=str(considered), inline=True)
         safe_add_field(embed, name="Inattivi trovati", value=str(len(inactive)), inline=True)
         safe_add_field(embed, name="Stato reminder", value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
-        safe_add_field(embed, name="📄 Policy di base", value=self._format_policy_default(policy), inline=False)
+        safe_add_field(embed, name="📄 Policy di base", value=self._format_policy_default(policy, cfg or {}), inline=False)
         safe_add_field(embed, name="🏷️ Policy per ruoli", value=self._format_role_policies(guild, role_policy_rows), inline=False)
+        safe_add_field(embed, name="⛔ Ruoli esclusi dal controllo inattivi", value=self._format_excluded_roles(guild, cfg or {}), inline=False)
 
         all_lines = [
             self._format_inactive_preview_line(i, candidate, state=states.get(str(candidate.member.id)), cfg=cfg)

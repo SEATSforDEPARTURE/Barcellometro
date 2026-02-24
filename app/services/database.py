@@ -2576,6 +2576,12 @@ class DatabaseService:
             (guild_id, user_id, ts_iso),
         )
 
+    async def list_inactivity_banned_states(self, guild_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT user_id, last_kick_at FROM inactivity_user_state WHERE guild_id = ? AND last_kick_at IS NOT NULL",
+            (guild_id,),
+        )
+
     async def mark_user_reminded(self, guild_id: str, user_id: str, ts_iso: str) -> None:
         await self.execute(
             """

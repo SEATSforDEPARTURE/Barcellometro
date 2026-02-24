@@ -69,6 +69,52 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         except Exception as exc:
             return f"[Errore render template: {exc}]\n{template}"
 
+    def _format_remaining(deadline: datetime, now: datetime) -> str:
+        delta = deadline - now
+        if delta.total_seconds() <= 0:
+            return "scaduto"
+        total = int(delta.total_seconds())
+        days = total // 86400
+        hours = (total % 86400) // 3600
+        minutes = max(1, (total % 3600) // 60)
+        if days > 0:
+            return f"-{days}g {hours}h"
+        if hours > 0:
+            return f"-{hours}h {minutes}m"
+        return f"-{minutes}m"
+
+    async def _send_lines_with_txt(interaction: discord.Interaction, *, title: str, lines: list[str], txt_prefix: str) -> None:
+        ts_name = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+        payload = "\n".join(lines) if lines else "Nessun risultato."
+        txt_file = discord.File(io.BytesIO(payload.encode("utf-8")), filename=f"{txt_prefix}_{ts_name}.txt")
+
+        if not lines:
+            embed = discord.Embed(title=title, description="Nessun risultato.", colour=discord.Colour.blue())
+            await interaction.response.send_message(embed=embed, ephemeral=True, file=txt_file)
+            return
+
+        chunks: list[str] = []
+        current = ""
+        for line in lines:
+            add = line if not current else f"\n{line}"
+            if len(current) + len(add) > 3900:
+                chunks.append(current)
+                current = line
+            else:
+                current += add
+        if current:
+            chunks.append(current)
+
+        embeds: list[discord.Embed] = []
+        total = len(chunks)
+        for i, chunk in enumerate(chunks[:10], start=1):
+            suffix = f" ({i}/{total})" if total > 1 else ""
+            embeds.append(discord.Embed(title=f"{title}{suffix}", description=chunk, colour=discord.Colour.blue()))
+        if total > 10:
+            embeds[-1].add_field(name="Nota", value="Lista completa in allegato .txt", inline=False)
+
+        await interaction.response.send_message(embeds=embeds, ephemeral=True, file=txt_file)
+
     @inattivi_group.command(name="on", description="Abilita gestione inattivi")
     async def inattivi_on(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
@@ -338,7 +384,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         states = await ctx.database.fetch_inactivity_user_states(guild_id, [str(c.member.id) for c in inactive])
         grace_days = int((cfg or {}).get("grace_days_after_reminder", 7))
         now = datetime.now(timezone.utc)
-        lines: list[str] = []
+        rows: list[tuple[datetime, str]] = []
 
         for candidate in inactive:
             state = states.get(str(candidate.member.id))
@@ -352,22 +398,64 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
                 continue
             if candidate.last_message_ts and candidate.last_message_ts > str(state["last_reminder_at"]):
                 continue
-            delta = now - reminder_at
-            if delta >= timedelta(days=grace_days):
-                continue
-            remaining = timedelta(days=grace_days) - delta
-            remaining_days = int(remaining.total_seconds() // 86400)
-            remaining_hours = int((remaining.total_seconds() % 86400) // 3600)
+            deadline = reminder_at + timedelta(days=grace_days)
+            remaining = _format_remaining(deadline, now)
             reminded_fmt = reminder_at.astimezone(ROME).strftime("%d/%m %H:%M")
-            display = getattr(candidate.member, "display_name", getattr(candidate.member, "name", "sconosciuto"))
-            lines.append(
-                f"• {candidate.member.mention} ({display}) — 🔔 {reminded_fmt} · restano {remaining_days}g {remaining_hours}h"
-            )
+            remain_txt = remaining if remaining == "scaduto" else f"{remaining} alla scad."
+            rows.append((deadline, f"• {candidate.member.mention} -🔔 Avv. il {reminded_fmt} ({remain_txt})"))
 
-        embed = discord.Embed(title="⏳ Utenti in grace period", colour=discord.Colour.blue())
-        embed.add_field(name="Totale", value=str(len(lines)), inline=True)
-        embed.add_field(name="Dettaglio", value="\n".join(lines)[:FIELD_MAX] if lines else "Nessun utente in grace.", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        rows.sort(key=lambda x: x[0])
+        await _send_lines_with_txt(
+            interaction,
+            title="⏳ Utenti grace inattivi",
+            lines=[line for _, line in rows],
+            txt_prefix="inattivi_grace_users",
+        )
+
+    @inattivi_group.command(name="banned_users", description="Mostra utenti con ban temporaneo e quando scade")
+    async def inattivi_banned_users(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message("❌ Guild non disponibile.", ephemeral=True)
+            return
+
+        guild_id = str(interaction.guild_id)
+        cfg_row = await ctx.database.get_inactivity_config(guild_id)
+        cfg = dict(cfg_row) if cfg_row else {}
+        ban_days = int(cfg.get("ban_days", 7))
+        now = datetime.now(timezone.utc)
+        rows = await ctx.database.list_inactivity_banned_states(guild_id)
+        items: list[tuple[datetime, str]] = []
+
+        for row in rows:
+            raw = row["last_kick_at"]
+            if not raw:
+                continue
+            try:
+                kicked_at = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if kicked_at.tzinfo is None:
+                    kicked_at = kicked_at.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            deadline = kicked_at + timedelta(days=ban_days)
+            if deadline <= now:
+                continue
+            remaining = _format_remaining(deadline, now)
+            user_id = int(str(row["user_id"]))
+            member = guild.get_member(user_id)
+            mention = member.mention if member else f"<@{user_id}>"
+            kicked_fmt = kicked_at.astimezone(ROME).strftime("%d/%m %H:%M")
+            items.append((deadline, f"• {mention} -🚫 Ban. il {kicked_fmt} ({remaining} alla scad.)"))
+
+        items.sort(key=lambda x: x[0])
+        await _send_lines_with_txt(
+            interaction,
+            title="🚫 Ban temporanei attivi",
+            lines=[line for _, line in items],
+            txt_prefix="inattivi_banned_users",
+        )
 
     @inattivi_group.command(name="run", description="Esegui subito scansione inattivi e pannello moderazione")
     async def inattivi_run(interaction: discord.Interaction) -> None:
