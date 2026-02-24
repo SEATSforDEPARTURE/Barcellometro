@@ -11,7 +11,7 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from typing import Any
+from typing import Any, Literal
 
 import discord
 
@@ -22,6 +22,7 @@ from app.services.config_file_loader import load_json_file
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope
+from app.services.qna_session_store import QnaSession, QnaSessionStore
 from app.utils.pii import contains_pii
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class TriggerEngineService:
         self._barcello_window_override_cache: dict[str, int] = {}
         self._barcello_window_override_cache_fingerprint: str | None = None
         self._barcello_last_applied_window: dict[str, int] = {}
+        self._qna_sessions = QnaSessionStore(ttl_minutes=60)
 
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
@@ -97,7 +99,35 @@ class TriggerEngineService:
             return
         await interaction.response.send_message(text, ephemeral=ephemeral)
 
-    async def handle_qna_question(self, interaction: discord.Interaction, question: str) -> None:
+    def _trim_qna_history(self, history: list[dict[str, str]], *, max_messages: int = 16) -> list[dict[str, str]]:
+        if max_messages <= 0:
+            return []
+        trimmed = history[-max_messages:]
+        while trimmed and str(trimmed[0].get("role") or "") == "assistant":
+            trimmed = trimmed[1:]
+        return trimmed
+
+    async def handle_qna_question(
+        self,
+        interaction: discord.Interaction,
+        question: str,
+        *,
+        scope_override: Literal["channel", "global"] | None = None,
+    ) -> None:
+        mapped_scope: Literal["channel_qna", "general_llm"] | None = None
+        if scope_override == "global":
+            mapped_scope = "general_llm"
+        elif scope_override == "channel":
+            mapped_scope = "channel_qna"
+        await self.route_qna(interaction, question, scope=mapped_scope)
+
+    async def route_qna(
+        self,
+        interaction: discord.Interaction,
+        question: str,
+        *,
+        scope: Literal["channel_qna", "general_llm"] | None = None,
+    ) -> None:
         question_text = (question or "").strip()
         if interaction.guild_id is None or interaction.channel_id is None:
             await self._qna_reply(interaction, "Usa questo comando in un canale.", ephemeral=True)
@@ -110,10 +140,14 @@ class TriggerEngineService:
 
         guild_id = str(interaction.guild_id)
         channel_id = str(interaction.channel_id)
-        if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
+        user_id = str(interaction.user.id)
+        route_scope = scope or "channel_qna"
+        logger.info("qna_dispatch scope=%s guild=%s channel=%s user=%s", route_scope, guild_id, channel_id, user_id)
+
+        if route_scope == "channel_qna" and not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
             await self._qna_reply(interaction, "Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
             return
-        if is_out_of_scope_question(question_text):
+        if route_scope == "channel_qna" and is_out_of_scope_question(question_text):
             await self._qna_reply(interaction, "Posso rispondere solo su questo canale.", ephemeral=True)
             return
         if is_sensitive_question(question_text):
@@ -137,7 +171,7 @@ class TriggerEngineService:
 
         limit = await self._resolve_qna_limit(interaction, profile=profile, limits=limits)
         window_date = datetime.now(ROME_TZ).date().isoformat()
-        used = await self._database.get_usage(guild_id, str(interaction.user.id), "qna", window_date)
+        used = await self._database.get_usage(guild_id, user_id, "qna", window_date)
         if used >= limit:
             if profile == "role1":
                 delta = max(0, limit_pro - limit_plus)
@@ -157,43 +191,71 @@ class TriggerEngineService:
             question_clean = f"{question_clean}?"
         public_content = f"{interaction.user.mention} **chiede:** {question_clean}"
 
-        scope = await self._decide_qna_scope(question_clean)
-        answer = await self._handle_qna(
-            scope=scope,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            question=question_clean,
-            source=interaction,
-        )
-        if answer is None:
-            await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
-            return
-        if not answer.get("can_answer"):
-            await self._qna_reply(interaction, str(answer.get("refusal_reason") or "Non posso rispondere."), ephemeral=True)
-            return
-        text = str(answer.get("answer") or "").strip()
-        if not text:
-            await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
-            return
+        if route_scope == "general_llm":
+            history = [{"role": "user", "content": question_clean}]
+            text = await self._ask_general_answer(question_clean, history=history)
+            if not text:
+                await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
+                return
+            history.append({"role": "assistant", "content": text})
+            history = self._trim_qna_history(history)
+            evidence_pack: list[dict[str, str]] = []
+        else:
+            answer = await self._handle_qna(
+                scope="channel",
+                guild_id=guild_id,
+                channel_id=channel_id,
+                question=question_clean,
+                source=interaction,
+            )
+            if answer is None:
+                await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
+                return
+            if not answer.get("can_answer"):
+                await self._qna_reply(
+                    interaction,
+                    str(answer.get("refusal_reason") or "In questo canale non ho QnA salvate su questa domanda. Se vuoi una risposta generale usa /domanda generale: ..."),
+                    ephemeral=True,
+                )
+                return
+            text = str(answer.get("answer") or "").strip()
+            if not text:
+                await self._qna_reply(
+                    interaction,
+                    "In questo canale non ho QnA salvate su questa domanda. Se vuoi una risposta generale usa /domanda generale: ...",
+                    ephemeral=True,
+                )
+                return
 
-        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
-        if not isinstance(evidence_pack, list):
-            evidence_pack = []
+            evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
+            if not isinstance(evidence_pack, list):
+                evidence_pack = []
 
         if contains_pii(text):
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
             return
 
-        embed = self._build_qna_embed(question_clean, text, evidence_pack)
+        render_mode: Literal["evidence", "plain"] = "plain" if route_scope == "general_llm" else "evidence"
+        logger.info("qna_render mode=%s scope=%s evidence_items=%d", render_mode, route_scope, len(evidence_pack))
+        embed = self._build_qna_embed(question_clean, text, evidence_pack, mode=render_mode)
 
         await self._database.increment_usage(
             guild_id,
-            str(interaction.user.id),
+            user_id,
             "qna",
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await interaction.followup.send(content=public_content, embed=embed, ephemeral=False)
+        sent_message = await interaction.followup.send(content=public_content, embed=embed, ephemeral=False, wait=True)
+        if route_scope == "general_llm":
+            message_id_raw = getattr(sent_message, "id", None)
+            if message_id_raw is not None:
+                try:
+                    anchor_key = (int(guild_id), int(channel_id), int(message_id_raw))
+                except (TypeError, ValueError):
+                    anchor_key = None
+                if anchor_key is not None:
+                    self._qna_sessions.set(anchor_key, QnaSession(scope="general_llm", history=history))
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         try:
@@ -202,6 +264,24 @@ class TriggerEngineService:
             content = (message.content or "").strip()
             if not content:
                 return
+
+            if message.reference and message.reference.message_id and message.channel and message.guild:
+                anchor_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
+                session = self._qna_sessions.get(anchor_key)
+                if session and session.scope == "general_llm":
+                    session.history.append({"role": "user", "content": content})
+                    session.history = self._trim_qna_history(session.history)
+                    answer_text = await self._ask_general_answer(content, history=session.history)
+                    if answer_text:
+                        session.history.append({"role": "assistant", "content": answer_text})
+                        session.history = self._trim_qna_history(session.history)
+                        reply_message = await message.reply(answer_text, mention_author=False)
+                        base_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
+                        new_anchor_key = (int(message.guild.id), int(message.channel.id), int(reply_message.id))
+                        self._qna_sessions.set(base_key, session)
+                        self._qna_sessions.set(new_anchor_key, session)
+                        logger.info("qna_session_hit=true scope=general_llm history_len=%s", len(session.history))
+                    return
 
             question = content
             if question.lower().startswith("domanda:"):
@@ -253,6 +333,14 @@ class TriggerEngineService:
                 question_clean = f"{question_clean}?"
 
             scope = await self._decide_qna_scope(question_clean)
+            logger.info(
+                "qna scope=%s guild_id=%s channel_id=%s user_id=%s len(question)=%s",
+                scope,
+                guild_id,
+                channel_id,
+                str(message.author.id),
+                len(question_clean),
+            )
             answer = await self._handle_qna(
                 scope=scope,
                 guild_id=guild_id,
@@ -278,7 +366,7 @@ class TriggerEngineService:
                 return
 
             await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
-            embed = self._build_qna_embed(question_clean, text, evidence_pack)
+            embed = self._build_qna_embed(question_clean, text, evidence_pack, mode="evidence")
             await message.reply(
                 content=f"{message.author.mention} **chiede:** {question_clean}",
                 embed=embed,
@@ -1161,11 +1249,11 @@ class TriggerEngineService:
             return {"can_answer": True, "answer": cached, "refusal_reason": None, "evidence_pack": []}
 
         if scope == "global":
-            answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
-            if answer and answer.get("can_answer"):
-                await self._database.set_cache(cache_key, str(answer.get("answer") or ""), 7 * 24 * 3600)
-                answer["evidence_pack"] = []
-            return answer
+            text_answer = await self._ask_general_answer(question)
+            if text_answer:
+                await self._database.set_cache(cache_key, text_answer, 7 * 24 * 3600)
+                return {"can_answer": True, "answer": text_answer, "refusal_reason": None, "evidence_pack": []}
+            return None
 
         assert channel_bundle is not None
         empty_reply = str(channel_bundle.get("empty_reply") or "").strip()
@@ -1201,10 +1289,10 @@ class TriggerEngineService:
 
         if channel_answer and channel_answer.get("can_answer"):
             return channel_answer
-        global_answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
-        if not global_answer or not global_answer.get("can_answer"):
-            return channel_answer or global_answer
-        fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{str(global_answer.get('answer') or '').strip()}"
+        global_answer_text = await self._ask_general_answer(question)
+        if not global_answer_text:
+            return channel_answer
+        fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{global_answer_text.strip()}"
         await self._database.set_cache(f"qna:mixed:global:{normalized_question}", fallback_text, 7 * 24 * 3600)
         return {"can_answer": True, "answer": fallback_text, "refusal_reason": None, "evidence_pack": []}
 
@@ -1249,13 +1337,79 @@ class TriggerEngineService:
         scope = str(answer.get("scope") or "mixed").strip().lower()
         return scope
 
-    async def _build_qna_global_payload(self, question: str) -> str:
-        prompt = {
-            "question": question,
-            "constraints": ["risposta generale", "non includere PII", "rispondi in italiano"],
-            "output_schema": {"can_answer": "bool", "answer": "string", "refusal_reason": "string|null"},
-        }
-        return json.dumps(prompt, ensure_ascii=False)
+    def _classify_general_query_type(self, question: str) -> str:
+        q = (question or "").lower()
+        if any(token in q for token in ["meteo", "temperatura", "pioggia", "vento", "prevision"]):
+            return "weather"
+        if any(token in q for token in ["notizie", "news", "ultime", "breaking", "oggi nel mondo"]):
+            return "news"
+        if any(token in q for token in ["prezzo", "costo", "quotazione", "btc", "bitcoin", "euro oggi"]):
+            return "prices"
+        if any(token in q for token in ["risultato", "partita", "classifica", "serie a", "champions"]):
+            return "sports"
+        if any(token in q for token in ["evento", "concerto", "fiera", "programma", "quando si tiene"]):
+            return "events"
+        return "generic"
+
+    def _needs_web_search(self, question: str) -> bool:
+        query_type = self._classify_general_query_type(question)
+        if query_type in {"weather", "news", "prices", "sports", "events"}:
+            return True
+        q = (question or "").lower()
+        realtime_tokens = ["oggi", "domani", "adesso", "in tempo reale", "attuale", "ultim", "live"]
+        return any(token in q for token in realtime_tokens)
+
+    async def _ask_general_answer(self, question: str, history: list[dict[str, str]] | None = None) -> str | None:
+        query_type = self._classify_general_query_type(question)
+        use_web = self._needs_web_search(question)
+        logger.info("general_llm_web=%s query_type=%s", use_web, query_type)
+
+        if use_web:
+            try:
+                if hasattr(self._ai, "ask_general_with_web"):
+                    text_web = await self._ai.ask_general_with_web(question, self._general_persona_system_prompt(), history or [])
+                    if text_web:
+                        return text_web
+            except Exception:  # noqa: BLE001
+                logger.exception("general_llm web_search failed", extra={"query_type": query_type})
+
+            offline = await self._ask_general_llm(question, history=history)
+            if not offline:
+                return None
+            return f"{offline}\n\n_(Nota: non sono riuscito a verificare fonti web affidabili in tempo reale.)_"
+
+        return await self._ask_general_llm(question, history=history)
+
+    def _general_persona_system_prompt(self) -> str:
+        return (
+            "Sei Barcellometro, assistente della community. "
+            "Rispondi in modo utile, naturale, in italiano. "
+            "Quando usi dati dal web cita le fonti in modo chiaro."
+        )
+
+    async def _ask_general_llm(self, question: str, history: list[dict[str, str]] | None = None) -> str | None:
+        if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
+            return None
+        model = self._ai.get_model("summary") or "gpt-4o-mini"
+        provider = "openai"
+        logger.info("qna_llm_called=%s model=%s", True, model)
+        logger.info("qna_general_llm_called=true provider=%s model=%s", provider, model)
+
+        persona = self._general_persona_system_prompt()
+        if hasattr(self._ai, "ask_general"):
+            try:
+                return await self._ai.ask_general(question, persona, history or [])
+            except Exception:  # noqa: BLE001
+                logger.exception("general_llm offline helper failed")
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": persona}]
+        if history:
+            messages.extend(history)
+        else:
+            messages.append({"role": "user", "content": question})
+        response = await self._ai.client().responses.create(model=model, input=messages)
+        text = str(getattr(response, "output_text", "") or "").strip()
+        return text or None
 
     def _normalize_question(self, question: str) -> str:
         return re.sub(r"\s+", " ", question.strip().lower())
@@ -1415,9 +1569,21 @@ class TriggerEngineService:
         bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
         return tier_limit + max(0, bonus)
 
-    def _build_qna_embed(self, question: str, answer_text: str, evidence: list[dict[str, str]]) -> discord.Embed:
+    def _build_qna_embed(
+        self,
+        question: str,
+        answer_text: str,
+        evidence: list[dict[str, str]],
+        *,
+        mode: Literal["evidence", "plain"] = "evidence",
+    ) -> discord.Embed:
+        if mode == "plain":
+            normalized = re.sub(r"\s+", " ", (answer_text or "").strip())
+            description = self._truncate_embed_description(normalized)
+        else:
+            description = self._truncate_embed_description(self._bulletize_answer(question, answer_text, evidence))
         embed = discord.Embed(
-            description=self._truncate_embed_description(self._bulletize_answer(question, answer_text, evidence)),
+            description=description,
             timestamp=datetime.now(timezone.utc),
         )
         embed.set_footer(text="Barcellometro Q&A")
@@ -1756,6 +1922,8 @@ class TriggerEngineService:
         ]
         cache_ttl = int(budgets.get("cache_ttl") or 45 * 60)
         empty_reply = ""
+        if not evidence_pack and not targets:
+            empty_reply = "Non ho trovato QnA salvate per questo canale."
 
         if targets:
             per_target_messages: dict[str, list[dict[str, str]]] = {}
