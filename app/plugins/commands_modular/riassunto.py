@@ -1815,7 +1815,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             )
             return
 
-    @riassunto_group.command(name="ultimi", description="Riassunto degli ultimi N minuti/ore/giorni/settimane")
+    @riassunto_group.command(name="ultimi", description="Riassunto ultimi N periodi")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo")
     @app_commands.choices(
         unita=[
@@ -1853,7 +1853,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         window = resolve_ieri_window()
         await _run_riassunto(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ieri", granularity_hint="days")
 
-    @riassunto_group.command(name="range", description="Riassunto di un range custom (data+ora italiane)")
+    @riassunto_group.command(name="range", description="Riassunto per intervallo")
     @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)")
     async def riassunto_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)

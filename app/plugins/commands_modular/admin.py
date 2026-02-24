@@ -8,7 +8,7 @@ from app.plugins.commands_modular.permissions import check_permission
 
 
 def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext) -> None:
-    @barcellometro_group.command(name="check", description="Abilita o disabilita la raccolta eventi nel canale")
+    @barcellometro_group.command(name="check", description="Attiva/disattiva raccolta eventi")
     @app_commands.describe(state="on/off")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
     async def check_command(interaction: discord.Interaction, state: app_commands.Choice[str]) -> None:
@@ -133,7 +133,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
             ephemeral=True,
         )
 
-    @barcellometro_group.command(name="calibrate", description="Calibra automaticamente i pesi del barcello")
+    @barcellometro_group.command(name="calibrate", description="Calibra pesi barcello")
     async def barcellometro_calibrate(interaction: discord.Interaction) -> None:
         profile, _ = await ctx.entitlements.resolve_profile_with_role_id(interaction.user)
         if profile != "mod":
@@ -147,7 +147,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
             message = f"Calibrazione non aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
         await interaction.followup.send(message, ephemeral=True)
 
-    @barcellometro_group.command(name="insights_config", description="Configura curiosità utenti con istruzione naturale")
+    @barcellometro_group.command(name="insights_config", description="Configura curiosità utenti")
     async def insights_config(interaction: discord.Interaction, testo: str) -> None:
         if not await check_permission(interaction, "barcellometro.ai", ctx):
             return
@@ -160,7 +160,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
             ephemeral=True,
         )
 
-    @barcellometro_group.command(name="insights_status", description="Mostra stato e configurazione curiosità utenti")
+    @barcellometro_group.command(name="insights_status", description="Stato curiosità utenti")
     async def insights_status(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in un canale.", ephemeral=True)

@@ -120,7 +120,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         await interaction.response.send_message("Cap giornaliero disabilitato.", ephemeral=True)
 
     @messaggi_group.command(name="cap_set", description="Imposta cap giornaliero")
-    @app_commands.describe(n="Numero massimo invii per canale")
+    @app_commands.describe(n="Max invii canale")
     async def messaggi_cap_set(interaction: discord.Interaction, n: int) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.cap.set", ctx):
             return
@@ -130,7 +130,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.set_setting("messages_daily_cap", str(n))
         await interaction.response.send_message(f"Cap giornaliero impostato a {n}.", ephemeral=True)
 
-    @messaggi_group.command(name="on", description="Abilita i messaggi automatici nel canale corrente")
+    @messaggi_group.command(name="on", description="Abilita messaggi nel canale")
     async def messaggi_on(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.on", ctx):
             return
@@ -138,9 +138,9 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             await interaction.response.send_message("Usa il comando in un canale della guild.", ephemeral=True)
             return
         await ctx.database.set_message_channel_enabled(str(interaction.guild_id), str(interaction.channel_id), True)
-        await interaction.response.send_message("Messaggi community abilitati in questo canale.", ephemeral=True)
+        await interaction.response.send_message("Messaggi auto abilitati in questo canale.", ephemeral=True)
 
-    @messaggi_group.command(name="off", description="Disabilita i messaggi automatici nel canale corrente")
+    @messaggi_group.command(name="off", description="Disabilita messaggi nel canale")
     async def messaggi_off(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.off", ctx):
             return
@@ -148,9 +148,9 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             await interaction.response.send_message("Usa il comando in un canale della guild.", ephemeral=True)
             return
         await ctx.database.set_message_channel_enabled(str(interaction.guild_id), str(interaction.channel_id), False)
-        await interaction.response.send_message("Messaggi community disabilitati in questo canale.", ephemeral=True)
+        await interaction.response.send_message("Messaggi auto disabilitati in questo canale.", ephemeral=True)
 
-    @messaggi_group.command(name="status", description="Mostra lo stato dei messaggi automatici nel canale")
+    @messaggi_group.command(name="status", description="Stato messaggi nel canale")
     async def messaggi_status(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.status", ctx):
             return
@@ -167,7 +167,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="aggiungi", description="Aggiungi una nuova campagna custom")
     @app_commands.describe(
-        testo="Fallback (usato se manca la variante o se IGNORE_BARCELLO)",
+        testo="Testo fallback",
         testo_verde="Testo per mood verde",
         testo_giallo="Testo per mood giallo",
         testo_rosso="Testo per mood rosso",
@@ -178,7 +178,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         jitter_sec="Jitter opzionale in secondi",
         solo_se_inattivo_min="Invia solo se inattivo da X minuti",
         embed_title="Titolo embed opzionale",
-        embed_color="Colore embed opzionale (#RRGGBB, RRGGBB, 0xRRGGBB)",
+        embed_color="Colore embed opzionale",
     )
     @app_commands.choices(mood_mode=MOOD_CHOICES)
     async def messaggi_aggiungi(
@@ -348,7 +348,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             ephemeral=True,
         )
 
-    @messaggi_group.command(name="test", description="Invia subito il messaggio della campagna")
+    @messaggi_group.command(name="test", description="Invia campagna ora")
     @app_commands.describe(id="ID campagna")
     async def messaggi_test(interaction: discord.Interaction, id: int) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.test", ctx):

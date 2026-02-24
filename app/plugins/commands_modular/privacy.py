@@ -77,8 +77,8 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
             )
         )
 
-    @privacy_group.command(name="on", description="Attiva privacy (disconnette il bot dal vocale)")
-    @app_commands.describe(voice_channel="Canale vocale (opzionale)")
+    @privacy_group.command(name="on", description="Attiva privacy vocale")
+    @app_commands.describe(voice_channel="Canale vocale")
     async def privacy_on(
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,
@@ -105,8 +105,8 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
             ephemeral=True,
         )
 
-    @privacy_group.command(name="off", description="Disattiva privacy (riabilita auto-join)")
-    @app_commands.describe(voice_channel="Canale vocale (opzionale)")
+    @privacy_group.command(name="off", description="Disattiva privacy vocale")
+    @app_commands.describe(voice_channel="Canale vocale")
     async def privacy_off(
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,
@@ -135,7 +135,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         )
 
     @privacy_group.command(name="status", description="Mostra lo stato privacy")
-    @app_commands.describe(voice_channel="Canale vocale (opzionale)")
+    @app_commands.describe(voice_channel="Canale vocale")
     async def privacy_status(
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,

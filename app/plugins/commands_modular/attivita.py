@@ -565,7 +565,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
     async def attivita_ieri(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
         await _send_activity_report(interaction, resolve_ieri_window(), utente)
 
-    @attivita_group.command(name="ultimi", description="Report attività ultimi N minuti/ore/giorni/settimane")
+    @attivita_group.command(name="ultimi", description="Report attività ultimi N periodi")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", utente="Utente da analizzare (opzionale)")
     @app_commands.choices(
         unita=[

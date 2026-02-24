@@ -53,7 +53,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
     @app_commands.describe(
         max_mb="Massimo MB",
         max_duration_s="Durata massima in secondi",
-        discord_max_chars="Massimo caratteri per messaggio",
+        discord_max_chars="Max caratteri msg",
         queue_max="Dimensione coda",
     )
     async def audio_notes_limits_command(
