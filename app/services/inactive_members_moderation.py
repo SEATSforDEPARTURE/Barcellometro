@@ -328,7 +328,7 @@ class InactiveMembersModerationService:
             add_len = len(line) + (1 if preview_lines else 0)
             if current_len + add_len > FIELD_MAX:
                 extra_lines.extend(all_lines[idx:])
-                continue
+                break
             preview_lines.append(line)
             current_len += add_len
 

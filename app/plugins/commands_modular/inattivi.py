@@ -286,6 +286,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         if cfg is None:
             await interaction.response.send_message("Nessuna configurazione inattivi presente.", ephemeral=True)
             return
+        cfg = dict(cfg)
 
         reminder_raw = str(cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!")
         kick_raw = str(cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}")
