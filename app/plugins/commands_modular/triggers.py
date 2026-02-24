@@ -353,15 +353,24 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await _set_toggle(interaction, "prompt", "status")
 
     @prompt_group.command(name="create", description="Crea campagna AI_PROMPT")
+    @app_commands.describe(
+        embed_title="Titolo embed opzionale",
+        embed_color="Colore embed opzionale (#RRGGBB, RRGGBB, 0xRRGGBB)",
+    )
     async def prompt_create(
         interaction: discord.Interaction,
         name: str,
         time_local: str,
         interval_minutes: int,
         prompt_text: str,
+        embed_title: str | None = None,
+        embed_color: str | None = None,
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            return
+        if ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
+            await interaction.response.send_message("embed_color non valido. Usa #RRGGBB, RRGGBB oppure 0xRRGGBB.", ephemeral=True)
             return
         next_run = calculate_initial_next_run(datetime.now(timezone.utc), time_local, interval_minutes, ctx.timezone)
         campaign_id = await ctx.database.create_message_campaign(
@@ -382,6 +391,8 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             mood_mode="IGNORE_BARCELLO",
             next_run_at=next_run.isoformat(),
             created_by=str(interaction.user.id),
+            embed_title=embed_title,
+            embed_color=embed_color,
         )
         await interaction.response.send_message(f"Campagna AI_PROMPT creata: {campaign_id}", ephemeral=True)
 
@@ -399,6 +410,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             "\n".join(
                 [
                     f"ID {r['id']} {'on' if r['enabled'] else 'off'} {r['name'] or '-'} ch={r['channel_id'] or '-'} next={r['next_run_at'] or '-'}"
+                    f" embed_title={r['embed_title'] or '-'} embed_color={r['embed_color'] or '-'}"
                     for r in rows
                 ]
             ),
@@ -420,6 +432,61 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             campaign_id = int(row["id"])
         await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), campaign_id)
         await interaction.response.send_message("Campagna eliminata.", ephemeral=True)
+
+    @prompt_group.command(name="test", description="Genera e invia un test AI_PROMPT")
+    @app_commands.describe(id="ID campagna")
+    async def prompt_test(interaction: discord.Interaction, id: int) -> None:
+        if not await _require_mod(interaction):
+            return
+        if interaction.guild_id is None or interaction.channel is None or interaction.channel_id is None:
+            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        campaign = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
+        if not campaign:
+            await interaction.followup.send("Campagna non trovata.", ephemeral=True)
+            return
+        if not isinstance(campaign, dict) and hasattr(campaign, "keys"):
+            campaign = dict(campaign)
+
+        logger.info(
+            "prompt_test campaign_id=%s type=%s user=%s channel=%s",
+            id,
+            campaign.get("type"),
+            interaction.user.id,
+            interaction.channel_id,
+        )
+        if str(campaign.get("type")) != "AI_PROMPT":
+            await interaction.followup.send("Questo test è solo per AI_PROMPT.", ephemeral=True)
+            return
+
+        if ctx.message_scheduler is None:
+            await interaction.followup.send("Servizio scheduler non disponibile.", ephemeral=True)
+            return
+
+        logger.info("prompt_test campaign_id=%s used_service=%s", id, "message_scheduler")
+        rendered_text, reason, debug_payload = await ctx.message_scheduler.preview_campaign_text(
+            campaign,
+            channel_id_override=str(interaction.channel_id),
+        )
+        logger.info(
+            "prompt_test campaign_id=%s user=%s channel=%s ai_called=%s reason=%s",
+            id,
+            interaction.user.id,
+            interaction.channel_id,
+            "yes" if debug_payload.get("selected_source") == "ai" else "no",
+            reason,
+        )
+        if not rendered_text:
+            await interaction.followup.send(
+                f"Impossibile generare il test ({reason or 'no_text'}).",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send("Test inviato.", ephemeral=True)
+        if isinstance(interaction.channel, discord.abc.Messageable):
+            await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
 
     @qna_group.command(name="on", description="Abilita trigger qna")
     async def qna_on(interaction: discord.Interaction) -> None:

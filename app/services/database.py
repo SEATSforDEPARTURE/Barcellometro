@@ -245,7 +245,9 @@ class DatabaseService:
                 created_by TEXT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                deleted_at TEXT NULL
+                deleted_at TEXT NULL,
+                embed_title TEXT NULL,
+                embed_color TEXT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_message_campaigns_due
@@ -467,6 +469,8 @@ class DatabaseService:
             "text_red": "TEXT NULL",
             "text_black": "TEXT NULL",
             "mood_mode": "TEXT NOT NULL DEFAULT 'AUTO'",
+            "embed_title": "TEXT NULL",
+            "embed_color": "TEXT NULL",
         }
         for name, col_def in missing.items():
             if name not in existing:
@@ -2354,6 +2358,8 @@ class DatabaseService:
         mood_mode: str,
         next_run_at: str,
         created_by: Optional[str],
+        embed_title: Optional[str] = None,
+        embed_color: Optional[str] = None,
     ) -> int:
         assert self._conn is not None
         now = datetime.now(timezone.utc).isoformat()
@@ -2362,9 +2368,9 @@ class DatabaseService:
             INSERT INTO message_campaigns (
                 guild_id, channel_id, type, name, text, text_green, text_yellow, text_red, text_black, enabled, start_time_local, interval_minutes,
                 jitter_seconds, only_if_idle_minutes, mood_mode, last_sent_at, next_run_at, created_by,
-                created_at, updated_at, deleted_at
+                created_at, updated_at, deleted_at, embed_title, embed_color
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?)
             """,
             (
                 guild_id,
@@ -2386,6 +2392,8 @@ class DatabaseService:
                 created_by,
                 now,
                 now,
+                embed_title,
+                embed_color,
             ),
         )
         await self._conn.commit()

@@ -177,6 +177,8 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         ora_inizio="Ora di inizio (HH:MM, Europe/Rome)",
         jitter_sec="Jitter opzionale in secondi",
         solo_se_inattivo_min="Invia solo se inattivo da X minuti",
+        embed_title="Titolo embed opzionale",
+        embed_color="Colore embed opzionale (#RRGGBB, RRGGBB, 0xRRGGBB)",
     )
     @app_commands.choices(mood_mode=MOOD_CHOICES)
     async def messaggi_aggiungi(
@@ -191,6 +193,8 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         mood_mode: Optional[app_commands.Choice[str]] = None,
         jitter_sec: Optional[int] = 0,
         solo_se_inattivo_min: Optional[int] = 0,
+        embed_title: Optional[str] = None,
+        embed_color: Optional[str] = None,
     ) -> None:
         if not await check_permission(interaction, "barcellometro.messaggi.aggiungi", ctx):
             return
@@ -222,6 +226,9 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         if validation_error:
             await interaction.response.send_message(validation_error, ephemeral=True)
             return
+        if ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
+            await interaction.response.send_message("embed_color non valido. Usa #RRGGBB, RRGGBB oppure 0xRRGGBB.", ephemeral=True)
+            return
 
         campaign_id = await ctx.database.create_message_campaign(
             guild_id=str(interaction.guild_id),
@@ -241,6 +248,8 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
             mood_mode=resolved_mood_mode,
             next_run_at=next_run.isoformat(),
             created_by=str(interaction.user.id),
+            embed_title=embed_title,
+            embed_color=embed_color,
         )
         await interaction.response.send_message(
             f"Campagna creata con ID {campaign_id}. Prossima esecuzione: {next_run.isoformat()}",
@@ -280,6 +289,8 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
                         f"var {variant_str}",
                         f"last {row['last_sent_at'] or '-'}",
                         f"next {row['next_run_at']}",
+                        f"embed_title {row['embed_title'] or '-'}",
+                        f"embed_color {row['embed_color'] or '-'}",
                         f"base: {_truncate(row['text'] or '')}" if row["text"] else "base: —",
                     ]
                 )
@@ -349,10 +360,19 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         if not campaign:
             await interaction.response.send_message("Campagna non trovata.", ephemeral=True)
             return
+        if not isinstance(campaign, dict) and hasattr(campaign, "keys"):
+            campaign = dict(campaign)
+        if ctx.message_scheduler is None:
+            await interaction.response.send_message("Servizio scheduler non disponibile.", ephemeral=True)
+            return
         enabled = await ctx.database.get_message_channel_status(str(interaction.guild_id), str(interaction.channel_id))
         if not enabled:
             await interaction.response.send_message("Canale non abilitato: invio forzato.", ephemeral=True)
         else:
             await interaction.response.send_message("Invio test in corso.", ephemeral=True)
         if isinstance(interaction.channel, discord.abc.Messageable):
-            await interaction.channel.send(content=str(campaign["text"] or ""))
+            rendered_text, _, _ = await ctx.message_scheduler.preview_campaign_text(
+                campaign,
+                channel_id_override=str(interaction.channel_id),
+            )
+            await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
