@@ -430,6 +430,16 @@ class MessageSchedulerService:
                 last_sent_at=None,
             )
 
+    async def preview_campaign_text(
+        self,
+        campaign: dict[str, object],
+        *,
+        channel_id_override: Optional[str] = None,
+    ) -> tuple[Optional[str], Optional[str], dict[str, object]]:
+        guild_id = str(campaign["guild_id"])
+        channel_id = channel_id_override or str(campaign.get("channel_id") or "")
+        return await self._resolve_campaign_text(campaign, guild_id, channel_id)
+
     async def _skip_for_quiet_hours(self, now: datetime) -> Optional[str]:
         settings = await self._get_quiet_settings()
         if not settings.enabled:
@@ -493,7 +503,8 @@ class MessageSchedulerService:
             if not prompt:
                 return None, "no_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": None, "barcello_score": None, "selected_source": "base", "cache_status": "n/a"}
             barcello_color, barcello_score, _, _ = await self._get_barcello_color(guild_id, channel_id)
-            channel = self._bot.get_channel(int(channel_id))
+            resolved_channel_id = int(channel_id) if channel_id.isdigit() else None
+            channel = self._bot.get_channel(resolved_channel_id) if resolved_channel_id is not None else None
             channel_name = channel.name if channel and hasattr(channel, "name") else "canale"
             guild = self._bot.get_guild(int(guild_id))
             guild_name = guild.name if guild else "guild"
