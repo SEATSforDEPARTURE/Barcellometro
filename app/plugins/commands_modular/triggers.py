@@ -421,6 +421,45 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), campaign_id)
         await interaction.response.send_message("Campagna eliminata.", ephemeral=True)
 
+    @prompt_group.command(name="test", description="Genera e invia un test AI_PROMPT")
+    @app_commands.describe(id="ID campagna")
+    async def prompt_test(interaction: discord.Interaction, id: int) -> None:
+        if not await _require_mod(interaction):
+            return
+        if interaction.guild_id is None or interaction.channel is None or interaction.channel_id is None:
+            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            return
+        campaign = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
+        if not campaign:
+            await interaction.response.send_message("Campagna non trovata.", ephemeral=True)
+            return
+        if str(campaign.get("type")) != "AI_PROMPT":
+            await interaction.response.send_message("Questo test è solo per AI_PROMPT.", ephemeral=True)
+            return
+
+        rendered_text, reason, debug_payload = await ctx.message_scheduler_service.preview_campaign_text(
+            campaign,
+            channel_id_override=str(interaction.channel_id),
+        )
+        logger.info(
+            "prompt_test campaign_id=%s user=%s channel=%s ai_called=%s reason=%s",
+            id,
+            interaction.user.id,
+            interaction.channel_id,
+            "yes" if debug_payload.get("selected_source") == "ai" else "no",
+            reason,
+        )
+        if not rendered_text:
+            await interaction.response.send_message(
+                f"Impossibile generare il test ({reason or 'no_text'}).",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message("Test inviato.", ephemeral=True)
+        if isinstance(interaction.channel, discord.abc.Messageable):
+            await interaction.channel.send(content=rendered_text)
+
     @qna_group.command(name="on", description="Abilita trigger qna")
     async def qna_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "on")
