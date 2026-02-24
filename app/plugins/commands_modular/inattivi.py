@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
@@ -8,6 +10,7 @@ from discord import app_commands
 from app.plugins.commands_modular.command_helpers import describe_placeholders
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.services.discord_embed_utils import FIELD_MAX, truncate
 
 PERM = "barcellometro.inattivi.config"
 TEMPLATE_HELP = "Placeholder: {user},{username},{display_name},...,{reason}. Es: {display_name}, {days_inactive}g."
@@ -41,6 +44,29 @@ async def _ensure_cfg(ctx: CommandContext, guild_id: str) -> None:
 def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -> None:
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, PERM, ctx)
+
+    def _render_preview(template: str) -> str:
+        sample = {
+            "user": "@ExampleUser",
+            "username": "ExampleUser",
+            "display_name": "Example",
+            "user_id": "1234567890",
+            "server": "Barcellometro",
+            "guild_id": "987654321",
+            "days_inactive": 39,
+            "window_days": 30,
+            "min_messages": 1,
+            "message_count": 0,
+            "grace_days": 7,
+            "reminder_count": 1,
+            "ban_days": 7,
+            "rejoin_link": "https://discord.gg/XXXX",
+            "reason": "Inattività",
+        }
+        try:
+            return template.format(**sample)
+        except Exception as exc:
+            return f"[Errore render template: {exc}]\n{template}"
 
     @inattivi_group.command(name="on", description="Abilita gestione inattivi")
     async def inattivi_on(interaction: discord.Interaction) -> None:
@@ -251,6 +277,52 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await _ensure_cfg(ctx, str(interaction.guild_id))
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), atrio_template=testo)
         await interaction.response.send_message("✅ Template atrio aggiornato.", ephemeral=True)
+
+    @inattivi_group.command(name="template_show", description="Mostra i template attuali (reminder/kick/atrio).")
+    async def inattivi_template_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await ctx.database.get_inactivity_config(str(interaction.guild_id))
+        if cfg is None:
+            await interaction.response.send_message("Nessuna configurazione inattivi presente.", ephemeral=True)
+            return
+
+        reminder_raw = str(cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!")
+        kick_raw = str(cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}")
+        atrio_raw = str(cfg.get("atrio_template") or "👋 {username} è uscito per inattività ({days_inactive}g).")
+
+        reminder_preview = _render_preview(reminder_raw)
+        kick_preview = _render_preview(kick_raw)
+        atrio_preview = _render_preview(atrio_raw)
+
+        embed = discord.Embed(title="🧩 Template inattivi", colour=discord.Colour.blue())
+        extra_sections: list[str] = []
+
+        def add_template_field(name: str, text: str) -> None:
+            if len(text) <= FIELD_MAX:
+                embed.add_field(name=name, value=text, inline=False)
+            else:
+                embed.add_field(name=name, value=truncate(text, FIELD_MAX), inline=False)
+                extra_sections.append(f"## {name}\n{text}")
+
+        add_template_field("📩 Template reminder", reminder_raw)
+        add_template_field("🚪 Template kick", kick_raw)
+        add_template_field("🏛 Template atrio", atrio_raw)
+        add_template_field("🧪 Esempio reminder", reminder_preview)
+        add_template_field("🧪 Esempio kick", kick_preview)
+        add_template_field("🧪 Esempio atrio", atrio_preview)
+
+        extra_file: discord.File | None = None
+        if extra_sections:
+            ts_name = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+            filename = f"templates_{ts_name}.txt"
+            payload = "\n\n".join(extra_sections).encode("utf-8")
+            extra_file = discord.File(io.BytesIO(payload), filename=filename)
+
+        if extra_file is None:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True, file=extra_file)
 
     @inattivi_group.command(name="run", description="Esegui subito scansione inattivi e pannello moderazione")
     async def inattivi_run(interaction: discord.Interaction) -> None:

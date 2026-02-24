@@ -7,13 +7,15 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import discord
 
-from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description, truncate
+from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)
+ROME = ZoneInfo("Europe/Rome")
 
 
 @dataclass
@@ -246,7 +248,7 @@ class InactiveMembersModerationService:
             return f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | 💬 Ultimo: mai"
         if not candidate.last_channel_id or not candidate.last_message_id:
             return f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | 💬 Ultimo: mai"
-        local = dt.astimezone()
+        local = cls._to_rome(dt)
         last_fmt = local.strftime("%d/%m %H:%M")
         jump_url = (
             f"https://discord.com/channels/{candidate.member.guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
@@ -318,15 +320,17 @@ class InactiveMembersModerationService:
         preview_lines: list[str] = []
         extra_lines: list[str] = []
         preview_limit = 15
+        current_len = 0
         for idx, line in enumerate(all_lines):
             if idx >= preview_limit:
                 extra_lines.append(line)
                 continue
-            candidate_preview = "\n".join([*preview_lines, line])
-            if len(candidate_preview) > FIELD_MAX:
+            add_len = len(line) + (1 if preview_lines else 0)
+            if current_len + add_len > FIELD_MAX:
                 extra_lines.extend(all_lines[idx:])
-                break
+                continue
             preview_lines.append(line)
+            current_len += add_len
 
         if preview_lines:
             preview_value = "\n".join(preview_lines)
@@ -336,19 +340,20 @@ class InactiveMembersModerationService:
         if extra_lines:
             summary_line = f"+ altri {len(extra_lines)} inattivi… (vedi allegato .txt)"
             if preview_lines:
-                candidate_with_summary = f"{preview_value}\n{summary_line}"
-                if len(candidate_with_summary) <= FIELD_MAX:
-                    preview_value = candidate_with_summary
+                summary_add = len(summary_line) + 1
+                while preview_lines and (current_len + summary_add) > FIELD_MAX:
+                    moved = preview_lines.pop()
+                    extra_lines.insert(0, moved)
+                    current_len = len("\n".join(preview_lines)) if preview_lines else 0
+                if preview_lines:
+                    preview_lines.append(summary_line)
+                    preview_value = "\n".join(preview_lines)
                 else:
-                    allowed = FIELD_MAX - len(summary_line) - 1
-                    if allowed > 0:
-                        preview_value = f"{truncate(preview_value, allowed)}\n{summary_line}"
-                    else:
-                        preview_value = truncate(summary_line, FIELD_MAX)
+                    preview_value = summary_line[:FIELD_MAX]
             else:
-                preview_value = truncate(summary_line, FIELD_MAX)
+                preview_value = summary_line[:FIELD_MAX]
 
-        safe_add_field(embed, name="Preview inattivi", value=preview_value, inline=False)
+        embed.add_field(name="Preview inattivi", value=preview_value, inline=False)
 
         extra_file: discord.File | None = None
         if extra_lines:
@@ -492,3 +497,8 @@ class InactiveMembersModerationService:
             lines.append("Errori: " + "; ".join(errors[:10]))
         safe_set_description(embed, "\n".join(lines))
         return embed
+    @staticmethod
+    def _to_rome(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ROME)
