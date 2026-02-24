@@ -4,12 +4,14 @@ from zoneinfo import ZoneInfo
 
 from app.services.database import DatabaseService
 from app.services.message_scheduler import (
+    MessageSchedulerService,
     calculate_initial_next_run,
     is_in_quiet_hours,
     select_round_robin_campaign,
     select_text_for_mood,
     should_skip_for_daily_cap,
     should_skip_for_idle,
+    split_embed_pages,
 )
 from app.plugins.commands_modular.messaggi import validate_campaign_texts
 
@@ -194,6 +196,51 @@ def test_db_crud_campaigns() -> None:
         campaigns_after = await db.list_message_campaigns("guild1", include_disabled=True)
         assert campaigns_after == []
 
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_split_embed_pages_prefers_newlines() -> None:
+    text = "riga1\nriga2\nriga3"
+    pages = split_embed_pages(text, limit=8)
+    assert pages == ["riga1\n", "riga2\n", "riga3"]
+
+
+def test_split_embed_pages_hard_split_long_line() -> None:
+    text = "x" * 11
+    pages = split_embed_pages(text, limit=4)
+    assert pages == ["xxxx", "xxxx", "xxx"]
+
+
+def test_split_embed_pages_empty_text() -> None:
+    assert split_embed_pages("", limit=10) == [""]
+
+
+def test_send_campaign_embed_multi_page() -> None:
+    class DummyChannel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, **kwargs):
+            self.sent.append(kwargs)
+
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        scheduler = MessageSchedulerService(db, bot=None)  # type: ignore[arg-type]
+        channel = DummyChannel()
+        campaign = {"id": 7, "name": "Campagna prova", "embed_color": "#112233"}
+        text = ("a" * 3900) + "\n" + ("b" * 30)
+        await scheduler.send_campaign_embed(channel, campaign, text)
+        assert len(channel.sent) == 1
+        embeds = channel.sent[0]["embeds"]
+        assert len(embeds) == 2
+        assert embeds[0].title == "Campagna prova • PAG 1/2"
+        assert embeds[1].title == "Campagna prova • PAG 2/2"
+        assert embeds[0].footer.text == "Questo servizio è offerto dal vostro Barcellometruccio di fiducia."
+        assert embeds[0].colour.value == 0x112233
         await db.close()
 
     asyncio.run(_run())
