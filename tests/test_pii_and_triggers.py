@@ -668,3 +668,18 @@ def test_poll_barcello_override_logs_only_channels_with_window_change(tmp_path, 
     assert len(logs) == 1
     assert "channel_id=2" in logs[0]
     assert "window=40" in logs[0]
+
+
+def test_build_qna_global_payload_uses_guild_scope_only() -> None:
+    database = Mock()
+    database.search_guild_messages = AsyncMock(return_value=[])
+    database.search_channel_messages = AsyncMock(return_value=[])
+    service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+
+    payload = asyncio.run(service._build_qna_global_payload("10", "domanda"))
+
+    database.search_guild_messages.assert_awaited_once()
+    database.search_channel_messages.assert_not_called()
+    parsed = json.loads(payload)
+    assert parsed["context"]["scope"] == "global"
+    assert parsed["context"]["guild_id"] == "10"
