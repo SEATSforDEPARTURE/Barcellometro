@@ -38,6 +38,15 @@ class InactivityActionsView(discord.ui.View):
         self._mod_channel_id = mod_channel_id
         self.message: discord.Message | None = None
 
+    def _is_admin(self, interaction: discord.Interaction) -> bool:
+        return bool(interaction.user.guild_permissions.administrator)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questi bottoni.", ephemeral=True)
+            return False
+        return True
+
     async def on_timeout(self) -> None:
         for child in self.children:
             if isinstance(child, discord.ui.Button):
@@ -51,6 +60,9 @@ class InactivityActionsView(discord.ui.View):
     @discord.ui.button(label="🔔 Invia reminder", style=discord.ButtonStyle.primary)
     async def reminder(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
+        if not self._is_admin(interaction):
+            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         result = await self._service.execute_reminders(self._guild_id)
         await interaction.followup.send(embed=self._service.build_action_embed("✅ AZIONE COMPLETATA · Reminder", result), ephemeral=True)
@@ -58,6 +70,9 @@ class InactivityActionsView(discord.ui.View):
     @discord.ui.button(label="🚪 Caccia + ban temporaneo", style=discord.ButtonStyle.danger)
     async def kick(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
+        if not self._is_admin(interaction):
+            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         result = await self._service.execute_kick_pipeline(self._guild_id, require_grace=False)
         await interaction.followup.send(embed=self._service.build_action_embed("✅ AZIONE COMPLETATA · Caccia", result), ephemeral=True)
@@ -65,6 +80,9 @@ class InactivityActionsView(discord.ui.View):
     @discord.ui.button(label="❌ Annulla", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
+        if not self._is_admin(interaction):
+            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            return
         for child in self.children:
             if isinstance(child, discord.ui.Button):
                 child.disabled = True
@@ -87,6 +105,15 @@ class GraceExpiredActionsView(discord.ui.View):
         self._expired_user_ids = expired_user_ids
         self.message: discord.Message | None = None
 
+    def _is_admin(self, interaction: discord.Interaction) -> bool:
+        return bool(interaction.user.guild_permissions.administrator)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not self._is_admin(interaction):
+            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questi bottoni.", ephemeral=True)
+            return False
+        return True
+
     async def on_timeout(self) -> None:
         for child in self.children:
             if isinstance(child, discord.ui.Button):
@@ -100,6 +127,9 @@ class GraceExpiredActionsView(discord.ui.View):
     @discord.ui.button(label="🚪 Kick ora", style=discord.ButtonStyle.danger)
     async def kick_now(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
+        if not self._is_admin(interaction):
+            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         result = await self._service.execute_kick_pipeline(self._guild_id, require_grace=True)
         await interaction.followup.send(embed=self._service.build_action_embed("✅ AZIONE COMPLETATA · Kick scaduti", result), ephemeral=True)
@@ -107,6 +137,9 @@ class GraceExpiredActionsView(discord.ui.View):
     @discord.ui.button(label="⏳ Estendi grace", style=discord.ButtonStyle.primary)
     async def extend_grace(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
+        if not self._is_admin(interaction):
+            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         now_iso = datetime.now(timezone.utc).isoformat()
         for user_id in self._expired_user_ids:
@@ -119,6 +152,9 @@ class GraceExpiredActionsView(discord.ui.View):
     @discord.ui.button(label="❌ Annulla", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
+        if not self._is_admin(interaction):
+            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            return
         for child in self.children:
             if isinstance(child, discord.ui.Button):
                 child.disabled = True
