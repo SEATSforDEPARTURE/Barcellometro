@@ -447,7 +447,12 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             await interaction.response.send_message("Questo test è solo per AI_PROMPT.", ephemeral=True)
             return
 
-        rendered_text, reason, debug_payload = await ctx.message_scheduler_service.preview_campaign_text(
+        if ctx.message_scheduler is None:
+            await interaction.response.send_message("Servizio scheduler non disponibile.", ephemeral=True)
+            return
+
+        logger.info("prompt_test campaign_id=%s used_service=%s", id, "message_scheduler")
+        rendered_text, reason, debug_payload = await ctx.message_scheduler.preview_campaign_text(
             campaign,
             channel_id_override=str(interaction.channel_id),
         )
