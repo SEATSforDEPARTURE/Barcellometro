@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import aiosqlite
 import discord
 
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
@@ -70,6 +71,59 @@ class InactivityActionsView(discord.ui.View):
         await interaction.response.edit_message(view=self)
         embed = discord.Embed(title="❌ Annullato", description="Azione manuale inattivi annullata.", color=0x808080)
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+class GraceExpiredActionsView(discord.ui.View):
+    def __init__(
+        self,
+        service: "InactiveMembersModerationService",
+        guild_id: str,
+        expired_user_ids: list[str],
+        timeout: float = 600,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self._service = service
+        self._guild_id = guild_id
+        self._expired_user_ids = expired_user_ids
+        self.message: discord.Message | None = None
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                logger.debug("grace expired view timeout edit failed", exc_info=True)
+
+    @discord.ui.button(label="🚪 Kick ora", style=discord.ButtonStyle.danger)
+    async def kick_now(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        _ = button
+        await interaction.response.defer(ephemeral=True)
+        result = await self._service.execute_kick_pipeline(self._guild_id, require_grace=True)
+        await interaction.followup.send(embed=self._service.build_action_embed("✅ AZIONE COMPLETATA · Kick scaduti", result), ephemeral=True)
+
+    @discord.ui.button(label="⏳ Estendi grace", style=discord.ButtonStyle.primary)
+    async def extend_grace(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        _ = button
+        await interaction.response.defer(ephemeral=True)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for user_id in self._expired_user_ids:
+            await self._service._database.extend_user_grace(self._guild_id, user_id, now_iso)
+        await interaction.followup.send(
+            f"✅ Grace esteso per **{len(self._expired_user_ids)}** utenti (senza invio DM).",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="❌ Annulla", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        _ = button
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send("❌ Azione grace scaduto annullata.", ephemeral=True)
 
 
 class InactiveMembersModerationService:
@@ -242,21 +296,81 @@ class InactiveMembersModerationService:
         return (1, dt)
 
     @classmethod
-    def _format_inactive_preview_line(cls, candidate: InactiveCandidate) -> str:
-        dt = cls._parse_last_message_dt(candidate.last_message_ts)
-        if dt is None:
-            return f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | 💬 Ultimo: mai"
-        if not candidate.last_channel_id or not candidate.last_message_id:
-            return f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | 💬 Ultimo: mai"
-        local = cls._to_rome(dt)
+    def _parse_state_reminder_dt(cls, state: aiosqlite.Row | None) -> datetime | None:
+        if not state:
+            return None
+        return cls._parse_last_message_dt(state["last_reminder_at"])
+
+    def _format_grace_remaining(self, reminder_at: datetime, grace_days: int) -> str:
+        deadline = reminder_at + timedelta(days=grace_days)
+        now = datetime.now(timezone.utc)
+        delta = deadline - now
+        if delta.total_seconds() <= 0:
+            return "scaduto"
+        total_seconds = int(delta.total_seconds())
+        days = total_seconds // 86400
+        if days > 0:
+            return f"-{days}g"
+        hours = (total_seconds % 86400) // 3600
+        if hours > 0:
+            return f"-{hours}h"
+        minutes = max(1, (total_seconds % 3600) // 60)
+        return f"-{minutes}m"
+
+    def _format_inactive_preview_line(self, idx: int, candidate: InactiveCandidate, *, state: aiosqlite.Row | None, cfg: dict[str, Any]) -> str:
+        grace_days = int(cfg.get("grace_days_after_reminder", 7)) if cfg else 7
+        reminder_dt = self._parse_state_reminder_dt(state)
+        if reminder_dt is None:
+            prefix = f"{idx}) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+        else:
+            remaining = self._format_grace_remaining(reminder_dt, grace_days)
+            if remaining == "scaduto":
+                prefix = f"{idx}) (🔔 scaduto) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+            else:
+                prefix = f"{idx}) (🔔 {remaining} alla scad.) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+        dt = self._parse_last_message_dt(candidate.last_message_ts)
+        if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
+            return f"{prefix}💬 Ultimo: mai"
+        local = self._to_rome(dt)
         last_fmt = local.strftime("%d/%m %H:%M")
         jump_url = (
             f"https://discord.com/channels/{candidate.member.guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
         )
-        return (
-            f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | "
-            f"💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
-        )
+        return f"{prefix}💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
+
+    def _format_inactive_txt_line(
+        self,
+        idx: int,
+        candidate: InactiveCandidate,
+        *,
+        state: aiosqlite.Row | None = None,
+        cfg: dict[str, Any] | None = None,
+        guild: discord.Guild | None = None,
+    ) -> str:
+        mention = candidate.member.mention
+        display = getattr(candidate.member, "display_name", getattr(candidate.member, "name", "sconosciuto"))
+        count = candidate.count_in_window
+        grace_days = int((cfg or {}).get("grace_days_after_reminder", 7))
+        reminder_dt = self._parse_state_reminder_dt(state)
+        if reminder_dt is None:
+            prefix = f"{idx}) {mention} ({display}) ({count} msg totali) | "
+        else:
+            data_fmt = self._to_rome(reminder_dt).strftime("%d/%m %H:%M")
+            remaining = self._format_grace_remaining(reminder_dt, grace_days)
+            grace_text = "scaduto" if remaining == "scaduto" else f"{remaining} alla scad."
+            prefix = f"{idx}) 🔔 Avv. il {data_fmt} ({grace_text}) | {mention} ({display}) ({count} msg totali) | "
+        dt = self._parse_last_message_dt(candidate.last_message_ts)
+        if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
+            return f"{prefix}💬 Ultimo: mai"
+
+        local = self._to_rome(dt)
+        last_fmt = local.strftime("%d/%m %H:%M")
+        channel_id = int(candidate.last_channel_id)
+        ch = (guild.get_channel(channel_id) if guild is not None else None) or self._bot.get_channel(channel_id)
+        channel_name = ch.name if ch and hasattr(ch, "name") else "canale_sconosciuto"
+        guild_id = guild.id if guild is not None else candidate.member.guild.id
+        jump_url = f"https://discord.com/channels/{guild_id}/{candidate.last_channel_id}/{candidate.last_message_id}"
+        return f"{prefix}💬 Ultimo: {last_fmt} in \"{channel_name}\" 🕒 {candidate.days_inactive}g fa ({jump_url})"
 
     def _format_policy_default(self, policy: dict[str, Any]) -> str:
         mode = str(policy.get("mode", "OR")).upper()
@@ -286,6 +400,31 @@ class InactiveMembersModerationService:
             lines.append(f"• …altre {len(rows) - 8} policy ruolo")
         return "\n".join(lines)
 
+    async def _collect_expired_grace_users(
+        self,
+        guild_id: str,
+        inactive: list[InactiveCandidate],
+        cfg: dict[str, Any],
+    ) -> list[tuple[InactiveCandidate, aiosqlite.Row, datetime, timedelta]]:
+        if not inactive:
+            return []
+        grace_days = int(cfg.get("grace_days_after_reminder", 7))
+        states = await self._database.fetch_inactivity_user_states(guild_id, [str(c.member.id) for c in inactive])
+        now = datetime.now(timezone.utc)
+        expired: list[tuple[InactiveCandidate, aiosqlite.Row, datetime, timedelta]] = []
+        for candidate in inactive:
+            state = states.get(str(candidate.member.id))
+            reminder_at = self._parse_state_reminder_dt(state)
+            if reminder_at is None:
+                continue
+            if candidate.last_message_ts and candidate.last_message_ts > str(state["last_reminder_at"]):
+                continue
+            delta = now - reminder_at
+            if delta < timedelta(days=grace_days):
+                continue
+            expired.append((candidate, state, reminder_at, delta - timedelta(days=grace_days)))
+        return expired
+
     async def handle_post_activity_report(self, guild_id: str, mod_channel_id: str) -> None:
         cfg = await self._get_config(guild_id)
         if not cfg or not bool(cfg.get("enabled")):
@@ -294,29 +433,84 @@ class InactiveMembersModerationService:
         channel = self._bot.get_channel(int(mod_channel_id))
         if guild is None or not isinstance(channel, discord.abc.Messageable):
             return
-        await self.post_manual_panel(guild_id, mod_channel_id)
+        inactive, considered, _ = await self.scan_inactive_members(guild_id)
+        await self.post_manual_panel(guild_id, mod_channel_id, inactive=inactive, cfg=cfg, considered=considered)
         if bool(cfg.get("auto_enabled")):
             reminder_stats = await self.execute_reminders(guild_id)
             kick_stats = await self.execute_kick_pipeline(guild_id, require_grace=True)
             await channel.send(embed=self.build_action_embed("🤖 Auto inattivi completata", reminder_stats, kick_stats))
+            return
 
-    async def post_manual_panel(self, guild_id: str, mod_channel_id: str) -> None:
+        expired = await self._collect_expired_grace_users(guild_id, inactive, cfg)
+        if not expired:
+            return
+
+        lines: list[str] = []
+        for candidate, state, reminder_at, overdue in expired:
+            display = getattr(candidate.member, "display_name", getattr(candidate.member, "name", "sconosciuto"))
+            reminded_fmt = self._to_rome(reminder_at).strftime("%d/%m %H:%M")
+            overdue_days = max(0, int(overdue.total_seconds() // 86400))
+            lines.append(f"• {candidate.member.mention} ({display}) — 🔔 {reminded_fmt} · scaduto da {overdue_days}g")
+
+        preview_lines: list[str] = []
+        extra = 0
+        current_len = 0
+        for line in lines:
+            add_len = len(line) + (1 if preview_lines else 0)
+            if current_len + add_len > FIELD_MAX:
+                extra += 1
+                continue
+            preview_lines.append(line)
+            current_len += add_len
+        if extra > 0:
+            preview_lines.append(f"+ altri {extra}…")
+        embed = discord.Embed(title="⚠️ GRACE SCADUTO (AUTO OFF)", colour=discord.Colour.orange())
+        safe_add_field(embed, name="Utenti scaduti", value=str(len(expired)), inline=True)
+        safe_add_field(embed, name="Dettaglio", value="\n".join(preview_lines) if preview_lines else "Nessun utente.", inline=False)
+
+        view = GraceExpiredActionsView(self, guild_id, [str(c.member.id) for c, _, _, _ in expired])
+        message = await channel.send(embed=embed, view=view)
+        view.message = message
+
+    async def post_manual_panel(self, guild_id: str, mod_channel_id: str, *, inactive: list[InactiveCandidate] | None = None, cfg: dict[str, Any] | None = None, considered: int | None = None) -> None:
         guild = self._bot.get_guild(int(guild_id))
         channel = self._bot.get_channel(int(mod_channel_id))
         if guild is None or not isinstance(channel, discord.abc.Messageable):
             return
-        inactive, considered, cfg = await self.scan_inactive_members(guild_id)
+        if inactive is None or cfg is None or considered is None:
+            inactive, considered, cfg = await self.scan_inactive_members(guild_id)
         policy = cfg.get("default_policy", {}) if cfg else {}
         role_policy_rows = await self._database.list_inactivity_role_policies(guild_id)
+
+        ordered = sorted(inactive, key=self._inactive_sort_key)
+        states = await self._database.fetch_inactivity_user_states(guild_id, [str(c.member.id) for c in ordered])
+        now = datetime.now(timezone.utc)
+        grace_days = int(cfg.get("grace_days_after_reminder", 7)) if cfg else 7
+        warned = 0
+        in_grace = 0
+        expired_grace = 0
+        for candidate in ordered:
+            reminder_at = self._parse_state_reminder_dt(states.get(str(candidate.member.id)))
+            if reminder_at is None:
+                continue
+            warned += 1
+            delta = now - reminder_at
+            if delta < timedelta(days=grace_days):
+                in_grace += 1
+            else:
+                expired_grace += 1
 
         embed = discord.Embed(title="✏️ INATTIVI (SERVER-WIDE)", colour=discord.Colour.blue())
         safe_add_field(embed, name="Membri analizzati", value=str(considered), inline=True)
         safe_add_field(embed, name="Inattivi trovati", value=str(len(inactive)), inline=True)
+        safe_add_field(embed, name="Stato reminder", value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
         safe_add_field(embed, name="📄 Policy di base", value=self._format_policy_default(policy), inline=False)
         safe_add_field(embed, name="🏷️ Policy per ruoli", value=self._format_role_policies(guild, role_policy_rows), inline=False)
 
-        ordered = sorted(inactive, key=self._inactive_sort_key)
-        all_lines = [self._format_inactive_preview_line(candidate) for candidate in ordered]
+        all_lines = [
+            self._format_inactive_preview_line(i, candidate, state=states.get(str(candidate.member.id)), cfg=cfg)
+            for i, candidate in enumerate(ordered, start=1)
+        ]
         preview_lines: list[str] = []
         extra_lines: list[str] = []
         preview_limit = 15
@@ -355,30 +549,54 @@ class InactiveMembersModerationService:
 
         embed.add_field(name="Preview inattivi", value=preview_value, inline=False)
 
-        extra_file: discord.File | None = None
-        if extra_lines:
+        txt_file: discord.File | None = None
+        if ordered:
             ts_name = datetime.now().strftime("%Y%m%d_%H%M")
-            filename = f"inattivi_extra_{ts_name}.txt"
-            payload = "\n".join(extra_lines).encode("utf-8")
-            extra_file = discord.File(io.BytesIO(payload), filename=filename)
+            filename = f"inattivi_serverwide_{ts_name}.txt"
+            txt_lines = [
+                self._format_inactive_txt_line(i, candidate, state=states.get(str(candidate.member.id)), cfg=cfg, guild=guild)
+                for i, candidate in enumerate(ordered, start=1)
+            ]
+            payload = "\n".join(txt_lines).encode("utf-8")
+            txt_file = discord.File(io.BytesIO(payload), filename=filename)
 
         view = InactivityActionsView(self, guild_id, mod_channel_id)
-        if extra_file is not None:
-            message = await channel.send(embed=embed, view=view, file=extra_file)
+        if txt_file is not None:
+            message = await channel.send(embed=embed, view=view, file=txt_file)
         else:
             message = await channel.send(embed=embed, view=view)
         view.message = message
 
-    def _render_template(self, template: str, *, member: discord.Member, guild: discord.Guild, days_inactive: int, policy: dict[str, Any], cfg: dict[str, Any]) -> str:
+    def _render_template(
+        self,
+        template: str,
+        *,
+        member: discord.Member,
+        guild: discord.Guild,
+        days_inactive: int,
+        policy: dict[str, Any],
+        cfg: dict[str, Any],
+        message_count: int | None = None,
+        reminder_count: int | None = None,
+        reason: str | None = None,
+    ) -> str:
         base = template or ""
         return base.format(
             user=member.mention,
             username=member.display_name,
+            display_name=member.display_name,
+            user_id=member.id,
             server=guild.name,
+            guild_id=guild.id,
             days_inactive=days_inactive,
             window_days=policy.get("window_days", 30),
-            rejoin_link=cfg.get("invite_url") or "",
+            min_messages=policy.get("min_messages", 1),
+            message_count=message_count if message_count is not None else 0,
             grace_days=cfg.get("grace_days_after_reminder", 7),
+            reminder_count=reminder_count if reminder_count is not None else 0,
+            ban_days=cfg.get("ban_days", 7),
+            rejoin_link=cfg.get("invite_url") or "",
+            reason=reason or "",
         )
 
     async def execute_reminders(self, guild_id: str) -> dict[str, Any]:
@@ -387,22 +605,24 @@ class InactiveMembersModerationService:
         if guild is None or not cfg:
             return {"dm_ok": 0, "dm_fail": 0, "errors": []}
         now = datetime.now(timezone.utc)
-        cooldown = int(cfg.get("reminder_cooldown_days", 14))
         template = cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
         ok = 0
         fail = 0
         errors: list[str] = []
         for candidate in inactive:
             state = await self._database.get_inactivity_user_state(guild_id, str(candidate.member.id))
-            last_reminder = state["last_reminder_at"] if state else None
-            if last_reminder:
-                try:
-                    last_dt = datetime.fromisoformat(str(last_reminder).replace("Z", "+00:00"))
-                    if (now - last_dt).days < cooldown:
-                        continue
-                except Exception:
-                    pass
-            body = self._render_template(template, member=candidate.member, guild=guild, days_inactive=candidate.days_inactive, policy=candidate.policy, cfg=cfg)
+            if state and state["last_reminder_at"]:
+                continue
+            body = self._render_template(
+                template,
+                member=candidate.member,
+                guild=guild,
+                days_inactive=candidate.days_inactive,
+                policy=candidate.policy,
+                cfg=cfg,
+                message_count=candidate.count_in_window,
+                reminder_count=(state["reminder_count"] if state and state.get("reminder_count") is not None else 0),
+            )
             try:
                 await candidate.member.send(body)
                 await self._database.mark_user_reminded(guild_id, str(candidate.member.id), now.isoformat())
@@ -439,8 +659,19 @@ class InactiveMembersModerationService:
                     continue
                 if candidate.last_message_ts and candidate.last_message_ts > str(state["last_reminder_at"]):
                     continue
+            reminder_count = state["reminder_count"] if state and state.get("reminder_count") is not None else 0
             try:
-                msg = self._render_template(kick_template, member=candidate.member, guild=guild, days_inactive=candidate.days_inactive, policy=candidate.policy, cfg=cfg)
+                msg = self._render_template(
+                    kick_template,
+                    member=candidate.member,
+                    guild=guild,
+                    days_inactive=candidate.days_inactive,
+                    policy=candidate.policy,
+                    cfg=cfg,
+                    message_count=candidate.count_in_window,
+                    reminder_count=reminder_count,
+                    reason="Inattività prolungata",
+                )
                 await candidate.member.send(msg)
                 stats["dm_ok"] += 1
             except Exception as exc:
@@ -464,7 +695,17 @@ class InactiveMembersModerationService:
                 stats["errors"].append(f"ban {user_id}: {exc.__class__.__name__}")
             if isinstance(atrio_channel, discord.abc.Messageable):
                 try:
-                    text = self._render_template(atrio_template, member=candidate.member, guild=guild, days_inactive=candidate.days_inactive, policy=candidate.policy, cfg=cfg)
+                    text = self._render_template(
+                        atrio_template,
+                        member=candidate.member,
+                        guild=guild,
+                        days_inactive=candidate.days_inactive,
+                        policy=candidate.policy,
+                        cfg=cfg,
+                        message_count=candidate.count_in_window,
+                        reminder_count=reminder_count,
+                        reason="Inattività prolungata",
+                    )
                     await atrio_channel.send(text)
                     stats["atrio_ok"] += 1
                 except Exception as exc:
