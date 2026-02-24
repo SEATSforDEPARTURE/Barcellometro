@@ -104,6 +104,20 @@ class TriggerEngineService:
         *,
         scope_override: Literal["channel", "global"] | None = None,
     ) -> None:
+        mapped_scope: Literal["channel_qna", "general_llm"] | None = None
+        if scope_override == "global":
+            mapped_scope = "general_llm"
+        elif scope_override == "channel":
+            mapped_scope = "channel_qna"
+        await self.route_qna(interaction, question, scope=mapped_scope)
+
+    async def route_qna(
+        self,
+        interaction: discord.Interaction,
+        question: str,
+        *,
+        scope: Literal["channel_qna", "general_llm"] | None = None,
+    ) -> None:
         question_text = (question or "").strip()
         if interaction.guild_id is None or interaction.channel_id is None:
             await self._qna_reply(interaction, "Usa questo comando in un canale.", ephemeral=True)
@@ -116,10 +130,14 @@ class TriggerEngineService:
 
         guild_id = str(interaction.guild_id)
         channel_id = str(interaction.channel_id)
-        if not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
+        user_id = str(interaction.user.id)
+        route_scope = scope or "channel_qna"
+        logger.info("qna_dispatch scope=%s guild=%s channel=%s user=%s", route_scope, guild_id, channel_id, user_id)
+
+        if route_scope == "channel_qna" and not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
             await self._qna_reply(interaction, "Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
             return
-        if is_out_of_scope_question(question_text):
+        if route_scope == "channel_qna" and is_out_of_scope_question(question_text):
             await self._qna_reply(interaction, "Posso rispondere solo su questo canale.", ephemeral=True)
             return
         if is_sensitive_question(question_text):
@@ -143,7 +161,7 @@ class TriggerEngineService:
 
         limit = await self._resolve_qna_limit(interaction, profile=profile, limits=limits)
         window_date = datetime.now(ROME_TZ).date().isoformat()
-        used = await self._database.get_usage(guild_id, str(interaction.user.id), "qna", window_date)
+        used = await self._database.get_usage(guild_id, user_id, "qna", window_date)
         if used >= limit:
             if profile == "role1":
                 delta = max(0, limit_pro - limit_plus)
@@ -163,16 +181,7 @@ class TriggerEngineService:
             question_clean = f"{question_clean}?"
         public_content = f"{interaction.user.mention} **chiede:** {question_clean}"
 
-        scope = scope_override or await self._decide_qna_scope(question_clean)
-        logger.info(
-            "qna scope=%s guild_id=%s channel_id=%s user_id=%s len(question)=%s",
-            scope,
-            guild_id,
-            channel_id,
-            str(interaction.user.id),
-            len(question_clean),
-        )
-        if scope == "global":
+        if route_scope == "general_llm":
             text = await self._ask_general_llm(question_clean)
             if not text:
                 await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
@@ -180,7 +189,7 @@ class TriggerEngineService:
             evidence_pack: list[dict[str, str]] = []
         else:
             answer = await self._handle_qna(
-                scope=scope,
+                scope="channel",
                 guild_id=guild_id,
                 channel_id=channel_id,
                 question=question_clean,
@@ -190,11 +199,19 @@ class TriggerEngineService:
                 await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
                 return
             if not answer.get("can_answer"):
-                await self._qna_reply(interaction, str(answer.get("refusal_reason") or "Non posso rispondere."), ephemeral=True)
+                await self._qna_reply(
+                    interaction,
+                    str(answer.get("refusal_reason") or "In questo canale non ho QnA salvate su questa domanda. Se vuoi una risposta generale usa /domanda generale: ..."),
+                    ephemeral=True,
+                )
                 return
             text = str(answer.get("answer") or "").strip()
             if not text:
-                await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
+                await self._qna_reply(
+                    interaction,
+                    "In questo canale non ho QnA salvate su questa domanda. Se vuoi una risposta generale usa /domanda generale: ...",
+                    ephemeral=True,
+                )
                 return
 
             evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
@@ -209,7 +226,7 @@ class TriggerEngineService:
 
         await self._database.increment_usage(
             guild_id,
-            str(interaction.user.id),
+            user_id,
             "qna",
             window_date,
             datetime.now(timezone.utc).isoformat(),
@@ -1283,6 +1300,7 @@ class TriggerEngineService:
             return None
         model = self._ai.get_model("summary") or "gpt-4o-mini"
         provider = "openai"
+        logger.info("qna_llm_called=%s model=%s", True, model)
         logger.info("qna_general_llm_called=true provider=%s model=%s", provider, model)
         response = await self._ai.client().responses.create(
             model=model,
@@ -1295,7 +1313,12 @@ class TriggerEngineService:
             ],
         )
         text = str(getattr(response, "output_text", "") or "").strip()
-        return text or None
+        if not text:
+            return None
+        text = text.replace("prove dirette", "informazioni verificabili")
+        text = text.replace("contesto fornito", "dettagli disponibili")
+        text = text.replace("periodo richiesto", "informazioni richieste")
+        return text
 
     def _normalize_question(self, question: str) -> str:
         return re.sub(r"\s+", " ", question.strip().lower())

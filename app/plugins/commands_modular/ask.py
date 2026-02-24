@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Literal
 
@@ -8,32 +9,45 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 
+logger = logging.getLogger(__name__)
 
-def parse_qna_input(canale: str | None, generale: str | None) -> tuple[str | None, Literal["channel", "global"] | None, str | None]:
+
+def parse_qna_input(
+    canale: str | None,
+    generale: str | None,
+) -> tuple[str | None, Literal["channel_qna", "general_llm"] | None, str | None, bool, bool]:
     channel_text = (canale or "").strip()
     global_text = (generale or "").strip()
     has_channel = bool(channel_text)
     has_global = bool(global_text)
 
     if has_channel and has_global:
-        return ("Compila un solo campo tra 'canale' e 'generale'.", None, None)
+        return ("Compila un solo campo tra 'canale' e 'generale'.", None, None, has_channel, has_global)
     if not has_channel and not has_global:
-        return ("Compila uno dei due campi: 'canale' oppure 'generale'.", None, None)
-    if has_channel:
-        return (None, "channel", channel_text)
-    return (None, "global", global_text)
+        return ("Compila uno dei due campi: 'canale' oppure 'generale'.", None, None, has_channel, has_global)
+    if has_global:
+        return (None, "general_llm", global_text, has_channel, has_global)
+    return (None, "channel_qna", channel_text, has_channel, has_global)
 
 
 async def _handle_ask_like(interaction: discord.Interaction, ctx: CommandContext, canale: str | None, generale: str | None) -> None:
     if ctx.trigger_engine is None:
         await interaction.response.send_message("Servizio trigger non disponibile.", ephemeral=True)
         return
-    error_text, scope, text_value = parse_qna_input(canale, generale)
+    error_text, scope, text_value, has_channel, has_global = parse_qna_input(canale, generale)
     if error_text:
         await interaction.response.send_message(error_text, ephemeral=True)
         return
     assert scope is not None
     assert text_value is not None
+
+    logger.info(
+        "qna_dispatch scope=%s has_canale=%s has_generale=%s len_text=%s",
+        scope,
+        has_channel,
+        has_global,
+        len(text_value),
+    )
 
     if text_value.lower() == "stato":
         if interaction.guild_id is None:
@@ -58,7 +72,7 @@ async def _handle_ask_like(interaction: discord.Interaction, ctx: CommandContext
             ephemeral=True,
         )
         return
-    await ctx.trigger_engine.handle_qna_question(interaction, text_value, scope_override=scope)
+    await ctx.trigger_engine.route_qna(interaction, text_value, scope=scope)
 
 
 def register_ask(tree: app_commands.CommandTree, guild: discord.abc.Snowflake | None, ctx: CommandContext) -> None:
