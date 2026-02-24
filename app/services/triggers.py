@@ -11,7 +11,7 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from typing import Any
+from typing import Any, Literal
 
 import discord
 
@@ -97,7 +97,13 @@ class TriggerEngineService:
             return
         await interaction.response.send_message(text, ephemeral=ephemeral)
 
-    async def handle_qna_question(self, interaction: discord.Interaction, question: str) -> None:
+    async def handle_qna_question(
+        self,
+        interaction: discord.Interaction,
+        question: str,
+        *,
+        scope_override: Literal["channel", "global"] | None = None,
+    ) -> None:
         question_text = (question or "").strip()
         if interaction.guild_id is None or interaction.channel_id is None:
             await self._qna_reply(interaction, "Usa questo comando in un canale.", ephemeral=True)
@@ -157,7 +163,15 @@ class TriggerEngineService:
             question_clean = f"{question_clean}?"
         public_content = f"{interaction.user.mention} **chiede:** {question_clean}"
 
-        scope = await self._decide_qna_scope(question_clean)
+        scope = scope_override or await self._decide_qna_scope(question_clean)
+        logger.info(
+            "qna scope=%s guild_id=%s channel_id=%s user_id=%s len(question)=%s",
+            scope,
+            guild_id,
+            channel_id,
+            str(interaction.user.id),
+            len(question_clean),
+        )
         answer = await self._handle_qna(
             scope=scope,
             guild_id=guild_id,
@@ -253,6 +267,14 @@ class TriggerEngineService:
                 question_clean = f"{question_clean}?"
 
             scope = await self._decide_qna_scope(question_clean)
+            logger.info(
+                "qna scope=%s guild_id=%s channel_id=%s user_id=%s len(question)=%s",
+                scope,
+                guild_id,
+                channel_id,
+                str(message.author.id),
+                len(question_clean),
+            )
             answer = await self._handle_qna(
                 scope=scope,
                 guild_id=guild_id,
@@ -1161,7 +1183,7 @@ class TriggerEngineService:
             return {"can_answer": True, "answer": cached, "refusal_reason": None, "evidence_pack": []}
 
         if scope == "global":
-            answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
+            answer = await self._ask_ai_json(await self._build_qna_global_payload(guild_id, question))
             if answer and answer.get("can_answer"):
                 await self._database.set_cache(cache_key, str(answer.get("answer") or ""), 7 * 24 * 3600)
                 answer["evidence_pack"] = []
@@ -1201,7 +1223,7 @@ class TriggerEngineService:
 
         if channel_answer and channel_answer.get("can_answer"):
             return channel_answer
-        global_answer = await self._ask_ai_json(await self._build_qna_global_payload(question))
+        global_answer = await self._ask_ai_json(await self._build_qna_global_payload(guild_id, question))
         if not global_answer or not global_answer.get("can_answer"):
             return channel_answer or global_answer
         fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{str(global_answer.get('answer') or '').strip()}"
@@ -1249,10 +1271,23 @@ class TriggerEngineService:
         scope = str(answer.get("scope") or "mixed").strip().lower()
         return scope
 
-    async def _build_qna_global_payload(self, question: str) -> str:
+    async def _build_qna_global_payload(self, guild_id: str, question: str) -> str:
+        global_rows = await self._database.search_guild_messages(guild_id=guild_id, query_text=question, limit=20, candidate_pool=220)
+        evidence_ranked = self._normalize_search_rows(global_rows)
+        evidence_pack = self._build_evidence_pack(evidence_ranked, None, snippet_max=140, evidence_max=20)
+
         prompt = {
             "question": question,
-            "constraints": ["risposta generale", "non includere PII", "rispondi in italiano"],
+            "constraints": [
+                "rispondi solo usando il contesto generale del server",
+                "non includere PII",
+                "rispondi in italiano",
+            ],
+            "context": {
+                "scope": "global",
+                "guild_id": guild_id,
+                "evidence": evidence_pack,
+            },
             "output_schema": {"can_answer": "bool", "answer": "string", "refusal_reason": "string|null"},
         }
         return json.dumps(prompt, ensure_ascii=False)
