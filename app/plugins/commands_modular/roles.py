@@ -8,8 +8,8 @@ from app.plugins.commands_modular.permissions import ensure_admin
 
 
 def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
-    @role_group.command(name="set-role", description="Imposta limiti per un ruolo su un comando")
-    @app_commands.describe(role="Ruolo", command="Nome comando", usage_limit="Limite utilizzi (vuoto = illimitato)", cooldown_seconds="Cooldown in secondi")
+    @role_group.command(name="set-role", description="Limiti ruolo comando")
+    @app_commands.describe(role="Ruolo", command="Nome comando", usage_limit="Limite usi (vuoto=∞)", cooldown_seconds="Cooldown sec")
     async def role_set_command(
         interaction: discord.Interaction,
         role: discord.Role,
@@ -34,8 +34,8 @@ def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
         )
         await interaction.response.send_message("Policy ruolo aggiornata.", ephemeral=True)
 
-    @role_group.command(name="set-user", description="Imposta limiti per un utente su un comando")
-    @app_commands.describe(user="Utente", command="Nome comando", usage_limit="Limite utilizzi (vuoto = illimitato)", cooldown_seconds="Cooldown in secondi")
+    @role_group.command(name="set-user", description="Limiti utente comando")
+    @app_commands.describe(user="Utente", command="Nome comando", usage_limit="Limite usi (vuoto=∞)", cooldown_seconds="Cooldown sec")
     async def user_set_command(
         interaction: discord.Interaction,
         user: discord.User,

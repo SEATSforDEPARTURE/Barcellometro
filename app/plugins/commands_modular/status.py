@@ -8,8 +8,8 @@ from app.plugins.commands_modular.permissions import check_permission
 
 
 def register_status(status_group: app_commands.Group, ctx: CommandContext) -> None:
-    @status_group.command(name="barcellometro", description="Stato generale o di un servizio/plugin")
-    @app_commands.describe(service="Nome servizio o plugin")
+    @status_group.command(name="barcellometro", description="Stato servizi")
+    @app_commands.describe(service="Servizio/plugin")
     async def status_barcellometro(interaction: discord.Interaction, service: str | None = None) -> None:
         if not await check_permission(interaction, "status.barcellometro", ctx):
             return

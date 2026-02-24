@@ -18,7 +18,7 @@ def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: Com
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, "barcellometro.attivita.config", ctx)
 
-    @activity_group.command(name="on", description="Abilita monitorazione attività giornaliera")
+    @activity_group.command(name="on", description="Abilita report giornaliero")
     async def attivita_on(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction):
             return
@@ -28,7 +28,7 @@ def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: Com
         await ctx.database.set_activity_channel_enabled(str(interaction.guild_id), str(interaction.channel_id), True)
         await interaction.response.send_message("✅ Canale aggiunto alla monitorazione attività.", ephemeral=True)
 
-    @activity_group.command(name="off", description="Disabilita monitorazione attività giornaliera")
+    @activity_group.command(name="off", description="Disabilita report giornaliero")
     async def attivita_off(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction):
             return
@@ -38,8 +38,8 @@ def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: Com
         await ctx.database.set_activity_channel_enabled(str(interaction.guild_id), str(interaction.channel_id), False)
         await interaction.response.send_message("🛑 Canale rimosso dalla monitorazione attività.", ephemeral=True)
 
-    @activity_group.command(name="canale", description="Imposta il canale mod per il resoconto attività")
-    @app_commands.describe(canale_mod="Canale in cui pubblicare il resoconto giornaliero")
+    @activity_group.command(name="canale", description="Imposta canale report")
+    @app_commands.describe(canale_mod="Canale report")
     async def attivita_canale(interaction: discord.Interaction, canale_mod: discord.TextChannel) -> None:
         if not await _ensure(interaction):
             return
@@ -58,8 +58,8 @@ def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: Com
         )
         await interaction.response.send_message(f"✅ Canale mod impostato su {canale_mod.mention}.", ephemeral=True)
 
-    @activity_group.command(name="ora", description="Imposta orario invio resoconto (HH:MM)")
-    @app_commands.describe(hhmm="Orario locale Europe/Rome in formato HH:MM (es. 20:30)")
+    @activity_group.command(name="ora", description="Imposta orario report")
+    @app_commands.describe(hhmm="Orario HH:MM")
     async def attivita_ora(interaction: discord.Interaction, hhmm: str) -> None:
         if not await _ensure(interaction):
             return
@@ -80,7 +80,7 @@ def register_barcellometro_attivita(activity_group: app_commands.Group, ctx: Com
         else:
             await interaction.response.send_message(f"✅ Orario aggiornato: **{hhmm}**.", ephemeral=True)
 
-    @activity_group.command(name="invia", description="Invia subito il resoconto attività nel canale mod configurato")
+    @activity_group.command(name="invia", description="Invia report ora")
     async def attivita_invia(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction):
             return

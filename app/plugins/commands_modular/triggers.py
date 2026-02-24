@@ -19,11 +19,11 @@ BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
 def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandContext) -> None:
-    qna_group = app_commands.Group(name="qna", description="Trigger e limiti QnA")
-    frasi_group = app_commands.Group(name="frasi", description="Trigger e regole frasi")
+    qna_group = app_commands.Group(name="qna", description="QnA")
+    frasi_group = app_commands.Group(name="frasi", description="Frasi")
     barcello_group = app_commands.Group(name="barcello", description="Trigger Barcello")
-    prompt_group = app_commands.Group(name="prompt", description="Trigger e campagne prompt")
-    insights_group = app_commands.Group(name="insights", description="Trigger curiosità utenti")
+    prompt_group = app_commands.Group(name="prompt", description="Prompt")
+    insights_group = app_commands.Group(name="insights", description="Curiosità utenti")
 
     add_group_once(barcellometro_group, qna_group, logger)
     add_group_once(barcellometro_group, frasi_group, logger)
@@ -104,8 +104,8 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     async def barcello_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "barcello", "status")
 
-    @barcello_group.command(name="mood", description="Mostra o imposta mood per il canale")
-    @app_commands.describe(value="Nuovo mood (se vuoto mostra lo status)")
+    @barcello_group.command(name="mood", description="Mostra/imposta mood")
+    @app_commands.describe(value="Nuovo mood")
     async def barcello_mood(interaction: discord.Interaction, value: str | None = None) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -277,7 +277,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         )
         await interaction.response.send_message(f"```json\n{pretty}\n```\n{guide}", ephemeral=True)
 
-    @frasi_group.command(name="template_set", description="Imposta template trigger frasi (canale)")
+    @frasi_group.command(name="template_set", description="Template frasi canale")
     @app_commands.choices(
         kind=[
             app_commands.Choice(name="DEFAULT", value="DEFAULT"),
@@ -299,7 +299,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await ctx.database.set_trigger_state(guild_id, channel_id, "frasi", normalized)
         await interaction.response.send_message(f"Template {kind.value} aggiornato.", ephemeral=True)
 
-    @frasi_group.command(name="template_set_user", description="Imposta template trigger frasi per utente")
+    @frasi_group.command(name="template_set_user", description="Template frasi utente")
     @app_commands.choices(
         kind=[
             app_commands.Choice(name="DEFAULT", value="DEFAULT"),
@@ -355,7 +355,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     @prompt_group.command(name="create", description="Crea campagna AI_PROMPT")
     @app_commands.describe(
         embed_title="Titolo embed opzionale",
-        embed_color="Colore embed opzionale (#RRGGBB, RRGGBB, 0xRRGGBB)",
+        embed_color="Colore embed opzionale",
     )
     async def prompt_create(
         interaction: discord.Interaction,
@@ -522,7 +522,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         pretty = json.dumps(data, ensure_ascii=False, indent=2)
         await interaction.response.send_message(f"```json\n{pretty}\n```", ephemeral=True)
 
-    @qna_group.command(name="limits_set", description="Imposta limite giornaliero QnA per tier")
+    @qna_group.command(name="limits_set", description="Imposta limite QnA tier")
     async def qna_limits_set(interaction: discord.Interaction, tier_key: str, limit_int: int) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -552,7 +552,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await ctx.database.set_setting("qna.daily_limits", json.dumps(data, ensure_ascii=False))
         await interaction.response.send_message(f"Limite aggiornato: {key}={limit_int}", ephemeral=True)
 
-    @qna_group.command(name="bonus_add", description="Aggiunge bonus domande QnA a un utente")
+    @qna_group.command(name="bonus_add", description="Aggiungi bonus QnA utente")
     async def qna_bonus_add(interaction: discord.Interaction, user: discord.Member, amount_int: int, hours_valid: int | None = None) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)

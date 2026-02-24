@@ -21,7 +21,7 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
             await interaction.response.send_message(message, ephemeral=True)
 
     @resoconto_group.command(name="giornaliero", description="Gestisci il resoconto giornaliero")
-    @app_commands.describe(opzione="on/off/stato/HH:MM o vuoto per invio manuale")
+    @app_commands.describe(opzione="on/off/stato/HH:MM")
     async def giornaliero(interaction: discord.Interaction, opzione: str | None = None) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await send_ephemeral(interaction, "Comando disponibile solo in un canale guild.")

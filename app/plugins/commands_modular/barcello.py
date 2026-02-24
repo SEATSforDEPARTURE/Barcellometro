@@ -900,7 +900,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
         payload = _parse_json_safe(ai_text)
         return payload, ai_text
 
-    @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
+    @app_commands.command(name="barcello", description="Stato barcello (DM)")
     @app_commands.rename(window_minutes="minuti")
     @app_commands.describe(
         user1="Utente 1 (opzionale)",
