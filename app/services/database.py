@@ -2555,6 +2555,27 @@ class DatabaseService:
     async def get_inactivity_user_state(self, guild_id: str, user_id: str) -> Optional[aiosqlite.Row]:
         return await self.fetchone("SELECT * FROM inactivity_user_state WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
 
+    async def fetch_inactivity_user_states(self, guild_id: str, user_ids: list[str]) -> dict[str, aiosqlite.Row]:
+        if not user_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in user_ids)
+        rows = await self.fetchall(
+            f"SELECT * FROM inactivity_user_state WHERE guild_id = ? AND user_id IN ({placeholders})",
+            (guild_id, *user_ids),
+        )
+        return {str(row["user_id"]): row for row in rows}
+
+    async def extend_user_grace(self, guild_id: str, user_id: str, ts_iso: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO inactivity_user_state (guild_id, user_id, last_reminder_at, reminder_count, last_kick_at)
+            VALUES (?, ?, ?, 0, NULL)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                last_reminder_at = excluded.last_reminder_at
+            """,
+            (guild_id, user_id, ts_iso),
+        )
+
     async def mark_user_reminded(self, guild_id: str, user_id: str, ts_iso: str) -> None:
         await self.execute(
             """
