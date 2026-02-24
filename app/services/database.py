@@ -2619,6 +2619,46 @@ class DatabaseService:
                 continue
         return result
 
+    async def fetch_last_message_info_by_user_guild(self, guild_id: str) -> dict[int, dict[str, str]]:
+        rows = await self.fetchall(
+            """
+            SELECT m.author_id, m.ts AS last_ts, m.channel_id AS last_channel_id, m.message_id AS last_message_id
+            FROM messages AS m
+            INNER JOIN (
+                SELECT author_id, MAX(ts) AS last_ts
+                FROM messages
+                WHERE guild_id = ? AND COALESCE(is_deleted, 0) = 0
+                GROUP BY author_id
+            ) AS latest
+              ON latest.author_id = m.author_id AND latest.last_ts = m.ts
+            WHERE m.guild_id = ? AND COALESCE(m.is_deleted, 0) = 0
+            ORDER BY m.author_id ASC, m.message_id DESC
+            """,
+            (guild_id, guild_id),
+        )
+        result: dict[int, dict[str, str]] = {}
+        for row in rows:
+            aid = row["author_id"]
+            if not aid:
+                continue
+            try:
+                author_id = int(str(aid))
+            except Exception:
+                continue
+            if author_id in result:
+                continue
+            ts = row["last_ts"]
+            channel_id = row["last_channel_id"]
+            message_id = row["last_message_id"]
+            if not ts or not channel_id or not message_id:
+                continue
+            result[author_id] = {
+                "ts": str(ts),
+                "channel_id": str(channel_id),
+                "message_id": str(message_id),
+            }
+        return result
+
     async def fetch_message_counts_by_user_since(self, guild_id: str, since_ts: str) -> dict[int, int]:
         rows = await self.fetchall(
             """

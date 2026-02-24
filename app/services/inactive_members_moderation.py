@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 class InactiveCandidate:
     member: discord.Member
     last_message_ts: str | None
+    last_channel_id: str | None
+    last_message_id: str | None
     count_in_window: int
     days_inactive: int
     policy: dict[str, Any]
@@ -161,7 +163,7 @@ class InactiveMembersModerationService:
 
         excluded_roles = cfg["excluded_role_ids"]
         default_policy = cfg["default_policy"]
-        last_map = await self._database.fetch_last_message_ts_by_user_guild(guild_id)
+        last_map = await self._database.fetch_last_message_info_by_user_guild(guild_id)
         max_window_days = int(default_policy.get("window_days", 30))
         role_rows = await self._database.list_inactivity_role_policies(guild_id)
         for row in role_rows:
@@ -186,7 +188,10 @@ class InactiveMembersModerationService:
                     continue
 
             considered += 1
-            last_ts = last_map.get(member.id)
+            last_info = last_map.get(member.id)
+            last_ts = last_info.get("ts") if last_info else None
+            last_channel_id = last_info.get("channel_id") if last_info else None
+            last_message_id = last_info.get("message_id") if last_info else None
             if last_ts:
                 try:
                     last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
@@ -203,7 +208,17 @@ class InactiveMembersModerationService:
                 per_member_counts = await self._database.fetch_message_counts_by_user_since(guild_id, member_window_start)
                 count = per_member_counts.get(member.id, 0)
             if self._is_inactive(days_inactive=days, count_in_window=count, policy=policy):
-                candidates.append(InactiveCandidate(member=member, last_message_ts=last_ts, count_in_window=count, days_inactive=days, policy=policy))
+                candidates.append(
+                    InactiveCandidate(
+                        member=member,
+                        last_message_ts=last_ts,
+                        last_channel_id=last_channel_id,
+                        last_message_id=last_message_id,
+                        count_in_window=count,
+                        days_inactive=days,
+                        policy=policy,
+                    )
+                )
 
         return candidates, considered, cfg
 
@@ -229,18 +244,21 @@ class InactiveMembersModerationService:
         dt = cls._parse_last_message_dt(candidate.last_message_ts)
         if dt is None:
             return f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | 💬 Ultimo: mai"
+        if not candidate.last_channel_id or not candidate.last_message_id:
+            return f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | 💬 Ultimo: mai"
         local = dt.astimezone()
         last_fmt = local.strftime("%d/%m %H:%M")
-        unix_ts = int(dt.timestamp())
+        jump_url = (
+            f"https://discord.com/channels/{candidate.member.guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
+        )
         return (
             f"• {candidate.member.mention} — ({candidate.count_in_window} msg) | "
-            f"💬 Ultimo: {last_fmt} (UNIX: {unix_ts}) 🕒 {candidate.days_inactive}g fa"
+            f"💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
         )
 
     def _format_policy_default(self, policy: dict[str, Any]) -> str:
         mode = str(policy.get("mode", "OR")).upper()
         return (
-            "📄 **Policy di base**\n"
             f"• Inattività: **{policy.get('inactive_days', 30)} giorni**\n"
             f"• Finestra analisi: **{policy.get('window_days', 30)} giorni**\n"
             f"• Min messaggi: **{policy.get('min_messages', 1)}**\n"
@@ -251,8 +269,8 @@ class InactiveMembersModerationService:
 
     def _format_role_policies(self, guild: discord.Guild, rows: list[Any]) -> str:
         if not rows:
-            return "🏷️ **Policy per ruoli**\n• Nessuna policy ruolo configurata."
-        lines = ["🏷️ **Policy per ruoli**"]
+            return "• Nessuna policy ruolo configurata."
+        lines: list[str] = []
         for row in rows[:8]:
             policy = self._parse_policy_json(row["policy_json"])
             role_id = int(str(row["role_id"]))
