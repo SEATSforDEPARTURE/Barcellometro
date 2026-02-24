@@ -404,6 +404,50 @@ class DatabaseService:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS inactivity_config (
+                guild_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                auto_enabled INTEGER NOT NULL DEFAULT 0,
+                grace_days_after_reminder INTEGER NOT NULL DEFAULT 7,
+                reminder_cooldown_days INTEGER NOT NULL DEFAULT 14,
+                ban_days INTEGER NOT NULL DEFAULT 7,
+                atrio_channel_id TEXT NULL,
+                invite_url TEXT NULL,
+                excluded_role_ids_json TEXT NOT NULL DEFAULT '[]',
+                default_policy_json TEXT NOT NULL DEFAULT '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR","min_account_age_days":0}',
+                dm_reminder_template TEXT NULL,
+                dm_kick_template TEXT NULL,
+                atrio_template TEXT NULL,
+                updated_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS inactivity_role_policies (
+                guild_id TEXT NOT NULL,
+                role_id TEXT NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 0,
+                policy_json TEXT NOT NULL,
+                PRIMARY KEY (guild_id, role_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS inactivity_user_state (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                last_reminder_at TEXT NULL,
+                reminder_count INTEGER NOT NULL DEFAULT 0,
+                last_kick_at TEXT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS temp_bans (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                unban_at TEXT NOT NULL,
+                reason TEXT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            );
             """
         )
         await self._ensure_message_campaign_columns()
@@ -2427,6 +2471,215 @@ class DatabaseService:
             """,
             (guild_id, last_campaign_id, now),
         )
+
+    async def get_inactivity_config(self, guild_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone("SELECT * FROM inactivity_config WHERE guild_id = ?", (guild_id,))
+
+    async def upsert_inactivity_config(self, guild_id: str, **fields: Any) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        current = await self.get_inactivity_config(guild_id)
+        base: dict[str, Any] = {
+            "enabled": 0,
+            "auto_enabled": 0,
+            "grace_days_after_reminder": 7,
+            "reminder_cooldown_days": 14,
+            "ban_days": 7,
+            "atrio_channel_id": None,
+            "invite_url": None,
+            "excluded_role_ids_json": "[]",
+            "default_policy_json": '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR","min_account_age_days":0}',
+            "dm_reminder_template": None,
+            "dm_kick_template": None,
+            "atrio_template": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if current:
+            for key in base:
+                if key in current.keys():
+                    base[key] = current[key]
+        base.update(fields)
+        base["updated_at"] = now
+        columns = [
+            "guild_id",
+            "enabled",
+            "auto_enabled",
+            "grace_days_after_reminder",
+            "reminder_cooldown_days",
+            "ban_days",
+            "atrio_channel_id",
+            "invite_url",
+            "excluded_role_ids_json",
+            "default_policy_json",
+            "dm_reminder_template",
+            "dm_kick_template",
+            "atrio_template",
+            "updated_at",
+            "created_at",
+        ]
+        values = [guild_id] + [base[col] for col in columns[1:]]
+        placeholders = ", ".join("?" for _ in columns)
+        update_cols = ", ".join(f"{col}=excluded.{col}" for col in columns[1:-1])
+        await self.execute(
+            f"INSERT INTO inactivity_config ({', '.join(columns)}) VALUES ({placeholders}) ON CONFLICT(guild_id) DO UPDATE SET {update_cols}",
+            tuple(values),
+        )
+
+    async def set_inactivity_enabled(self, guild_id: str, enabled: bool) -> None:
+        await self.upsert_inactivity_config(guild_id, enabled=1 if enabled else 0)
+
+    async def set_inactivity_auto_enabled(self, guild_id: str, auto_enabled: bool) -> None:
+        await self.upsert_inactivity_config(guild_id, auto_enabled=1 if auto_enabled else 0)
+
+    async def upsert_inactivity_role_policy(self, guild_id: str, role_id: str, policy_json: str, priority: int) -> None:
+        await self.execute(
+            """
+            INSERT INTO inactivity_role_policies (guild_id, role_id, priority, policy_json)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, role_id) DO UPDATE SET
+                priority = excluded.priority,
+                policy_json = excluded.policy_json
+            """,
+            (guild_id, role_id, int(priority), policy_json),
+        )
+
+    async def delete_inactivity_role_policy(self, guild_id: str, role_id: str) -> None:
+        await self.execute("DELETE FROM inactivity_role_policies WHERE guild_id = ? AND role_id = ?", (guild_id, role_id))
+
+    async def list_inactivity_role_policies(self, guild_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT guild_id, role_id, priority, policy_json FROM inactivity_role_policies WHERE guild_id = ? ORDER BY priority DESC, role_id ASC",
+            (guild_id,),
+        )
+
+    async def get_inactivity_user_state(self, guild_id: str, user_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone("SELECT * FROM inactivity_user_state WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+
+    async def mark_user_reminded(self, guild_id: str, user_id: str, ts_iso: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO inactivity_user_state (guild_id, user_id, last_reminder_at, reminder_count, last_kick_at)
+            VALUES (?, ?, ?, 1, NULL)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                last_reminder_at = excluded.last_reminder_at,
+                reminder_count = COALESCE(inactivity_user_state.reminder_count, 0) + 1
+            """,
+            (guild_id, user_id, ts_iso),
+        )
+
+    async def mark_user_kicked(self, guild_id: str, user_id: str, ts_iso: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO inactivity_user_state (guild_id, user_id, last_reminder_at, reminder_count, last_kick_at)
+            VALUES (?, ?, NULL, 0, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                last_kick_at = excluded.last_kick_at
+            """,
+            (guild_id, user_id, ts_iso),
+        )
+
+    async def add_temp_ban(self, guild_id: str, user_id: str, unban_at: str, reason: str | None) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO temp_bans (guild_id, user_id, unban_at, reason, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                unban_at = excluded.unban_at,
+                reason = excluded.reason
+            """,
+            (guild_id, user_id, unban_at, reason, now),
+        )
+
+    async def list_due_temp_unbans(self, now_iso: str) -> list[aiosqlite.Row]:
+        return await self.fetchall("SELECT guild_id, user_id, unban_at, reason, created_at FROM temp_bans WHERE unban_at <= ? ORDER BY unban_at ASC", (now_iso,))
+
+    async def remove_temp_ban(self, guild_id: str, user_id: str) -> None:
+        await self.execute("DELETE FROM temp_bans WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+
+    async def fetch_last_message_ts_by_user_guild(self, guild_id: str) -> dict[int, str]:
+        rows = await self.fetchall(
+            """
+            SELECT author_id, MAX(ts) AS last_ts
+            FROM messages
+            WHERE guild_id = ? AND COALESCE(is_deleted, 0) = 0
+            GROUP BY author_id
+            """,
+            (guild_id,),
+        )
+        result: dict[int, str] = {}
+        for row in rows:
+            aid = row["author_id"]
+            ts = row["last_ts"]
+            if not aid or not ts:
+                continue
+            try:
+                result[int(str(aid))] = str(ts)
+            except Exception:
+                continue
+        return result
+
+    async def fetch_last_message_info_by_user_guild(self, guild_id: str) -> dict[int, dict[str, str]]:
+        rows = await self.fetchall(
+            """
+            SELECT m.author_id, m.ts AS last_ts, m.channel_id AS last_channel_id, m.message_id AS last_message_id
+            FROM messages AS m
+            INNER JOIN (
+                SELECT author_id, MAX(ts) AS last_ts
+                FROM messages
+                WHERE guild_id = ? AND COALESCE(is_deleted, 0) = 0
+                GROUP BY author_id
+            ) AS latest
+              ON latest.author_id = m.author_id AND latest.last_ts = m.ts
+            WHERE m.guild_id = ? AND COALESCE(m.is_deleted, 0) = 0
+            ORDER BY m.author_id ASC, m.message_id DESC
+            """,
+            (guild_id, guild_id),
+        )
+        result: dict[int, dict[str, str]] = {}
+        for row in rows:
+            aid = row["author_id"]
+            if not aid:
+                continue
+            try:
+                author_id = int(str(aid))
+            except Exception:
+                continue
+            if author_id in result:
+                continue
+            ts = row["last_ts"]
+            channel_id = row["last_channel_id"]
+            message_id = row["last_message_id"]
+            if not ts or not channel_id or not message_id:
+                continue
+            result[author_id] = {
+                "ts": str(ts),
+                "channel_id": str(channel_id),
+                "message_id": str(message_id),
+            }
+        return result
+
+    async def fetch_message_counts_by_user_since(self, guild_id: str, since_ts: str) -> dict[int, int]:
+        rows = await self.fetchall(
+            """
+            SELECT author_id, COUNT(*) AS cnt
+            FROM messages
+            WHERE guild_id = ? AND ts >= ? AND COALESCE(is_deleted, 0) = 0
+            GROUP BY author_id
+            """,
+            (guild_id, since_ts),
+        )
+        result: dict[int, int] = {}
+        for row in rows:
+            aid = row["author_id"]
+            cnt = row["cnt"]
+            if not aid:
+                continue
+            try:
+                result[int(str(aid))] = int(cnt)
+            except Exception:
+                continue
+        return result
 
     async def list_custom_campaigns_enabled(self, guild_id: str) -> list[dict[str, object]]:
         rows = await self.fetchall(
