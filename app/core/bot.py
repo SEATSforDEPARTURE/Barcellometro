@@ -33,13 +33,14 @@ from app.services.translate.argos import ArgosTranslateService
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PLUGINS = [
+DEFAULT_PLUGINS_MAIN = [
     "app.plugins.discord_adapter",
     "app.plugins.commands",
     "app.plugins.example_consumer",
     "app.plugins.audio_notes_transcribe",
-    "app.plugins.voice_ingest",
 ]
+
+DEFAULT_PLUGINS_WORKER = ["app.plugins.voice_ingest"]
 
 
 def _parse_plugin_allowlist(raw: str) -> list[str]:
@@ -159,23 +160,30 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("translate.ai", translate_ai_service)
 
     plugin_loader = PluginLoader(registry)
-    mandatory_plugins = ["app.plugins.discord_adapter"]
-    if instance_mode == "main":
-        mandatory_plugins.append("app.plugins.commands")
+    mandatory_plugins = ["app.plugins.discord_adapter"] if instance_mode == "main" else []
 
     allowlist_raw = config.plugin_allowlist
-    if allowlist_raw:
-        allowlist = _parse_plugin_allowlist(allowlist_raw)
-        plugin_list_final = _unique(allowlist + DEFAULT_PLUGINS)
+    allowlist = _parse_plugin_allowlist(allowlist_raw) if allowlist_raw else []
+    if instance_mode == "worker":
+        if allowlist:
+            logger.warning("Ignoring PLUGIN_ALLOWLIST in worker mode: %s", allowlist)
+        plugin_list_final = list(DEFAULT_PLUGINS_WORKER)
     else:
-        allowlist = []
-        plugin_list_final = list(DEFAULT_PLUGINS)
+        if allowlist:
+            plugin_list_final = _unique(allowlist)
+        else:
+            plugin_list_final = list(DEFAULT_PLUGINS_MAIN)
+        if "app.plugins.voice_ingest" in plugin_list_final:
+            logger.warning("Removing app.plugins.voice_ingest from main plugin loading plan")
+            plugin_list_final = [p for p in plugin_list_final if p != "app.plugins.voice_ingest"]
 
     logger.info(
-        "Plugin loading plan: instance_mode=%s allowlist_raw=%s parsed_allowlist=%s plugin_list_final=%s",
+        "Plugin loading plan: instance_mode_raw=%s instance_mode_normalized=%s allowlist_raw=%s parsed_allowlist=%s mandatory_plugins=%s plugin_list_final=%s",
+        config.instance_mode,
         instance_mode,
         allowlist_raw,
         allowlist,
+        mandatory_plugins,
         plugin_list_final,
     )
 
