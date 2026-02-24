@@ -932,3 +932,24 @@ def test_format_for_discord_embed_splits_long_general_text_with_bullets_and_emoj
     emoji_count = sum(out.count(ch) for ch in ["💛", "✨", "🔎", "🐹", "📌", "🧠"])
     assert emoji_count >= 3
     assert "**" in out
+
+
+def test_normalize_discord_formatting_forces_multiline_bullets() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    raw = "✨ - **Energie Altissime**: bene - **Comunicazione al Top**: ok - **Creatività in Crescita**: wow"
+
+    out = service.normalize_discord_formatting(raw)
+
+    assert "\n- **Energie Altissime**" in out
+    assert "\n- **Comunicazione al Top**" in out
+    assert "\n- **Creatività in Crescita**" in out
+
+
+def test_build_qna_embed_plain_mode_normalizes_single_line_llm_output() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    raw = "✨ - **Energie Altissime**: bene - **Comunicazione al Top**: ok"
+
+    embed = service._build_qna_embed("q", raw, [], scope="general_llm", mode="plain")
+
+    assert "\n- **Energie Altissime**" in embed.description
+    assert "\n- **Comunicazione al Top**" in embed.description

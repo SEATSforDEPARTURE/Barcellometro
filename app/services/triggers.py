@@ -1599,6 +1599,24 @@ class TriggerEngineService:
             sections.extend(proof_lines)
         return "\n".join(sections) if sections else raw
 
+    def normalize_discord_formatting(self, text: str) -> str:
+        normalized = (text or "").strip()
+        if not normalized:
+            return normalized
+
+        normalized = normalized.replace(" - ", "\n- ")
+        normalized = normalized.replace("• ", "\n• ")
+        normalized = normalized.replace("👉 ", "\n👉 ")
+        normalized = normalized.replace("✨ ", "\n✨ ")
+        normalized = re.sub(r"\s-\s\*\*", "\n- **", normalized)
+
+        if "\n" not in normalized and len(normalized) > 500:
+            sentences = [part.strip() for part in normalized.split(". ") if part.strip()]
+            if sentences:
+                normalized = "\n\n".join(sentences)
+
+        return normalized.strip()
+
     def _build_qna_embed(
         self,
         question: str,
@@ -1613,7 +1631,8 @@ class TriggerEngineService:
         else:
             base_text = self._bulletize_answer(question, answer_text, evidence)
         formatted = self.format_for_discord_embed(base_text, scope)
-        description = self._truncate_embed_description(formatted)
+        formatted_text = self.normalize_discord_formatting(formatted)
+        description = self._truncate_embed_description(formatted_text)
         embed = discord.Embed(description=description)
         footer_text = "Barcellometro • Generale" if scope == "general_llm" else "Barcellometro • Q&A"
         embed.set_footer(text=footer_text)
