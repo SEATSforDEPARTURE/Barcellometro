@@ -26,7 +26,8 @@ CAP_DEFAULT = 6
 CAP_DEFAULT_ENABLED = True
 BARCELLO_CACHE_TTL_SECONDS = 60
 DEFAULT_CAMPAIGN_EMBED_COLOR = 0x2F3136
-CAMPAIGN_EMBED_FOOTER = "Servizio offerto dal vostro amichevole Barcellometro di quartiere."
+CAMPAIGN_EMBED_FOOTER = "Questo servizio è offerto dal vostro Barcellometruccio di fiducia."
+MAX_EMBEDS_PER_MESSAGE = 10
 
 BARCELLO_COLOR_MAP = {
     "GREEN": "GREEN",
@@ -162,6 +163,33 @@ def select_text_for_mood(
     if barcello_color == "BLACK":
         return text_black or base_text, "barcello_black", "black" if text_black else "base"
     return base_text, "barcello_unavailable", "base"
+
+
+def split_embed_pages(text: str, limit: int = 3900) -> list[str]:
+    if limit <= 0:
+        raise ValueError("limit must be > 0")
+    if not text:
+        return [""]
+
+    pages: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        while len(line) > limit:
+            if current:
+                pages.append(current)
+                current = ""
+            pages.append(line[:limit])
+            line = line[limit:]
+        if len(current) + len(line) <= limit:
+            current += line
+        else:
+            if current:
+                pages.append(current)
+            current = line
+
+    if current or not pages:
+        pages.append(current)
+    return pages
 
 
 def _parse_iso(value: object) -> Optional[datetime]:
@@ -454,16 +482,6 @@ class MessageSchedulerService:
             parsed = parsed[2:]
         return len(parsed) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in parsed)
 
-    def _clamp_embed_description(self, text: str, limit: int = 4096) -> str:
-        if len(text) <= limit:
-            return text
-        cutoff = max(limit - 1, 1)
-        chunk = text[:cutoff]
-        last_newline = chunk.rfind("\n")
-        if last_newline >= 0:
-            chunk = chunk[:last_newline]
-        return (chunk.rstrip() or text[:cutoff].rstrip()) + "…"
-
     def _parse_embed_color(self, value: Optional[str]) -> int:
         if value is None:
             return DEFAULT_CAMPAIGN_EMBED_COLOR
@@ -489,22 +507,40 @@ class MessageSchedulerService:
         campaign: dict[str, object],
         rendered_text: Optional[str],
     ) -> None:
-        title = str(campaign.get("embed_title") or campaign.get("name") or "📣 Campagna")
+        base_title = str(campaign.get("embed_title") or campaign.get("name") or "📣 Campagna")
         raw_text = str(rendered_text or "")
-        description = self._clamp_embed_description(raw_text)
         color = self._parse_embed_color(campaign.get("embed_color"))
-        embed = discord.Embed(title=title, description=description, colour=color)
-        embed.set_footer(text=CAMPAIGN_EMBED_FOOTER)
+        pages = split_embed_pages(raw_text, limit=3900)
+        if len(pages) > MAX_EMBEDS_PER_MESSAGE:
+            pages = split_embed_pages(raw_text, limit=4096)
+        total = len(pages)
+
+        embeds: list[discord.Embed] = []
+        for page_index, page in enumerate(pages, start=1):
+            title = base_title if total == 1 else f"{base_title} • PAG {page_index}/{total}"
+            embed = discord.Embed(title=title, description=page, colour=color)
+            embed.set_footer(text=CAMPAIGN_EMBED_FOOTER)
+            embeds.append(embed)
+
         logger.info(
-            "campaign_send_embed id=%s name=%s title=%s color=%s raw_len=%s clamped_len=%s",
-            campaign.get("id"),
-            campaign.get("name"),
-            title,
-            hex(color),
+            "campaign_send_embed pages=%s raw_len=%s title=%s campaign_id=%s",
+            total,
             len(raw_text),
-            len(description),
+            base_title,
+            campaign.get("id"),
         )
-        await channel.send(embed=embed)
+
+        if total <= MAX_EMBEDS_PER_MESSAGE:
+            await channel.send(embeds=embeds)
+            return
+
+        logger.warning(
+            "campaign_send_embed_exceeds_message_limit pages=%s campaign_id=%s; sending in chunks",
+            total,
+            campaign.get("id"),
+        )
+        for idx in range(0, total, MAX_EMBEDS_PER_MESSAGE):
+            await channel.send(embeds=embeds[idx : idx + MAX_EMBEDS_PER_MESSAGE])
 
     async def _skip_for_quiet_hours(self, now: datetime) -> Optional[str]:
         settings = await self._get_quiet_settings()
