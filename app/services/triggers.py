@@ -222,7 +222,9 @@ class TriggerEngineService:
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
             return
 
-        embed = self._build_qna_embed(question_clean, text, evidence_pack)
+        render_mode: Literal["evidence", "plain"] = "plain" if route_scope == "general_llm" else "evidence"
+        logger.info("qna_render mode=%s scope=%s evidence_items=%d", render_mode, route_scope, len(evidence_pack))
+        embed = self._build_qna_embed(question_clean, text, evidence_pack, mode=render_mode)
 
         await self._database.increment_usage(
             guild_id,
@@ -324,7 +326,7 @@ class TriggerEngineService:
                 return
 
             await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
-            embed = self._build_qna_embed(question_clean, text, evidence_pack)
+            embed = self._build_qna_embed(question_clean, text, evidence_pack, mode="evidence")
             await message.reply(
                 content=f"{message.author.mention} **chiede:** {question_clean}",
                 embed=embed,
@@ -1313,12 +1315,7 @@ class TriggerEngineService:
             ],
         )
         text = str(getattr(response, "output_text", "") or "").strip()
-        if not text:
-            return None
-        text = text.replace("prove dirette", "informazioni verificabili")
-        text = text.replace("contesto fornito", "dettagli disponibili")
-        text = text.replace("periodo richiesto", "informazioni richieste")
-        return text
+        return text or None
 
     def _normalize_question(self, question: str) -> str:
         return re.sub(r"\s+", " ", question.strip().lower())
@@ -1478,9 +1475,21 @@ class TriggerEngineService:
         bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
         return tier_limit + max(0, bonus)
 
-    def _build_qna_embed(self, question: str, answer_text: str, evidence: list[dict[str, str]]) -> discord.Embed:
+    def _build_qna_embed(
+        self,
+        question: str,
+        answer_text: str,
+        evidence: list[dict[str, str]],
+        *,
+        mode: Literal["evidence", "plain"] = "evidence",
+    ) -> discord.Embed:
+        if mode == "plain":
+            normalized = re.sub(r"\s+", " ", (answer_text or "").strip())
+            description = self._truncate_embed_description(normalized)
+        else:
+            description = self._truncate_embed_description(self._bulletize_answer(question, answer_text, evidence))
         embed = discord.Embed(
-            description=self._truncate_embed_description(self._bulletize_answer(question, answer_text, evidence)),
+            description=description,
             timestamp=datetime.now(timezone.utc),
         )
         embed.set_footer(text="Barcellometro Q&A")

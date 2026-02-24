@@ -16,6 +16,24 @@ if "discord" not in sys.modules:
     discord_stub.Client = object
     sys.modules["discord"] = discord_stub
 
+discord_stub = sys.modules["discord"]
+if not hasattr(discord_stub, "Embed"):
+    class _FakeEmbed:
+        def __init__(self, description: str = "", timestamp=None, **kwargs) -> None:
+            self.description = description
+            self.timestamp = timestamp
+            self.title = kwargs.get("title")
+            self.color = kwargs.get("color")
+            self.fields: list[dict[str, object]] = []
+
+        def set_footer(self, text: str) -> None:
+            self.footer = text
+
+        def add_field(self, *, name: str, value: str, inline: bool = False) -> None:
+            self.fields.append({"name": name, "value": value, "inline": inline})
+
+    discord_stub.Embed = _FakeEmbed
+
 if "aiosqlite" not in sys.modules:
     aiosqlite_stub = types.ModuleType("aiosqlite")
     aiosqlite_stub.Connection = object
@@ -143,7 +161,7 @@ def test_decorate_proof_links_keeps_unknown_links() -> None:
 def test_decorate_proof_links_fixes_spaced_markdown_parentheses() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "Fonte: [🧾 14/02 14:26] (https://discord.com/channels/1/2/3)"
-    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)" in decorated
@@ -152,7 +170,7 @@ def test_decorate_proof_links_fixes_spaced_markdown_parentheses() -> None:
 def test_decorate_proof_links_rewrites_naked_proof_url() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "prova (https://discord.com/channels/1/2/3)"
-    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert decorated == "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)"
@@ -161,7 +179,7 @@ def test_decorate_proof_links_rewrites_naked_proof_url() -> None:
 def test_decorate_proof_links_removes_broken_spacing_patterns() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "Test [🧾 14/02 14:26] ( https://discord.com/channels/1/2/3 )"
-    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert "] (http" not in decorated
@@ -172,7 +190,7 @@ def test_decorate_proof_links_removes_broken_spacing_patterns() -> None:
 def test_decorate_proof_links_removes_newlines_and_spaces_inside_link_url() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "Fonte: [🧾 14/02 14:26](https://discord.com/channels/1/\n2/3 )"
-    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert "\n" not in decorated.split("(", 1)[1].split(")", 1)[0]
@@ -731,23 +749,21 @@ def test_handle_qna_question_global_bypasses_retrieval() -> None:
     followup.send.assert_awaited_once()
 
 
-def test_ask_general_llm_sanitizes_retrieval_phrases() -> None:
-    ai_client = Mock()
-    ai_client.responses.create = AsyncMock(
-        return_value=SimpleNamespace(output_text="Non ho trovato prove dirette nel contesto fornito per il periodo richiesto.")
-    )
-    ai_service = Mock()
-    ai_service.is_enabled.return_value = True
-    ai_service.client.return_value = ai_client
-    ai_service.get_model.return_value = "gpt-4o-mini"
+def test_build_qna_embed_plain_mode_keeps_general_answer_text() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    embed = service._build_qna_embed("quanti minuti", "3 ore sono 180 minuti.", [], mode="plain")
+    assert embed.description is not None
+    assert "180" in embed.description
 
-    service = TriggerEngineService(Mock(), Mock(), Mock(), ai_service, community_insights=Mock())
-    out = asyncio.run(service._ask_general_llm("che sono i cammelli"))
 
-    assert out is not None
-    assert "prove dirette" not in out
-    assert "contesto fornito" not in out
-    assert "periodo richiesto" not in out
+def test_build_qna_embed_evidence_mode_adds_proof_links() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "• Confermato [prova](https://discord.com/channels/1/2/3)"
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
+    embed = service._build_qna_embed("cosa è stato confermato?", answer, evidence, mode="evidence")
+    assert embed.description is not None
+    assert "[🧾" in embed.description
+    assert "https://discord.com/channels/1/2/3" in embed.description
 
 
 def test_route_qna_general_llm_bypasses_channel_trigger_check() -> None:
