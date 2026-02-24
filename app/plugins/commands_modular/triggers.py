@@ -353,15 +353,24 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await _set_toggle(interaction, "prompt", "status")
 
     @prompt_group.command(name="create", description="Crea campagna AI_PROMPT")
+    @app_commands.describe(
+        embed_title="Titolo embed opzionale",
+        embed_color="Colore embed opzionale (#RRGGBB, RRGGBB, 0xRRGGBB)",
+    )
     async def prompt_create(
         interaction: discord.Interaction,
         name: str,
         time_local: str,
         interval_minutes: int,
         prompt_text: str,
+        embed_title: str | None = None,
+        embed_color: str | None = None,
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            return
+        if ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
+            await interaction.response.send_message("embed_color non valido. Usa #RRGGBB, RRGGBB oppure 0xRRGGBB.", ephemeral=True)
             return
         next_run = calculate_initial_next_run(datetime.now(timezone.utc), time_local, interval_minutes, ctx.timezone)
         campaign_id = await ctx.database.create_message_campaign(
@@ -382,6 +391,8 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             mood_mode="IGNORE_BARCELLO",
             next_run_at=next_run.isoformat(),
             created_by=str(interaction.user.id),
+            embed_title=embed_title,
+            embed_color=embed_color,
         )
         await interaction.response.send_message(f"Campagna AI_PROMPT creata: {campaign_id}", ephemeral=True)
 
@@ -399,6 +410,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             "\n".join(
                 [
                     f"ID {r['id']} {'on' if r['enabled'] else 'off'} {r['name'] or '-'} ch={r['channel_id'] or '-'} next={r['next_run_at'] or '-'}"
+                    f" embed_title={r['embed_title'] or '-'} embed_color={r['embed_color'] or '-'}"
                     for r in rows
                 ]
             ),
@@ -474,7 +486,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
 
         await interaction.followup.send("Test inviato.", ephemeral=True)
         if isinstance(interaction.channel, discord.abc.Messageable):
-            await interaction.channel.send(content=rendered_text)
+            await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
 
     @qna_group.command(name="on", description="Abilita trigger qna")
     async def qna_on(interaction: discord.Interaction) -> None:

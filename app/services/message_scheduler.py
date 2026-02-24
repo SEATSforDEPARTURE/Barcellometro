@@ -25,6 +25,8 @@ QUIET_DEFAULT_ENABLED = True
 CAP_DEFAULT = 6
 CAP_DEFAULT_ENABLED = True
 BARCELLO_CACHE_TTL_SECONDS = 60
+DEFAULT_CAMPAIGN_EMBED_COLOR = 0x2F3136
+CAMPAIGN_EMBED_FOOTER = "Servizio offerto dal vostro amichevole Barcellometro di quartiere."
 
 BARCELLO_COLOR_MAP = {
     "GREEN": "GREEN",
@@ -396,7 +398,7 @@ class MessageSchedulerService:
 
         logger.info("Sending campaign id=%s to channel_id=%s", campaign_id, channel_id)
         try:
-            await channel.send(content=str(resolved_text))
+            await self.send_campaign_embed(channel, campaign, resolved_text)
             await self._database.insert_send_log(
                 campaign_id=campaign_id,
                 guild_id=guild_id,
@@ -439,6 +441,70 @@ class MessageSchedulerService:
         guild_id = str(campaign["guild_id"])
         channel_id = channel_id_override or str(campaign.get("channel_id") or "")
         return await self._resolve_campaign_text(campaign, guild_id, channel_id)
+
+    def is_valid_embed_color(self, value: Optional[str]) -> bool:
+        if value is None:
+            return True
+        parsed = str(value).strip()
+        if not parsed:
+            return True
+        if parsed.startswith("#"):
+            parsed = parsed[1:]
+        elif parsed.lower().startswith("0x"):
+            parsed = parsed[2:]
+        return len(parsed) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in parsed)
+
+    def _clamp_embed_description(self, text: str, limit: int = 4096) -> str:
+        if len(text) <= limit:
+            return text
+        cutoff = max(limit - 1, 1)
+        chunk = text[:cutoff]
+        last_newline = chunk.rfind("\n")
+        if last_newline >= 0:
+            chunk = chunk[:last_newline]
+        return (chunk.rstrip() or text[:cutoff].rstrip()) + "…"
+
+    def _parse_embed_color(self, value: Optional[str]) -> int:
+        if value is None:
+            return DEFAULT_CAMPAIGN_EMBED_COLOR
+        parsed = str(value).strip()
+        if not parsed:
+            return DEFAULT_CAMPAIGN_EMBED_COLOR
+        if parsed.startswith("#"):
+            parsed = parsed[1:]
+        elif parsed.lower().startswith("0x"):
+            parsed = parsed[2:]
+        if len(parsed) != 6:
+            logger.warning("Invalid embed_color=%s; using default", value)
+            return DEFAULT_CAMPAIGN_EMBED_COLOR
+        try:
+            return int(parsed, 16)
+        except ValueError:
+            logger.warning("Invalid embed_color=%s; using default", value)
+            return DEFAULT_CAMPAIGN_EMBED_COLOR
+
+    async def send_campaign_embed(
+        self,
+        channel: discord.abc.Messageable,
+        campaign: dict[str, object],
+        rendered_text: Optional[str],
+    ) -> None:
+        title = str(campaign.get("embed_title") or campaign.get("name") or "📣 Campagna")
+        raw_text = str(rendered_text or "")
+        description = self._clamp_embed_description(raw_text)
+        color = self._parse_embed_color(campaign.get("embed_color"))
+        embed = discord.Embed(title=title, description=description, colour=color)
+        embed.set_footer(text=CAMPAIGN_EMBED_FOOTER)
+        logger.info(
+            "campaign_send_embed id=%s name=%s title=%s color=%s raw_len=%s clamped_len=%s",
+            campaign.get("id"),
+            campaign.get("name"),
+            title,
+            hex(color),
+            len(raw_text),
+            len(description),
+        )
+        await channel.send(embed=embed)
 
     async def _skip_for_quiet_hours(self, now: datetime) -> Optional[str]:
         settings = await self._get_quiet_settings()
