@@ -22,6 +22,7 @@ from app.services.config_file_loader import load_json_file
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope
+from app.services.qna_session_store import QnaSession, QnaSessionStore
 from app.utils.pii import contains_pii
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class TriggerEngineService:
         self._barcello_window_override_cache: dict[str, int] = {}
         self._barcello_window_override_cache_fingerprint: str | None = None
         self._barcello_last_applied_window: dict[str, int] = {}
+        self._qna_sessions = QnaSessionStore(ttl_minutes=60)
 
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
@@ -96,6 +98,14 @@ class TriggerEngineService:
             await interaction.followup.send(text, ephemeral=ephemeral)
             return
         await interaction.response.send_message(text, ephemeral=ephemeral)
+
+    def _trim_qna_history(self, history: list[dict[str, str]], *, max_messages: int = 16) -> list[dict[str, str]]:
+        if max_messages <= 0:
+            return []
+        trimmed = history[-max_messages:]
+        while trimmed and str(trimmed[0].get("role") or "") == "assistant":
+            trimmed = trimmed[1:]
+        return trimmed
 
     async def handle_qna_question(
         self,
@@ -182,10 +192,13 @@ class TriggerEngineService:
         public_content = f"{interaction.user.mention} **chiede:** {question_clean}"
 
         if route_scope == "general_llm":
-            text = await self._ask_general_llm(question_clean)
+            history = [{"role": "user", "content": question_clean}]
+            text = await self._ask_general_llm(question_clean, history=history)
             if not text:
                 await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
                 return
+            history.append({"role": "assistant", "content": text})
+            history = self._trim_qna_history(history)
             evidence_pack: list[dict[str, str]] = []
         else:
             answer = await self._handle_qna(
@@ -233,7 +246,16 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        await interaction.followup.send(content=public_content, embed=embed, ephemeral=False)
+        sent_message = await interaction.followup.send(content=public_content, embed=embed, ephemeral=False, wait=True)
+        if route_scope == "general_llm":
+            message_id_raw = getattr(sent_message, "id", None)
+            if message_id_raw is not None:
+                try:
+                    anchor_key = (int(guild_id), int(channel_id), int(message_id_raw))
+                except (TypeError, ValueError):
+                    anchor_key = None
+                if anchor_key is not None:
+                    self._qna_sessions.set(anchor_key, QnaSession(scope="general_llm", history=history))
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         try:
@@ -242,6 +264,24 @@ class TriggerEngineService:
             content = (message.content or "").strip()
             if not content:
                 return
+
+            if message.reference and message.reference.message_id and message.channel and message.guild:
+                anchor_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
+                session = self._qna_sessions.get(anchor_key)
+                if session and session.scope == "general_llm":
+                    session.history.append({"role": "user", "content": content})
+                    session.history = self._trim_qna_history(session.history)
+                    answer_text = await self._ask_general_llm(content, history=session.history)
+                    if answer_text:
+                        session.history.append({"role": "assistant", "content": answer_text})
+                        session.history = self._trim_qna_history(session.history)
+                        reply_message = await message.reply(answer_text, mention_author=False)
+                        base_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
+                        new_anchor_key = (int(message.guild.id), int(message.channel.id), int(reply_message.id))
+                        self._qna_sessions.set(base_key, session)
+                        self._qna_sessions.set(new_anchor_key, session)
+                        logger.info("qna_session_hit=true scope=general_llm history_len=%s", len(session.history))
+                    return
 
             question = content
             if question.lower().startswith("domanda:"):
@@ -1297,23 +1337,24 @@ class TriggerEngineService:
         scope = str(answer.get("scope") or "mixed").strip().lower()
         return scope
 
-    async def _ask_general_llm(self, question: str) -> str | None:
+    async def _ask_general_llm(self, question: str, history: list[dict[str, str]] | None = None) -> str | None:
         if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
             return None
         model = self._ai.get_model("summary") or "gpt-4o-mini"
         provider = "openai"
         logger.info("qna_llm_called=%s model=%s", True, model)
         logger.info("qna_general_llm_called=true provider=%s model=%s", provider, model)
-        response = await self._ai.client().responses.create(
-            model=model,
-            input=[
-                {
-                    "role": "system",
-                    "content": "Sei Barcellometro, assistente della community. Rispondi in modo utile, naturale, in italiano. Se la domanda chiede meteo o info non disponibile senza internet, dillo chiaramente e suggerisci come verificarlo.",
-                },
-                {"role": "user", "content": question},
-            ],
-        )
+        messages: list[dict[str, str]] = [
+            {
+                "role": "system",
+                "content": "Sei Barcellometro, assistente della community. Rispondi in modo utile, naturale, in italiano. Se la domanda chiede meteo o info non disponibile senza internet, dillo chiaramente e suggerisci come verificarlo.",
+            }
+        ]
+        if history:
+            messages.extend(history)
+        else:
+            messages.append({"role": "user", "content": question})
+        response = await self._ai.client().responses.create(model=model, input=messages)
         text = str(getattr(response, "output_text", "") or "").strip()
         return text or None
 

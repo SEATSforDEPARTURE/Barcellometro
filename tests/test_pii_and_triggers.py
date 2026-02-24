@@ -803,3 +803,80 @@ def test_route_qna_general_llm_bypasses_channel_trigger_check() -> None:
     database.get_trigger_enabled.assert_not_called()
     service._handle_qna.assert_not_called()
     service._ask_general_llm.assert_awaited_once()
+
+
+def test_route_qna_general_llm_stores_anchor_session() -> None:
+    database = Mock()
+    database.get_usage = AsyncMock(return_value=0)
+    database.increment_usage = AsyncMock()
+
+    entitlements = Mock()
+    entitlements.resolve_profile = AsyncMock(return_value="role1")
+
+    service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
+    service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
+    service._resolve_qna_limit = AsyncMock(return_value=3)
+    service._ask_general_llm = AsyncMock(return_value="Risposta utile")
+    service._build_qna_embed = Mock(return_value=Mock())
+
+    response = Mock()
+    response.is_done = Mock(return_value=False)
+    response.defer = AsyncMock()
+
+    followup = Mock()
+    followup.send = AsyncMock(return_value=SimpleNamespace(id=999))
+
+    interaction = SimpleNamespace(
+        guild_id=10,
+        channel_id=20,
+        user=SimpleNamespace(id=30, mention="<@30>"),
+        response=response,
+        followup=followup,
+    )
+
+    asyncio.run(service.route_qna(interaction, "domanda", scope="general_llm"))
+
+    assert service._qna_sessions.get((10, 20, 999)) is not None
+
+
+def test_handle_message_qna_reply_session_hit_reanchors() -> None:
+    database = Mock()
+    database.get_trigger_enabled = AsyncMock(return_value=True)
+    database.get_usage = AsyncMock(return_value=0)
+    database.increment_usage = AsyncMock()
+
+    service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+    service._ask_general_llm = AsyncMock(return_value="Risposta contestuale")
+    service._handle_qna = AsyncMock()
+    service._qna_sessions.set(
+        (10, 20, 500),
+        SimpleNamespace(scope="general_llm", history=[{"role": "user", "content": "prima domanda"}], created_at=datetime.now(), last_used_at=datetime.now()),
+    )
+
+    async def _reply(*args, **kwargs):
+        return SimpleNamespace(id=700)
+
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=10),
+        channel=SimpleNamespace(id=20),
+        author=SimpleNamespace(id=111),
+        content="e poi?",
+        reference=SimpleNamespace(message_id=500),
+        reply=_reply,
+    )
+
+    asyncio.run(service.handle_message_qna(message))
+
+    service._ask_general_llm.assert_awaited_once()
+    service._handle_qna.assert_not_called()
+    assert service._qna_sessions.get((10, 20, 700)) is not None
+
+
+def test_trim_qna_history_limits_and_starts_with_user() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    history = [{"role": "assistant", "content": "a0"}] + [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": str(i)} for i in range(30)
+    ]
+    trimmed = service._trim_qna_history(history, max_messages=16)
+    assert len(trimmed) <= 16
+    assert trimmed[0]["role"] == "user"
