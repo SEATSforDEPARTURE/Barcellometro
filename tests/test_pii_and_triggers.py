@@ -746,7 +746,7 @@ def test_handle_qna_question_global_bypasses_retrieval() -> None:
 
 def test_build_qna_embed_plain_mode_keeps_general_answer_text() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    embed = service._build_qna_embed("quanti minuti", "3 ore sono 180 minuti.", [], mode="plain")
+    embed = service._build_qna_embed("quanti minuti", "3 ore sono 180 minuti.", [], scope="general_llm", mode="plain")
     assert embed.description is not None
     assert "180" in embed.description
 
@@ -755,7 +755,7 @@ def test_build_qna_embed_evidence_mode_adds_proof_links() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "• Confermato [prova](https://discord.com/channels/1/2/3)"
     evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
-    embed = service._build_qna_embed("cosa è stato confermato?", answer, evidence, mode="evidence")
+    embed = service._build_qna_embed("cosa è stato confermato?", answer, evidence, scope="channel_qna", mode="evidence")
     assert embed.description is not None
     assert "[🧾" in embed.description
     assert "https://discord.com/channels/1/2/3" in embed.description
@@ -848,7 +848,11 @@ def test_handle_message_qna_reply_session_hit_reanchors() -> None:
         SimpleNamespace(scope="general_llm", history=[{"role": "user", "content": "prima domanda"}], created_at=datetime.now(), last_used_at=datetime.now()),
     )
 
+    captured: dict[str, object] = {}
+
     async def _reply(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
         return SimpleNamespace(id=700)
 
     message = SimpleNamespace(
@@ -864,6 +868,9 @@ def test_handle_message_qna_reply_session_hit_reanchors() -> None:
 
     service._ask_general_answer.assert_awaited_once()
     service._handle_qna.assert_not_called()
+    assert "embed" in captured.get("kwargs", {})
+    assert captured["kwargs"].get("mention_author") is False
+    assert len(captured.get("args", ())) == 0
     assert service._qna_sessions.get((10, 20, 700)) is not None
 
 

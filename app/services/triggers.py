@@ -237,7 +237,7 @@ class TriggerEngineService:
 
         render_mode: Literal["evidence", "plain"] = "plain" if route_scope == "general_llm" else "evidence"
         logger.info("qna_render mode=%s scope=%s evidence_items=%d", render_mode, route_scope, len(evidence_pack))
-        embed = self._build_qna_embed(question_clean, text, evidence_pack, mode=render_mode)
+        embed = self._build_qna_embed(question_clean, text, evidence_pack, scope=route_scope, mode=render_mode)
 
         await self._database.increment_usage(
             guild_id,
@@ -275,7 +275,8 @@ class TriggerEngineService:
                     if answer_text:
                         session.history.append({"role": "assistant", "content": answer_text})
                         session.history = self._trim_qna_history(session.history)
-                        reply_message = await message.reply(answer_text, mention_author=False)
+                        reply_embed = self._build_qna_embed(content, answer_text, [], scope="general_llm", mode="plain")
+                        reply_message = await message.reply(embed=reply_embed, mention_author=False)
                         base_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
                         new_anchor_key = (int(message.guild.id), int(message.channel.id), int(reply_message.id))
                         self._qna_sessions.set(base_key, session)
@@ -366,7 +367,7 @@ class TriggerEngineService:
                 return
 
             await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
-            embed = self._build_qna_embed(question_clean, text, evidence_pack, mode="evidence")
+            embed = self._build_qna_embed(question_clean, text, evidence_pack, scope="channel_qna", mode="evidence")
             await message.reply(
                 content=f"{message.author.mention} **chiede:** {question_clean}",
                 embed=embed,
@@ -1575,6 +1576,7 @@ class TriggerEngineService:
         answer_text: str,
         evidence: list[dict[str, str]],
         *,
+        scope: Literal["general_llm", "channel_qna"] = "channel_qna",
         mode: Literal["evidence", "plain"] = "evidence",
     ) -> discord.Embed:
         if mode == "plain":
@@ -1586,7 +1588,8 @@ class TriggerEngineService:
             description=description,
             timestamp=datetime.now(timezone.utc),
         )
-        embed.set_footer(text="Barcellometro Q&A")
+        footer_text = "Barcellometro • Generale" if scope == "general_llm" else f"Barcellometro Q&A • {datetime.now(ROME_TZ).strftime('%d/%m %H:%M')}"
+        embed.set_footer(text=footer_text)
         return embed
 
     def _bulletize_answer(self, question: str, answer_text: str, evidence: list[dict[str, str]]) -> str:
