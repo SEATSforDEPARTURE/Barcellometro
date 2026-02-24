@@ -868,6 +868,80 @@ class DatabaseService:
         scored.sort(key=lambda item: (int(item.get("score", 0)), str(item.get("created_at", ""))), reverse=True)
         return scored[:safe_limit]
 
+    async def search_guild_messages(
+        self,
+        *,
+        guild_id: str,
+        query_text: str,
+        limit: int = 60,
+        candidate_pool: int = 300,
+        min_content_length: int = 0,
+    ) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(60, int(limit or 60)))
+        safe_pool = max(safe_limit, min(300, int(candidate_pool or 300)))
+        keywords = [token for token in re.findall(r"\w+", query_text.lower()) if len(token) > 2][:12]
+        phrase = query_text.strip().lower()
+
+        params: list[Any] = [guild_id]
+        where_parts = ["m.guild_id = ?", "COALESCE(m.is_deleted, 0) = 0", "COALESCE(u.is_bot, 0) = 0"]
+        if min_content_length > 0:
+            where_parts.append("LENGTH(TRIM(COALESCE(m.content, ''))) >= ?")
+            params.append(int(min_content_length))
+        if keywords:
+            like_parts: list[str] = []
+            for kw in keywords:
+                like_parts.append("LOWER(m.content) LIKE ?")
+                params.append(f"%{kw}%")
+            where_parts.append("(" + " OR ".join(like_parts) + ")")
+
+        sql = f"""
+            SELECT
+                m.message_id,
+                m.guild_id,
+                m.channel_id,
+                m.author_id,
+                m.ts AS created_at,
+                m.content,
+                COALESCE(gm.nickname, u.display_name, u.global_name, u.username, m.author_id) AS author_name
+            FROM messages AS m
+            LEFT JOIN users AS u ON u.user_id = m.author_id
+            LEFT JOIN guild_memberships AS gm ON gm.guild_id = m.guild_id AND gm.user_id = m.author_id
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY m.ts DESC
+            LIMIT ?
+        """
+        params.append(safe_pool)
+        rows = await self.fetchall(sql, tuple(params))
+        scored: list[dict[str, Any]] = []
+        for row in rows:
+            content = str(row["content"] or "")
+            lower = content.lower()
+            score = 0
+            for kw in keywords:
+                idx = lower.find(kw)
+                if idx >= 0:
+                    score += 1
+                    if idx < 80:
+                        score += 1
+            if phrase and phrase in lower:
+                score += 2
+            if score <= 0 and keywords:
+                continue
+            scored.append(
+                {
+                    "message_id": str(row["message_id"] or ""),
+                    "guild_id": str(row["guild_id"] or ""),
+                    "channel_id": str(row["channel_id"] or ""),
+                    "author_id": str(row["author_id"] or ""),
+                    "author_name": str(row["author_name"] or row["author_id"] or ""),
+                    "created_at": str(row["created_at"] or ""),
+                    "content": content,
+                    "score": score,
+                }
+            )
+        scored.sort(key=lambda item: (int(item.get("score", 0)), str(item.get("created_at", ""))), reverse=True)
+        return scored[:safe_limit]
+
     async def get_qna_session_history(self, guild_id: str, channel_id: str, user_id: str, now_iso: str) -> list[dict[str, str]]:
         row = await self.fetchone(
             """
