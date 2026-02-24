@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import json
 import sys
 import types
+from types import SimpleNamespace
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
@@ -670,16 +671,61 @@ def test_poll_barcello_override_logs_only_channels_with_window_change(tmp_path, 
     assert "window=40" in logs[0]
 
 
-def test_build_qna_global_payload_uses_guild_scope_only() -> None:
+def test_ask_general_llm_uses_assistant_prompt_and_returns_text() -> None:
+    ai_client = Mock()
+    ai_client.responses.create = AsyncMock(return_value=SimpleNamespace(output_text="Risposta generale"))
+    ai_service = Mock()
+    ai_service.is_enabled.return_value = True
+    ai_service.client.return_value = ai_client
+    ai_service.get_model.return_value = "gpt-4o-mini"
+
+    service = TriggerEngineService(Mock(), Mock(), Mock(), ai_service, community_insights=Mock())
+    out = asyncio.run(service._ask_general_llm("meteo Cerignola"))
+
+    assert out == "Risposta generale"
+    ai_client.responses.create.assert_awaited_once()
+    call_kwargs = ai_client.responses.create.await_args.kwargs
+    assert call_kwargs["model"] == "gpt-4o-mini"
+    payload = call_kwargs["input"]
+    assert payload[0]["role"] == "system"
+    assert "assistente della community" in payload[0]["content"]
+    assert payload[1] == {"role": "user", "content": "meteo Cerignola"}
+
+
+def test_handle_qna_question_global_bypasses_retrieval() -> None:
     database = Mock()
-    database.search_guild_messages = AsyncMock(return_value=[])
-    database.search_channel_messages = AsyncMock(return_value=[])
-    service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+    database.get_trigger_enabled = AsyncMock(return_value=True)
+    database.get_usage = AsyncMock(return_value=0)
+    database.increment_usage = AsyncMock()
 
-    payload = asyncio.run(service._build_qna_global_payload("10", "domanda"))
+    entitlements = Mock()
+    entitlements.resolve_profile = AsyncMock(return_value="role1")
 
-    database.search_guild_messages.assert_awaited_once()
-    database.search_channel_messages.assert_not_called()
-    parsed = json.loads(payload)
-    assert parsed["context"]["scope"] == "global"
-    assert parsed["context"]["guild_id"] == "10"
+    service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
+    service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
+    service._resolve_qna_limit = AsyncMock(return_value=3)
+    service._ask_general_llm = AsyncMock(return_value="Risposta global")
+    service._handle_qna = AsyncMock()
+    service._build_qna_embed = Mock(return_value=Mock())
+
+    response = Mock()
+    response.is_done = Mock(return_value=False)
+    response.defer = AsyncMock()
+    response.send_message = AsyncMock()
+
+    followup = Mock()
+    followup.send = AsyncMock()
+
+    interaction = SimpleNamespace(
+        guild_id=10,
+        channel_id=20,
+        user=SimpleNamespace(id=30, mention="<@30>"),
+        response=response,
+        followup=followup,
+    )
+
+    asyncio.run(service.handle_qna_question(interaction, "Domanda generale", scope_override="global"))
+
+    service._ask_general_llm.assert_awaited_once()
+    service._handle_qna.assert_not_called()
+    followup.send.assert_awaited_once()

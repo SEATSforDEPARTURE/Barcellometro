@@ -172,27 +172,34 @@ class TriggerEngineService:
             str(interaction.user.id),
             len(question_clean),
         )
-        answer = await self._handle_qna(
-            scope=scope,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            question=question_clean,
-            source=interaction,
-        )
-        if answer is None:
-            await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
-            return
-        if not answer.get("can_answer"):
-            await self._qna_reply(interaction, str(answer.get("refusal_reason") or "Non posso rispondere."), ephemeral=True)
-            return
-        text = str(answer.get("answer") or "").strip()
-        if not text:
-            await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
-            return
+        if scope == "global":
+            text = await self._ask_general_llm(question_clean)
+            if not text:
+                await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
+                return
+            evidence_pack: list[dict[str, str]] = []
+        else:
+            answer = await self._handle_qna(
+                scope=scope,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                question=question_clean,
+                source=interaction,
+            )
+            if answer is None:
+                await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
+                return
+            if not answer.get("can_answer"):
+                await self._qna_reply(interaction, str(answer.get("refusal_reason") or "Non posso rispondere."), ephemeral=True)
+                return
+            text = str(answer.get("answer") or "").strip()
+            if not text:
+                await self._qna_reply(interaction, "Risposta non valida.", ephemeral=True)
+                return
 
-        evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
-        if not isinstance(evidence_pack, list):
-            evidence_pack = []
+            evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
+            if not isinstance(evidence_pack, list):
+                evidence_pack = []
 
         if contains_pii(text):
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
@@ -1183,11 +1190,11 @@ class TriggerEngineService:
             return {"can_answer": True, "answer": cached, "refusal_reason": None, "evidence_pack": []}
 
         if scope == "global":
-            answer = await self._ask_ai_json(await self._build_qna_global_payload(guild_id, question))
-            if answer and answer.get("can_answer"):
-                await self._database.set_cache(cache_key, str(answer.get("answer") or ""), 7 * 24 * 3600)
-                answer["evidence_pack"] = []
-            return answer
+            text_answer = await self._ask_general_llm(question)
+            if text_answer:
+                await self._database.set_cache(cache_key, text_answer, 7 * 24 * 3600)
+                return {"can_answer": True, "answer": text_answer, "refusal_reason": None, "evidence_pack": []}
+            return None
 
         assert channel_bundle is not None
         empty_reply = str(channel_bundle.get("empty_reply") or "").strip()
@@ -1223,10 +1230,10 @@ class TriggerEngineService:
 
         if channel_answer and channel_answer.get("can_answer"):
             return channel_answer
-        global_answer = await self._ask_ai_json(await self._build_qna_global_payload(guild_id, question))
-        if not global_answer or not global_answer.get("can_answer"):
-            return channel_answer or global_answer
-        fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{str(global_answer.get('answer') or '').strip()}"
+        global_answer_text = await self._ask_general_llm(question)
+        if not global_answer_text:
+            return channel_answer
+        fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{global_answer_text.strip()}"
         await self._database.set_cache(f"qna:mixed:global:{normalized_question}", fallback_text, 7 * 24 * 3600)
         return {"can_answer": True, "answer": fallback_text, "refusal_reason": None, "evidence_pack": []}
 
@@ -1271,26 +1278,24 @@ class TriggerEngineService:
         scope = str(answer.get("scope") or "mixed").strip().lower()
         return scope
 
-    async def _build_qna_global_payload(self, guild_id: str, question: str) -> str:
-        global_rows = await self._database.search_guild_messages(guild_id=guild_id, query_text=question, limit=20, candidate_pool=220)
-        evidence_ranked = self._normalize_search_rows(global_rows)
-        evidence_pack = self._build_evidence_pack(evidence_ranked, None, snippet_max=140, evidence_max=20)
-
-        prompt = {
-            "question": question,
-            "constraints": [
-                "rispondi solo usando il contesto generale del server",
-                "non includere PII",
-                "rispondi in italiano",
+    async def _ask_general_llm(self, question: str) -> str | None:
+        if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
+            return None
+        model = self._ai.get_model("summary") or "gpt-4o-mini"
+        provider = "openai"
+        logger.info("qna_general_llm_called=true provider=%s model=%s", provider, model)
+        response = await self._ai.client().responses.create(
+            model=model,
+            input=[
+                {
+                    "role": "system",
+                    "content": "Sei Barcellometro, assistente della community. Rispondi in modo utile, naturale, in italiano. Se la domanda chiede meteo o info non disponibile senza internet, dillo chiaramente e suggerisci come verificarlo.",
+                },
+                {"role": "user", "content": question},
             ],
-            "context": {
-                "scope": "global",
-                "guild_id": guild_id,
-                "evidence": evidence_pack,
-            },
-            "output_schema": {"can_answer": "bool", "answer": "string", "refusal_reason": "string|null"},
-        }
-        return json.dumps(prompt, ensure_ascii=False)
+        )
+        text = str(getattr(response, "output_text", "") or "").strip()
+        return text or None
 
     def _normalize_question(self, question: str) -> str:
         return re.sub(r"\s+", " ", question.strip().lower())
@@ -1791,6 +1796,8 @@ class TriggerEngineService:
         ]
         cache_ttl = int(budgets.get("cache_ttl") or 45 * 60)
         empty_reply = ""
+        if not evidence_pack and not targets:
+            empty_reply = "Non ho trovato QnA salvate per questo canale."
 
         if targets:
             per_target_messages: dict[str, list[dict[str, str]]] = {}
