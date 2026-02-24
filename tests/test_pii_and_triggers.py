@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import json
 import sys
 import types
+from types import SimpleNamespace
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
@@ -14,6 +15,24 @@ if "discord" not in sys.modules:
     discord_stub.Member = object
     discord_stub.Client = object
     sys.modules["discord"] = discord_stub
+
+discord_stub = sys.modules["discord"]
+if not hasattr(discord_stub, "Embed"):
+    class _FakeEmbed:
+        def __init__(self, description: str = "", timestamp=None, **kwargs) -> None:
+            self.description = description
+            self.timestamp = timestamp
+            self.title = kwargs.get("title")
+            self.color = kwargs.get("color")
+            self.fields: list[dict[str, object]] = []
+
+        def set_footer(self, text: str) -> None:
+            self.footer = text
+
+        def add_field(self, *, name: str, value: str, inline: bool = False) -> None:
+            self.fields.append({"name": name, "value": value, "inline": inline})
+
+    discord_stub.Embed = _FakeEmbed
 
 if "aiosqlite" not in sys.modules:
     aiosqlite_stub = types.ModuleType("aiosqlite")
@@ -142,7 +161,7 @@ def test_decorate_proof_links_keeps_unknown_links() -> None:
 def test_decorate_proof_links_fixes_spaced_markdown_parentheses() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "Fonte: [🧾 14/02 14:26] (https://discord.com/channels/1/2/3)"
-    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)" in decorated
@@ -151,7 +170,7 @@ def test_decorate_proof_links_fixes_spaced_markdown_parentheses() -> None:
 def test_decorate_proof_links_rewrites_naked_proof_url() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "prova (https://discord.com/channels/1/2/3)"
-    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert decorated == "[🧾 14/02 14:26](https://discord.com/channels/1/2/3)"
@@ -160,7 +179,7 @@ def test_decorate_proof_links_rewrites_naked_proof_url() -> None:
 def test_decorate_proof_links_removes_broken_spacing_patterns() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "Test [🧾 14/02 14:26] ( https://discord.com/channels/1/2/3 )"
-    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert "] (http" not in decorated
@@ -171,7 +190,7 @@ def test_decorate_proof_links_removes_broken_spacing_patterns() -> None:
 def test_decorate_proof_links_removes_newlines_and_spaces_inside_link_url() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "Fonte: [🧾 14/02 14:26](https://discord.com/channels/1/\n2/3 )"
-    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00"}]
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
 
     decorated = service._decorate_proof_links(answer, evidence)
     assert "\n" not in decorated.split("(", 1)[1].split(")", 1)[0]
@@ -668,3 +687,269 @@ def test_poll_barcello_override_logs_only_channels_with_window_change(tmp_path, 
     assert len(logs) == 1
     assert "channel_id=2" in logs[0]
     assert "window=40" in logs[0]
+
+
+def test_ask_general_llm_uses_assistant_prompt_and_returns_text() -> None:
+    ai_client = Mock()
+    ai_client.responses.create = AsyncMock(return_value=SimpleNamespace(output_text="Risposta generale"))
+    ai_service = Mock()
+    ai_service.is_enabled.return_value = True
+    ai_service.client.return_value = ai_client
+    ai_service.get_model.return_value = "gpt-4o-mini"
+    ai_service.ask_general = AsyncMock(return_value="Risposta generale")
+
+    service = TriggerEngineService(Mock(), Mock(), Mock(), ai_service, community_insights=Mock())
+    out = asyncio.run(service._ask_general_llm("meteo Cerignola"))
+
+    assert out == "Risposta generale"
+    ai_service.ask_general.assert_awaited_once()
+
+
+def test_handle_qna_question_global_bypasses_retrieval() -> None:
+    database = Mock()
+    database.get_trigger_enabled = AsyncMock(return_value=True)
+    database.get_usage = AsyncMock(return_value=0)
+    database.increment_usage = AsyncMock()
+
+    entitlements = Mock()
+    entitlements.resolve_profile = AsyncMock(return_value="role1")
+
+    service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
+    service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
+    service._resolve_qna_limit = AsyncMock(return_value=3)
+    service._ask_general_answer = AsyncMock(return_value="Risposta global")
+    service._handle_qna = AsyncMock()
+    service._build_qna_embed = Mock(return_value=Mock())
+
+    response = Mock()
+    response.is_done = Mock(return_value=False)
+    response.defer = AsyncMock()
+    response.send_message = AsyncMock()
+
+    followup = Mock()
+    followup.send = AsyncMock()
+
+    interaction = SimpleNamespace(
+        guild_id=10,
+        channel_id=20,
+        user=SimpleNamespace(id=30, mention="<@30>"),
+        response=response,
+        followup=followup,
+    )
+
+    asyncio.run(service.handle_qna_question(interaction, "Domanda generale", scope_override="global"))
+
+    service._ask_general_answer.assert_awaited_once()
+    service._handle_qna.assert_not_called()
+    followup.send.assert_awaited_once()
+
+
+def test_build_qna_embed_plain_mode_keeps_general_answer_text() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    embed = service._build_qna_embed("quanti minuti", "3 ore sono 180 minuti.", [], scope="general_llm", mode="plain")
+    assert embed.description is not None
+    assert "180" in embed.description
+
+
+def test_build_qna_embed_evidence_mode_adds_proof_links() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    answer = "• Confermato [prova](https://discord.com/channels/1/2/3)"
+    evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
+    embed = service._build_qna_embed("cosa è stato confermato?", answer, evidence, scope="channel_qna", mode="evidence")
+    assert embed.description is not None
+    assert "[🧾" in embed.description
+    assert "https://discord.com/channels/1/2/3" in embed.description
+
+
+def test_route_qna_general_llm_bypasses_channel_trigger_check() -> None:
+    database = Mock()
+    database.get_trigger_enabled = AsyncMock(return_value=False)
+    database.get_usage = AsyncMock(return_value=0)
+    database.increment_usage = AsyncMock()
+
+    entitlements = Mock()
+    entitlements.resolve_profile = AsyncMock(return_value="role1")
+
+    service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
+    service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
+    service._resolve_qna_limit = AsyncMock(return_value=3)
+    service._ask_general_answer = AsyncMock(return_value="Risposta utile")
+    service._handle_qna = AsyncMock()
+    service._build_qna_embed = Mock(return_value=Mock())
+
+    response = Mock()
+    response.is_done = Mock(return_value=False)
+    response.defer = AsyncMock()
+    response.send_message = AsyncMock()
+
+    followup = Mock()
+    followup.send = AsyncMock()
+
+    interaction = SimpleNamespace(
+        guild_id=10,
+        channel_id=20,
+        user=SimpleNamespace(id=30, mention="<@30>"),
+        response=response,
+        followup=followup,
+    )
+
+    asyncio.run(service.route_qna(interaction, "che sono i cammelli", scope="general_llm"))
+
+    database.get_trigger_enabled.assert_not_called()
+    service._handle_qna.assert_not_called()
+    service._ask_general_answer.assert_awaited_once()
+
+
+def test_route_qna_general_llm_stores_anchor_session() -> None:
+    database = Mock()
+    database.get_usage = AsyncMock(return_value=0)
+    database.increment_usage = AsyncMock()
+
+    entitlements = Mock()
+    entitlements.resolve_profile = AsyncMock(return_value="role1")
+
+    service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
+    service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
+    service._resolve_qna_limit = AsyncMock(return_value=3)
+    service._ask_general_answer = AsyncMock(return_value="Risposta utile")
+    service._build_qna_embed = Mock(return_value=Mock())
+
+    response = Mock()
+    response.is_done = Mock(return_value=False)
+    response.defer = AsyncMock()
+
+    followup = Mock()
+    followup.send = AsyncMock(return_value=SimpleNamespace(id=999))
+
+    interaction = SimpleNamespace(
+        guild_id=10,
+        channel_id=20,
+        user=SimpleNamespace(id=30, mention="<@30>"),
+        response=response,
+        followup=followup,
+    )
+
+    asyncio.run(service.route_qna(interaction, "domanda", scope="general_llm"))
+
+    assert service._qna_sessions.get((10, 20, 999)) is not None
+
+
+def test_handle_message_qna_reply_session_hit_reanchors() -> None:
+    database = Mock()
+    database.get_trigger_enabled = AsyncMock(return_value=True)
+    database.get_usage = AsyncMock(return_value=0)
+    database.increment_usage = AsyncMock()
+
+    service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+    service._ask_general_answer = AsyncMock(return_value="Risposta contestuale")
+    service._handle_qna = AsyncMock()
+    service._qna_sessions.set(
+        (10, 20, 500),
+        SimpleNamespace(scope="general_llm", history=[{"role": "user", "content": "prima domanda"}], created_at=datetime.now(), last_used_at=datetime.now()),
+    )
+
+    captured: dict[str, object] = {}
+
+    async def _reply(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(id=700)
+
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=10),
+        channel=SimpleNamespace(id=20),
+        author=SimpleNamespace(id=111),
+        content="e poi?",
+        reference=SimpleNamespace(message_id=500),
+        reply=_reply,
+    )
+
+    asyncio.run(service.handle_message_qna(message))
+
+    service._ask_general_answer.assert_awaited_once()
+    service._handle_qna.assert_not_called()
+    assert "embed" in captured.get("kwargs", {})
+    assert captured["kwargs"].get("mention_author") is False
+    assert len(captured.get("args", ())) == 0
+    assert service._qna_sessions.get((10, 20, 700)) is not None
+
+
+def test_trim_qna_history_limits_and_starts_with_user() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    history = [{"role": "assistant", "content": "a0"}] + [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": str(i)} for i in range(30)
+    ]
+    trimmed = service._trim_qna_history(history, max_messages=16)
+    assert len(trimmed) <= 16
+    assert trimmed[0]["role"] == "user"
+
+
+def test_needs_web_search_classifier() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._needs_web_search("che tempo fa domani a Torino?") is True
+    assert service._needs_web_search("quanti minuti ci sono in 3 ore?") is False
+
+
+def test_ask_general_answer_uses_web_when_needed() -> None:
+    ai_service = Mock()
+    ai_service.is_enabled.return_value = True
+    ai_service.client.return_value = Mock()
+    ai_service.get_model.return_value = "gpt-4o-mini"
+    ai_service.ask_general_with_web = AsyncMock(return_value="Meteo con fonti")
+    ai_service.ask_general = AsyncMock(return_value="offline")
+
+    service = TriggerEngineService(Mock(), Mock(), Mock(), ai_service, community_insights=Mock())
+    out = asyncio.run(service._ask_general_answer("meteo domani Torino", history=[{"role": "user", "content": "meteo domani Torino"}]))
+
+    assert out == "Meteo con fonti"
+    ai_service.ask_general_with_web.assert_awaited_once()
+    ai_service.ask_general.assert_not_called()
+
+
+def test_build_qna_embed_footer_has_no_datetime() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    general = service._build_qna_embed("q", "risposta", [], scope="general_llm", mode="plain")
+    channel = service._build_qna_embed("q", "risposta", [], scope="channel_qna", mode="evidence")
+
+    assert getattr(general, "footer", "") == "Barcellometro • Generale"
+    assert getattr(channel, "footer", "") == "Barcellometro • Q&A"
+    assert not any(char.isdigit() for char in str(getattr(general, "footer", "")))
+    assert not any(char.isdigit() for char in str(getattr(channel, "footer", "")))
+
+
+def test_format_for_discord_embed_splits_long_general_text_with_bullets_and_emoji() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    long_text = (
+        "L'acquario oggi mostra segnali interessanti con alcune variazioni nel comportamento generale del gruppo. "
+        "Ci sono dinamiche positive che vale la pena seguire con attenzione nelle prossime ore. "
+        "Può essere utile concentrarsi sui punti chiave e mantenere il focus sugli obiettivi pratici. "
+        "Inoltre, conviene verificare i dati principali e confrontarli con il trend recente prima di decidere."
+    ) * 3
+    out = service.format_for_discord_embed(long_text, "general_llm")
+
+    assert "\n" in out
+    assert "•" in out
+    emoji_count = sum(out.count(ch) for ch in ["💛", "✨", "🔎", "🐹", "📌", "🧠"])
+    assert emoji_count >= 3
+    assert "**" in out
+
+
+def test_normalize_discord_formatting_forces_multiline_bullets() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    raw = "✨ - **Energie Altissime**: bene - **Comunicazione al Top**: ok - **Creatività in Crescita**: wow"
+
+    out = service.normalize_discord_formatting(raw)
+
+    assert "\n- **Energie Altissime**" in out
+    assert "\n- **Comunicazione al Top**" in out
+    assert "\n- **Creatività in Crescita**" in out
+
+
+def test_build_qna_embed_plain_mode_normalizes_single_line_llm_output() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    raw = "✨ - **Energie Altissime**: bene - **Comunicazione al Top**: ok"
+
+    embed = service._build_qna_embed("q", raw, [], scope="general_llm", mode="plain")
+
+    assert "\n- **Energie Altissime**" in embed.description
+    assert "\n- **Comunicazione al Top**" in embed.description
