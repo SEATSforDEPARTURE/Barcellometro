@@ -301,30 +301,67 @@ class InactiveMembersModerationService:
             return None
         return cls._parse_last_message_dt(state["last_reminder_at"])
 
-    @classmethod
-    def _reminder_marker(cls, state: aiosqlite.Row | None) -> str:
-        reminder_dt = cls._parse_state_reminder_dt(state)
-        if reminder_dt is None:
-            return ""
-        return f"🔔 {cls._to_rome(reminder_dt).strftime('%d/%m %H:%M')}"
+    def _format_grace_remaining(self, reminder_at: datetime, grace_days: int) -> str:
+        deadline = reminder_at + timedelta(days=grace_days)
+        now = datetime.now(timezone.utc)
+        delta = deadline - now
+        if delta.total_seconds() <= 0:
+            return "scaduto"
+        total_seconds = int(delta.total_seconds())
+        days = total_seconds // 86400
+        if days > 0:
+            return f"-{days}g"
+        hours = (total_seconds % 86400) // 3600
+        if hours > 0:
+            return f"-{hours}h"
+        minutes = max(1, (total_seconds % 3600) // 60)
+        return f"-{minutes}m"
 
-    @classmethod
-    def _format_inactive_preview_line(cls, candidate: InactiveCandidate, *, state: aiosqlite.Row | None, cfg: dict[str, Any]) -> str:
-        _ = cfg
-        reminder_marker = cls._reminder_marker(state)
-        reminder_part = f" | {reminder_marker}" if reminder_marker else ""
-        dt = cls._parse_last_message_dt(candidate.last_message_ts)
+    def _format_inactive_preview_line(self, idx: int, candidate: InactiveCandidate, *, state: aiosqlite.Row | None, cfg: dict[str, Any]) -> str:
+        grace_days = int(cfg.get("grace_days_after_reminder", 7)) if cfg else 7
+        reminder_dt = self._parse_state_reminder_dt(state)
+        if reminder_dt is None:
+            prefix = f"{idx}) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+        else:
+            remaining = self._format_grace_remaining(reminder_dt, grace_days)
+            if remaining == "scaduto":
+                prefix = f"{idx}) (🔔 scaduto) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+            else:
+                prefix = f"{idx}) (🔔 {remaining} alla scad.) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+        dt = self._parse_last_message_dt(candidate.last_message_ts)
         if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
-            return f"• {candidate.member.mention} — ({candidate.count_in_window} msg){reminder_part} | 💬 Ultimo: mai"
-        local = cls._to_rome(dt)
+            return f"{prefix}💬 Ultimo: mai"
+        local = self._to_rome(dt)
         last_fmt = local.strftime("%d/%m %H:%M")
         jump_url = (
             f"https://discord.com/channels/{candidate.member.guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
         )
-        return (
-            f"• {candidate.member.mention} — ({candidate.count_in_window} msg){reminder_part} | "
-            f"💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
-        )
+        return f"{prefix}💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
+
+    def _format_inactive_txt_line(self, idx: int, candidate: InactiveCandidate, *, state: aiosqlite.Row | None, cfg: dict[str, Any], guild: discord.Guild) -> str:
+        mention = candidate.member.mention
+        display = getattr(candidate.member, "display_name", getattr(candidate.member, "name", "sconosciuto"))
+        count = candidate.count_in_window
+        grace_days = int(cfg.get("grace_days_after_reminder", 7)) if cfg else 7
+        reminder_dt = self._parse_state_reminder_dt(state)
+        if reminder_dt is None:
+            prefix = f"{idx}) {mention} ({display}) ({count} msg totali) | "
+        else:
+            data_fmt = self._to_rome(reminder_dt).strftime("%d/%m %H:%M")
+            remaining = self._format_grace_remaining(reminder_dt, grace_days)
+            grace_text = "scaduto" if remaining == "scaduto" else f"{remaining} alla scad."
+            prefix = f"{idx}) 🔔 Avv. il {data_fmt} ({grace_text}) | {mention} ({display}) ({count} msg totali) | "
+        dt = self._parse_last_message_dt(candidate.last_message_ts)
+        if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
+            return f"{prefix}💬 Ultimo: mai"
+
+        local = self._to_rome(dt)
+        last_fmt = local.strftime("%d/%m %H:%M")
+        channel_id = int(candidate.last_channel_id)
+        ch = guild.get_channel(channel_id) or self._bot.get_channel(channel_id)
+        channel_name = ch.name if ch and hasattr(ch, "name") else "canale_sconosciuto"
+        jump_url = f"https://discord.com/channels/{guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
+        return f"{prefix}💬 Ultimo: {last_fmt} in \"{channel_name}\" 🕒 {candidate.days_inactive}g fa ({jump_url})"
 
     def _format_inactive_txt_line(self, idx: int, candidate: InactiveCandidate, *, state: aiosqlite.Row | None, guild: discord.Guild) -> str:
         mention = candidate.member.mention
@@ -483,8 +520,8 @@ class InactiveMembersModerationService:
         safe_add_field(embed, name="🏷️ Policy per ruoli", value=self._format_role_policies(guild, role_policy_rows), inline=False)
 
         all_lines = [
-            self._format_inactive_preview_line(candidate, state=states.get(str(candidate.member.id)), cfg=cfg)
-            for candidate in ordered
+            self._format_inactive_preview_line(i, candidate, state=states.get(str(candidate.member.id)), cfg=cfg)
+            for i, candidate in enumerate(ordered, start=1)
         ]
         preview_lines: list[str] = []
         extra_lines: list[str] = []
@@ -529,7 +566,7 @@ class InactiveMembersModerationService:
             ts_name = datetime.now().strftime("%Y%m%d_%H%M")
             filename = f"inattivi_serverwide_{ts_name}.txt"
             txt_lines = [
-                self._format_inactive_txt_line(i, candidate, state=states.get(str(candidate.member.id)), guild=guild)
+                self._format_inactive_txt_line(i, candidate, state=states.get(str(candidate.member.id)), cfg=cfg, guild=guild)
                 for i, candidate in enumerate(ordered, start=1)
             ]
             payload = "\n".join(txt_lines).encode("utf-8")
