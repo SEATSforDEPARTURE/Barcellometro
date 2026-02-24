@@ -28,7 +28,7 @@ def setup(registry: ServiceRegistry) -> None:
     database = registry.get("database")
     ingest: IngestService = registry.get("ingest")
     trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
-    backfill = registry.get("backfill")
+    backfill = registry.get("backfill") if registry.has("backfill") else None
     config = registry.get("config")
     warned_disabled_channels: set[str] = set()
 
@@ -179,7 +179,10 @@ def setup(registry: ServiceRegistry) -> None:
             errors=errors,
         )
 
-    backfill.register_handler(backfill_handler)
+    if backfill is not None:
+        backfill.register_handler(backfill_handler)
+    else:
+        logger.info("Backfill service not registered; skipping backfill handler setup")
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
