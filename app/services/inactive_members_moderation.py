@@ -258,6 +258,25 @@ class InactiveMembersModerationService:
             f"💬 Ultimo: [{last_fmt}]({jump_url}) 🕒 {candidate.days_inactive}g fa"
         )
 
+    def _format_inactive_txt_line(self, candidate: InactiveCandidate, idx: int, guild: discord.Guild) -> str:
+        mention = candidate.member.mention
+        display = getattr(candidate.member, "display_name", getattr(candidate.member, "name", "sconosciuto"))
+        count = candidate.count_in_window
+        dt = self._parse_last_message_dt(candidate.last_message_ts)
+        if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
+            return f"{idx}) {mention} ({display}) ({count} msg totali) | 💬 Ultimo: mai"
+
+        local = self._to_rome(dt)
+        last_fmt = local.strftime("%d/%m %H:%M")
+        channel_id = int(candidate.last_channel_id)
+        ch = guild.get_channel(channel_id) or self._bot.get_channel(channel_id)
+        channel_name = ch.name if ch and hasattr(ch, "name") else "canale_sconosciuto"
+        jump_url = f"https://discord.com/channels/{guild.id}/{candidate.last_channel_id}/{candidate.last_message_id}"
+        return (
+            f"{idx}) {mention} ({display}) ({count} msg totali) | "
+            f"💬 Ultimo: {last_fmt} in \"{channel_name}\" 🕒 {candidate.days_inactive}g fa ({jump_url})"
+        )
+
     def _format_policy_default(self, policy: dict[str, Any]) -> str:
         mode = str(policy.get("mode", "OR")).upper()
         return (
@@ -355,16 +374,17 @@ class InactiveMembersModerationService:
 
         embed.add_field(name="Preview inattivi", value=preview_value, inline=False)
 
-        extra_file: discord.File | None = None
-        if extra_lines:
+        txt_file: discord.File | None = None
+        if ordered:
             ts_name = datetime.now().strftime("%Y%m%d_%H%M")
-            filename = f"inattivi_extra_{ts_name}.txt"
-            payload = "\n".join(extra_lines).encode("utf-8")
-            extra_file = discord.File(io.BytesIO(payload), filename=filename)
+            filename = f"inattivi_serverwide_{ts_name}.txt"
+            txt_lines = [self._format_inactive_txt_line(candidate, i, guild) for i, candidate in enumerate(ordered, start=1)]
+            payload = "\n".join(txt_lines).encode("utf-8")
+            txt_file = discord.File(io.BytesIO(payload), filename=filename)
 
         view = InactivityActionsView(self, guild_id, mod_channel_id)
-        if extra_file is not None:
-            message = await channel.send(embed=embed, view=view, file=extra_file)
+        if txt_file is not None:
+            message = await channel.send(embed=embed, view=view, file=txt_file)
         else:
             message = await channel.send(embed=embed, view=view)
         view.message = message
