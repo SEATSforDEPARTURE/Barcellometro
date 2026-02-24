@@ -520,55 +520,46 @@ class InactiveMembersModerationService:
             else:
                 expired_grace += 1
 
-        embed = discord.Embed(title="✏️ INATTIVI (SERVER-WIDE)", colour=discord.Colour.blue())
-        safe_add_field(embed, name="Membri analizzati", value=str(considered), inline=True)
-        safe_add_field(embed, name="Inattivi trovati", value=str(len(inactive)), inline=True)
-        safe_add_field(embed, name="Stato reminder", value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
-        safe_add_field(embed, name="📄 Policy di base", value=self._format_policy_default(policy, cfg or {}), inline=False)
-        safe_add_field(embed, name="🏷️ Policy per ruoli", value=self._format_role_policies(guild, role_policy_rows), inline=False)
-        safe_add_field(embed, name="⛔ Ruoli esclusi dal controllo inattivi", value=self._format_excluded_roles(guild, cfg or {}), inline=False)
-
         all_lines = [
             self._format_inactive_preview_line(i, candidate, state=states.get(str(candidate.member.id)), cfg=cfg)
             for i, candidate in enumerate(ordered, start=1)
         ]
-        preview_lines: list[str] = []
-        extra_lines: list[str] = []
-        preview_limit = 15
-        current_len = 0
-        for idx, line in enumerate(all_lines):
-            if idx >= preview_limit:
-                extra_lines.append(line)
-                continue
-            add_len = len(line) + (1 if preview_lines else 0)
-            if current_len + add_len > FIELD_MAX:
-                extra_lines.extend(all_lines[idx:])
-                break
-            preview_lines.append(line)
-            current_len += add_len
 
-        if preview_lines:
-            preview_value = "\n".join(preview_lines)
-        else:
-            preview_value = "Nessun inattivo."
+        max_desc = 3900
 
-        if extra_lines:
-            summary_line = f"+ altri {len(extra_lines)} inattivi… (vedi allegato .txt)"
-            if preview_lines:
-                summary_add = len(summary_line) + 1
-                while preview_lines and (current_len + summary_add) > FIELD_MAX:
-                    moved = preview_lines.pop()
-                    extra_lines.insert(0, moved)
-                    current_len = len("\n".join(preview_lines)) if preview_lines else 0
-                if preview_lines:
-                    preview_lines.append(summary_line)
-                    preview_value = "\n".join(preview_lines)
+        def _chunk_lines(lines: list[str]) -> list[str]:
+            if not lines:
+                return ["Nessun inattivo."]
+            chunks: list[str] = []
+            current = ""
+            for raw_line in lines:
+                line = raw_line if len(raw_line) <= 3500 else f"{raw_line[:3500]}…"
+                add = line if not current else f"\n{line}"
+                if len(current) + len(add) > max_desc:
+                    if current:
+                        chunks.append(current)
+                        current = line
+                    else:
+                        chunks.append(line[:max_desc])
+                        current = ""
                 else:
-                    preview_value = summary_line[:FIELD_MAX]
-            else:
-                preview_value = summary_line[:FIELD_MAX]
+                    current += add
+            if current:
+                chunks.append(current)
+            return chunks
 
-        embed.add_field(name="Preview inattivi", value=preview_value, inline=False)
+        chunks = _chunk_lines(all_lines)
+        total_pages = len(chunks)
+
+        embeds: list[discord.Embed] = []
+        for i, chunk in enumerate(chunks, start=1):
+            embed = discord.Embed(title=f"✏️ INATTIVI (SERVER-WIDE) — Pag. {i}/{total_pages}", colour=discord.Colour.blue())
+            if i == 1:
+                safe_add_field(embed, name="Membri analizzati", value=str(considered), inline=True)
+                safe_add_field(embed, name="Inattivi trovati", value=str(len(inactive)), inline=True)
+                safe_add_field(embed, name="Stato reminder", value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
+            embed.description = chunk
+            embeds.append(embed)
 
         txt_file: discord.File | None = None
         if ordered:
@@ -578,15 +569,26 @@ class InactiveMembersModerationService:
                 self._format_inactive_txt_line(i, candidate, state=states.get(str(candidate.member.id)), cfg=cfg, guild=guild)
                 for i, candidate in enumerate(ordered, start=1)
             ]
-            payload = "\n".join(txt_lines).encode("utf-8")
+            policy_sections = (
+                "\n\n====================\n"
+                "POLICY E IMPOSTAZIONI\n"
+                "====================\n"
+                f"\n📄 Policy di base\n{self._format_policy_default(policy, cfg or {})}"
+                f"\n\n🏷️ Policy per ruoli\n{self._format_role_policies(guild, role_policy_rows)}"
+                f"\n\n⛔ Ruoli esclusi dal controllo inattivi\n{self._format_excluded_roles(guild, cfg or {})}"
+            )
+            payload = ("\n".join(txt_lines) + policy_sections).encode("utf-8")
             txt_file = discord.File(io.BytesIO(payload), filename=filename)
 
         view = InactivityActionsView(self, guild_id, mod_channel_id)
         if txt_file is not None:
-            message = await channel.send(embed=embed, view=view, file=txt_file)
+            message = await channel.send(embed=embeds[0], view=view, file=txt_file)
         else:
-            message = await channel.send(embed=embed, view=view)
+            message = await channel.send(embed=embeds[0], view=view)
         view.message = message
+
+        for extra_embed in embeds[1:]:
+            await channel.send(embed=extra_embed)
 
     def _render_template(
         self,
