@@ -1383,9 +1383,11 @@ class TriggerEngineService:
 
     def _general_persona_system_prompt(self) -> str:
         return (
-            "Sei Barcellometro, assistente della community. "
-            "Rispondi in modo utile, naturale, in italiano. "
-            "Quando usi dati dal web cita le fonti in modo chiaro."
+            "Sei Barcellometro, assistente della community con tono empatico, simpatico e cricetoso. "
+            "Rispondi in italiano con Markdown compatibile Discord: **grassetto**, elenchi puntati e righe brevi. "
+            "Usa 4-10 emoji pertinenti quando utile, evita muri di testo e preferisci 3-5 punti chiari. "
+            "Struttura consigliata: apertura calorosa breve, punti essenziali, chiusura con aggancio naturale. "
+            "Se usi dati dal web cita le fonti in modo chiaro."
         )
 
     async def _ask_general_llm(self, question: str, history: list[dict[str, str]] | None = None) -> str | None:
@@ -1570,6 +1572,33 @@ class TriggerEngineService:
         bonus, _ = await self._database.get_qna_bonus(str(guild.id), str(member.id))
         return tier_limit + max(0, bonus)
 
+    def format_for_discord_embed(self, answer_text: str, scope: Literal["general_llm", "channel_qna"]) -> str:
+        raw = (answer_text or "").strip()
+        if not raw:
+            return raw
+
+        if scope == "general_llm":
+            if "\n" not in raw and len(raw) > 700:
+                sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", raw) if part.strip()]
+                if sentences:
+                    opening = "💛 **Ci sono!** Ti riassumo al volo in modo chiaro."
+                    bullets = [f"• ✨ {sentence}" for sentence in sentences[:5]]
+                    closing = "🔎 **Vuoi che lo renda più specifico su un punto preciso?**"
+                    return "\n".join([opening, *bullets, closing])
+            return raw
+
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        proof_lines = [line for line in lines if "https://discord.com/channels/" in line or "🧾" in line]
+        answer_lines = [line for line in lines if line not in proof_lines]
+        sections: list[str] = []
+        if answer_lines:
+            sections.append("**Risposta**")
+            sections.extend(answer_lines)
+        if proof_lines:
+            sections.append("\n**Prove**")
+            sections.extend(proof_lines)
+        return "\n".join(sections) if sections else raw
+
     def _build_qna_embed(
         self,
         question: str,
@@ -1580,15 +1609,13 @@ class TriggerEngineService:
         mode: Literal["evidence", "plain"] = "evidence",
     ) -> discord.Embed:
         if mode == "plain":
-            normalized = re.sub(r"\s+", " ", (answer_text or "").strip())
-            description = self._truncate_embed_description(normalized)
+            base_text = re.sub(r"\s+", " ", (answer_text or "").strip())
         else:
-            description = self._truncate_embed_description(self._bulletize_answer(question, answer_text, evidence))
-        embed = discord.Embed(
-            description=description,
-            timestamp=datetime.now(timezone.utc),
-        )
-        footer_text = "Barcellometro • Generale" if scope == "general_llm" else f"Barcellometro Q&A • {datetime.now(ROME_TZ).strftime('%d/%m %H:%M')}"
+            base_text = self._bulletize_answer(question, answer_text, evidence)
+        formatted = self.format_for_discord_embed(base_text, scope)
+        description = self._truncate_embed_description(formatted)
+        embed = discord.Embed(description=description)
+        footer_text = "Barcellometro • Generale" if scope == "general_llm" else "Barcellometro • Q&A"
         embed.set_footer(text=footer_text)
         return embed
 

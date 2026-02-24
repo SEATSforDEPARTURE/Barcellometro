@@ -904,3 +904,31 @@ def test_ask_general_answer_uses_web_when_needed() -> None:
     assert out == "Meteo con fonti"
     ai_service.ask_general_with_web.assert_awaited_once()
     ai_service.ask_general.assert_not_called()
+
+
+def test_build_qna_embed_footer_has_no_datetime() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    general = service._build_qna_embed("q", "risposta", [], scope="general_llm", mode="plain")
+    channel = service._build_qna_embed("q", "risposta", [], scope="channel_qna", mode="evidence")
+
+    assert getattr(general, "footer", "") == "Barcellometro • Generale"
+    assert getattr(channel, "footer", "") == "Barcellometro • Q&A"
+    assert not any(char.isdigit() for char in str(getattr(general, "footer", "")))
+    assert not any(char.isdigit() for char in str(getattr(channel, "footer", "")))
+
+
+def test_format_for_discord_embed_splits_long_general_text_with_bullets_and_emoji() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    long_text = (
+        "L'acquario oggi mostra segnali interessanti con alcune variazioni nel comportamento generale del gruppo. "
+        "Ci sono dinamiche positive che vale la pena seguire con attenzione nelle prossime ore. "
+        "Può essere utile concentrarsi sui punti chiave e mantenere il focus sugli obiettivi pratici. "
+        "Inoltre, conviene verificare i dati principali e confrontarli con il trend recente prima di decidere."
+    ) * 3
+    out = service.format_for_discord_embed(long_text, "general_llm")
+
+    assert "\n" in out
+    assert "•" in out
+    emoji_count = sum(out.count(ch) for ch in ["💛", "✨", "🔎", "🐹", "📌", "🧠"])
+    assert emoji_count >= 3
+    assert "**" in out
