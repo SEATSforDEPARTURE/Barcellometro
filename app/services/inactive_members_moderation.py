@@ -359,11 +359,27 @@ class InactiveMembersModerationService:
         if reminder_dt is None:
             prefix = f"{idx}) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
         else:
-            remaining = self._format_grace_remaining(reminder_dt, grace_days)
-            if remaining == "scaduto":
-                prefix = f"{idx}) (🔔 scaduto) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+            reminder_local = self._to_rome(reminder_dt)
+            date_fmt = reminder_local.strftime("%d/%m %H:%M")
+            deadline = reminder_dt + timedelta(days=grace_days)
+            delta = deadline - datetime.now(timezone.utc)
+            if delta.total_seconds() <= 0:
+                remaining = "scaduto"
             else:
-                prefix = f"{idx}) (🔔 {remaining} alla scad.) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+                total_seconds = int(delta.total_seconds())
+                days = total_seconds // 86400
+                hours = (total_seconds % 86400) // 3600
+                minutes = max(1, (total_seconds % 3600) // 60)
+                if days > 0:
+                    remaining = f"-{days}g {hours}h"
+                elif hours > 0:
+                    remaining = f"-{hours}h {minutes}m"
+                else:
+                    remaining = f"-{minutes}m"
+            if remaining == "scaduto":
+                prefix = f"{idx}) 🔔 {date_fmt} (⌛scaduto) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
+            else:
+                prefix = f"{idx}) 🔔 {date_fmt} (⌛{remaining}) {candidate.member.mention} — ({candidate.count_in_window} msg) | "
         dt = self._parse_last_message_dt(candidate.last_message_ts)
         if dt is None or not candidate.last_channel_id or not candidate.last_message_id:
             return f"{prefix}💬 Ultimo: mai"
