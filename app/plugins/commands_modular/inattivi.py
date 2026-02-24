@@ -13,8 +13,7 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.services.discord_embed_utils import FIELD_MAX, truncate
 
 PERM = "barcellometro.inattivi.config"
-TEMPLATE_HELP = "Placeholder: {user},{username},{display_name},...,{reason}. Es: {display_name}, {days_inactive}g."
-_ = describe_placeholders()
+TEMPLATE_HELP = f"Placeholder supportati: {describe_placeholders()} Es: {{display_name}}, {{days_inactive}}g."
 
 
 def _normalize_mode(mode: str) -> str:

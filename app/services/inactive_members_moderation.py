@@ -389,16 +389,36 @@ class InactiveMembersModerationService:
             message = await channel.send(embed=embed, view=view)
         view.message = message
 
-    def _render_template(self, template: str, *, member: discord.Member, guild: discord.Guild, days_inactive: int, policy: dict[str, Any], cfg: dict[str, Any]) -> str:
+    def _render_template(
+        self,
+        template: str,
+        *,
+        member: discord.Member,
+        guild: discord.Guild,
+        days_inactive: int,
+        policy: dict[str, Any],
+        cfg: dict[str, Any],
+        message_count: int | None = None,
+        reminder_count: int | None = None,
+        reason: str | None = None,
+    ) -> str:
         base = template or ""
         return base.format(
             user=member.mention,
             username=member.display_name,
+            display_name=member.display_name,
+            user_id=member.id,
             server=guild.name,
+            guild_id=guild.id,
             days_inactive=days_inactive,
             window_days=policy.get("window_days", 30),
-            rejoin_link=cfg.get("invite_url") or "",
+            min_messages=policy.get("min_messages", 1),
+            message_count=message_count if message_count is not None else 0,
             grace_days=cfg.get("grace_days_after_reminder", 7),
+            reminder_count=reminder_count if reminder_count is not None else 0,
+            ban_days=cfg.get("ban_days", 7),
+            rejoin_link=cfg.get("invite_url") or "",
+            reason=reason or "",
         )
 
     async def execute_reminders(self, guild_id: str) -> dict[str, Any]:
@@ -422,7 +442,16 @@ class InactiveMembersModerationService:
                         continue
                 except Exception:
                     pass
-            body = self._render_template(template, member=candidate.member, guild=guild, days_inactive=candidate.days_inactive, policy=candidate.policy, cfg=cfg)
+            body = self._render_template(
+                template,
+                member=candidate.member,
+                guild=guild,
+                days_inactive=candidate.days_inactive,
+                policy=candidate.policy,
+                cfg=cfg,
+                message_count=candidate.count_in_window,
+                reminder_count=(state["reminder_count"] if state and state.get("reminder_count") is not None else 0),
+            )
             try:
                 await candidate.member.send(body)
                 await self._database.mark_user_reminded(guild_id, str(candidate.member.id), now.isoformat())
@@ -459,8 +488,19 @@ class InactiveMembersModerationService:
                     continue
                 if candidate.last_message_ts and candidate.last_message_ts > str(state["last_reminder_at"]):
                     continue
+            reminder_count = state["reminder_count"] if state and state.get("reminder_count") is not None else 0
             try:
-                msg = self._render_template(kick_template, member=candidate.member, guild=guild, days_inactive=candidate.days_inactive, policy=candidate.policy, cfg=cfg)
+                msg = self._render_template(
+                    kick_template,
+                    member=candidate.member,
+                    guild=guild,
+                    days_inactive=candidate.days_inactive,
+                    policy=candidate.policy,
+                    cfg=cfg,
+                    message_count=candidate.count_in_window,
+                    reminder_count=reminder_count,
+                    reason="Inattività prolungata",
+                )
                 await candidate.member.send(msg)
                 stats["dm_ok"] += 1
             except Exception as exc:
@@ -484,7 +524,17 @@ class InactiveMembersModerationService:
                 stats["errors"].append(f"ban {user_id}: {exc.__class__.__name__}")
             if isinstance(atrio_channel, discord.abc.Messageable):
                 try:
-                    text = self._render_template(atrio_template, member=candidate.member, guild=guild, days_inactive=candidate.days_inactive, policy=candidate.policy, cfg=cfg)
+                    text = self._render_template(
+                        atrio_template,
+                        member=candidate.member,
+                        guild=guild,
+                        days_inactive=candidate.days_inactive,
+                        policy=candidate.policy,
+                        cfg=cfg,
+                        message_count=candidate.count_in_window,
+                        reminder_count=reminder_count,
+                        reason="Inattività prolungata",
+                    )
                     await atrio_channel.send(text)
                     stats["atrio_ok"] += 1
                 except Exception as exc:
