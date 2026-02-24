@@ -193,7 +193,7 @@ class TriggerEngineService:
 
         if route_scope == "general_llm":
             history = [{"role": "user", "content": question_clean}]
-            text = await self._ask_general_llm(question_clean, history=history)
+            text = await self._ask_general_answer(question_clean, history=history)
             if not text:
                 await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
                 return
@@ -271,7 +271,7 @@ class TriggerEngineService:
                 if session and session.scope == "general_llm":
                     session.history.append({"role": "user", "content": content})
                     session.history = self._trim_qna_history(session.history)
-                    answer_text = await self._ask_general_llm(content, history=session.history)
+                    answer_text = await self._ask_general_answer(content, history=session.history)
                     if answer_text:
                         session.history.append({"role": "assistant", "content": answer_text})
                         session.history = self._trim_qna_history(session.history)
@@ -1249,7 +1249,7 @@ class TriggerEngineService:
             return {"can_answer": True, "answer": cached, "refusal_reason": None, "evidence_pack": []}
 
         if scope == "global":
-            text_answer = await self._ask_general_llm(question)
+            text_answer = await self._ask_general_answer(question)
             if text_answer:
                 await self._database.set_cache(cache_key, text_answer, 7 * 24 * 3600)
                 return {"can_answer": True, "answer": text_answer, "refusal_reason": None, "evidence_pack": []}
@@ -1289,7 +1289,7 @@ class TriggerEngineService:
 
         if channel_answer and channel_answer.get("can_answer"):
             return channel_answer
-        global_answer_text = await self._ask_general_llm(question)
+        global_answer_text = await self._ask_general_answer(question)
         if not global_answer_text:
             return channel_answer
         fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{global_answer_text.strip()}"
@@ -1337,6 +1337,56 @@ class TriggerEngineService:
         scope = str(answer.get("scope") or "mixed").strip().lower()
         return scope
 
+    def _classify_general_query_type(self, question: str) -> str:
+        q = (question or "").lower()
+        if any(token in q for token in ["meteo", "temperatura", "pioggia", "vento", "prevision"]):
+            return "weather"
+        if any(token in q for token in ["notizie", "news", "ultime", "breaking", "oggi nel mondo"]):
+            return "news"
+        if any(token in q for token in ["prezzo", "costo", "quotazione", "btc", "bitcoin", "euro oggi"]):
+            return "prices"
+        if any(token in q for token in ["risultato", "partita", "classifica", "serie a", "champions"]):
+            return "sports"
+        if any(token in q for token in ["evento", "concerto", "fiera", "programma", "quando si tiene"]):
+            return "events"
+        return "generic"
+
+    def _needs_web_search(self, question: str) -> bool:
+        query_type = self._classify_general_query_type(question)
+        if query_type in {"weather", "news", "prices", "sports", "events"}:
+            return True
+        q = (question or "").lower()
+        realtime_tokens = ["oggi", "domani", "adesso", "in tempo reale", "attuale", "ultim", "live"]
+        return any(token in q for token in realtime_tokens)
+
+    async def _ask_general_answer(self, question: str, history: list[dict[str, str]] | None = None) -> str | None:
+        query_type = self._classify_general_query_type(question)
+        use_web = self._needs_web_search(question)
+        logger.info("general_llm_web=%s query_type=%s", use_web, query_type)
+
+        if use_web:
+            try:
+                if hasattr(self._ai, "ask_general_with_web"):
+                    text_web = await self._ai.ask_general_with_web(question, self._general_persona_system_prompt(), history or [])
+                    if text_web:
+                        return text_web
+            except Exception:  # noqa: BLE001
+                logger.exception("general_llm web_search failed", extra={"query_type": query_type})
+
+            offline = await self._ask_general_llm(question, history=history)
+            if not offline:
+                return None
+            return f"{offline}\n\n_(Nota: non sono riuscito a verificare fonti web affidabili in tempo reale.)_"
+
+        return await self._ask_general_llm(question, history=history)
+
+    def _general_persona_system_prompt(self) -> str:
+        return (
+            "Sei Barcellometro, assistente della community. "
+            "Rispondi in modo utile, naturale, in italiano. "
+            "Quando usi dati dal web cita le fonti in modo chiaro."
+        )
+
     async def _ask_general_llm(self, question: str, history: list[dict[str, str]] | None = None) -> str | None:
         if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
             return None
@@ -1344,12 +1394,15 @@ class TriggerEngineService:
         provider = "openai"
         logger.info("qna_llm_called=%s model=%s", True, model)
         logger.info("qna_general_llm_called=true provider=%s model=%s", provider, model)
-        messages: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": "Sei Barcellometro, assistente della community. Rispondi in modo utile, naturale, in italiano. Se la domanda chiede meteo o info non disponibile senza internet, dillo chiaramente e suggerisci come verificarlo.",
-            }
-        ]
+
+        persona = self._general_persona_system_prompt()
+        if hasattr(self._ai, "ask_general"):
+            try:
+                return await self._ai.ask_general(question, persona, history or [])
+            except Exception:  # noqa: BLE001
+                logger.exception("general_llm offline helper failed")
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": persona}]
         if history:
             messages.extend(history)
         else:

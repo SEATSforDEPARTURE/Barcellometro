@@ -696,18 +696,13 @@ def test_ask_general_llm_uses_assistant_prompt_and_returns_text() -> None:
     ai_service.is_enabled.return_value = True
     ai_service.client.return_value = ai_client
     ai_service.get_model.return_value = "gpt-4o-mini"
+    ai_service.ask_general = AsyncMock(return_value="Risposta generale")
 
     service = TriggerEngineService(Mock(), Mock(), Mock(), ai_service, community_insights=Mock())
     out = asyncio.run(service._ask_general_llm("meteo Cerignola"))
 
     assert out == "Risposta generale"
-    ai_client.responses.create.assert_awaited_once()
-    call_kwargs = ai_client.responses.create.await_args.kwargs
-    assert call_kwargs["model"] == "gpt-4o-mini"
-    payload = call_kwargs["input"]
-    assert payload[0]["role"] == "system"
-    assert "assistente della community" in payload[0]["content"]
-    assert payload[1] == {"role": "user", "content": "meteo Cerignola"}
+    ai_service.ask_general.assert_awaited_once()
 
 
 def test_handle_qna_question_global_bypasses_retrieval() -> None:
@@ -722,7 +717,7 @@ def test_handle_qna_question_global_bypasses_retrieval() -> None:
     service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
     service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
     service._resolve_qna_limit = AsyncMock(return_value=3)
-    service._ask_general_llm = AsyncMock(return_value="Risposta global")
+    service._ask_general_answer = AsyncMock(return_value="Risposta global")
     service._handle_qna = AsyncMock()
     service._build_qna_embed = Mock(return_value=Mock())
 
@@ -744,7 +739,7 @@ def test_handle_qna_question_global_bypasses_retrieval() -> None:
 
     asyncio.run(service.handle_qna_question(interaction, "Domanda generale", scope_override="global"))
 
-    service._ask_general_llm.assert_awaited_once()
+    service._ask_general_answer.assert_awaited_once()
     service._handle_qna.assert_not_called()
     followup.send.assert_awaited_once()
 
@@ -778,7 +773,7 @@ def test_route_qna_general_llm_bypasses_channel_trigger_check() -> None:
     service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
     service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
     service._resolve_qna_limit = AsyncMock(return_value=3)
-    service._ask_general_llm = AsyncMock(return_value="Risposta utile")
+    service._ask_general_answer = AsyncMock(return_value="Risposta utile")
     service._handle_qna = AsyncMock()
     service._build_qna_embed = Mock(return_value=Mock())
 
@@ -802,7 +797,7 @@ def test_route_qna_general_llm_bypasses_channel_trigger_check() -> None:
 
     database.get_trigger_enabled.assert_not_called()
     service._handle_qna.assert_not_called()
-    service._ask_general_llm.assert_awaited_once()
+    service._ask_general_answer.assert_awaited_once()
 
 
 def test_route_qna_general_llm_stores_anchor_session() -> None:
@@ -816,7 +811,7 @@ def test_route_qna_general_llm_stores_anchor_session() -> None:
     service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
     service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
     service._resolve_qna_limit = AsyncMock(return_value=3)
-    service._ask_general_llm = AsyncMock(return_value="Risposta utile")
+    service._ask_general_answer = AsyncMock(return_value="Risposta utile")
     service._build_qna_embed = Mock(return_value=Mock())
 
     response = Mock()
@@ -846,7 +841,7 @@ def test_handle_message_qna_reply_session_hit_reanchors() -> None:
     database.increment_usage = AsyncMock()
 
     service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
-    service._ask_general_llm = AsyncMock(return_value="Risposta contestuale")
+    service._ask_general_answer = AsyncMock(return_value="Risposta contestuale")
     service._handle_qna = AsyncMock()
     service._qna_sessions.set(
         (10, 20, 500),
@@ -867,7 +862,7 @@ def test_handle_message_qna_reply_session_hit_reanchors() -> None:
 
     asyncio.run(service.handle_message_qna(message))
 
-    service._ask_general_llm.assert_awaited_once()
+    service._ask_general_answer.assert_awaited_once()
     service._handle_qna.assert_not_called()
     assert service._qna_sessions.get((10, 20, 700)) is not None
 
@@ -880,3 +875,25 @@ def test_trim_qna_history_limits_and_starts_with_user() -> None:
     trimmed = service._trim_qna_history(history, max_messages=16)
     assert len(trimmed) <= 16
     assert trimmed[0]["role"] == "user"
+
+
+def test_needs_web_search_classifier() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._needs_web_search("che tempo fa domani a Torino?") is True
+    assert service._needs_web_search("quanti minuti ci sono in 3 ore?") is False
+
+
+def test_ask_general_answer_uses_web_when_needed() -> None:
+    ai_service = Mock()
+    ai_service.is_enabled.return_value = True
+    ai_service.client.return_value = Mock()
+    ai_service.get_model.return_value = "gpt-4o-mini"
+    ai_service.ask_general_with_web = AsyncMock(return_value="Meteo con fonti")
+    ai_service.ask_general = AsyncMock(return_value="offline")
+
+    service = TriggerEngineService(Mock(), Mock(), Mock(), ai_service, community_insights=Mock())
+    out = asyncio.run(service._ask_general_answer("meteo domani Torino", history=[{"role": "user", "content": "meteo domani Torino"}]))
+
+    assert out == "Meteo con fonti"
+    ai_service.ask_general_with_web.assert_awaited_once()
+    ai_service.ask_general.assert_not_called()
