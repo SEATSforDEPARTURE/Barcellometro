@@ -14,7 +14,7 @@ from app.plugins.commands_modular import (
     register_attivita,
     register_ask,
     register_barcello,
-    register_barcellometro_attivita,
+    register_attivita_settings,
     register_inattivi,
     register_messaggi,
     register_privacy,
@@ -54,8 +54,7 @@ def setup(registry: ServiceRegistry) -> None:
     privacy_group = app_commands.Group(name="privacy", description="Privacy vocale")
     status_group = app_commands.Group(name="status", description="Stato servizi")
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunti")
-    attivita_group = app_commands.Group(name="attivita", description="Report attività")
-    activity_config_group = app_commands.Group(name="attivita", description="Monitor attività")
+    attivita_group = app_commands.Group(name="attivita", description="Comandi attività (utenti) + gestione report (mod/admin)")
     inattivi_group = app_commands.Group(name="inattivi", description="Utenti inattivi")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
 
@@ -65,7 +64,6 @@ def setup(registry: ServiceRegistry) -> None:
     add_group_once(barcellometro_group, audio_notes_group, logger)
     add_group_once(barcellometro_group, messaggi_group, logger)
     add_group_once(barcellometro_group, voice_ingest_group, logger)
-    add_group_once(barcellometro_group, activity_config_group, logger)
 
     register_admin(barcellometro_group, ctx)
     register_roles(role_group, ctx)
@@ -78,7 +76,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_status(status_group, ctx)
     register_riassunto(riassunto_group, ctx)
     register_attivita(attivita_group, ctx)
-    register_barcellometro_attivita(activity_config_group, ctx)
+    register_attivita_settings(attivita_group, ctx)
 
     inattivi_registered = True
     try:
