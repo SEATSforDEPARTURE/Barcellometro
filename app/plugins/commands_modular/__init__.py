@@ -3,7 +3,7 @@ from .audio_notes import register_audio_notes
 from .attivita import register_attivita
 from .ask import register_ask
 from .barcello import register_barcello
-from .barcellometro_attivita import register_barcellometro_attivita
+from .barcellometro_attivita import register_attivita_settings
 from .command_helpers import add_command_once, add_group_once, describe_placeholders
 from .ctx import CommandContext
 from .permissions import check_permission, ensure_admin
@@ -34,7 +34,7 @@ __all__ = [
     "register_attivita",
     "register_ask",
     "register_barcello",
-    "register_barcellometro_attivita",
+    "register_attivita_settings",
     "register_privacy",
     "register_resoconto",
     "register_riassunto",
