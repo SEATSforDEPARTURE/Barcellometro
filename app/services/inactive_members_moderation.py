@@ -659,6 +659,7 @@ class InactiveMembersModerationService:
         message_count: int | None = None,
         reminder_count: int | None = None,
         reason: str | None = None,
+        inactivity_text: str | None = None,
     ) -> str:
         base = template or ""
         return base.format(
@@ -677,6 +678,7 @@ class InactiveMembersModerationService:
             ban_days=cfg.get("ban_days", 7),
             rejoin_link=cfg.get("invite_url") or "",
             reason=reason or "",
+            inactivity_text=inactivity_text or f"è stato inattivo per {days_inactive} giorni",
         )
 
     async def execute_reminders(self, guild_id: str) -> dict[str, Any]:
@@ -722,7 +724,7 @@ class InactiveMembersModerationService:
         grace_days = int(cfg.get("grace_days_after_reminder", 7))
         ban_days = int(cfg.get("ban_days", 7))
         kick_template = cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}"
-        atrio_template = cfg.get("atrio_template") or "👋 {username} è uscito per inattività ({days_inactive}g)."
+        atrio_template = cfg.get("atrio_template") or "{display_name} ha lasciato il server per inattività ({inactivity_text})."
         atrio_channel = guild.get_channel(int(cfg["atrio_channel_id"])) if cfg.get("atrio_channel_id") else None
         stats = {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "atrio_ok": 0, "errors": []}
         by_id = {c.member.id: c for c in inactive}
@@ -775,6 +777,12 @@ class InactiveMembersModerationService:
                 stats["errors"].append(f"ban {user_id}: {exc.__class__.__name__}")
             if isinstance(atrio_channel, discord.abc.Messageable):
                 try:
+                    last_message_at = self._parse_last_message_dt(candidate.last_message_ts)
+                    if not last_message_at:
+                        inactivity_text = "non è mai stato attivo"
+                    else:
+                        days_inactive = (now - last_message_at).days
+                        inactivity_text = f"è stato inattivo per {days_inactive} giorni"
                     text = self._render_template(
                         atrio_template,
                         member=candidate.member,
@@ -785,6 +793,7 @@ class InactiveMembersModerationService:
                         message_count=candidate.count_in_window,
                         reminder_count=reminder_count,
                         reason="Inattività prolungata",
+                        inactivity_text=inactivity_text,
                     )
                     await atrio_channel.send(text)
                     stats["atrio_ok"] += 1

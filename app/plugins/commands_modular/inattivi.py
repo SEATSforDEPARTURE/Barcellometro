@@ -63,6 +63,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
             "ban_days": 7,
             "rejoin_link": "https://discord.gg/XXXX",
             "reason": "Inattività",
+            "inactivity_text": "è stato inattivo per 39 giorni",
         }
         try:
             return template.format(**sample)
@@ -337,7 +338,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
 
         reminder_raw = str(cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!")
         kick_raw = str(cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}")
-        atrio_raw = str(cfg.get("atrio_template") or "👋 {username} è uscito per inattività ({days_inactive}g).")
+        atrio_raw = str(cfg.get("atrio_template") or "{display_name} ha lasciato il server per inattività ({inactivity_text}).")
 
         reminder_preview = _render_preview(reminder_raw)
         kick_preview = _render_preview(kick_raw)
