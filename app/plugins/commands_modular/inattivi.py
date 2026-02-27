@@ -464,7 +464,9 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         if ctx.inactive_members_moderation is None:
             await interaction.response.send_message("❌ Servizio inattivi non disponibile.", ephemeral=True)
             return
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
         cfg = await ctx.database.get_activity_monitoring_config(str(interaction.guild_id))
         mod_channel_id = str(cfg["mod_channel_id"]) if cfg and cfg["mod_channel_id"] else str(interaction.channel_id)
         await ctx.inactive_members_moderation.handle_post_activity_report(str(interaction.guild_id), mod_channel_id)
-        await interaction.response.send_message("✅ Esecuzione completata.", ephemeral=True)
+        await interaction.followup.send("✅ Esecuzione completata.", ephemeral=True)
