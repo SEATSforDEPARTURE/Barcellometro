@@ -19,6 +19,26 @@ logger = logging.getLogger(__name__)
 ROME = ZoneInfo("Europe/Rome")
 
 
+def _state_int(state: Any, key: str, default: int = 0) -> int:
+    if not state:
+        return default
+    try:
+        if hasattr(state, "keys") and key not in state.keys():
+            return default
+        value = state[key]
+    except Exception:
+        try:
+            value = state.get(key)
+        except Exception:
+            return default
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
 @dataclass
 class InactiveCandidate:
     member: discord.Member
@@ -681,7 +701,7 @@ class InactiveMembersModerationService:
                 policy=candidate.policy,
                 cfg=cfg,
                 message_count=candidate.count_in_window,
-                reminder_count=(state["reminder_count"] if state and state.get("reminder_count") is not None else 0),
+                reminder_count=_state_int(state, "reminder_count", 0),
             )
             try:
                 await candidate.member.send(body)
@@ -719,7 +739,7 @@ class InactiveMembersModerationService:
                     continue
                 if candidate.last_message_ts and candidate.last_message_ts > str(state["last_reminder_at"]):
                     continue
-            reminder_count = state["reminder_count"] if state and state.get("reminder_count") is not None else 0
+            reminder_count = _state_int(state, "reminder_count", 0)
             try:
                 msg = self._render_template(
                     kick_template,
