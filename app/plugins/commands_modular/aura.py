@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import timezone
 
 import discord
@@ -9,7 +10,10 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
-from app.services.aura import render_karma_bar
+from app.services.aura import compute_and_store_aura_result
+from app.services.aura_render import AuraRenderPayload, build_aura_embeds
+
+logger = logging.getLogger(__name__)
 
 
 def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -24,86 +28,89 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         if interaction.guild_id is None:
             await send_ephemeral(interaction, "Comando disponibile solo in un server.")
             return
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
         if not await check_permission(interaction, "aura", ctx):
             return
 
         member = target_user or interaction.user
         aura_cfg = await ctx.entitlements.get_feature_profile_config(interaction.user, "aura")
+        caller_profile, _ = await ctx.entitlements.resolve_profile_with_role_id(interaction.user)
         limits = aura_cfg.get("limits", {}) if isinstance(aura_cfg, dict) else {}
         if target_user is not None and not bool(limits.get("allow_target_user", False)):
             await send_ephemeral(interaction, "Il tuo tier non permette target user per /aura.")
             return
 
-        start_ts = start_dt.astimezone(timezone.utc).isoformat()
-        end_ts = end_dt.astimezone(timezone.utc).isoformat()
-        eligibility = await ctx.aura_eligibility.evaluate_member(member, str(interaction.guild_id), start_ts, end_ts)
+        start_utc = start_dt.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        end_utc = end_dt.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        start_ts = start_utc.isoformat()
+        end_ts = end_utc.isoformat()
+        guild_id = str(interaction.guild_id)
+        user_id = str(member.id)
+
+        eligibility = await ctx.aura_eligibility.evaluate_member(member, guild_id, start_ts, end_ts)
         if not eligibility.eligible:
             embed = discord.Embed(title="✨ RESOCONTO AURA", description=f"{eligibility.reason}\nPer attivarla: aumenta i messaggi nel periodo.", color=0x5865F2)
             embed.add_field(name="Periodo", value=f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}", inline=False)
             embed.set_footer(text="Stima calcolata in loco: nessuna chiamata AI.")
-            if interaction.response.is_done():
-                await interaction.followup.send(embed=embed, ephemeral=True)
-            else:
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
-        row = await ctx.database.fetch_latest_aura_result(str(interaction.guild_id), str(member.id), start_ts, end_ts, channel_id=None)
+        row = await ctx.database.fetch_latest_aura_result_covering_window(guild_id, user_id, start_ts, end_ts, channel_id=None)
         if row is None:
-            await send_ephemeral(interaction, "Aura non pronta per questo periodo. Riprova più tardi.")
+            logger.info("aura ondemand compute: guild=%s user=%s start=%s end=%s", guild_id, user_id, start_ts, end_ts)
+            await compute_and_store_aura_result(
+                ctx.database,
+                guild_id=guild_id,
+                user_id=user_id,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                channel_id=None,
+                reason_code="ondemand.aggregate",
+            )
+            row = await ctx.database.fetch_latest_aura_result(guild_id, user_id, start_ts, end_ts, channel_id=None)
+        if row is None:
+            error_embed = discord.Embed(
+                title="✨ RESOCONTO AURA",
+                description="Impossibile calcolare Aura per il periodo richiesto. Potrebbero non esserci dati sufficienti oppure il calcolo non ha prodotto output.",
+                color=0xED4245,
+            )
+            error_embed.add_field(name="Periodo", value=f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}", inline=False)
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
             return
 
-        karma = int(row["karma_percent"])
-        status = "🟢 Positiva" if karma >= 67 else ("🟡 Bilanciata" if karma >= 34 else "🔴 In calo")
-        main = discord.Embed(
-            title=f"✨ RESOCONTO AURA \"😇 / 😈 — SERVER\"",
-            description=f"Periodo: {start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}\nStato: {status}",
-            color=0x5865F2,
-        )
-        main.add_field(name="Karma server", value=render_karma_bar(karma), inline=False)
-        main.add_field(name="Narrativa", value="Trend locale calcolato con metriche di attività e impatto comunità.", inline=False)
-        main.set_footer(text="Stima calcolata in loco. Eventuali imprecisioni sono possibili.")
+        render_cfg = aura_cfg.get("render", {}) if isinstance(aura_cfg, dict) else {}
+        sections = render_cfg.get("sections", []) if isinstance(render_cfg.get("sections", []), list) else []
+        details_max = int(render_cfg.get("details_embeds_max", 1) or 1)
+        title_prefix = str(render_cfg.get("details_title_prefix", "✨ DETTAGLI AURA") or "✨ DETTAGLI AURA")
 
-        details_max = int((aura_cfg.get("render", {}) or {}).get("details_embeds_max", 1))
-        title_prefix = str((aura_cfg.get("render", {}) or {}).get("details_title_prefix", "✨ Dettagli Aura"))
-        sections = list((aura_cfg.get("render", {}) or {}).get("sections", []))
-
-        detail_embeds: list[discord.Embed] = []
-        ledger = await ctx.database.fetch_aura_ledger_aggregate(str(interaction.guild_id), str(member.id), start_ts, end_ts)
-        archetype = await ctx.database.fetch_latest_archetype_profile(str(interaction.guild_id), str(member.id), period_days=30)
+        ledger = await ctx.database.fetch_aura_ledger_aggregate(guild_id, user_id, start_ts, end_ts)
+        archetype = await ctx.database.fetch_latest_archetype_profile(guild_id, user_id, period_days=30)
         archetype_metrics = json.loads(archetype["metrics_json"]) if archetype and archetype["metrics_json"] else {}
-        base_metrics = json.loads(row["metrics_json"])
 
-        sections_rendered = 0
-        for i in range(max(details_max, 0)):
-            if sections_rendered >= len(sections):
-                break
-            embed = discord.Embed(title=f"{title_prefix} (Pag {i+1}/{details_max})", color=0x2F3136)
-            while sections_rendered < len(sections) and len(embed.fields) < 4:
-                sec = sections[sections_rendered]
-                if sec == "details.score_breakdown":
-                    value = "\n".join([f"• {item['reason_code']}: {item['total']:+d}" for item in ledger[:8]]) or "• Nessun evento"
-                    embed.add_field(name="Score breakdown", value=value, inline=False)
-                elif sec == "details.metrics_basic":
-                    embed.add_field(name="Metriche base", value=f"Volume: {base_metrics.get('msg_count',0)}\nDiversity: {base_metrics.get('unique_interactions',0)}\nInfluence: {base_metrics.get('reply_received',0)}\nConsistency: {base_metrics.get('quality_counter',0)}", inline=False)
-                elif sec == "details.metrics_advanced":
-                    embed.add_field(name="Metriche avanzate", value=f"Monopoly: {max(0, 100-base_metrics.get('unique_interactions',0))}\nReplies/msg: {base_metrics.get('reply_received',0)}/{max(1, base_metrics.get('msg_count',1))}\nClimate delta: {base_metrics.get('invigorate_events',0)-base_metrics.get('degrade_events',0)}", inline=False)
-                elif sec == "details.flags_mod" and bool((aura_cfg.get("privacy", {}) or {}).get("show_mod_flags", False)):
-                    embed.add_field(name="Flag mod", value="Nessun flag sensibile esposto in v1.", inline=False)
-                elif sec == "details.missions" and bool((aura_cfg.get("missions", {}) or {}).get("enabled", False)):
-                    embed.add_field(name="Missioni", value="• Rispondi a 3 utenti nuovi\n• Mantieni tono costruttivo\n• Contribuisci in 2 canali", inline=False)
-                elif sec == "details.interactions_top":
-                    embed.add_field(name="Top interazioni", value="Classifica interazioni disponibile in v1.1", inline=False)
-                elif sec == "details.topics":
-                    insights = archetype_metrics.get("insights", []) if isinstance(archetype_metrics, dict) else []
-                    embed.add_field(name="Insights", value="\n".join(f"• {x}" for x in insights[:3]) or "• Nessun insight", inline=False)
-                sections_rendered += 1
-            if embed.fields:
-                detail_embeds.append(embed)
+        embeds = build_aura_embeds(
+            profile_name=caller_profile,
+            aura_payload=AuraRenderPayload(
+                period_label=f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}",
+                karma_percent=int(row["karma_percent"]),
+                metrics_json=str(row["metrics_json"] or "{}"),
+                ledger=ledger,
+                archetype_metrics=archetype_metrics if isinstance(archetype_metrics, dict) else {},
+            ),
+            include_sections=sections,
+            details_title_prefix=title_prefix,
+            details_embeds_max=details_max,
+        )
 
-        if not interaction.response.is_done():
-            await interaction.response.send_message(embeds=[main, *detail_embeds])
-        else:
-            await interaction.followup.send(embeds=[main, *detail_embeds])
+        try:
+            dm = await interaction.user.create_dm()
+            for idx in range(0, len(embeds), 10):
+                await dm.send(embeds=embeds[idx : idx + 10])
+            logger.info("aura dm sent: user=%s guild=%s pages=%s", str(interaction.user.id), guild_id, len(embeds))
+            await interaction.followup.send("📩 Resoconto Aura inviato in DM.", ephemeral=True)
+        except discord.Forbidden:
+            logger.warning("aura dm blocked: user=%s guild=%s", str(interaction.user.id), guild_id)
+            await interaction.followup.send("Non posso scriverti in DM. Abilita i DM dal server e riprova.", ephemeral=True)
 
     @aura_group.command(name="ultimi", description="Aura ultimi N periodi")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", utente="Utente target opzionale")
