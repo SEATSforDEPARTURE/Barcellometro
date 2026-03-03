@@ -345,6 +345,7 @@
                 "show_mod_metrics": true
               },
               "capabilities": [
+                "summary.include_names_when_tense",
                 "analysis.ai_preferred"
               ]
             }
@@ -398,31 +399,45 @@
               "messages": {
                 "dm_text": "Serve almeno PLUS per usare /riassunto.",
                 "footer_text": "Passa a PLUS per accedere ai riassunti."
-              }
+              },
+              "capabilities": []
             },
             "role1": {
               "allowed": true,
               "messages": {
                 "footer_text": "Finestra standard attiva per il tuo profilo."
-              }
+              },
+              "capabilities": [
+                "analysis.local"
+              ]
             },
             "role2": {
               "allowed": true,
               "messages": {
                 "footer_text": "Finestra estesa disponibile per il tuo profilo."
-              }
+              },
+              "capabilities": [
+                "analysis.ai_preferred"
+              ]
             },
             "role3": {
               "allowed": true,
               "messages": {
                 "footer_text": "Finestra avanzata disponibile per il tuo profilo."
-              }
+              },
+              "capabilities": [
+                "analysis.ai_preferred"
+              ]
             },
             "mod": {
               "allowed": true,
               "messages": {
                 "footer_text": "Profilo moderatore: limiti estesi."
-              }
+              },
+              "capabilities": [
+                "summary.include_names_when_tense",
+                "analysis.ai_preferred"
+              ]
             }
           },
           "limits": {
@@ -454,7 +469,10 @@
           },
           "detail_level": {
             "base": "score",
-            "mod": "mod_extras"
+            "mod": "mod_extras",
+            "role1": "score",
+            "role2": "score",
+            "role3": "score"
           },
           "capabilities": {
             "base": [],

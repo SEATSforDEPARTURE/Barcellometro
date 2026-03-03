@@ -1,42 +1,84 @@
+import asyncio
 import json
+import sys
+import types
+from dataclasses import dataclass
 from pathlib import Path
 
+# app.services.database imports aiosqlite at module import time; stub is enough for these unit calls.
+sys.modules.setdefault("aiosqlite", types.SimpleNamespace())
 
-def test_entitlements_example_covers_runtime_access_paths() -> None:
+from app.services.entitlements import EntitlementsService
+
+
+class FakeDatabase:
+    def __init__(self, settings: dict[str, str]) -> None:
+        self._settings = settings
+
+    async def get_setting(self, key: str) -> str | None:
+        return self._settings.get(key)
+
+
+@dataclass
+class FakeRole:
+    id: int
+
+
+@dataclass
+class FakePermissions:
+    administrator: bool = False
+
+
+@dataclass
+class FakeMember:
+    roles: list[FakeRole]
+    guild_permissions: FakePermissions
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def test_entitlements_example_runtime_read_paths_are_valid() -> None:
     payload = json.loads(Path("app/settings/entitlements.example.json").read_text())
 
     assert payload["mod"]["role_ids"] == []
+    assert payload["entitlements"]["profile_map"]["role_to_profile"] == {}
 
-    profile_map = payload["entitlements"]["profile_map"]
-    assert profile_map["role_to_profile"] == {}
-    for profile in ("base", "role1", "role2", "role3", "mod"):
-        assert isinstance(profile_map["profiles"][profile]["priority"], int)
+    settings = {
+        "mod.role_ids": json.dumps(payload["mod"]["role_ids"]),
+        "entitlements.profile_map": json.dumps(payload["entitlements"]["profile_map"]),
+        "entitlements.policies": json.dumps(payload["entitlements"]["policies"]),
+    }
+    service = EntitlementsService(FakeDatabase(settings))
 
-    policies = payload["entitlements"]["policies"]
-    commands = policies["commands"]
+    base = FakeMember(roles=[], guild_permissions=FakePermissions())
+    mod = FakeMember(roles=[], guild_permissions=FakePermissions(administrator=True))
 
-    # /barcello expects allowed/messages/output/capabilities in command profile config
-    barcello_profiles = commands["barcello"]["profiles"]
-    for profile in ("base", "role1", "role2", "role3", "mod"):
-        cfg = barcello_profiles[profile]
-        assert isinstance(cfg.get("allowed"), bool)
-        assert isinstance(cfg.get("messages", {}), dict)
-        output = cfg.get("output", {})
-        for key in ("show_score", "show_motivation", "show_trend", "show_advice", "show_mod_metrics"):
-            assert key in output
+    # profile resolution + feature gate
+    assert run(service.resolve_profile(base)) == "base"
+    assert run(service.resolve_profile(mod)) == "mod"
+    assert isinstance(run(service.is_feature_allowed(base, "ai")), bool)
 
-    # /riassunto uses profile config and max_window_seconds limit mapping
-    riassunto = commands["riassunto"]
-    for profile in ("base", "role1", "role2", "role3", "mod"):
-        assert isinstance(riassunto["profiles"][profile]["allowed"], bool)
-        assert isinstance(riassunto["limits"]["max_window_seconds"][profile], int)
+    # command profile config used by /barcello and /riassunto
+    for command in ("barcello", "riassunto"):
+        cfg = run(service.get_command_profile_config(base, command))
+        assert isinstance(cfg["allowed"], bool)
+        assert isinstance(cfg["messages"], dict)
+        assert isinstance(cfg["capabilities"], list)
+        assert isinstance(cfg["output"]["show_score"], bool)
 
-    # /aura and AuraEligibilityService expect all these keys for feature profile config
-    aura_profiles = commands["aura"]["profiles"]
-    for profile in ("base", "role1", "role2", "role3", "mod"):
-        aura_cfg = aura_profiles[profile]["features"]["aura"]
-        for key in ("enabled", "limits", "render", "privacy", "missions", "eligibility"):
-            assert key in aura_cfg
+    # root command policy maps used by future helpers
+    for command in ("barcello", "riassunto"):
+        assert isinstance(run(service.is_subcommand_allowed(base, command, "view")), bool)
+        assert isinstance(run(service.get_detail_level(base, command)), str)
+        assert isinstance(run(service.has_capability(mod, command, "analysis.ai_preferred")), bool)
 
-    # Global feature gate used by /barcello and /riassunto
-    assert isinstance(policies["features"]["ai"]["allowed_profiles"], list)
+    # /riassunto max window seconds
+    assert isinstance(run(service.get_command_limit_seconds(base, "riassunto", "max_window_seconds")), int)
+
+    # /aura feature profile config consumed by command + eligibility service
+    aura_cfg = run(service.get_feature_profile_config(base, "aura"))
+    for key in ("enabled", "limits", "render", "privacy", "missions", "eligibility"):
+        assert key in aura_cfg
+    assert isinstance(aura_cfg["limits"]["allow_target_user"], bool)
