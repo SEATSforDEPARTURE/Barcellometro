@@ -106,6 +106,51 @@ class AuraRollingStatsService:
             )
 
 
+async def compute_and_store_aura_result(
+    db: DatabaseService,
+    *,
+    guild_id: str,
+    user_id: str,
+    start_ts: str,
+    end_ts: str,
+    channel_id: str | None,
+    reason_code: str | None = None,
+) -> None:
+    metrics = await db.fetch_aura_metrics(guild_id, user_id, start_ts, end_ts, channel_id=channel_id)
+    if channel_id is None:
+        karma_percent = max(0, min(100, 50 + metrics["invigorate_events"] * 4 - metrics["degrade_events"] * 6 + min(metrics["msg_count"], 40) // 2))
+        trend_delta = metrics["invigorate_events"] - metrics["degrade_events"]
+        points_total = karma_percent + trend_delta
+    else:
+        karma_percent = max(0, min(100, 45 + metrics["invigorate_events"] * 4 - metrics["degrade_events"] * 6 + min(metrics["msg_count"], 30) // 2))
+        trend_delta = metrics["invigorate_events"] - metrics["degrade_events"]
+        points_total = karma_percent
+
+    await db.upsert_aura_result(
+        guild_id=guild_id,
+        user_id=user_id,
+        channel_id=channel_id,
+        period_start=start_ts,
+        period_end=end_ts,
+        karma_percent=karma_percent,
+        trend_delta=trend_delta,
+        points_total=points_total,
+        metrics_json=json.dumps(metrics),
+        computed_at=end_ts,
+    )
+
+    if reason_code:
+        await db.insert_aura_ledger_event(
+            guild_id,
+            user_id,
+            channel_id,
+            end_ts,
+            reason_code,
+            points_total,
+            {"period_start": start_ts, "period_end": end_ts, "channel_id": channel_id},
+        )
+
+
 class AuraAggregationJob:
     def __init__(
         self,
@@ -152,40 +197,25 @@ class AuraAggregationJob:
                 )
                 if not eligibility.eligible:
                     continue
-                metrics = await self._db.fetch_aura_metrics(guild_id, str(member.id), period_start, period_end)
-                karma_percent = max(0, min(100, 50 + metrics["invigorate_events"] * 4 - metrics["degrade_events"] * 6 + min(metrics["msg_count"], 40) // 2))
-                trend_delta = metrics["invigorate_events"] - metrics["degrade_events"]
-                points_total = karma_percent + trend_delta
-                metrics_json = json.dumps(metrics)
-                await self._db.upsert_aura_result(
+                await compute_and_store_aura_result(
+                    self._db,
                     guild_id=guild_id,
                     user_id=str(member.id),
+                    start_ts=period_start,
+                    end_ts=period_end,
                     channel_id=None,
-                    period_start=period_start,
-                    period_end=period_end,
-                    karma_percent=karma_percent,
-                    trend_delta=trend_delta,
-                    points_total=points_total,
-                    metrics_json=metrics_json,
-                    computed_at=period_end,
+                    reason_code="batch.aggregate",
                 )
                 channels = await self._db.fetch_user_channels_in_range(guild_id, str(member.id), period_start, period_end)
                 for channel_id in channels:
-                    ch_metrics = await self._db.fetch_aura_metrics(guild_id, str(member.id), period_start, period_end, channel_id=channel_id)
-                    ch_karma = max(0, min(100, 45 + ch_metrics["invigorate_events"] * 4 - ch_metrics["degrade_events"] * 6 + min(ch_metrics["msg_count"], 30) // 2))
-                    await self._db.upsert_aura_result(
+                    await compute_and_store_aura_result(
+                        self._db,
                         guild_id=guild_id,
                         user_id=str(member.id),
+                        start_ts=period_start,
+                        end_ts=period_end,
                         channel_id=channel_id,
-                        period_start=period_start,
-                        period_end=period_end,
-                        karma_percent=ch_karma,
-                        trend_delta=ch_metrics["invigorate_events"] - ch_metrics["degrade_events"],
-                        points_total=ch_karma,
-                        metrics_json=json.dumps(ch_metrics),
-                        computed_at=period_end,
                     )
-                await self._db.insert_aura_ledger_event(guild_id, str(member.id), None, period_end, "batch.aggregate", points_total, {"period_start": period_start, "period_end": period_end})
 
 
 class ArchetypeAnalyzerService:

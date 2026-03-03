@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import timezone
 
 import discord
@@ -9,7 +10,9 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
-from app.services.aura import render_karma_bar
+from app.services.aura import compute_and_store_aura_result, render_karma_bar
+
+logger = logging.getLogger(__name__)
 
 
 def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -34,8 +37,10 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             await send_ephemeral(interaction, "Il tuo tier non permette target user per /aura.")
             return
 
-        start_ts = start_dt.astimezone(timezone.utc).isoformat()
-        end_ts = end_dt.astimezone(timezone.utc).isoformat()
+        start_utc = start_dt.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        end_utc = end_dt.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        start_ts = start_utc.isoformat()
+        end_ts = end_utc.isoformat()
         eligibility = await ctx.aura_eligibility.evaluate_member(member, str(interaction.guild_id), start_ts, end_ts)
         if not eligibility.eligible:
             embed = discord.Embed(title="✨ RESOCONTO AURA", description=f"{eligibility.reason}\nPer attivarla: aumenta i messaggi nel periodo.", color=0x5865F2)
@@ -47,9 +52,31 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
                 await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        row = await ctx.database.fetch_latest_aura_result(str(interaction.guild_id), str(member.id), start_ts, end_ts, channel_id=None)
+        row = await ctx.database.fetch_latest_aura_result_covering_window(str(interaction.guild_id), str(member.id), start_ts, end_ts, channel_id=None)
         if row is None:
-            await send_ephemeral(interaction, "Aura non pronta per questo periodo. Riprova più tardi.")
+            logger.info("aura ondemand compute: guild=%s user=%s start=%s end=%s", str(interaction.guild_id), str(member.id), start_ts, end_ts)
+            await compute_and_store_aura_result(
+                ctx.database,
+                guild_id=str(interaction.guild_id),
+                user_id=str(member.id),
+                start_ts=start_ts,
+                end_ts=end_ts,
+                channel_id=None,
+                reason_code="ondemand.aggregate",
+            )
+            row = await ctx.database.fetch_latest_aura_result(str(interaction.guild_id), str(member.id), start_ts, end_ts, channel_id=None)
+        if row is None:
+            error_embed = discord.Embed(
+                title="✨ RESOCONTO AURA",
+                description="Impossibile calcolare Aura per il periodo richiesto. Potrebbero non esserci dati sufficienti oppure il calcolo non ha prodotto output.",
+                color=0xED4245,
+            )
+            error_embed.add_field(name="Periodo", value=f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}", inline=False)
+            error_embed.set_footer(text="Stima calcolata in loco: nessuna chiamata AI.")
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
 
         karma = int(row["karma_percent"])

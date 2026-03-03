@@ -3,7 +3,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.aura import AuraEligibilityService, render_karma_bar
+from app.services.aura import AuraEligibilityService, compute_and_store_aura_result, render_karma_bar
+from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 
 
@@ -124,3 +125,36 @@ def test_eligibility_bots_and_min_messages() -> None:
     bot_result = run(service_ok.evaluate_member(bot_member, "10", datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()))
     assert bot_result.eligible is False
     assert "bot" in bot_result.reason.lower()
+
+
+def test_compute_and_store_aura_result_creates_missing_window_row() -> None:
+    async def _scenario() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        start = now.replace(hour=0, minute=0)
+        end = now.replace(hour=23, minute=59)
+        start_ts = start.isoformat()
+        end_ts = end.isoformat()
+
+        await db.execute(
+            """
+            INSERT INTO messages (message_id, guild_id, channel_id, author_id, ts, content, is_deleted)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            """,
+            ("m1", "10", "99", "1", start_ts, "hello"),
+        )
+        await db.upsert_aura_rolling_on_message(guild_id="10", user_id="1", window_key=start.date().isoformat(), ts=start_ts, unique_increment=2)
+
+        before = await db.fetch_latest_aura_result("10", "1", start_ts, end_ts, channel_id=None)
+        assert before is None
+
+        await compute_and_store_aura_result(db, guild_id="10", user_id="1", start_ts=start_ts, end_ts=end_ts, channel_id=None)
+
+        after = await db.fetch_latest_aura_result("10", "1", start_ts, end_ts, channel_id=None)
+        assert after is not None
+        assert int(after["karma_percent"]) >= 0
+        await db.close()
+
+    run(_scenario())
