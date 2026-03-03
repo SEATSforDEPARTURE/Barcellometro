@@ -30,6 +30,7 @@ def setup(registry: ServiceRegistry) -> None:
     trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
     backfill = registry.get("backfill") if registry.has("backfill") else None
     config = registry.get("config")
+    aura_rolling = registry.get("aura_rolling") if registry.has("aura_rolling") else None
     warned_disabled_channels: set[str] = set()
 
     async def ensure_channel_record(channel: discord.abc.GuildChannel) -> bool:
@@ -283,6 +284,14 @@ def setup(registry: ServiceRegistry) -> None:
             content=content_redacted,
             meta={"message_id": str(message.id)},
         )
+        if aura_rolling is not None:
+            await aura_rolling.on_message_saved(
+                guild_id=str(message.guild.id),
+                channel_id=str(message.channel.id),
+                user_id=str(message.author.id),
+                ts=ts,
+                mentions=[str(user.id) for user in message.mentions],
+            )
         if voice_meta:
             await emit_event(
                 "chat.message",

@@ -20,7 +20,87 @@ DEFAULT_ENTITLEMENTS_PROFILE_MAP = json.dumps(
 )
 DEFAULT_ENTITLEMENTS_POLICIES = json.dumps(
     {
-        "commands": {},
+        "commands": {
+            "aura": {
+                "profiles": {
+                    "base": {
+                        "allowed": True,
+                        "features": {
+                            "aura": {
+                                "enabled": True,
+                                "limits": {
+                                    "max_range_days": 30,
+                                    "max_lookback_days": 60,
+                                    "cooldown_seconds": 90,
+                                    "max_requests_per_day": 8,
+                                    "allow_target_user": False,
+                                    "allow_target_channel": False,
+                                },
+                                "render": {
+                                    "details_embeds_max": 1,
+                                    "details_title_prefix": "✨ Dettagli Aura",
+                                    "sections": ["main.karma", "main.trend", "main.summary", "details.metrics_basic"],
+                                },
+                                "privacy": {"show_sensitive_penalties": False, "show_mod_flags": False},
+                                "missions": {"enabled": False, "daily_count": 3, "daily_bonus_points": 8},
+                                "eligibility": {
+                                    "min_account_age_days": 7,
+                                    "min_messages_in_range": 20,
+                                    "exclude_bots": True,
+                                    "exclude_roles": [],
+                                    "exclude_if_flagged_fake": True,
+                                },
+                            }
+                        },
+                    },
+                    "mod": {
+                        "allowed": True,
+                        "features": {
+                            "aura": {
+                                "enabled": True,
+                                "limits": {
+                                    "max_range_days": 30,
+                                    "max_lookback_days": 180,
+                                    "cooldown_seconds": 15,
+                                    "max_requests_per_day": 100,
+                                    "allow_target_user": True,
+                                    "allow_target_channel": True,
+                                },
+                                "render": {
+                                    "details_embeds_max": 3,
+                                    "details_title_prefix": "✨ Dettagli Aura Mod",
+                                    "sections": [
+                                        "main.karma",
+                                        "main.trend",
+                                        "main.summary",
+                                        "details.score_breakdown",
+                                        "details.metrics_basic",
+                                        "details.metrics_advanced",
+                                        "details.interactions_top",
+                                        "details.topics",
+                                        "details.flags_mod",
+                                        "details.missions"
+                                    ],
+                                },
+                                "privacy": {"show_sensitive_penalties": True, "show_mod_flags": True},
+                                "missions": {"enabled": True, "daily_count": 3, "daily_bonus_points": 8},
+                                "eligibility": {
+                                    "min_account_age_days": 7,
+                                    "min_messages_in_range": 20,
+                                    "exclude_bots": True,
+                                    "exclude_roles": [],
+                                    "exclude_if_flagged_fake": True,
+                                },
+                            }
+                        },
+                    },
+                },
+                "limits": {
+                    "cooldown_seconds": {"base": 90, "mod": 15},
+                    "max_requests_per_day": {"base": 8, "mod": 100},
+                },
+            }
+        },
         "features": {"ai": {"allowed_profiles": []}},
     }
 )

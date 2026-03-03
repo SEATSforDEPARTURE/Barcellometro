@@ -450,6 +450,71 @@ class DatabaseService:
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (guild_id, user_id)
             );
+
+            CREATE TABLE IF NOT EXISTS aura_user_profile (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                eligible INTEGER NOT NULL DEFAULT 0,
+                eligibility_reason TEXT,
+                role_tier TEXT,
+                aura_lifetime INTEGER NOT NULL DEFAULT 0,
+                aura_season INTEGER NOT NULL DEFAULT 0,
+                last_computed_at TEXT,
+                PRIMARY KEY (guild_id, user_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS aura_user_rolling_stats (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                window_key TEXT NOT NULL,
+                msg_count INTEGER NOT NULL DEFAULT 0,
+                reply_received INTEGER NOT NULL DEFAULT 0,
+                unique_interactions INTEGER NOT NULL DEFAULT 0,
+                degrade_events INTEGER NOT NULL DEFAULT 0,
+                invigorate_events INTEGER NOT NULL DEFAULT 0,
+                quality_counter INTEGER NOT NULL DEFAULT 0,
+                last_activity_at TEXT,
+                PRIMARY KEY (guild_id, user_id, window_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS aura_events_ledger (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                channel_id TEXT,
+                ts TEXT NOT NULL,
+                reason_code TEXT NOT NULL,
+                delta_points INTEGER NOT NULL,
+                meta_json TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_aura_events_ledger_gut
+            ON aura_events_ledger (guild_id, user_id, ts);
+
+            CREATE TABLE IF NOT EXISTS aura_results (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                channel_id TEXT,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                karma_percent INTEGER NOT NULL,
+                trend_delta INTEGER NOT NULL,
+                points_total INTEGER NOT NULL,
+                metrics_json TEXT NOT NULL,
+                computed_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, user_id, channel_id, period_start, period_end)
+            );
+
+            CREATE TABLE IF NOT EXISTS archetype_profiles (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                period_days INTEGER NOT NULL,
+                archetype_scores_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                computed_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, user_id, period_days)
+            );
+
             """
         )
         await self._ensure_message_campaign_columns()
@@ -2789,6 +2854,172 @@ class DatabaseService:
             except Exception:
                 continue
         return result
+
+
+
+    async def upsert_aura_rolling_on_message(self, *, guild_id: str, user_id: str, window_key: str, ts: str, unique_increment: int) -> None:
+        await self.execute(
+            """
+            INSERT INTO aura_user_rolling_stats (guild_id, user_id, window_key, msg_count, unique_interactions, quality_counter, last_activity_at)
+            VALUES (?, ?, ?, 1, ?, 1, ?)
+            ON CONFLICT(guild_id, user_id, window_key) DO UPDATE SET
+                msg_count = aura_user_rolling_stats.msg_count + 1,
+                unique_interactions = aura_user_rolling_stats.unique_interactions + excluded.unique_interactions,
+                quality_counter = aura_user_rolling_stats.quality_counter + 1,
+                last_activity_at = excluded.last_activity_at
+            """,
+            (guild_id, user_id, window_key, max(unique_increment, 1), ts),
+        )
+
+    async def upsert_aura_rolling_on_barcello(self, *, guild_id: str, user_id: str, window_key: str, ts: str, invigorate: bool) -> None:
+        col = "invigorate_events" if invigorate else "degrade_events"
+        await self.execute(
+            f"""
+            INSERT INTO aura_user_rolling_stats (guild_id, user_id, window_key, {col}, last_activity_at)
+            VALUES (?, ?, ?, 1, ?)
+            ON CONFLICT(guild_id, user_id, window_key) DO UPDATE SET
+                {col} = aura_user_rolling_stats.{col} + 1,
+                last_activity_at = excluded.last_activity_at
+            """,
+            (guild_id, user_id, window_key, ts),
+        )
+
+    async def fetch_recent_active_users(self, guild_id: str, ts: str, minutes: int = 30) -> list[str]:
+        end_dt = datetime.fromisoformat(ts)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        start_ts = (end_dt - timedelta(minutes=minutes)).isoformat()
+        rows = await self.fetchall(
+            """
+            SELECT DISTINCT author_id FROM messages
+            WHERE guild_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, start_ts, end_dt.isoformat()),
+        )
+        return [str(r["author_id"]) for r in rows if r["author_id"]]
+
+    async def upsert_aura_user_profile(self, *, guild_id: str, user_id: str, eligible: int, eligibility_reason: str, role_tier: str, last_computed_at: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO aura_user_profile (guild_id, user_id, eligible, eligibility_reason, role_tier, last_computed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                eligible = excluded.eligible,
+                eligibility_reason = excluded.eligibility_reason,
+                role_tier = excluded.role_tier,
+                last_computed_at = excluded.last_computed_at
+            """,
+            (guild_id, user_id, eligible, eligibility_reason, role_tier, last_computed_at),
+        )
+
+    async def fetch_aura_metrics(self, guild_id: str, user_id: str, start_ts: str, end_ts: str, *, channel_id: str | None = None) -> dict[str, int]:
+        params: list[str] = [guild_id, user_id, start_ts, end_ts]
+        extra = ""
+        if channel_id:
+            extra = " AND channel_id = ?"
+            params.append(channel_id)
+        msg_row = await self.fetchone(
+            f"""
+            SELECT COUNT(*) AS msg_count,
+                   SUM(CASE WHEN reply_to_message_id IS NOT NULL THEN 1 ELSE 0 END) AS replied
+            FROM messages
+            WHERE guild_id = ? AND author_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0 {extra}
+            """,
+            tuple(params),
+        )
+        rolling_row = await self.fetchone(
+            """
+            SELECT SUM(unique_interactions) AS unique_interactions,
+                   SUM(degrade_events) AS degrade_events,
+                   SUM(invigorate_events) AS invigorate_events,
+                   SUM(quality_counter) AS quality_counter
+            FROM aura_user_rolling_stats
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (guild_id, user_id),
+        )
+        return {
+            "msg_count": int(msg_row["msg_count"] or 0) if msg_row else 0,
+            "reply_received": int(msg_row["replied"] or 0) if msg_row else 0,
+            "unique_interactions": int(rolling_row["unique_interactions"] or 0) if rolling_row else 0,
+            "degrade_events": int(rolling_row["degrade_events"] or 0) if rolling_row else 0,
+            "invigorate_events": int(rolling_row["invigorate_events"] or 0) if rolling_row else 0,
+            "quality_counter": int(rolling_row["quality_counter"] or 0) if rolling_row else 0,
+        }
+
+    async def upsert_aura_result(self, *, guild_id: str, user_id: str, channel_id: str | None, period_start: str, period_end: str, karma_percent: int, trend_delta: int, points_total: int, metrics_json: str, computed_at: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO aura_results (guild_id, user_id, channel_id, period_start, period_end, karma_percent, trend_delta, points_total, metrics_json, computed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id, channel_id, period_start, period_end) DO UPDATE SET
+                karma_percent = excluded.karma_percent,
+                trend_delta = excluded.trend_delta,
+                points_total = excluded.points_total,
+                metrics_json = excluded.metrics_json,
+                computed_at = excluded.computed_at
+            """,
+            (guild_id, user_id, channel_id, period_start, period_end, karma_percent, trend_delta, points_total, metrics_json, computed_at),
+        )
+
+    async def fetch_latest_aura_result(self, guild_id: str, user_id: str, period_start: str, period_end: str, *, channel_id: str | None = None) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM aura_results
+            WHERE guild_id = ? AND user_id = ? AND period_start = ? AND period_end = ?
+              AND ((channel_id IS NULL AND ? IS NULL) OR channel_id = ?)
+            ORDER BY computed_at DESC LIMIT 1
+            """,
+            (guild_id, user_id, period_start, period_end, channel_id, channel_id),
+        )
+
+    async def fetch_user_channels_in_range(self, guild_id: str, user_id: str, start_ts: str, end_ts: str) -> list[str]:
+        rows = await self.fetchall(
+            """
+            SELECT DISTINCT channel_id FROM messages
+            WHERE guild_id = ? AND author_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, user_id, start_ts, end_ts),
+        )
+        return [str(r["channel_id"]) for r in rows if r["channel_id"]]
+
+    async def insert_aura_ledger_event(self, guild_id: str, user_id: str, channel_id: str | None, ts: str, reason_code: str, delta_points: int, meta: dict[str, Any]) -> None:
+        await self.execute(
+            "INSERT INTO aura_events_ledger (id, guild_id, user_id, channel_id, ts, reason_code, delta_points, meta_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (f"{guild_id}:{user_id}:{reason_code}:{ts}", guild_id, user_id, channel_id, ts, reason_code, delta_points, json.dumps(meta)),
+        )
+
+    async def fetch_aura_ledger_aggregate(self, guild_id: str, user_id: str, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT reason_code, SUM(delta_points) AS total
+            FROM aura_events_ledger
+            WHERE guild_id = ? AND user_id = ? AND ts >= ? AND ts <= ?
+            GROUP BY reason_code
+            ORDER BY total DESC
+            """,
+            (guild_id, user_id, start_ts, end_ts),
+        )
+        return [{"reason_code": str(r["reason_code"]), "total": int(r["total"] or 0)} for r in rows]
+
+    async def upsert_archetype_profile(self, *, guild_id: str, user_id: str, period_days: int, archetype_scores_json: str, metrics_json: str, computed_at: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO archetype_profiles (guild_id, user_id, period_days, archetype_scores_json, metrics_json, computed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id, period_days) DO UPDATE SET
+                archetype_scores_json = excluded.archetype_scores_json,
+                metrics_json = excluded.metrics_json,
+                computed_at = excluded.computed_at
+            """,
+            (guild_id, user_id, period_days, archetype_scores_json, metrics_json, computed_at),
+        )
+
+    async def fetch_latest_archetype_profile(self, guild_id: str, user_id: str, period_days: int = 30) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            "SELECT * FROM archetype_profiles WHERE guild_id = ? AND user_id = ? AND period_days = ? ORDER BY computed_at DESC LIMIT 1",
+            (guild_id, user_id, period_days),
+        )
 
     async def list_custom_campaigns_enabled(self, guild_id: str) -> list[dict[str, object]]:
         rows = await self.fetchall(

@@ -1,0 +1,140 @@
+{
+  "mod": {"role_ids": []},
+  "entitlements": {
+    "profile_map": {
+      "profiles": {
+        "base": {"priority": 0},
+        "trusted": {"priority": 20},
+        "mod": {"priority": 100}
+      },
+      "role_to_profile": {}
+    },
+    "policies": {
+      "commands": {
+        "aura": {
+          "profiles": {
+            "base": {
+              "allowed": true,
+              "features": {
+                "aura": {
+                  "enabled": true,
+                  "limits": {
+                    "max_range_days": 30,
+                    "max_lookback_days": 60,
+                    "cooldown_seconds": 90,
+                    "max_requests_per_day": 8,
+                    "allow_target_user": false,
+                    "allow_target_channel": false
+                  },
+                  "render": {
+                    "details_embeds_max": 1,
+                    "details_title_prefix": "✨ Dettagli Aura",
+                    "sections": [
+                      "main.karma",
+                      "main.trend",
+                      "main.summary",
+                      "details.metrics_basic"
+                    ]
+                  },
+                  "privacy": {"show_sensitive_penalties": false, "show_mod_flags": false},
+                  "missions": {"enabled": false, "daily_count": 3, "daily_bonus_points": 8},
+                  "eligibility": {
+                    "min_account_age_days": 7,
+                    "min_messages_in_range": 20,
+                    "exclude_bots": true,
+                    "exclude_roles": [],
+                    "exclude_if_flagged_fake": true
+                  }
+                }
+              }
+            },
+            "trusted": {
+              "allowed": true,
+              "features": {
+                "aura": {
+                  "enabled": true,
+                  "limits": {
+                    "max_range_days": 30,
+                    "max_lookback_days": 90,
+                    "cooldown_seconds": 45,
+                    "max_requests_per_day": 25,
+                    "allow_target_user": true,
+                    "allow_target_channel": false
+                  },
+                  "render": {
+                    "details_embeds_max": 2,
+                    "details_title_prefix": "✨ Dettagli Aura",
+                    "sections": [
+                      "main.karma",
+                      "main.trend",
+                      "main.summary",
+                      "details.score_breakdown",
+                      "details.metrics_basic",
+                      "details.interactions_top",
+                      "details.topics"
+                    ]
+                  },
+                  "privacy": {"show_sensitive_penalties": false, "show_mod_flags": false},
+                  "missions": {"enabled": true, "daily_count": 3, "daily_bonus_points": 8},
+                  "eligibility": {
+                    "min_account_age_days": 7,
+                    "min_messages_in_range": 20,
+                    "exclude_bots": true,
+                    "exclude_roles": [],
+                    "exclude_if_flagged_fake": true
+                  }
+                }
+              }
+            },
+            "mod": {
+              "allowed": true,
+              "features": {
+                "aura": {
+                  "enabled": true,
+                  "limits": {
+                    "max_range_days": 30,
+                    "max_lookback_days": 180,
+                    "cooldown_seconds": 15,
+                    "max_requests_per_day": 100,
+                    "allow_target_user": true,
+                    "allow_target_channel": true
+                  },
+                  "render": {
+                    "details_embeds_max": 4,
+                    "details_title_prefix": "✨ Dettagli Aura Mod",
+                    "sections": [
+                      "main.karma",
+                      "main.trend",
+                      "main.summary",
+                      "details.score_breakdown",
+                      "details.metrics_basic",
+                      "details.metrics_advanced",
+                      "details.interactions_top",
+                      "details.topics",
+                      "details.flags_mod",
+                      "details.missions"
+                    ]
+                  },
+                  "privacy": {"show_sensitive_penalties": true, "show_mod_flags": true},
+                  "missions": {"enabled": true, "daily_count": 3, "daily_bonus_points": 8},
+                  "eligibility": {
+                    "min_account_age_days": 7,
+                    "min_messages_in_range": 20,
+                    "exclude_bots": true,
+                    "exclude_roles": [],
+                    "exclude_if_flagged_fake": true
+                  }
+                }
+              }
+            }
+          },
+          "limits": {
+            "cooldown_seconds": {"base": 90, "trusted": 45, "mod": 15},
+            "max_requests_per_day": {"base": 8, "trusted": 25, "mod": 100}
+          }
+        }
+      },
+      "features": {"ai": {"allowed_profiles": []}}
+    }
+  }
+}

@@ -173,6 +173,22 @@ class EntitlementsService:
                 return val
         return None
 
+    async def get_feature_profile_config(self, member: Any, feature: str) -> dict[str, Any]:
+        profile = await self.resolve_profile(member)
+        policies = await self._get_json_setting("entitlements.policies", DEFAULT_POLICIES)
+        commands = policies.get("commands", {}) if isinstance(policies, dict) else {}
+        command_policy = commands.get("aura", {}) if isinstance(commands, dict) else {}
+        profiles = command_policy.get("profiles", {}) if isinstance(command_policy, dict) else {}
+        base = profiles.get("base", {}) if isinstance(profiles.get("base"), dict) else {}
+        selected = profiles.get(profile, base)
+        if not isinstance(selected, dict):
+            selected = base
+        features = selected.get("features", {}) if isinstance(selected.get("features"), dict) else {}
+        feature_cfg = features.get(feature, {}) if isinstance(features, dict) else {}
+        if not isinstance(feature_cfg, dict):
+            return {}
+        return feature_cfg
+
     async def _get_command_policy(self, command: str) -> dict[str, Any]:
         policies = await self._get_json_setting("entitlements.policies", DEFAULT_POLICIES)
         commands = policies.get("commands", {}) if isinstance(policies, dict) else {}

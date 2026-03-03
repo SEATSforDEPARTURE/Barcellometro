@@ -38,6 +38,8 @@ class CommandContext:
     inactive_members_moderation: Any
     timezone: ZoneInfo
     message_scheduler: Optional[Any] = None
+    aura_eligibility: Optional[Any] = None
+    aura_rolling: Optional[Any] = None
 
     @classmethod
     def from_registry(cls, registry: ServiceRegistry) -> "CommandContext":
@@ -67,6 +69,8 @@ class CommandContext:
         daily_activity_report = registry.get("daily_activity_report") if registry.has("daily_activity_report") else None
         inactive_members_moderation = registry.get("inactive_members_moderation") if registry.has("inactive_members_moderation") else None
         message_scheduler = registry.get("message_scheduler") if registry.has("message_scheduler") else None
+        aura_eligibility = registry.get("aura_eligibility") if registry.has("aura_eligibility") else None
+        aura_rolling = registry.get("aura_rolling") if registry.has("aura_rolling") else None
         ingest: IngestService = registry.get("ingest")
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
@@ -92,5 +96,7 @@ class CommandContext:
             daily_activity_report=daily_activity_report,
             inactive_members_moderation=inactive_members_moderation,
             message_scheduler=message_scheduler,
+            aura_eligibility=aura_eligibility,
+            aura_rolling=aura_rolling,
             timezone=timezone,
         )

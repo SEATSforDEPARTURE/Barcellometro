@@ -13,6 +13,7 @@ from app.plugins.commands_modular import (
     register_audio_notes,
     register_attivita,
     register_ask,
+    register_aura,
     register_barcello,
     register_attivita_settings,
     register_inattivi,
@@ -54,6 +55,7 @@ def setup(registry: ServiceRegistry) -> None:
     privacy_group = app_commands.Group(name="privacy", description="Privacy vocale")
     status_group = app_commands.Group(name="status", description="Stato servizi")
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunti")
+    aura_group = app_commands.Group(name="aura", description="Resoconto aura")
     attivita_group = app_commands.Group(name="attivita", description="Comandi attività (utenti) + gestione report (mod/admin)")
     inattivi_group = app_commands.Group(name="inattivi", description="Utenti inattivi")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
@@ -75,6 +77,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_privacy(privacy_group, ctx)
     register_status(status_group, ctx)
     register_riassunto(riassunto_group, ctx)
+    register_aura(aura_group, ctx)
     register_attivita(attivita_group, ctx)
     register_attivita_settings(attivita_group, ctx)
 
@@ -105,6 +108,7 @@ def setup(registry: ServiceRegistry) -> None:
     root_commands: list[app_commands.Command | app_commands.Group] = [
         barcellometro_group,
         riassunto_group,
+        aura_group,
         attivita_group,
         status_group,
         resoconto_group,
