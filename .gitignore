@@ -38,6 +38,8 @@ logs/
 *.key
 *.crt
 *.json
+!**/*.example.json
+app/settings/entitlements.json
 
 # === Local DB / Artifacts ===
 *.sqlite
