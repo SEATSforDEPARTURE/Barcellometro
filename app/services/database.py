@@ -2973,6 +2973,17 @@ class DatabaseService:
             (guild_id, user_id, period_start, period_end, channel_id, channel_id),
         )
 
+    async def fetch_latest_aura_result_covering_window(self, guild_id: str, user_id: str, period_start: str, period_end: str, *, channel_id: str | None = None) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM aura_results
+            WHERE guild_id = ? AND user_id = ? AND period_start <= ? AND period_end >= ?
+              AND ((channel_id IS NULL AND ? IS NULL) OR channel_id = ?)
+            ORDER BY computed_at DESC LIMIT 1
+            """,
+            (guild_id, user_id, period_start, period_end, channel_id, channel_id),
+        )
+
     async def fetch_user_channels_in_range(self, guild_id: str, user_id: str, start_ts: str, end_ts: str) -> list[str]:
         rows = await self.fetchall(
             """
