@@ -621,8 +621,24 @@ class MessageSchedulerService:
             if self._ai_service is None or not self._ai_service.is_enabled() or self._ai_service.client() is None:
                 return None, "ai_disabled", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "fallback", "cache_status": "n/a"}
             model = self._ai_service.get_model("summary") or "gpt-4o-mini"
-            response = await self._ai_service.client().responses.create(model=model, input=resolved_prompt)
-            text = (getattr(response, "output_text", "") or "").strip() or "AI non disponibile"
+            web_enabled_raw = await self._get_setting_with_default("messages_ai_prompt_web_enabled", "true")
+            web_enabled = web_enabled_raw.lower() in {"1", "true", "yes", "y"}
+            logger.info("AI_PROMPT resolve settings: ai_prompt_web=%s model=%s", str(web_enabled).lower(), model)
+
+            persona_system = self._campaign_persona_system_prompt(include_web_instruction=web_enabled)
+            if web_enabled:
+                try:
+                    text = await self._ai_service.ask_general_with_web(
+                        resolved_prompt,
+                        persona_system,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("AI_PROMPT web generation failed, fallback to non-web")
+                    text = await self._ai_service.ask_general(resolved_prompt, self._campaign_persona_system_prompt())
+            else:
+                text = await self._ai_service.ask_general(resolved_prompt, persona_system)
+
+            text = (text or "").strip() or "AI non disponibile"
             return text, "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "n/a"}
 
         mood_mode = str(campaign.get("mood_mode") or "AUTO")
@@ -732,6 +748,16 @@ class MessageSchedulerService:
         if self._community_insights is None:
             return None
         return await self._community_insights.get_next_message(guild_id)
+
+    def _campaign_persona_system_prompt(self, *, include_web_instruction: bool = False) -> str:
+        base = (
+            "Sei il Barcellometro: tono brillante, chiaro e coinvolgente per community Discord. "
+            "Non dire che non puoi fare real-time, non scusarti e non parlare dei limiti. "
+            "Restituisci SOLO il testo finale pronto per Discord."
+        )
+        if include_web_instruction:
+            return f"{base} Includi link diretti alle fonti nel testo quando usi il web."
+        return base
 
     def status(self) -> dict[str, object]:
         return {
