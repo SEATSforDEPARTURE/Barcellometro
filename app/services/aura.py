@@ -59,6 +59,28 @@ AURA_REASON_META: dict[str, dict[str, str]] = {
     for key, value in AURA_REASON_HUMAN.items()
 }
 
+DEFAULT_AURA_RULES: dict[str, int] = {
+    "first_message_of_day": 5,
+    "reply_to_new_user": 8,
+    "positive_climate_contribution": 10,
+    "climate_degrade": -10,
+    "monopoly_penalty": -6,
+    "voice_join_bonus": 4,
+    "mission_completed": 15,
+}
+
+AURA_REASON_HUMAN: dict[str, str] = {
+    "first_message_of_day": "per aver scritto per prima nel giorno",
+    "reply_to_new_user": "per aver risposto a una persona nuova",
+    "positive_climate_contribution": "per aver contribuito a un clima più costruttivo",
+    "climate_degrade": "per aver abbassato il clima in una discussione",
+    "monopoly_penalty": "per aver monopolizzato la conversazione",
+    "voice_join_bonus": "per aver partecipato in canale vocale",
+    "mission_completed": "per aver completato una missione giornaliera",
+    "ondemand.aggregate": "bilancio complessivo del periodo",
+    "batch.aggregate": "bilancio aggregato periodico",
+}
+
 
 @dataclass
 class AuraEligibilityResult:
