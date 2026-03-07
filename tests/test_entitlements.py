@@ -149,3 +149,39 @@ def test_command_profile_config_defaults_and_overrides() -> None:
 
     mod_config = run(service.get_command_profile_config(mod_member, "barcello"))
     assert mod_config["output"]["show_mod_metrics"] is True
+
+
+def test_aura_feature_sections_by_tier() -> None:
+    policies = {
+        "commands": {
+            "aura": {
+                "profiles": {
+                    "base": {"features": {"aura": {"enabled": True, "render": {"sections": []}, "limits": {"allow_target_user": False}}}},
+                    "role1": {"features": {"aura": {"enabled": True, "render": {"sections": ["details.missions", "details.note.role1"]}, "limits": {"allow_target_user": False}}}},
+                    "role2": {"features": {"aura": {"enabled": True, "render": {"sections": ["details.missions", "details.profile", "details.note.role2"]}, "limits": {"allow_target_user": False}}}},
+                    "role3": {"features": {"aura": {"enabled": True, "render": {"sections": ["details.missions", "details.profile", "details.advice"]}, "limits": {"allow_target_user": False}}}},
+                    "mod": {"features": {"aura": {"enabled": True, "render": {"sections": ["details.missions", "details.profile", "details.advice", "details.metrics_aggregated"]}, "limits": {"allow_target_user": True}}}},
+                }
+            }
+        }
+    }
+    profile_map = {
+        "profiles": {"base": {"priority": 0}, "role1": {"priority": 1}, "role2": {"priority": 2}, "role3": {"priority": 3}},
+        "role_to_profile": {"11": "role1", "22": "role2", "33": "role3"},
+    }
+    settings = {"entitlements.profile_map": __import__('json').dumps(profile_map), "entitlements.policies": __import__('json').dumps(policies), "mod.role_ids": "[]"}
+    service = EntitlementsService(FakeDatabase(settings))
+
+    base = FakeMember(roles=[], guild_permissions=FakePermissions())
+    role1 = FakeMember(roles=[FakeRole(11)], guild_permissions=FakePermissions())
+    role2 = FakeMember(roles=[FakeRole(22)], guild_permissions=FakePermissions())
+    role3 = FakeMember(roles=[FakeRole(33)], guild_permissions=FakePermissions())
+    mod = FakeMember(roles=[], guild_permissions=FakePermissions(administrator=True))
+
+    assert run(service.get_feature_profile_config(base, "aura"))["render"]["sections"] == []
+    assert "details.note.role1" in run(service.get_feature_profile_config(role1, "aura"))["render"]["sections"]
+    assert "details.profile" in run(service.get_feature_profile_config(role2, "aura"))["render"]["sections"]
+    assert "details.advice" in run(service.get_feature_profile_config(role3, "aura"))["render"]["sections"]
+    mod_cfg = run(service.get_feature_profile_config(mod, "aura"))
+    assert "details.metrics_aggregated" in mod_cfg["render"]["sections"]
+    assert mod_cfg["limits"]["allow_target_user"] is True

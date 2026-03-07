@@ -12,7 +12,7 @@ from discord import app_commands
 
 from app.services.entitlements import EntitlementsService
 from app.services.config_file_loader import load_json_file
-from app.services.barcello_window import resolve_window_minutes
+from app.services.barcello_window import resolve_default_window_minutes
 from app.utils.embed_limits import _split_field_chunks
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
@@ -959,18 +959,11 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
 
             if window_minutes is None:
                 raw_default = await get_setting(ctx, "barcello.default_window_minutes", "30")
-                try:
-                    default_window_minutes = int(raw_default)
-                except ValueError:
-                    default_window_minutes = 30
+                trigger_config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+                window_minutes = resolve_default_window_minutes(interaction.channel_id, raw_default, trigger_config)
+                default_window_minutes = int(raw_default) if str(raw_default).isdigit() else 30
                 if default_window_minutes <= 0:
                     default_window_minutes = 30
-                trigger_config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
-                window_minutes = resolve_window_minutes(
-                    interaction.channel_id,
-                    default_window=default_window_minutes,
-                    trigger_config=trigger_config,
-                )
                 if window_minutes != default_window_minutes:
                     logger.info("barcello window override applied channel_id=%s window=%s", interaction.channel_id, window_minutes)
             if window_minutes <= 0:
