@@ -34,28 +34,27 @@
                   "enabled": true,
                   "limits": {
                     "max_range_days": 30,
-                    "max_lookback_days": 60,
-                    "cooldown_seconds": 90,
-                    "max_requests_per_day": 8,
+                    "max_lookback_days": 180,
+                    "cooldown_seconds": 60,
+                    "max_requests_per_day": 20,
                     "allow_target_user": false,
                     "allow_target_channel": false
                   },
                   "render": {
-                    "details_embeds_max": 1,
-                    "details_title_prefix": "✨ Dettagli Aura",
-                    "sections": [
-                      "main.karma",
-                      "main.trend",
-                      "main.summary",
-                      "details.metrics_basic"
-                    ]
+                    "details_embeds_max": 0,
+                    "details_title_prefix": "🗒️ DETTAGLI AURA",
+                    "show_server_karma": true,
+                    "show_channel_karma": true,
+                    "show_trend": true,
+                    "show_notes": true,
+                    "sections": []
                   },
                   "privacy": {
                     "show_sensitive_penalties": false,
                     "show_mod_flags": false
                   },
                   "missions": {
-                    "enabled": false,
+                    "enabled": true,
                     "daily_count": 3,
                     "daily_bonus_points": 8
                   },
@@ -76,23 +75,22 @@
                   "enabled": true,
                   "limits": {
                     "max_range_days": 30,
-                    "max_lookback_days": 90,
+                    "max_lookback_days": 180,
                     "cooldown_seconds": 60,
-                    "max_requests_per_day": 15,
-                    "allow_target_user": true,
+                    "max_requests_per_day": 20,
+                    "allow_target_user": false,
                     "allow_target_channel": false
                   },
                   "render": {
                     "details_embeds_max": 2,
-                    "details_title_prefix": "✨ Dettagli Aura",
+                    "details_title_prefix": "🗒️ DETTAGLI AURA",
+                    "show_server_karma": true,
+                    "show_channel_karma": true,
+                    "show_trend": true,
+                    "show_notes": true,
                     "sections": [
-                      "main.karma",
-                      "main.trend",
-                      "main.summary",
-                      "details.score_breakdown",
-                      "details.metrics_basic",
-                      "details.interactions_top",
-                      "details.topics"
+                      "details.missions",
+                      "details.note.role1"
                     ]
                   },
                   "privacy": {
@@ -121,28 +119,27 @@
                   "enabled": true,
                   "limits": {
                     "max_range_days": 30,
-                    "max_lookback_days": 120,
-                    "cooldown_seconds": 45,
-                    "max_requests_per_day": 25,
-                    "allow_target_user": true,
+                    "max_lookback_days": 180,
+                    "cooldown_seconds": 60,
+                    "max_requests_per_day": 20,
+                    "allow_target_user": false,
                     "allow_target_channel": false
                   },
                   "render": {
                     "details_embeds_max": 2,
-                    "details_title_prefix": "✨ Dettagli Aura",
+                    "details_title_prefix": "🗒️ DETTAGLI AURA",
+                    "show_server_karma": true,
+                    "show_channel_karma": true,
+                    "show_trend": true,
+                    "show_notes": true,
                     "sections": [
-                      "main.karma",
-                      "main.trend",
-                      "main.summary",
-                      "details.score_breakdown",
-                      "details.metrics_basic",
-                      "details.metrics_advanced",
-                      "details.interactions_top",
-                      "details.topics"
+                      "details.missions",
+                      "details.profile",
+                      "details.note.role2"
                     ]
                   },
                   "privacy": {
-                    "show_sensitive_penalties": true,
+                    "show_sensitive_penalties": false,
                     "show_mod_flags": false
                   },
                   "missions": {
@@ -168,28 +165,26 @@
                   "limits": {
                     "max_range_days": 30,
                     "max_lookback_days": 180,
-                    "cooldown_seconds": 30,
-                    "max_requests_per_day": 50,
-                    "allow_target_user": true,
-                    "allow_target_channel": true
+                    "cooldown_seconds": 60,
+                    "max_requests_per_day": 20,
+                    "allow_target_user": false,
+                    "allow_target_channel": false
                   },
                   "render": {
                     "details_embeds_max": 3,
-                    "details_title_prefix": "✨ Dettagli Aura",
+                    "details_title_prefix": "🗒️ DETTAGLI AURA",
+                    "show_server_karma": true,
+                    "show_channel_karma": true,
+                    "show_trend": true,
+                    "show_notes": true,
                     "sections": [
-                      "main.karma",
-                      "main.trend",
-                      "main.summary",
-                      "details.score_breakdown",
-                      "details.metrics_basic",
-                      "details.metrics_advanced",
-                      "details.interactions_top",
-                      "details.topics",
-                      "details.missions"
+                      "details.missions",
+                      "details.profile",
+                      "details.advice"
                     ]
                   },
                   "privacy": {
-                    "show_sensitive_penalties": true,
+                    "show_sensitive_penalties": false,
                     "show_mod_flags": false
                   },
                   "missions": {
@@ -215,25 +210,24 @@
                   "limits": {
                     "max_range_days": 30,
                     "max_lookback_days": 180,
-                    "cooldown_seconds": 15,
-                    "max_requests_per_day": 100,
+                    "cooldown_seconds": 60,
+                    "max_requests_per_day": 20,
                     "allow_target_user": true,
-                    "allow_target_channel": true
+                    "allow_target_channel": false
                   },
                   "render": {
                     "details_embeds_max": 4,
-                    "details_title_prefix": "✨ Dettagli Aura Mod",
+                    "details_title_prefix": "🗒️ DETTAGLI AURA",
+                    "show_server_karma": true,
+                    "show_channel_karma": true,
+                    "show_trend": true,
+                    "show_notes": true,
                     "sections": [
-                      "main.karma",
-                      "main.trend",
-                      "main.summary",
-                      "details.score_breakdown",
-                      "details.metrics_basic",
-                      "details.metrics_advanced",
-                      "details.interactions_top",
-                      "details.topics",
-                      "details.flags_mod",
-                      "details.missions"
+                      "details.missions",
+                      "details.profile",
+                      "details.advice",
+                      "details.points_timeline",
+                      "details.metrics_aggregated"
                     ]
                   },
                   "privacy": {
@@ -489,6 +483,32 @@
               "summary.include_names_when_tense",
               "analysis.ai_preferred"
             ]
+          }
+        },
+        "resoconto": {
+          "profiles": {
+            "base": {
+              "allowed": true,
+              "capabilities": []
+            },
+            "role1": {
+              "allowed": true,
+              "capabilities": []
+            },
+            "role2": {
+              "allowed": true,
+              "capabilities": []
+            },
+            "role3": {
+              "allowed": true,
+              "capabilities": []
+            },
+            "mod": {
+              "allowed": true,
+              "capabilities": [
+                "aura_report.view"
+              ]
+            }
           }
         }
       },

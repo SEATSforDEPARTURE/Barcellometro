@@ -1,0 +1,21 @@
+{
+  "max_per_day": 3,
+  "good_morning": {
+    "start_hour": 5,
+    "end_hour": 11,
+    "keywords": ["buongiorno", "buon giorno", "giornooo", "ciao buongiorno"],
+    "require_first_in_server": true
+  },
+  "missions": [
+    {"id": "good_morning", "text": "Dai il buongiorno per prima.", "bonus_points": 12, "enabled": true, "condition": "always", "time_window": "morning", "keywords": ["buongiorno"]},
+    {"id": "talk_new_user", "text": "Scrivi a qualcuno con cui interagisci poco.", "bonus_points": 8, "enabled": true, "condition": "low_diversity", "require_mentions_count": 1},
+    {"id": "calm_reply", "text": "Rispondi con tono calmo in una conversazione accesa.", "bonus_points": 10, "enabled": true, "condition": "tension", "require_no_degrade": true},
+    {"id": "voice_starter", "text": "Entra per prima in un canale vocale.", "bonus_points": 10, "enabled": false, "condition": "always"},
+    {"id": "cross_channel_presence", "text": "Partecipa in almeno 2 canali diversi.", "bonus_points": 9, "enabled": true, "condition": "always", "require_channels_count": 2},
+    {"id": "welcome_back_user", "text": "Rispondi a un utente rientrato attivo da poco.", "bonus_points": 7, "enabled": false, "condition": "always"},
+    {"id": "balanced_participation", "text": "Mantieni una presenza costante senza penalità.", "bonus_points": 11, "enabled": true, "condition": "high_activity", "require_messages": 8},
+    {"id": "positive_recovery", "text": "Aiuta a rialzare il clima dopo un momento negativo.", "bonus_points": 12, "enabled": false, "condition": "tension"},
+    {"id": "conversation_starter", "text": "Avvia una nuova conversazione coinvolgendo altri utenti.", "bonus_points": 8, "enabled": true, "condition": "always"},
+    {"id": "helpful_reply", "text": "Dai una risposta utile e costruttiva a una domanda.", "bonus_points": 6, "enabled": false, "condition": "always"}
+  ]
+}

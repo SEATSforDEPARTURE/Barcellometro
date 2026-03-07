@@ -3,9 +3,10 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.aura import AuraEligibilityService, compute_and_store_aura_result, render_karma_bar
+from app.services.aura import AuraEligibilityService, AuraMissionService, AuraScoringService, compute_and_store_aura_result, load_aura_rules, normalize_text_for_matching, render_karma_bar
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
+from app.services.barcello_window import resolve_default_window_minutes
 
 
 class FakeDatabase:
@@ -75,7 +76,7 @@ def test_aura_entitlements_eligibility_gate_and_target_disabled_for_base() -> No
 
 
 def test_render_karma_bar_cursor_edges() -> None:
-    assert "🟣" in render_karma_bar(0)
+    assert "🔴" in render_karma_bar(0)
     assert render_karma_bar(0).endswith("0%")
     assert render_karma_bar(50).endswith("50%")
     assert render_karma_bar(100).endswith("100%")
@@ -156,5 +157,124 @@ def test_compute_and_store_aura_result_creates_missing_window_row() -> None:
         assert after is not None
         assert int(after["karma_percent"]) >= 0
         await db.close()
+
+    run(_scenario())
+
+
+def test_resolve_default_window_minutes_matches_overrides() -> None:
+    trigger = {"channel_overrides": {"99": {"window_minutes": 45}}}
+    assert resolve_default_window_minutes("99", "30", trigger) == 45
+    assert resolve_default_window_minutes("100", "30", trigger) == 30
+    assert resolve_default_window_minutes("100", "bad", trigger) == 30
+
+
+def test_aura_entitlements_target_enabled_for_mod() -> None:
+    policies = {
+        "commands": {
+            "aura": {
+                "profiles": {
+                    "base": {"features": {"aura": {"enabled": True, "limits": {"allow_target_user": False}}}},
+                    "mod": {"features": {"aura": {"enabled": True, "limits": {"allow_target_user": True}}}},
+                }
+            }
+        }
+    }
+    settings = {
+        "entitlements.policies": json.dumps(policies),
+        "entitlements.profile_map": json.dumps({"profiles": {"base": {"priority": 0}}, "role_to_profile": {}}),
+        "mod.role_ids": "[]",
+    }
+    entitlements = EntitlementsService(FakeDatabase(settings=settings))
+    mod_member = FakeMember(id=99, roles=[], guild_permissions=FakePermissions(administrator=True))
+    aura_cfg = run(entitlements.get_feature_profile_config(mod_member, "aura"))
+    assert aura_cfg["limits"]["allow_target_user"] is True
+
+
+
+
+class FakeLedgerDB:
+    def __init__(self) -> None:
+        self.events = []
+        self.missions = []
+
+    async def insert_aura_ledger_event(self, guild_id, user_id, channel_id, ts, reason_code, delta_points, meta):
+        self.events.append({
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "channel_id": channel_id,
+            "ts": ts,
+            "reason_code": reason_code,
+            "delta_points": delta_points,
+            "meta": meta,
+        })
+
+    async def list_aura_missions_for_user(self, guild_id, user_id, start_ts, end_ts):
+        return self.missions
+
+    async def complete_aura_mission(self, **kwargs):
+        self.completed = kwargs
+
+    async def count_guild_good_morning_before(self, guild_id, day_iso, before_ts, keywords):
+        return 0
+
+
+def test_aura_scoring_service_records_positive_and_negative_deltas() -> None:
+    async def _scenario() -> None:
+        db = FakeLedgerDB()
+        scoring = AuraScoringService(db)  # type: ignore[arg-type]
+        ts = datetime.now(timezone.utc).isoformat()
+        await scoring.award_points(guild_id="10", user_id="1", reason_code="first_message_of_day", ts=ts, channel_id="99")
+        await scoring.penalize_points(guild_id="10", user_id="1", reason_code="climate_degrade", ts=ts, channel_id="99")
+        assert len(db.events) == 2
+        deltas = sorted(int(x["delta_points"]) for x in db.events)
+        assert deltas[0] < 0
+        assert deltas[1] > 0
+        assert db.events[0]["meta"]["reason_human"]
+
+    run(_scenario())
+
+
+def test_load_aura_rules_contains_extended_reason_codes() -> None:
+    rules = load_aura_rules()
+    assert "first_message_of_day" in rules
+    assert "cross_user_interaction" in rules
+
+
+def test_normalize_text_for_matching_good_morning_variants() -> None:
+    out = normalize_text_for_matching("Buongiornooooo a tuttI!!!")
+    assert "buongiorno" in out
+
+
+def test_mission_good_morning_completes_and_records_points(monkeypatch) -> None:
+    async def _scenario() -> None:
+        db = FakeLedgerDB()
+        db.missions = [
+            {
+                "mission_id": "good_morning",
+                "assigned_at": "2026-03-07T07:00:00+00:00",
+                "status": "assigned",
+                "reward_points": 12,
+                "meta": {"label": "Dai il buongiorno per prima."},
+            }
+        ]
+        scoring = AuraScoringService(db)  # type: ignore[arg-type]
+        service = AuraMissionService(db, scoring)  # type: ignore[arg-type]
+
+        def _fake_cfg():
+            return {"good_morning": {"start_hour": 5, "end_hour": 11, "keywords": ["buongiorno"]}}
+
+        monkeypatch.setattr("app.services.aura.load_aura_missions_config", _fake_cfg)
+
+        done = await service.process_message_for_missions(
+            guild_id="10",
+            user_id="1",
+            channel_id="99",
+            message_id="m1",
+            ts="2026-03-07T08:00:00+00:00",
+            content="Buongiornooooo raga",
+            mentions=[],
+        )
+        assert "good_morning" in done
+        assert len(db.events) >= 1
 
     run(_scenario())
