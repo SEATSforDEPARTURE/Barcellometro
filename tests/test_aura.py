@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.aura import AuraEligibilityService, AuraMissionService, AuraScoringService, compute_and_store_aura_result, load_aura_rules, normalize_text_for_matching, render_karma_bar
+from app.services.aura import AuraEligibilityService, AuraMissionService, AuraScoringService, build_discord_jump_link, compute_and_store_aura_result, load_aura_rule_definitions, load_aura_rules, normalize_text_for_matching, render_karma_bar, resolve_aura_reason_label
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.barcello_window import resolve_default_window_minutes
@@ -278,3 +278,83 @@ def test_mission_good_morning_completes_and_records_points(monkeypatch) -> None:
         assert len(db.events) >= 1
 
     run(_scenario())
+
+
+def test_load_aura_rule_definitions_supports_number_and_object(monkeypatch) -> None:
+    def _fake_loader(path: str):
+        if path.endswith("aura_rules.json"):
+            return {
+                "first_message_of_day": 7,
+                "good_morning_first": {
+                    "points": 12,
+                    "label_user": "per aver dato il buongiorno per prima",
+                    "label_mod": "buongiorno per prima nel server",
+                    "category": "missione_sociale",
+                    "sign": "positive",
+                    "enabled": True,
+                },
+            }
+        return {}
+
+    monkeypatch.setattr("app.services.aura.load_json_file", _fake_loader)
+    defs = load_aura_rule_definitions()
+    assert defs["first_message_of_day"].points == 7
+    assert defs["good_morning_first"].points == 12
+    assert defs["good_morning_first"].label_user.startswith("per aver dato")
+
+
+def test_mission_good_morning_records_separate_rule_and_completion_events(monkeypatch) -> None:
+    async def _scenario() -> None:
+        db = FakeLedgerDB()
+        db.missions = [
+            {
+                "mission_id": "good_morning",
+                "assigned_at": "2026-03-07T07:00:00+00:00",
+                "status": "assigned",
+                "reward_points": 12,
+                "meta": {"label": "Dai il buongiorno per prima."},
+            }
+        ]
+        scoring = AuraScoringService(db)  # type: ignore[arg-type]
+        service = AuraMissionService(db, scoring)  # type: ignore[arg-type]
+
+        def _fake_cfg():
+            return {
+                "good_morning": {"start_hour": 5, "end_hour": 11, "keywords": ["buongiorno"]},
+                "missions": [
+                    {
+                        "id": "good_morning",
+                        "completion_text": "aver completato la missione 'Dai il buongiorno per prima'",
+                        "rule_on_complete": "good_morning_first",
+                    }
+                ],
+            }
+
+        monkeypatch.setattr("app.services.aura.load_aura_missions_config", _fake_cfg)
+
+        done = await service.process_message_for_missions(
+            guild_id="10",
+            user_id="1",
+            channel_id="99",
+            message_id="m1",
+            ts="2026-03-07T08:00:00+00:00",
+            content="Buongiornooooo raga",
+            mentions=[],
+        )
+        assert "good_morning" in done
+        mission_events = [e for e in db.events if e["reason_code"] == "mission_completed"]
+        rule_events = [e for e in db.events if e["reason_code"] == "good_morning_first"]
+        assert len(mission_events) == 1
+        assert len(rule_events) == 1
+        assert int(mission_events[0]["delta_points"]) == 15
+        assert int(rule_events[0]["delta_points"]) == 12
+
+    run(_scenario())
+
+
+def test_resolve_aura_reason_label_and_jump_link_fallback() -> None:
+    label = resolve_aura_reason_label("unknown.reason", audience="user")
+    assert "unknown.reason" in label
+    assert resolve_aura_reason_label("mission_completed", audience="mod")
+    assert build_discord_jump_link("1", "2", "3") == "https://discord.com/channels/1/2/3"
+    assert build_discord_jump_link("1", None, "3") is None

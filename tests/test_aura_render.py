@@ -133,4 +133,4 @@ def test_mod_points_timeline_section_present() -> None:
         ledger_lines=["**👍 +1 P.A.** test"],
     )
     names = [f.name for f in embeds[1].fields]
-    assert any("PUNTI ATTRIBUITI E SOTTRATTI" in n for n in names)
+    assert any("BREAKDOWN PUNTI" in n for n in names)

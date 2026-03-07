@@ -231,7 +231,7 @@ def build_aura_embeds(
     if "details.advice" in include_sections:
         details_sections.append(("🧭 CONSIGLI PERSONALIZZATI", _compact_bullets(_build_advice_lines(metrics, channel_name=aura_payload.channel_name), fallback="Nessun dato rilevante nel periodo.")))
     if "details.points_timeline" in include_sections and aura_payload.points_timeline_lines is not None:
-        details_sections.append(("🧾 PUNTI ATTRIBUITI E SOTTRATTI", _compact_bullets(aura_payload.points_timeline_lines, fallback="Nessun dato rilevante nel periodo.")))
+        details_sections.append(("🧾 BREAKDOWN PUNTI", _compact_bullets(aura_payload.points_timeline_lines, fallback="Nessun dato rilevante nel periodo.")))
     if "details.metrics_aggregated" in include_sections:
         details_sections.append((":bricks: METRICHE AGGREGATE", "Dettagli completi nel file allegato."))
 

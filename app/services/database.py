@@ -3083,7 +3083,10 @@ class DatabaseService:
                 meta = {}
             out.append(
                 {
+                    "guild_id": guild_id,
+                    "user_id": user_id,
                     "channel_id": str(row["channel_id"]) if row["channel_id"] else None,
+                    "message_id": str(meta.get("message_id")) if meta.get("message_id") else None,
                     "ts": str(row["ts"]),
                     "reason_code": str(row["reason_code"]),
                     "delta_points": int(row["delta_points"] or 0),

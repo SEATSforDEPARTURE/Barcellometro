@@ -19,6 +19,16 @@ AURA_RULES_EXAMPLE_PATH = "app/settings/aura_rules.example.json"
 AURA_MISSIONS_CONFIG_PATH = "app/settings/aura_missions.json"
 AURA_MISSIONS_EXAMPLE_PATH = "app/settings/aura_missions.example.json"
 
+
+@dataclass(frozen=True)
+class AuraRuleDefinition:
+    points: int
+    label_user: str
+    label_mod: str
+    category: str
+    sign: str
+    enabled: bool = True
+
 DEFAULT_AURA_RULES: dict[str, int] = {
     "first_message_of_day": 5,
     "reply_to_new_user": 8,
@@ -41,6 +51,7 @@ DEFAULT_AURA_RULES: dict[str, int] = {
     "mission_completed": 15,
     "spam_like_penalty": -8,
     "tension_chain_penalty": -7,
+    "good_morning_first": 12,
 }
 
 AURA_REASON_HUMAN: dict[str, str] = {
@@ -65,19 +76,88 @@ AURA_REASON_HUMAN: dict[str, str] = {
     "sustained_consistency_bonus": "per costanza positiva nel periodo",
     "spam_like_penalty": "per comportamento simile a spam",
     "tension_chain_penalty": "per aver alimentato una catena di tensione",
+    "good_morning_first": "per aver dato il buongiorno per prima",
     "ondemand.aggregate": "bilancio complessivo del periodo",
     "batch.aggregate": "bilancio aggregato periodico",
 }
 
-AURA_REASON_META: dict[str, dict[str, str]] = {
-    key: {
-        "user_label": value,
-        "mod_label": value,
-        "category": "positive" if DEFAULT_AURA_RULES.get(key, 0) >= 0 else "negative",
-        "sign": "+" if DEFAULT_AURA_RULES.get(key, 0) >= 0 else "-",
-    }
-    for key, value in AURA_REASON_HUMAN.items()
-}
+
+def _build_default_rule_definitions() -> dict[str, AuraRuleDefinition]:
+    out: dict[str, AuraRuleDefinition] = {}
+    for code, points in DEFAULT_AURA_RULES.items():
+        label = AURA_REASON_HUMAN.get(code, f"attività registrata ({code})")
+        out[code] = AuraRuleDefinition(
+            points=int(points),
+            label_user=label,
+            label_mod=label,
+            category="penalita" if int(points) < 0 else "attivita",
+            sign="negative" if int(points) < 0 else "positive",
+            enabled=True,
+        )
+    return out
+
+
+def _parse_rule_definition(reason_code: str, value: Any, defaults: AuraRuleDefinition | None = None) -> AuraRuleDefinition | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        points = int(value)
+        base_label = defaults.label_user if defaults else AURA_REASON_HUMAN.get(reason_code, f"attività registrata ({reason_code})")
+        return AuraRuleDefinition(
+            points=points,
+            label_user=base_label,
+            label_mod=(defaults.label_mod if defaults else base_label),
+            category=(defaults.category if defaults else ("penalita" if points < 0 else "attivita")),
+            sign=(defaults.sign if defaults else ("negative" if points < 0 else "positive")),
+            enabled=(defaults.enabled if defaults else True),
+        )
+    if not isinstance(value, dict):
+        return None
+    raw_points = value.get("points", defaults.points if defaults else 0)
+    try:
+        points = int(raw_points)
+    except (TypeError, ValueError):
+        points = defaults.points if defaults else 0
+    base_label = AURA_REASON_HUMAN.get(reason_code, f"attività registrata ({reason_code})")
+    label_user = str(value.get("label_user") or (defaults.label_user if defaults else base_label)).strip() or base_label
+    label_mod = str(value.get("label_mod") or (defaults.label_mod if defaults else label_user)).strip() or label_user
+    category = str(value.get("category") or (defaults.category if defaults else "attivita")).strip() or "attivita"
+    sign = str(value.get("sign") or (defaults.sign if defaults else ("negative" if points < 0 else "positive"))).strip() or ("negative" if points < 0 else "positive")
+    enabled = bool(value.get("enabled", defaults.enabled if defaults else True))
+    return AuraRuleDefinition(points=points, label_user=label_user, label_mod=label_mod, category=category, sign=sign, enabled=enabled)
+
+
+def load_aura_rule_definitions() -> dict[str, AuraRuleDefinition]:
+    data = load_json_file(AURA_RULES_CONFIG_PATH)
+    if not data:
+        data = load_json_file(AURA_RULES_EXAMPLE_PATH)
+    defaults = _build_default_rule_definitions()
+    if not isinstance(data, dict):
+        return defaults
+    parsed = dict(defaults)
+    for k, v in data.items():
+        code = str(k)
+        parsed_rule = _parse_rule_definition(code, v, parsed.get(code))
+        if parsed_rule is not None:
+            parsed[code] = parsed_rule
+    return parsed
+
+
+def resolve_aura_reason_label(reason_code: str, *, audience: str = "user") -> str:
+    rules = load_aura_rule_definitions()
+    reason = rules.get(reason_code)
+    if reason is not None:
+        label = reason.label_mod if audience == "mod" else reason.label_user
+        return label.strip() or AURA_REASON_HUMAN.get(reason_code, reason_code)
+    if reason_code in AURA_REASON_HUMAN:
+        return AURA_REASON_HUMAN[reason_code]
+    return f"attività registrata ({reason_code})"
+
+
+def build_discord_jump_link(guild_id: str, channel_id: str | None, message_id: str | None) -> str | None:
+    if not channel_id or not message_id:
+        return None
+    return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
 
 @dataclass
@@ -97,22 +177,11 @@ def render_karma_bar(percent: int) -> str:
 
 
 def aura_reason_to_human(reason_code: str) -> str:
-    return AURA_REASON_HUMAN.get(reason_code, f"attività registrata ({reason_code})")
+    return resolve_aura_reason_label(reason_code, audience="user")
 
 
 def load_aura_rules() -> dict[str, int]:
-    data = load_json_file(AURA_RULES_CONFIG_PATH)
-    if not data:
-        data = load_json_file(AURA_RULES_EXAMPLE_PATH)
-    if not isinstance(data, dict):
-        return dict(DEFAULT_AURA_RULES)
-    out = dict(DEFAULT_AURA_RULES)
-    for k, v in data.items():
-        try:
-            out[str(k)] = int(v)
-        except (TypeError, ValueError):
-            continue
-    return out
+    return {k: v.points for k, v in load_aura_rule_definitions().items()}
 
 
 def load_aura_missions_config() -> dict[str, Any]:
@@ -189,7 +258,7 @@ class AuraMissionService:
             if not ok:
                 continue
             due = f"{current_day}T23:59:59+00:00"
-            reward = int(item.get("bonus_points", 0) or 0)
+            reward = int(item.get("reward_points", item.get("bonus_points", 0)) or 0)
             await self._db.assign_aura_mission(
                 guild_id=guild_id,
                 user_id=user_id,
@@ -217,6 +286,9 @@ class AuraMissionService:
     ) -> list[str]:
         now = datetime.fromisoformat(ts)
         day = now.date().isoformat()
+        cfg = load_aura_missions_config()
+        mission_defs = cfg.get("missions", []) if isinstance(cfg.get("missions", []), list) else []
+        mission_by_id = {str(item.get("id", "")): item for item in mission_defs if isinstance(item, dict)}
         active = await self._db.list_aura_missions_for_user(guild_id, user_id, f"{day}T00:00:00+00:00", f"{day}T23:59:59+00:00")
         completed: list[str] = []
         normalized = normalize_text_for_matching(content)
@@ -226,8 +298,9 @@ class AuraMissionService:
             mission_id = str(mission.get("mission_id", ""))
             reward = int(mission.get("reward_points", 0) or 0)
             meta = mission.get("meta", {}) if isinstance(mission.get("meta"), dict) else {}
+            mission_cfg = mission_by_id.get(mission_id, {})
+            completion_text = str(mission_cfg.get("completion_text") or f"aver completato la missione '{meta.get('label', mission_id)}'")
             if mission_id == "good_morning":
-                cfg = load_aura_missions_config()
                 gm = cfg.get("good_morning", {}) if isinstance(cfg, dict) else {}
                 start_hour = int(gm.get("start_hour", 5) or 5)
                 end_hour = int(gm.get("end_hour", 11) or 11)
@@ -264,20 +337,21 @@ class AuraMissionService:
                 message_id=message_id,
                 source_service="mission",
                 source_event="mission.completed",
-                meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id), "matched_keyword": "buongiorno" if mission_id == "good_morning" else None},
+                meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id), "completion_text": completion_text, "matched_keyword": "buongiorno" if mission_id == "good_morning" else None},
             )
             if reward > 0:
+                reward_reason = str(mission_cfg.get("rule_on_complete") or ("good_morning_first" if mission_id == "good_morning" else "mission_completed"))
                 await self._scoring.award_points(
                     guild_id=guild_id,
                     user_id=user_id,
-                    reason_code="good_morning_first" if mission_id == "good_morning" else "mission_completed",
+                    reason_code=reward_reason,
                     ts=ts,
                     channel_id=channel_id,
                     points=reward,
                     message_id=message_id,
                     source_service="mission",
                     source_event="mission.reward",
-                    meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id)},
+                    meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id), "completion_text": completion_text, "mission_reward_points": reward},
                 )
             completed.append(mission_id)
         return completed
@@ -365,7 +439,8 @@ class AuraScoringService:
         meta: dict[str, Any] | None = None,
     ) -> None:
         payload = dict(meta or {})
-        payload.setdefault("reason_human", aura_reason_to_human(reason_code))
+        payload.setdefault("reason_human", resolve_aura_reason_label(reason_code, audience="user"))
+        payload.setdefault("reason_human_mod", resolve_aura_reason_label(reason_code, audience="mod"))
         payload.setdefault("message_id", message_id)
         payload.setdefault("source_service", source_service)
         payload.setdefault("source_event", source_event)
