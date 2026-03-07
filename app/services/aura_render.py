@@ -15,6 +15,36 @@ MISSIONS_CONFIG_PATH = "app/settings/aura_missions.json"
 MISSIONS_EXAMPLE_PATH = "app/settings/aura_missions.example.json"
 
 
+DEFAULT_ARCHETYPE_DEFS: dict[str, dict[str, Any]] = {
+    "scintilla": {"label": "Scintilla", "emoji": "✨", "description": "Accendi facilmente il ritmo delle conversazioni.", "profile_reason_template": "Nel periodo hai spesso dato il via ai momenti più vivi della community.", "advice": ["Usa questa energia per coinvolgere anche chi parla meno."], "order": 10, "enabled": True},
+    "pacificatore": {"label": "Pacificatore", "emoji": "🌿", "description": "Favorisci toni costruttivi e abbassi gli attriti.", "profile_reason_template": "Hai mantenuto un tono costruttivo e un impatto equilibrato nel clima della community.", "advice": ["Continua a riequilibrare i momenti più tesi senza spegnere il confronto."], "order": 20, "enabled": True},
+    "agitatore": {"label": "Agitatore", "emoji": "🔥", "description": "Spingi il ritmo e alzi l'intensità della discussione.", "profile_reason_template": "Hai spinto il ritmo e mosso fortemente l'intensità delle discussioni.", "advice": ["Canalizza l'energia evitando escalation nei momenti delicati."], "order": 30, "enabled": True},
+    "collante": {"label": "Collante", "emoji": "🧩", "description": "Tieni insieme persone e conversazioni in più spazi.", "profile_reason_template": "Ti sei mosso tra persone diverse aiutando a tenere vivo il legame nella community.", "advice": ["Continua a fare da ponte tra gruppi e canali diversi."], "order": 40, "enabled": True},
+    "mediatore": {"label": "Mediatore", "emoji": "⚖️", "description": "Riequilibri i confronti e faciliti il dialogo.", "profile_reason_template": "Hai facilitato il dialogo smorzando attriti e favorendo confronto equilibrato.", "advice": ["Rendi ancora più esplicita la tua mediazione nei thread tesi."], "order": 50, "enabled": True},
+    "esploratore_sociale": {"label": "Esploratore sociale", "emoji": "🧭", "description": "Interagisci con persone diverse in più canali.", "profile_reason_template": "Hai attraversato contesti e persone diverse portando varietà alle interazioni.", "advice": ["Mantieni questa varietà e includi anche canali meno attivi."], "order": 60, "enabled": True},
+    "costante": {"label": "Costante", "emoji": "⏱️", "description": "Sei presente con regolarità nel tempo.", "profile_reason_template": "Hai mantenuto una presenza stabile e continua senza grandi sbalzi.", "advice": ["Conserva la regolarità aggiungendo piccoli momenti di iniziativa."], "order": 70, "enabled": True},
+    "lampo": {"label": "Lampo", "emoji": "⚡", "description": "Intervieni poco ma lasci un impatto netto.", "profile_reason_template": "Anche con presenza ridotta, i tuoi interventi hanno lasciato un impatto evidente.", "advice": ["Quando entri, prova ad attivare anche follow-up leggeri."], "order": 80, "enabled": True},
+    "silenzioso": {"label": "Silenzioso", "emoji": "🌙", "description": "Osservi molto e intervieni in modo misurato.", "profile_reason_template": "Hai partecipato in modo discreto e misurato, senza essere assente.", "advice": ["Inserisci qualche intervento in più nei momenti utili."], "order": 90, "enabled": True},
+    "ascoltatore": {"label": "Ascoltatore", "emoji": "👂", "description": "Favorisci ascolto e risposte calme.", "profile_reason_template": "Hai sostenuto il dialogo con risposte attente e presenza calma.", "advice": ["Continua con risposte utili, aprendo spazio anche ad altri."], "order": 100, "enabled": True},
+    "selettivo": {"label": "Selettivo", "emoji": "🎯", "description": "Concentri le interazioni su pochi contesti mirati.", "profile_reason_template": "Hai concentrato le interazioni su persone e spazi mirati con buona coerenza.", "advice": ["Ogni tanto allarga il raggio per aumentare la diversità."], "order": 110, "enabled": True},
+    "dominante": {"label": "Dominante", "emoji": "🦁", "description": "Occupi molto spazio conversazionale e ne dirigi il ritmo.", "profile_reason_template": "Hai occupato una parte importante dello spazio conversazionale del periodo.", "advice": ["Lascia più spazio alle altre voci per migliorare l'equilibrio."], "order": 120, "enabled": True},
+}
+
+
+def _load_archetype_definitions() -> dict[str, dict[str, Any]]:
+    cfg = load_json_file(ARCHETYPES_CONFIG_PATH) or load_json_file(ARCHETYPES_EXAMPLE_PATH) or {}
+    configured = cfg.get("archetypes", {}) if isinstance(cfg, dict) else {}
+    merged = {k: dict(v) for k, v in DEFAULT_ARCHETYPE_DEFS.items()}
+    if isinstance(configured, dict):
+        for key, value in configured.items():
+            if not isinstance(value, dict):
+                continue
+            base = dict(merged.get(str(key), {}))
+            base.update(value)
+            merged[str(key)] = base
+    return merged
+
+
 @dataclass
 class AuraTrendInfo:
     server_direction: str
@@ -179,9 +209,11 @@ def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any], 
 
 
 def _build_profile_lines(archetype_metrics: dict[str, Any], *, fallback_metrics: dict[str, Any]) -> list[str]:
-    cfg = load_json_file(ARCHETYPES_CONFIG_PATH) or load_json_file(ARCHETYPES_EXAMPLE_PATH) or {}
-    profile_defs = cfg.get("archetypes", {}) if isinstance(cfg, dict) else {}
+    profile_defs = _load_archetype_definitions()
     scores = archetype_metrics.get("scores", {}) if isinstance(archetype_metrics, dict) else {}
+    payload_metrics = archetype_metrics.get("metrics", {}) if isinstance(archetype_metrics, dict) else {}
+    reasons = archetype_metrics.get("reasons", {}) if isinstance(archetype_metrics, dict) else {}
+
     if not isinstance(scores, dict) or not scores:
         climate = max(0, min(100, 50 + (int(fallback_metrics.get("invigorate_events", 0) or 0) - int(fallback_metrics.get("degrade_events", 0) or 0)) * 10))
         return [
@@ -189,21 +221,59 @@ def _build_profile_lines(archetype_metrics: dict[str, Any], *, fallback_metrics:
             f"**🌿 {100 - climate}% Pacificatore** — hai anche segnali di dialogo costruttivo.",
         ]
 
-    agitator_raw = int(scores.get("climate_impact", 0) or 0)
-    pacifier = max(0, min(100, 100 - agitator_raw))
-    agitator = 100 - pacifier
-    ag = profile_defs.get("agitatore", {}) if isinstance(profile_defs, dict) else {}
-    pa = profile_defs.get("pacificatore", {}) if isinstance(profile_defs, dict) else {}
-    ag_emoji = str(ag.get("emoji", "🔥"))
-    ag_label = str(ag.get("label", "Agitatore"))
-    ag_desc = str(ag.get("description", "quando il ritmo cresce, tendi a spingere la discussione."))
-    pa_emoji = str(pa.get("emoji", "🌿"))
-    pa_label = str(pa.get("label", "Pacificatore"))
-    pa_desc = str(pa.get("description", "in più momenti mantieni equilibrio e ascolto."))
-    return [
-        f"**{ag_emoji} {agitator}% {ag_label}** — {ag_desc}",
-        f"**{pa_emoji} {pacifier}% {pa_label}** — {pa_desc}",
-    ]
+    normalized_scores: dict[str, int] = {}
+    for key, value in scores.items():
+        try:
+            normalized_scores[str(key)] = max(0, int(round(float(value))))
+        except (TypeError, ValueError):
+            continue
+    if not normalized_scores:
+        return ["Nessun dato rilevante nel periodo."]
+
+    ordered = sorted(
+        (
+            (key, val)
+            for key, val in normalized_scores.items()
+            if bool(profile_defs.get(key, {}).get("enabled", True))
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    if not ordered:
+        return ["Nessun dato rilevante nel periodo."]
+
+    top = ordered[:2]
+    if len(ordered) >= 3 and ordered[2][1] > 0 and (ordered[1][1] - ordered[2][1]) <= 8:
+        top.append(ordered[2])
+
+    lines: list[str] = []
+    for archetype_key, pct in top:
+        cfg = profile_defs.get(archetype_key, {})
+        emoji = str(cfg.get("emoji", "✨")).strip() or "✨"
+        label = str(cfg.get("label", archetype_key.replace("_", " ").title())).strip() or archetype_key
+        template = str(cfg.get("profile_reason_template", "")).strip()
+        if template:
+            reason = template
+        else:
+            reason = str(cfg.get("description", "Profilo emerso dalle tue metriche del periodo.")).strip() or "Profilo emerso dalle tue metriche del periodo."
+
+        if archetype_key == "scintilla" and int(payload_metrics.get("first_message_of_day", fallback_metrics.get("first_message_of_day", 0)) or 0) > 0:
+            reason = "Nel periodo hai spesso acceso il ritmo della giornata e dato il via ai momenti più vivi."
+        elif archetype_key == "collante" and int(payload_metrics.get("unique_interactions", fallback_metrics.get("unique_interactions", 0)) or 0) >= 5:
+            reason = "Ti sei mosso tra persone e spazi diversi aiutando a tenere connessa la community."
+        elif archetype_key == "costante" and int(payload_metrics.get("active_days", fallback_metrics.get("active_days", 0)) or 0) >= 10:
+            reason = "Hai mostrato una presenza regolare e continua lungo tutto il periodo."
+        elif archetype_key == "dominante" and int(payload_metrics.get("msg_count", fallback_metrics.get("msg_count", 0)) or 0) > 30:
+            reason = "Hai occupato una quota importante della conversazione, guidandone spesso il ritmo."
+
+        if isinstance(reasons, dict) and reasons.get(archetype_key):
+            reason = str(reasons.get(archetype_key)).strip() or reason
+
+        reason = reason[:1].upper() + reason[1:] if reason else "Profilo emerso dalle tue metriche del periodo."
+        if not reason.endswith((".", "!", "?")):
+            reason = f"{reason}."
+        lines.append(f"**{emoji} {pct}% {label}** — {reason}")
+    return lines
 
 
 def _build_advice_lines(metrics: dict[str, Any], *, channel_name: str) -> list[str]:

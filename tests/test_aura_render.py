@@ -1,4 +1,4 @@
-from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, _build_missions, build_aura_embeds, render_karma_bar
+from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
 
 
 def _payload() -> AuraRenderPayload:
@@ -14,7 +14,7 @@ def _payload() -> AuraRenderPayload:
         metrics_json='{"msg_count": 10, "unique_interactions": 3, "reply_received": 4, "quality_counter": 2, "invigorate_events": 5, "degrade_events": 1}',
         channel_metrics_json='{"msg_count": 3, "unique_interactions": 2, "reply_received": 1, "quality_counter": 1, "invigorate_events": 1, "degrade_events": 0}',
         ledger=[{"reason_code": "ondemand.aggregate", "total": 12}],
-        archetype_metrics={"scores": {"climate_impact": 56}},
+        archetype_metrics={"scores": {"scintilla": 41, "pacificatore": 33, "collante": 26}},
         trend=AuraTrendInfo(
             server_direction="improving",
             server_comment="Trend positivo.",
@@ -78,8 +78,8 @@ def test_build_aura_embeds_uses_custom_archetypes_and_missions_config(monkeypatc
         if path.endswith("aura_archetypes.json") or path.endswith("aura_archetypes.example.json"):
             return {
                 "archetypes": {
-                    "agitatore": {"label": "Catalizzatore", "emoji": "⚡", "description": "spingi il ritmo"},
-                    "pacificatore": {"label": "Mediatore", "emoji": "🕊️", "description": "abbassi i toni"},
+                    "scintilla": {"label": "Catalizzatore", "emoji": "⚡", "profile_reason_template": "hai acceso il periodo"},
+                    "pacificatore": {"label": "Mediatore", "emoji": "🕊️", "profile_reason_template": "hai calmato il periodo"},
                 },
                 "default_advice": ["Consiglio custom 1", "Consiglio custom 2"],
             }
@@ -176,3 +176,56 @@ def test_build_missions_orders_pending_before_completed_and_expired() -> None:
     assert lines[0].startswith("⬜ Da fare")
     assert "✅ Completata" in lines[1]
     assert lines[2].startswith("⌛ Scaduta")
+
+
+def test_load_archetype_definitions_returns_12_defaults() -> None:
+    defs = _load_archetype_definitions()
+    assert len(defs) >= 12
+    for key in [
+        "scintilla",
+        "pacificatore",
+        "agitatore",
+        "collante",
+        "mediatore",
+        "esploratore_sociale",
+        "costante",
+        "lampo",
+        "silenzioso",
+        "ascoltatore",
+        "selettivo",
+        "dominante",
+    ]:
+        assert key in defs
+
+
+def test_profile_lines_show_prominent_archetypes_with_emoji_percent_name_reason() -> None:
+    lines = _build_profile_lines(
+        {
+            "scores": {"scintilla": 41, "pacificatore": 33, "collante": 26, "agitatore": 1},
+            "metrics": {"first_message_of_day": 5, "unique_interactions": 9, "active_days": 15},
+        },
+        fallback_metrics={},
+    )
+    assert len(lines) == 3
+    assert "✨ 41% Scintilla" in lines[0]
+    assert "—" in lines[0]
+    assert "🌿 33% Pacificatore" in lines[1]
+
+
+def test_profile_lines_fallback_with_legacy_payload() -> None:
+    lines = _build_profile_lines({"scores": {}}, fallback_metrics={"invigorate_events": 4, "degrade_events": 1})
+    assert any("Agitatore" in line for line in lines)
+    assert any("Pacificatore" in line for line in lines)
+
+
+def test_build_aura_embeds_respects_profile_visibility_section() -> None:
+    embeds = build_aura_embeds(
+        profile_name="role1",
+        aura_payload=_payload(),
+        include_sections=["details.missions"],
+        details_title_prefix="🗒️ DETTAGLI AURA",
+        details_embeds_max=2,
+        ledger_lines=["👍 **+5 P.A.** test"],
+    )
+    detail_text = "\n".join(field.name for emb in embeds[1:] for field in emb.fields)
+    assert "PROFILO PERSONALE" not in detail_text
