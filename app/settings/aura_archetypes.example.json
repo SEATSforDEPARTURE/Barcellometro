@@ -37,7 +37,7 @@
       "label": "Collante",
       "emoji": "🧩",
       "description": "Tieni insieme persone e canali, creando continuità relazionale.",
-      "profile_reason_template": "ti sei mosso tra persone e spazi diversi aiutando a tenere vivo il legame tra i membri",
+      "profile_reason_template": "hai tenuto insieme persone e momenti diversi, distribuendo bene le interazioni",
       "advice": [
         "continua a fare da ponte tra gruppi che si incrociano poco"
       ],
@@ -59,7 +59,7 @@
       "label": "Esploratore sociale",
       "emoji": "🧭",
       "description": "Interagisci con persone diverse e attraversi più canali.",
-      "profile_reason_template": "hai mostrato varietà spostandoti tra canali e interazioni con persone diverse",
+      "profile_reason_template": "ti sei mosso tra più canali e persone senza restare in un solo spazio",
       "advice": [
         "mantieni la varietà includendo anche contesti meno attivi"
       ],
@@ -70,7 +70,7 @@
       "label": "Costante",
       "emoji": "⏱️",
       "description": "Sei presente con regolarità e continuità, senza grandi sbalzi.",
-      "profile_reason_template": "hai mantenuto una presenza regolare e continua lungo tutto il periodo",
+      "profile_reason_template": "hai mantenuto continuità nel tempo con una presenza regolare",
       "advice": [
         "preserva la costanza aggiungendo piccoli momenti di iniziativa"
       ],
@@ -81,7 +81,7 @@
       "label": "Lampo",
       "emoji": "⚡",
       "description": "Sei meno presente, ma quando entri lasci un impatto forte.",
-      "profile_reason_template": "anche con presenza ridotta, i tuoi interventi hanno lasciato segno",
+      "profile_reason_template": "sei intervenuto poco, ma con messaggi che hanno lasciato un impatto netto",
       "advice": [
         "quando entri, prova ad agganciare uno scambio in più"
       ],
@@ -92,7 +92,7 @@
       "label": "Silenzioso",
       "emoji": "🌙",
       "description": "Osservi molto e intervieni poco, restando comunque presente.",
-      "profile_reason_template": "hai partecipato in modo discreto e misurato, senza sparire dal tutto",
+      "profile_reason_template": "hai avuto una presenza discreta, intervenendo in modo misurato",
       "advice": [
         "aggiungi qualche intervento in più nei momenti dove puoi dare valore"
       ],
@@ -103,7 +103,7 @@
       "label": "Ascoltatore",
       "emoji": "👂",
       "description": "Favorisci ascolto, risposte attente e presenza calma.",
-      "profile_reason_template": "hai sostenuto il dialogo con risposte attente e un tono calmo",
+      "profile_reason_template": "hai sostenuto il dialogo con risposte attente e poco invasive",
       "advice": [
         "continua a rispondere con cura, lasciando spazio anche agli altri"
       ],
@@ -125,7 +125,7 @@
       "label": "Dominante",
       "emoji": "🦁",
       "description": "Occupi molto spazio conversazionale e dirigi spesso il ritmo.",
-      "profile_reason_template": "hai occupato una quota ampia dello spazio conversazionale nel periodo",
+      "profile_reason_template": "hai guidato una parte importante della conversazione, con una presenza molto visibile",
       "advice": [
         "lascia più spazio alle altre voci per migliorare l'equilibrio"
       ],
