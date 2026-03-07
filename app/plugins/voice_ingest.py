@@ -162,6 +162,95 @@ def setup(registry: ServiceRegistry) -> None:
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
 
+    def _safe_is_connected(client: Optional[discord.VoiceClient]) -> bool:
+        if client is None:
+            return False
+        try:
+            return bool(client.is_connected())
+        except Exception:
+            return False
+
+    async def _wait_until_voice_ready(
+        client: Optional[discord.VoiceClient],
+        *,
+        guild_id: int,
+        channel_id: int,
+        timeout_sec: float = 4.0,
+        interval_sec: float = 0.2,
+    ) -> bool:
+        deadline = time.monotonic() + timeout_sec
+        attempt = 0
+        while time.monotonic() < deadline:
+            attempt += 1
+            connected = _safe_is_connected(client)
+            current_channel = getattr(client, "channel", None) if client is not None else None
+            current_channel_id = getattr(current_channel, "id", None)
+            channel_ok = current_channel_id in (None, channel_id)
+            logger.info(
+                "Voice ingest wait-ready guild=%s channel=%s attempt=%s connected=%s current_channel=%s",
+                guild_id,
+                channel_id,
+                attempt,
+                connected,
+                current_channel_id,
+            )
+            if connected and channel_ok:
+                return True
+            await asyncio.sleep(interval_sec)
+        logger.error(
+            "Voice ingest wait-ready timeout guild=%s channel=%s connected=%s",
+            guild_id,
+            channel_id,
+            _safe_is_connected(client),
+        )
+        return False
+
+    async def _safe_disconnect(client: Optional[discord.VoiceClient], *, guild_id: int, channel_id: int, reason: str) -> None:
+        if client is None:
+            return
+        try:
+            if _safe_is_connected(client):
+                logger.info(
+                    "Voice ingest disconnecting guild=%s channel=%s reason=%s",
+                    guild_id,
+                    channel_id,
+                    reason,
+                )
+                await client.disconnect(force=True)
+        except Exception:
+            logger.exception(
+                "Voice ingest cleanup disconnect failed guild=%s channel=%s reason=%s",
+                guild_id,
+                channel_id,
+                reason,
+            )
+
+    def _log_voice_stack_versions() -> None:
+        discord_version = getattr(discord, "__version__", "unknown")
+        voice_recv_version = "missing"
+        davey_version = "missing"
+
+        try:
+            from discord.ext import voice_recv  # type: ignore
+
+            voice_recv_version = getattr(voice_recv, "__version__", "unknown")
+        except Exception:
+            logger.warning("Voice stack warning: discord.ext.voice_recv is not available")
+
+        try:
+            import davey  # type: ignore
+
+            davey_version = getattr(davey, "__version__", "unknown")
+        except Exception:
+            logger.warning("Voice stack warning: davey is not installed")
+
+        logger.info(
+            "Voice stack: discord.py=%s, voice_recv=%s, davey=%s",
+            discord_version,
+            voice_recv_version,
+            davey_version,
+        )
+
     def _throttled_log(key: str, level: int, message: str, every_sec: int = 30) -> None:
         now = time.time()
         last = last_log_ts.get(key, 0)
@@ -413,34 +502,101 @@ def setup(registry: ServiceRegistry) -> None:
         lock = join_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
             if guild.id in connecting_guilds:
-                logger.info("Voice ingest connect already in progress for guild %s", guild.id)
+                logger.info("Voice ingest connect already in progress for guild=%s channel=%s", guild.id, channel.id)
                 return
             existing = guild.voice_client
-            if existing and existing.is_connected():
+            if existing and not _safe_is_connected(existing):
+                logger.warning(
+                    "Voice ingest found stale voice client before join guild=%s channel=%s; cleaning up",
+                    guild.id,
+                    channel.id,
+                )
+                await _safe_disconnect(existing, guild_id=guild.id, channel_id=channel.id, reason="stale_before_join")
+                voice_client = None
+            elif existing and _safe_is_connected(existing):
                 if existing.channel and existing.channel.id == channel.id:
-                    logger.info("Voice ingest already connected to channel %s", channel.id)
+                    logger.info("Voice ingest already connected guild=%s channel=%s", guild.id, channel.id)
                     return
-                logger.info("Voice ingest moving to channel %s", channel.id)
+                logger.info("Voice ingest moving guild=%s to channel=%s", guild.id, channel.id)
                 await _end_session()
                 await existing.move_to(channel)
                 voice_client = existing
+                ready = await _wait_until_voice_ready(voice_client, guild_id=guild.id, channel_id=channel.id)
+                if not ready:
+                    await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="move_wait_timeout")
+                    voice_client = None
+                    raise discord.ClientException("Voice client not ready after move")
                 await _start_session(guild.id, channel.id)
-                logger.info("Voice ingest moved to channel %s", channel.id)
+                logger.info("Voice ingest moved guild=%s channel=%s", guild.id, channel.id)
                 return
             if not _spec_available():
-                logger.warning("voice_recv not available; voice ingest disabled")
+                logger.warning("voice_recv not available; voice ingest disabled for guild=%s channel=%s", guild.id, channel.id)
                 return
             from discord.ext import voice_recv  # type: ignore
+
             _install_opus_guard()
             _install_discord_opus_decode_guard()
             connecting_guilds.add(guild.id)
             try:
-                logger.info("Voice ingest connect start for channel %s", channel.id)
+                logger.info("Voice ingest connect start guild=%s channel=%s", guild.id, channel.id)
                 voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
+                logger.info(
+                    "Voice ingest connect returned guild=%s channel=%s client=%s connected=%s",
+                    guild.id,
+                    channel.id,
+                    type(voice_client).__name__ if voice_client is not None else None,
+                    _safe_is_connected(voice_client),
+                )
+                ready = await _wait_until_voice_ready(voice_client, guild_id=guild.id, channel_id=channel.id)
+                if not ready:
+                    await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="connect_wait_timeout")
+                    voice_client = None
+                    raise discord.ClientException("Voice client not ready after connect")
+
+                logger.info("Voice ingest starting session guild=%s channel=%s", guild.id, channel.id)
                 await _start_session(guild.id, channel.id)
                 base_sink = voice_recv.BasicSink(_on_voice_data)
-                voice_client.listen(SafeSink(base_sink))
-                logger.info("Voice ingest connect done for channel %s", channel.id)
+                logger.info("Voice ingest listen start guild=%s channel=%s", guild.id, channel.id)
+                try:
+                    voice_client.listen(SafeSink(base_sink))
+                except discord.ClientException as exc:
+                    logger.error(
+                        "Voice ingest listen failed guild=%s channel=%s error=%s connected=%s",
+                        guild.id,
+                        channel.id,
+                        type(exc).__name__,
+                        _safe_is_connected(voice_client),
+                    )
+                    await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="listen_client_exception")
+                    voice_client = None
+                    await _end_session()
+                    raise
+                except Exception:
+                    logger.exception(
+                        "Voice ingest listen unexpected failure guild=%s channel=%s connected=%s",
+                        guild.id,
+                        channel.id,
+                        _safe_is_connected(voice_client),
+                    )
+                    await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="listen_unexpected_exception")
+                    voice_client = None
+                    await _end_session()
+                    raise
+                logger.info("Voice ingest listen attached guild=%s channel=%s", guild.id, channel.id)
+                logger.info("Voice ingest connect done guild=%s channel=%s", guild.id, channel.id)
+            except Exception as exc:
+                logger.exception(
+                    "Voice ingest connect failure guild=%s channel=%s error=%s connected=%s",
+                    guild.id,
+                    channel.id,
+                    type(exc).__name__,
+                    _safe_is_connected(voice_client),
+                )
+                await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="join_exception")
+                voice_client = None
+                if active_session_id is not None:
+                    await _end_session()
+                raise
             finally:
                 connecting_guilds.discard(guild.id)
 
@@ -976,6 +1132,7 @@ def setup(registry: ServiceRegistry) -> None:
             closed_count,
             (after["c"] if after else None),
         )
+        _log_voice_stack_versions()
         if worker_task is None:
             worker_task = asyncio.create_task(_worker())
             def _log_worker_result(task_future: Any) -> None:
