@@ -43,8 +43,16 @@ def _increment_opus_corruption() -> None:
         _OPUS_GUARD_THROTTLED_LOG(_OPUS_GUARD_CORRUPTED_COUNT)
 
 
-def _is_known_corrupted_opus_error(error: Exception) -> bool:
-    return "corrupted stream" in str(error).lower()
+def _is_recoverable_opus_decode_error(error: Exception) -> bool:
+    message = str(error).lower()
+    recoverable_tokens = (
+        "corrupted stream",
+        "invalid argument",
+        "decode",
+        "bad arg",
+        "buffer too small",
+    )
+    return any(token in message for token in recoverable_tokens)
 
 
 def _install_opus_decode_guard() -> None:
@@ -78,9 +86,8 @@ def _install_opus_decode_guard() -> None:
         try:
             return original(self, *args, **kwargs)
         except OpusError as exc:
-            if not _is_known_corrupted_opus_error(exc):
-                logger.exception("Unexpected OpusError in decode guard")
-                raise
+            if not _is_recoverable_opus_decode_error(exc):
+                logger.warning("Opus decode guard swallowed non-standard OpusError: %r", exc)
             _increment_opus_corruption()
             if target_name == "_decode_packet":
                 packet = args[0] if args else None
@@ -337,7 +344,7 @@ def setup(registry: ServiceRegistry) -> None:
         if not _should_log_corruption_event(count):
             return
         suffix = f": {error!r}" if error is not None else ""
-        logger.warning("Opus corrupted stream ignored (count=%s%s)", count, suffix)
+        logger.warning("Opus decode error ignored (count=%s%s)", count, suffix)
 
     def _increment_opus_corrupted(error: Optional[Exception] = None) -> None:
         nonlocal opus_corrupted_count
@@ -346,6 +353,30 @@ def setup(registry: ServiceRegistry) -> None:
             return
         opus_corrupted_count += 1
         _log_opus_corruption(opus_corrupted_count, error)
+
+    def _log_opus_decode_failure(
+        source: str,
+        *,
+        error: Exception,
+        payload_size: Optional[int] = None,
+        user_id: Optional[int] = None,
+        ssrc: Optional[int] = None,
+    ) -> None:
+        count = opus_corrupted_count
+        if not _should_log_corruption_event(count):
+            return
+        logger.warning(
+            "Voice ingest Opus decode failure source=%s count=%s guild=%s channel=%s session=%s user=%s ssrc=%s payload_size=%s error=%r",
+            source,
+            count,
+            current_guild_id,
+            current_voice_channel_id,
+            active_session_id,
+            user_id,
+            ssrc,
+            payload_size,
+            error,
+        )
 
     def _install_opus_guard() -> None:
         nonlocal opus_guard_installed
@@ -374,6 +405,9 @@ def setup(registry: ServiceRegistry) -> None:
                     logger.exception("Unexpected OpusError in voice_recv decoder")
                     raise
                 _increment_opus_corrupted(exc)
+                packet_data = getattr(packet, "decrypted_data", None)
+                packet_len = len(packet_data) if isinstance(packet_data, (bytes, bytearray)) else None
+                _log_opus_decode_failure("voice_recv.OpusDecoder._decode_packet", error=exc, payload_size=packet_len)
                 return packet, b""
 
         setattr(wrapped, "_barcello_guard", True)
@@ -406,6 +440,14 @@ def setup(registry: ServiceRegistry) -> None:
                     logger.exception("Unexpected OpusError in global Decoder.decode")
                     raise
                 _increment_opus_corrupted(exc)
+                payload_size = len(data) if isinstance(data, (bytes, bytearray)) else None
+                decode_ssrc = getattr(self, "ssrc", None) or getattr(self, "_ssrc", None)
+                _log_opus_decode_failure(
+                    "discord.opus.Decoder.decode",
+                    error=exc,
+                    payload_size=payload_size,
+                    ssrc=int(decode_ssrc) if decode_ssrc is not None else None,
+                )
                 frame_size = getattr(self, "_frame_size", 960)
                 channels = getattr(self, "_channels", 2)
                 return b"\x00" * (frame_size * channels * 2)
@@ -438,11 +480,9 @@ def setup(registry: ServiceRegistry) -> None:
                 except Exception:
                     OpusError = None  # type: ignore[assignment]
                 if OpusError is not None and isinstance(exc, OpusError):
-                    if _is_known_corrupted_opus_error(exc):
-                        _increment_opus_corrupted(exc)
-                        return
-                    logger.exception("Voice ingest sink unexpected OpusError")
-                    raise
+                    _increment_opus_corrupted(exc)
+                    _log_opus_decode_failure("sink.write", error=exc, user_id=getattr(user, "id", None))
+                    return
                 logger.exception("Voice ingest sink write failed")
 
         def cleanup(self) -> None:
