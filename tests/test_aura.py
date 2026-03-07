@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.aura import AuraEligibilityService, AuraScoringService, compute_and_store_aura_result, render_karma_bar
+from app.services.aura import AuraEligibilityService, AuraScoringService, compute_and_store_aura_result, load_aura_rules, render_karma_bar
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.barcello_window import resolve_default_window_minutes
@@ -222,3 +222,9 @@ def test_aura_scoring_service_records_positive_and_negative_deltas() -> None:
         assert db.events[0]["meta"]["reason_human"]
 
     run(_scenario())
+
+
+def test_load_aura_rules_contains_extended_reason_codes() -> None:
+    rules = load_aura_rules()
+    assert "first_message_of_day" in rules
+    assert "cross_user_interaction" in rules

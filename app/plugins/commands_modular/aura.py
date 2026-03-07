@@ -68,16 +68,22 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
 
     def _ledger_lines(ledger_events: list[dict[str, object]], channel_map: dict[str, str]) -> list[str]:
         lines: list[str] = []
+        aggregate_fallback: list[str] = []
         for event in ledger_events:
             delta = int(event.get("delta_points", 0) or 0)
             reason_code = str(event.get("reason_code", "evento"))
             channel_id = event.get("channel_id")
             channel_name = channel_map.get(str(channel_id), "#canale") if channel_id else "nel server"
-            verb = aura_reason_to_human(reason_code)
             emoji = "👍" if delta >= 0 else "👎"
             signed = f"+{delta}" if delta >= 0 else str(delta)
+            if reason_code in {"ondemand.aggregate", "batch.aggregate"}:
+                aggregate_fallback.append(f"**{emoji} {signed} P.A.** Bilancio complessivo del periodo nel server.")
+                continue
+            verb = aura_reason_to_human(reason_code)
             lines.append(f"**{emoji} {signed} P.A.** {verb} in {channel_name}.")
 
+        if not lines:
+            return aggregate_fallback[:1] or ["Nessun evento aura dettagliato registrato nel periodo."]
         if len(lines) <= 10:
             return lines
         shown = lines[:10]
@@ -236,6 +242,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         ledger_events = await ctx.database.fetch_aura_ledger_events(guild_id, user_id, start_ts, end_ts)
         channel_map = await ctx.database.get_channel_name_map(guild_id)
         ledger_lines = _ledger_lines(ledger_events, channel_map)
+        missions_assigned = await ctx.database.list_aura_missions_for_user(guild_id, user_id, start_ts, end_ts)
         archetype = await ctx.database.fetch_latest_archetype_profile(guild_id, user_id, period_days=30)
         archetype_metrics = json.loads(archetype["metrics_json"]) if archetype and archetype["metrics_json"] else {}
 
@@ -265,6 +272,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
                 channel_metrics_json=str(channel_row["metrics_json"] or "{}") if channel_row else "{}",
                 ledger=ledger,
                 archetype_metrics=archetype_metrics if isinstance(archetype_metrics, dict) else {},
+                assigned_missions=missions_assigned,
                 trend=AuraTrendInfo(
                     server_direction=server_dir,
                     server_comment=server_comment,
@@ -284,7 +292,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         if caller_profile == "mod" and "details.metrics_aggregated" in sections:
             server_metrics = json.loads(str(server_row["metrics_json"] or "{}")) if server_row else {}
             channel_metrics = json.loads(str(channel_row["metrics_json"] or "{}")) if channel_row else {}
-            missions_preview = ["Nessuna per oggi."]
+            missions_preview = [str(m.get("mission_id")) for m in missions_assigned] or ["Nessuna per oggi."]
             payload = _build_mod_metrics_txt(
                 guild_id=guild_id,
                 user_id=user_id,

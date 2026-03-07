@@ -6,7 +6,13 @@ from typing import Any
 
 import discord
 
+from app.services.config_file_loader import load_json_file
 from app.utils.embed_limits import MAX_EMBED_CHARS, _ensure_embed_limits, _estimate_embed_size, _split_field_chunks
+
+ARCHETYPES_CONFIG_PATH = "app/settings/aura_archetypes.json"
+ARCHETYPES_EXAMPLE_PATH = "app/settings/aura_archetypes.example.json"
+MISSIONS_CONFIG_PATH = "app/settings/aura_missions.json"
+MISSIONS_EXAMPLE_PATH = "app/settings/aura_missions.example.json"
 
 
 @dataclass
@@ -34,6 +40,7 @@ class AuraRenderPayload:
     ledger: list[dict[str, int | str]]
     archetype_metrics: dict[str, object]
     trend: AuraTrendInfo
+    assigned_missions: list[dict[str, Any]] | None = None
 
 
 def render_karma_bar(percent: int) -> str:
@@ -70,7 +77,21 @@ def _score_lines(ledger_lines: list[str]) -> list[str]:
     return ledger_lines[:10]
 
 
-def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any]) -> list[str]:
+def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any], assigned: list[dict[str, Any]] | None = None) -> list[str]:
+    cfg = load_json_file(MISSIONS_CONFIG_PATH) or load_json_file(MISSIONS_EXAMPLE_PATH) or {}
+    if assigned:
+        lines: list[str] = []
+        for item in assigned[:3]:
+            label = str(item.get("meta", {}).get("label") or item.get("mission_id") or "missione")
+            reward = int(item.get("reward_points", 0) or 0)
+            status = str(item.get("status", "assigned"))
+            box = "✅" if status == "completed" else "🔲"
+            text = f"{box} {label} (+{reward} P.A.)" if reward > 0 else f"{box} {label}"
+            if status == "completed":
+                text = f"**{text}**"
+            lines.append(text)
+        return lines or ["Nessuna per oggi."]
+    mission_defs = cfg.get("missions", []) if isinstance(cfg, dict) else []
     msg_count = int(metrics.get("msg_count", 0) or 0)
     unique = int(metrics.get("unique_interactions", 0) or 0)
     degrade = int(metrics.get("degrade_events", 0) or 0)
@@ -80,18 +101,39 @@ def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any]) 
         return ["Nessuna per oggi."]
 
     missions: list[str] = []
-    if unique < 2 or diversity < 40:
-        missions.append("🔲 Scrivi un messaggio a qualcuno che non contatti di solito. (+5 P.A.)")
-    if msg_count >= 2 and unique <= 3:
-        missions.append("🔲 Scrivi 2 messaggi a una persona alla quale non hai mai scritto. (+10 P.A.)")
-    if degrade > 0:
-        missions.append("🔲 Prova a rispondere con tono calmo in una conversazione accesa. (+10 P.A.)")
-    if msg_count >= 8 and degrade <= 0:
-        missions.append("**✅ Dai il buongiorno per prima.**")
+    if isinstance(mission_defs, list) and mission_defs:
+        for item in mission_defs:
+            if not isinstance(item, dict) or not bool(item.get("enabled", True)):
+                continue
+            text = str(item.get("text", "")).strip()
+            reward = int(item.get("bonus_points", 0) or 0)
+            cond = str(item.get("condition", "always")).strip().lower()
+            ok = cond == "always"
+            if cond == "low_diversity":
+                ok = unique < 2 or diversity < 40
+            elif cond == "high_activity":
+                ok = msg_count >= 8 and degrade <= 0
+            elif cond == "tension":
+                ok = degrade > 0
+            if ok and text:
+                missions.append(f"🔲 {text} (+{reward} P.A.)" if reward > 0 else f"🔲 {text}")
+            if len(missions) >= int(cfg.get("max_per_day", 3) or 3):
+                break
+    if not missions:
+        if unique < 2 or diversity < 40:
+            missions.append("🔲 Scrivi un messaggio a qualcuno che non contatti di solito. (+5 P.A.)")
+        if msg_count >= 2 and unique <= 3:
+            missions.append("🔲 Scrivi 2 messaggi a una persona alla quale non hai mai scritto. (+10 P.A.)")
+        if degrade > 0:
+            missions.append("🔲 Prova a rispondere con tono calmo in una conversazione accesa. (+10 P.A.)")
+        if msg_count >= 8 and degrade <= 0:
+            missions.append("**✅ Dai il buongiorno per prima.**")
     return missions[:3] if missions else ["Nessuna per oggi."]
 
 
 def _build_profile_lines(archetype_metrics: dict[str, Any], *, fallback_metrics: dict[str, Any]) -> list[str]:
+    cfg = load_json_file(ARCHETYPES_CONFIG_PATH) or load_json_file(ARCHETYPES_EXAMPLE_PATH) or {}
+    profile_defs = cfg.get("archetypes", {}) if isinstance(cfg, dict) else {}
     scores = archetype_metrics.get("scores", {}) if isinstance(archetype_metrics, dict) else {}
     if not isinstance(scores, dict) or not scores:
         climate = max(0, min(100, 50 + (int(fallback_metrics.get("invigorate_events", 0) or 0) - int(fallback_metrics.get("degrade_events", 0) or 0)) * 10))
@@ -103,13 +145,25 @@ def _build_profile_lines(archetype_metrics: dict[str, Any], *, fallback_metrics:
     agitator_raw = int(scores.get("climate_impact", 0) or 0)
     pacifier = max(0, min(100, 100 - agitator_raw))
     agitator = 100 - pacifier
+    ag = profile_defs.get("agitatore", {}) if isinstance(profile_defs, dict) else {}
+    pa = profile_defs.get("pacificatore", {}) if isinstance(profile_defs, dict) else {}
+    ag_emoji = str(ag.get("emoji", "🔥"))
+    ag_label = str(ag.get("label", "Agitatore"))
+    ag_desc = str(ag.get("description", "quando il ritmo cresce, tendi a spingere la discussione."))
+    pa_emoji = str(pa.get("emoji", "🌿"))
+    pa_label = str(pa.get("label", "Pacificatore"))
+    pa_desc = str(pa.get("description", "in più momenti mantieni equilibrio e ascolto."))
     return [
-        f"**🔥 {agitator}% Agitatore** — quando il ritmo cresce, tendi a spingere la discussione.",
-        f"**🌿 {pacifier}% Pacificatore** — in più momenti mantieni equilibrio e ascolto.",
+        f"**{ag_emoji} {agitator}% {ag_label}** — {ag_desc}",
+        f"**{pa_emoji} {pacifier}% {pa_label}** — {pa_desc}",
     ]
 
 
 def _build_advice_lines(metrics: dict[str, Any], *, channel_name: str) -> list[str]:
+    cfg = load_json_file(ARCHETYPES_CONFIG_PATH) or load_json_file(ARCHETYPES_EXAMPLE_PATH) or {}
+    advice_cfg = cfg.get("default_advice", []) if isinstance(cfg, dict) else []
+    if isinstance(advice_cfg, list) and advice_cfg:
+        return [str(x) for x in advice_cfg[:3]]
     lines: list[str] = []
     unique = int(metrics.get("unique_interactions", 0) or 0)
     degrade = int(metrics.get("degrade_events", 0) or 0)
@@ -170,7 +224,7 @@ def build_aura_embeds(
     details_sections.append(("🕹️ PUNTEGGI", _compact_bullets(_score_lines(ledger_lines), fallback="Nessun dato rilevante nel periodo.")))
 
     if "details.missions" in include_sections:
-        details_sections.append(("📜 MISSIONI QUOTIDIANE", _compact_bullets(_build_missions(metrics, aura_payload.archetype_metrics), fallback="Nessuna per oggi.")))
+        details_sections.append(("📜 MISSIONI QUOTIDIANE", _compact_bullets(_build_missions(metrics, aura_payload.archetype_metrics, aura_payload.assigned_missions), fallback="Nessuna per oggi.")))
     if "details.profile" in include_sections:
         details_sections.append(("👤 PROFILO PERSONALE", _compact_bullets(_build_profile_lines(aura_payload.archetype_metrics, fallback_metrics=metrics), fallback="Nessun dato rilevante nel periodo.")))
     if "details.advice" in include_sections:

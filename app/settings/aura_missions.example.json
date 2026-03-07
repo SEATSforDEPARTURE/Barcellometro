@@ -1,0 +1,29 @@
+{
+  "max_per_day": 3,
+  "missions": [
+    {
+      "id": "talk_new_user",
+      "text": "Scrivi un messaggio a qualcuno che non contatti di solito.",
+      "bonus_points": 5,
+      "archetypes_preferred": ["agitatore", "pacificatore"],
+      "condition": "low_diversity",
+      "enabled": true
+    },
+    {
+      "id": "calm_reply",
+      "text": "Rispondi con tono calmo in una conversazione accesa.",
+      "bonus_points": 10,
+      "archetypes_preferred": ["agitatore"],
+      "condition": "tension",
+      "enabled": true
+    },
+    {
+      "id": "good_morning",
+      "text": "Dai il buongiorno per prima.",
+      "bonus_points": 15,
+      "archetypes_preferred": ["pacificatore"],
+      "condition": "high_activity",
+      "enabled": true
+    }
+  ]
+}

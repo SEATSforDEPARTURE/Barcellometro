@@ -67,7 +67,7 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
             return
 
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            await interaction.response.defer(thinking=True)
         sent = await daily_service.generate_and_send_for_channel(guild_id, channel_id, manual=True)
         if sent:
             await interaction.followup.send(
@@ -93,7 +93,7 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
             await send_ephemeral(interaction, "Comando disponibile solo ai mod.")
             return
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            await interaction.response.defer(thinking=True)
 
         guild_id = str(interaction.guild_id)
         start_ts = start_dt.isoformat()
@@ -103,8 +103,23 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         period_line = f"{period_text} {start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}"
 
         channel_map = await ctx.database.get_channel_name_map(guild_id)
-        top_pos = "\n".join(f"• +{row['total']} → <@{row['user_id']}>" for row in report["top_positive"]) or "• Nessun dato rilevante nel periodo."
-        top_neg = "\n".join(f"• {row['total']} → <@{row['user_id']}>" for row in report["top_negative"]) or "• Nessun dato rilevante nel periodo."
+        async def _user_reasons(user_id: str, *, positive: bool) -> str:
+            items = await ctx.database.fetch_aura_user_reason_totals(guild_id, user_id, start_ts, end_ts)
+            filtered = [x for x in items if (x["total"] > 0 if positive else x["total"] < 0)]
+            labels = [aura_reason_to_human(str(x["reason_code"])) for x in filtered[:3]]
+            return ", ".join(labels) if labels else "nessun motivo principale"
+
+        top_pos_lines: list[str] = []
+        for row in report["top_positive"]:
+            why = await _user_reasons(str(row["user_id"]), positive=True)
+            top_pos_lines.append(f"• +{row['total']} → <@{row['user_id']}> — {why}")
+        top_pos = "\n".join(top_pos_lines) or "• Nessun dato rilevante nel periodo."
+
+        top_neg_lines: list[str] = []
+        for row in report["top_negative"]:
+            why = await _user_reasons(str(row["user_id"]), positive=False)
+            top_neg_lines.append(f"• {row['total']} → <@{row['user_id']}> — {why}")
+        top_neg = "\n".join(top_neg_lines) or "• Nessun dato rilevante nel periodo."
         reasons = "\n".join(
             f"• {item['total']:+d} per {aura_reason_to_human(item['reason_code'])}"
             for item in report["by_reason"][:6]
@@ -129,11 +144,22 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         embed.add_field(name="📉 TOP AURA NEGATIVA", value=top_neg, inline=False)
         embed.add_field(name="🧾 CAUSE PRINCIPALI", value=reasons, inline=False)
         embed.add_field(name="🏷️ CANALI PIÙ COINVOLTI", value=channels, inline=False)
+        mission_stats = await ctx.database.fetch_aura_mission_stats(guild_id, start_ts, end_ts)
+        embed.add_field(
+            name="📜 MISSIONI NEL PERIODO",
+            value=(
+                f"• Ricevute da {mission_stats['users_count']} utenti\n"
+                f"• Completate: {mission_stats['completed_count']}\n"
+                f"• Incomplete: {mission_stats['pending_count']}"
+            ),
+            inline=False,
+        )
         embed.set_footer(text="Dati elaborati in loco. Eventuali imprecisioni sono possibili.")
 
         txt_lines = [
             "=== RESOCONTO AURA MOD ===",
             f"guild_id: {guild_id}",
+            f"guild_name: {interaction.guild.name if interaction.guild else guild_id}",
             f"period_start: {start_ts}",
             f"period_end: {end_ts}",
             "",
@@ -145,8 +171,31 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
             "=== BY REASON ===",
         ]
         txt_lines.extend([f"{item['reason_code']} => {item['total']:+d} ({item['count']})" for item in report["by_reason"]])
+        member_names = await ctx.database.get_member_name_map(guild_id)
+        events = await ctx.database.fetch_aura_ledger_events_for_guild(guild_id, start_ts, end_ts)
+        txt_lines.extend(["", "=== EVENTI CRONOLOGICI ==="])
+        for ev in events:
+            user_id = str(ev["user_id"])
+            display = member_names.get(user_id, user_id)
+            ch = channel_map.get(str(ev.get("channel_id")), "#canale") if ev.get("channel_id") else "-"
+            delta = int(ev["delta_points"])
+            reason = str(ev["reason_code"])
+            why = aura_reason_to_human(reason)
+            txt_lines.append(
+                f"[{ev['ts']}] user={user_id} (@{display}) channel={ch} delta={delta:+d} reason={reason} motivo=\"{why}\""
+            )
+        txt_lines.extend(
+            [
+                "",
+                "=== MISSIONI ===",
+                f"assigned_count: {mission_stats['assigned_count']}",
+                f"completed_count: {mission_stats['completed_count']}",
+                f"pending_count: {mission_stats['pending_count']}",
+                "TODO: dettaglio per mission_id disponibile appena il ciclo di assegnazione/completamento è pienamente integrato runtime.",
+            ]
+        )
         file = discord.File(BytesIO("\n".join(txt_lines).encode("utf-8")), filename=f"resoconto_aura_{guild_id}.txt")
-        await interaction.followup.send(embed=embed, file=file, ephemeral=True)
+        await interaction.followup.send(embed=embed, file=file)
 
     @aura_group.command(name="oggi", description="Resoconto Aura mod di oggi")
     async def aura_oggi(interaction: discord.Interaction) -> None:

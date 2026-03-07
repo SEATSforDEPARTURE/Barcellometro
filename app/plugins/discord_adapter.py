@@ -291,6 +291,7 @@ def setup(registry: ServiceRegistry) -> None:
                 user_id=str(message.author.id),
                 ts=ts,
                 mentions=[str(user.id) for user in message.mentions],
+                message_id=str(message.id),
             )
         if voice_meta:
             await emit_event(

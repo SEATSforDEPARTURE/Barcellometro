@@ -68,3 +68,41 @@ def test_build_aura_embeds_missions_can_be_empty_for_today() -> None:
     )
     detail_values = "\n".join(field.value for field in embeds[1].fields)
     assert "Nessuna per oggi" in detail_values
+
+
+def test_build_aura_embeds_uses_custom_archetypes_and_missions_config(monkeypatch) -> None:
+    payload = _payload()
+
+    def _fake_loader(path: str):
+        if path.endswith("aura_archetypes.json") or path.endswith("aura_archetypes.example.json"):
+            return {
+                "archetypes": {
+                    "agitatore": {"label": "Catalizzatore", "emoji": "⚡", "description": "spingi il ritmo"},
+                    "pacificatore": {"label": "Mediatore", "emoji": "🕊️", "description": "abbassi i toni"},
+                },
+                "default_advice": ["Consiglio custom 1", "Consiglio custom 2"],
+            }
+        if path.endswith("aura_missions.json") or path.endswith("aura_missions.example.json"):
+            return {
+                "max_per_day": 2,
+                "missions": [
+                    {"text": "Missione custom A", "bonus_points": 11, "condition": "always", "enabled": True},
+                    {"text": "Missione custom B", "bonus_points": 7, "condition": "always", "enabled": True},
+                ],
+            }
+        return {}
+
+    monkeypatch.setattr("app.services.aura_render.load_json_file", _fake_loader)
+
+    embeds = build_aura_embeds(
+        profile_name="role3",
+        aura_payload=payload,
+        include_sections=["details.profile", "details.missions", "details.advice"],
+        details_title_prefix="🗒️ DETTAGLI AURA",
+        details_embeds_max=2,
+        ledger_lines=["**👍 +5 P.A.** test"],
+    )
+    detail_text = "\n".join(field.value for emb in embeds[1:] for field in emb.fields)
+    assert "Catalizzatore" in detail_text
+    assert "Missione custom A" in detail_text
+    assert "Consiglio custom 1" in detail_text
