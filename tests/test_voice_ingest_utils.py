@@ -20,11 +20,20 @@ def test_extract_pcm_bytes_handles_bytes() -> None:
     assert voice_ingest._extract_pcm_bytes(None) is None
 
 
-def test_should_log_corruption_event_is_rate_limited() -> None:
+def test_opus_detail_warning_rate_limited_to_first_events() -> None:
     assert voice_ingest._should_log_corruption_event(1) is True
     assert voice_ingest._should_log_corruption_event(voice_ingest.OPUS_WARNING_LOG_FIRST) is True
     assert voice_ingest._should_log_corruption_event(voice_ingest.OPUS_WARNING_LOG_FIRST + 1) is False
-    assert voice_ingest._should_log_corruption_event(voice_ingest.OPUS_WARNING_LOG_EVERY) is True
+
+
+def test_opus_periodic_summary_interval_helper() -> None:
+    assert voice_ingest._should_emit_periodic_summary(31.0, 0.0, interval_sec=30) is True
+    assert voice_ingest._should_emit_periodic_summary(29.9, 0.0, interval_sec=30) is False
+
+
+def test_safe_average_handles_zero_count() -> None:
+    assert voice_ingest._safe_average(10.0, 0) == 0.0
+    assert voice_ingest._safe_average(9.0, 3) == 3.0
 
 
 def test_evaluate_chunk_quality_discards_short_or_corrupted() -> None:
@@ -81,13 +90,14 @@ def test_install_opus_decode_guard_idempotent(monkeypatch) -> None:
     assert first is second
 
 
-def test_recoverable_opus_decode_error_tokens() -> None:
-    assert voice_ingest._is_recoverable_opus_decode_error(Exception("invalid argument")) is True
-    assert voice_ingest._is_recoverable_opus_decode_error(Exception("corrupted stream")) is True
-    assert voice_ingest._is_recoverable_opus_decode_error(Exception("buffer too small")) is True
+def test_known_corrupted_opus_error_tokens() -> None:
+    assert voice_ingest._is_known_corrupted_opus_error(Exception("invalid argument")) is True
+    assert voice_ingest._is_known_corrupted_opus_error(Exception("corrupted stream")) is True
+    assert voice_ingest._is_known_corrupted_opus_error(Exception("buffer too small")) is True
+    assert voice_ingest._is_known_corrupted_opus_error(Exception("decode failed")) is True
 
 
-def test_install_opus_decode_guard_swallows_invalid_argument(monkeypatch) -> None:
+def test_install_opus_decode_guard_swallows_repeated_invalid_argument(monkeypatch) -> None:
     class DummyOpusError(Exception):
         pass
 
@@ -110,8 +120,10 @@ def test_install_opus_decode_guard_swallows_invalid_argument(monkeypatch) -> Non
     voice_ingest._install_opus_decode_guard()
     decoder = DummyDecoder()
     packet = object()
-    returned_packet, decoded = decoder._decode_packet(packet)
 
-    assert returned_packet is packet
-    assert decoded == b""
-    assert voice_ingest._OPUS_GUARD_CORRUPTED_COUNT == 1
+    for _ in range(10):
+        returned_packet, decoded = decoder._decode_packet(packet)
+        assert returned_packet is packet
+        assert decoded == b""
+
+    assert voice_ingest._OPUS_GUARD_CORRUPTED_COUNT == 10

@@ -32,8 +32,8 @@ MIN_PCM_BYTES = int(0.35 * PCM_BYTES_PER_SECOND_48K_STEREO_S16)
 MAX_CORRUPTION_RATIO = 0.45
 CRITICAL_CORRUPTION_RATIO = 0.70
 MIN_WAV_SECONDS = 0.6
-OPUS_WARNING_LOG_FIRST = 5
-OPUS_WARNING_LOG_EVERY = 100
+OPUS_WARNING_LOG_FIRST = 3
+OPUS_SUMMARY_LOG_INTERVAL_SEC = 30
 
 
 def _increment_opus_corruption() -> None:
@@ -154,7 +154,17 @@ class _ChunkStats:
 
 
 def _should_log_corruption_event(count: int) -> bool:
-    return count <= OPUS_WARNING_LOG_FIRST or (count % OPUS_WARNING_LOG_EVERY) == 0
+    return count <= OPUS_WARNING_LOG_FIRST
+
+
+def _should_emit_periodic_summary(now_ts: float, last_ts: float, interval_sec: int = OPUS_SUMMARY_LOG_INTERVAL_SEC) -> bool:
+    return now_ts - last_ts >= interval_sec
+
+
+def _safe_average(total: float, count: int) -> float:
+    if count <= 0:
+        return 0.0
+    return total / float(count)
 
 
 def _estimate_chunk_duration(stats: _ChunkStats, chunk_seconds: int) -> float:
@@ -242,6 +252,20 @@ def setup(registry: ServiceRegistry) -> None:
     opus_corrupted_count = 0
     opus_guard_installed = False
     opus_decode_guard_installed = False
+    opus_last_summary_ts = 0.0
+    opus_error_type_counts: dict[str, int] = {}
+    opus_payload_size_min: Optional[int] = None
+    opus_payload_size_max: Optional[int] = None
+    opus_payload_size_total = 0
+    opus_payload_size_count = 0
+    decode_errors_by_user: dict[int, int] = {}
+    decode_errors_by_ssrc: dict[int, int] = {}
+    chunk_corruption_ratio_total = 0.0
+    chunk_corruption_ratio_count = 0
+    total_chunks_ok = 0
+    total_chunks_discarded_high_corruption = 0
+    total_chunks_discarded_silent = 0
+    stt_success_count = 0
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
@@ -349,13 +373,76 @@ def setup(registry: ServiceRegistry) -> None:
         suffix = f": {error!r}" if error is not None else ""
         logger.warning("Opus decode error ignored (count=%s%s)", count, suffix)
 
+    def _emit_periodic_opus_summary_if_needed() -> None:
+        nonlocal opus_last_summary_ts
+        now_ts = time.time()
+        if not _should_emit_periodic_summary(now_ts, opus_last_summary_ts):
+            return
+        opus_last_summary_ts = now_ts
+        avg_payload_size = _safe_average(opus_payload_size_total, opus_payload_size_count)
+        top_error_types = sorted(opus_error_type_counts.items(), key=lambda item: item[1], reverse=True)[:3]
+        top_users = sorted(decode_errors_by_user.items(), key=lambda item: item[1], reverse=True)[:3]
+        top_ssrc = sorted(decode_errors_by_ssrc.items(), key=lambda item: item[1], reverse=True)[:3]
+        logger.info(
+            "Voice ingest Opus summary session=%s guild=%s channel=%s total_decode_errors=%s error_types=%s payload_size_avg=%.1f payload_size_min=%s payload_size_max=%s top_users=%s top_ssrc=%s",
+            active_session_id,
+            current_guild_id,
+            current_voice_channel_id,
+            opus_corrupted_count,
+            top_error_types,
+            avg_payload_size,
+            opus_payload_size_min,
+            opus_payload_size_max,
+            top_users,
+            top_ssrc,
+        )
+
     def _increment_opus_corrupted(error: Optional[Exception] = None) -> None:
         nonlocal opus_corrupted_count
         if error is not None and not _is_known_corrupted_opus_error(error):
             logger.exception("Unexpected OpusError while decoding voice frame")
             return
         opus_corrupted_count += 1
-        _log_opus_corruption(opus_corrupted_count, error)
+
+    def _log_opus_decode_failure(
+        source: str,
+        *,
+        error: Exception,
+        payload_size: Optional[int] = None,
+        user_id: Optional[int] = None,
+        ssrc: Optional[int] = None,
+    ) -> None:
+        nonlocal opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count
+        message = str(error).lower().strip() or type(error).__name__.lower()
+        opus_error_type_counts[message] = opus_error_type_counts.get(message, 0) + 1
+        if payload_size is not None and payload_size >= 0:
+            opus_payload_size_total += payload_size
+            opus_payload_size_count += 1
+            if opus_payload_size_min is None or payload_size < opus_payload_size_min:
+                opus_payload_size_min = payload_size
+            if opus_payload_size_max is None or payload_size > opus_payload_size_max:
+                opus_payload_size_max = payload_size
+        if user_id is not None:
+            decode_errors_by_user[user_id] = decode_errors_by_user.get(user_id, 0) + 1
+        if ssrc is not None:
+            decode_errors_by_ssrc[ssrc] = decode_errors_by_ssrc.get(ssrc, 0) + 1
+
+        count = opus_corrupted_count
+        if _should_log_corruption_event(count):
+            logger.warning(
+                "Voice ingest Opus decode failure source=%s count=%s guild=%s channel=%s session=%s user=%s ssrc=%s payload_size=%s error=%r",
+                source,
+                count,
+                current_guild_id,
+                current_voice_channel_id,
+                active_session_id,
+                user_id,
+                ssrc,
+                payload_size,
+                error,
+            )
+        else:
+            _emit_periodic_opus_summary_if_needed()
 
     def _log_opus_decode_failure(
         source: str,
@@ -538,6 +625,8 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal active_session_id, active_session_started
         nonlocal current_guild_id, active_session_started_epoch, current_voice_channel_id
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks, stt_empty_chunks
+        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count
+        nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count, total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent, stt_success_count
         existing_session = await database.get_active_voice_session(str(guild_id), str(voice_channel_id))
         if existing_session is not None:
             existing_session_id = str(existing_session["voice_session_id"])
@@ -558,6 +647,21 @@ def setup(registry: ServiceRegistry) -> None:
             dropped_chunks = 0
             stt_enqueued_chunks = 0
             stt_empty_chunks = 0
+            opus_corrupted_count = 0
+            opus_last_summary_ts = 0.0
+            opus_error_type_counts.clear()
+            decode_errors_by_user.clear()
+            decode_errors_by_ssrc.clear()
+            opus_payload_size_min = None
+            opus_payload_size_max = None
+            opus_payload_size_total = 0
+            opus_payload_size_count = 0
+            chunk_corruption_ratio_total = 0.0
+            chunk_corruption_ratio_count = 0
+            total_chunks_ok = 0
+            total_chunks_discarded_high_corruption = 0
+            total_chunks_discarded_silent = 0
+            stt_success_count = 0
             audio_buffers_by_user.clear()
             audio_buffers_by_ssrc.clear()
             chunk_stats_by_user.clear()
@@ -567,6 +671,21 @@ def setup(registry: ServiceRegistry) -> None:
         dropped_chunks = 0
         stt_enqueued_chunks = 0
         stt_empty_chunks = 0
+        opus_corrupted_count = 0
+        opus_last_summary_ts = 0.0
+        opus_error_type_counts.clear()
+        decode_errors_by_user.clear()
+        decode_errors_by_ssrc.clear()
+        opus_payload_size_min = None
+        opus_payload_size_max = None
+        opus_payload_size_total = 0
+        opus_payload_size_count = 0
+        chunk_corruption_ratio_total = 0.0
+        chunk_corruption_ratio_count = 0
+        total_chunks_ok = 0
+        total_chunks_discarded_high_corruption = 0
+        total_chunks_discarded_silent = 0
+        stt_success_count = 0
         audio_buffers_by_user.clear()
         audio_buffers_by_ssrc.clear()
         chunk_stats_by_user.clear()
@@ -623,13 +742,22 @@ def setup(registry: ServiceRegistry) -> None:
         if not active_session_id:
             return
         logger.info(
-            "Voice ingest session summary voice_session_id=%s chunks_processed=%s chunks_dropped=%s chunks_enqueued=%s stt_empty=%s opus_corrupted_total=%s",
+            "Voice ingest session summary voice_session_id=%s chunks_processed=%s chunks_dropped=%s chunks_enqueued=%s opus_corrupted_total=%s corrupted_stream_count=%s invalid_argument_count=%s total_chunks_ok=%s total_chunks_discarded_high_corruption=%s total_chunks_discarded_silent=%s stt_success_count=%s stt_empty_count=%s avg_corruption_ratio=%.3f decode_errors_by_user=%s decode_errors_by_ssrc=%s",
             active_session_id,
             processed_chunks,
             dropped_chunks,
             stt_enqueued_chunks,
-            stt_empty_chunks,
             opus_corrupted_count,
+            opus_error_type_counts.get("opuserror('corrupted stream')", 0) + opus_error_type_counts.get("corrupted stream", 0),
+            opus_error_type_counts.get("opuserror('invalid argument')", 0) + opus_error_type_counts.get("invalid argument", 0),
+            total_chunks_ok,
+            total_chunks_discarded_high_corruption,
+            total_chunks_discarded_silent,
+            stt_success_count,
+            stt_empty_chunks,
+            _safe_average(chunk_corruption_ratio_total, chunk_corruption_ratio_count),
+            sorted(decode_errors_by_user.items(), key=lambda item: item[1], reverse=True)[:5],
+            sorted(decode_errors_by_ssrc.items(), key=lambda item: item[1], reverse=True)[:5],
         )
         await database.end_voice_session(active_session_id, _now_iso())
         await ingest.emit(
@@ -784,6 +912,8 @@ def setup(registry: ServiceRegistry) -> None:
 
     def _on_voice_data(user: Optional[discord.User], data: Any) -> None:
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks
+        nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count
+        nonlocal total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent
         try:
             if active_session_id is None or active_session_started is None:
                 return
@@ -870,6 +1000,8 @@ def setup(registry: ServiceRegistry) -> None:
                 drop_reason = "silent_chunk"
 
             processed_chunks += 1
+            chunk_corruption_ratio_total += corruption_ratio
+            chunk_corruption_ratio_count += 1
             if not enqueue_allowed:
                 dropped_chunks += 1
                 logger.info(
@@ -883,6 +1015,10 @@ def setup(registry: ServiceRegistry) -> None:
                     corruption_ratio,
                     drop_reason,
                 )
+                if drop_reason == "silent_chunk":
+                    total_chunks_discarded_silent += 1
+                elif drop_reason.startswith("corruption_ratio>"):
+                    total_chunks_discarded_high_corruption += 1
                 if corruption_ratio >= CRITICAL_CORRUPTION_RATIO:
                     logger.warning(
                         "Voice ingest high corruption ratio user_id=%s frames_total=%s frames_corrupted=%s ratio=%.2f",
@@ -920,6 +1056,7 @@ def setup(registry: ServiceRegistry) -> None:
                 dropped_chunks += 1
                 return
             stt_enqueued_chunks += 1
+            total_chunks_ok += 1
             logger.info(
                 "Voice ingest chunk finalized job_id=%s user_id=%s bytes=%s duration=%.2fs frames_total=%s frames_corrupted=%s corruption_ratio=%.2f enqueue=yes reason=ok",
                 job_id,
@@ -993,7 +1130,7 @@ def setup(registry: ServiceRegistry) -> None:
         await queue.put(job)
 
     async def _worker() -> None:
-        nonlocal breaker_failures, breaker_until, stt_empty_chunks
+        nonlocal breaker_failures, breaker_until, stt_empty_chunks, stt_success_count
         logger.info("Voice ingest worker started")
         semaphore = asyncio.Semaphore(int(os.getenv("VOICE_INGEST_MAX_CONCURRENT_STT", "1")))
         timeout_sec = int(os.getenv("VOICE_INGEST_STT_TIMEOUT_SEC", "60"))
@@ -1094,6 +1231,7 @@ def setup(registry: ServiceRegistry) -> None:
                         },
                     )
                 )
+                stt_success_count += 1
                 breaker_failures = 0
             except Exception:
                 logger.exception("Voice ingest failed")
