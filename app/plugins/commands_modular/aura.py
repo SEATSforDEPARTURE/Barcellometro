@@ -74,51 +74,100 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             return f"per {completion_text}"
         return resolve_aura_reason_label(reason, audience=audience)
 
+    def _is_aggregate_reason(reason_code: str) -> bool:
+        return reason_code in {"ondemand.aggregate", "batch.aggregate"}
+
+    def _timeline_event_line(
+        event: dict[str, object],
+        *,
+        channel_map: dict[str, str],
+        audience: str,
+        with_jump_link: bool,
+        guild_id: str | None = None,
+        include_reason_rule: bool = False,
+    ) -> str | None:
+        delta = int(event.get("delta_points", 0) or 0)
+        reason = str(event.get("reason_code", "evento"))
+        if _is_aggregate_reason(reason):
+            return None
+
+        channel_id = str(event.get("channel_id") or "")
+        channel_name = channel_map.get(channel_id) if channel_id else None
+        label = _resolve_event_reason_label(event, audience=audience)
+        place = f" in {channel_name}" if channel_name else ""
+
+        if not with_jump_link:
+            emoji = "👍" if delta >= 0 else "👎"
+            return f"{emoji} **{delta:+d} P.A.** {label}{place}."
+
+        meta = event.get("meta", {}) if isinstance(event.get("meta"), dict) else {}
+        message_id = str(event.get("message_id") or meta.get("message_id") or "")
+        ts = str(event.get("ts", ""))
+        try:
+            from datetime import datetime as _dt
+
+            dt = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+            ts_label = dt.strftime("%d/%m %H:%M")
+        except Exception:
+            ts_label = ts
+        jump = build_discord_jump_link(guild_id or "", channel_id or None, message_id or None)
+        head = f"[{ts_label}]({jump})" if jump else ts_label
+        side = "😇" if delta >= 0 else "😈"
+        suffix = f" *(regola: {reason})*" if include_reason_rule else ""
+        return f"**{head} — {side} {delta:+d} P.A.** - {label}{place}.{suffix}"
+
     def _ledger_lines(ledger_events: list[dict[str, object]], channel_map: dict[str, str]) -> list[str]:
         lines: list[str] = []
-        aggregate_fallback: list[str] = []
         for event in ledger_events:
-            delta = int(event.get("delta_points", 0) or 0)
-            reason_code = str(event.get("reason_code", "evento"))
-            channel_id = str(event.get("channel_id") or "")
-            channel_name = channel_map.get(channel_id) if channel_id else None
-            emoji = "👍" if delta >= 0 else "👎"
-            signed = f"+{delta}" if delta >= 0 else str(delta)
-            if reason_code in {"ondemand.aggregate", "batch.aggregate"}:
-                aggregate_fallback.append(f"• {emoji} {signed} P.A. bilancio complessivo del periodo nel server.")
-                continue
-            verb = _resolve_event_reason_label(event, audience="user")
-            place = f" in {channel_name}" if channel_name else ""
-            lines.append(f"• {emoji} {signed} P.A. {verb}{place}.")
-
+            line = _timeline_event_line(
+                event,
+                channel_map=channel_map,
+                audience="user",
+                with_jump_link=False,
+            )
+            if line:
+                lines.append(line)
         if not lines:
-            return aggregate_fallback[:1] or ["Nessun evento aura dettagliato registrato nel periodo."]
+            return ["Nessun evento aura dettagliato registrato nel periodo."]
         return lines[:10]
-
 
     def _points_timeline_lines(ledger_events: list[dict[str, object]], guild_id: str, channel_map: dict[str, str]) -> list[str]:
         lines: list[str] = []
         for event in ledger_events[:20]:
+            line = _timeline_event_line(
+                event,
+                channel_map=channel_map,
+                audience="mod",
+                with_jump_link=True,
+                guild_id=guild_id,
+                include_reason_rule=True,
+            )
+            if line:
+                lines.append(f"• {line}")
+        return lines or ["• Nessun evento aura dettagliato registrato nel periodo."]
+
+    def _points_timeline_text_lines(ledger_events: list[dict[str, object]], channel_map: dict[str, str]) -> list[str]:
+        lines: list[str] = []
+        for event in ledger_events[:50]:
             delta = int(event.get("delta_points", 0) or 0)
             reason = str(event.get("reason_code", "evento"))
-            meta = event.get("meta", {}) if isinstance(event.get("meta"), dict) else {}
-            message_id = str(event.get("message_id") or meta.get("message_id") or "")
-            channel_id = str(event.get("channel_id") or "")
+            if _is_aggregate_reason(reason):
+                continue
             ts = str(event.get("ts", ""))
             try:
                 from datetime import datetime as _dt
+
                 dt = _dt.fromisoformat(ts.replace("Z", "+00:00"))
                 ts_label = dt.strftime("%d/%m %H:%M")
             except Exception:
                 ts_label = ts
-            jump = build_discord_jump_link(guild_id, channel_id or None, message_id or None)
-            head = f"[{ts_label}]({jump})" if jump else ts_label
             side = "😇" if delta >= 0 else "😈"
             label = _resolve_event_reason_label(event, audience="mod")
-            channel_name = channel_map.get(channel_id)
+            channel_id = str(event.get("channel_id") or "")
+            channel_name = channel_map.get(channel_id) if channel_id else None
             place = f" in {channel_name}" if channel_name else ""
-            lines.append(f"• **{head} — {side} {delta:+d} P.A.** - {label}{place}. *(regola: {reason})*")
-        return lines
+            lines.append(f"• {ts_label} — {side} {delta:+d} P.A. — {label}{place}. (regola: {reason})")
+        return lines or ["• Nessun evento aura dettagliato registrato nel periodo."]
 
     def _build_mod_metrics_txt(
         *,
@@ -133,6 +182,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         trend_server_delta: int,
         trend_channel_delta: int,
         ledger: list[dict[str, object]],
+        channel_map: dict[str, str],
         archetype_metrics: dict[str, object],
         missions: list[str],
     ) -> bytes:
@@ -162,11 +212,10 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             f"trend_server_delta: {trend_server_delta:+d}",
             f"trend_channel_delta: {trend_channel_delta:+d}",
             "",
-            "=== BREAKDOWN ===",
+            "=== BREAKDOWN PUNTI ===",
+            "",
         ]
-        for item in ledger:
-            delta = int(item.get('delta_points', 0) or 0)
-            lines.append(f"{item.get('reason_code')} => {delta:+d}")
+        lines.extend(_points_timeline_text_lines(ledger, channel_map))
         lines += ["", "=== ARCHETIPI ===", json.dumps(archetype_metrics, ensure_ascii=False), "", "=== MISSIONI ==="]
         lines.extend(missions or ["Nessuna per oggi."])
         return "\n".join(lines).encode("utf-8")
@@ -331,6 +380,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
                 trend_server_delta=server_delta,
                 trend_channel_delta=channel_delta,
                 ledger=ledger_events,
+                channel_map=channel_map,
                 archetype_metrics=archetype_metrics if isinstance(archetype_metrics, dict) else {},
                 missions=missions_preview,
             )

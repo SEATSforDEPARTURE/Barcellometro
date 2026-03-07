@@ -33,15 +33,16 @@ def test_first_embed_format_period_no_percent_and_no_extra_text() -> None:
         include_sections=["details.missions", "details.note.role1"],
         details_title_prefix="🗒️ DETTAGLI AURA",
         details_embeds_max=2,
-        ledger_lines=["**👍 +5 P.A.** test"],
+        ledger_lines=["👍 **+5 P.A.** test"],
     )
     main = embeds[0]
-    assert main.description == "**🕒 Ultime 24 ore 01/01/2026 00:00 → 01/01/2026 23:59**"
-    all_values = "\n".join(f.value for f in main.fields)
-    assert "😇 70%" not in all_values
-    assert "Questi punti" not in all_values
-
-
+    assert len(main.fields) == 0
+    assert "**🕒 Ultime 24 ore 01/01/2026 00:00 → 01/01/2026 23:59**" in (main.description or "")
+    assert "**✨ KARMA \"Barcellometro\"**" in (main.description or "")
+    assert "PUNTI AURA TOTALI: **120**" in (main.description or "")
+    assert "PUNTI AURA CANALE: **35**" in (main.description or "")
+    assert "😇 70%" not in (main.description or "")
+    assert "Questi punti" not in (main.description or "")
 def test_build_aura_embeds_mod_placeholder_for_metrics() -> None:
     embeds = build_aura_embeds(
         profile_name="mod",
@@ -49,7 +50,7 @@ def test_build_aura_embeds_mod_placeholder_for_metrics() -> None:
         include_sections=["details.metrics_aggregated"],
         details_title_prefix="🗒️ DETTAGLI AURA",
         details_embeds_max=2,
-        ledger_lines=["**👍 +5 P.A.** test"],
+        ledger_lines=["👍 **+5 P.A.** test"],
     )
     detail_text = "\n".join(field.value for emb in embeds[1:] for field in emb.fields)
     assert "Dettagli completi nel file allegato." in detail_text
@@ -64,7 +65,7 @@ def test_build_aura_embeds_missions_can_be_empty_for_today() -> None:
         include_sections=["details.missions"],
         details_title_prefix="🗒️ DETTAGLI AURA",
         details_embeds_max=1,
-        ledger_lines=["**👍 +5 P.A.** test"],
+        ledger_lines=["👍 **+5 P.A.** test"],
     )
     detail_values = "\n".join(field.value for field in embeds[1].fields)
     assert "Nessuna per oggi" in detail_values
@@ -100,7 +101,7 @@ def test_build_aura_embeds_uses_custom_archetypes_and_missions_config(monkeypatc
         include_sections=["details.profile", "details.missions", "details.advice"],
         details_title_prefix="🗒️ DETTAGLI AURA",
         details_embeds_max=2,
-        ledger_lines=["**👍 +5 P.A.** test"],
+        ledger_lines=["👍 **+5 P.A.** test"],
     )
     detail_text = "\n".join(field.value for emb in embeds[1:] for field in emb.fields)
     assert "Catalizzatore" in detail_text
@@ -130,7 +131,21 @@ def test_mod_points_timeline_section_present() -> None:
         include_sections=["details.points_timeline"],
         details_title_prefix="🗒️ DETTAGLI AURA",
         details_embeds_max=1,
-        ledger_lines=["**👍 +1 P.A.** test"],
+        ledger_lines=["👍 **+1 P.A.** test"],
     )
     names = [f.name for f in embeds[1].fields]
     assert any("BREAKDOWN PUNTI" in n for n in names)
+
+
+def test_scores_section_uses_single_bullet_and_keeps_bold_delta() -> None:
+    embeds = build_aura_embeds(
+        profile_name="role1",
+        aura_payload=_payload(),
+        include_sections=["details.missions"],
+        details_title_prefix="🗒️ DETTAGLI AURA",
+        details_embeds_max=1,
+        ledger_lines=["👍 **+15 P.A.** per aver completato una missione giornaliera in #pollaio."],
+    )
+    detail_text = "\n".join(field.value for field in embeds[1].fields)
+    assert "• 👍 **+15 P.A.** per aver completato una missione giornaliera in #pollaio." in detail_text
+    assert "• •" not in detail_text

@@ -78,6 +78,29 @@ def _score_lines(ledger_lines: list[str]) -> list[str]:
     return ledger_lines[:10]
 
 
+def _build_main_aura_description(*, aura_payload: AuraRenderPayload) -> str:
+    return "\n\n".join(
+        [
+            f"**🕒 {aura_payload.period_line}**",
+            (
+                f"**✨ KARMA \"{aura_payload.server_name}\"**\n"
+                f"{render_karma_bar(aura_payload.karma_server_percent)}\n\n"
+                f"PUNTI AURA TOTALI: **{aura_payload.server_points_total}**"
+            ),
+            (
+                f"**✨ KARMA \"{aura_payload.channel_name}\"**\n"
+                f"{render_karma_bar(aura_payload.karma_channel_percent)}\n\n"
+                f"PUNTI AURA CANALE: **{aura_payload.channel_points_month}**"
+            ),
+            (
+                "📈 TREND\n"
+                f"• Nel server in generale: {_direction_label(aura_payload.trend.server_direction)}. {aura_payload.trend.server_comment}\n"
+                f"• Nel \"{aura_payload.channel_name}\": {_direction_label(aura_payload.trend.channel_direction)}. {aura_payload.trend.channel_comment}"
+            ),
+        ]
+    )
+
+
 def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any], assigned: list[dict[str, Any]] | None = None) -> list[str]:
     cfg = load_json_file(MISSIONS_CONFIG_PATH) or load_json_file(MISSIONS_EXAMPLE_PATH) or {}
     if assigned:
@@ -192,31 +215,7 @@ def build_aura_embeds(
     main = discord.Embed(
         title=f"✨ RESOCONTO AURA \"{aura_payload.username}\"",
         color=0x5865F2,
-        description=f"**🕒 {aura_payload.period_line}**",
-    )
-    main.add_field(
-        name=f"✨ KARMA \"{aura_payload.server_name}\"",
-        value=(
-            f"{render_karma_bar(aura_payload.karma_server_percent)}\n\n"
-            f"**PUNTI AURA TOTALI:** {aura_payload.server_points_total}"
-        ),
-        inline=False,
-    )
-    main.add_field(
-        name=f"✨ KARMA \"{aura_payload.channel_name}\"",
-        value=(
-            f"{render_karma_bar(aura_payload.karma_channel_percent)}\n\n"
-            f"**PUNTI AURA CANALE:** {aura_payload.channel_points_month}"
-        ),
-        inline=False,
-    )
-    main.add_field(
-        name="📈 TREND",
-        value=(
-            f"• Nel server in generale: {_direction_label(aura_payload.trend.server_direction)}. {aura_payload.trend.server_comment}\n"
-            f"• Nel \"{aura_payload.channel_name}\": {_direction_label(aura_payload.trend.channel_direction)}. {aura_payload.trend.channel_comment}"
-        ),
-        inline=False,
+        description=_build_main_aura_description(aura_payload=aura_payload),
     )
     main.set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
 
