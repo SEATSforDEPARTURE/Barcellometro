@@ -1,3 +1,4 @@
+from app.services.aura_archetypes import build_dynamic_archetype_reason
 from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
 
 
@@ -218,6 +219,19 @@ def test_profile_lines_fallback_with_legacy_payload() -> None:
     assert any("Pacificatore" in line for line in lines)
 
 
+def test_build_aura_embeds_profile_section_uses_new_title() -> None:
+    embeds = build_aura_embeds(
+        profile_name="role2",
+        aura_payload=_payload(),
+        include_sections=["details.profile"],
+        details_title_prefix="🗒️ DETTAGLI AURA",
+        details_embeds_max=2,
+        ledger_lines=["👍 **+5 P.A.** test"],
+    )
+    detail_text = "\n".join(field.name for emb in embeds[1:] for field in emb.fields)
+    assert "TOP CARATTERISTICHE PROFILO PERSONALE" in detail_text
+
+
 def test_build_aura_embeds_respects_profile_visibility_section() -> None:
     embeds = build_aura_embeds(
         profile_name="role1",
@@ -228,4 +242,54 @@ def test_build_aura_embeds_respects_profile_visibility_section() -> None:
         ledger_lines=["👍 **+5 P.A.** test"],
     )
     detail_text = "\n".join(field.name for emb in embeds[1:] for field in emb.fields)
-    assert "PROFILO PERSONALE" not in detail_text
+    assert "TOP CARATTERISTICHE PROFILO PERSONALE" not in detail_text
+
+
+def test_dynamic_reason_dominante_uses_high_monopoly_metrics() -> None:
+    reason = build_dynamic_archetype_reason(
+        "dominante",
+        metrics={"msg_count": 80, "unique_interactions": 8, "channel_diversity": 2},
+        scores={"dominante": 53},
+        config={"profile_reason_template": "fallback dominante"},
+    )
+    assert "pochi spazi" in reason
+
+
+def test_dynamic_reason_collante_uses_unique_and_channels() -> None:
+    reason = build_dynamic_archetype_reason(
+        "collante",
+        metrics={"msg_count": 40, "unique_interactions": 12, "channel_diversity": 5, "replies_sent": 14},
+        scores={"collante": 28},
+        config={"profile_reason_template": "fallback collante"},
+    )
+    assert "più canali" in reason
+
+
+def test_dynamic_reason_costante_uses_active_days_and_consistency() -> None:
+    reason = build_dynamic_archetype_reason(
+        "costante",
+        metrics={"msg_count": 24, "active_days": 16, "daily_regularity": 0.72},
+        scores={"costante": 31},
+        config={"profile_reason_template": "fallback costante"},
+    )
+    assert "presenza costante e regolare" in reason
+
+
+def test_dynamic_reason_silenzioso_uses_low_volume_non_zero_presence() -> None:
+    reason = build_dynamic_archetype_reason(
+        "silenzioso",
+        metrics={"msg_count": 6, "active_days": 4, "unique_interactions": 4, "replies_sent": 1},
+        scores={"silenzioso": 22},
+        config={"profile_reason_template": "fallback silenzioso"},
+    )
+    assert "presenza discreta" in reason
+
+
+def test_dynamic_reason_falls_back_to_template_when_metrics_are_insufficient() -> None:
+    reason = build_dynamic_archetype_reason(
+        "mediatore",
+        metrics={"msg_count": 0},
+        scores={"mediatore": 12},
+        config={"profile_reason_template": "template statico"},
+    )
+    assert reason == "template statico"

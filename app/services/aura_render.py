@@ -6,6 +6,7 @@ from typing import Any
 
 import discord
 
+from app.services.aura_archetypes import build_dynamic_archetype_reason
 from app.services.config_file_loader import load_json_file
 from app.utils.embed_limits import MAX_EMBED_CHARS, _ensure_embed_limits, _estimate_embed_size, _split_field_chunks
 
@@ -251,20 +252,15 @@ def _build_profile_lines(archetype_metrics: dict[str, Any], *, fallback_metrics:
         cfg = profile_defs.get(archetype_key, {})
         emoji = str(cfg.get("emoji", "✨")).strip() or "✨"
         label = str(cfg.get("label", archetype_key.replace("_", " ").title())).strip() or archetype_key
-        template = str(cfg.get("profile_reason_template", "")).strip()
-        if template:
-            reason = template
-        else:
-            reason = str(cfg.get("description", "Profilo emerso dalle tue metriche del periodo.")).strip() or "Profilo emerso dalle tue metriche del periodo."
-
-        if archetype_key == "scintilla" and int(payload_metrics.get("first_message_of_day", fallback_metrics.get("first_message_of_day", 0)) or 0) > 0:
-            reason = "Nel periodo hai spesso acceso il ritmo della giornata e dato il via ai momenti più vivi."
-        elif archetype_key == "collante" and int(payload_metrics.get("unique_interactions", fallback_metrics.get("unique_interactions", 0)) or 0) >= 5:
-            reason = "Ti sei mosso tra persone e spazi diversi aiutando a tenere connessa la community."
-        elif archetype_key == "costante" and int(payload_metrics.get("active_days", fallback_metrics.get("active_days", 0)) or 0) >= 10:
-            reason = "Hai mostrato una presenza regolare e continua lungo tutto il periodo."
-        elif archetype_key == "dominante" and int(payload_metrics.get("msg_count", fallback_metrics.get("msg_count", 0)) or 0) > 30:
-            reason = "Hai occupato una quota importante della conversazione, guidandone spesso il ritmo."
+        resolved_metrics = dict(fallback_metrics)
+        if isinstance(payload_metrics, dict):
+            resolved_metrics.update(payload_metrics)
+        reason = build_dynamic_archetype_reason(
+            archetype_key,
+            metrics=resolved_metrics,
+            scores=normalized_scores,
+            config=cfg,
+        )
 
         if isinstance(reasons, dict) and reasons.get(archetype_key):
             reason = str(reasons.get(archetype_key)).strip() or reason
@@ -319,7 +315,7 @@ def build_aura_embeds(
     if "details.missions" in include_sections:
         details_sections.append(("📜 MISSIONI QUOTIDIANE", _compact_bullets(_build_missions(metrics, aura_payload.archetype_metrics, aura_payload.assigned_missions), fallback="Nessuna per oggi.")))
     if "details.profile" in include_sections:
-        details_sections.append(("👤 PROFILO PERSONALE", _compact_bullets(_build_profile_lines(aura_payload.archetype_metrics, fallback_metrics=metrics), fallback="Nessun dato rilevante nel periodo.")))
+        details_sections.append(("👤 TOP CARATTERISTICHE PROFILO PERSONALE", _compact_bullets(_build_profile_lines(aura_payload.archetype_metrics, fallback_metrics=metrics), fallback="Nessun dato rilevante nel periodo.")))
     if "details.advice" in include_sections:
         details_sections.append(("🧭 CONSIGLI PERSONALIZZATI", _compact_bullets(_build_advice_lines(metrics, channel_name=aura_payload.channel_name), fallback="Nessun dato rilevante nel periodo.")))
     if "details.points_timeline" in include_sections and aura_payload.points_timeline_lines is not None:
