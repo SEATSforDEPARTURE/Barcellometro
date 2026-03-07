@@ -428,6 +428,9 @@ def setup(registry: ServiceRegistry) -> None:
 
     def _increment_opus_corrupted(error: Optional[Exception] = None) -> None:
         nonlocal opus_corrupted_count
+        if error is not None and not _is_known_corrupted_opus_error(error):
+            logger.exception("Unexpected OpusError while decoding voice frame")
+            return
         opus_corrupted_count += 1
 
     def _log_opus_decode_failure(
@@ -493,6 +496,9 @@ def setup(registry: ServiceRegistry) -> None:
             try:
                 return original(self, packet)
             except OpusError as exc:
+                if not _is_known_corrupted_opus_error(exc):
+                    logger.exception("Unexpected OpusError in voice_recv decoder")
+                    raise
                 _increment_opus_corrupted(exc)
                 packet_data = getattr(packet, "decrypted_data", None)
                 packet_len = len(packet_data) if isinstance(packet_data, (bytes, bytearray)) else None
@@ -525,6 +531,9 @@ def setup(registry: ServiceRegistry) -> None:
             try:
                 return current(self, data, fec=fec)
             except OpusError as exc:
+                if not _is_known_corrupted_opus_error(exc):
+                    logger.exception("Unexpected OpusError in global Decoder.decode")
+                    raise
                 _increment_opus_corrupted(exc)
                 payload_size = len(data) if isinstance(data, (bytes, bytearray)) else None
                 decode_ssrc = getattr(self, "ssrc", None) or getattr(self, "_ssrc", None)
