@@ -46,12 +46,18 @@ class AuraRenderPayload:
 
 def render_karma_bar(percent: int) -> str:
     value = max(0, min(100, int(percent)))
-    center = "🟢"
-    if value < 35:
-        center = "🔴"
-    elif value < 67:
-        center = "🟡"
-    return f"😈━━━━━━━━{center}━━━━😇"
+    normalized = value / 100
+    segments = ["━"] * 12
+    marker_idx = round(normalized * (len(segments) - 1))
+
+    marker = "🟡"
+    if normalized < 0.4:
+        marker = "🔴"
+    elif normalized > 0.6:
+        marker = "🟢"
+
+    segments[marker_idx] = marker
+    return f"😈{''.join(segments)}😇"
 
 
 def _direction_label(direction: str) -> str:
@@ -104,12 +110,29 @@ def _build_main_aura_description(*, aura_payload: AuraRenderPayload) -> str:
 def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any], assigned: list[dict[str, Any]] | None = None) -> list[str]:
     cfg = load_json_file(MISSIONS_CONFIG_PATH) or load_json_file(MISSIONS_EXAMPLE_PATH) or {}
     if assigned:
+        pending: list[dict[str, Any]] = []
+        completed: list[dict[str, Any]] = []
+        expired: list[dict[str, Any]] = []
+        for item in assigned:
+            status = str(item.get("status", "assigned")).lower()
+            if status == "completed":
+                completed.append(item)
+            elif status in {"expired", "scaduta", "scaduto"}:
+                expired.append(item)
+            else:
+                pending.append(item)
+
         lines: list[str] = []
-        for item in assigned[:3]:
+        for item in [*pending, *completed, *expired][:3]:
             label = str(item.get("meta", {}).get("label") or item.get("mission_id") or "missione")
             reward = int(item.get("reward_points", 0) or 0)
-            status = str(item.get("status", "assigned"))
-            box = "✅" if status == "completed" else "🔲"
+            status = str(item.get("status", "assigned")).lower()
+            if status == "completed":
+                box = "✅"
+            elif status in {"expired", "scaduta", "scaduto"}:
+                box = "⌛"
+            else:
+                box = "⬜"
             text = f"{box} {label} (+{reward} P.A.)" if reward > 0 else f"{box} {label}"
             if status == "completed":
                 text = f"**{text}**"
@@ -140,16 +163,16 @@ def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any], 
             elif cond == "tension":
                 ok = degrade > 0
             if ok and text:
-                missions.append(f"🔲 {text} (+{reward} P.A.)" if reward > 0 else f"🔲 {text}")
+                missions.append(f"⬜ {text} (+{reward} P.A.)" if reward > 0 else f"⬜ {text}")
             if len(missions) >= int(cfg.get("max_per_day", 3) or 3):
                 break
     if not missions:
         if unique < 2 or diversity < 40:
-            missions.append("🔲 Scrivi un messaggio a qualcuno che non contatti di solito. (+5 P.A.)")
+            missions.append("⬜ Scrivi un messaggio a qualcuno che non contatti di solito. (+5 P.A.)")
         if msg_count >= 2 and unique <= 3:
-            missions.append("🔲 Scrivi 2 messaggi a una persona alla quale non hai mai scritto. (+10 P.A.)")
+            missions.append("⬜ Scrivi 2 messaggi a una persona alla quale non hai mai scritto. (+10 P.A.)")
         if degrade > 0:
-            missions.append("🔲 Prova a rispondere con tono calmo in una conversazione accesa. (+10 P.A.)")
+            missions.append("⬜ Prova a rispondere con tono calmo in una conversazione accesa. (+10 P.A.)")
         if msg_count >= 8 and degrade <= 0:
             missions.append("**✅ Dai il buongiorno per prima.**")
     return missions[:3] if missions else ["Nessuna per oggi."]

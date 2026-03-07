@@ -112,18 +112,19 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             ts_label = ts
         jump = build_discord_jump_link(guild_id or "", channel_id or None, message_id or None)
         head = f"[{ts_label}]({jump})" if jump else ts_label
-        side = "😇" if delta >= 0 else "😈"
+        side = "👍" if delta >= 0 else "👎"
         suffix = f" *(regola: {reason})*" if include_reason_rule else ""
-        return f"**{head} — {side} {delta:+d} P.A.** - {label}{place}.{suffix}"
+        return f"**{head} {side} {delta:+d} P.A.** {label}{place}.{suffix}"
 
-    def _ledger_lines(ledger_events: list[dict[str, object]], channel_map: dict[str, str]) -> list[str]:
+    def _ledger_lines(ledger_events: list[dict[str, object]], channel_map: dict[str, str], guild_id: str) -> list[str]:
         lines: list[str] = []
         for event in ledger_events:
             line = _timeline_event_line(
                 event,
                 channel_map=channel_map,
                 audience="user",
-                with_jump_link=False,
+                with_jump_link=True,
+                guild_id=guild_id,
             )
             if line:
                 lines.append(line)
@@ -315,7 +316,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         ledger = await ctx.database.fetch_aura_ledger_aggregate(guild_id, user_id, start_ts, end_ts)
         ledger_events = await ctx.database.fetch_aura_ledger_events(guild_id, user_id, start_ts, end_ts)
         channel_map = await ctx.database.get_channel_name_map(guild_id)
-        ledger_lines = _ledger_lines(ledger_events, channel_map)
+        ledger_lines = _ledger_lines(ledger_events, channel_map, guild_id)
         missions_assigned = await ctx.database.list_aura_missions_for_user(guild_id, user_id, start_ts, end_ts)
         archetype = await ctx.database.fetch_latest_archetype_profile(guild_id, user_id, period_days=30)
         archetype_metrics = json.loads(archetype["metrics_json"]) if archetype and archetype["metrics_json"] else {}

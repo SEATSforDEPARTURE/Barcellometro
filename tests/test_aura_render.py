@@ -1,4 +1,4 @@
-from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, build_aura_embeds
+from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, _build_missions, build_aura_embeds, render_karma_bar
 
 
 def _payload() -> AuraRenderPayload:
@@ -149,3 +149,30 @@ def test_scores_section_uses_single_bullet_and_keeps_bold_delta() -> None:
     detail_text = "\n".join(field.value for field in embeds[1].fields)
     assert "• 👍 **+15 P.A.** per aver completato una missione giornaliera in #pollaio." in detail_text
     assert "• •" not in detail_text
+
+
+def test_render_karma_bar_moves_marker_and_changes_color() -> None:
+    negative = render_karma_bar(5)
+    neutral = render_karma_bar(50)
+    positive = render_karma_bar(95)
+
+    assert "🔴" in negative
+    assert negative.index("🔴") < neutral.index("🟡")
+    assert "🟡" in neutral
+    assert positive.endswith("😇")
+    assert "🟢" in positive
+    assert positive.index("🟢") > neutral.index("🟡")
+
+
+def test_build_missions_orders_pending_before_completed_and_expired() -> None:
+    assigned = [
+        {"mission_id": "m_done", "status": "completed", "reward_points": 15, "meta": {"label": "Completata"}},
+        {"mission_id": "m_open", "status": "assigned", "reward_points": 9, "meta": {"label": "Da fare"}},
+        {"mission_id": "m_exp", "status": "expired", "reward_points": 5, "meta": {"label": "Scaduta"}},
+    ]
+
+    lines = _build_missions({"msg_count": 10}, {"scores": {}}, assigned)
+
+    assert lines[0].startswith("⬜ Da fare")
+    assert "✅ Completata" in lines[1]
+    assert lines[2].startswith("⌛ Scaduta")
