@@ -43,16 +43,19 @@ def _increment_opus_corruption() -> None:
         _OPUS_GUARD_THROTTLED_LOG(_OPUS_GUARD_CORRUPTED_COUNT)
 
 
-def _is_recoverable_opus_decode_error(error: Exception) -> bool:
+def _is_known_corrupted_opus_error(error: Exception) -> bool:
     message = str(error).lower()
     recoverable_tokens = (
         "corrupted stream",
         "invalid argument",
-        "decode",
-        "bad arg",
         "buffer too small",
+        "decode failed",
     )
     return any(token in message for token in recoverable_tokens)
+
+
+def _is_recoverable_opus_decode_error(error: Exception) -> bool:
+    return _is_known_corrupted_opus_error(error)
 
 
 def _install_opus_decode_guard() -> None:
