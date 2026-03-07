@@ -51,6 +51,7 @@ def test_evaluate_chunk_quality_discards_short_or_corrupted() -> None:
         duration_sec=2.0,
         total_frames=100,
         corrupted_frames=90,
+        max_corruption_ratio=0.45,
     )
     assert ok is False
     assert reason.startswith("corruption_ratio>")
@@ -127,3 +128,20 @@ def test_install_opus_decode_guard_swallows_repeated_invalid_argument(monkeypatc
         assert decoded == b""
 
     assert voice_ingest._OPUS_GUARD_CORRUPTED_COUNT == 10
+
+
+def test_configurable_max_corruption_ratio_env(monkeypatch) -> None:
+    monkeypatch.setenv(voice_ingest.VOICE_INGEST_MAX_CORRUPTION_RATIO_ENV, "0.52")
+    assert voice_ingest._get_configured_max_corruption_ratio() == 0.52
+    monkeypatch.setenv(voice_ingest.VOICE_INGEST_MAX_CORRUPTION_RATIO_ENV, "bad")
+    assert voice_ingest._get_configured_max_corruption_ratio() == voice_ingest.MAX_CORRUPTION_RATIO
+
+
+def test_count_error_matches_for_summary() -> None:
+    counts = {
+        "opuserror('corrupted stream')": 3,
+        "invalid argument": 2,
+        "something else": 4,
+    }
+    assert voice_ingest._count_error_matches(counts, "corrupted stream") == 3
+    assert voice_ingest._count_error_matches(counts, "invalid argument") == 2

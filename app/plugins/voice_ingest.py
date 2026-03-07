@@ -30,6 +30,7 @@ PCM_BYTES_PER_SECOND_48K_STEREO_S16 = 48000 * 2 * 2
 MIN_CHUNK_SECONDS = 1.0
 MIN_PCM_BYTES = int(0.35 * PCM_BYTES_PER_SECOND_48K_STEREO_S16)
 MAX_CORRUPTION_RATIO = 0.45
+VOICE_INGEST_MAX_CORRUPTION_RATIO_ENV = "VOICE_INGEST_MAX_CORRUPTION_RATIO"
 CRITICAL_CORRUPTION_RATIO = 0.70
 MIN_WAV_SECONDS = 0.6
 OPUS_WARNING_LOG_FIRST = 3
@@ -167,6 +168,24 @@ def _safe_average(total: float, count: int) -> float:
     return total / float(count)
 
 
+
+
+def _get_configured_max_corruption_ratio() -> float:
+    raw = os.getenv(VOICE_INGEST_MAX_CORRUPTION_RATIO_ENV, "").strip()
+    if not raw:
+        return MAX_CORRUPTION_RATIO
+    try:
+        value = float(raw)
+    except ValueError:
+        return MAX_CORRUPTION_RATIO
+    if value < 0.1 or value > 0.95:
+        return MAX_CORRUPTION_RATIO
+    return value
+
+
+def _count_error_matches(error_counts: dict[str, int], needle: str) -> int:
+    n = needle.lower()
+    return sum(count for key, count in error_counts.items() if n in key.lower())
 def _estimate_chunk_duration(stats: _ChunkStats, chunk_seconds: int) -> float:
     if stats.first_frame_ts > 0 and stats.last_frame_ts >= stats.first_frame_ts:
         return max(0.0, stats.last_frame_ts - stats.first_frame_ts)
@@ -185,6 +204,7 @@ def _evaluate_chunk_quality(
     duration_sec: float,
     total_frames: int,
     corrupted_frames: int,
+    max_corruption_ratio: float = MAX_CORRUPTION_RATIO,
 ) -> tuple[bool, str]:
     if duration_sec < MIN_CHUNK_SECONDS:
         return False, f"duration<{MIN_CHUNK_SECONDS}s"
@@ -192,8 +212,8 @@ def _evaluate_chunk_quality(
         return False, f"pcm_bytes<{MIN_PCM_BYTES}"
     if total_frames <= 0:
         return False, "no_frames"
-    if _chunk_corruption_ratio(total_frames, corrupted_frames) > MAX_CORRUPTION_RATIO:
-        return False, f"corruption_ratio>{MAX_CORRUPTION_RATIO:.2f}"
+    if _chunk_corruption_ratio(total_frames, corrupted_frames) > max_corruption_ratio:
+        return False, f"corruption_ratio>{max_corruption_ratio:.2f}"
     return True, "ok"
 
 
@@ -266,6 +286,8 @@ def setup(registry: ServiceRegistry) -> None:
     total_chunks_discarded_high_corruption = 0
     total_chunks_discarded_silent = 0
     stt_success_count = 0
+    consecutive_discarded_chunks = 0
+    max_consecutive_discarded_chunks = 0
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
@@ -384,11 +406,18 @@ def setup(registry: ServiceRegistry) -> None:
         top_users = sorted(decode_errors_by_user.items(), key=lambda item: item[1], reverse=True)[:3]
         top_ssrc = sorted(decode_errors_by_ssrc.items(), key=lambda item: item[1], reverse=True)[:3]
         logger.info(
-            "Voice ingest Opus summary session=%s guild=%s channel=%s total_decode_errors=%s error_types=%s payload_size_avg=%.1f payload_size_min=%s payload_size_max=%s top_users=%s top_ssrc=%s",
+            "Voice ingest periodic summary session=%s guild=%s channel=%s total_decode_errors=%s corrupted_stream_count=%s invalid_argument_count=%s avg_corruption_ratio=%.3f chunks_ok=%s chunks_discarded=%s consecutive_discarded=%s max_consecutive_discarded=%s error_types=%s payload_size_avg=%.1f payload_size_min=%s payload_size_max=%s top_users=%s top_ssrc=%s",
             active_session_id,
             current_guild_id,
             current_voice_channel_id,
             opus_corrupted_count,
+            _count_error_matches(opus_error_type_counts, "corrupted stream"),
+            _count_error_matches(opus_error_type_counts, "invalid argument"),
+            _safe_average(chunk_corruption_ratio_total, chunk_corruption_ratio_count),
+            total_chunks_ok,
+            dropped_chunks,
+            consecutive_discarded_chunks,
+            max_consecutive_discarded_chunks,
             top_error_types,
             avg_payload_size,
             opus_payload_size_min,
@@ -443,30 +472,6 @@ def setup(registry: ServiceRegistry) -> None:
             )
         else:
             _emit_periodic_opus_summary_if_needed()
-
-    def _log_opus_decode_failure(
-        source: str,
-        *,
-        error: Exception,
-        payload_size: Optional[int] = None,
-        user_id: Optional[int] = None,
-        ssrc: Optional[int] = None,
-    ) -> None:
-        count = opus_corrupted_count
-        if not _should_log_corruption_event(count):
-            return
-        logger.warning(
-            "Voice ingest Opus decode failure source=%s count=%s guild=%s channel=%s session=%s user=%s ssrc=%s payload_size=%s error=%r",
-            source,
-            count,
-            current_guild_id,
-            current_voice_channel_id,
-            active_session_id,
-            user_id,
-            ssrc,
-            payload_size,
-            error,
-        )
 
     def _install_opus_guard() -> None:
         nonlocal opus_guard_installed
@@ -627,6 +632,7 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks, stt_empty_chunks
         nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count, total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent, stt_success_count
+        nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
         existing_session = await database.get_active_voice_session(str(guild_id), str(voice_channel_id))
         if existing_session is not None:
             existing_session_id = str(existing_session["voice_session_id"])
@@ -662,6 +668,8 @@ def setup(registry: ServiceRegistry) -> None:
             total_chunks_discarded_high_corruption = 0
             total_chunks_discarded_silent = 0
             stt_success_count = 0
+            consecutive_discarded_chunks = 0
+            max_consecutive_discarded_chunks = 0
             audio_buffers_by_user.clear()
             audio_buffers_by_ssrc.clear()
             chunk_stats_by_user.clear()
@@ -686,6 +694,8 @@ def setup(registry: ServiceRegistry) -> None:
         total_chunks_discarded_high_corruption = 0
         total_chunks_discarded_silent = 0
         stt_success_count = 0
+        consecutive_discarded_chunks = 0
+        max_consecutive_discarded_chunks = 0
         audio_buffers_by_user.clear()
         audio_buffers_by_ssrc.clear()
         chunk_stats_by_user.clear()
@@ -742,14 +752,14 @@ def setup(registry: ServiceRegistry) -> None:
         if not active_session_id:
             return
         logger.info(
-            "Voice ingest session summary voice_session_id=%s chunks_processed=%s chunks_dropped=%s chunks_enqueued=%s opus_corrupted_total=%s corrupted_stream_count=%s invalid_argument_count=%s total_chunks_ok=%s total_chunks_discarded_high_corruption=%s total_chunks_discarded_silent=%s stt_success_count=%s stt_empty_count=%s avg_corruption_ratio=%.3f decode_errors_by_user=%s decode_errors_by_ssrc=%s",
+            "Voice ingest session summary voice_session_id=%s chunks_processed=%s chunks_dropped=%s chunks_enqueued=%s opus_corrupted_total=%s corrupted_stream_count=%s invalid_argument_count=%s total_chunks_ok=%s total_chunks_discarded_high_corruption=%s total_chunks_discarded_silent=%s stt_success_count=%s stt_empty_count=%s avg_corruption_ratio=%.3f decode_errors_by_user=%s decode_errors_by_ssrc=%s consecutive_discarded=%s max_consecutive_discarded=%s",
             active_session_id,
             processed_chunks,
             dropped_chunks,
             stt_enqueued_chunks,
             opus_corrupted_count,
-            opus_error_type_counts.get("opuserror('corrupted stream')", 0) + opus_error_type_counts.get("corrupted stream", 0),
-            opus_error_type_counts.get("opuserror('invalid argument')", 0) + opus_error_type_counts.get("invalid argument", 0),
+            _count_error_matches(opus_error_type_counts, "corrupted stream"),
+            _count_error_matches(opus_error_type_counts, "invalid argument"),
             total_chunks_ok,
             total_chunks_discarded_high_corruption,
             total_chunks_discarded_silent,
@@ -758,6 +768,8 @@ def setup(registry: ServiceRegistry) -> None:
             _safe_average(chunk_corruption_ratio_total, chunk_corruption_ratio_count),
             sorted(decode_errors_by_user.items(), key=lambda item: item[1], reverse=True)[:5],
             sorted(decode_errors_by_ssrc.items(), key=lambda item: item[1], reverse=True)[:5],
+            consecutive_discarded_chunks,
+            max_consecutive_discarded_chunks,
         )
         await database.end_voice_session(active_session_id, _now_iso())
         await ingest.emit(
@@ -914,6 +926,7 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count
         nonlocal total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent
+        nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
         try:
             if active_session_id is None or active_session_started is None:
                 return
@@ -989,11 +1002,13 @@ def setup(registry: ServiceRegistry) -> None:
             chunk_stats.corrupted_frames = max(0, opus_corrupted_count - chunk_stats.corruption_start_counter)
             chunk_duration_sec = _estimate_chunk_duration(chunk_stats, chunk_seconds)
             corruption_ratio = _chunk_corruption_ratio(chunk_stats.total_frames, chunk_stats.corrupted_frames)
+            max_corruption_ratio = _get_configured_max_corruption_ratio()
             enqueue_allowed, drop_reason = _evaluate_chunk_quality(
                 pcm_bytes=len(chunk_data),
                 duration_sec=chunk_duration_sec,
                 total_frames=chunk_stats.total_frames,
                 corrupted_frames=chunk_stats.corrupted_frames,
+                max_corruption_ratio=max_corruption_ratio,
             )
             if _is_silent(chunk_data):
                 enqueue_allowed = False
@@ -1015,6 +1030,9 @@ def setup(registry: ServiceRegistry) -> None:
                     corruption_ratio,
                     drop_reason,
                 )
+                consecutive_discarded_chunks += 1
+                if consecutive_discarded_chunks > max_consecutive_discarded_chunks:
+                    max_consecutive_discarded_chunks = consecutive_discarded_chunks
                 if drop_reason == "silent_chunk":
                     total_chunks_discarded_silent += 1
                 elif drop_reason.startswith("corruption_ratio>"):
@@ -1027,7 +1045,10 @@ def setup(registry: ServiceRegistry) -> None:
                         chunk_stats.corrupted_frames,
                         corruption_ratio,
                     )
+                _emit_periodic_opus_summary_if_needed()
                 return
+            consecutive_discarded_chunks = 0
+            _emit_periodic_opus_summary_if_needed()
             job_id = str(uuid4())
             guild_id = current_guild_id
             if guild_id is None and voice_client and voice_client.guild:
