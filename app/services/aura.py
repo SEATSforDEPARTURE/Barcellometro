@@ -327,6 +327,25 @@ class AuraMissionService:
             elif mission_id == "voice_starter":
                 continue
 
+            if hasattr(self._db, "aura_ledger_event_already_recorded"):
+                already_processed = await self._db.aura_ledger_event_already_recorded(
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    reason_code="mission_completed",
+                    message_id=message_id,
+                    source_event="mission.completed",
+                    mission_id=mission_id,
+                )
+                if already_processed:
+                    logger.info(
+                        "Skipping mission processing already completed on message: guild=%s user=%s mission=%s message_id=%s",
+                        guild_id,
+                        user_id,
+                        mission_id,
+                        message_id,
+                    )
+                    continue
+
             await self._db.complete_aura_mission(guild_id=guild_id, user_id=user_id, mission_id=mission_id, assigned_at=str(mission.get("assigned_at")), completed_at=ts)
             await self._scoring.apply_rule(
                 guild_id=guild_id,
@@ -444,6 +463,30 @@ class AuraScoringService:
         payload.setdefault("message_id", message_id)
         payload.setdefault("source_service", source_service)
         payload.setdefault("source_event", source_event)
+
+        mission_id = str(payload.get("mission_id") or "").strip() or None
+        normalized_message_id = str(message_id or payload.get("message_id") or "").strip()
+        if normalized_message_id and hasattr(self._db, "aura_ledger_event_already_recorded"):
+            already = await self._db.aura_ledger_event_already_recorded(
+                guild_id=guild_id,
+                user_id=user_id,
+                reason_code=reason_code,
+                message_id=normalized_message_id,
+                source_event=source_event,
+                mission_id=mission_id,
+            )
+            if already:
+                logger.info(
+                    "Skipping already processed aura ledger event: guild=%s user=%s reason=%s source_event=%s message_id=%s mission_id=%s",
+                    guild_id,
+                    user_id,
+                    reason_code,
+                    source_event,
+                    normalized_message_id,
+                    mission_id,
+                )
+                return
+
         await self._db.insert_aura_ledger_event(
             guild_id,
             user_id,

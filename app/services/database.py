@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import uuid
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 
@@ -3045,11 +3046,58 @@ class DatabaseService:
         )
         return [str(r["channel_id"]) for r in rows if r["channel_id"]]
 
-    async def insert_aura_ledger_event(self, guild_id: str, user_id: str, channel_id: str | None, ts: str, reason_code: str, delta_points: int, meta: dict[str, Any]) -> None:
+    async def insert_aura_ledger_event(
+        self,
+        guild_id: str,
+        user_id: str,
+        channel_id: str | None,
+        ts: str,
+        reason_code: str,
+        delta_points: int,
+        meta: dict[str, Any],
+        *,
+        event_id: str | None = None,
+    ) -> str:
+        ledger_id = (event_id or uuid.uuid4().hex).strip() or uuid.uuid4().hex
         await self.execute(
             "INSERT INTO aura_events_ledger (id, guild_id, user_id, channel_id, ts, reason_code, delta_points, meta_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (f"{guild_id}:{user_id}:{reason_code}:{ts}", guild_id, user_id, channel_id, ts, reason_code, delta_points, json.dumps(meta)),
+            (ledger_id, guild_id, user_id, channel_id, ts, reason_code, delta_points, json.dumps(meta)),
         )
+        return ledger_id
+
+    async def aura_ledger_event_already_recorded(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        reason_code: str,
+        message_id: str,
+        source_event: str,
+        mission_id: str | None = None,
+    ) -> bool:
+        rows = await self.fetchall(
+            """
+            SELECT COALESCE(meta_json, '{}') AS meta_json
+            FROM aura_events_ledger
+            WHERE guild_id = ? AND user_id = ? AND reason_code = ?
+            ORDER BY ts DESC
+            LIMIT 200
+            """,
+            (guild_id, user_id, reason_code),
+        )
+        for row in rows:
+            try:
+                meta = json.loads(row["meta_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if str(meta.get("message_id") or "") != message_id:
+                continue
+            if str(meta.get("source_event") or "") != source_event:
+                continue
+            if mission_id is not None and str(meta.get("mission_id") or "") != mission_id:
+                continue
+            return True
+        return False
 
     async def fetch_aura_ledger_aggregate(self, guild_id: str, user_id: str, start_ts: str, end_ts: str) -> list[dict[str, Any]]:
         rows = await self.fetchall(

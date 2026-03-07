@@ -197,8 +197,9 @@ class FakeLedgerDB:
         self.events = []
         self.missions = []
 
-    async def insert_aura_ledger_event(self, guild_id, user_id, channel_id, ts, reason_code, delta_points, meta):
+    async def insert_aura_ledger_event(self, guild_id, user_id, channel_id, ts, reason_code, delta_points, meta, *, event_id=None):
         self.events.append({
+            "id": event_id or f"id-{len(self.events)+1}",
             "guild_id": guild_id,
             "user_id": user_id,
             "channel_id": channel_id,
@@ -207,6 +208,23 @@ class FakeLedgerDB:
             "delta_points": delta_points,
             "meta": meta,
         })
+        return self.events[-1]["id"]
+
+    async def aura_ledger_event_already_recorded(self, *, guild_id, user_id, reason_code, message_id, source_event, mission_id=None):
+        for ev in self.events:
+            meta = ev.get("meta", {})
+            if ev.get("guild_id") != guild_id or ev.get("user_id") != user_id:
+                continue
+            if ev.get("reason_code") != reason_code:
+                continue
+            if str(meta.get("message_id") or "") != str(message_id):
+                continue
+            if str(meta.get("source_event") or "") != str(source_event):
+                continue
+            if mission_id is not None and str(meta.get("mission_id") or "") != str(mission_id):
+                continue
+            return True
+        return False
 
     async def list_aura_missions_for_user(self, guild_id, user_id, start_ts, end_ts):
         return self.missions
@@ -390,3 +408,77 @@ def test_resolve_aura_reason_label_and_jump_link_fallback() -> None:
     assert resolve_aura_reason_label("mission_completed", audience="mod")
     assert build_discord_jump_link("1", "2", "3") == "https://discord.com/channels/1/2/3"
     assert build_discord_jump_link("1", None, "3") is None
+
+
+def test_two_different_events_same_message_do_not_collide() -> None:
+    async def _scenario() -> None:
+        db = FakeLedgerDB()
+        scoring = AuraScoringService(db)  # type: ignore[arg-type]
+        ts = "2026-03-07T08:00:00+00:00"
+        await scoring.apply_rule(
+            guild_id="10",
+            user_id="1",
+            rule_code="mission_completed",
+            ts=ts,
+            channel_id="99",
+            message_id="m42",
+            source_service="mission",
+            source_event="mission.completed",
+            meta={"mission_id": "good_morning"},
+        )
+        await scoring.award_points(
+            guild_id="10",
+            user_id="1",
+            reason_code="good_morning_first",
+            ts=ts,
+            channel_id="99",
+            points=12,
+            message_id="m42",
+            source_service="mission",
+            source_event="mission.reward",
+            meta={"mission_id": "good_morning"},
+        )
+        assert len(db.events) == 2
+        assert db.events[0]["id"] != db.events[1]["id"]
+
+    run(_scenario())
+
+
+def test_same_event_duplicate_not_recorded_twice_logically() -> None:
+    async def _scenario() -> None:
+        db = FakeLedgerDB()
+        scoring = AuraScoringService(db)  # type: ignore[arg-type]
+        ts = "2026-03-07T08:00:00+00:00"
+        kwargs = {
+            "guild_id": "10",
+            "user_id": "1",
+            "rule_code": "mission_completed",
+            "ts": ts,
+            "channel_id": "99",
+            "message_id": "m77",
+            "source_service": "mission",
+            "source_event": "mission.completed",
+            "meta": {"mission_id": "good_morning"},
+        }
+        await scoring.apply_rule(**kwargs)
+        await scoring.apply_rule(**kwargs)
+        events = [e for e in db.events if e["reason_code"] == "mission_completed"]
+        assert len(events) == 1
+
+    run(_scenario())
+
+
+def test_database_insert_aura_ledger_event_generates_unique_ids() -> None:
+    async def _scenario() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        ts = "2026-03-07T08:00:00+00:00"
+        id1 = await db.insert_aura_ledger_event("10", "1", "99", ts, "mission_completed", 15, {"message_id": "m1", "source_event": "mission.completed"})
+        id2 = await db.insert_aura_ledger_event("10", "1", "99", ts, "good_morning_first", 12, {"message_id": "m1", "source_event": "mission.reward"})
+        assert id1 != id2
+        rows = await db.fetchall("SELECT COUNT(*) AS cnt FROM aura_events_ledger")
+        assert int(rows[0]["cnt"] or 0) == 2
+        await db.close()
+
+    run(_scenario())
