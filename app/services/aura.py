@@ -544,7 +544,6 @@ class AuraEligibilityService:
         self._entitlements = entitlements
 
     async def evaluate_member(self, member: discord.abc.User, guild_id: str, start_ts: str, end_ts: str) -> AuraEligibilityResult:
-        profile = await self._entitlements.resolve_profile(member)
         aura_config = await self._entitlements.get_feature_profile_config(member, "aura")
         eligibility = aura_config.get("eligibility", {}) if isinstance(aura_config, dict) else {}
         if not bool(aura_config.get("enabled", False)):

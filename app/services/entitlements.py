@@ -48,14 +48,14 @@ class EntitlementsService:
 
     async def resolve_profile_with_role_id(self, member: Any) -> tuple[str, str | None]:
         if bool(getattr(getattr(member, "guild_permissions", None), "administrator", False)):
-            logger.info("resolve_profile_with_role_id: admin perms => mod")
+            logger.debug("resolve_profile_with_role_id: admin perms => mod")
             return "mod", None
 
         mod_role_ids = await self._get_json_setting("mod.role_ids", [])
         role_ids = [str(getattr(role, "id", "")) for role in getattr(member, "roles", [])]
         for role_id in role_ids:
             if role_id in {str(role_id) for role_id in mod_role_ids}:
-                logger.info("resolve_profile_with_role_id: mod role match => mod (%s)", role_id)
+                logger.debug("resolve_profile_with_role_id: mod role match => mod (%s)", role_id)
                 return "mod", role_id
 
         profile_map = await self._get_json_setting("entitlements.profile_map", DEFAULT_PROFILE_MAP)
@@ -76,7 +76,7 @@ class EntitlementsService:
                 best_profile = profile
                 best_priority = priority
                 winner_role_id = role_id
-        logger.info(
+        logger.debug(
             "resolve_profile_with_role_id: selected profile=%s winner_role_id=%s",
             best_profile,
             winner_role_id,
