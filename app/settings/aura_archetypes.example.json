@@ -1,0 +1,25 @@
+{
+  "archetypes": {
+    "agitatore": {
+      "label": "Agitatore",
+      "emoji": "🔥",
+      "description": "quando il ritmo cresce, tendi a spingere la discussione.",
+      "advice": ["Prova a rallentare nei momenti tesi."],
+      "missions": ["Scrivi un messaggio di mediazione in una discussione."],
+      "order": 1
+    },
+    "pacificatore": {
+      "label": "Pacificatore",
+      "emoji": "🌿",
+      "description": "mantieni equilibrio e ascolto nel confronto.",
+      "advice": ["Continua a coinvolgere utenti diversi."],
+      "missions": ["Coinvolgi due utenti che non interagiscono spesso."],
+      "order": 2
+    }
+  },
+  "default_advice": [
+    "Per migliorare la tua aura potresti coinvolgere più persone in canali diversi.",
+    "Potresti bilanciare meglio i toni nei momenti di confronto acceso.",
+    "Continua così: il tuo contributo è già ben bilanciato."
+  ]
+}

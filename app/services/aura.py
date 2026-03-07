@@ -10,9 +10,54 @@ from typing import Any
 import discord
 
 from app.services.database import DatabaseService
+from app.services.config_file_loader import load_json_file
 from app.services.entitlements import EntitlementsService
 
 logger = logging.getLogger(__name__)
+AURA_RULES_CONFIG_PATH = "app/settings/aura_rules.json"
+AURA_RULES_EXAMPLE_PATH = "app/settings/aura_rules.example.json"
+
+DEFAULT_AURA_RULES: dict[str, int] = {
+    "first_message_of_day": 5,
+    "reply_to_new_user": 8,
+    "conversation_starter": 6,
+    "cross_user_interaction": 7,
+    "positive_climate_contribution": 10,
+    "barcello_invigorate_bonus": 10,
+    "climate_degrade": -10,
+    "monopoly_penalty": -6,
+    "low_diversity_penalty": -5,
+    "barcello_degrade_penalty": -10,
+    "voice_join_bonus": 4,
+    "mission_completed": 15,
+}
+
+AURA_REASON_HUMAN: dict[str, str] = {
+    "first_message_of_day": "per aver scritto per prima nel giorno",
+    "reply_to_new_user": "per aver risposto a una persona nuova",
+    "positive_climate_contribution": "per aver contribuito a un clima più costruttivo",
+    "climate_degrade": "per aver abbassato il clima in una discussione",
+    "monopoly_penalty": "per aver monopolizzato la conversazione",
+    "voice_join_bonus": "per aver partecipato in canale vocale",
+    "mission_completed": "per aver completato una missione giornaliera",
+    "conversation_starter": "per aver avviato una conversazione",
+    "cross_user_interaction": "per aver coinvolto utenti diversi",
+    "low_diversity_penalty": "per bassa diversità nelle interazioni",
+    "barcello_invigorate_bonus": "per aver contribuito a migliorare il barcello",
+    "barcello_degrade_penalty": "per aver contribuito a degradare il barcello",
+    "ondemand.aggregate": "bilancio complessivo del periodo",
+    "batch.aggregate": "bilancio aggregato periodico",
+}
+
+AURA_REASON_META: dict[str, dict[str, str]] = {
+    key: {
+        "user_label": value,
+        "mod_label": value,
+        "category": "positive" if DEFAULT_AURA_RULES.get(key, 0) >= 0 else "negative",
+        "sign": "+" if DEFAULT_AURA_RULES.get(key, 0) >= 0 else "-",
+    }
+    for key, value in AURA_REASON_HUMAN.items()
+}
 
 
 @dataclass
@@ -23,11 +68,165 @@ class AuraEligibilityResult:
 
 def render_karma_bar(percent: int) -> str:
     value = max(0, min(100, int(percent)))
-    width = 13
-    cursor_idx = int(round((value / 100) * (width - 1)))
-    cells = ["━"] * width
-    cells[cursor_idx] = "🟣"
-    return f"😈{''.join(cells)}😇  {value}%"
+    center = "🟢"
+    if value < 35:
+        center = "🔴"
+    elif value < 67:
+        center = "🟡"
+    return f"😈━━━━━━━━{center}━━━━😇  {value}%"
+
+
+def aura_reason_to_human(reason_code: str) -> str:
+    return AURA_REASON_HUMAN.get(reason_code, f"attività registrata ({reason_code})")
+
+
+def load_aura_rules() -> dict[str, int]:
+    data = load_json_file(AURA_RULES_CONFIG_PATH)
+    if not data:
+        data = load_json_file(AURA_RULES_EXAMPLE_PATH)
+    if not isinstance(data, dict):
+        return dict(DEFAULT_AURA_RULES)
+    out = dict(DEFAULT_AURA_RULES)
+    for k, v in data.items():
+        try:
+            out[str(k)] = int(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+class AuraScoringService:
+    def __init__(self, database: DatabaseService) -> None:
+        self._db = database
+        self._rules = load_aura_rules()
+
+    async def award_points(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        reason_code: str,
+        ts: str,
+        channel_id: str | None = None,
+        points: int | None = None,
+        message_id: str | None = None,
+        source_service: str = "aura",
+        source_event: str = "award",
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        delta = abs(int(points if points is not None else self._rules.get(reason_code, 1)))
+        await self.record_event(
+            guild_id=guild_id,
+            user_id=user_id,
+            reason_code=reason_code,
+            delta_points=delta,
+            ts=ts,
+            channel_id=channel_id,
+            message_id=message_id,
+            source_service=source_service,
+            source_event=source_event,
+            meta=meta,
+        )
+        return delta
+
+    async def penalize_points(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        reason_code: str,
+        ts: str,
+        channel_id: str | None = None,
+        points: int | None = None,
+        message_id: str | None = None,
+        source_service: str = "aura",
+        source_event: str = "penalty",
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        base = int(points if points is not None else abs(self._rules.get(reason_code, -1)))
+        delta = -abs(base)
+        await self.record_event(
+            guild_id=guild_id,
+            user_id=user_id,
+            reason_code=reason_code,
+            delta_points=delta,
+            ts=ts,
+            channel_id=channel_id,
+            message_id=message_id,
+            source_service=source_service,
+            source_event=source_event,
+            meta=meta,
+        )
+        return delta
+
+    async def record_event(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        reason_code: str,
+        delta_points: int,
+        ts: str,
+        channel_id: str | None = None,
+        message_id: str | None = None,
+        source_service: str = "aura",
+        source_event: str = "record",
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        payload = dict(meta or {})
+        payload.setdefault("reason_human", aura_reason_to_human(reason_code))
+        payload.setdefault("message_id", message_id)
+        payload.setdefault("source_service", source_service)
+        payload.setdefault("source_event", source_event)
+        await self._db.insert_aura_ledger_event(
+            guild_id,
+            user_id,
+            channel_id,
+            ts,
+            reason_code,
+            int(delta_points),
+            payload,
+        )
+
+    async def apply_rule(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        rule_code: str,
+        ts: str,
+        channel_id: str | None = None,
+        message_id: str | None = None,
+        source_service: str = "aura",
+        source_event: str = "rule",
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        points = int(self._rules.get(rule_code, 0))
+        if points >= 0:
+            return await self.award_points(
+                guild_id=guild_id,
+                user_id=user_id,
+                reason_code=rule_code,
+                ts=ts,
+                channel_id=channel_id,
+                points=points,
+                message_id=message_id,
+                source_service=source_service,
+                source_event=source_event,
+                meta=meta,
+            )
+        return await self.penalize_points(
+            guild_id=guild_id,
+            user_id=user_id,
+            reason_code=rule_code,
+            ts=ts,
+            channel_id=channel_id,
+            points=abs(points),
+            message_id=message_id,
+            source_service=source_service,
+            source_event=source_event,
+            meta=meta,
+        )
 
 
 class AuraEligibilityService:
@@ -83,8 +282,9 @@ class AuraEligibilityService:
 class AuraRollingStatsService:
     def __init__(self, database: DatabaseService) -> None:
         self._db = database
+        self._scoring = AuraScoringService(database)
 
-    async def on_message_saved(self, *, guild_id: str, channel_id: str, user_id: str, ts: str, mentions: list[str]) -> None:
+    async def on_message_saved(self, *, guild_id: str, channel_id: str, user_id: str, ts: str, mentions: list[str], message_id: str | None = None) -> None:
         window_key = datetime.fromisoformat(ts).date().isoformat()
         await self._db.upsert_aura_rolling_on_message(
             guild_id=guild_id,
@@ -93,6 +293,29 @@ class AuraRollingStatsService:
             ts=ts,
             unique_increment=max(1, len(set(mentions))),
         )
+        if await self._db.count_user_messages_for_day(guild_id, user_id, window_key) == 1:
+            await self._scoring.apply_rule(
+                guild_id=guild_id,
+                user_id=user_id,
+                rule_code="first_message_of_day",
+                ts=ts,
+                channel_id=channel_id,
+                message_id=message_id,
+                source_service="discord_adapter",
+                source_event="message.first_of_day",
+            )
+        if mentions:
+            await self._scoring.apply_rule(
+                guild_id=guild_id,
+                user_id=user_id,
+                rule_code="cross_user_interaction" if "cross_user_interaction" in self._scoring._rules else "reply_to_new_user",
+                ts=ts,
+                channel_id=channel_id,
+                message_id=message_id,
+                source_service="discord_adapter",
+                source_event="message.mentions",
+                meta={"mentions_count": len(set(mentions))},
+            )
 
     async def on_barcello_event(self, *, guild_id: str, ts: str, invigorate: bool) -> None:
         active_users = await self._db.fetch_recent_active_users(guild_id, ts, minutes=30)
@@ -103,6 +326,15 @@ class AuraRollingStatsService:
                 window_key=datetime.fromisoformat(ts).date().isoformat(),
                 ts=ts,
                 invigorate=invigorate,
+            )
+            await self._scoring.apply_rule(
+                guild_id=guild_id,
+                user_id=str(user_id),
+                rule_code="barcello_invigorate_bonus" if invigorate and "barcello_invigorate_bonus" in self._scoring._rules else "positive_climate_contribution" if invigorate else "barcello_degrade_penalty" if "barcello_degrade_penalty" in self._scoring._rules else "climate_degrade",
+                ts=ts,
+                source_service="barcello",
+                source_event="barcello.result",
+                meta={"invigorate": invigorate},
             )
 
 
