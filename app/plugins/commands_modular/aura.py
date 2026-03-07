@@ -19,7 +19,7 @@ from app.plugins.commands_modular.time_windows import (
     resolve_range_window,
     resolve_ultimi_window,
 )
-from app.services.aura import aura_reason_to_human, compute_and_store_aura_result
+from app.services.aura import build_discord_jump_link, resolve_aura_reason_label, compute_and_store_aura_result
 from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, build_aura_embeds
 from app.services.config_file_loader import load_json_file
 from app.services.barcello_window import resolve_default_window_minutes
@@ -66,34 +66,34 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             label = prefix
         return f"{label} {start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}".strip()
 
+    def _resolve_event_reason_label(event: dict[str, object], *, audience: str) -> str:
+        reason = str(event.get("reason_code", "evento"))
+        meta = event.get("meta", {}) if isinstance(event.get("meta"), dict) else {}
+        completion_text = str(meta.get("completion_text") or "").strip()
+        if reason == "mission_completed" and completion_text:
+            return f"per {completion_text}"
+        return resolve_aura_reason_label(reason, audience=audience)
+
     def _ledger_lines(ledger_events: list[dict[str, object]], channel_map: dict[str, str]) -> list[str]:
         lines: list[str] = []
         aggregate_fallback: list[str] = []
         for event in ledger_events:
             delta = int(event.get("delta_points", 0) or 0)
             reason_code = str(event.get("reason_code", "evento"))
-            channel_id = event.get("channel_id")
-            channel_name = channel_map.get(str(channel_id), "#canale") if channel_id else "nel server"
+            channel_id = str(event.get("channel_id") or "")
+            channel_name = channel_map.get(channel_id) if channel_id else None
             emoji = "👍" if delta >= 0 else "👎"
             signed = f"+{delta}" if delta >= 0 else str(delta)
             if reason_code in {"ondemand.aggregate", "batch.aggregate"}:
-                aggregate_fallback.append(f"**{emoji} {signed} P.A.** Bilancio complessivo del periodo nel server.")
+                aggregate_fallback.append(f"• {emoji} {signed} P.A. bilancio complessivo del periodo nel server.")
                 continue
-            verb = aura_reason_to_human(reason_code)
-            lines.append(f"**{emoji} {signed} P.A.** {verb} in {channel_name}.")
+            verb = _resolve_event_reason_label(event, audience="user")
+            place = f" in {channel_name}" if channel_name else ""
+            lines.append(f"• {emoji} {signed} P.A. {verb}{place}.")
 
         if not lines:
             return aggregate_fallback[:1] or ["Nessun evento aura dettagliato registrato nel periodo."]
-        if len(lines) <= 10:
-            return lines
-        shown = lines[:10]
-        remaining = ledger_events[10:]
-        rem_sum = sum(int(item.get("delta_points", 0) or 0) for item in remaining)
-        if rem_sum > 0:
-            shown.append(f"**👍 + altri {rem_sum} P.A.**")
-        elif rem_sum < 0:
-            shown.append(f"**👎 - altri {abs(rem_sum)} P.A.**")
-        return shown
+        return lines[:10]
 
 
     def _points_timeline_lines(ledger_events: list[dict[str, object]], guild_id: str, channel_map: dict[str, str]) -> list[str]:
@@ -102,7 +102,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             delta = int(event.get("delta_points", 0) or 0)
             reason = str(event.get("reason_code", "evento"))
             meta = event.get("meta", {}) if isinstance(event.get("meta"), dict) else {}
-            message_id = str(meta.get("message_id") or "")
+            message_id = str(event.get("message_id") or meta.get("message_id") or "")
             channel_id = str(event.get("channel_id") or "")
             ts = str(event.get("ts", ""))
             try:
@@ -111,14 +111,13 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
                 ts_label = dt.strftime("%d/%m %H:%M")
             except Exception:
                 ts_label = ts
-            if message_id and channel_id:
-                jump = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
-                head = f"[{ts_label}]({jump})"
-            else:
-                head = ts_label
+            jump = build_discord_jump_link(guild_id, channel_id or None, message_id or None)
+            head = f"[{ts_label}]({jump})" if jump else ts_label
             side = "😇" if delta >= 0 else "😈"
-            label = aura_reason_to_human(reason)
-            lines.append(f"**{head} — {side} {delta:+d} P.A.** - {label}.")
+            label = _resolve_event_reason_label(event, audience="mod")
+            channel_name = channel_map.get(channel_id)
+            place = f" in {channel_name}" if channel_name else ""
+            lines.append(f"• **{head} — {side} {delta:+d} P.A.** - {label}{place}. *(regola: {reason})*")
         return lines
 
     def _build_mod_metrics_txt(
