@@ -731,6 +731,21 @@ class AuraAggregationJob:
 
 
 class ArchetypeAnalyzerService:
+    ARCHETYPE_KEYS: tuple[str, ...] = (
+        "scintilla",
+        "pacificatore",
+        "agitatore",
+        "collante",
+        "mediatore",
+        "esploratore_sociale",
+        "costante",
+        "lampo",
+        "silenzioso",
+        "ascoltatore",
+        "selettivo",
+        "dominante",
+    )
+
     def __init__(
         self,
         database: DatabaseService,
@@ -768,14 +783,10 @@ class ArchetypeAnalyzerService:
                 if not eligibility.eligible:
                     continue
                 metrics = await self._db.fetch_aura_metrics(guild_id, str(member.id), period_start, period_end)
-                score_payload = {
-                    "volume": min(100, metrics["msg_count"] * 2),
-                    "diversity": min(100, metrics["unique_interactions"] * 5),
-                    "influence": min(100, metrics["reply_received"] * 6),
-                    "climate_impact": max(0, min(100, 50 + (metrics["invigorate_events"] - metrics["degrade_events"]) * 8)),
-                    "quality_proxy": min(100, metrics["quality_counter"] * 4),
-                    "consistency": 100 if metrics["msg_count"] > 0 else 0,
-                }
+                metrics_detail = await self._fetch_archetype_metrics(guild_id=guild_id, user_id=str(member.id), period_start=period_start, period_end=period_end, base_metrics=metrics)
+                raw_scores = self._compute_archetype_raw_scores(metrics_detail)
+                score_payload = self._normalize_archetype_scores(raw_scores)
+                reasons = self._build_archetype_debug_reasons(metrics_detail, raw_scores, score_payload)
                 insights = [
                     "Mantieni costanza settimanale per aumentare la stabilità.",
                     "Interagire con utenti diversi migliora la diversità.",
@@ -785,6 +796,186 @@ class ArchetypeAnalyzerService:
                     user_id=str(member.id),
                     period_days=30,
                     archetype_scores_json=json.dumps(score_payload),
-                    metrics_json=json.dumps({"insights": insights, "scores": score_payload}),
+                    metrics_json=json.dumps({"insights": insights, "scores": score_payload, "metrics": metrics_detail, "reasons": reasons}),
                     computed_at=period_end,
                 )
+
+    async def _fetch_archetype_metrics(self, *, guild_id: str, user_id: str, period_start: str, period_end: str, base_metrics: dict[str, int]) -> dict[str, float | int]:
+        totals = await self._db.fetchone(
+            """
+            SELECT
+                COUNT(*) AS msg_count,
+                COUNT(DISTINCT channel_id) AS channel_diversity,
+                COUNT(DISTINCT substr(ts, 1, 10)) AS active_days,
+                SUM(CASE WHEN reply_to_message_id IS NOT NULL THEN 1 ELSE 0 END) AS replies_sent
+            FROM messages
+            WHERE guild_id = ? AND author_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, user_id, period_start, period_end),
+        )
+        day_rows = await self._db.fetchall(
+            """
+            SELECT substr(ts, 1, 10) AS day_key, COUNT(*) AS day_msgs
+            FROM messages
+            WHERE guild_id = ? AND author_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            GROUP BY day_key
+            """,
+            (guild_id, user_id, period_start, period_end),
+        )
+        mention_rows = await self._db.fetchall(
+            """
+            SELECT mentions_json
+            FROM messages
+            WHERE guild_id = ? AND author_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, user_id, period_start, period_end),
+        )
+        first_msg_days = await self._db.fetchone(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM (
+                SELECT m.message_id
+                FROM messages m
+                JOIN (
+                    SELECT substr(ts, 1, 10) AS day_key, MIN(ts) AS min_ts
+                    FROM messages
+                    WHERE guild_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+                    GROUP BY day_key
+                ) first_of_day ON substr(m.ts, 1, 10) = first_of_day.day_key AND m.ts = first_of_day.min_ts
+                WHERE m.guild_id = ? AND m.author_id = ?
+            ) t
+            """,
+            (guild_id, period_start, period_end, guild_id, user_id),
+        )
+        mission_row = await self._db.fetchone(
+            """
+            SELECT COUNT(*) AS completed
+            FROM aura_events_ledger
+            WHERE guild_id = ? AND user_id = ? AND ts >= ? AND ts <= ? AND reason_code = 'mission_completed'
+            """,
+            (guild_id, user_id, period_start, period_end),
+        )
+
+        mention_targets: set[str] = set()
+        mention_count = 0
+        for row in mention_rows:
+            raw = row["mentions_json"]
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, list):
+                for item in payload:
+                    target = str(item).strip()
+                    if target and target != user_id:
+                        mention_targets.add(target)
+                        mention_count += 1
+
+        day_counts = [int(r["day_msgs"] or 0) for r in day_rows]
+        avg_msgs = (sum(day_counts) / len(day_counts)) if day_counts else 0.0
+        variance = (sum((x - avg_msgs) ** 2 for x in day_counts) / len(day_counts)) if day_counts else 0.0
+        std_dev = variance ** 0.5
+        regularity = max(0.0, min(1.0, 1.0 - (std_dev / (avg_msgs + 1.0)))) if day_counts else 0.0
+
+        return {
+            "msg_count": int(totals["msg_count"] or base_metrics.get("msg_count", 0) or 0) if totals else int(base_metrics.get("msg_count", 0) or 0),
+            "replies_sent": int(totals["replies_sent"] or 0) if totals else 0,
+            "unique_interactions": int(base_metrics.get("unique_interactions", 0) or 0),
+            "reply_received": int(base_metrics.get("reply_received", 0) or 0),
+            "degrade_events": int(base_metrics.get("degrade_events", 0) or 0),
+            "invigorate_events": int(base_metrics.get("invigorate_events", 0) or 0),
+            "quality_counter": int(base_metrics.get("quality_counter", 0) or 0),
+            "channel_diversity": int(totals["channel_diversity"] or 0) if totals else 0,
+            "active_days": int(totals["active_days"] or 0) if totals else 0,
+            "first_message_of_day": int(first_msg_days["cnt"] or 0) if first_msg_days else 0,
+            "mentions_count": mention_count,
+            "mentions_unique_users": len(mention_targets),
+            "missions_completed": int(mission_row["completed"] or 0) if mission_row else 0,
+            "daily_regularity": round(regularity, 4),
+        }
+
+    def _compute_archetype_raw_scores(self, m: dict[str, float | int]) -> dict[str, float]:
+        msg = float(m.get("msg_count", 0) or 0)
+        unique = float(m.get("unique_interactions", 0) or 0)
+        replies = float(m.get("reply_received", 0) or 0)
+        replies_sent = float(m.get("replies_sent", 0) or 0)
+        invigorate = float(m.get("invigorate_events", 0) or 0)
+        degrade = float(m.get("degrade_events", 0) or 0)
+        quality = float(m.get("quality_counter", 0) or 0)
+        channels = float(m.get("channel_diversity", 0) or 0)
+        first_day = float(m.get("first_message_of_day", 0) or 0)
+        mentions = float(m.get("mentions_count", 0) or 0)
+        missions = float(m.get("missions_completed", 0) or 0)
+        active_days = float(m.get("active_days", 0) or 0)
+        regularity = float(m.get("daily_regularity", 0) or 0)
+
+        interactions_per_msg = unique / max(msg, 1.0)
+        channels_per_msg = channels / max(msg, 1.0)
+        mentions_per_msg = mentions / max(msg, 1.0)
+        climate_push = invigorate + degrade
+        climate_balance = max(0.0, invigorate - degrade)
+        monopoly_ratio = max(0.0, (msg - unique) / max(msg, 1.0))
+        impact_per_msg = (invigorate * 1.5 + replies + quality + missions * 2.0) / max(msg, 1.0)
+        low_presence = max(0.0, 1.0 - min(1.0, msg / 30.0))
+
+        return {
+            "scintilla": 0.50 * first_day + 0.35 * invigorate + 0.2 * missions + 0.12 * replies,
+            "pacificatore": 0.45 * climate_balance + 0.3 * quality + 0.25 * regularity * 10.0 + 0.15 * replies_sent - 0.35 * degrade,
+            "agitatore": 0.35 * climate_push + 0.25 * max(0.0, degrade * 2.0 - quality) + 0.2 * first_day + 0.1 * msg,
+            "collante": 0.45 * unique + 0.3 * mentions + 0.25 * active_days + 0.15 * replies_sent,
+            "mediatore": 0.35 * climate_balance + 0.3 * replies_sent + 0.25 * quality + 0.15 * unique - 0.3 * degrade,
+            "esploratore_sociale": 0.45 * unique + 0.35 * channels + 0.2 * mentions,
+            "costante": 0.5 * active_days + 0.35 * regularity * 20.0 + 0.15 * min(msg, 40.0),
+            "lampo": (impact_per_msg * 20.0) * low_presence + 0.25 * first_day,
+            "silenzioso": max(0.0, (22.0 - msg) * 0.8 + active_days * 0.6 - monopoly_ratio * 10.0),
+            "ascoltatore": 0.45 * replies_sent + 0.3 * quality + 0.15 * unique + 8.0 * max(0.0, 0.4 - mentions_per_msg),
+            "selettivo": max(0.0, (1.0 - min(1.0, interactions_per_msg * 1.7)) * 35.0 + active_days * 0.5 + quality * 0.2),
+            "dominante": 0.45 * msg + monopoly_ratio * 35.0 + (1.0 - min(1.0, channels_per_msg * 4.0)) * 14.0 - quality * 0.2,
+        }
+
+    def _normalize_archetype_scores(self, raw_scores: dict[str, float]) -> dict[str, int]:
+        positive = {k: max(0.0, float(raw_scores.get(k, 0.0) or 0.0)) for k in self.ARCHETYPE_KEYS}
+        total = sum(positive.values())
+        if total <= 0:
+            base = round(100 / len(self.ARCHETYPE_KEYS))
+            normalized = {k: base for k in self.ARCHETYPE_KEYS}
+            normalized[self.ARCHETYPE_KEYS[0]] += 100 - sum(normalized.values())
+            return normalized
+        weights = {k: (v / total) * 100 for k, v in positive.items()}
+        rounded = {k: int(round(v)) for k, v in weights.items()}
+        diff = 100 - sum(rounded.values())
+        if diff != 0:
+            direction = 1 if diff > 0 else -1
+            ranking = sorted(self.ARCHETYPE_KEYS, key=lambda key: weights[key] - rounded[key], reverse=(diff > 0))
+            idx = 0
+            while diff != 0 and ranking:
+                key = ranking[idx % len(ranking)]
+                if rounded[key] + direction >= 0:
+                    rounded[key] += direction
+                    diff -= direction
+                idx += 1
+        return rounded
+
+    def _build_archetype_debug_reasons(self, metrics: dict[str, float | int], raw_scores: dict[str, float], normalized: dict[str, int]) -> dict[str, str]:
+        top_keys = sorted(self.ARCHETYPE_KEYS, key=lambda k: normalized.get(k, 0), reverse=True)[:4]
+        base: dict[str, str] = {}
+        snippets = {
+            "scintilla": "attivi spesso i momenti iniziali della giornata e aumenti il ritmo",
+            "pacificatore": "mantieni il clima più costruttivo con buona qualità",
+            "agitatore": "muovi molto il clima e alzi l'intensità delle discussioni",
+            "collante": "connetti persone diverse con interazioni distribuite",
+            "mediatore": "favorisci equilibrio e risposte utili nei confronti",
+            "esploratore_sociale": "ti muovi tra più canali e contatti diversi",
+            "costante": "hai una presenza regolare su più giorni",
+            "lampo": "sei poco presente ma con impatto relativo molto alto",
+            "silenzioso": "osservi e partecipi poco, senza occupare troppo spazio",
+            "ascoltatore": "intervieni con risposte mirate e tono calmo",
+            "selettivo": "concentri le interazioni su pochi contesti in modo mirato",
+            "dominante": "occupi una quota ampia dello spazio conversazionale",
+        }
+        for key in top_keys:
+            base[key] = snippets.get(key, "profilo emerso dalle metriche aggregate")
+        base["_debug"] = f"msg={int(metrics.get('msg_count', 0) or 0)}, unique={int(metrics.get('unique_interactions', 0) or 0)}, raw_top={sorted(raw_scores.items(), key=lambda kv: kv[1], reverse=True)[:3]}"
+        return base

@@ -1,15 +1,137 @@
 {
   "archetypes": {
-    "agitatore": {"label": "Agitatore", "emoji": "🔥", "description": "spinge il ritmo della discussione", "advice": ["Rallenta nei momenti tesi."], "missions": ["calm_reply"], "order": 1},
-    "pacificatore": {"label": "Pacificatore", "emoji": "🌿", "description": "favorisce toni costruttivi", "advice": ["Continua a mediare con calma."], "missions": ["good_morning"], "order": 2},
-    "collante": {"label": "Collante", "emoji": "🧩", "description": "collega gruppi diversi", "advice": ["Coinvolgi utenti meno presenti."], "missions": ["talk_new_user"], "order": 3},
-    "esploratore_sociale": {"label": "Esploratore sociale", "emoji": "🧭", "description": "si muove tra canali e persone diverse", "advice": ["Mantieni varietà nelle interazioni."], "missions": ["cross_channel_presence"], "order": 4},
-    "presenza_costante": {"label": "Presenza costante", "emoji": "⏱️", "description": "attivo con regolarità", "advice": ["Bilancia volume e qualità."], "missions": ["balanced_participation"], "order": 5},
-    "mediatore": {"label": "Mediatore", "emoji": "⚖️", "description": "riduce tensioni locali", "advice": ["Continua a fare da ponte."], "missions": ["positive_recovery"], "order": 6},
-    "dominatore": {"label": "Dominatore", "emoji": "🦁", "description": "tende a monopolizzare la discussione", "advice": ["Lascia spazio ad altri utenti."], "missions": ["talk_new_user"], "order": 7},
-    "scintilla": {"label": "Scintilla", "emoji": "✨", "description": "accende nuove conversazioni", "advice": ["Usa la spinta in modo inclusivo."], "missions": ["conversation_starter"], "order": 8},
-    "ascoltatore": {"label": "Ascoltatore", "emoji": "👂", "description": "risponde con attenzione", "advice": ["Mantieni risposte utili."], "missions": ["helpful_reply"], "order": 9},
-    "equilibratore": {"label": "Equilibratore", "emoji": "🫶", "description": "bilancia energia e calma", "advice": ["Continua con ritmo sostenibile."], "missions": ["balanced_participation"], "order": 10}
+    "scintilla": {
+      "label": "Scintilla",
+      "emoji": "✨",
+      "description": "Accendi facilmente il ritmo delle conversazioni e crei movimento.",
+      "profile_reason_template": "nel periodo hai spesso dato il via ai momenti più vivi della community",
+      "advice": [
+        "usa questa energia anche per coinvolgere chi parla meno"
+      ],
+      "order": 10,
+      "enabled": true
+    },
+    "pacificatore": {
+      "label": "Pacificatore",
+      "emoji": "🌿",
+      "description": "Favorisci toni costruttivi e riduci attriti o tensioni.",
+      "profile_reason_template": "hai mantenuto toni costruttivi con un impatto più equilibrato sul clima",
+      "advice": [
+        "continua a stemperare i momenti tesi senza spegnere il confronto"
+      ],
+      "order": 20,
+      "enabled": true
+    },
+    "agitatore": {
+      "label": "Agitatore",
+      "emoji": "🔥",
+      "description": "Spingi il ritmo e puoi alzare l'intensità delle discussioni.",
+      "profile_reason_template": "hai spinto spesso il ritmo, scuotendo le conversazioni nei momenti più accesi",
+      "advice": [
+        "incanala l'energia evitando escalation quando il clima è già alto"
+      ],
+      "order": 30,
+      "enabled": true
+    },
+    "collante": {
+      "label": "Collante",
+      "emoji": "🧩",
+      "description": "Tieni insieme persone e canali, creando continuità relazionale.",
+      "profile_reason_template": "ti sei mosso tra persone e spazi diversi aiutando a tenere vivo il legame tra i membri",
+      "advice": [
+        "continua a fare da ponte tra gruppi che si incrociano poco"
+      ],
+      "order": 40,
+      "enabled": true
+    },
+    "mediatore": {
+      "label": "Mediatore",
+      "emoji": "⚖️",
+      "description": "Riequilibri i confronti, faciliti il dialogo e smorzi attriti.",
+      "profile_reason_template": "hai facilitato il dialogo con interventi che hanno riequilibrato momenti delicati",
+      "advice": [
+        "esplicita ancora di più il tuo ruolo di ponte quando serve"
+      ],
+      "order": 50,
+      "enabled": true
+    },
+    "esploratore_sociale": {
+      "label": "Esploratore sociale",
+      "emoji": "🧭",
+      "description": "Interagisci con persone diverse e attraversi più canali.",
+      "profile_reason_template": "hai mostrato varietà spostandoti tra canali e interazioni con persone diverse",
+      "advice": [
+        "mantieni la varietà includendo anche contesti meno attivi"
+      ],
+      "order": 60,
+      "enabled": true
+    },
+    "costante": {
+      "label": "Costante",
+      "emoji": "⏱️",
+      "description": "Sei presente con regolarità e continuità, senza grandi sbalzi.",
+      "profile_reason_template": "hai mantenuto una presenza regolare e continua lungo tutto il periodo",
+      "advice": [
+        "preserva la costanza aggiungendo piccoli momenti di iniziativa"
+      ],
+      "order": 70,
+      "enabled": true
+    },
+    "lampo": {
+      "label": "Lampo",
+      "emoji": "⚡",
+      "description": "Sei meno presente, ma quando entri lasci un impatto forte.",
+      "profile_reason_template": "anche con presenza ridotta, i tuoi interventi hanno lasciato segno",
+      "advice": [
+        "quando entri, prova ad agganciare uno scambio in più"
+      ],
+      "order": 80,
+      "enabled": true
+    },
+    "silenzioso": {
+      "label": "Silenzioso",
+      "emoji": "🌙",
+      "description": "Osservi molto e intervieni poco, restando comunque presente.",
+      "profile_reason_template": "hai partecipato in modo discreto e misurato, senza sparire dal tutto",
+      "advice": [
+        "aggiungi qualche intervento in più nei momenti dove puoi dare valore"
+      ],
+      "order": 90,
+      "enabled": true
+    },
+    "ascoltatore": {
+      "label": "Ascoltatore",
+      "emoji": "👂",
+      "description": "Favorisci ascolto, risposte attente e presenza calma.",
+      "profile_reason_template": "hai sostenuto il dialogo con risposte attente e un tono calmo",
+      "advice": [
+        "continua a rispondere con cura, lasciando spazio anche agli altri"
+      ],
+      "order": 100,
+      "enabled": true
+    },
+    "selettivo": {
+      "label": "Selettivo",
+      "emoji": "🎯",
+      "description": "Concentri le interazioni su poche persone o contesti mirati.",
+      "profile_reason_template": "hai concentrato le interazioni su pochi contesti in modo mirato e coerente",
+      "advice": [
+        "allarga ogni tanto il raggio per migliorare la diversity"
+      ],
+      "order": 110,
+      "enabled": true
+    },
+    "dominante": {
+      "label": "Dominante",
+      "emoji": "🦁",
+      "description": "Occupi molto spazio conversazionale e dirigi spesso il ritmo.",
+      "profile_reason_template": "hai occupato una quota ampia dello spazio conversazionale nel periodo",
+      "advice": [
+        "lascia più spazio alle altre voci per migliorare l'equilibrio"
+      ],
+      "order": 120,
+      "enabled": true
+    }
   },
   "default_advice": [
     "Per migliorare la tua aura potresti coinvolgere più persone in canali diversi.",

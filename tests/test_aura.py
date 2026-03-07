@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.aura import AuraEligibilityService, AuraMissionService, AuraScoringService, build_discord_jump_link, compute_and_store_aura_result, load_aura_rule_definitions, load_aura_rules, normalize_text_for_matching, render_karma_bar, resolve_aura_reason_label
+from app.services.aura import ArchetypeAnalyzerService, AuraEligibilityService, AuraMissionService, AuraScoringService, build_discord_jump_link, compute_and_store_aura_result, load_aura_rule_definitions, load_aura_rules, normalize_text_for_matching, render_karma_bar, resolve_aura_reason_label
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.barcello_window import resolve_default_window_minutes
@@ -278,6 +278,38 @@ def test_mission_good_morning_completes_and_records_points(monkeypatch) -> None:
         assert len(db.events) >= 1
 
     run(_scenario())
+
+
+def test_archetype_analyzer_normalizes_scores_to_100() -> None:
+    service = ArchetypeAnalyzerService(database=None, bot=None, eligibility_service=None)  # type: ignore[arg-type]
+    raw = {k: float(idx + 1) for idx, k in enumerate(service.ARCHETYPE_KEYS)}
+    normalized = service._normalize_archetype_scores(raw)
+    assert sum(normalized.values()) == 100
+    assert set(normalized.keys()) == set(service.ARCHETYPE_KEYS)
+
+
+def test_archetype_analyzer_computes_multiscore_12_archetypes() -> None:
+    service = ArchetypeAnalyzerService(database=None, bot=None, eligibility_service=None)  # type: ignore[arg-type]
+    metrics = {
+        "msg_count": 42,
+        "unique_interactions": 16,
+        "reply_received": 12,
+        "replies_sent": 15,
+        "invigorate_events": 6,
+        "degrade_events": 2,
+        "quality_counter": 11,
+        "channel_diversity": 7,
+        "first_message_of_day": 4,
+        "mentions_count": 10,
+        "missions_completed": 3,
+        "active_days": 18,
+        "daily_regularity": 0.82,
+    }
+    raw = service._compute_archetype_raw_scores(metrics)
+    assert len(raw) == 12
+    assert raw["collante"] > 0
+    assert raw["esploratore_sociale"] > 0
+    assert raw["costante"] > 0
 
 
 def test_load_aura_rule_definitions_supports_number_and_object(monkeypatch) -> None:
