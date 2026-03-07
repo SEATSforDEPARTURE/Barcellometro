@@ -61,7 +61,7 @@ def test_entitlements_example_runtime_read_paths_are_valid() -> None:
     assert isinstance(run(service.is_feature_allowed(base, "ai")), bool)
 
     # command profile config used by /barcello and /riassunto
-    for command in ("barcello", "riassunto"):
+    for command in ("barcello", "riassunto", "resoconto"):
         cfg = run(service.get_command_profile_config(base, command))
         assert isinstance(cfg["allowed"], bool)
         assert isinstance(cfg["messages"], dict)
@@ -69,7 +69,7 @@ def test_entitlements_example_runtime_read_paths_are_valid() -> None:
         assert isinstance(cfg["output"]["show_score"], bool)
 
     # root command policy maps used by future helpers
-    for command in ("barcello", "riassunto"):
+    for command in ("barcello", "riassunto", "resoconto"):
         assert isinstance(run(service.is_subcommand_allowed(base, command, "view")), bool)
         assert isinstance(run(service.get_detail_level(base, command)), str)
         assert isinstance(run(service.has_capability(mod, command, "analysis.ai_preferred")), bool)
@@ -82,3 +82,9 @@ def test_entitlements_example_runtime_read_paths_are_valid() -> None:
     for key in ("enabled", "limits", "render", "privacy", "missions", "eligibility"):
         assert key in aura_cfg
     assert isinstance(aura_cfg["limits"]["allow_target_user"], bool)
+
+
+def test_entitlements_example_mod_has_aura_report_capability() -> None:
+    payload = json.loads(Path("app/settings/entitlements.example.json").read_text())
+    mod_caps = payload["entitlements"]["policies"]["commands"]["resoconto"]["profiles"]["mod"]["capabilities"]
+    assert "aura_report.view" in mod_caps

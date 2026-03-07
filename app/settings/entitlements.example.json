@@ -483,6 +483,32 @@
               "analysis.ai_preferred"
             ]
           }
+        },
+        "resoconto": {
+          "profiles": {
+            "base": {
+              "allowed": true,
+              "capabilities": []
+            },
+            "role1": {
+              "allowed": true,
+              "capabilities": []
+            },
+            "role2": {
+              "allowed": true,
+              "capabilities": []
+            },
+            "role3": {
+              "allowed": true,
+              "capabilities": []
+            },
+            "mod": {
+              "allowed": true,
+              "capabilities": [
+                "aura_report.view"
+              ]
+            }
+          }
         }
       },
       "features": {

@@ -14,6 +14,28 @@ from app.services.entitlements import EntitlementsService
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_AURA_RULES: dict[str, int] = {
+    "first_message_of_day": 5,
+    "reply_to_new_user": 8,
+    "positive_climate_contribution": 10,
+    "climate_degrade": -10,
+    "monopoly_penalty": -6,
+    "voice_join_bonus": 4,
+    "mission_completed": 15,
+}
+
+AURA_REASON_HUMAN: dict[str, str] = {
+    "first_message_of_day": "per aver scritto per prima nel giorno",
+    "reply_to_new_user": "per aver risposto a una persona nuova",
+    "positive_climate_contribution": "per aver contribuito a un clima più costruttivo",
+    "climate_degrade": "per aver abbassato il clima in una discussione",
+    "monopoly_penalty": "per aver monopolizzato la conversazione",
+    "voice_join_bonus": "per aver partecipato in canale vocale",
+    "mission_completed": "per aver completato una missione giornaliera",
+    "ondemand.aggregate": "bilancio complessivo del periodo",
+    "batch.aggregate": "bilancio aggregato periodico",
+}
+
 
 @dataclass
 class AuraEligibilityResult:
@@ -29,6 +51,143 @@ def render_karma_bar(percent: int) -> str:
     elif value < 67:
         center = "🟡"
     return f"😈━━━━━━━━{center}━━━━😇  {value}%"
+
+
+def aura_reason_to_human(reason_code: str) -> str:
+    return AURA_REASON_HUMAN.get(reason_code, f"attività registrata ({reason_code})")
+
+
+class AuraScoringService:
+    def __init__(self, database: DatabaseService) -> None:
+        self._db = database
+
+    async def award_points(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        reason_code: str,
+        ts: str,
+        channel_id: str | None = None,
+        points: int | None = None,
+        message_id: str | None = None,
+        source_service: str = "aura",
+        source_event: str = "award",
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        delta = abs(int(points if points is not None else DEFAULT_AURA_RULES.get(reason_code, 1)))
+        await self.record_event(
+            guild_id=guild_id,
+            user_id=user_id,
+            reason_code=reason_code,
+            delta_points=delta,
+            ts=ts,
+            channel_id=channel_id,
+            message_id=message_id,
+            source_service=source_service,
+            source_event=source_event,
+            meta=meta,
+        )
+        return delta
+
+    async def penalize_points(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        reason_code: str,
+        ts: str,
+        channel_id: str | None = None,
+        points: int | None = None,
+        message_id: str | None = None,
+        source_service: str = "aura",
+        source_event: str = "penalty",
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        base = int(points if points is not None else abs(DEFAULT_AURA_RULES.get(reason_code, -1)))
+        delta = -abs(base)
+        await self.record_event(
+            guild_id=guild_id,
+            user_id=user_id,
+            reason_code=reason_code,
+            delta_points=delta,
+            ts=ts,
+            channel_id=channel_id,
+            message_id=message_id,
+            source_service=source_service,
+            source_event=source_event,
+            meta=meta,
+        )
+        return delta
+
+    async def record_event(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        reason_code: str,
+        delta_points: int,
+        ts: str,
+        channel_id: str | None = None,
+        message_id: str | None = None,
+        source_service: str = "aura",
+        source_event: str = "record",
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        payload = dict(meta or {})
+        payload.setdefault("reason_human", aura_reason_to_human(reason_code))
+        payload.setdefault("message_id", message_id)
+        payload.setdefault("source_service", source_service)
+        payload.setdefault("source_event", source_event)
+        await self._db.insert_aura_ledger_event(
+            guild_id,
+            user_id,
+            channel_id,
+            ts,
+            reason_code,
+            int(delta_points),
+            payload,
+        )
+
+    async def apply_rule(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        rule_code: str,
+        ts: str,
+        channel_id: str | None = None,
+        message_id: str | None = None,
+        source_service: str = "aura",
+        source_event: str = "rule",
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        points = int(DEFAULT_AURA_RULES.get(rule_code, 0))
+        if points >= 0:
+            return await self.award_points(
+                guild_id=guild_id,
+                user_id=user_id,
+                reason_code=rule_code,
+                ts=ts,
+                channel_id=channel_id,
+                points=points,
+                message_id=message_id,
+                source_service=source_service,
+                source_event=source_event,
+                meta=meta,
+            )
+        return await self.penalize_points(
+            guild_id=guild_id,
+            user_id=user_id,
+            reason_code=rule_code,
+            ts=ts,
+            channel_id=channel_id,
+            points=abs(points),
+            message_id=message_id,
+            source_service=source_service,
+            source_event=source_event,
+            meta=meta,
+        )
 
 
 class AuraEligibilityService:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from io import BytesIO
 from datetime import timezone
 
 import discord
@@ -18,7 +19,7 @@ from app.plugins.commands_modular.time_windows import (
     resolve_range_window,
     resolve_ultimi_window,
 )
-from app.services.aura import compute_and_store_aura_result
+from app.services.aura import aura_reason_to_human, compute_and_store_aura_result
 from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, build_aura_embeds
 from app.services.config_file_loader import load_json_file
 from app.services.barcello_window import resolve_default_window_minutes
@@ -47,6 +48,97 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         if delta <= -3:
             return "worsening", "Sono emersi più attriti rispetto alla finestra precedente."
         return "stable", "Andamento vicino alla finestra precedente."
+
+    def _period_prefix(period_key: str) -> str:
+        mapping = {
+            "oggi": "Oggi",
+            "ieri": "Ieri",
+        }
+        return mapping.get(period_key, "")
+
+    def _format_period_line(period_key: str, period_text: str, start_dt, end_dt) -> str:
+        prefix = _period_prefix(period_key)
+        if period_key == "ultimi":
+            label = period_text
+        elif period_key == "range":
+            label = "Range"
+        else:
+            label = prefix
+        return f"{label} {start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}".strip()
+
+    def _ledger_lines(ledger_events: list[dict[str, object]], channel_map: dict[str, str]) -> list[str]:
+        lines: list[str] = []
+        for event in ledger_events:
+            delta = int(event.get("delta_points", 0) or 0)
+            reason_code = str(event.get("reason_code", "evento"))
+            channel_id = event.get("channel_id")
+            channel_name = channel_map.get(str(channel_id), "#canale") if channel_id else "nel server"
+            verb = aura_reason_to_human(reason_code)
+            emoji = "👍" if delta >= 0 else "👎"
+            signed = f"+{delta}" if delta >= 0 else str(delta)
+            lines.append(f"**{emoji} {signed} P.A.** {verb} in {channel_name}.")
+
+        if len(lines) <= 10:
+            return lines
+        shown = lines[:10]
+        remaining = ledger_events[10:]
+        rem_sum = sum(int(item.get("delta_points", 0) or 0) for item in remaining)
+        if rem_sum > 0:
+            shown.append(f"**👍 + altri {rem_sum} P.A.**")
+        elif rem_sum < 0:
+            shown.append(f"**👎 - altri {abs(rem_sum)} P.A.**")
+        return shown
+
+    def _build_mod_metrics_txt(
+        *,
+        guild_id: str,
+        user_id: str,
+        start_ts: str,
+        end_ts: str,
+        server_points_total: int,
+        channel_points_month: int,
+        server_metrics: dict[str, object],
+        channel_metrics: dict[str, object],
+        trend_server_delta: int,
+        trend_channel_delta: int,
+        ledger: list[dict[str, object]],
+        archetype_metrics: dict[str, object],
+        missions: list[str],
+    ) -> bytes:
+        lines = [
+            "=== METADATI ===",
+            f"guild_id: {guild_id}",
+            f"user_id: {user_id}",
+            f"period_start: {start_ts}",
+            f"period_end: {end_ts}",
+            "scope: server + channel",
+            "",
+            "=== SCORE ===",
+            f"punti_totali_server: {server_points_total}",
+            f"punti_totali_canale_mese: {channel_points_month}",
+            "",
+            "=== METRICHE BASE ===",
+            f"server_msg_count: {server_metrics.get('msg_count', 0)}",
+            f"server_unique_interactions: {server_metrics.get('unique_interactions', 0)}",
+            f"server_reply_received: {server_metrics.get('reply_received', 0)}",
+            f"server_quality_counter: {server_metrics.get('quality_counter', 0)}",
+            f"server_invigorate: {server_metrics.get('invigorate_events', 0)}",
+            f"server_degrade: {server_metrics.get('degrade_events', 0)}",
+            f"channel_msg_count: {channel_metrics.get('msg_count', 0)}",
+            f"channel_unique_interactions: {channel_metrics.get('unique_interactions', 0)}",
+            "",
+            "=== TREND ===",
+            f"trend_server_delta: {trend_server_delta:+d}",
+            f"trend_channel_delta: {trend_channel_delta:+d}",
+            "",
+            "=== BREAKDOWN ===",
+        ]
+        for item in ledger:
+            delta = int(item.get('delta_points', 0) or 0)
+            lines.append(f"{item.get('reason_code')} => {delta:+d}")
+        lines += ["", "=== ARCHETIPI ===", json.dumps(archetype_metrics, ensure_ascii=False), "", "=== MISSIONI ==="]
+        lines.extend(missions or ["Nessuna per oggi."])
+        return "\n".join(lines).encode("utf-8")
 
     async def _compute_or_fetch_result(*, guild_id: str, user_id: str, start_ts: str, end_ts: str, channel_id: str | None):
         row = await ctx.database.fetch_latest_aura_result_covering_window(guild_id, user_id, start_ts, end_ts, channel_id=channel_id)
@@ -141,12 +233,14 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         title_prefix = str(render_cfg.get("details_title_prefix", "🗒️ DETTAGLI AURA") or "🗒️ DETTAGLI AURA")
 
         ledger = await ctx.database.fetch_aura_ledger_aggregate(guild_id, user_id, start_ts, end_ts)
+        ledger_events = await ctx.database.fetch_aura_ledger_events(guild_id, user_id, start_ts, end_ts)
+        channel_map = await ctx.database.get_channel_name_map(guild_id)
+        ledger_lines = _ledger_lines(ledger_events, channel_map)
         archetype = await ctx.database.fetch_latest_archetype_profile(guild_id, user_id, period_days=30)
         archetype_metrics = json.loads(archetype["metrics_json"]) if archetype and archetype["metrics_json"] else {}
 
         guild_name = interaction.guild.name if interaction.guild else "Server"
         channel_name = interaction.channel.name if hasattr(interaction.channel, "name") and interaction.channel else "canale"
-        period_row = f"{start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}"
         period_text = build_period_label(
             period_label,
             start_dt=start_dt,
@@ -154,6 +248,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             start_ts=start_ts,
             end_ts=end_ts,
         )
+        period_row = _format_period_line(period_label, period_text, start_dt, end_dt)
 
         embeds = build_aura_embeds(
             profile_name=caller_profile,
@@ -161,8 +256,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
                 username=member.display_name if isinstance(member, discord.Member) else getattr(member, "name", "Utente"),
                 server_name=guild_name,
                 channel_name=channel_name,
-                period_row=period_row,
-                period_label=period_text,
+                period_line=period_row,
                 karma_server_percent=int(server_row["karma_percent"]),
                 karma_channel_percent=int(channel_row["karma_percent"]) if channel_row else int(server_row["karma_percent"]),
                 server_points_total=await ctx.database.sum_aura_points(guild_id, user_id, channel_id=None),
@@ -183,12 +277,36 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             include_sections=sections,
             details_title_prefix=title_prefix,
             details_embeds_max=details_max,
+            ledger_lines=ledger_lines,
         )
+
+        mod_file: discord.File | None = None
+        if caller_profile == "mod" and "details.metrics_aggregated" in sections:
+            server_metrics = json.loads(str(server_row["metrics_json"] or "{}")) if server_row else {}
+            channel_metrics = json.loads(str(channel_row["metrics_json"] or "{}")) if channel_row else {}
+            missions_preview = ["Nessuna per oggi."]
+            payload = _build_mod_metrics_txt(
+                guild_id=guild_id,
+                user_id=user_id,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                server_points_total=await ctx.database.sum_aura_points(guild_id, user_id, channel_id=None),
+                channel_points_month=int(channel_month_row["points_total"]) if channel_month_row else 0,
+                server_metrics=server_metrics,
+                channel_metrics=channel_metrics,
+                trend_server_delta=server_delta,
+                trend_channel_delta=channel_delta,
+                ledger=ledger_events,
+                archetype_metrics=archetype_metrics if isinstance(archetype_metrics, dict) else {},
+                missions=missions_preview,
+            )
+            mod_file = discord.File(BytesIO(payload), filename=f"aura_metrics_{guild_id}_{user_id}.txt")
 
         try:
             dm = await interaction.user.create_dm()
             for idx in range(0, len(embeds), 10):
-                await dm.send(embeds=embeds[idx : idx + 10])
+                files = [mod_file] if idx == 0 and mod_file is not None else None
+                await dm.send(embeds=embeds[idx : idx + 10], files=files)
             logger.info("aura dm sent: user=%s guild=%s pages=%s", str(interaction.user.id), guild_id, len(embeds))
             await interaction.followup.send("📩 Resoconto Aura inviato in DM.", ephemeral=True)
         except discord.Forbidden:

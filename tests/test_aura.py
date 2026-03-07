@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.aura import AuraEligibilityService, compute_and_store_aura_result, render_karma_bar
+from app.services.aura import AuraEligibilityService, AuraScoringService, compute_and_store_aura_result, render_karma_bar
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.barcello_window import resolve_default_window_minutes
@@ -188,3 +188,37 @@ def test_aura_entitlements_target_enabled_for_mod() -> None:
     mod_member = FakeMember(id=99, roles=[], guild_permissions=FakePermissions(administrator=True))
     aura_cfg = run(entitlements.get_feature_profile_config(mod_member, "aura"))
     assert aura_cfg["limits"]["allow_target_user"] is True
+
+
+
+
+class FakeLedgerDB:
+    def __init__(self) -> None:
+        self.events = []
+
+    async def insert_aura_ledger_event(self, guild_id, user_id, channel_id, ts, reason_code, delta_points, meta):
+        self.events.append({
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "channel_id": channel_id,
+            "ts": ts,
+            "reason_code": reason_code,
+            "delta_points": delta_points,
+            "meta": meta,
+        })
+
+
+def test_aura_scoring_service_records_positive_and_negative_deltas() -> None:
+    async def _scenario() -> None:
+        db = FakeLedgerDB()
+        scoring = AuraScoringService(db)  # type: ignore[arg-type]
+        ts = datetime.now(timezone.utc).isoformat()
+        await scoring.award_points(guild_id="10", user_id="1", reason_code="first_message_of_day", ts=ts, channel_id="99")
+        await scoring.penalize_points(guild_id="10", user_id="1", reason_code="climate_degrade", ts=ts, channel_id="99")
+        assert len(db.events) == 2
+        deltas = sorted(int(x["delta_points"]) for x in db.events)
+        assert deltas[0] < 0
+        assert deltas[1] > 0
+        assert db.events[0]["meta"]["reason_human"]
+
+    run(_scenario())

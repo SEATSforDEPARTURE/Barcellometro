@@ -24,8 +24,7 @@ class AuraRenderPayload:
     username: str
     server_name: str
     channel_name: str
-    period_row: str
-    period_label: str
+    period_line: str
     karma_server_percent: int
     karma_channel_percent: int
     server_points_total: int
@@ -44,7 +43,7 @@ def render_karma_bar(percent: int) -> str:
         center = "🔴"
     elif value < 67:
         center = "🟡"
-    return f"😈━━━━━━━━{center}━━━━😇  {value}%"
+    return f"😈━━━━━━━━{center}━━━━😇"
 
 
 def _direction_label(direction: str) -> str:
@@ -63,36 +62,12 @@ def _compact_bullets(lines: list[str], *, fallback: str) -> str:
     return "\n".join(f"• {line}" for line in clean)
 
 
-def _reason_to_text(reason_code: str, value: int, *, channel_name: str) -> str:
-    points = f"{'👍' if value >= 0 else '👎'} {'+' if value >= 0 else ''}{value} P.A."
-    code = reason_code.lower()
-    if "invigorate" in code:
-        return f"**{points}** per aver migliorato il clima in {channel_name}."
-    if "degrade" in code:
-        return f"**{points}** per aver irrigidito il clima in {channel_name}."
-    if "reply" in code:
-        return f"**{points}** per aver risposto ad altri utenti in {channel_name}."
-    if "conversation" in code or "start" in code:
-        return f"**{points}** per aver avviato conversazioni in {channel_name}."
-    if "ondemand.aggregate" in code or "batch.aggregate" in code:
-        return f"**{points}** bilancio complessivo del periodo in {channel_name}."
-    return f"**{points}** attività registrata ({reason_code}) in {channel_name}."
-
-
-def _score_lines(ledger: list[dict[str, int | str]], *, channel_name: str) -> list[str]:
-    if not ledger:
+def _score_lines(ledger_lines: list[str]) -> list[str]:
+    if not ledger_lines:
         return ["Nessun dato rilevante nel periodo."]
-    natural = [_reason_to_text(str(item.get("reason_code", "evento")), int(item.get("total", 0) or 0), channel_name=channel_name) for item in ledger]
-    if len(natural) <= 10:
-        return natural
-    visible = natural[:10]
-    remainder = [int(item.get("total", 0) or 0) for item in ledger[10:]]
-    rem_total = sum(remainder)
-    rem_abs = abs(rem_total)
-    if rem_abs > 0:
-        tail = f"**{'👍 +' if rem_total >= 0 else '👎 -'} altri {rem_abs} P.A.**"
-        visible.append(tail)
-    return visible
+    if len(ledger_lines) <= 10:
+        return ledger_lines
+    return ledger_lines[:10]
 
 
 def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any]) -> list[str]:
@@ -140,7 +115,7 @@ def _build_advice_lines(metrics: dict[str, Any], *, channel_name: str) -> list[s
     degrade = int(metrics.get("degrade_events", 0) or 0)
     msg_count = int(metrics.get("msg_count", 0) or 0)
     if unique <= 2:
-        lines.append(f"Per migliorare la tua aura potresti coinvolgere più persone in {channel_name}.")
+        lines.append("Per migliorare la tua aura potresti coinvolgere più persone in canali diversi.")
     if degrade > 0:
         lines.append("Potresti bilanciare meglio i toni nei momenti di confronto acceso.")
     if msg_count < 5:
@@ -157,37 +132,34 @@ def build_aura_embeds(
     include_sections: list[str],
     details_title_prefix: str,
     details_embeds_max: int,
+    ledger_lines: list[str],
 ) -> list[discord.Embed]:
     main = discord.Embed(
         title=f"✨ RESOCONTO AURA \"{aura_payload.username}\"",
         color=0x5865F2,
-        description=f"🕒 {aura_payload.period_row}\n{aura_payload.period_label}",
+        description=f"**🕒 {aura_payload.period_line}**",
     )
     main.add_field(
         name=f"✨ KARMA \"{aura_payload.server_name}\"",
         value=(
-            f"{render_karma_bar(aura_payload.karma_server_percent)}\n"
-            f"**PUNTI AURA TOTALI:** {aura_payload.server_points_total}\n"
-            "Questi punti NON si resettano mai, sono accumulati dall’ingresso nel server.\n"
-            "Il risultato riflette come si è mosso il tuo contributo nel periodo richiesto."
+            f"{render_karma_bar(aura_payload.karma_server_percent)}\n\n"
+            f"**PUNTI AURA TOTALI:** {aura_payload.server_points_total}"
         ),
         inline=False,
     )
     main.add_field(
         name=f"✨ KARMA \"{aura_payload.channel_name}\"",
         value=(
-            f"{render_karma_bar(aura_payload.karma_channel_percent)}\n"
-            f"**PUNTI AURA CANALE:** {aura_payload.channel_points_month}\n"
-            "Questi punti si resettano a fine mese.\n"
-            "La stima mostra l’impatto locale nel canale del comando."
+            f"{render_karma_bar(aura_payload.karma_channel_percent)}\n\n"
+            f"**PUNTI AURA CANALE:** {aura_payload.channel_points_month}"
         ),
         inline=False,
     )
     main.add_field(
         name="📈 TREND",
         value=(
-            f"• Nel server in generale: **{_direction_label(aura_payload.trend.server_direction)}**. {aura_payload.trend.server_comment}\n"
-            f"• Nel \"{aura_payload.channel_name}\": **{_direction_label(aura_payload.trend.channel_direction)}**. {aura_payload.trend.channel_comment}"
+            f"• Nel server in generale: {_direction_label(aura_payload.trend.server_direction)}. {aura_payload.trend.server_comment}\n"
+            f"• Nel \"{aura_payload.channel_name}\": {_direction_label(aura_payload.trend.channel_direction)}. {aura_payload.trend.channel_comment}"
         ),
         inline=False,
     )
@@ -195,7 +167,7 @@ def build_aura_embeds(
 
     details_sections: list[tuple[str, str]] = []
     metrics = json.loads(aura_payload.metrics_json) if aura_payload.metrics_json else {}
-    details_sections.append(("🕹️ PUNTEGGI", _compact_bullets(_score_lines(aura_payload.ledger, channel_name=aura_payload.channel_name), fallback="Nessun dato rilevante nel periodo.")))
+    details_sections.append(("🕹️ PUNTEGGI", _compact_bullets(_score_lines(ledger_lines), fallback="Nessun dato rilevante nel periodo.")))
 
     if "details.missions" in include_sections:
         details_sections.append(("📜 MISSIONI QUOTIDIANE", _compact_bullets(_build_missions(metrics, aura_payload.archetype_metrics), fallback="Nessuna per oggi.")))
@@ -204,19 +176,7 @@ def build_aura_embeds(
     if "details.advice" in include_sections:
         details_sections.append(("🧭 CONSIGLI PERSONALIZZATI", _compact_bullets(_build_advice_lines(metrics, channel_name=aura_payload.channel_name), fallback="Nessun dato rilevante nel periodo.")))
     if "details.metrics_aggregated" in include_sections:
-        channel_metrics = json.loads(aura_payload.channel_metrics_json) if aura_payload.channel_metrics_json else {}
-        metrics_lines = [
-            f"volume messaggi: {int(metrics.get('msg_count', 0) or 0)}",
-            f"interazioni uniche: {int(metrics.get('unique_interactions', 0) or 0)}",
-            f"reply ricevute: {int(metrics.get('reply_received', 0) or 0)}",
-            f"consistency/quality_counter: {int(metrics.get('quality_counter', 0) or 0)}",
-            f"invigorate/degrade: {int(metrics.get('invigorate_events', 0) or 0)}/{int(metrics.get('degrade_events', 0) or 0)}",
-            f"delta clima: {int(metrics.get('invigorate_events', 0) or 0) - int(metrics.get('degrade_events', 0) or 0)}",
-            f"metriche server: msg={int(metrics.get('msg_count', 0) or 0)} unique={int(metrics.get('unique_interactions', 0) or 0)}",
-            f"metriche canale: msg={int(channel_metrics.get('msg_count', 0) or 0)} unique={int(channel_metrics.get('unique_interactions', 0) or 0)}",
-            f"trend precedente vs attuale: {aura_payload.trend.server_delta:+d}/{aura_payload.trend.channel_delta:+d}",
-        ]
-        details_sections.append((":bricks: METRICHE AGGREGATE", _compact_bullets(metrics_lines, fallback="Nessun dato rilevante nel periodo.")))
+        details_sections.append((":bricks: METRICHE AGGREGATE", "Dettagli completi nel file allegato."))
 
     if "details.note.role1" in include_sections:
         details_sections.append(("📌 NOTE", "• Per conoscere i dettagli sul tuo profilo personale e i consigli su come migliorare la tua aura, abbonati a un piano superiore PRO o PRO MAX. 😉"))
@@ -239,7 +199,8 @@ def build_aura_embeds(
     tier_label = tier_label_map.get(profile_name, profile_name.upper())
 
     for page_idx, chunk in enumerate(page_chunks, start=1):
-        embed = discord.Embed(title=f"🗒️ DETTAGLI AURA — \"{tier_label}\" (Pag {page_idx}/{total_pages})", color=0x2F3136)
+        prefix = details_title_prefix.strip() if details_title_prefix else "🗒️ DETTAGLI AURA"
+        embed = discord.Embed(title=f"{prefix} — \"{tier_label}\" (Pag {page_idx}/{total_pages})", color=0x2F3136)
         for name, value in chunk:
             for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
                 embed.add_field(name=name if part_idx == 0 else f"{name} (cont.)", value=piece, inline=False)
@@ -248,8 +209,4 @@ def build_aura_embeds(
 
     embeds = [main, *details]
     sanitized = _ensure_embed_limits(embeds, max_chars=MAX_EMBED_CHARS)
-    final: list[discord.Embed] = []
-    for emb in sanitized:
-        if _estimate_embed_size(emb) <= MAX_EMBED_CHARS:
-            final.append(emb)
-    return final
+    return [emb for emb in sanitized if _estimate_embed_size(emb) <= MAX_EMBED_CHARS]

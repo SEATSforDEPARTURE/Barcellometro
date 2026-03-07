@@ -6,8 +6,7 @@ def _payload() -> AuraRenderPayload:
         username="Mario",
         server_name="Barcellometro",
         channel_name="generale",
-        period_row="01/01/2026 00:00 → 01/01/2026 23:59",
-        period_label="Ultime 24 ore",
+        period_line="Ultime 24 ore 01/01/2026 00:00 → 01/01/2026 23:59",
         karma_server_percent=72,
         karma_channel_percent=61,
         server_points_total=120,
@@ -27,37 +26,33 @@ def _payload() -> AuraRenderPayload:
     )
 
 
-def test_build_aura_embeds_role1_sections_and_pagination() -> None:
+def test_first_embed_format_period_no_percent_and_no_extra_text() -> None:
     embeds = build_aura_embeds(
         profile_name="role1",
         aura_payload=_payload(),
         include_sections=["details.missions", "details.note.role1"],
         details_title_prefix="🗒️ DETTAGLI AURA",
         details_embeds_max=2,
+        ledger_lines=["**👍 +5 P.A.** test"],
     )
-
-    assert len(embeds) >= 2
-    assert "RESOCONTO AURA" in (embeds[0].title or "")
-    detail_title = embeds[1].title or ""
-    assert "PLUS" in detail_title
-    values = "\n".join(field.value for field in embeds[1].fields)
-    assert "MISSIONI" in "\n".join(field.name for field in embeds[1].fields)
-    assert "abbonati" in values.lower()
+    main = embeds[0]
+    assert main.description == "**🕒 Ultime 24 ore 01/01/2026 00:00 → 01/01/2026 23:59**"
+    all_values = "\n".join(f.value for f in main.fields)
+    assert "😇 70%" not in all_values
+    assert "Questi punti" not in all_values
 
 
-def test_build_aura_embeds_mod_includes_aggregated_metrics() -> None:
+def test_build_aura_embeds_mod_placeholder_for_metrics() -> None:
     embeds = build_aura_embeds(
         profile_name="mod",
         aura_payload=_payload(),
-        include_sections=["details.missions", "details.profile", "details.advice", "details.metrics_aggregated"],
+        include_sections=["details.metrics_aggregated"],
         details_title_prefix="🗒️ DETTAGLI AURA",
-        details_embeds_max=3,
+        details_embeds_max=2,
+        ledger_lines=["**👍 +5 P.A.** test"],
     )
-
-    assert len(embeds) >= 2
     detail_text = "\n".join(field.value for emb in embeds[1:] for field in emb.fields)
-    assert "volume messaggi" in detail_text
-    assert "trend precedente vs attuale" in detail_text
+    assert "Dettagli completi nel file allegato." in detail_text
 
 
 def test_build_aura_embeds_missions_can_be_empty_for_today() -> None:
@@ -69,6 +64,7 @@ def test_build_aura_embeds_missions_can_be_empty_for_today() -> None:
         include_sections=["details.missions"],
         details_title_prefix="🗒️ DETTAGLI AURA",
         details_embeds_max=1,
+        ledger_lines=["**👍 +5 P.A.** test"],
     )
     detail_values = "\n".join(field.value for field in embeds[1].fields)
     assert "Nessuna per oggi" in detail_values
