@@ -3013,6 +3013,18 @@ class DatabaseService:
         )
         return [{"reason_code": str(r["reason_code"]), "total": int(r["total"] or 0)} for r in rows]
 
+    async def sum_aura_points(self, guild_id: str, user_id: str, *, channel_id: str | None = None) -> int:
+        row = await self.fetchone(
+            """
+            SELECT SUM(delta_points) AS total
+            FROM aura_events_ledger
+            WHERE guild_id = ? AND user_id = ?
+              AND ((channel_id IS NULL AND ? IS NULL) OR channel_id = ?)
+            """,
+            (guild_id, user_id, channel_id, channel_id),
+        )
+        return int(row["total"] or 0) if row else 0
+
     async def upsert_archetype_profile(self, *, guild_id: str, user_id: str, period_days: int, archetype_scores_json: str, metrics_json: str, computed_at: str) -> None:
         await self.execute(
             """

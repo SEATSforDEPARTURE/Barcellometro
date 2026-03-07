@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+
 ROME_TZ = ZoneInfo("Europe/Rome")
 
 

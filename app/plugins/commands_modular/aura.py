@@ -9,11 +9,22 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
+from app.plugins.commands_modular.settings import get_setting
+from app.plugins.commands_modular.time_windows import (
+    TimeWindowResult,
+    build_period_label,
+    resolve_ieri_window,
+    resolve_oggi_window,
+    resolve_range_window,
+    resolve_ultimi_window,
+)
 from app.services.aura import compute_and_store_aura_result
-from app.services.aura_render import AuraRenderPayload, build_aura_embeds
+from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, build_aura_embeds
+from app.services.config_file_loader import load_json_file
+from app.services.barcello_window import resolve_default_window_minutes
 
 logger = logging.getLogger(__name__)
+BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
 def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -24,7 +35,42 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         else:
             await interaction.response.send_message(message, ephemeral=ephemeral)
 
-    async def _run(interaction: discord.Interaction, *, start_dt, end_dt, target_user: discord.Member | None = None) -> None:
+    async def _resolve_default_window_for_aura(interaction: discord.Interaction) -> TimeWindowResult:
+        raw_default = await get_setting(ctx, "barcello.default_window_minutes", "30")
+        trigger_config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        resolved = resolve_default_window_minutes(interaction.channel_id or 0, raw_default, trigger_config)
+        return resolve_ultimi_window(max(1, resolved), "minuti", ctx.config)[0] or resolve_oggi_window()
+
+    def _trend_direction(delta: int) -> tuple[str, str]:
+        if delta >= 3:
+            return "improving", "Segnali più costruttivi rispetto alla finestra precedente."
+        if delta <= -3:
+            return "worsening", "Sono emersi più attriti rispetto alla finestra precedente."
+        return "stable", "Andamento vicino alla finestra precedente."
+
+    async def _compute_or_fetch_result(*, guild_id: str, user_id: str, start_ts: str, end_ts: str, channel_id: str | None):
+        row = await ctx.database.fetch_latest_aura_result_covering_window(guild_id, user_id, start_ts, end_ts, channel_id=channel_id)
+        if row is None:
+            await compute_and_store_aura_result(
+                ctx.database,
+                guild_id=guild_id,
+                user_id=user_id,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                channel_id=channel_id,
+                reason_code="ondemand.aggregate" if channel_id is None else None,
+            )
+            row = await ctx.database.fetch_latest_aura_result(guild_id, user_id, start_ts, end_ts, channel_id=channel_id)
+        return row
+
+    async def _run(
+        interaction: discord.Interaction,
+        *,
+        start_dt,
+        end_dt,
+        period_label: str,
+        target_user: discord.Member | None = None,
+    ) -> None:
         if interaction.guild_id is None:
             await send_ephemeral(interaction, "Comando disponibile solo in un server.")
             return
@@ -33,13 +79,14 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "aura", ctx):
             return
 
-        member = target_user or interaction.user
         aura_cfg = await ctx.entitlements.get_feature_profile_config(interaction.user, "aura")
         caller_profile, _ = await ctx.entitlements.resolve_profile_with_role_id(interaction.user)
         limits = aura_cfg.get("limits", {}) if isinstance(aura_cfg, dict) else {}
-        if target_user is not None and not bool(limits.get("allow_target_user", False)):
-            await send_ephemeral(interaction, "Il tuo tier non permette target user per /aura.")
+        can_target = bool(limits.get("allow_target_user", False)) or caller_profile == "mod"
+        if target_user is not None and not can_target:
+            await send_ephemeral(interaction, "Puoi usare /aura solo sul tuo profilo.")
             return
+        member = target_user or interaction.user
 
         start_utc = start_dt.astimezone(timezone.utc).replace(second=0, microsecond=0)
         end_utc = end_dt.astimezone(timezone.utc).replace(second=0, microsecond=0)
@@ -47,6 +94,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         end_ts = end_utc.isoformat()
         guild_id = str(interaction.guild_id)
         user_id = str(member.id)
+        channel_id = str(interaction.channel_id) if interaction.channel_id else None
 
         eligibility = await ctx.aura_eligibility.evaluate_member(member, guild_id, start_ts, end_ts)
         if not eligibility.eligible:
@@ -56,46 +104,81 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
-        row = await ctx.database.fetch_latest_aura_result_covering_window(guild_id, user_id, start_ts, end_ts, channel_id=None)
-        if row is None:
-            logger.info("aura ondemand compute: guild=%s user=%s start=%s end=%s", guild_id, user_id, start_ts, end_ts)
-            await compute_and_store_aura_result(
-                ctx.database,
-                guild_id=guild_id,
-                user_id=user_id,
-                start_ts=start_ts,
-                end_ts=end_ts,
-                channel_id=None,
-                reason_code="ondemand.aggregate",
-            )
-            row = await ctx.database.fetch_latest_aura_result(guild_id, user_id, start_ts, end_ts, channel_id=None)
-        if row is None:
-            error_embed = discord.Embed(
-                title="✨ RESOCONTO AURA",
-                description="Impossibile calcolare Aura per il periodo richiesto. Potrebbero non esserci dati sufficienti oppure il calcolo non ha prodotto output.",
-                color=0xED4245,
-            )
-            error_embed.add_field(name="Periodo", value=f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}", inline=False)
-            await interaction.followup.send(embed=error_embed, ephemeral=True)
+        server_row = await _compute_or_fetch_result(guild_id=guild_id, user_id=user_id, start_ts=start_ts, end_ts=end_ts, channel_id=None)
+        channel_row = await _compute_or_fetch_result(guild_id=guild_id, user_id=user_id, start_ts=start_ts, end_ts=end_ts, channel_id=channel_id)
+        if server_row is None:
+            await send_ephemeral(interaction, "Impossibile calcolare Aura nel periodo richiesto.")
             return
+
+        duration = end_utc - start_utc
+        prev_end = start_utc
+        prev_start = prev_end - duration
+        prev_server = await ctx.database.fetch_aura_metrics(guild_id, user_id, prev_start.isoformat(), prev_end.isoformat(), channel_id=None)
+        cur_server = await ctx.database.fetch_aura_metrics(guild_id, user_id, start_ts, end_ts, channel_id=None)
+        prev_channel = await ctx.database.fetch_aura_metrics(guild_id, user_id, prev_start.isoformat(), prev_end.isoformat(), channel_id=channel_id)
+        cur_channel = await ctx.database.fetch_aura_metrics(guild_id, user_id, start_ts, end_ts, channel_id=channel_id)
+        server_delta = (cur_server.get("invigorate_events", 0) - cur_server.get("degrade_events", 0)) - (
+            prev_server.get("invigorate_events", 0) - prev_server.get("degrade_events", 0)
+        )
+        channel_delta = (cur_channel.get("invigorate_events", 0) - cur_channel.get("degrade_events", 0)) - (
+            prev_channel.get("invigorate_events", 0) - prev_channel.get("degrade_events", 0)
+        )
+        server_dir, server_comment = _trend_direction(server_delta)
+        channel_dir, channel_comment = _trend_direction(channel_delta)
+
+        month_start = end_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        channel_month_row = await _compute_or_fetch_result(
+            guild_id=guild_id,
+            user_id=user_id,
+            start_ts=month_start.isoformat(),
+            end_ts=end_ts,
+            channel_id=channel_id,
+        )
 
         render_cfg = aura_cfg.get("render", {}) if isinstance(aura_cfg, dict) else {}
         sections = render_cfg.get("sections", []) if isinstance(render_cfg.get("sections", []), list) else []
         details_max = int(render_cfg.get("details_embeds_max", 1) or 1)
-        title_prefix = str(render_cfg.get("details_title_prefix", "✨ DETTAGLI AURA") or "✨ DETTAGLI AURA")
+        title_prefix = str(render_cfg.get("details_title_prefix", "🗒️ DETTAGLI AURA") or "🗒️ DETTAGLI AURA")
 
         ledger = await ctx.database.fetch_aura_ledger_aggregate(guild_id, user_id, start_ts, end_ts)
         archetype = await ctx.database.fetch_latest_archetype_profile(guild_id, user_id, period_days=30)
         archetype_metrics = json.loads(archetype["metrics_json"]) if archetype and archetype["metrics_json"] else {}
 
+        guild_name = interaction.guild.name if interaction.guild else "Server"
+        channel_name = interaction.channel.name if hasattr(interaction.channel, "name") and interaction.channel else "canale"
+        period_row = f"{start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}"
+        period_text = build_period_label(
+            period_label,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            start_ts=start_ts,
+            end_ts=end_ts,
+        )
+
         embeds = build_aura_embeds(
             profile_name=caller_profile,
             aura_payload=AuraRenderPayload(
-                period_label=f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}",
-                karma_percent=int(row["karma_percent"]),
-                metrics_json=str(row["metrics_json"] or "{}"),
+                username=member.display_name if isinstance(member, discord.Member) else getattr(member, "name", "Utente"),
+                server_name=guild_name,
+                channel_name=channel_name,
+                period_row=period_row,
+                period_label=period_text,
+                karma_server_percent=int(server_row["karma_percent"]),
+                karma_channel_percent=int(channel_row["karma_percent"]) if channel_row else int(server_row["karma_percent"]),
+                server_points_total=await ctx.database.sum_aura_points(guild_id, user_id, channel_id=None),
+                channel_points_month=int(channel_month_row["points_total"]) if channel_month_row else 0,
+                metrics_json=str(server_row["metrics_json"] or "{}"),
+                channel_metrics_json=str(channel_row["metrics_json"] or "{}") if channel_row else "{}",
                 ledger=ledger,
                 archetype_metrics=archetype_metrics if isinstance(archetype_metrics, dict) else {},
+                trend=AuraTrendInfo(
+                    server_direction=server_dir,
+                    server_comment=server_comment,
+                    channel_direction=channel_dir,
+                    channel_comment=channel_comment,
+                    server_delta=server_delta,
+                    channel_delta=channel_delta,
+                ),
             ),
             include_sections=sections,
             details_title_prefix=title_prefix,
@@ -113,37 +196,45 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             await interaction.followup.send("Non posso scriverti in DM. Abilita i DM dal server e riprova.", ephemeral=True)
 
     @aura_group.command(name="ultimi", description="Aura ultimi N periodi")
-    @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", utente="Utente target opzionale")
+    @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", utente="Utente target (solo mod)")
     @app_commands.choices(unita=[
         app_commands.Choice(name="minuti", value="minuti"),
         app_commands.Choice(name="ore", value="ore"),
         app_commands.Choice(name="giorni", value="giorni"),
         app_commands.Choice(name="settimane", value="settimane"),
     ])
-    async def aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str], utente: discord.Member | None = None) -> None:
-        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
-        if error:
-            await send_ephemeral(interaction, error)
-            return
-        assert window is not None
-        await _run(interaction, start_dt=window.start_dt, end_dt=window.end_dt, target_user=utente)
+    async def aura_ultimi(
+        interaction: discord.Interaction,
+        quantita: app_commands.Range[int, 1, 999] | None = None,
+        unita: app_commands.Choice[str] | None = None,
+        utente: discord.Member | None = None,
+    ) -> None:
+        if quantita is None or unita is None:
+            window = await _resolve_default_window_for_aura(interaction)
+        else:
+            window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+            if error:
+                await send_ephemeral(interaction, error)
+                return
+            assert window is not None
+        await _run(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ultimi", target_user=utente)
 
     @aura_group.command(name="oggi", description="Aura di oggi")
     async def aura_oggi(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
         w = resolve_oggi_window()
-        await _run(interaction, start_dt=w.start_dt, end_dt=w.end_dt, target_user=utente)
+        await _run(interaction, start_dt=w.start_dt, end_dt=w.end_dt, period_label="oggi", target_user=utente)
 
     @aura_group.command(name="ieri", description="Aura di ieri")
     async def aura_ieri(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
         w = resolve_ieri_window()
-        await _run(interaction, start_dt=w.start_dt, end_dt=w.end_dt, target_user=utente)
+        await _run(interaction, start_dt=w.start_dt, end_dt=w.end_dt, period_label="ieri", target_user=utente)
 
     @aura_group.command(name="range", description="Aura per intervallo")
-    @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)", utente="Utente target opzionale")
+    @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)", utente="Utente target (solo mod)")
     async def aura_range(interaction: discord.Interaction, da: str, a: str, utente: discord.Member | None = None) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:
             await send_ephemeral(interaction, error)
             return
         assert window is not None
-        await _run(interaction, start_dt=window.start_dt, end_dt=window.end_dt, target_user=utente)
+        await _run(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range", target_user=utente)

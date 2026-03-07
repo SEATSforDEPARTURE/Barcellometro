@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from app.services.aura import AuraEligibilityService, compute_and_store_aura_result, render_karma_bar
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
+from app.services.barcello_window import resolve_default_window_minutes
 
 
 class FakeDatabase:
@@ -75,7 +76,7 @@ def test_aura_entitlements_eligibility_gate_and_target_disabled_for_base() -> No
 
 
 def test_render_karma_bar_cursor_edges() -> None:
-    assert "🟣" in render_karma_bar(0)
+    assert "🔴" in render_karma_bar(0)
     assert render_karma_bar(0).endswith("0%")
     assert render_karma_bar(50).endswith("50%")
     assert render_karma_bar(100).endswith("100%")
@@ -158,3 +159,32 @@ def test_compute_and_store_aura_result_creates_missing_window_row() -> None:
         await db.close()
 
     run(_scenario())
+
+
+def test_resolve_default_window_minutes_matches_overrides() -> None:
+    trigger = {"channel_overrides": {"99": {"window_minutes": 45}}}
+    assert resolve_default_window_minutes("99", "30", trigger) == 45
+    assert resolve_default_window_minutes("100", "30", trigger) == 30
+    assert resolve_default_window_minutes("100", "bad", trigger) == 30
+
+
+def test_aura_entitlements_target_enabled_for_mod() -> None:
+    policies = {
+        "commands": {
+            "aura": {
+                "profiles": {
+                    "base": {"features": {"aura": {"enabled": True, "limits": {"allow_target_user": False}}}},
+                    "mod": {"features": {"aura": {"enabled": True, "limits": {"allow_target_user": True}}}},
+                }
+            }
+        }
+    }
+    settings = {
+        "entitlements.policies": json.dumps(policies),
+        "entitlements.profile_map": json.dumps({"profiles": {"base": {"priority": 0}}, "role_to_profile": {}}),
+        "mod.role_ids": "[]",
+    }
+    entitlements = EntitlementsService(FakeDatabase(settings=settings))
+    mod_member = FakeMember(id=99, roles=[], guild_permissions=FakePermissions(administrator=True))
+    aura_cfg = run(entitlements.get_feature_profile_config(mod_member, "aura"))
+    assert aura_cfg["limits"]["allow_target_user"] is True
