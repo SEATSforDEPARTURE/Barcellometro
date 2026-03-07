@@ -106,3 +106,31 @@ def test_build_aura_embeds_uses_custom_archetypes_and_missions_config(monkeypatc
     assert "Catalizzatore" in detail_text
     assert "Missione custom A" in detail_text
     assert "Consiglio custom 1" in detail_text
+
+
+def test_scores_section_can_skip_aggregate_lines() -> None:
+    embeds = build_aura_embeds(
+        profile_name="role1",
+        aura_payload=_payload(),
+        include_sections=["details.missions"],
+        details_title_prefix="🗒️ DETTAGLI AURA",
+        details_embeds_max=1,
+        ledger_lines=["Nessun evento aura dettagliato registrato nel periodo."],
+    )
+    detail_text = "\n".join(field.value for field in embeds[1].fields)
+    assert "Nessun evento aura dettagliato registrato nel periodo." in detail_text
+
+
+def test_mod_points_timeline_section_present() -> None:
+    payload = _payload()
+    payload.points_timeline_lines = ["**[07/03 08:00](https://discord.com/channels/1/2/3) — 😇 +12 P.A.** - Per aver scritto il primo buongiorno del server."]
+    embeds = build_aura_embeds(
+        profile_name="mod",
+        aura_payload=payload,
+        include_sections=["details.points_timeline"],
+        details_title_prefix="🗒️ DETTAGLI AURA",
+        details_embeds_max=1,
+        ledger_lines=["**👍 +1 P.A.** test"],
+    )
+    names = [f.name for f in embeds[1].fields]
+    assert any("PUNTI ATTRIBUITI E SOTTRATTI" in n for n in names)

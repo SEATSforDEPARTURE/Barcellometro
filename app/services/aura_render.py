@@ -41,6 +41,7 @@ class AuraRenderPayload:
     archetype_metrics: dict[str, object]
     trend: AuraTrendInfo
     assigned_missions: list[dict[str, Any]] | None = None
+    points_timeline_lines: list[str] | None = None
 
 
 def render_karma_bar(percent: int) -> str:
@@ -229,6 +230,8 @@ def build_aura_embeds(
         details_sections.append(("👤 PROFILO PERSONALE", _compact_bullets(_build_profile_lines(aura_payload.archetype_metrics, fallback_metrics=metrics), fallback="Nessun dato rilevante nel periodo.")))
     if "details.advice" in include_sections:
         details_sections.append(("🧭 CONSIGLI PERSONALIZZATI", _compact_bullets(_build_advice_lines(metrics, channel_name=aura_payload.channel_name), fallback="Nessun dato rilevante nel periodo.")))
+    if "details.points_timeline" in include_sections and aura_payload.points_timeline_lines is not None:
+        details_sections.append(("🧾 PUNTI ATTRIBUITI E SOTTRATTI", _compact_bullets(aura_payload.points_timeline_lines, fallback="Nessun dato rilevante nel periodo.")))
     if "details.metrics_aggregated" in include_sections:
         details_sections.append((":bricks: METRICHE AGGREGATE", "Dettagli completi nel file allegato."))
 

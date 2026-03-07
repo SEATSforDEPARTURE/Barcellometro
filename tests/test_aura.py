@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.aura import AuraEligibilityService, AuraScoringService, compute_and_store_aura_result, load_aura_rules, render_karma_bar
+from app.services.aura import AuraEligibilityService, AuraMissionService, AuraScoringService, compute_and_store_aura_result, load_aura_rules, normalize_text_for_matching, render_karma_bar
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.barcello_window import resolve_default_window_minutes
@@ -195,6 +195,7 @@ def test_aura_entitlements_target_enabled_for_mod() -> None:
 class FakeLedgerDB:
     def __init__(self) -> None:
         self.events = []
+        self.missions = []
 
     async def insert_aura_ledger_event(self, guild_id, user_id, channel_id, ts, reason_code, delta_points, meta):
         self.events.append({
@@ -206,6 +207,15 @@ class FakeLedgerDB:
             "delta_points": delta_points,
             "meta": meta,
         })
+
+    async def list_aura_missions_for_user(self, guild_id, user_id, start_ts, end_ts):
+        return self.missions
+
+    async def complete_aura_mission(self, **kwargs):
+        self.completed = kwargs
+
+    async def count_guild_good_morning_before(self, guild_id, day_iso, before_ts, keywords):
+        return 0
 
 
 def test_aura_scoring_service_records_positive_and_negative_deltas() -> None:
@@ -228,3 +238,43 @@ def test_load_aura_rules_contains_extended_reason_codes() -> None:
     rules = load_aura_rules()
     assert "first_message_of_day" in rules
     assert "cross_user_interaction" in rules
+
+
+def test_normalize_text_for_matching_good_morning_variants() -> None:
+    out = normalize_text_for_matching("Buongiornooooo a tuttI!!!")
+    assert "buongiorno" in out
+
+
+def test_mission_good_morning_completes_and_records_points(monkeypatch) -> None:
+    async def _scenario() -> None:
+        db = FakeLedgerDB()
+        db.missions = [
+            {
+                "mission_id": "good_morning",
+                "assigned_at": "2026-03-07T07:00:00+00:00",
+                "status": "assigned",
+                "reward_points": 12,
+                "meta": {"label": "Dai il buongiorno per prima."},
+            }
+        ]
+        scoring = AuraScoringService(db)  # type: ignore[arg-type]
+        service = AuraMissionService(db, scoring)  # type: ignore[arg-type]
+
+        def _fake_cfg():
+            return {"good_morning": {"start_hour": 5, "end_hour": 11, "keywords": ["buongiorno"]}}
+
+        monkeypatch.setattr("app.services.aura.load_aura_missions_config", _fake_cfg)
+
+        done = await service.process_message_for_missions(
+            guild_id="10",
+            user_id="1",
+            channel_id="99",
+            message_id="m1",
+            ts="2026-03-07T08:00:00+00:00",
+            content="Buongiornooooo raga",
+            mentions=[],
+        )
+        assert "good_morning" in done
+        assert len(db.events) >= 1
+
+    run(_scenario())

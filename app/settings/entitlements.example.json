@@ -226,6 +226,7 @@
                       "details.missions",
                       "details.profile",
                       "details.advice",
+                      "details.points_timeline",
                       "details.metrics_aggregated"
                     ]
                   },

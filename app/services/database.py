@@ -2971,6 +2971,33 @@ class DatabaseService:
         )
         return int(row["cnt"] or 0) if row else 0
 
+    async def count_user_distinct_channels_for_day(self, guild_id: str, user_id: str, day_iso: str) -> int:
+        row = await self.fetchone(
+            """
+            SELECT COUNT(DISTINCT channel_id) AS cnt
+            FROM messages
+            WHERE guild_id = ? AND author_id = ? AND substr(ts, 1, 10) = ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, user_id, day_iso),
+        )
+        return int(row["cnt"] or 0) if row else 0
+
+    async def count_guild_good_morning_before(self, guild_id: str, day_iso: str, before_ts: str, keywords: list[str]) -> int:
+        rows = await self.fetchall(
+            """
+            SELECT content FROM messages
+            WHERE guild_id = ? AND substr(ts, 1, 10) = ? AND ts < ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, day_iso, before_ts),
+        )
+        lowered = [str(k).lower() for k in keywords if str(k).strip()]
+        count = 0
+        for row in rows:
+            content = str(row["content"] or "").lower()
+            if any(k in content for k in lowered):
+                count += 1
+        return count
+
     async def upsert_aura_result(self, *, guild_id: str, user_id: str, channel_id: str | None, period_start: str, period_end: str, karma_percent: int, trend_delta: int, points_total: int, metrics_json: str, computed_at: str) -> None:
         await self.execute(
             """
@@ -3163,6 +3190,26 @@ class DatabaseService:
             VALUES (?, ?, ?, ?, ?, 'assigned', NULL, ?, ?)
             """,
             (guild_id, user_id, mission_id, assigned_at, due_date, int(reward_points), json.dumps(meta or {})),
+        )
+
+    async def complete_aura_mission(self, *, guild_id: str, user_id: str, mission_id: str, assigned_at: str, completed_at: str) -> None:
+        await self.execute(
+            """
+            UPDATE aura_mission_assignments
+            SET status = 'completed', completed_at = ?
+            WHERE guild_id = ? AND user_id = ? AND mission_id = ? AND assigned_at = ? AND status = 'assigned'
+            """,
+            (completed_at, guild_id, user_id, mission_id, assigned_at),
+        )
+
+    async def expire_aura_missions(self, *, guild_id: str, user_id: str, now_ts: str) -> None:
+        await self.execute(
+            """
+            UPDATE aura_mission_assignments
+            SET status = 'expired'
+            WHERE guild_id = ? AND user_id = ? AND status = 'assigned' AND due_date < ?
+            """,
+            (guild_id, user_id, now_ts),
         )
 
     async def list_aura_missions_for_user(self, guild_id: str, user_id: str, start_ts: str, end_ts: str) -> list[dict[str, Any]]:

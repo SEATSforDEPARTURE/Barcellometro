@@ -1,21 +1,15 @@
 {
   "archetypes": {
-    "agitatore": {
-      "label": "Agitatore",
-      "emoji": "🔥",
-      "description": "quando il ritmo cresce, tendi a spingere la discussione.",
-      "advice": ["Prova a rallentare nei momenti tesi."],
-      "missions": ["Scrivi un messaggio di mediazione in una discussione."],
-      "order": 1
-    },
-    "pacificatore": {
-      "label": "Pacificatore",
-      "emoji": "🌿",
-      "description": "mantieni equilibrio e ascolto nel confronto.",
-      "advice": ["Continua a coinvolgere utenti diversi."],
-      "missions": ["Coinvolgi due utenti che non interagiscono spesso."],
-      "order": 2
-    }
+    "agitatore": {"label": "Agitatore", "emoji": "🔥", "description": "spinge il ritmo della discussione", "advice": ["Rallenta nei momenti tesi."], "missions": ["calm_reply"], "order": 1},
+    "pacificatore": {"label": "Pacificatore", "emoji": "🌿", "description": "favorisce toni costruttivi", "advice": ["Continua a mediare con calma."], "missions": ["good_morning"], "order": 2},
+    "collante": {"label": "Collante", "emoji": "🧩", "description": "collega gruppi diversi", "advice": ["Coinvolgi utenti meno presenti."], "missions": ["talk_new_user"], "order": 3},
+    "esploratore_sociale": {"label": "Esploratore sociale", "emoji": "🧭", "description": "si muove tra canali e persone diverse", "advice": ["Mantieni varietà nelle interazioni."], "missions": ["cross_channel_presence"], "order": 4},
+    "presenza_costante": {"label": "Presenza costante", "emoji": "⏱️", "description": "attivo con regolarità", "advice": ["Bilancia volume e qualità."], "missions": ["balanced_participation"], "order": 5},
+    "mediatore": {"label": "Mediatore", "emoji": "⚖️", "description": "riduce tensioni locali", "advice": ["Continua a fare da ponte."], "missions": ["positive_recovery"], "order": 6},
+    "dominatore": {"label": "Dominatore", "emoji": "🦁", "description": "tende a monopolizzare la discussione", "advice": ["Lascia spazio ad altri utenti."], "missions": ["talk_new_user"], "order": 7},
+    "scintilla": {"label": "Scintilla", "emoji": "✨", "description": "accende nuove conversazioni", "advice": ["Usa la spinta in modo inclusivo."], "missions": ["conversation_starter"], "order": 8},
+    "ascoltatore": {"label": "Ascoltatore", "emoji": "👂", "description": "risponde con attenzione", "advice": ["Mantieni risposte utili."], "missions": ["helpful_reply"], "order": 9},
+    "equilibratore": {"label": "Equilibratore", "emoji": "🫶", "description": "bilancia energia e calma", "advice": ["Continua con ritmo sostenibile."], "missions": ["balanced_participation"], "order": 10}
   },
   "default_advice": [
     "Per migliorare la tua aura potresti coinvolgere più persone in canali diversi.",

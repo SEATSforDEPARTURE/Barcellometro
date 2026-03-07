@@ -95,6 +95,32 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             shown.append(f"**👎 - altri {abs(rem_sum)} P.A.**")
         return shown
 
+
+    def _points_timeline_lines(ledger_events: list[dict[str, object]], guild_id: str, channel_map: dict[str, str]) -> list[str]:
+        lines: list[str] = []
+        for event in ledger_events[:20]:
+            delta = int(event.get("delta_points", 0) or 0)
+            reason = str(event.get("reason_code", "evento"))
+            meta = event.get("meta", {}) if isinstance(event.get("meta"), dict) else {}
+            message_id = str(meta.get("message_id") or "")
+            channel_id = str(event.get("channel_id") or "")
+            ts = str(event.get("ts", ""))
+            try:
+                from datetime import datetime as _dt
+                dt = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+                ts_label = dt.strftime("%d/%m %H:%M")
+            except Exception:
+                ts_label = ts
+            if message_id and channel_id:
+                jump = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
+                head = f"[{ts_label}]({jump})"
+            else:
+                head = ts_label
+            side = "😇" if delta >= 0 else "😈"
+            label = aura_reason_to_human(reason)
+            lines.append(f"**{head} — {side} {delta:+d} P.A.** - {label}.")
+        return lines
+
     def _build_mod_metrics_txt(
         *,
         guild_id: str,
@@ -273,6 +299,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
                 ledger=ledger,
                 archetype_metrics=archetype_metrics if isinstance(archetype_metrics, dict) else {},
                 assigned_missions=missions_assigned,
+                points_timeline_lines=_points_timeline_lines(ledger_events, guild_id, channel_map) if caller_profile == "mod" and "details.points_timeline" in sections else None,
                 trend=AuraTrendInfo(
                     server_direction=server_dir,
                     server_comment=server_comment,

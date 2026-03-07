@@ -16,12 +16,15 @@ from app.services.entitlements import EntitlementsService
 logger = logging.getLogger(__name__)
 AURA_RULES_CONFIG_PATH = "app/settings/aura_rules.json"
 AURA_RULES_EXAMPLE_PATH = "app/settings/aura_rules.example.json"
+AURA_MISSIONS_CONFIG_PATH = "app/settings/aura_missions.json"
+AURA_MISSIONS_EXAMPLE_PATH = "app/settings/aura_missions.example.json"
 
 DEFAULT_AURA_RULES: dict[str, int] = {
     "first_message_of_day": 5,
     "reply_to_new_user": 8,
     "conversation_starter": 6,
     "cross_user_interaction": 7,
+    "cross_channel_participation": 8,
     "positive_climate_contribution": 10,
     "barcello_invigorate_bonus": 10,
     "climate_degrade": -10,
@@ -29,7 +32,15 @@ DEFAULT_AURA_RULES: dict[str, int] = {
     "low_diversity_penalty": -5,
     "barcello_degrade_penalty": -10,
     "voice_join_bonus": 4,
+    "voice_starter_bonus": 10,
+    "helpful_reply": 6,
+    "welcome_back_user": 7,
+    "balanced_presence_bonus": 9,
+    "high_diversity_bonus": 8,
+    "sustained_consistency_bonus": 10,
     "mission_completed": 15,
+    "spam_like_penalty": -8,
+    "tension_chain_penalty": -7,
 }
 
 AURA_REASON_HUMAN: dict[str, str] = {
@@ -45,6 +56,15 @@ AURA_REASON_HUMAN: dict[str, str] = {
     "low_diversity_penalty": "per bassa diversità nelle interazioni",
     "barcello_invigorate_bonus": "per aver contribuito a migliorare il barcello",
     "barcello_degrade_penalty": "per aver contribuito a degradare il barcello",
+    "cross_channel_participation": "per aver partecipato in canali diversi",
+    "voice_starter_bonus": "per essere entrato per primo in vocale",
+    "helpful_reply": "per una risposta utile e costruttiva",
+    "welcome_back_user": "per aver accolto un utente di ritorno",
+    "balanced_presence_bonus": "per presenza bilanciata e costante",
+    "high_diversity_bonus": "per alta diversità nelle interazioni",
+    "sustained_consistency_bonus": "per costanza positiva nel periodo",
+    "spam_like_penalty": "per comportamento simile a spam",
+    "tension_chain_penalty": "per aver alimentato una catena di tensione",
     "ondemand.aggregate": "bilancio complessivo del periodo",
     "batch.aggregate": "bilancio aggregato periodico",
 }
@@ -57,28 +77,6 @@ AURA_REASON_META: dict[str, dict[str, str]] = {
         "sign": "+" if DEFAULT_AURA_RULES.get(key, 0) >= 0 else "-",
     }
     for key, value in AURA_REASON_HUMAN.items()
-}
-
-DEFAULT_AURA_RULES: dict[str, int] = {
-    "first_message_of_day": 5,
-    "reply_to_new_user": 8,
-    "positive_climate_contribution": 10,
-    "climate_degrade": -10,
-    "monopoly_penalty": -6,
-    "voice_join_bonus": 4,
-    "mission_completed": 15,
-}
-
-AURA_REASON_HUMAN: dict[str, str] = {
-    "first_message_of_day": "per aver scritto per prima nel giorno",
-    "reply_to_new_user": "per aver risposto a una persona nuova",
-    "positive_climate_contribution": "per aver contribuito a un clima più costruttivo",
-    "climate_degrade": "per aver abbassato il clima in una discussione",
-    "monopoly_penalty": "per aver monopolizzato la conversazione",
-    "voice_join_bonus": "per aver partecipato in canale vocale",
-    "mission_completed": "per aver completato una missione giornaliera",
-    "ondemand.aggregate": "bilancio complessivo del periodo",
-    "batch.aggregate": "bilancio aggregato periodico",
 }
 
 
@@ -115,6 +113,177 @@ def load_aura_rules() -> dict[str, int]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def load_aura_missions_config() -> dict[str, Any]:
+    data = load_json_file(AURA_MISSIONS_CONFIG_PATH)
+    if not data:
+        data = load_json_file(AURA_MISSIONS_EXAMPLE_PATH)
+    if not isinstance(data, dict):
+        return {"max_per_day": 3, "missions": []}
+    return data
+
+
+def normalize_text_for_matching(text: str) -> str:
+    raw = " ".join((text or "").lower().split())
+    chars: list[str] = []
+    prev = ""
+    streak = 0
+    for ch in raw:
+        if ch == prev:
+            streak += 1
+        else:
+            streak = 1
+            prev = ch
+        if streak <= 2:
+            chars.append(ch)
+    return "".join(chars)
+
+
+class AuraMissionService:
+    def __init__(self, database: DatabaseService, scoring: AuraScoringService) -> None:
+        self._db = database
+        self._scoring = scoring
+
+    async def assign_daily_missions_for_user(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        ts: str,
+        metrics: dict[str, int] | None = None,
+    ) -> list[dict[str, Any]]:
+        cfg = load_aura_missions_config()
+        mission_defs = cfg.get("missions", []) if isinstance(cfg.get("missions", []), list) else []
+        if not mission_defs:
+            return []
+        current_day = datetime.fromisoformat(ts).date().isoformat()
+        active = await self._db.list_aura_missions_for_user(guild_id, user_id, f"{current_day}T00:00:00+00:00", f"{current_day}T23:59:59+00:00")
+        existing_ids = {str(item.get("mission_id")) for item in active}
+        max_per_day = int(cfg.get("max_per_day", 3) or 3)
+        remaining = max(0, max_per_day - len(existing_ids))
+        if remaining <= 0:
+            return active
+
+        chosen: list[dict[str, Any]] = []
+        m = metrics or {}
+        unique = int(m.get("unique_interactions", 0) or 0)
+        degrade = int(m.get("degrade_events", 0) or 0)
+        msg_count = int(m.get("msg_count", 0) or 0)
+        for item in mission_defs:
+            if remaining <= 0:
+                break
+            if not isinstance(item, dict) or not bool(item.get("enabled", True)):
+                continue
+            mission_id = str(item.get("id", "")).strip()
+            if not mission_id or mission_id in existing_ids:
+                continue
+            cond = str(item.get("condition", "always")).strip().lower()
+            ok = cond == "always"
+            if cond == "low_diversity":
+                ok = unique < 2
+            elif cond == "tension":
+                ok = degrade > 0
+            elif cond == "high_activity":
+                ok = msg_count >= 8
+            if not ok:
+                continue
+            due = f"{current_day}T23:59:59+00:00"
+            reward = int(item.get("bonus_points", 0) or 0)
+            await self._db.assign_aura_mission(
+                guild_id=guild_id,
+                user_id=user_id,
+                mission_id=mission_id,
+                assigned_at=ts,
+                due_date=due,
+                reward_points=reward,
+                meta={"label": str(item.get("text", mission_id)), "config": item},
+            )
+            chosen.append({"mission_id": mission_id, "reward_points": reward})
+            existing_ids.add(mission_id)
+            remaining -= 1
+        return chosen
+
+    async def process_message_for_missions(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        channel_id: str,
+        message_id: str,
+        ts: str,
+        content: str,
+        mentions: list[str],
+    ) -> list[str]:
+        now = datetime.fromisoformat(ts)
+        day = now.date().isoformat()
+        active = await self._db.list_aura_missions_for_user(guild_id, user_id, f"{day}T00:00:00+00:00", f"{day}T23:59:59+00:00")
+        completed: list[str] = []
+        normalized = normalize_text_for_matching(content)
+        for mission in active:
+            if mission.get("status") != "assigned":
+                continue
+            mission_id = str(mission.get("mission_id", ""))
+            reward = int(mission.get("reward_points", 0) or 0)
+            meta = mission.get("meta", {}) if isinstance(mission.get("meta"), dict) else {}
+            if mission_id == "good_morning":
+                cfg = load_aura_missions_config()
+                gm = cfg.get("good_morning", {}) if isinstance(cfg, dict) else {}
+                start_hour = int(gm.get("start_hour", 5) or 5)
+                end_hour = int(gm.get("end_hour", 11) or 11)
+                keywords = [str(x).lower() for x in gm.get("keywords", ["buongiorno", "buon giorno"]) if str(x).strip()]
+                if now.hour < start_hour or now.hour > end_hour:
+                    continue
+                if not any(k in normalized for k in keywords):
+                    continue
+                if await self._db.count_guild_good_morning_before(guild_id, day, ts, keywords) != 0:
+                    continue
+            elif mission_id == "talk_new_user":
+                if len(set(mentions)) < 1:
+                    continue
+            elif mission_id == "cross_channel_presence":
+                req = int(meta.get("config", {}).get("require_channels_count", 2) if isinstance(meta.get("config"), dict) else 2)
+                channels = await self._db.count_user_distinct_channels_for_day(guild_id, user_id, day)
+                if channels < req:
+                    continue
+            elif mission_id == "balanced_participation":
+                req = int(meta.get("config", {}).get("require_messages", 8) if isinstance(meta.get("config"), dict) else 8)
+                msg_count = await self._db.count_user_messages_for_day(guild_id, user_id, day)
+                if msg_count < req:
+                    continue
+            elif mission_id == "voice_starter":
+                continue
+
+            await self._db.complete_aura_mission(guild_id=guild_id, user_id=user_id, mission_id=mission_id, assigned_at=str(mission.get("assigned_at")), completed_at=ts)
+            await self._scoring.apply_rule(
+                guild_id=guild_id,
+                user_id=user_id,
+                rule_code="mission_completed",
+                ts=ts,
+                channel_id=channel_id,
+                message_id=message_id,
+                source_service="mission",
+                source_event="mission.completed",
+                meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id), "matched_keyword": "buongiorno" if mission_id == "good_morning" else None},
+            )
+            if reward > 0:
+                await self._scoring.award_points(
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    reason_code="good_morning_first" if mission_id == "good_morning" else "mission_completed",
+                    ts=ts,
+                    channel_id=channel_id,
+                    points=reward,
+                    message_id=message_id,
+                    source_service="mission",
+                    source_event="mission.reward",
+                    meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id)},
+                )
+            completed.append(mission_id)
+        return completed
+
+    async def expire_missions(self, *, guild_id: str, user_id: str, ts: str) -> None:
+        await self._db.expire_aura_missions(guild_id=guild_id, user_id=user_id, now_ts=ts)
 
 
 class AuraScoringService:
@@ -305,8 +474,9 @@ class AuraRollingStatsService:
     def __init__(self, database: DatabaseService) -> None:
         self._db = database
         self._scoring = AuraScoringService(database)
+        self._missions = AuraMissionService(database, self._scoring)
 
-    async def on_message_saved(self, *, guild_id: str, channel_id: str, user_id: str, ts: str, mentions: list[str], message_id: str | None = None) -> None:
+    async def on_message_saved(self, *, guild_id: str, channel_id: str, user_id: str, ts: str, mentions: list[str], message_id: str | None = None, content: str = "") -> None:
         window_key = datetime.fromisoformat(ts).date().isoformat()
         await self._db.upsert_aura_rolling_on_message(
             guild_id=guild_id,
@@ -337,6 +507,19 @@ class AuraRollingStatsService:
                 source_service="discord_adapter",
                 source_event="message.mentions",
                 meta={"mentions_count": len(set(mentions))},
+            )
+        metrics_today = await self._db.fetch_aura_metrics(guild_id, user_id, f"{window_key}T00:00:00+00:00", f"{window_key}T23:59:59+00:00", channel_id=None)
+        await self._missions.expire_missions(guild_id=guild_id, user_id=user_id, ts=ts)
+        await self._missions.assign_daily_missions_for_user(guild_id=guild_id, user_id=user_id, ts=ts, metrics=metrics_today)
+        if message_id:
+            await self._missions.process_message_for_missions(
+                guild_id=guild_id,
+                user_id=user_id,
+                channel_id=channel_id,
+                message_id=message_id,
+                ts=ts,
+                content=content,
+                mentions=mentions,
             )
 
     async def on_barcello_event(self, *, guild_id: str, ts: str, invigorate: bool) -> None:

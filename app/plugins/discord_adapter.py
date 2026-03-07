@@ -292,6 +292,7 @@ def setup(registry: ServiceRegistry) -> None:
                 ts=ts,
                 mentions=[str(user.id) for user in message.mentions],
                 message_id=str(message.id),
+                content=content_redacted,
             )
         if voice_meta:
             await emit_event(
