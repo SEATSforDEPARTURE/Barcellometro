@@ -11,3 +11,13 @@ def resolve_window_minutes(channel_id: int | str, *, default_window: int, trigge
     if isinstance(override_window, int) and not isinstance(override_window, bool) and override_window > 0:
         return override_window
     return resolved_default
+
+
+def resolve_default_window_minutes(channel_id: int | str, raw_default: str | int | None, trigger_config: dict[str, Any]) -> int:
+    try:
+        default_window = int(raw_default) if raw_default is not None else 30
+    except (TypeError, ValueError):
+        default_window = 30
+    if default_window <= 0:
+        default_window = 30
+    return resolve_window_minutes(channel_id, default_window=default_window, trigger_config=trigger_config)

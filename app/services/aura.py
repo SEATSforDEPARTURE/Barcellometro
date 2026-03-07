@@ -23,11 +23,12 @@ class AuraEligibilityResult:
 
 def render_karma_bar(percent: int) -> str:
     value = max(0, min(100, int(percent)))
-    width = 13
-    cursor_idx = int(round((value / 100) * (width - 1)))
-    cells = ["━"] * width
-    cells[cursor_idx] = "🟣"
-    return f"😈{''.join(cells)}😇  {value}%"
+    center = "🟢"
+    if value < 35:
+        center = "🔴"
+    elif value < 67:
+        center = "🟡"
+    return f"😈━━━━━━━━{center}━━━━😇  {value}%"
 
 
 class AuraEligibilityService:
