@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import importlib
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import discord
 
-from app.vendor.voice_recv import VendorVoiceReceive
+from app.vendor.voice_recv import DecodeErrorContext, VendorVoiceReceive
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +21,22 @@ class AdapterDecodeCounters:
     invalid_argument_count: int = 0
 
 
+@dataclass
+class VoiceStackCompatibilityReport:
+    available: bool
+    compatible: bool
+    discord_version: str
+    voice_recv_version: str
+    davey_version: str
+    reasons: list[str]
+
+
 class VoiceReceiveAdapter:
     """Application-facing adapter exposing a stable receive API."""
+
+    MIN_DISCORD_VERSION = (2, 7, 0)
+    MIN_VOICE_RECV_VERSION = (0, 5, 2)
+    MIN_DAVEY_VERSION = (0, 2, 0)
 
     def __init__(self) -> None:
         self._vendor = VendorVoiceReceive()
@@ -28,6 +44,77 @@ class VoiceReceiveAdapter:
         self._sink: Any = None
         self._attached_client_id: Optional[int] = None
         self._decode_counters = AdapterDecodeCounters()
+
+    @staticmethod
+    def _parse_version_parts(version: str) -> tuple[int, int, int]:
+        if not version:
+            return (0, 0, 0)
+        parts = re.findall(r"\d+", version)
+        if not parts:
+            return (0, 0, 0)
+        numbers = [int(p) for p in parts[:3]]
+        while len(numbers) < 3:
+            numbers.append(0)
+        return tuple(numbers)  # type: ignore[return-value]
+
+    @staticmethod
+    def _is_prerelease(version: str) -> bool:
+        return bool(re.search(r"[a-zA-Z]", version or ""))
+
+    @staticmethod
+    def _version_lt(version: str, minimum: tuple[int, int, int]) -> bool:
+        parsed = VoiceReceiveAdapter._parse_version_parts(version)
+        if parsed < minimum:
+            return True
+        if parsed == minimum and VoiceReceiveAdapter._is_prerelease(version):
+            return True
+        return False
+
+    @staticmethod
+    def _fmt_minimum(minimum: tuple[int, int, int]) -> str:
+        return ".".join(str(v) for v in minimum)
+
+    def get_voice_stack_report(self) -> VoiceStackCompatibilityReport:
+        reasons: list[str] = []
+        discord_version = getattr(discord, "__version__", "unknown")
+        voice_recv_version = "missing"
+        davey_version = "missing"
+
+        if self._version_lt(discord_version, self.MIN_DISCORD_VERSION):
+            reasons.append(
+                f"discord.py={discord_version} < {self._fmt_minimum(self.MIN_DISCORD_VERSION)}"
+            )
+
+        voice_recv_available = False
+        try:
+            voice_recv = importlib.import_module("discord.ext.voice_recv")
+            voice_recv_version = getattr(voice_recv, "__version__", "unknown")
+            voice_recv_available = True
+            if self._version_lt(voice_recv_version, self.MIN_VOICE_RECV_VERSION):
+                reasons.append(
+                    f"discord-ext-voice-recv={voice_recv_version} < {self._fmt_minimum(self.MIN_VOICE_RECV_VERSION)}"
+                )
+        except Exception:
+            reasons.append("discord.ext.voice_recv module missing")
+
+        try:
+            davey = importlib.import_module("davey")
+            davey_version = getattr(davey, "__version__", "unknown")
+            if self._version_lt(davey_version, self.MIN_DAVEY_VERSION):
+                reasons.append(f"davey={davey_version} < {self._fmt_minimum(self.MIN_DAVEY_VERSION)}")
+        except Exception:
+            reasons.append("davey module missing")
+
+        compatible = len(reasons) == 0
+        available = voice_recv_available
+        return VoiceStackCompatibilityReport(
+            available=available,
+            compatible=compatible,
+            discord_version=discord_version,
+            voice_recv_version=voice_recv_version,
+            davey_version=davey_version,
+            reasons=reasons,
+        )
 
     def _classify_decode_error(self, exc: Exception) -> Optional[str]:
         message = str(exc).lower()
@@ -37,14 +124,31 @@ class VoiceReceiveAdapter:
             return "opus"
         return None
 
-    def _build_decode_error_handler(self, on_decode_error: Callable[[Exception, str], None]) -> Callable[[Exception, str], None]:
-        def _on_decode_error(exc: Exception, source: str) -> None:
+    def _build_decode_error_handler(
+        self,
+        on_decode_error: Callable[[Exception, DecodeErrorContext], None],
+    ) -> Callable[[Exception, DecodeErrorContext], None]:
+        def _on_decode_error(exc: Exception, context: DecodeErrorContext) -> None:
             decode_type = self._classify_decode_error(exc)
             if decode_type == "crypto":
-                logger.error("Voice receive adapter crypto decode failure source=%s error=%s", source, type(exc).__name__)
+                logger.error(
+                    "Voice receive adapter crypto decode failure source=%s error=%s user=%s ssrc=%s payload_size=%s",
+                    context.source,
+                    type(exc).__name__,
+                    context.user_id,
+                    context.ssrc,
+                    context.payload_size,
+                )
             elif decode_type == "opus":
-                logger.warning("Voice receive adapter opus decode failure source=%s error=%s", source, type(exc).__name__)
-            on_decode_error(exc, source)
+                logger.warning(
+                    "Voice receive adapter opus decode failure source=%s error=%s user=%s ssrc=%s payload_size=%s",
+                    context.source,
+                    type(exc).__name__,
+                    context.user_id,
+                    context.ssrc,
+                    context.payload_size,
+                )
+            on_decode_error(exc, context)
 
         return _on_decode_error
 
@@ -63,14 +167,15 @@ class VoiceReceiveAdapter:
         return self._attached_client_id == id(voice_client)
 
     def available(self) -> bool:
-        return self._vendor.available()
+        report = self.get_voice_stack_report()
+        return report.available and report.compatible
 
     async def connect_and_listen(
         self,
         *,
         channel: discord.VoiceChannel,
         on_pcm_frame: Callable[[Optional[discord.User], Any], None],
-        on_decode_error: Callable[[Exception, str], None],
+        on_decode_error: Callable[[Exception, DecodeErrorContext], None],
     ) -> discord.VoiceClient:
         from discord.ext import voice_recv  # type: ignore
 
@@ -98,7 +203,7 @@ class VoiceReceiveAdapter:
         voice_client: discord.VoiceClient,
         voice_recv_module: Any,
         on_pcm_frame: Callable[[Optional[discord.User], Any], None],
-        on_decode_error: Callable[[Exception, str], None],
+        on_decode_error: Callable[[Exception, DecodeErrorContext], None],
     ) -> bool:
         if self.listener_attached(voice_client):
             return False

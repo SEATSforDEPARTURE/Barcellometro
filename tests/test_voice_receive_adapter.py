@@ -6,6 +6,7 @@ from typing import Any
 import asyncio
 
 from app.services.voice_receive_adapter import VoiceReceiveAdapter
+from app.vendor.voice_recv import DecodeErrorContext
 
 
 class DummyOpusError(Exception):
@@ -14,7 +15,7 @@ class DummyOpusError(Exception):
 
 def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[Any, Any, Any, Any]:
     module = types.ModuleType("discord.ext.voice_recv")
-    module.__version__ = "test"
+    module.__version__ = "0.5.2"
     module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv", loader=None)
 
     class AudioSink:
@@ -88,6 +89,7 @@ def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[An
     sys.modules["discord.ext.voice_recv.router"] = router_module
     sys.modules["discord.ext.voice_recv.reader"] = reader_module
     sys.modules["discord.ext.voice_recv.opus"] = opus_module
+    sys.modules["davey"] = types.SimpleNamespace(__version__="0.2.0")
 
     class FakeVoiceClient:
         def __init__(self) -> None:
@@ -123,8 +125,8 @@ def test_corrupted_stream_does_not_kill_router_loop() -> None:
     adapter = VoiceReceiveAdapter()
     errors: list[str] = []
 
-    def on_decode_error(exc: Exception, source: str) -> None:
-        errors.append(f"{source}:{exc}")
+    def on_decode_error(exc: Exception, context: DecodeErrorContext) -> None:
+        errors.append(f"{context.source}:{exc}")
 
     channel = FakeChannel()
     client = asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=on_decode_error))
@@ -150,8 +152,8 @@ def test_invalid_argument_sink_error_is_dropped_without_fake_pcm() -> None:
     def on_frame(_user: Any, _data: Any) -> None:
         raise DummyOpusError("invalid argument")
 
-    def on_decode_error(exc: Exception, source: str) -> None:
-        errors.append(f"{source}:{exc}")
+    def on_decode_error(exc: Exception, context: DecodeErrorContext) -> None:
+        errors.append(f"{context.source}:{exc}")
 
     channel = FakeChannel()
     client = asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=on_frame, on_decode_error=on_decode_error))
@@ -261,8 +263,8 @@ def test_packet_level_decode_error_is_handled_without_fallback() -> None:
     adapter = VoiceReceiveAdapter()
     errors: list[str] = []
 
-    def on_decode_error(exc: Exception, source: str) -> None:
-        errors.append(f"{source}:{exc}")
+    def on_decode_error(exc: Exception, context: DecodeErrorContext) -> None:
+        errors.append(f"{context.source}:{exc}")
 
     channel = FakeChannel()
     asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=on_decode_error))
@@ -285,3 +287,37 @@ def test_crypto_and_opus_errors_are_classified_in_vendor_counters() -> None:
     assert counters.crypto_decode_errors == 1
     assert counters.opus_corrupted_total == 1
     assert counters.corrupted_stream_count == 1
+
+
+def test_stack_report_detects_pre_release_and_old_davey(monkeypatch: Any) -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    import discord
+    monkeypatch.setattr(discord, "__version__", "2.7.1")
+    sys.modules["discord.ext.voice_recv"].__version__ = "0.5.2a"
+    sys.modules["davey"] = types.SimpleNamespace(__version__="0.1.4")
+
+    report = adapter.get_voice_stack_report()
+
+    assert report.available is True
+    assert report.compatible is False
+    assert any("discord-ext-voice-recv=0.5.2a < 0.5.2" in reason for reason in report.reasons)
+    assert any("davey=0.1.4 < 0.2.0" in reason for reason in report.reasons)
+
+
+def test_decode_context_extracts_payload_user_and_ssrc() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    class BrokenPacket:
+        def __init__(self) -> None:
+            self.user_id = 44
+            self.ssrc = 55
+            self.payload = b"xyz"
+
+    context = adapter._vendor._extract_decode_error_context(source="test.pop_data", args=(BrokenPacket(),), kwargs={})
+
+    assert context.user_id == 44
+    assert context.ssrc == 55
+    assert context.payload_size == 3

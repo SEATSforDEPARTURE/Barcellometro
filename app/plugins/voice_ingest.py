@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import importlib
 import importlib.util
 import logging
@@ -22,6 +23,7 @@ import aiosqlite
 from app.core.service_registry import ServiceRegistry
 from app.services.ingest import EventEnvelope, IngestService
 from app.services.voice_receive_adapter import VoiceReceiveAdapter
+from app.vendor.voice_recv import DecodeErrorContext
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,11 @@ CRITICAL_CORRUPTION_RATIO = 0.70
 MIN_WAV_SECONDS = 0.6
 OPUS_WARNING_LOG_FIRST = 3
 OPUS_SUMMARY_LOG_INTERVAL_SEC = 30
+DECODE_STORM_WINDOW_SEC = 6.0
+DECODE_STORM_ERROR_THRESHOLD = 24
+DECODE_STORM_NO_PCM_SEC = 4.0
+DECODE_STORM_RECONNECT_BACKOFF_SEC = 1.2
+MAX_DECODE_STORM_RECOVERIES = 1
 DEFAULT_MIN_SPEECH_RATIO = 0.20
 DEFAULT_MIN_AVG_RMS = 250.0
 DEFAULT_FRAME_SILENCE_RMS = 220.0
@@ -178,6 +185,27 @@ def _get_configured_max_corruption_ratio() -> float:
 def _count_error_matches(error_counts: dict[str, int], needle: str) -> int:
     n = needle.lower()
     return sum(count for key, count in error_counts.items() if n in key.lower())
+
+
+def _is_decode_corruption_storm(
+    *,
+    error_count_in_window: int,
+    window_sec: float,
+    threshold: int,
+    processed_chunks: int,
+    last_pcm_frame_ts: float,
+    now_ts: float,
+    no_pcm_sec: float,
+) -> bool:
+    if window_sec <= 0 or threshold <= 0:
+        return False
+    if error_count_in_window < threshold:
+        return False
+    if processed_chunks > 0:
+        return False
+    if last_pcm_frame_ts <= 0:
+        return True
+    return (now_ts - last_pcm_frame_ts) >= no_pcm_sec
 def _estimate_chunk_duration(stats: _ChunkStats, chunk_seconds: int) -> float:
     if stats.first_frame_ts > 0 and stats.last_frame_ts >= stats.first_frame_ts:
         return max(0.0, stats.last_frame_ts - stats.first_frame_ts)
@@ -447,6 +475,10 @@ def setup(registry: ServiceRegistry) -> None:
     consecutive_discarded_chunks = 0
     max_consecutive_discarded_chunks = 0
     voice_receive_adapter = VoiceReceiveAdapter()
+    decode_error_window: deque[float] = deque()
+    last_pcm_frame_ts = 0.0
+    decode_storm_recovery_count = 0
+    decode_storm_recovery_in_progress = False
     configured_max_corruption_ratio = _get_configured_max_corruption_ratio()
     logger.info(
         "Voice ingest quality config %s=%s",
@@ -454,8 +486,41 @@ def setup(registry: ServiceRegistry) -> None:
         configured_max_corruption_ratio,
     )
 
-    def _spec_available() -> bool:
-        return voice_receive_adapter.available()
+    def _clear_voice_runtime_buffers(*, keep_counters: bool = False) -> None:
+        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count
+        audio_buffers_by_user.clear()
+        audio_buffers_by_ssrc.clear()
+        chunk_stats_by_user.clear()
+        chunk_stats_by_ssrc.clear()
+        audio_buffer_start_by_user.clear()
+        audio_buffer_start_by_ssrc.clear()
+        if not keep_counters:
+            opus_corrupted_count = 0
+            opus_last_summary_ts = 0.0
+            opus_error_type_counts.clear()
+            decode_errors_by_user.clear()
+            decode_errors_by_ssrc.clear()
+            opus_payload_size_min = None
+            opus_payload_size_max = None
+            opus_payload_size_total = 0
+            opus_payload_size_count = 0
+        decode_error_window.clear()
+
+    def _spec_available(*, guild_id: Optional[int] = None, channel_id: Optional[int] = None, reason: str = "runtime") -> bool:
+        report = voice_receive_adapter.get_voice_stack_report()
+        if report.compatible:
+            return True
+        logger.error(
+            "Voice ingest runtime stack incompatible guild=%s channel=%s reason=%s discord.py=%s voice_recv=%s davey=%s details=%s",
+            guild_id,
+            channel_id,
+            reason,
+            report.discord_version,
+            report.voice_recv_version,
+            report.davey_version,
+            report.reasons,
+        )
+        return False
 
 
     def _state_for(guild_id: int) -> _VoiceConnectionState:
@@ -547,29 +612,16 @@ def setup(registry: ServiceRegistry) -> None:
             )
 
     def _log_voice_stack_versions() -> None:
-        discord_version = getattr(discord, "__version__", "unknown")
-        voice_recv_version = "missing"
-        davey_version = "missing"
-
-        try:
-            from discord.ext import voice_recv  # type: ignore
-
-            voice_recv_version = getattr(voice_recv, "__version__", "unknown")
-        except Exception:
-            logger.warning("Voice stack warning: discord.ext.voice_recv is not available")
-
-        try:
-            import davey  # type: ignore
-
-            davey_version = getattr(davey, "__version__", "unknown")
-        except Exception:
-            logger.warning("Voice stack warning: davey is not installed")
-
-        logger.info(
-            "Voice stack: discord.py=%s, voice_recv=%s, davey=%s",
-            discord_version,
-            voice_recv_version,
-            davey_version,
+        report = voice_receive_adapter.get_voice_stack_report()
+        level = logging.INFO if report.compatible else logging.ERROR
+        logger.log(
+            level,
+            "Voice stack: discord.py=%s, voice_recv=%s, davey=%s compatible=%s reasons=%s",
+            report.discord_version,
+            report.voice_recv_version,
+            report.davey_version,
+            report.compatible,
+            report.reasons,
         )
 
     def _throttled_log(key: str, level: int, message: str, every_sec: int = 30) -> None:
@@ -754,10 +806,10 @@ def setup(registry: ServiceRegistry) -> None:
             chunks_saved_to_db = 0
             consecutive_discarded_chunks = 0
             max_consecutive_discarded_chunks = 0
-            audio_buffers_by_user.clear()
-            audio_buffers_by_ssrc.clear()
-            chunk_stats_by_user.clear()
-            chunk_stats_by_ssrc.clear()
+            decode_storm_recovery_count = 0
+            decode_storm_recovery_in_progress = False
+            last_pcm_frame_ts = 0.0
+            _clear_voice_runtime_buffers(keep_counters=False)
             return existing_session_id
         processed_chunks = 0
         dropped_chunks = 0
@@ -983,9 +1035,8 @@ def setup(registry: ServiceRegistry) -> None:
                 )
                 await _safe_disconnect(existing, guild_id=guild.id, channel_id=channel.id, reason="stale_before_join")
                 voice_client = None
-            if not _spec_available():
-                logger.warning("voice_recv not available; voice ingest disabled for guild=%s channel=%s", guild.id, channel.id)
-                _set_voice_state(guild.id, state="failed", reason=f"voice_recv_missing:{reason}", channel_id=channel.id, listener_attached=False)
+            if not _spec_available(guild_id=guild.id, channel_id=channel.id, reason=reason):
+                _set_voice_state(guild.id, state="failed", reason=f"voice_stack_incompatible:{reason}", channel_id=channel.id, listener_attached=False)
                 return
             _set_voice_state(guild.id, state="connecting", reason=reason, channel_id=channel.id, listener_attached=False)
             try:
@@ -1080,29 +1131,111 @@ def setup(registry: ServiceRegistry) -> None:
                 logger.exception("Voice ingest delayed leave failed")
         leave_task.add_done_callback(_log_leave_result)
 
-    def _on_decode_error(error: Exception, source: str) -> None:
+    def _decode_storm_detected(now_ts: float) -> bool:
+        while decode_error_window and now_ts - decode_error_window[0] > DECODE_STORM_WINDOW_SEC:
+            decode_error_window.popleft()
+        return _is_decode_corruption_storm(
+            error_count_in_window=len(decode_error_window),
+            window_sec=DECODE_STORM_WINDOW_SEC,
+            threshold=DECODE_STORM_ERROR_THRESHOLD,
+            processed_chunks=processed_chunks,
+            last_pcm_frame_ts=last_pcm_frame_ts,
+            now_ts=now_ts,
+            no_pcm_sec=DECODE_STORM_NO_PCM_SEC,
+        )
+
+    async def _recover_from_decode_storm(*, trigger: DecodeErrorContext) -> None:
+        nonlocal decode_storm_recovery_count, decode_storm_recovery_in_progress, voice_client
+        if decode_storm_recovery_in_progress:
+            return
+        if decode_storm_recovery_count >= MAX_DECODE_STORM_RECOVERIES:
+            logger.error(
+                "Voice ingest decode storm recovery exhausted session=%s guild=%s channel=%s errors_in_window=%s",
+                active_session_id,
+                current_guild_id,
+                current_voice_channel_id,
+                len(decode_error_window),
+            )
+            if current_guild_id is not None:
+                _set_voice_state(current_guild_id, state="failed", reason="decode_storm_recovery_exhausted", channel_id=current_voice_channel_id, listener_attached=False)
+            return
+        decode_storm_recovery_in_progress = True
+        decode_storm_recovery_count += 1
+        try:
+            guild_id = current_guild_id
+            channel_id = current_voice_channel_id
+            if guild_id is None or channel_id is None:
+                return
+            guild = bot.get_guild(guild_id)
+            channel = guild.get_channel(channel_id) if guild is not None and hasattr(guild, "get_channel") else None
+            logger.error(
+                "Voice ingest decode storm detected session=%s guild=%s channel=%s errors_in_window=%s source=%s user=%s ssrc=%s payload_size=%s recovery_attempt=%s",
+                active_session_id,
+                guild_id,
+                channel_id,
+                len(decode_error_window),
+                trigger.source,
+                trigger.user_id,
+                trigger.ssrc,
+                trigger.payload_size,
+                decode_storm_recovery_count,
+            )
+            if channel is None:
+                _set_voice_state(guild_id, state="failed", reason="decode_storm_channel_missing", channel_id=channel_id, listener_attached=False)
+                return
+            _set_voice_state(guild_id, state="reconnecting", reason="decode_storm", channel_id=channel_id, listener_attached=False)
+            await _safe_disconnect(voice_client, guild_id=guild_id, channel_id=channel_id, reason="decode_storm")
+            voice_client = None
+            _clear_voice_runtime_buffers(keep_counters=False)
+            await asyncio.sleep(DECODE_STORM_RECONNECT_BACKOFF_SEC)
+            await ensure_voice_connected(guild, channel, reason="decode_storm_recovery")
+        except Exception:
+            if current_guild_id is not None:
+                _set_voice_state(current_guild_id, state="failed", reason="decode_storm_reconnect_failed", channel_id=current_voice_channel_id, listener_attached=False)
+            logger.exception("Voice ingest decode storm recovery failed")
+        finally:
+            decode_storm_recovery_in_progress = False
+
+    def _on_decode_error(error: Exception, context: DecodeErrorContext) -> None:
         nonlocal opus_corrupted_count
         counters = voice_receive_adapter.counters
+        source = context.source
         message = str(error).lower()
         if "cryptoerror" in message or "decoding packet data" in message:
             logger.error(
-                "Voice ingest crypto decode error source=%s state=%s reason=%s crypto_decode_errors=%s",
+                "Voice ingest crypto decode error source=%s state=%s reason=%s crypto_decode_errors=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s",
                 source,
                 _state_for(current_guild_id).state if current_guild_id is not None else "idle",
                 _state_for(current_guild_id).reason if current_guild_id is not None else "n/a",
                 counters.crypto_decode_errors,
+                active_session_id,
+                current_guild_id,
+                current_voice_channel_id,
+                context.user_id,
+                context.ssrc,
+                context.payload_size,
             )
             return
         _increment_opus_corrupted(error)
-        _log_opus_decode_failure(source, error=error)
+        _log_opus_decode_failure(source, error=error, payload_size=context.payload_size, user_id=context.user_id, ssrc=context.ssrc)
         logger.warning(
-            "Voice ingest opus decode error source=%s opus_corrupted_total=%s",
+            "Voice ingest opus decode error source=%s opus_corrupted_total=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s",
             source,
             counters.opus_corrupted_total,
+            active_session_id,
+            current_guild_id,
+            current_voice_channel_id,
+            context.user_id,
+            context.ssrc,
+            context.payload_size,
         )
+        now_ts = time.time()
+        decode_error_window.append(now_ts)
+        if _decode_storm_detected(now_ts):
+            asyncio.create_task(_recover_from_decode_storm(trigger=context))
 
     def _on_voice_data(user: Optional[discord.User], data: Any) -> None:
-        nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks
+        nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks, last_pcm_frame_ts
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count
         nonlocal total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent
         nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
@@ -1121,6 +1254,7 @@ def setup(registry: ServiceRegistry) -> None:
                 )
                 return
             now = time.time()
+            last_pcm_frame_ts = now
             ssrc = getattr(data, "ssrc", None)
             if user is None:
                 if ssrc is not None:

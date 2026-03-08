@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import sys
 import types
 
@@ -261,3 +263,36 @@ def test_duration_mismatch_warning_detects_stereo_misread_pattern() -> None:
 def test_duration_mismatch_warning_not_emitted_for_coherent_durations() -> None:
     warning = voice_ingest._duration_mismatch_warning(chunk_duration=10.02, raw_duration=9.73, wav_duration=9.68)
     assert warning is None
+
+
+def test_decode_corruption_storm_detection_gate() -> None:
+    assert (
+        voice_ingest._is_decode_corruption_storm(
+            error_count_in_window=30,
+            window_sec=6.0,
+            threshold=24,
+            processed_chunks=0,
+            last_pcm_frame_ts=0.0,
+            now_ts=10.0,
+            no_pcm_sec=4.0,
+        )
+        is True
+    )
+    assert (
+        voice_ingest._is_decode_corruption_storm(
+            error_count_in_window=30,
+            window_sec=6.0,
+            threshold=24,
+            processed_chunks=1,
+            last_pcm_frame_ts=0.0,
+            now_ts=10.0,
+            no_pcm_sec=4.0,
+        )
+        is False
+    )
+
+
+def test_voice_ingest_source_does_not_reference_packet_router_internal() -> None:
+    source = Path("app/plugins/voice_ingest.py").read_text()
+    assert "PacketRouter" not in source
+    assert "_do_run" not in source

@@ -106,7 +106,7 @@ class _FakeChannel:
 
 def _install_fake_voice_recv() -> None:
     module = types.ModuleType("discord.ext.voice_recv")
-    module.__version__ = "test"
+    module.__version__ = "0.5.2"
     module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv", loader=None)
 
     class VoiceRecvClient:
@@ -137,6 +137,7 @@ def _install_fake_voice_recv() -> None:
 
     sys.modules["discord.ext.voice_recv"] = module
     sys.modules["discord.ext.voice_recv.router"] = router_module
+    sys.modules["davey"] = types.SimpleNamespace(__version__="0.2.0")
 
 
 def _build_registry() -> tuple[ServiceRegistry, _FakeBot, _FakeDatabase]:
@@ -289,3 +290,37 @@ def test_privacy_enforcer_and_voice_state_autojoin_single_connect(monkeypatch: A
 
     assert channel.connect_calls == 1
     assert client.listen_calls == 1
+
+
+def test_join_fails_fast_when_voice_stack_incompatible(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    report = types.SimpleNamespace(
+        available=True,
+        compatible=False,
+        discord_version="2.7.1",
+        voice_recv_version="0.5.2a",
+        davey_version="0.1.4",
+        reasons=["davey=0.1.4 < 0.2.0"],
+    )
+    monkeypatch.setattr(
+        "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
+        lambda _self: report,
+    )
+
+    registry, bot, db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=46, voice_client=None)
+    channel = _FakeChannel(guild, 782, client)
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(controller.join(channel))
+
+    assert channel.connect_calls == 0
+    assert client.listen_calls == 0
+    assert db.started == 0
+    assert "runtime stack incompatible" in caplog.text
