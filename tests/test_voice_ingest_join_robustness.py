@@ -141,7 +141,7 @@ def _install_fake_voice_recv() -> None:
 
     sys.modules["discord.ext.voice_recv"] = module
     sys.modules["discord.ext.voice_recv.router"] = router_module
-    sys.modules["davey"] = types.SimpleNamespace(__version__="0.2.0")
+    sys.modules["davey"] = types.SimpleNamespace(__version__="0.1.4")
 
 
 def _build_registry() -> tuple[ServiceRegistry, _FakeBot, _FakeDatabase]:
@@ -296,6 +296,41 @@ def test_privacy_enforcer_and_voice_state_autojoin_single_connect(monkeypatch: A
     assert client.listen_calls == 1
 
 
+
+
+def test_join_proceeds_with_supported_runtime_versions(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    report = types.SimpleNamespace(
+        available=True,
+        compatible=True,
+        discord_version="2.7.1",
+        voice_recv_version="0.5.2a",
+        davey_version="0.1.4",
+        reasons=[],
+    )
+    monkeypatch.setattr(
+        "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
+        lambda _self: report,
+    )
+
+    registry, bot, db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=460, voice_client=None)
+    channel = _FakeChannel(guild, 7820, client)
+
+    with caplog.at_level("INFO"):
+        asyncio.run(controller.join(channel))
+
+    assert channel.connect_calls == 1
+    assert client.listen_calls == 1
+    assert db.started == 1
+    assert "failed_runtime_incompatible" not in caplog.text
+
 def test_join_fails_fast_when_voice_stack_incompatible(monkeypatch: Any, caplog: Any) -> None:
     _install_fake_voice_recv()
     monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
@@ -307,7 +342,7 @@ def test_join_fails_fast_when_voice_stack_incompatible(monkeypatch: Any, caplog:
         discord_version="2.7.1",
         voice_recv_version="0.5.2a",
         davey_version="0.1.4",
-        reasons=["davey=0.1.4 < 0.2.0"],
+        reasons=["davey=0.1.3 < 0.1.4"],
     )
     monkeypatch.setattr(
         "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
@@ -341,7 +376,7 @@ def test_incompatible_stack_logs_once_and_blocks_followup_join_attempts(monkeypa
         discord_version="2.7.1",
         voice_recv_version="0.5.2a",
         davey_version="0.1.4",
-        reasons=["discord-ext-voice-recv=0.5.2a is a prerelease and lower than required stable 0.5.2"],
+        reasons=["discord-ext-voice-recv=0.5.1 not in supported range <0.5.3,>=0.5.2a0"],
     )
     monkeypatch.setattr(
         "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
@@ -374,7 +409,7 @@ def test_voice_state_autojoin_respects_runtime_block(monkeypatch: Any, caplog: A
         discord_version="2.7.1",
         voice_recv_version="0.5.2a",
         davey_version="0.1.4",
-        reasons=["davey=0.1.4 < 0.2.0"],
+        reasons=["davey=0.1.3 < 0.1.4"],
     )
     monkeypatch.setattr(
         "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
@@ -421,7 +456,7 @@ def test_runtime_block_sets_fatal_state(monkeypatch: Any, caplog: Any) -> None:
         discord_version="2.7.1",
         voice_recv_version="0.5.2a",
         davey_version="0.1.4",
-        reasons=["davey=0.1.4 < 0.2.0"],
+        reasons=["davey=0.1.3 < 0.1.4"],
     )
     monkeypatch.setattr(
         "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
@@ -452,7 +487,7 @@ def test_runtime_block_does_not_trigger_reconnect_recovery(monkeypatch: Any, cap
         discord_version="2.7.1",
         voice_recv_version="0.5.2a",
         davey_version="0.1.4",
-        reasons=["davey=0.1.4 < 0.2.0"],
+        reasons=["davey=0.1.3 < 0.1.4"],
     )
     monkeypatch.setattr(
         "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",

@@ -89,7 +89,7 @@ def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[An
     sys.modules["discord.ext.voice_recv.router"] = router_module
     sys.modules["discord.ext.voice_recv.reader"] = reader_module
     sys.modules["discord.ext.voice_recv.opus"] = opus_module
-    sys.modules["davey"] = types.SimpleNamespace(__version__="0.2.0")
+    sys.modules["davey"] = types.SimpleNamespace(__version__="0.1.4")
 
     class FakeVoiceClient:
         def __init__(self) -> None:
@@ -289,7 +289,7 @@ def test_crypto_and_opus_errors_are_classified_in_vendor_counters() -> None:
     assert counters.corrupted_stream_count == 1
 
 
-def test_stack_report_detects_pre_release_and_old_davey(monkeypatch: Any) -> None:
+def test_stack_report_accepts_supported_prerelease_and_davey_floor(monkeypatch: Any) -> None:
     _install_fake_voice_recv()
     adapter = VoiceReceiveAdapter()
 
@@ -301,9 +301,8 @@ def test_stack_report_detects_pre_release_and_old_davey(monkeypatch: Any) -> Non
     report = adapter.get_voice_stack_report()
 
     assert report.available is True
-    assert report.compatible is False
-    assert any("discord-ext-voice-recv=0.5.2a is a prerelease and lower than required stable 0.5.2" in reason for reason in report.reasons)
-    assert any("davey=0.1.4 < 0.2.0" in reason for reason in report.reasons)
+    assert report.compatible is True
+    assert report.reasons == []
 
 
 def test_decode_context_extracts_payload_user_and_ssrc() -> None:
@@ -323,8 +322,15 @@ def test_decode_context_extracts_payload_user_and_ssrc() -> None:
     assert context.payload_size == 3
 
 
-def test_prerelease_version_is_lower_than_required_stable() -> None:
-    incompatible, detail = VoiceReceiveAdapter._version_lt("0.5.2a", VoiceReceiveAdapter.MIN_VOICE_RECV_VERSION)
+def test_voice_recv_runtime_alias_is_supported() -> None:
+    incompatible, detail = VoiceReceiveAdapter._voice_recv_incompatible("0.5.2a")
+
+    assert incompatible is False
+    assert detail is None
+
+
+def test_voice_recv_really_lower_version_is_rejected() -> None:
+    incompatible, detail = VoiceReceiveAdapter._voice_recv_incompatible("0.5.1")
 
     assert incompatible is True
-    assert detail == "0.5.2a is a prerelease and lower than required stable 0.5.2"
+    assert detail == "0.5.1 not in supported range <0.5.3,>=0.5.2a0"

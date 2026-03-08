@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import discord
+from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from app.vendor.voice_recv import DecodeErrorContext, VendorVoiceReceive
@@ -35,8 +36,9 @@ class VoiceReceiveAdapter:
     """Application-facing adapter exposing a stable receive API."""
 
     MIN_DISCORD_VERSION = (2, 7, 0)
-    MIN_VOICE_RECV_VERSION = (0, 5, 2)
-    MIN_DAVEY_VERSION = (0, 2, 0)
+    MIN_DAVEY_VERSION = (0, 1, 4)
+    VOICE_RECV_SUPPORTED_SPECIFIER = SpecifierSet(">=0.5.2a0,<0.5.3", prereleases=True)
+    VOICE_RECV_SUPPORTED_RUNTIME_ALIASES = {"0.5.2a"}
 
     def __init__(self) -> None:
         self._vendor = VendorVoiceReceive()
@@ -54,9 +56,19 @@ class VoiceReceiveAdapter:
             return True, f"unparseable version '{version}'"
         minimum_version = Version(minimum_str)
         if parsed < minimum_version:
-            if parsed.is_prerelease and parsed.release == minimum_version.release:
-                return True, f"{version} is a prerelease and lower than required stable {minimum_str}"
             return True, f"{version} < {minimum_str}"
+        return False, None
+
+    @classmethod
+    def _voice_recv_incompatible(cls, version: str) -> tuple[bool, Optional[str]]:
+        if version in cls.VOICE_RECV_SUPPORTED_RUNTIME_ALIASES:
+            return False, None
+        try:
+            parsed = Version(version)
+        except InvalidVersion:
+            return True, f"unparseable version '{version}'"
+        if parsed not in cls.VOICE_RECV_SUPPORTED_SPECIFIER:
+            return True, f"{version} not in supported range {cls.VOICE_RECV_SUPPORTED_SPECIFIER}"
         return False, None
 
     @staticmethod
@@ -78,7 +90,7 @@ class VoiceReceiveAdapter:
             voice_recv = importlib.import_module("discord.ext.voice_recv")
             voice_recv_version = getattr(voice_recv, "__version__", "unknown")
             voice_recv_available = True
-            voice_recv_incompatible, voice_recv_detail = self._version_lt(voice_recv_version, self.MIN_VOICE_RECV_VERSION)
+            voice_recv_incompatible, voice_recv_detail = self._voice_recv_incompatible(voice_recv_version)
             if voice_recv_incompatible:
                 reasons.append(f"discord-ext-voice-recv={voice_recv_detail}")
         except Exception:
