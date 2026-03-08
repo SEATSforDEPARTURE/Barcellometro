@@ -64,6 +64,8 @@ class VendorVoiceReceive:
         self._installed_hooks = 0
         self._introspected = False
         self._patched_sources: list[str] = []
+        self._last_stage_trace_ts: dict[str, float] = {}
+        self._stage_trace_interval_sec = 2.0
 
     def _classify_decode_error(self, exc: BaseException) -> Optional[str]:
         message = str(exc).lower()
@@ -147,6 +149,65 @@ class VendorVoiceReceive:
         self._introspected = True
         return resolved, unresolved
 
+    @staticmethod
+    def _extract_trace_payload(source: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        candidate = VendorVoiceReceive._extract_payload_candidate(source, args, kwargs)
+        if isinstance(candidate, (bytes, bytearray)):
+            return candidate
+        for attr in ("decrypted_data", "payload", "data"):
+            maybe = getattr(candidate, attr, None)
+            if isinstance(maybe, (bytes, bytearray)):
+                return maybe
+        return None
+
+    def _trace_decode_stage(self, *, source: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        now = time.monotonic()
+        last = self._last_stage_trace_ts.get(source, 0.0)
+        if now - last < self._stage_trace_interval_sec:
+            return
+        self._last_stage_trace_ts[source] = now
+        payload = self._extract_trace_payload(source, args, kwargs)
+        payload_size: Optional[int] = None
+        packet_type: Optional[str] = None
+        payload_preview_hex: Optional[str] = None
+        payload_looks_like_rtp: Optional[bool] = None
+        if isinstance(payload, (bytes, bytearray)):
+            payload_size = len(payload)
+            packet_type = type(payload).__name__
+            payload_preview_hex = self._payload_preview(payload)
+            payload_looks_like_rtp = self._looks_like_rtp(payload)
+        logger.debug(
+            "Voice recv decode stage source=%s decoder_instance_id=%s packet_id=%s packet_type=%s payload_size=%s payload_looks_like_rtp=%s payload_preview_hex=%s",
+            source,
+            id(args[0]) if args else None,
+            id(args[1]) if len(args) > 1 else None,
+            packet_type,
+            payload_size,
+            payload_looks_like_rtp,
+            payload_preview_hex,
+        )
+
+    def _sanitize_decoder_decode_args(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any], bool]:
+        payload = self._extract_payload_candidate("Decoder.decode", args, kwargs)
+        if not isinstance(payload, (bytes, bytearray)):
+            return args, kwargs, False
+        opus_payload = self._extract_opus_from_rtp(payload)
+        if opus_payload is None:
+            return args, kwargs, False
+        if len(args) >= 2:
+            new_args = list(args)
+            new_args[1] = opus_payload
+            return tuple(new_args), kwargs, True
+        if "data" in kwargs:
+            new_kwargs = dict(kwargs)
+            new_kwargs["data"] = opus_payload
+            return args, new_kwargs, True
+        if "packet" in kwargs:
+            new_kwargs = dict(kwargs)
+            new_kwargs["packet"] = opus_payload
+            return args, new_kwargs, True
+        return args, kwargs, False
+
     def _guard(self, *, on_decode_error: DecodeErrorCallback, source: str, return_value: Any = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def _decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             if getattr(fn, "_barcello_vendor_decode_guard", False):
@@ -154,13 +215,25 @@ class VendorVoiceReceive:
 
             @wraps(fn)
             def _wrapped(*args: Any, **kwargs: Any) -> Any:
+                self._trace_decode_stage(source=source, args=args, kwargs=kwargs)
+                call_args = args
+                call_kwargs = kwargs
+                if source == "Decoder.decode":
+                    call_args, call_kwargs, sanitized = self._sanitize_decoder_decode_args(args, kwargs)
+                    if sanitized:
+                        logger.warning(
+                            "Voice recv corrected RTP payload boundary before Decoder.decode decoder_instance_id=%s original_size=%s corrected_size=%s",
+                            id(args[0]) if args else None,
+                            len(args[1]) if len(args) >= 2 and isinstance(args[1], (bytes, bytearray)) else None,
+                            len(call_args[1]) if len(call_args) >= 2 and isinstance(call_args[1], (bytes, bytearray)) else None,
+                        )
                 try:
-                    return fn(*args, **kwargs)
+                    return fn(*call_args, **call_kwargs)
                 except Exception as exc:
                     if not self._is_decode_error(exc):
                         raise
                     self._register_decode_error(exc)
-                    on_decode_error(exc, self._extract_decode_error_context(source=source, args=args, kwargs=kwargs))
+                    on_decode_error(exc, self._extract_decode_error_context(source=source, args=call_args, kwargs=call_kwargs))
                     self._emit_decode_summary_if_needed(source=source)
                     return return_value
 
@@ -182,11 +255,53 @@ class VendorVoiceReceive:
 
     @staticmethod
     def _looks_like_rtp(payload: bytes | bytearray) -> bool:
-        if len(payload) < 2:
+        if len(payload) < 12:
             return False
         first = payload[0]
+        second = payload[1]
         version = (first >> 6) & 0b11
-        return version == 2
+        if version != 2:
+            return False
+        csrc_count = first & 0x0F
+        has_extension = bool(first & 0x10)
+        padding = bool(first & 0x20)
+        payload_type = second & 0x7F
+        if payload_type < 96 or payload_type > 127:
+            return False
+        offset = 12 + (csrc_count * 4)
+        if len(payload) < offset:
+            return False
+        if has_extension:
+            if len(payload) < offset + 4:
+                return False
+            ext_len_words = int.from_bytes(payload[offset + 2 : offset + 4], byteorder="big")
+            offset += 4 + (ext_len_words * 4)
+            if len(payload) < offset:
+                return False
+        if padding:
+            pad_len = payload[-1]
+            if pad_len <= 0 or pad_len > len(payload) - offset:
+                return False
+        return True
+
+    @staticmethod
+    def _extract_opus_from_rtp(payload: bytes | bytearray) -> Optional[bytes]:
+        if not VendorVoiceReceive._looks_like_rtp(payload):
+            return None
+        first = payload[0]
+        csrc_count = first & 0x0F
+        has_extension = bool(first & 0x10)
+        padding = bool(first & 0x20)
+        offset = 12 + (csrc_count * 4)
+        if has_extension:
+            ext_len_words = int.from_bytes(payload[offset + 2 : offset + 4], byteorder="big")
+            offset += 4 + (ext_len_words * 4)
+        end = len(payload)
+        if padding:
+            end -= payload[-1]
+        if offset >= end:
+            return None
+        return bytes(payload[offset:end])
 
     @staticmethod
     def _packet_origin_for_source(source: str) -> Optional[str]:

@@ -538,3 +538,19 @@ def test_on_ready_is_idempotent_and_skips_duplicate_startup(monkeypatch: Any) ->
 
     assert db.cleanup_calls == 1
     assert len(created_tasks) == 2
+
+
+def test_setup_does_not_register_duplicate_listeners_across_reinit(monkeypatch: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+    voice_ingest._VOICE_INGEST_STARTUP_GUARD["initialized_bots"].clear()
+    voice_ingest._VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"].clear()
+
+    registry, bot, _db = _build_registry()
+    voice_ingest.setup(registry)
+    voice_ingest.setup(registry)
+
+    assert len(bot._listeners.get("on_ready", [])) == 1
+    assert len(bot._listeners.get("on_voice_state_update", [])) == 1
+    assert len(bot._listeners.get("on_message", [])) == 1
