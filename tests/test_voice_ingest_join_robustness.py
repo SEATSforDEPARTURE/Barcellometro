@@ -2,6 +2,7 @@ import asyncio
 import builtins
 import importlib.machinery
 import sys
+import threading
 import types
 from typing import Any
 
@@ -20,6 +21,7 @@ class _FakeBot:
     def __init__(self) -> None:
         self.user = types.SimpleNamespace(id=999)
         self._listeners: dict[str, list[Any]] = {}
+        self.loop: Any = None
 
     def add_listener(self, cb: Any, name: str) -> None:
         self._listeners.setdefault(name, []).append(cb)
@@ -158,7 +160,12 @@ def _build_registry() -> tuple[ServiceRegistry, _FakeBot, _FakeDatabase]:
 def _bootstrap_controller(registry: ServiceRegistry, bot: _FakeBot) -> Any:
     voice_ingest.setup(registry)
     on_ready = bot.get_listener("on_ready")
-    asyncio.run(on_ready())
+
+    async def _run_ready() -> None:
+        bot.loop = asyncio.get_running_loop()
+        await on_ready()
+
+    asyncio.run(_run_ready())
     return registry.get("voice_ingest")
 
 
@@ -513,15 +520,79 @@ def test_first_frame_retry_runs_and_patches_late_decoder(monkeypatch: Any, caplo
     with caplog.at_level("INFO"):
         asyncio.run(controller.join(channel))
 
-        async def _emit_first_frame() -> None:
-            monkeypatch.setattr(voice_ingest.asyncio, "create_task", asyncio.create_task)
+        async def _emit_first_frame_from_thread() -> None:
+            loop = asyncio.get_running_loop()
+            bot.loop = loop
             assert late_client.last_sink is not None
             late_client.receiver = types.SimpleNamespace(decoder=_LateDecoder())
-            late_client.last_sink.write(None, types.SimpleNamespace(pcm=b"\x01\x02", ssrc=55))
+
+            done = threading.Event()
+
+            def _writer() -> None:
+                late_client.last_sink.write(None, types.SimpleNamespace(pcm=b"\x01\x02", ssrc=55))
+                done.set()
+
+            thread = threading.Thread(target=_writer)
+            thread.start()
+            await asyncio.to_thread(done.wait, 1.0)
+            thread.join(timeout=1.0)
             await asyncio.sleep(0)
 
-        asyncio.run(_emit_first_frame())
+        asyncio.run(_emit_first_frame_from_thread())
 
     assert late_client.receiver.decoder.pop_data() is None
     assert "Voice ingest first-frame live Opus guard retry scheduled" in caplog.text
     assert "Live OpusError guard fallback start reason=first_frame" in caplog.text
+
+
+def test_live_guard_finds_decoder_inside_packet_router_args(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv(include_decoder=False)
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+    monkeypatch.setattr(voice_ingest.importlib.util, "find_spec", lambda name: object() if name == "discord.ext.voice_recv" else None)
+
+    class DummyOpusError(Exception):
+        pass
+
+    fake_discord_opus = types.ModuleType("discord.opus")
+    fake_discord_opus.OpusError = DummyOpusError
+    monkeypatch.setitem(sys.modules, "discord.opus", fake_discord_opus)
+
+    class _HiddenDecoder:
+        def _decode_packet(self, _packet: Any) -> bytes:
+            raise DummyOpusError("corrupted stream")
+
+    class _TargetWrapper:
+        def __init__(self) -> None:
+            self.decoder_obj = _HiddenDecoder()
+
+    class PacketRouter:
+        def __init__(self) -> None:
+            self._target = object()
+            self._args = (_TargetWrapper(),)
+            self._kwargs = {}
+
+    class _AudioReader:
+        def __init__(self) -> None:
+            self.packet_router = PacketRouter()
+
+    class _RuntimeVoiceClient(_FakeVoiceClient):
+        def __init__(self) -> None:
+            super().__init__(connected=True)
+            self.reader = _AudioReader()
+
+    registry, bot, _db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _RuntimeVoiceClient()
+    guild = types.SimpleNamespace(id=101, voice_client=None)
+    channel = _FakeChannel(guild, 904, client)
+
+    with caplog.at_level("INFO"):
+        asyncio.run(controller.join(channel))
+
+    decoder = client.reader.packet_router._args[0].decoder_obj
+    assert decoder._decode_packet(None) is None
+    assert "Live Opus guard PacketRouter runtime found" in caplog.text
+    assert "Installed OpusError guard on live live._HiddenDecoder._decode_packet" in caplog.text
+    assert "Live Opus guard discovery summary reason=post_listen:initial" in caplog.text

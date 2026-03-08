@@ -447,6 +447,8 @@ def setup(registry: ServiceRegistry) -> None:
     connecting_guilds: set[int] = set()
     first_frame_logged: set[int] = set()
     live_guard_first_frame_retry_started = False
+    live_guard_runtime_patched = False
+    live_guard_last_summary: Optional[tuple[str, int, int, int]] = None
     audio_buffers_by_user: dict[int, bytearray] = {}
     audio_buffers_by_ssrc: dict[int, bytearray] = {}
     chunk_stats_by_user: dict[int, _ChunkStats] = {}
@@ -867,72 +869,21 @@ def setup(registry: ServiceRegistry) -> None:
             logger.warning("Unable to install any OpusError guard for voice_recv receive path")
 
     def _install_live_opus_guard(client: Any, *, reason: str = "manual") -> int:
+        nonlocal live_guard_runtime_patched, live_guard_last_summary
         try:
             from discord.opus import OpusError
         except Exception:
             logger.warning("Unable to install live OpusError guard: import failed module=discord.opus", exc_info=True)
             return 0
 
-        relevant_type_keywords = (
-            "voice",
-            "recv",
-            "router",
-            "decoder",
-            "reader",
-            "packet",
-            "sink",
-            "client",
-            "opus",
-        )
-        interesting_attrs = {
-            "ssrc",
-            "packet",
-            "_packet",
-            "_decoder",
-            "decoder",
-            "_decoders",
-            "decoders",
-            "_router",
-            "router",
-            "_receiver",
-            "receiver",
-            "_recv_client",
-            "recv_client",
-            "_reader",
-            "reader",
-        }
         method_candidates = ("pop_data", "_process_packet", "_decode_packet")
-        traversal_attrs = (
-            "_connection",
-            "_recv_client",
-            "recv_client",
-            "_receiver",
-            "receiver",
-            "_router",
-            "router",
-            "_reader",
-            "reader",
-            "_decoder",
-            "decoder",
-            "_decoders",
-            "decoders",
-            "packet",
-            "_packet",
-        )
+        traversal_attrs = ("_target", "_args", "_kwargs", "packet", "_packet", "decoder", "_decoder", "router", "_router")
 
         patched = 0
         visited = 0
         candidates_found = 0
         inspected_logged = 0
         candidate_logged = 0
-
-        def _is_relevant_for_log(obj: Any, attr_names: list[str], methods: list[str]) -> bool:
-            type_name = type(obj).__name__.lower()
-            if any(keyword in type_name for keyword in relevant_type_keywords):
-                return True
-            if methods:
-                return True
-            return any(name in interesting_attrs for name in attr_names)
 
         def _extract_decode_context(obj: Any, method_name: str, *args: Any, **kwargs: Any) -> tuple[Optional[int], Optional[int], Optional[int]]:
             packet = args[0] if args else kwargs.get("packet")
@@ -992,6 +943,7 @@ def setup(registry: ServiceRegistry) -> None:
             assigned = getattr(obj, method_name)
             if assigned is wrapped:
                 patched += 1
+                live_guard_runtime_patched = True
                 logger.info(
                     "Installed OpusError guard on live %s object=%r object_type=%s original_id=%s wrapped_id=%s",
                     source,
@@ -1004,8 +956,53 @@ def setup(registry: ServiceRegistry) -> None:
             logger.warning("Failed to verify OpusError guard assignment on live %s object=%r", source, obj)
             return False
 
-        queue: list[tuple[Any, int]] = [(client, 0)]
+        def _enqueue_if_runtime_obj(queue: list[tuple[Any, int]], seen: set[int], nested: Any, depth: int) -> None:
+            if nested is None:
+                return
+            if id(nested) in seen:
+                return
+            queue.append((nested, depth + 1))
+
+        def _inspect_router_runtime(router_obj: Any, queue: list[tuple[Any, int]], seen: set[int], depth: int) -> None:
+            nonlocal inspected_logged
+            router_target = getattr(router_obj, "_target", None)
+            router_args = getattr(router_obj, "_args", None)
+            router_kwargs = getattr(router_obj, "_kwargs", None)
+
+            if inspected_logged < LIVE_OPUS_GUARD_OBJECT_LOG_LIMIT:
+                logger.info(
+                    "Live Opus guard PacketRouter runtime found depth=%s target=%s args_type=%s kwargs_type=%s",
+                    depth,
+                    type(router_target).__name__ if router_target is not None else None,
+                    type(router_args).__name__ if router_args is not None else None,
+                    type(router_kwargs).__name__ if router_kwargs is not None else None,
+                )
+                inspected_logged += 1
+
+            _enqueue_if_runtime_obj(queue, seen, router_target, depth)
+            if isinstance(router_args, (tuple, list)):
+                for item in router_args[:LIVE_OPUS_GUARD_MAX_COLLECTION_ITEMS]:
+                    _enqueue_if_runtime_obj(queue, seen, item, depth)
+            elif router_args is not None:
+                _enqueue_if_runtime_obj(queue, seen, router_args, depth)
+            if isinstance(router_kwargs, dict):
+                for item in list(router_kwargs.values())[:LIVE_OPUS_GUARD_MAX_COLLECTION_ITEMS]:
+                    _enqueue_if_runtime_obj(queue, seen, item, depth)
+
+        def _seed_runtime_path(client_obj: Any, queue: list[tuple[Any, int]], seen: set[int]) -> None:
+            seed_objects: list[Any] = [client_obj]
+            for attr_name in ("_reader", "reader"):
+                value = getattr(client_obj, attr_name, None)
+                if value is not None:
+                    seed_objects.append(value)
+            for seed in seed_objects:
+                _enqueue_if_runtime_obj(queue, seen, seed, 0)
+
+        queue: list[tuple[Any, int]] = []
         seen: set[int] = set()
+        _seed_runtime_path(client, queue, seen)
+
+        logger.info("Live Opus guard discovery start reason=%s", reason)
 
         while queue and visited < LIVE_OPUS_GUARD_MAX_VISITED_OBJECTS:
             obj, depth = queue.pop(0)
@@ -1021,17 +1018,19 @@ def setup(registry: ServiceRegistry) -> None:
                 continue
 
             attr_map = getattr(obj, "__dict__", None)
-            attr_names = list(attr_map.keys()) if isinstance(attr_map, dict) else []
             available_methods = [name for name in method_candidates if callable(getattr(obj, name, None))]
 
-            if _is_relevant_for_log(obj, attr_names, available_methods) and inspected_logged < LIVE_OPUS_GUARD_OBJECT_LOG_LIMIT:
+            if inspected_logged < LIVE_OPUS_GUARD_OBJECT_LOG_LIMIT:
                 logger.info(
                     "Live Opus guard inspected object type=%s depth=%s attrs=%s",
                     type(obj).__name__,
                     depth,
-                    attr_names[:LIVE_OPUS_GUARD_ATTR_LOG_LIMIT],
+                    list(attr_map.keys())[:LIVE_OPUS_GUARD_ATTR_LOG_LIMIT] if isinstance(attr_map, dict) else [],
                 )
                 inspected_logged += 1
+
+            if type(obj).__name__ == "PacketRouter":
+                _inspect_router_runtime(obj, queue, seen, depth)
 
             if available_methods:
                 candidates_found += 1
@@ -1074,21 +1073,38 @@ def setup(registry: ServiceRegistry) -> None:
                 if added >= LIVE_OPUS_GUARD_MAX_COLLECTION_ITEMS:
                     break
 
-        logger.info(
-            "Live Opus guard discovery summary reason=%s visited_objects=%s candidate_decoders=%s patched_objects=%s",
-            reason,
-            visited,
-            candidates_found,
-            patched,
-        )
+        summary = (reason, visited, candidates_found, patched)
+        if live_guard_last_summary != summary:
+            logger.info(
+                "Live Opus guard discovery summary reason=%s visited_objects=%s candidate_decoders=%s patched_objects=%s",
+                reason,
+                visited,
+                candidates_found,
+                patched,
+            )
+            live_guard_last_summary = summary
+        else:
+            logger.debug(
+                "Live Opus guard discovery unchanged reason=%s visited_objects=%s candidate_decoders=%s patched_objects=%s",
+                reason,
+                visited,
+                candidates_found,
+                patched,
+            )
         return patched
 
     async def _install_live_opus_guard_with_retry(client: Any, *, reason: str = "listen") -> bool:
+        nonlocal live_guard_runtime_patched
+        if live_guard_runtime_patched:
+            logger.debug("Live OpusError guard already patched runtime decoder; skipping reason=%s", reason)
+            return True
         logger.info("Live OpusError guard fallback start reason=%s", reason)
         patched = _install_live_opus_guard(client, reason=f"{reason}:initial")
         if patched > 0:
             return True
         for attempt in range(1, LIVE_OPUS_GUARD_RETRY_ATTEMPTS + 1):
+            if live_guard_runtime_patched:
+                return True
             await asyncio.sleep(LIVE_OPUS_GUARD_RETRY_INTERVAL_SEC)
             patched = _install_live_opus_guard(client, reason=f"{reason}:retry{attempt}")
             if patched > 0:
@@ -1398,9 +1414,10 @@ def setup(registry: ServiceRegistry) -> None:
         current_guild_id = None
         active_session_started_epoch = None
         live_guard_first_frame_retry_started = False
+        live_guard_runtime_patched = False
 
     async def _join_voice_channel(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
-        nonlocal voice_client, live_guard_first_frame_retry_started
+        nonlocal voice_client, live_guard_first_frame_retry_started, live_guard_runtime_patched
         lock = join_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
             if guild.id in connecting_guilds:
@@ -1456,6 +1473,7 @@ def setup(registry: ServiceRegistry) -> None:
 
                 logger.info("Voice ingest starting session guild=%s channel=%s", guild.id, channel.id)
                 live_guard_first_frame_retry_started = False
+                live_guard_runtime_patched = False
                 await _start_session(guild.id, channel.id)
                 base_sink = voice_recv.BasicSink(_on_voice_data)
                 logger.info("Voice ingest listen start guild=%s channel=%s", guild.id, channel.id)
@@ -1545,7 +1563,7 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent
         nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
         nonlocal chunks_dropped_low_speech, chunks_dropped_low_rms, chunks_dropped_no_speech_after_vad
-        nonlocal live_guard_first_frame_retry_started
+        nonlocal live_guard_first_frame_retry_started, live_guard_runtime_patched
         try:
             if active_session_id is None or active_session_started is None:
                 return
@@ -1560,18 +1578,26 @@ def setup(registry: ServiceRegistry) -> None:
                 )
                 return
             now = time.time()
-            if voice_client is not None and not live_guard_first_frame_retry_started:
+            if voice_client is not None and not live_guard_runtime_patched and not live_guard_first_frame_retry_started:
                 live_guard_first_frame_retry_started = True
                 logger.info("Voice ingest first-frame live Opus guard retry scheduled")
-                guard_task = asyncio.create_task(_install_live_opus_guard_with_retry(voice_client, reason="first_frame"))
+                loop = bot.loop
+                if loop is None or not loop.is_running():
+                    logger.warning("Voice ingest loop not ready for first-frame live guard retry")
+                else:
+                    guard_future = asyncio.run_coroutine_threadsafe(
+                        _install_live_opus_guard_with_retry(voice_client, reason="first_frame"),
+                        loop,
+                    )
 
-                def _log_guard_result(task_future: Any) -> None:
-                    try:
-                        task_future.result()
-                    except Exception:
-                        logger.exception("Voice ingest first-frame live Opus guard retry failed")
+                    def _log_guard_result(task_future: Any) -> None:
+                        try:
+                            task_future.result()
+                        except Exception:
+                            logger.exception("Voice ingest first-frame live Opus guard retry failed")
 
-                guard_task.add_done_callback(_log_guard_result)
+                    guard_future.add_done_callback(_log_guard_result)
+
             ssrc = getattr(data, "ssrc", None)
             if user is None:
                 if ssrc is not None:
