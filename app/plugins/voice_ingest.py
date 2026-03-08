@@ -122,7 +122,7 @@ class _ChunkStats:
     rms_max: float = 0.0
 
 
-VoiceConnStateValue = Literal["idle", "connecting", "connected", "disconnecting", "reconnecting", "failed"]
+VoiceConnStateValue = Literal["idle", "connecting", "connected", "disconnecting", "reconnecting", "failed", "failed_runtime_incompatible"]
 
 
 @dataclass
@@ -479,6 +479,11 @@ def setup(registry: ServiceRegistry) -> None:
     last_pcm_frame_ts = 0.0
     decode_storm_recovery_count = 0
     decode_storm_recovery_in_progress = False
+    voice_runtime_blocked = False
+    voice_runtime_blocked_reasons: tuple[str, ...] = ()
+    voice_runtime_blocked_signature: Optional[tuple[str, str, str, tuple[str, ...]]] = None
+    voice_runtime_blocked_skip_logged = False
+    logged_runtime_incompatibilities: set[tuple[str, str, str, tuple[str, ...]]] = set()
     configured_max_corruption_ratio = _get_configured_max_corruption_ratio()
     logger.info(
         "Voice ingest quality config %s=%s",
@@ -506,10 +511,24 @@ def setup(registry: ServiceRegistry) -> None:
             opus_payload_size_count = 0
         decode_error_window.clear()
 
-    def _spec_available(*, guild_id: Optional[int] = None, channel_id: Optional[int] = None, reason: str = "runtime") -> bool:
-        report = voice_receive_adapter.get_voice_stack_report()
-        if report.compatible:
-            return True
+    def _runtime_incompatibility_signature(report: Any) -> tuple[str, str, str, tuple[str, ...]]:
+        return (
+            str(report.discord_version),
+            str(report.voice_recv_version),
+            str(report.davey_version),
+            tuple(str(reason) for reason in report.reasons),
+        )
+
+    def _mark_runtime_incompatible(*, report: Any, guild_id: Optional[int], channel_id: Optional[int], reason: str) -> None:
+        nonlocal voice_runtime_blocked, voice_runtime_blocked_reasons, voice_runtime_blocked_signature, voice_runtime_blocked_skip_logged
+        signature = _runtime_incompatibility_signature(report)
+        voice_runtime_blocked = True
+        voice_runtime_blocked_reasons = signature[3]
+        voice_runtime_blocked_signature = signature
+        if signature in logged_runtime_incompatibilities:
+            return
+        logged_runtime_incompatibilities.add(signature)
+        voice_runtime_blocked_skip_logged = False
         logger.error(
             "Voice ingest runtime stack incompatible guild=%s channel=%s reason=%s discord.py=%s voice_recv=%s davey=%s details=%s",
             guild_id,
@@ -520,6 +539,29 @@ def setup(registry: ServiceRegistry) -> None:
             report.davey_version,
             report.reasons,
         )
+
+    def _runtime_blocked_for_join(*, guild_id: Optional[int], channel_id: Optional[int], reason: str) -> bool:
+        nonlocal voice_runtime_blocked_skip_logged
+        if not voice_runtime_blocked:
+            return False
+        if not voice_runtime_blocked_skip_logged:
+            voice_runtime_blocked_skip_logged = True
+            logger.debug(
+                "Voice ingest join skipped due to blocked runtime incompatibility guild=%s channel=%s reason=%s details=%s",
+                guild_id,
+                channel_id,
+                reason,
+                list(voice_runtime_blocked_reasons),
+            )
+        return True
+
+    def _spec_available(*, guild_id: Optional[int] = None, channel_id: Optional[int] = None, reason: str = "runtime") -> bool:
+        if _runtime_blocked_for_join(guild_id=guild_id, channel_id=channel_id, reason=reason):
+            return False
+        report = voice_receive_adapter.get_voice_stack_report()
+        if report.compatible:
+            return True
+        _mark_runtime_incompatible(report=report, guild_id=guild_id, channel_id=channel_id, reason=reason)
         return False
 
 
@@ -1036,7 +1078,7 @@ def setup(registry: ServiceRegistry) -> None:
                 await _safe_disconnect(existing, guild_id=guild.id, channel_id=channel.id, reason="stale_before_join")
                 voice_client = None
             if not _spec_available(guild_id=guild.id, channel_id=channel.id, reason=reason):
-                _set_voice_state(guild.id, state="failed", reason=f"voice_stack_incompatible:{reason}", channel_id=channel.id, listener_attached=False)
+                _set_voice_state(guild.id, state="failed_runtime_incompatible", reason=f"voice_stack_incompatible:{reason}", channel_id=channel.id, listener_attached=False)
                 return
             _set_voice_state(guild.id, state="connecting", reason=reason, channel_id=channel.id, listener_attached=False)
             try:
@@ -1146,6 +1188,11 @@ def setup(registry: ServiceRegistry) -> None:
 
     async def _recover_from_decode_storm(*, trigger: DecodeErrorContext) -> None:
         nonlocal decode_storm_recovery_count, decode_storm_recovery_in_progress, voice_client
+        if voice_runtime_blocked:
+            if current_guild_id is not None:
+                _set_voice_state(current_guild_id, state="failed_runtime_incompatible", reason="voice_stack_incompatible:decode_storm_recovery", channel_id=current_voice_channel_id, listener_attached=False)
+            logger.debug("Voice ingest decode storm recovery skipped due to blocked runtime incompatibility")
+            return
         if decode_storm_recovery_in_progress:
             return
         if decode_storm_recovery_count >= MAX_DECODE_STORM_RECOVERIES:
@@ -1833,8 +1880,11 @@ def setup(registry: ServiceRegistry) -> None:
                     if enabled and auto_join:
                         non_bot_members = [m for m in channel.members if not m.bot]
                         if non_bot_members and (not _safe_is_connected(voice_client)):
-                            logger.info("Voice ingest privacy off; auto-joining channel %s", channel.id)
-                            await ensure_voice_connected(channel.guild, channel, reason="privacy_auto_join")
+                            if _runtime_blocked_for_join(guild_id=channel.guild.id, channel_id=channel.id, reason="privacy_auto_join"):
+                                logger.debug("Voice ingest privacy auto-join skipped due to runtime block channel=%s", channel.id)
+                            else:
+                                logger.info("Voice ingest privacy off; auto-joining channel %s", channel.id)
+                                await ensure_voice_connected(channel.guild, channel, reason="privacy_auto_join")
                 await asyncio.sleep(5)
             except Exception:
                 logger.exception("Voice ingest privacy enforcer failed")
@@ -1943,6 +1993,8 @@ def setup(registry: ServiceRegistry) -> None:
         non_bot_members = [m for m in voice_channel.members if not m.bot]
         if auto_join and non_bot_members and len(non_bot_members) >= min_users:
             if not _safe_is_connected(voice_client):
+                if _runtime_blocked_for_join(guild_id=member.guild.id, channel_id=voice_channel.id, reason="voice_state_auto_join"):
+                    return
                 await ensure_voice_connected(member.guild, voice_channel, reason="voice_state_auto_join")
         if _safe_is_connected(voice_client):
             if not non_bot_members:
