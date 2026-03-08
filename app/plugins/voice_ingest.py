@@ -13,7 +13,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Literal, Optional
 from uuid import uuid4
 
 import discord
@@ -110,6 +110,18 @@ class _ChunkStats:
     total_rms: float = 0.0
     rms_min: float = 0.0
     rms_max: float = 0.0
+
+
+VoiceConnStateValue = Literal["idle", "connecting", "connected", "disconnecting", "reconnecting", "failed"]
+
+
+@dataclass
+class _VoiceConnectionState:
+    guild_id: int
+    state: VoiceConnStateValue = "idle"
+    channel_id: Optional[int] = None
+    listener_attached: bool = False
+    reason: str = "startup"
 
 
 def _should_log_corruption_event(count: int) -> bool:
@@ -372,7 +384,7 @@ def setup(registry: ServiceRegistry) -> None:
     current_guild_id: Optional[int] = None
     legacy_warned: set[str] = set()
     join_locks: dict[int, asyncio.Lock] = {}
-    connecting_guilds: set[int] = set()
+    voice_conn_states: dict[int, _VoiceConnectionState] = {}
     first_frame_logged: set[int] = set()
     audio_buffers_by_user: dict[int, bytearray] = {}
     audio_buffers_by_ssrc: dict[int, bytearray] = {}
@@ -421,6 +433,32 @@ def setup(registry: ServiceRegistry) -> None:
 
     def _spec_available() -> bool:
         return voice_receive_adapter.available()
+
+
+    def _state_for(guild_id: int) -> _VoiceConnectionState:
+        state = voice_conn_states.get(guild_id)
+        if state is None:
+            state = _VoiceConnectionState(guild_id=guild_id)
+            voice_conn_states[guild_id] = state
+        return state
+
+    def _set_voice_state(guild_id: int, *, state: VoiceConnStateValue, reason: str, channel_id: Optional[int] = None, listener_attached: Optional[bool] = None) -> _VoiceConnectionState:
+        current = _state_for(guild_id)
+        current.state = state
+        current.reason = reason
+        if channel_id is not None:
+            current.channel_id = channel_id
+        if listener_attached is not None:
+            current.listener_attached = listener_attached
+        logger.info(
+            "Voice ingest state updated guild=%s state=%s channel=%s reason=%s listener_attached=%s",
+            guild_id,
+            current.state,
+            current.channel_id,
+            reason,
+            current.listener_attached,
+        )
+        return current
 
     def _safe_is_connected(client: Optional[discord.VoiceClient]) -> bool:
         if client is None:
@@ -858,44 +896,77 @@ def setup(registry: ServiceRegistry) -> None:
         current_guild_id = None
         active_session_started_epoch = None
 
-    async def _join_voice_channel(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
+    async def ensure_voice_connected(guild: discord.Guild, channel: discord.VoiceChannel, *, reason: str) -> None:
         nonlocal voice_client
         lock = join_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
-            if guild.id in connecting_guilds:
-                logger.info("Voice ingest connect already in progress for guild=%s channel=%s", guild.id, channel.id)
-                return
-            existing = guild.voice_client
-            if existing and not _safe_is_connected(existing):
-                logger.warning(
-                    "Voice ingest found stale voice client before join guild=%s channel=%s; cleaning up",
+            conn_state = _state_for(guild.id)
+            logger.info(
+                "Voice ingest connect requested guild=%s channel=%s reason=%s state=%s",
+                guild.id,
+                channel.id,
+                reason,
+                conn_state.state,
+            )
+            if conn_state.state in {"connecting", "reconnecting"}:
+                logger.info(
+                    "Voice ingest join skipped: already connecting guild=%s channel=%s reason=%s state=%s",
                     guild.id,
                     channel.id,
+                    reason,
+                    conn_state.state,
+                )
+                return
+            existing = guild.voice_client
+            if existing and _safe_is_connected(existing) and existing.channel and existing.channel.id == channel.id:
+                voice_client = existing
+                attached = voice_receive_adapter.listener_attached(existing)
+                _set_voice_state(guild.id, state="connected", reason=f"existing:{reason}", channel_id=channel.id, listener_attached=attached)
+                if attached:
+                    logger.info(
+                        "Voice ingest listen skipped: already attached guild=%s channel=%s reason=%s state=%s",
+                        guild.id,
+                        channel.id,
+                        reason,
+                        "connected",
+                    )
+                    logger.info(
+                        "Voice ingest join skipped: already connected same channel guild=%s channel=%s reason=%s state=%s",
+                        guild.id,
+                        channel.id,
+                        reason,
+                        "connected",
+                    )
+                    return
+                from discord.ext import voice_recv  # type: ignore
+
+                attached_now = voice_receive_adapter.attach_listener(
+                    voice_client=existing,
+                    voice_recv_module=voice_recv,
+                    on_pcm_frame=_on_voice_data,
+                    on_decode_error=_on_decode_error,
+                )
+                _set_voice_state(guild.id, state="connected", reason=f"attach_existing:{reason}", channel_id=channel.id, listener_attached=attached_now)
+                logger.info("Voice ingest listen attached guild=%s channel=%s reason=%s state=%s", guild.id, channel.id, reason, "connected")
+                logger.info("Voice ingest join skipped: already connected same channel guild=%s channel=%s reason=%s state=%s", guild.id, channel.id, reason, "connected")
+                return
+            if existing and not _safe_is_connected(existing):
+                logger.warning(
+                    "Voice ingest found stale voice client before join guild=%s channel=%s reason=%s state=%s; cleaning up",
+                    guild.id,
+                    channel.id,
+                    reason,
+                    conn_state.state,
                 )
                 await _safe_disconnect(existing, guild_id=guild.id, channel_id=channel.id, reason="stale_before_join")
                 voice_client = None
-            elif existing and _safe_is_connected(existing):
-                if existing.channel and existing.channel.id == channel.id:
-                    logger.info("Voice ingest already connected guild=%s channel=%s", guild.id, channel.id)
-                    return
-                logger.info("Voice ingest moving guild=%s to channel=%s", guild.id, channel.id)
-                await _end_session()
-                await existing.move_to(channel)
-                voice_client = existing
-                ready = await _wait_until_voice_ready(voice_client, guild_id=guild.id, channel_id=channel.id)
-                if not ready:
-                    await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="move_wait_timeout")
-                    voice_client = None
-                    raise discord.ClientException("Voice client not ready after move")
-                await _start_session(guild.id, channel.id)
-                logger.info("Voice ingest moved guild=%s channel=%s", guild.id, channel.id)
-                return
             if not _spec_available():
                 logger.warning("voice_recv not available; voice ingest disabled for guild=%s channel=%s", guild.id, channel.id)
+                _set_voice_state(guild.id, state="failed", reason=f"voice_recv_missing:{reason}", channel_id=channel.id, listener_attached=False)
                 return
-            connecting_guilds.add(guild.id)
+            _set_voice_state(guild.id, state="connecting", reason=reason, channel_id=channel.id, listener_attached=False)
             try:
-                logger.info("Voice ingest connect start guild=%s channel=%s", guild.id, channel.id)
+                logger.info("Voice ingest connect start guild=%s channel=%s reason=%s state=%s", guild.id, channel.id, reason, "connecting")
                 await _start_session(guild.id, channel.id)
                 voice_client = await voice_receive_adapter.connect_and_listen(
                     channel=channel,
@@ -904,16 +975,21 @@ def setup(registry: ServiceRegistry) -> None:
                 )
                 ready = await _wait_until_voice_ready(voice_client, guild_id=guild.id, channel_id=channel.id)
                 if not ready:
+                    _set_voice_state(guild.id, state="failed", reason=f"connect_wait_timeout:{reason}", channel_id=channel.id, listener_attached=False)
                     await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="connect_wait_timeout")
                     voice_client = None
                     await _end_session()
                     raise discord.ClientException("Voice client not ready after connect")
-                logger.info("Voice ingest connect done guild=%s channel=%s", guild.id, channel.id)
+                _set_voice_state(guild.id, state="connected", reason=reason, channel_id=channel.id, listener_attached=True)
+                logger.info("Voice ingest connect done guild=%s channel=%s reason=%s state=%s", guild.id, channel.id, reason, "connected")
             except Exception as exc:
+                _set_voice_state(guild.id, state="failed", reason=f"join_exception:{reason}", channel_id=channel.id, listener_attached=False)
                 logger.exception(
-                    "Voice ingest connect failure guild=%s channel=%s error=%s connected=%s",
+                    "Voice ingest connect failure guild=%s channel=%s reason=%s state=%s error=%s connected=%s",
                     guild.id,
                     channel.id,
+                    reason,
+                    "failed",
                     type(exc).__name__,
                     _safe_is_connected(voice_client),
                 )
@@ -922,14 +998,35 @@ def setup(registry: ServiceRegistry) -> None:
                 if active_session_id is not None:
                     await _end_session()
                 raise
-            finally:
-                connecting_guilds.discard(guild.id)
 
-    async def _leave_voice_channel() -> None:
+    async def _join_voice_channel(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
+        await ensure_voice_connected(guild, channel, reason="legacy_join")
+
+    async def _leave_voice_channel(*, reason: str = "manual") -> None:
         nonlocal voice_client
+        target_guild_id = getattr(getattr(voice_client, "guild", None), "id", current_guild_id)
+        target_channel_id = getattr(getattr(voice_client, "channel", None), "id", current_voice_channel_id)
+        if target_guild_id is not None:
+            _set_voice_state(target_guild_id, state="disconnecting", reason=reason, channel_id=target_channel_id, listener_attached=False)
+        logger.info(
+            "Voice ingest disconnect requested guild=%s channel=%s reason=%s state=%s",
+            target_guild_id,
+            target_channel_id,
+            reason,
+            "disconnecting",
+        )
         await voice_receive_adapter.disconnect()
         voice_client = None
         await _end_session()
+        if target_guild_id is not None:
+            _set_voice_state(target_guild_id, state="idle", reason=reason, channel_id=target_channel_id, listener_attached=False)
+        logger.info(
+            "Voice ingest disconnect completed guild=%s channel=%s reason=%s state=%s",
+            target_guild_id,
+            target_channel_id,
+            reason,
+            "idle",
+        )
 
     def _set_nonlocal_counter(counter_name: str) -> None:
         nonlocal stt_enqueued_chunks, chunks_sent_to_stt, total_chunks_ok
@@ -950,7 +1047,7 @@ def setup(registry: ServiceRegistry) -> None:
             non_bot_members = [m for m in channel.members if not m.bot]
             if non_bot_members:
                 return
-            await _leave_voice_channel()
+            await _leave_voice_channel(reason="empty_channel")
 
         leave_task = asyncio.create_task(_delayed_leave())
         def _log_leave_result(task_future: Any) -> None:
@@ -962,8 +1059,24 @@ def setup(registry: ServiceRegistry) -> None:
 
     def _on_decode_error(error: Exception, source: str) -> None:
         nonlocal opus_corrupted_count
+        counters = voice_receive_adapter.counters
+        message = str(error).lower()
+        if "cryptoerror" in message or "decoding packet data" in message:
+            logger.error(
+                "Voice ingest crypto decode error source=%s state=%s reason=%s crypto_decode_errors=%s",
+                source,
+                _state_for(current_guild_id).state if current_guild_id is not None else "idle",
+                _state_for(current_guild_id).reason if current_guild_id is not None else "n/a",
+                counters.crypto_decode_errors,
+            )
+            return
         _increment_opus_corrupted(error)
         _log_opus_decode_failure(source, error=error)
+        logger.warning(
+            "Voice ingest opus decode error source=%s opus_corrupted_total=%s",
+            source,
+            counters.opus_corrupted_total,
+        )
 
     def _on_voice_data(user: Optional[discord.User], data: Any) -> None:
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks
@@ -1517,17 +1630,17 @@ def setup(registry: ServiceRegistry) -> None:
                     continue
                 privacy = await _privacy_mode()
                 if privacy:
-                    if voice_client and voice_client.is_connected():
+                    if _safe_is_connected(voice_client):
                         logger.info("Voice ingest privacy enabled; leaving channel %s", channel.id)
-                        await _leave_voice_channel()
+                        await _leave_voice_channel(reason="privacy_enabled")
                 else:
                     enabled = await _enabled()
                     auto_join = await _auto_join()
                     if enabled and auto_join:
                         non_bot_members = [m for m in channel.members if not m.bot]
-                        if non_bot_members and (not voice_client or not voice_client.is_connected()):
+                        if non_bot_members and (not _safe_is_connected(voice_client)):
                             logger.info("Voice ingest privacy off; auto-joining channel %s", channel.id)
-                            await _join_voice_channel(channel.guild, channel)
+                            await ensure_voice_connected(channel.guild, channel, reason="privacy_auto_join")
                 await asyncio.sleep(5)
             except Exception:
                 logger.exception("Voice ingest privacy enforcer failed")
@@ -1635,9 +1748,9 @@ def setup(registry: ServiceRegistry) -> None:
         min_users = int(await _get_setting("min_users_to_join", "1"))
         non_bot_members = [m for m in voice_channel.members if not m.bot]
         if auto_join and non_bot_members and len(non_bot_members) >= min_users:
-            if not voice_client or not voice_client.is_connected():
-                await _join_voice_channel(member.guild, voice_channel)
-        if voice_client and voice_client.is_connected():
+            if not _safe_is_connected(voice_client):
+                await ensure_voice_connected(member.guild, voice_channel, reason="voice_state_auto_join")
+        if _safe_is_connected(voice_client):
             if not non_bot_members:
                 await _schedule_leave_if_empty(voice_channel)
 
@@ -1646,10 +1759,10 @@ def setup(registry: ServiceRegistry) -> None:
             return
         if await _privacy_mode():
             return
-        await _join_voice_channel(channel.guild, channel)
+        await ensure_voice_connected(channel.guild, channel, reason="command_join")
 
     async def _handle_leave_command() -> None:
-        await _leave_voice_channel()
+        await _leave_voice_channel(reason="command_leave")
 
     async def _handle_text_message(message: discord.Message) -> None:
         if not await _enabled():

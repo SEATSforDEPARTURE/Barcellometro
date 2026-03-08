@@ -95,9 +95,12 @@ class _FakeChannel:
         self.guild = guild
         self.id = channel_id
         self._voice_client = voice_client
+        self.connect_calls = 0
 
     async def connect(self, **_kwargs: Any) -> _FakeVoiceClient:
+        self.connect_calls += 1
         self._voice_client.channel = self
+        self.guild.voice_client = self._voice_client
         return self._voice_client
 
 
@@ -224,3 +227,65 @@ def test_voice_stack_logging_does_not_crash_if_optional_modules_missing(monkeypa
     on_ready = bot.get_listener("on_ready")
     asyncio.run(on_ready())
     assert registry.has("voice_ingest") is True
+
+
+def test_double_join_is_idempotent_single_connect(monkeypatch: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    registry, bot, db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=43, voice_client=None)
+    channel = _FakeChannel(guild, 779, client)
+
+    async def _run() -> None:
+        await asyncio.gather(controller.join(channel), controller.join(channel))
+
+    asyncio.run(_run())
+
+    assert channel.connect_calls == 1
+    assert client.listen_calls == 1
+    assert db.started == 1
+
+
+def test_join_skips_reconnect_when_already_connected_same_channel(monkeypatch: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    registry, bot, db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=44, voice_client=client)
+    channel = _FakeChannel(guild, 780, client)
+    client.channel = channel
+
+    asyncio.run(controller.join(channel))
+    asyncio.run(controller.join(channel))
+
+    assert channel.connect_calls == 0
+    assert client.listen_calls == 1
+    assert db.started == 0
+
+
+def test_privacy_enforcer_and_voice_state_autojoin_single_connect(monkeypatch: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    registry, bot, _db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=45, voice_client=None, get_channel=lambda _id: channel)
+    channel = _FakeChannel(guild, 781, client)
+
+    asyncio.run(controller.join(channel))
+    asyncio.run(controller.join(channel))
+
+    assert channel.connect_calls == 1
+    assert client.listen_calls == 1
