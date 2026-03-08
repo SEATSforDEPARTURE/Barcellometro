@@ -19,3 +19,9 @@ def test_voice_ingest_decode_storm_recovery_resets_runtime_buffers() -> None:
     source = Path("app/plugins/voice_ingest.py").read_text()
     assert "_clear_voice_runtime_buffers(keep_counters=False)" in source
     assert "failed_decode_storm" in source
+
+
+def test_voice_ingest_decode_storm_recovery_is_limited_to_one_attempt() -> None:
+    source = Path("app/plugins/voice_ingest.py").read_text()
+    assert "MAX_DECODE_STORM_RECOVERIES = 1" in source
+    assert "failed_decode_storm_recovery_exhausted" in source

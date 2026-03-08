@@ -729,6 +729,11 @@ def setup(registry: ServiceRegistry) -> None:
         payload_size: Optional[int] = None,
         user_id: Optional[int] = None,
         ssrc: Optional[int] = None,
+        packet_origin: Optional[str] = None,
+        packet_type: Optional[str] = None,
+        payload_preview_hex: Optional[str] = None,
+        payload_looks_like_rtp: Optional[bool] = None,
+        decoder_instance_id: Optional[int] = None,
     ) -> None:
         nonlocal opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count
         message = str(error).lower().strip() or type(error).__name__.lower()
@@ -748,7 +753,7 @@ def setup(registry: ServiceRegistry) -> None:
         count = opus_corrupted_count
         if _should_log_corruption_event(count):
             logger.warning(
-                "Voice ingest Opus decode failure source=%s count=%s guild=%s channel=%s session=%s user=%s ssrc=%s payload_size=%s error=%r",
+                "Voice ingest Opus decode failure source=%s count=%s guild=%s channel=%s session=%s user=%s ssrc=%s payload_size=%s packet_origin=%s packet_type=%s payload_preview_hex=%s payload_looks_like_rtp=%s decoder_instance_id=%s error=%r",
                 source,
                 count,
                 current_guild_id,
@@ -757,6 +762,11 @@ def setup(registry: ServiceRegistry) -> None:
                 user_id,
                 ssrc,
                 payload_size,
+                packet_origin,
+                packet_type,
+                payload_preview_hex,
+                payload_looks_like_rtp,
+                decoder_instance_id,
                 error,
             )
         else:
@@ -1271,9 +1281,20 @@ def setup(registry: ServiceRegistry) -> None:
             )
             return
         _increment_opus_corrupted(error)
-        _log_opus_decode_failure(source, error=error, payload_size=context.payload_size, user_id=context.user_id, ssrc=context.ssrc)
+        _log_opus_decode_failure(
+            source,
+            error=error,
+            payload_size=context.payload_size,
+            user_id=context.user_id,
+            ssrc=context.ssrc,
+            packet_origin=context.packet_origin,
+            packet_type=context.packet_type,
+            payload_preview_hex=context.payload_preview_hex,
+            payload_looks_like_rtp=context.payload_looks_like_rtp,
+            decoder_instance_id=context.decoder_instance_id,
+        )
         logger.warning(
-            "Voice ingest opus decode error source=%s opus_corrupted_total=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s packet_type=%s decoder_instance_id=%s context_session=%s context_guild=%s context_channel=%s",
+            "Voice ingest opus decode error source=%s opus_corrupted_total=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s packet_origin=%s packet_type=%s payload_preview_hex=%s payload_looks_like_rtp=%s decoder_instance_id=%s context_session=%s context_guild=%s context_channel=%s",
             source,
             counters.opus_corrupted_total,
             active_session_id,
@@ -1282,7 +1303,10 @@ def setup(registry: ServiceRegistry) -> None:
             context.user_id,
             context.ssrc,
             context.payload_size,
+            context.packet_origin,
             context.packet_type,
+            context.payload_preview_hex,
+            context.payload_looks_like_rtp,
             context.decoder_instance_id,
             context.session_id,
             context.guild_id,
@@ -1290,6 +1314,15 @@ def setup(registry: ServiceRegistry) -> None:
         )
         now_ts = time.time()
         decode_error_window.append(now_ts)
+        if context.payload_looks_like_rtp:
+            logger.error(
+                "Voice ingest decode payload anomaly source=%s packet_origin=%s payload_size=%s preview=%s decoder_instance_id=%s note=payload_looks_like_rtp_header",
+                source,
+                context.packet_origin,
+                context.payload_size,
+                context.payload_preview_hex,
+                context.decoder_instance_id,
+            )
         if _decode_storm_detected(now_ts):
             if decode_storm_recovery_task is None or decode_storm_recovery_task.done():
                 decode_storm_recovery_task = asyncio.create_task(_recover_from_decode_storm(trigger=context))
