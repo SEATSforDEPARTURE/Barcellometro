@@ -12,7 +12,7 @@ class DummyOpusError(Exception):
     pass
 
 
-def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[Any, Any]:
+def _install_fake_voice_recv(*, router_exc: Exception | None = None, include_all_hooks: bool = False) -> tuple[Any, Any]:
     module = types.ModuleType("discord.ext.voice_recv")
     module.__version__ = "test"
     module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv", loader=None)
@@ -44,6 +44,11 @@ def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[An
             return b"ok"
 
     class PacketRouter:
+        def _decode_packet(self, _packet: Any) -> bytes:
+            if router_exc is not None:
+                raise router_exc
+            return b"ok"
+
         def _do_run(self) -> None:
             if router_exc is not None:
                 raise router_exc
@@ -62,9 +67,31 @@ def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[An
 
     reader_module.AudioReader = AudioReader
 
+
+    opus_module = types.ModuleType("discord.ext.voice_recv.opus")
+    opus_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.opus", loader=None)
+
+    class OpusDecoder:
+        def decode(self, _packet: Any) -> bytes:
+            if router_exc is not None:
+                raise router_exc
+            return b"ok"
+
+    opus_module.OpusDecoder = OpusDecoder
+
+    if include_all_hooks:
+        class PacketDecryptor:
+            def decrypt(self, _packet: Any) -> bytes:
+                if router_exc is not None:
+                    raise router_exc
+                return b"ok"
+
+        router_module.PacketDecryptor = PacketDecryptor
+
     sys.modules["discord.ext.voice_recv"] = module
     sys.modules["discord.ext.voice_recv.router"] = router_module
     sys.modules["discord.ext.voice_recv.reader"] = reader_module
+    sys.modules["discord.ext.voice_recv.opus"] = opus_module
 
     class FakeVoiceClient:
         def __init__(self) -> None:
@@ -182,20 +209,9 @@ def test_listener_attach_is_idempotent() -> None:
     assert attached is False
 
 
-def test_crypto_and_opus_errors_are_tracked_separately(monkeypatch: Any) -> None:
+def test_crypto_and_opus_errors_are_tracked_separately() -> None:
     FakeChannel, _PacketRouter = _install_fake_voice_recv()
     adapter = VoiceReceiveAdapter()
-
-    class CryptoError(Exception):
-        pass
-
-    original_install = adapter._vendor.install_decode_guards
-
-    def _patched_install_decode_guards(*, on_decode_error: Any) -> int:
-        on_decode_error(CryptoError("CryptoError decoding packet data"), "test.crypto")
-        return original_install(on_decode_error=on_decode_error)
-
-    monkeypatch.setattr(adapter._vendor, "install_decode_guards", _patched_install_decode_guards)
 
     channel = FakeChannel()
     client = asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=lambda *_a: None))
@@ -215,6 +231,42 @@ def test_crypto_and_opus_errors_are_tracked_separately(monkeypatch: Any) -> None
     )
     client.sink.write(None, BrokenData())
 
+    adapter._vendor._register_decode_error(Exception("CryptoError decoding packet data"))
     counters = adapter.counters
     assert counters.crypto_decode_errors >= 1
     assert counters.opus_corrupted_total >= 1
+
+
+def test_runtime_introspection_and_hook_installation_finds_multiple_methods() -> None:
+    _install_fake_voice_recv(include_all_hooks=True)
+    adapter = VoiceReceiveAdapter()
+
+    hooks = adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    assert hooks >= 5
+
+
+def test_do_run_is_fallback_only_when_packet_level_hooks_exist() -> None:
+    _install_fake_voice_recv(include_all_hooks=True)
+    adapter = VoiceReceiveAdapter()
+
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    patched = adapter._vendor._patched_sources
+    assert "PacketRouter._do_run" in patched
+    assert "PacketDecoder.decode" in patched
+    assert "PacketRouter._decode_packet" in patched
+
+
+def test_crypto_and_opus_errors_are_classified_in_vendor_counters() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    vendor = adapter._vendor
+    vendor._register_decode_error(Exception("CryptoError decoding packet data"))
+    vendor._register_decode_error(Exception("OpusError('corrupted stream')"))
+
+    counters = adapter.counters
+    assert counters.crypto_decode_errors == 1
+    assert counters.opus_corrupted_total == 1
+    assert counters.corrupted_stream_count == 1

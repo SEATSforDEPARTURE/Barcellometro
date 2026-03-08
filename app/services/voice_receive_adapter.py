@@ -29,9 +29,29 @@ class VoiceReceiveAdapter:
         self._attached_client_id: Optional[int] = None
         self._decode_counters = AdapterDecodeCounters()
 
+    def _classify_decode_error(self, exc: Exception) -> Optional[str]:
+        message = str(exc).lower()
+        if "cryptoerror" in message or "decoding packet data" in message or "decrypt" in message:
+            return "crypto"
+        if "corrupted stream" in message or "invalid argument" in message or "decode failed" in message:
+            return "opus"
+        return None
+
+    def _build_decode_error_handler(self, on_decode_error: Callable[[Exception, str], None]) -> Callable[[Exception, str], None]:
+        def _on_decode_error(exc: Exception, source: str) -> None:
+            decode_type = self._classify_decode_error(exc)
+            if decode_type == "crypto":
+                logger.error("Voice receive adapter crypto decode failure source=%s error=%s", source, type(exc).__name__)
+            elif decode_type == "opus":
+                logger.warning("Voice receive adapter opus decode failure source=%s error=%s", source, type(exc).__name__)
+            on_decode_error(exc, source)
+
+        return _on_decode_error
+
     @property
     def counters(self) -> AdapterDecodeCounters:
         vendor = self._vendor.counters
+        self._decode_counters.crypto_decode_errors = vendor.crypto_decode_errors
         self._decode_counters.opus_corrupted_total = vendor.opus_corrupted_total
         self._decode_counters.corrupted_stream_count = vendor.corrupted_stream_count
         self._decode_counters.invalid_argument_count = vendor.invalid_argument_count
@@ -54,14 +74,7 @@ class VoiceReceiveAdapter:
     ) -> discord.VoiceClient:
         from discord.ext import voice_recv  # type: ignore
 
-        def _on_decode_error(exc: Exception, source: str) -> None:
-            message = str(exc).lower()
-            if "cryptoerror" in message or "decoding packet data" in message:
-                self._decode_counters.crypto_decode_errors += 1
-                logger.error("Voice receive adapter crypto decode failure source=%s error=%s", source, type(exc).__name__)
-            elif "corrupted stream" in message or "invalid argument" in message:
-                logger.warning("Voice receive adapter opus decode failure source=%s error=%s", source, type(exc).__name__)
-            on_decode_error(exc, source)
+        _on_decode_error = self._build_decode_error_handler(on_decode_error)
 
         self._vendor.install_decode_guards(on_decode_error=_on_decode_error)
         sink = self._vendor.build_sink(
@@ -90,14 +103,7 @@ class VoiceReceiveAdapter:
         if self.listener_attached(voice_client):
             return False
 
-        def _on_decode_error(exc: Exception, source: str) -> None:
-            message = str(exc).lower()
-            if "cryptoerror" in message or "decoding packet data" in message:
-                self._decode_counters.crypto_decode_errors += 1
-                logger.error("Voice receive adapter crypto decode failure source=%s error=%s", source, type(exc).__name__)
-            elif "corrupted stream" in message or "invalid argument" in message:
-                logger.warning("Voice receive adapter opus decode failure source=%s error=%s", source, type(exc).__name__)
-            on_decode_error(exc, source)
+        _on_decode_error = self._build_decode_error_handler(on_decode_error)
 
         self._vendor.install_decode_guards(on_decode_error=_on_decode_error)
         sink = self._vendor.build_sink(
