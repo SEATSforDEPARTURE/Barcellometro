@@ -21,13 +21,9 @@ import aiosqlite
 
 from app.core.service_registry import ServiceRegistry
 from app.services.ingest import EventEnvelope, IngestService
+from app.services.voice_receive_adapter import VoiceReceiveAdapter
 
 logger = logging.getLogger(__name__)
-
-_OPUS_GUARD_INSTALLED = False
-_OPUS_GUARD_CORRUPTED_COUNT = 0
-_OPUS_GUARD_THROTTLED_LOG: Optional[Callable[[int], None]] = None
-_OPUS_GUARD_ORIGINAL_DECODE: Optional[Callable[..., Any]] = None
 
 PCM_BYTES_PER_SECOND_48K_STEREO_S16 = 48000 * 2 * 2
 MIN_CHUNK_SECONDS = 1.0
@@ -38,14 +34,6 @@ CRITICAL_CORRUPTION_RATIO = 0.70
 MIN_WAV_SECONDS = 0.6
 OPUS_WARNING_LOG_FIRST = 3
 OPUS_SUMMARY_LOG_INTERVAL_SEC = 30
-LIVE_OPUS_GUARD_RETRY_ATTEMPTS = 8
-LIVE_OPUS_GUARD_RETRY_INTERVAL_SEC = 0.25
-LIVE_OPUS_GUARD_MAX_VISITED_OBJECTS = 180
-LIVE_OPUS_GUARD_MAX_DEPTH = 5
-LIVE_OPUS_GUARD_MAX_COLLECTION_ITEMS = 16
-LIVE_OPUS_GUARD_OBJECT_LOG_LIMIT = 20
-LIVE_OPUS_GUARD_ATTR_LOG_LIMIT = 10
-LIVE_OPUS_GUARD_ALLOWED_SIMPLE_TYPES = (str, bytes, bytearray, int, float, bool, type(None))
 DEFAULT_MIN_SPEECH_RATIO = 0.20
 DEFAULT_MIN_AVG_RMS = 250.0
 DEFAULT_FRAME_SILENCE_RMS = 220.0
@@ -55,70 +43,10 @@ KNOWN_HALLUCINATION_TEXTS = {
 }
 
 
-def _increment_opus_corruption() -> None:
-    global _OPUS_GUARD_CORRUPTED_COUNT
-    _OPUS_GUARD_CORRUPTED_COUNT += 1
-    if _OPUS_GUARD_THROTTLED_LOG is not None:
-        _OPUS_GUARD_THROTTLED_LOG(_OPUS_GUARD_CORRUPTED_COUNT)
-
-
 def _is_known_corrupted_opus_error(error: Exception) -> bool:
     message = str(error).lower()
-    recoverable_tokens = (
-        "corrupted stream",
-        "invalid argument",
-        "buffer too small",
-        "decode failed",
-    )
+    recoverable_tokens = ("corrupted stream", "invalid argument", "buffer too small", "decode failed")
     return any(token in message for token in recoverable_tokens)
-
-
-def _is_recoverable_opus_decode_error(error: Exception) -> bool:
-    return _is_known_corrupted_opus_error(error)
-
-
-def _install_opus_decode_guard() -> None:
-    global _OPUS_GUARD_INSTALLED, _OPUS_GUARD_ORIGINAL_DECODE
-    if _OPUS_GUARD_INSTALLED:
-        return
-    try:
-        from discord.opus import OpusError
-        from discord.ext.voice_recv import opus as vr_opus  # type: ignore
-    except Exception:
-        return
-
-    decoder = getattr(vr_opus, "OpusDecoder", None)
-    if decoder is None:
-        return
-
-    target_name = None
-    if hasattr(decoder, "_decode_packet"):
-        target_name = "_decode_packet"
-    elif hasattr(decoder, "_process_packet"):
-        target_name = "_process_packet"
-    if target_name is None:
-        return
-
-    original = getattr(decoder, target_name)
-    if getattr(original, "_barcello_guard", False):
-        _OPUS_GUARD_INSTALLED = True
-        return
-
-    def _wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
-        try:
-            return original(self, *args, **kwargs)
-        except OpusError as exc:
-            if not _is_recoverable_opus_decode_error(exc):
-                logger.warning("Opus decode guard swallowed non-standard OpusError: %r", exc)
-            _increment_opus_corruption()
-            if target_name == "_decode_packet":
-                packet = args[0] if args else None
-                return None
-            return None
-
-    setattr(_wrapped, "_barcello_guard", True)
-    setattr(decoder, target_name, _wrapped)
-    _OPUS_GUARD_INSTALLED = True
 
 
 def _now_iso() -> str:
@@ -446,9 +374,6 @@ def setup(registry: ServiceRegistry) -> None:
     join_locks: dict[int, asyncio.Lock] = {}
     connecting_guilds: set[int] = set()
     first_frame_logged: set[int] = set()
-    live_guard_first_frame_retry_started = False
-    live_guard_runtime_patched = False
-    live_guard_last_summary: Optional[tuple[str, int, int, int]] = None
     audio_buffers_by_user: dict[int, bytearray] = {}
     audio_buffers_by_ssrc: dict[int, bytearray] = {}
     chunk_stats_by_user: dict[int, _ChunkStats] = {}
@@ -463,8 +388,6 @@ def setup(registry: ServiceRegistry) -> None:
     active_session_started_epoch: Optional[float] = None
     last_log_ts: dict[str, float] = {}
     opus_corrupted_count = 0
-    opus_guard_installed = False
-    opus_decode_guard_installed = False
     opus_last_summary_ts = 0.0
     opus_error_type_counts: dict[str, int] = {}
     opus_payload_size_min: Optional[int] = None
@@ -488,6 +411,7 @@ def setup(registry: ServiceRegistry) -> None:
     chunks_saved_to_db = 0
     consecutive_discarded_chunks = 0
     max_consecutive_discarded_chunks = 0
+    voice_receive_adapter = VoiceReceiveAdapter()
     configured_max_corruption_ratio = _get_configured_max_corruption_ratio()
     logger.info(
         "Voice ingest quality config %s=%s",
@@ -496,7 +420,7 @@ def setup(registry: ServiceRegistry) -> None:
     )
 
     def _spec_available() -> bool:
-        return importlib.util.find_spec("discord.ext.voice_recv") is not None
+        return voice_receive_adapter.available()
 
     def _safe_is_connected(client: Optional[discord.VoiceClient]) -> bool:
         if client is None:
@@ -679,485 +603,6 @@ def setup(registry: ServiceRegistry) -> None:
         else:
             _emit_periodic_opus_summary_if_needed()
 
-    def _install_opus_guard() -> None:
-        nonlocal opus_guard_installed
-        if opus_guard_installed:
-            return
-        try:
-            from discord.opus import OpusError
-        except Exception:
-            logger.warning("Unable to install OpusError guard: import failed module=discord.opus", exc_info=True)
-            return
-
-        vr_opus = None
-        try:
-            vr_opus = importlib.import_module("discord.ext.voice_recv.opus")
-        except Exception:
-            logger.warning("Unable to install OpusError guard: import failed module=discord.ext.voice_recv.opus", exc_info=True)
-
-        vr_router = None
-        try:
-            vr_router = importlib.import_module("discord.ext.voice_recv.router")
-        except Exception:
-            logger.warning("Unable to install OpusError guard: import failed module=discord.ext.voice_recv.router", exc_info=True)
-
-        def _module_file(module_obj: Any) -> str:
-            return str(getattr(module_obj, "__file__", "unknown"))
-
-        def _log_runtime_target(label: str, module_name: str, module_obj: Any, target_obj: Any) -> None:
-            logger.info(
-                "Opus guard target %s module=%s file=%s repr=%r id=%s",
-                label,
-                module_name,
-                _module_file(module_obj),
-                target_obj,
-                id(target_obj) if target_obj is not None else None,
-            )
-
-        if vr_opus is not None:
-            _log_runtime_target("OpusDecoder", "discord.ext.voice_recv.opus", vr_opus, getattr(vr_opus, "OpusDecoder", None))
-            _log_runtime_target("OpusDecoder.pop_data", "discord.ext.voice_recv.opus", vr_opus, getattr(getattr(vr_opus, "OpusDecoder", None), "pop_data", None))
-            _log_runtime_target(
-                "OpusDecoder._decode_packet",
-                "discord.ext.voice_recv.opus",
-                vr_opus,
-                getattr(getattr(vr_opus, "OpusDecoder", None), "_decode_packet", None),
-            )
-        if vr_router is not None:
-            _log_runtime_target("PacketRouter", "discord.ext.voice_recv.router", vr_router, getattr(vr_router, "PacketRouter", None))
-            _log_runtime_target(
-                "PacketRouter._do_run",
-                "discord.ext.voice_recv.router",
-                vr_router,
-                getattr(getattr(vr_router, "PacketRouter", None), "_do_run", None),
-            )
-
-        def _extract_decode_context(decoder_obj: Any, *args: Any, **kwargs: Any) -> tuple[Optional[int], Optional[int], Optional[int]]:
-            packet = args[0] if args else kwargs.get("packet")
-            if packet is None:
-                packet = getattr(decoder_obj, "_packet", None)
-            if packet is None:
-                packet = getattr(decoder_obj, "packet", None)
-            if packet is None:
-                packet = getattr(decoder_obj, "_current_packet", None)
-
-            payload = getattr(packet, "decrypted_data", None)
-            if payload is None:
-                payload = getattr(packet, "data", None)
-            payload_size = len(payload) if isinstance(payload, (bytes, bytearray)) else None
-
-            ssrc = getattr(packet, "ssrc", None)
-            if ssrc is None:
-                ssrc = getattr(decoder_obj, "ssrc", None)
-
-            user_obj = getattr(packet, "member", None)
-            if user_obj is None:
-                user_obj = getattr(packet, "user", None)
-            user_id = getattr(user_obj, "id", None)
-            return payload_size, user_id, ssrc
-
-        def _install_decoder_method_guard(method_name: str) -> bool:
-            decoder = getattr(vr_opus, "OpusDecoder", None)
-            if decoder is None:
-                logger.info("OpusDecoder not present in discord.ext.voice_recv.opus; skipping decoder guard")
-                return False
-            if not hasattr(decoder, method_name):
-                logger.warning(
-                    "Unable to install OpusError guard: module=discord.ext.voice_recv.opus class=OpusDecoder method=%s missing",
-                    method_name,
-                )
-                return False
-
-            original = getattr(decoder, method_name)
-            if getattr(original, "_barcello_guard", False):
-                logger.info("OpusError guard already installed on voice_recv.OpusDecoder.%s", method_name)
-                return True
-
-            def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
-                try:
-                    return original(self, *args, **kwargs)
-                except OpusError as exc:
-                    if not _is_known_corrupted_opus_error(exc):
-                        logger.exception("Non-recoverable OpusError in voice_recv.OpusDecoder.%s", method_name)
-                        raise
-                    _increment_opus_corrupted(exc)
-                    payload_size, user_id, ssrc = _extract_decode_context(self, *args, **kwargs)
-                    _log_opus_decode_failure(
-                        f"voice_recv.OpusDecoder.{method_name}",
-                        error=exc,
-                        payload_size=payload_size,
-                        user_id=user_id,
-                        ssrc=ssrc,
-                    )
-                    return None
-
-            setattr(wrapped, "_barcello_guard", True)
-            setattr(decoder, method_name, wrapped)
-            assigned = getattr(decoder, method_name)
-            if assigned is wrapped:
-                logger.info(
-                    "Installed OpusError guard on voice_recv.OpusDecoder.%s module=%s file=%s original_id=%s wrapped_id=%s",
-                    method_name,
-                    "discord.ext.voice_recv.opus",
-                    _module_file(vr_opus),
-                    id(original),
-                    id(assigned),
-                )
-                return True
-            logger.warning(
-                "Failed to verify OpusError guard assignment on voice_recv.OpusDecoder.%s",
-                method_name,
-            )
-            return False
-
-        def _install_router_guard() -> bool:
-            if vr_router is None:
-                logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.router unavailable")
-                return False
-            router = getattr(vr_router, "PacketRouter", None)
-            if router is None:
-                logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.router class=PacketRouter missing")
-                return False
-            if not hasattr(router, "_do_run"):
-                logger.warning(
-                    "Unable to install OpusError guard: module=discord.ext.voice_recv.router class=PacketRouter method=_do_run missing"
-                )
-                return False
-
-            original = getattr(router, "_do_run")
-            if getattr(original, "_barcello_guard", False):
-                logger.info("OpusError guard already installed on voice_recv.PacketRouter._do_run")
-                return True
-
-            def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
-                try:
-                    return original(self, *args, **kwargs)
-                except OpusError as exc:
-                    if not _is_known_corrupted_opus_error(exc):
-                        logger.exception("Non-recoverable OpusError in voice_recv.PacketRouter._do_run")
-                        raise
-                    _increment_opus_corrupted(exc)
-                    _log_opus_decode_failure("voice_recv.PacketRouter._do_run", error=exc)
-                    return None
-
-            setattr(wrapped, "_barcello_guard", True)
-            setattr(router, "_do_run", wrapped)
-            assigned = getattr(router, "_do_run")
-            if assigned is wrapped:
-                logger.info(
-                    "Installed OpusError guard on voice_recv.PacketRouter._do_run module=%s file=%s original_id=%s wrapped_id=%s",
-                    "discord.ext.voice_recv.router",
-                    _module_file(vr_router),
-                    id(original),
-                    id(assigned),
-                )
-                return True
-            logger.warning("Failed to verify OpusError guard assignment on voice_recv.PacketRouter._do_run")
-            return False
-
-        installed = False
-        if vr_opus is None:
-            logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.opus unavailable")
-        elif getattr(vr_opus, "OpusDecoder", None) is None:
-            logger.info("OpusDecoder not present in discord.ext.voice_recv.opus; skipping decoder guard")
-        else:
-            installed = _install_decoder_method_guard("pop_data") or installed
-            installed = _install_decoder_method_guard("_decode_packet") or installed
-        installed = _install_router_guard() or installed
-        opus_guard_installed = installed
-        if not installed:
-            logger.warning("Unable to install any OpusError guard for voice_recv receive path")
-
-    def _install_live_opus_guard(client: Any, *, reason: str = "manual") -> int:
-        nonlocal live_guard_runtime_patched, live_guard_last_summary
-        try:
-            from discord.opus import OpusError
-        except Exception:
-            logger.warning("Unable to install live OpusError guard: import failed module=discord.opus", exc_info=True)
-            return 0
-
-        method_candidates = ("pop_data", "_process_packet", "_decode_packet")
-        traversal_attrs = ("_target", "_args", "_kwargs", "packet", "_packet", "decoder", "_decoder", "router", "_router")
-
-        patched = 0
-        visited = 0
-        candidates_found = 0
-        inspected_logged = 0
-        candidate_logged = 0
-
-        def _extract_decode_context(obj: Any, method_name: str, *args: Any, **kwargs: Any) -> tuple[Optional[int], Optional[int], Optional[int]]:
-            packet = args[0] if args else kwargs.get("packet")
-            if packet is None:
-                packet = getattr(obj, "_packet", None)
-            if packet is None:
-                packet = getattr(obj, "packet", None)
-            if packet is None and method_name == "pop_data":
-                packet = getattr(obj, "_current_packet", None)
-
-            payload = getattr(packet, "decrypted_data", None)
-            if payload is None:
-                payload = getattr(packet, "data", None)
-            payload_size = len(payload) if isinstance(payload, (bytes, bytearray)) else None
-
-            ssrc = getattr(packet, "ssrc", None)
-            if ssrc is None:
-                ssrc = getattr(obj, "ssrc", None)
-
-            user_obj = getattr(packet, "member", None)
-            if user_obj is None:
-                user_obj = getattr(packet, "user", None)
-            user_id = getattr(user_obj, "id", None)
-            return payload_size, user_id, ssrc
-
-        def _patch_instance_method(obj: Any, method_name: str, source: str) -> bool:
-            nonlocal patched
-            if obj is None or not hasattr(obj, method_name):
-                return False
-            original = getattr(obj, method_name)
-            if not callable(original):
-                return False
-            if getattr(original, "_barcello_guard", False):
-                return True
-
-            def wrapped(*args: Any, **kwargs: Any) -> Any:
-                try:
-                    return original(*args, **kwargs)
-                except OpusError as exc:
-                    if not _is_known_corrupted_opus_error(exc):
-                        logger.exception("Non-recoverable OpusError in %s", source)
-                        raise
-                    _increment_opus_corrupted(exc)
-                    payload_size, user_id, ssrc = _extract_decode_context(obj, method_name, *args, **kwargs)
-                    _log_opus_decode_failure(
-                        source,
-                        error=exc,
-                        payload_size=payload_size,
-                        user_id=user_id,
-                        ssrc=ssrc,
-                    )
-                    # Corrupted frame is dropped (None). We never emit fake-silence PCM.
-                    return None
-
-            setattr(wrapped, "_barcello_guard", True)
-            setattr(obj, method_name, wrapped)
-            assigned = getattr(obj, method_name)
-            if assigned is wrapped:
-                patched += 1
-                live_guard_runtime_patched = True
-                logger.info(
-                    "Installed OpusError guard on live %s object=%r object_type=%s original_id=%s wrapped_id=%s",
-                    source,
-                    obj,
-                    type(obj).__name__,
-                    id(original),
-                    id(assigned),
-                )
-                return True
-            logger.warning("Failed to verify OpusError guard assignment on live %s object=%r", source, obj)
-            return False
-
-        def _enqueue_if_runtime_obj(queue: list[tuple[Any, int]], seen: set[int], nested: Any, depth: int) -> None:
-            if nested is None:
-                return
-            if id(nested) in seen:
-                return
-            queue.append((nested, depth + 1))
-
-        def _inspect_router_runtime(router_obj: Any, queue: list[tuple[Any, int]], seen: set[int], depth: int) -> None:
-            nonlocal inspected_logged
-            router_target = getattr(router_obj, "_target", None)
-            router_args = getattr(router_obj, "_args", None)
-            router_kwargs = getattr(router_obj, "_kwargs", None)
-
-            if inspected_logged < LIVE_OPUS_GUARD_OBJECT_LOG_LIMIT:
-                logger.info(
-                    "Live Opus guard PacketRouter runtime found depth=%s target=%s args_type=%s kwargs_type=%s",
-                    depth,
-                    type(router_target).__name__ if router_target is not None else None,
-                    type(router_args).__name__ if router_args is not None else None,
-                    type(router_kwargs).__name__ if router_kwargs is not None else None,
-                )
-                inspected_logged += 1
-
-            _enqueue_if_runtime_obj(queue, seen, router_target, depth)
-            if isinstance(router_args, (tuple, list)):
-                for item in router_args[:LIVE_OPUS_GUARD_MAX_COLLECTION_ITEMS]:
-                    _enqueue_if_runtime_obj(queue, seen, item, depth)
-            elif router_args is not None:
-                _enqueue_if_runtime_obj(queue, seen, router_args, depth)
-            if isinstance(router_kwargs, dict):
-                for item in list(router_kwargs.values())[:LIVE_OPUS_GUARD_MAX_COLLECTION_ITEMS]:
-                    _enqueue_if_runtime_obj(queue, seen, item, depth)
-
-        def _seed_runtime_path(client_obj: Any, queue: list[tuple[Any, int]], seen: set[int]) -> None:
-            seed_objects: list[Any] = [client_obj]
-            for attr_name in ("_reader", "reader"):
-                value = getattr(client_obj, attr_name, None)
-                if value is not None:
-                    seed_objects.append(value)
-            for seed in seed_objects:
-                _enqueue_if_runtime_obj(queue, seen, seed, 0)
-
-        queue: list[tuple[Any, int]] = []
-        seen: set[int] = set()
-        _seed_runtime_path(client, queue, seen)
-
-        logger.info("Live Opus guard discovery start reason=%s", reason)
-
-        while queue and visited < LIVE_OPUS_GUARD_MAX_VISITED_OBJECTS:
-            obj, depth = queue.pop(0)
-            if obj is None:
-                continue
-            obj_id = id(obj)
-            if obj_id in seen:
-                continue
-            seen.add(obj_id)
-            visited += 1
-
-            if isinstance(obj, LIVE_OPUS_GUARD_ALLOWED_SIMPLE_TYPES):
-                continue
-
-            attr_map = getattr(obj, "__dict__", None)
-            available_methods = [name for name in method_candidates if callable(getattr(obj, name, None))]
-
-            if inspected_logged < LIVE_OPUS_GUARD_OBJECT_LOG_LIMIT:
-                logger.info(
-                    "Live Opus guard inspected object type=%s depth=%s attrs=%s",
-                    type(obj).__name__,
-                    depth,
-                    list(attr_map.keys())[:LIVE_OPUS_GUARD_ATTR_LOG_LIMIT] if isinstance(attr_map, dict) else [],
-                )
-                inspected_logged += 1
-
-            if type(obj).__name__ == "PacketRouter":
-                _inspect_router_runtime(obj, queue, seen, depth)
-
-            if available_methods:
-                candidates_found += 1
-                if candidate_logged < LIVE_OPUS_GUARD_OBJECT_LOG_LIMIT:
-                    logger.info(
-                        "Live Opus guard candidate decoder found type=%s object=%r methods=%s",
-                        type(obj).__name__,
-                        obj,
-                        available_methods,
-                    )
-                    candidate_logged += 1
-                for method_name in available_methods:
-                    _patch_instance_method(obj, method_name, f"live.{type(obj).__name__}.{method_name}")
-
-            if depth >= LIVE_OPUS_GUARD_MAX_DEPTH:
-                continue
-
-            nested_values: list[Any] = []
-            if isinstance(attr_map, dict):
-                nested_values.extend(attr_map.values())
-            for attr_name in traversal_attrs:
-                nested = getattr(obj, attr_name, None)
-                if nested is not None:
-                    nested_values.append(nested)
-            if isinstance(obj, dict):
-                nested_values.extend(obj.keys())
-                nested_values.extend(obj.values())
-            elif isinstance(obj, (list, tuple, set, frozenset)):
-                nested_values.extend(list(obj))
-
-            added = 0
-            for nested in nested_values:
-                if nested is None:
-                    continue
-                nested_id = id(nested)
-                if nested_id in seen:
-                    continue
-                queue.append((nested, depth + 1))
-                added += 1
-                if added >= LIVE_OPUS_GUARD_MAX_COLLECTION_ITEMS:
-                    break
-
-        summary = (reason, visited, candidates_found, patched)
-        if live_guard_last_summary != summary:
-            logger.info(
-                "Live Opus guard discovery summary reason=%s visited_objects=%s candidate_decoders=%s patched_objects=%s",
-                reason,
-                visited,
-                candidates_found,
-                patched,
-            )
-            live_guard_last_summary = summary
-        else:
-            logger.debug(
-                "Live Opus guard discovery unchanged reason=%s visited_objects=%s candidate_decoders=%s patched_objects=%s",
-                reason,
-                visited,
-                candidates_found,
-                patched,
-            )
-        return patched
-
-    async def _install_live_opus_guard_with_retry(client: Any, *, reason: str = "listen") -> bool:
-        nonlocal live_guard_runtime_patched
-        if live_guard_runtime_patched:
-            logger.debug("Live OpusError guard already patched runtime decoder; skipping reason=%s", reason)
-            return True
-        logger.info("Live OpusError guard fallback start reason=%s", reason)
-        patched = _install_live_opus_guard(client, reason=f"{reason}:initial")
-        if patched > 0:
-            return True
-        for attempt in range(1, LIVE_OPUS_GUARD_RETRY_ATTEMPTS + 1):
-            if live_guard_runtime_patched:
-                return True
-            await asyncio.sleep(LIVE_OPUS_GUARD_RETRY_INTERVAL_SEC)
-            patched = _install_live_opus_guard(client, reason=f"{reason}:retry{attempt}")
-            if patched > 0:
-                logger.info("Live OpusError guard fallback patched runtime objects reason=%s retry_attempt=%s", reason, attempt)
-                return True
-        logger.warning(
-            "Live OpusError guard fallback exhausted retries without patching runtime objects reason=%s attempts=%s",
-            reason,
-            LIVE_OPUS_GUARD_RETRY_ATTEMPTS,
-        )
-        return False
-    def _install_discord_opus_decode_guard() -> None:
-        nonlocal opus_decode_guard_installed
-        if opus_decode_guard_installed:
-            return
-        opus_decode_guard_installed = True
-        logger.info("Skipping GLOBAL OpusError guard on discord.opus.Decoder.decode to avoid fake-silence PCM")
-
-    try:
-        from discord.ext.voice_recv import AudioSink as _AudioSink  # type: ignore
-    except Exception:
-        _AudioSink = object  # type: ignore
-
-    class SafeSink(_AudioSink):
-        def __init__(self, inner: Any) -> None:
-            self._inner = inner
-
-        def wants_opus(self) -> bool:
-            wants = getattr(self._inner, "wants_opus", None)
-            return bool(wants()) if callable(wants) else False
-
-        def write(self, user: Optional[discord.User], data: Any) -> None:
-            try:
-                self._inner.write(user, data)
-            except Exception as exc:
-                try:
-                    from discord.opus import OpusError
-                except Exception:
-                    OpusError = None  # type: ignore[assignment]
-                if OpusError is not None and isinstance(exc, OpusError):
-                    _increment_opus_corrupted(exc)
-                    _log_opus_decode_failure("sink.write", error=exc, user_id=getattr(user, "id", None))
-                    return
-                logger.exception("Voice ingest sink write failed")
-
-        def cleanup(self) -> None:
-            cleanup = getattr(self._inner, "cleanup", None)
-            if callable(cleanup):
-                try:
-                    cleanup()
-                except Exception:
-                    return
-
     async def _get_setting(key: str, default: str) -> str:
         if not bot.user:
             return default
@@ -1334,7 +779,6 @@ def setup(registry: ServiceRegistry) -> None:
 
     async def _end_session() -> None:
         nonlocal active_session_id, active_session_started, current_voice_channel_id, current_guild_id, active_session_started_epoch
-        nonlocal live_guard_first_frame_retry_started
         if not active_session_id:
             return
         logger.info(
@@ -1413,11 +857,9 @@ def setup(registry: ServiceRegistry) -> None:
         current_voice_channel_id = None
         current_guild_id = None
         active_session_started_epoch = None
-        live_guard_first_frame_retry_started = False
-        live_guard_runtime_patched = False
 
     async def _join_voice_channel(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
-        nonlocal voice_client, live_guard_first_frame_retry_started, live_guard_runtime_patched
+        nonlocal voice_client
         lock = join_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
             if guild.id in connecting_guilds:
@@ -1451,59 +893,21 @@ def setup(registry: ServiceRegistry) -> None:
             if not _spec_available():
                 logger.warning("voice_recv not available; voice ingest disabled for guild=%s channel=%s", guild.id, channel.id)
                 return
-            from discord.ext import voice_recv  # type: ignore
-
-            _install_opus_guard()
             connecting_guilds.add(guild.id)
             try:
                 logger.info("Voice ingest connect start guild=%s channel=%s", guild.id, channel.id)
-                voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
-                logger.info(
-                    "Voice ingest connect returned guild=%s channel=%s client=%s connected=%s",
-                    guild.id,
-                    channel.id,
-                    type(voice_client).__name__ if voice_client is not None else None,
-                    _safe_is_connected(voice_client),
+                await _start_session(guild.id, channel.id)
+                voice_client = await voice_receive_adapter.connect_and_listen(
+                    channel=channel,
+                    on_pcm_frame=_on_voice_data,
+                    on_decode_error=_on_decode_error,
                 )
                 ready = await _wait_until_voice_ready(voice_client, guild_id=guild.id, channel_id=channel.id)
                 if not ready:
                     await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="connect_wait_timeout")
                     voice_client = None
+                    await _end_session()
                     raise discord.ClientException("Voice client not ready after connect")
-
-                logger.info("Voice ingest starting session guild=%s channel=%s", guild.id, channel.id)
-                live_guard_first_frame_retry_started = False
-                live_guard_runtime_patched = False
-                await _start_session(guild.id, channel.id)
-                base_sink = voice_recv.BasicSink(_on_voice_data)
-                logger.info("Voice ingest listen start guild=%s channel=%s", guild.id, channel.id)
-                try:
-                    voice_client.listen(SafeSink(base_sink))
-                except discord.ClientException as exc:
-                    logger.error(
-                        "Voice ingest listen failed guild=%s channel=%s error=%s connected=%s",
-                        guild.id,
-                        channel.id,
-                        type(exc).__name__,
-                        _safe_is_connected(voice_client),
-                    )
-                    await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="listen_client_exception")
-                    voice_client = None
-                    await _end_session()
-                    raise
-                except Exception:
-                    logger.exception(
-                        "Voice ingest listen unexpected failure guild=%s channel=%s connected=%s",
-                        guild.id,
-                        channel.id,
-                        _safe_is_connected(voice_client),
-                    )
-                    await _safe_disconnect(voice_client, guild_id=guild.id, channel_id=channel.id, reason="listen_unexpected_exception")
-                    voice_client = None
-                    await _end_session()
-                    raise
-                logger.info("Voice ingest listen attached guild=%s channel=%s", guild.id, channel.id)
-                await _install_live_opus_guard_with_retry(voice_client, reason="post_listen")
                 logger.info("Voice ingest connect done guild=%s channel=%s", guild.id, channel.id)
             except Exception as exc:
                 logger.exception(
@@ -1557,13 +961,17 @@ def setup(registry: ServiceRegistry) -> None:
                 logger.exception("Voice ingest delayed leave failed")
         leave_task.add_done_callback(_log_leave_result)
 
+    def _on_decode_error(error: Exception, source: str) -> None:
+        nonlocal opus_corrupted_count
+        _increment_opus_corrupted(error)
+        _log_opus_decode_failure(source, error=error)
+
     def _on_voice_data(user: Optional[discord.User], data: Any) -> None:
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count
         nonlocal total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent
         nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
         nonlocal chunks_dropped_low_speech, chunks_dropped_low_rms, chunks_dropped_no_speech_after_vad
-        nonlocal live_guard_first_frame_retry_started, live_guard_runtime_patched
         try:
             if active_session_id is None or active_session_started is None:
                 return
@@ -1578,26 +986,6 @@ def setup(registry: ServiceRegistry) -> None:
                 )
                 return
             now = time.time()
-            if voice_client is not None and not live_guard_runtime_patched and not live_guard_first_frame_retry_started:
-                live_guard_first_frame_retry_started = True
-                logger.info("Voice ingest first-frame live Opus guard retry scheduled")
-                loop = bot.loop
-                if loop is None or not loop.is_running():
-                    logger.warning("Voice ingest loop not ready for first-frame live guard retry")
-                else:
-                    guard_future = asyncio.run_coroutine_threadsafe(
-                        _install_live_opus_guard_with_retry(voice_client, reason="first_frame"),
-                        loop,
-                    )
-
-                    def _log_guard_result(task_future: Any) -> None:
-                        try:
-                            task_future.result()
-                        except Exception:
-                            logger.exception("Voice ingest first-frame live Opus guard retry failed")
-
-                    guard_future.add_done_callback(_log_guard_result)
-
             ssrc = getattr(data, "ssrc", None)
             if user is None:
                 if ssrc is not None:

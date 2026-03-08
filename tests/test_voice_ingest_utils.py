@@ -80,64 +80,11 @@ def test_evaluate_chunk_quality_accepts_valid_chunk() -> None:
     assert reason == "ok"
 
 
-def test_install_opus_decode_guard_idempotent(monkeypatch) -> None:
-    class DummyOpusError(Exception):
-        pass
-
-    class DummyDecoder:
-        def _decode_packet(self, packet):
-            return packet, b"ok"
-
-    fake_voice_recv_opus = types.SimpleNamespace(OpusDecoder=DummyDecoder)
-    monkeypatch.setitem(sys.modules, "discord.ext.voice_recv.opus", fake_voice_recv_opus)
-
-    fake_discord_opus = types.SimpleNamespace(OpusError=DummyOpusError)
-    monkeypatch.setitem(sys.modules, "discord.opus", fake_discord_opus)
-
-    monkeypatch.setattr(voice_ingest, "_OPUS_GUARD_INSTALLED", False)
-
-    voice_ingest._install_opus_decode_guard()
-    first = DummyDecoder._decode_packet
-    voice_ingest._install_opus_decode_guard()
-    second = DummyDecoder._decode_packet
-    assert first is second
-
-
 def test_known_corrupted_opus_error_tokens() -> None:
     assert voice_ingest._is_known_corrupted_opus_error(Exception("invalid argument")) is True
     assert voice_ingest._is_known_corrupted_opus_error(Exception("corrupted stream")) is True
     assert voice_ingest._is_known_corrupted_opus_error(Exception("buffer too small")) is True
     assert voice_ingest._is_known_corrupted_opus_error(Exception("decode failed")) is True
-
-
-def test_install_opus_decode_guard_swallows_repeated_invalid_argument(monkeypatch) -> None:
-    class DummyOpusError(Exception):
-        pass
-
-    class DummyDecoder:
-        def _decode_packet(self, packet):
-            raise DummyOpusError("invalid argument")
-
-    fake_voice_recv = types.ModuleType("discord.ext.voice_recv")
-    fake_voice_recv.opus = types.SimpleNamespace(OpusDecoder=DummyDecoder)
-    monkeypatch.setitem(sys.modules, "discord.ext.voice_recv", fake_voice_recv)
-    monkeypatch.setitem(sys.modules, "discord.ext.voice_recv.opus", fake_voice_recv.opus)
-
-    fake_discord_opus = types.ModuleType("discord.opus")
-    fake_discord_opus.OpusError = DummyOpusError
-    monkeypatch.setitem(sys.modules, "discord.opus", fake_discord_opus)
-
-    monkeypatch.setattr(voice_ingest, "_OPUS_GUARD_INSTALLED", False)
-    monkeypatch.setattr(voice_ingest, "_OPUS_GUARD_CORRUPTED_COUNT", 0)
-
-    voice_ingest._install_opus_decode_guard()
-    decoder = DummyDecoder()
-    packet = object()
-
-    for _ in range(10):
-        assert decoder._decode_packet(packet) is None
-
-    assert voice_ingest._OPUS_GUARD_CORRUPTED_COUNT == 10
 
 
 def test_configurable_max_corruption_ratio_env(monkeypatch) -> None:
