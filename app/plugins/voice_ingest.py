@@ -1325,6 +1325,14 @@ def setup(registry: ServiceRegistry) -> None:
             context.guild_id,
             context.channel_id,
         )
+        if context.session_id is None or context.guild_id is None or context.channel_id is None:
+            logger.debug(
+                "Voice ingest decode context incomplete source=%s reason=upstream_packet_context_not_bound_yet context_session=%s context_guild=%s context_channel=%s",
+                source,
+                context.session_id,
+                context.guild_id,
+                context.channel_id,
+            )
         now_ts = time.time()
         decode_error_window.append(now_ts)
         if context.payload_looks_like_rtp:
