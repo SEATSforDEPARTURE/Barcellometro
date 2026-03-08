@@ -25,9 +25,12 @@ from app.services.voice_receive_adapter import VoiceReceiveAdapter
 
 logger = logging.getLogger(__name__)
 
-PCM_BYTES_PER_SECOND_48K_STEREO_S16 = 48000 * 2 * 2
+PCM_SAMPLE_RATE = 48000
+PCM_CHANNELS = 1
+PCM_SAMPLE_WIDTH_BYTES = 2
+PCM_BYTES_PER_SECOND_48K_MONO_S16 = PCM_SAMPLE_RATE * PCM_CHANNELS * PCM_SAMPLE_WIDTH_BYTES
 MIN_CHUNK_SECONDS = 1.0
-MIN_PCM_BYTES = int(0.35 * PCM_BYTES_PER_SECOND_48K_STEREO_S16)
+MIN_PCM_BYTES = int(0.35 * PCM_BYTES_PER_SECOND_48K_MONO_S16)
 MAX_CORRUPTION_RATIO = 0.45
 VOICE_INGEST_MAX_CORRUPTION_RATIO_ENV = "VOICE_INGEST_MAX_CORRUPTION_RATIO"
 CRITICAL_CORRUPTION_RATIO = 0.70
@@ -138,6 +141,25 @@ def _safe_average(total: float, count: int) -> float:
     return total / float(count)
 
 
+def _pcm_duration_seconds(
+    pcm_bytes: int,
+    *,
+    sample_rate: int = PCM_SAMPLE_RATE,
+    channels: int = PCM_CHANNELS,
+    sample_width_bytes: int = PCM_SAMPLE_WIDTH_BYTES,
+) -> float:
+    bytes_per_second = sample_rate * channels * sample_width_bytes
+    if bytes_per_second <= 0:
+        return 0.0
+    return max(0.0, pcm_bytes / float(bytes_per_second))
+
+
+def _duration_mismatch_warning(chunk_duration: float, raw_duration: float, wav_duration: float) -> Optional[str]:
+    largest = max(chunk_duration, raw_duration, wav_duration, 0.001)
+    spread = max(chunk_duration, raw_duration, wav_duration) - min(chunk_duration, raw_duration, wav_duration)
+    if spread / largest > 0.20 and spread > 0.40:
+        return f"duration mismatch chunk={chunk_duration:.2f}s raw={raw_duration:.2f}s wav={wav_duration:.2f}s"
+    return None
 
 
 def _get_configured_max_corruption_ratio() -> float:
@@ -390,6 +412,7 @@ def setup(registry: ServiceRegistry) -> None:
     audio_buffers_by_ssrc: dict[int, bytearray] = {}
     chunk_stats_by_user: dict[int, _ChunkStats] = {}
     chunk_stats_by_ssrc: dict[int, _ChunkStats] = {}
+    pcm_format_logged_chunks: set[str] = set()
     audio_buffer_start_by_user: dict[int, float] = {}
     audio_buffer_start_by_ssrc: dict[int, float] = {}
     pending_by_user: dict[int, int] = {}
@@ -1278,6 +1301,26 @@ def setup(registry: ServiceRegistry) -> None:
             _safe_increment("stt_enqueued_chunks", lambda: _set_nonlocal_counter("stt_enqueued_chunks"))
             _safe_increment("chunks_sent_to_stt", lambda: _set_nonlocal_counter("chunks_sent_to_stt"))
             _safe_increment("total_chunks_ok", lambda: _set_nonlocal_counter("total_chunks_ok"))
+            wants_opus = False
+            sink = getattr(voice_receive_adapter, "_sink", None)
+            sink_wants_opus = getattr(sink, "wants_opus", None)
+            if callable(sink_wants_opus):
+                try:
+                    wants_opus = bool(sink_wants_opus())
+                except Exception:
+                    wants_opus = False
+            if job_id not in pcm_format_logged_chunks:
+                pcm_format_logged_chunks.add(job_id)
+                logger.info(
+                    "Voice ingest pcm format job_id=%s bytes=%s frames_total=%s sample_rate=%s channels=%s sample_width=%s wants_opus=%s",
+                    job_id,
+                    len(chunk_data),
+                    chunk_stats.total_frames,
+                    PCM_SAMPLE_RATE,
+                    PCM_CHANNELS,
+                    PCM_SAMPLE_WIDTH_BYTES,
+                    wants_opus,
+                )
             logger.info(
                 "Voice ingest chunk finalized job_id=%s user_id=%s bytes=%s duration=%.2fs frames_total=%s frames_corrupted=%s corruption_ratio=%.2f enqueue=yes reason=ok",
                 job_id,
@@ -1376,20 +1419,22 @@ def setup(registry: ServiceRegistry) -> None:
                 if os.path.getsize(job.audio_path) <= 4096:
                     logger.info("Voice ingest chunk too small; dropping job_id=%s.", job.job_id)
                     continue
-                normalized = await _normalize_audio(job.audio_path, ffmpeg_timeout)
+                normalized = await _normalize_audio(job.audio_path, ffmpeg_timeout, chunk_duration_sec=job.chunk_duration_sec)
                 if normalized is None:
                     logger.error("Voice ingest normalization failed; dropping chunk job_id=%s.", job.job_id)
                     continue
-                wav_path, duration = normalized
+                wav_path, duration, raw_duration = normalized
                 if duration is not None and duration < MIN_WAV_SECONDS:
                     logger.info("Voice ingest wav too short; dropping job_id=%s duration=%.2fs", job.job_id, duration)
                     continue
                 async with semaphore:
                     duration_label = f"{duration:.2f}s" if duration is not None else "unknown"
                     logger.info(
-                        "Voice ingest STT starting job_id=%s duration=%s frames_total=%s frames_corrupted=%s",
+                        "Voice ingest STT starting job_id=%s duration=%s raw_duration=%.2fs chunk_duration=%.2fs frames_total=%s frames_corrupted=%s",
                         job.job_id,
                         duration_label,
+                        raw_duration,
+                        job.chunk_duration_sec,
                         job.total_frames,
                         job.corrupted_frames,
                     )
@@ -1549,11 +1594,15 @@ def setup(registry: ServiceRegistry) -> None:
                     )
                 queue.task_done()
 
-    async def _normalize_audio(path: str, timeout_sec: int) -> Optional[tuple[str, Optional[float]]]:
+    async def _normalize_audio(
+        path: str, timeout_sec: int, *, chunk_duration_sec: float
+    ) -> Optional[tuple[str, Optional[float], float]]:
         try:
             tmp_dir = os.path.join(tempfile.gettempdir(), "voice_ingest")
             os.makedirs(tmp_dir, exist_ok=True)
             wav_path = os.path.join(tmp_dir, f"{uuid4()}.wav")
+            raw_size = os.path.getsize(path)
+            raw_duration = _pcm_duration_seconds(raw_size)
             result = await asyncio.to_thread(
                 subprocess.run,
                 [
@@ -1562,9 +1611,9 @@ def setup(registry: ServiceRegistry) -> None:
                     "-f",
                     "s16le",
                     "-ar",
-                    "48000",
+                    str(PCM_SAMPLE_RATE),
                     "-ac",
-                    "2",
+                    str(PCM_CHANNELS),
                     "-i",
                     path,
                     "-ac",
@@ -1586,9 +1635,20 @@ def setup(registry: ServiceRegistry) -> None:
             if not os.path.exists(wav_path) or os.path.getsize(wav_path) <= 4096:
                 logger.error("ffmpeg output too small; dropping chunk.")
                 return None
-            logger.info("Voice ingest normalized audio with ffmpeg: %s -> %s", path, wav_path)
             duration = _wav_duration(wav_path)
-            return wav_path, duration
+            if duration is not None:
+                mismatch = _duration_mismatch_warning(chunk_duration_sec, raw_duration, duration)
+                if mismatch is not None:
+                    logger.warning("Voice ingest %s", mismatch)
+            logger.info(
+                "Voice ingest normalized audio with ffmpeg: %s -> %s raw_duration=%.2fs chunk_duration=%.2fs wav_duration=%s",
+                path,
+                wav_path,
+                raw_duration,
+                chunk_duration_sec,
+                f"{duration:.2f}s" if duration is not None else "unknown",
+            )
+            return wav_path, duration, raw_duration
         except subprocess.TimeoutExpired:
             logger.error("ffmpeg timed out after %ss for %s", timeout_sec, path)
             return None
