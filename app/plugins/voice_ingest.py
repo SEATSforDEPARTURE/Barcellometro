@@ -52,6 +52,8 @@ KNOWN_HALLUCINATION_TEXTS = {
     "sottotitoli creati dalla comunita amara org",
 }
 
+_VOICE_INGEST_STARTUP_GUARD = {"initialized_bots": set(), "listeners_registered_bots": set()}
+
 
 def _is_known_corrupted_opus_error(error: Exception) -> bool:
     message = str(error).lower()
@@ -2102,8 +2104,9 @@ def setup(registry: ServiceRegistry) -> None:
             )
         )
 
-    controller_registered = False
-    startup_initialized = False
+    bot_key = id(bot)
+    controller_registered = bot_key in _VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"]
+    startup_initialized = bot_key in _VOICE_INGEST_STARTUP_GUARD["initialized_bots"]
 
     async def handle_ready() -> None:
         nonlocal worker_task
@@ -2127,7 +2130,8 @@ def setup(registry: ServiceRegistry) -> None:
             len(getattr(bot, "_listeners", {}).get("on_voice_state_update", [])),
             len(getattr(bot, "_listeners", {}).get("on_message", [])),
         )
-        if startup_initialized:
+        if startup_initialized or bot_key in _VOICE_INGEST_STARTUP_GUARD["initialized_bots"]:
+            startup_initialized = True
             logger.info(
                 "Voice ingest startup already initialized; skipping duplicate on_ready init worker_task_id=%s enforcer_task_id=%s",
                 id(worker_task) if worker_task is not None else None,
@@ -2183,11 +2187,17 @@ def setup(registry: ServiceRegistry) -> None:
         if not controller_registered:
             registry.register("voice_ingest", VoiceIngestController(_handle_join_command, _handle_leave_command))
             controller_registered = True
+            _VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"].add(bot_key)
             logger.info("Voice ingest controller registered")
         else:
             logger.info("Voice ingest controller already registered")
         startup_initialized = True
+        _VOICE_INGEST_STARTUP_GUARD["initialized_bots"].add(bot_key)
 
-    bot.add_listener(handle_ready, "on_ready")
-    bot.add_listener(_handle_voice_state, "on_voice_state_update")
-    bot.add_listener(_handle_text_message, "on_message")
+    if bot_key not in _VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"]:
+        bot.add_listener(handle_ready, "on_ready")
+        bot.add_listener(_handle_voice_state, "on_voice_state_update")
+        bot.add_listener(_handle_text_message, "on_message")
+        _VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"].add(bot_key)
+    else:
+        logger.info("Voice ingest listeners already registered; skipping duplicate listener registration")

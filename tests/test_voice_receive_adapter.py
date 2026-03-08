@@ -400,7 +400,7 @@ def test_decode_context_detects_rtp_like_payload_at_decoder_boundary() -> None:
     adapter = VoiceReceiveAdapter()
 
     # 0x80 starts RTP version-2 header in the first two bits.
-    payload = b"\x80\x78\x00\x01payload"
+    payload = bytes.fromhex("807800010000000100000002") + b"payload"
     context = adapter._vendor._extract_decode_error_context(source="Decoder.decode", args=(object(), payload), kwargs={})
 
     assert context.packet_origin == "decoder.decode.payload"
@@ -433,3 +433,40 @@ def test_decode_guard_preserves_decoder_signature_metadata() -> None:
 
     wrapped_sig = inspect.signature(Decoder.decode)
     assert wrapped_sig == original_sig
+
+
+
+def test_decoder_guard_strips_rtp_header_before_decode() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    Decoder = sys.modules["discord.ext.voice_recv.opus"].Decoder
+
+    seen_payloads: list[bytes] = []
+    original_decode = Decoder.decode
+
+    def traced(self: Any, packet: bytes) -> bytes:
+        seen_payloads.append(packet)
+        return original_decode(self, packet)
+
+    Decoder.decode = traced
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    decoder = Decoder()
+    opus_payload = bytes.fromhex("f8fffe006f707573")
+    rtp_header = bytes.fromhex("807812340000000100000002")
+    rtp_packet = rtp_header + opus_payload
+
+    assert decoder.decode(rtp_packet) == b"ok"
+    assert seen_payloads == [opus_payload]
+
+
+def test_rtp_payload_is_detected_upstream_at_packet_decoder_stage() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    payload = bytes.fromhex("807812340000000100000002") + b"abc"
+    context = adapter._vendor._extract_decode_error_context(source="PacketDecoder._process_packet", args=(object(), payload), kwargs={})
+
+    assert context.packet_origin == "packet_decoder._process_packet"
+    assert context.payload_looks_like_rtp is True
