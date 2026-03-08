@@ -100,6 +100,8 @@ class _FakeChannel:
 
 def _install_fake_voice_recv() -> None:
     module = types.ModuleType("discord.ext.voice_recv")
+    opus_module = types.ModuleType("discord.ext.voice_recv.opus")
+    router_module = types.ModuleType("discord.ext.voice_recv.router")
 
     class VoiceRecvClient:
         pass
@@ -111,12 +113,31 @@ def _install_fake_voice_recv() -> None:
         def __init__(self, cb: Any) -> None:
             self.cb = cb
 
+    class OpusDecoder:
+        def pop_data(self) -> bytes:
+            return b"ok"
+
+        def _decode_packet(self, _packet: Any) -> bytes:
+            return b"ok"
+
+    class PacketRouter:
+        def _do_run(self) -> None:
+            return
+
     module.VoiceRecvClient = VoiceRecvClient
     module.AudioSink = AudioSink
     module.BasicSink = BasicSink
+    module.opus = opus_module
+    module.router = router_module
     module.__version__ = "test"
     module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv", loader=None)
+    opus_module.OpusDecoder = OpusDecoder
+    router_module.PacketRouter = PacketRouter
+    opus_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.opus", loader=None)
+    router_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.router", loader=None)
     sys.modules["discord.ext.voice_recv"] = module
+    sys.modules["discord.ext.voice_recv.opus"] = opus_module
+    sys.modules["discord.ext.voice_recv.router"] = router_module
 
 
 def _build_registry() -> tuple[ServiceRegistry, _FakeBot, _FakeDatabase]:
@@ -204,3 +225,47 @@ def test_voice_stack_logging_does_not_crash_if_optional_modules_missing(monkeypa
     on_ready = bot.get_listener("on_ready")
     asyncio.run(on_ready())
     assert registry.has("voice_ingest") is True
+
+
+def test_opus_guards_protect_pop_data_and_router_do_run(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+    monkeypatch.setattr(voice_ingest.importlib.util, "find_spec", lambda name: object() if name == "discord.ext.voice_recv" else None)
+
+    class DummyOpusError(Exception):
+        pass
+
+    fake_discord_opus = types.ModuleType("discord.opus")
+    fake_discord_opus.OpusError = DummyOpusError
+    monkeypatch.setitem(sys.modules, "discord.opus", fake_discord_opus)
+
+    from discord.ext.voice_recv import opus as vr_opus  # type: ignore
+    from discord.ext.voice_recv import router as vr_router  # type: ignore
+
+    def _broken_pop_data(self: Any) -> bytes:
+        raise DummyOpusError("corrupted stream")
+
+    def _broken_do_run(self: Any) -> None:
+        raise DummyOpusError("invalid argument")
+
+    monkeypatch.setattr(vr_opus.OpusDecoder, "pop_data", _broken_pop_data)
+    monkeypatch.setattr(vr_router.PacketRouter, "_do_run", _broken_do_run)
+
+    registry, bot, _db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=77, voice_client=None)
+    channel = _FakeChannel(guild, 987, client)
+
+    with caplog.at_level("INFO"):
+        asyncio.run(controller.join(channel))
+
+    decoder = vr_opus.OpusDecoder()
+    assert decoder.pop_data() is None
+    router = vr_router.PacketRouter()
+    assert router._do_run() is None
+    assert "Installed OpusError guard on voice_recv.OpusDecoder.pop_data" in caplog.text
+    assert "Installed OpusError guard on voice_recv.PacketRouter._do_run" in caplog.text
+    assert "Opus decode failure source=voice_recv.OpusDecoder.pop_data" in caplog.text
