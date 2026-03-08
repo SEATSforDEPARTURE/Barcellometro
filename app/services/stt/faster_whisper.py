@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -31,11 +32,8 @@ class FasterWhisperSttService:
 
         def _run() -> TranscriptResult:
             language = None if config.language_hint == "auto" else config.language_hint
-            segments, info = model.transcribe(
-                audio_path,
-                beam_size=config.beam_size,
-                language=language,
-            )
+            transcribe_kwargs = self._build_transcribe_kwargs(model, config, language)
+            segments, info = model.transcribe(audio_path, **transcribe_kwargs)
             text = "".join(segment.text for segment in segments).strip()
             detected_lang = info.language if info and info.language else (language or "auto")
             return TranscriptResult(
@@ -46,6 +44,28 @@ class FasterWhisperSttService:
             )
 
         return await asyncio.to_thread(_run)
+
+    def _build_transcribe_kwargs(self, model: WhisperModel, config: _SttConfig, language: Optional[str]) -> dict[str, object]:
+        kwargs: dict[str, object] = {
+            "beam_size": config.beam_size,
+            "language": language,
+        }
+        supported = set(inspect.signature(model.transcribe).parameters.keys())
+        conservative_options: dict[str, object] = {
+            "condition_on_previous_text": False,
+            "vad_filter": os.getenv("STT_LOCAL_VAD_FILTER", "true").lower() in {"1", "true", "yes", "y"},
+            "temperature": float(os.getenv("STT_LOCAL_TEMPERATURE", "0.0")),
+            "no_speech_threshold": float(os.getenv("STT_LOCAL_NO_SPEECH_THRESHOLD", "0.65")),
+            "log_prob_threshold": float(os.getenv("STT_LOCAL_LOG_PROB_THRESHOLD", "-1.0")),
+            "compression_ratio_threshold": float(os.getenv("STT_LOCAL_COMPRESSION_RATIO_THRESHOLD", "2.0")),
+            "word_timestamps": False,
+            "best_of": 1,
+            "patience": 1.0,
+        }
+        for key, value in conservative_options.items():
+            if key in supported:
+                kwargs[key] = value
+        return kwargs
 
     async def _load_config(self) -> _SttConfig:
         model = (await self._database.get_setting("stt.local.model")) or os.getenv("STT_LOCAL_MODEL", "small")
