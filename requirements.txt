@@ -5,6 +5,6 @@ openai>=1.0
 faster-whisper>=1.0
 argostranslate>=1.9
 imageio-ffmpeg>=0.4.9
-discord-ext-voice-recv>=0.5.2
-# Keep davey >=0.2.0 aligned with runtime compatibility guard in voice ingest.
-davey>=0.2.0
+discord-ext-voice-recv>=0.5.2a179,<0.5.3
+# Runtime exposes voice_recv as 0.5.2a even when dist is 0.5.2a179; policy accepts 0.5.2a* line.
+davey>=0.1.4

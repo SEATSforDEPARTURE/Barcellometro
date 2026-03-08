@@ -658,12 +658,14 @@ def setup(registry: ServiceRegistry) -> None:
         level = logging.INFO if report.compatible else logging.ERROR
         logger.log(
             level,
-            "Voice stack: discord.py=%s, voice_recv=%s, davey=%s compatible=%s reasons=%s",
+            "Voice stack: discord.py=%s, voice_recv=%s, davey=%s compatible=%s reasons=%s policy_voice_recv=%s policy_davey_min=%s",
             report.discord_version,
             report.voice_recv_version,
             report.davey_version,
             report.compatible,
             report.reasons,
+            voice_receive_adapter.VOICE_RECV_SUPPORTED_SPECIFIER,
+            voice_receive_adapter._fmt_minimum(voice_receive_adapter.MIN_DAVEY_VERSION),
         )
 
     def _throttled_log(key: str, level: int, message: str, every_sec: int = 30) -> None:
