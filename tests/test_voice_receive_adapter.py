@@ -1,4 +1,5 @@
 import importlib.machinery
+import inspect
 import sys
 import types
 from typing import Any
@@ -367,3 +368,68 @@ def test_decode_error_context_includes_packet_type_and_decoder_id() -> None:
     context = contexts[-1]
     assert context.packet_type in {"bytes", "bytearray"}
     assert context.decoder_instance_id is not None
+
+
+def test_decode_guard_preserves_decode_call_arguments_and_binding() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    Decoder = sys.modules["discord.ext.voice_recv.opus"].Decoder
+
+    calls: list[tuple[int, bytes]] = []
+    original = Decoder.decode
+
+    def traced(self: Any, packet: bytes) -> bytes:
+        calls.append((id(self), packet))
+        return original(self, packet)
+
+    Decoder.decode = traced
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    decoder = Decoder()
+    payload = b"\x90\xab\x01\x02"
+    out = decoder.decode(payload)
+
+    assert out == b"ok"
+    assert calls == [(id(decoder), payload)]
+
+
+def test_decode_context_detects_rtp_like_payload_at_decoder_boundary() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    # 0x80 starts RTP version-2 header in the first two bits.
+    payload = b"\x80\x78\x00\x01payload"
+    context = adapter._vendor._extract_decode_error_context(source="Decoder.decode", args=(object(), payload), kwargs={})
+
+    assert context.packet_origin == "decoder.decode.payload"
+    assert context.payload_size == len(payload)
+    assert context.payload_preview_hex == payload[:8].hex()
+    assert context.payload_looks_like_rtp is True
+
+
+def test_packet_decoder_guard_does_not_mutate_packet_argument() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    PacketDecoder = sys.modules["discord.ext.voice_recv.opus"].PacketDecoder
+    packet_decoder = PacketDecoder()
+    payload = bytearray(b"abc")
+    before = bytes(payload)
+
+    assert packet_decoder.pop_data(payload) == b"ok"
+    assert bytes(payload) == before
+
+
+def test_decode_guard_preserves_decoder_signature_metadata() -> None:
+    _install_fake_voice_recv()
+    Decoder = sys.modules["discord.ext.voice_recv.opus"].Decoder
+    original_sig = inspect.signature(Decoder.decode)
+
+    adapter = VoiceReceiveAdapter()
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    wrapped_sig = inspect.signature(Decoder.decode)
+    assert wrapped_sig == original_sig

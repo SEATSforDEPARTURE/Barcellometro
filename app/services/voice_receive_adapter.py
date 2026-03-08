@@ -141,12 +141,17 @@ class VoiceReceiveAdapter:
                 )
             elif decode_type == "opus":
                 logger.warning(
-                    "Voice receive adapter opus decode failure source=%s error=%s user=%s ssrc=%s payload_size=%s",
+                    "Voice receive adapter opus decode failure source=%s error=%s user=%s ssrc=%s payload_size=%s packet_origin=%s packet_type=%s payload_preview_hex=%s payload_looks_like_rtp=%s decoder_instance_id=%s",
                     context.source,
                     type(exc).__name__,
                     context.user_id,
                     context.ssrc,
                     context.payload_size,
+                    context.packet_origin,
+                    context.packet_type,
+                    context.payload_preview_hex,
+                    context.payload_looks_like_rtp,
+                    context.decoder_instance_id,
                 )
             on_decode_error(exc, context)
 

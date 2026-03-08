@@ -4,6 +4,7 @@ import importlib
 import inspect
 import logging
 import time
+from functools import wraps
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -22,6 +23,9 @@ class DecodeErrorContext:
     channel_id: Optional[int] = None
     packet_type: Optional[str] = None
     decoder_instance_id: Optional[int] = None
+    packet_origin: Optional[str] = None
+    payload_preview_hex: Optional[str] = None
+    payload_looks_like_rtp: Optional[bool] = None
 
 
 DecodeErrorCallback = Callable[[Exception, DecodeErrorContext], None]
@@ -148,6 +152,7 @@ class VendorVoiceReceive:
             if getattr(fn, "_barcello_vendor_decode_guard", False):
                 return fn
 
+            @wraps(fn)
             def _wrapped(*args: Any, **kwargs: Any) -> Any:
                 try:
                     return fn(*args, **kwargs)
@@ -171,6 +176,46 @@ class VendorVoiceReceive:
         except Exception:
             return None
 
+    @staticmethod
+    def _payload_preview(payload: bytes | bytearray, *, max_len: int = 8) -> str:
+        return bytes(payload[:max_len]).hex()
+
+    @staticmethod
+    def _looks_like_rtp(payload: bytes | bytearray) -> bool:
+        if len(payload) < 2:
+            return False
+        first = payload[0]
+        version = (first >> 6) & 0b11
+        return version == 2
+
+    @staticmethod
+    def _packet_origin_for_source(source: str) -> Optional[str]:
+        if source == "Decoder.decode":
+            return "decoder.decode.payload"
+        if source in {"PacketDecoder.pop_data", "PacketDecoder._decode_packet", "PacketDecoder._process_packet"}:
+            return f"packet_decoder.{source.split('.', 1)[1]}"
+        if source == "sink.write":
+            return "sink.write.data"
+        if source == "PacketRouter._do_run":
+            return "packet_router.run"
+        return None
+
+    @staticmethod
+    def _extract_payload_candidate(source: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        if source == "Decoder.decode":
+            if len(args) >= 2:
+                return args[1]
+            return kwargs.get("packet") or kwargs.get("data")
+        if source in {"PacketDecoder.pop_data", "PacketDecoder._decode_packet", "PacketDecoder._process_packet"}:
+            if len(args) >= 2:
+                return args[1]
+            return kwargs.get("packet") or kwargs.get("data")
+        if source == "sink.write":
+            if len(args) >= 2:
+                return args[1]
+            return kwargs.get("data")
+        return None
+
     def _extract_decode_error_context(self, *, source: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> DecodeErrorContext:
         user_id: Optional[int] = None
         ssrc: Optional[int] = None
@@ -180,9 +225,26 @@ class VendorVoiceReceive:
         channel_id: Optional[int] = None
         packet_type: Optional[str] = None
         decoder_instance_id: Optional[int] = None
+        packet_origin = self._packet_origin_for_source(source)
+        payload_preview_hex: Optional[str] = None
+        payload_looks_like_rtp: Optional[bool] = None
 
         if args:
             decoder_instance_id = id(args[0])
+
+        payload_candidate = self._extract_payload_candidate(source, args, kwargs)
+        if isinstance(payload_candidate, (bytes, bytearray)):
+            payload_size = len(payload_candidate)
+            packet_type = type(payload_candidate).__name__
+            payload_preview_hex = self._payload_preview(payload_candidate)
+            payload_looks_like_rtp = self._looks_like_rtp(payload_candidate)
+        else:
+            candidate_payload = getattr(payload_candidate, "payload", None)
+            if isinstance(candidate_payload, (bytes, bytearray)):
+                payload_size = len(candidate_payload)
+                packet_type = type(candidate_payload).__name__
+                payload_preview_hex = self._payload_preview(candidate_payload)
+                payload_looks_like_rtp = self._looks_like_rtp(candidate_payload)
 
         candidates = list(args) + list(kwargs.values())
         first_candidate = candidates[0] if candidates else None
@@ -239,6 +301,9 @@ class VendorVoiceReceive:
             channel_id=channel_id,
             packet_type=packet_type,
             decoder_instance_id=decoder_instance_id,
+            packet_origin=packet_origin,
+            payload_preview_hex=payload_preview_hex,
+            payload_looks_like_rtp=payload_looks_like_rtp,
         )
 
     def install_decode_guards(self, *, on_decode_error: DecodeErrorCallback) -> int:
