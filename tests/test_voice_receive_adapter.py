@@ -645,3 +645,36 @@ def test_router_survives_same_propagated_error_without_recounting() -> None:
     assert counters.corrupted_stream_count == 1
     assert len(contexts) == 1
     assert contexts[0].source == "PacketDecoder._decode_packet"
+
+
+def test_decode_context_extracts_packet_sequence_and_timestamp() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    packet = types.SimpleNamespace(ssrc=77, sequence=1234, timestamp=5678, payload=b"abc")
+    context = adapter._vendor._extract_decode_error_context(
+        source="PacketDecoder._decode_packet",
+        args=(object(), packet),
+        kwargs={},
+    )
+
+    assert context.ssrc == 77
+    assert context.packet_sequence == 1234
+    assert context.packet_timestamp == 5678
+    assert context.payload_len == 3
+
+
+def test_decode_context_includes_error_class_and_message() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    err = DummyOpusError("corrupted stream")
+    context = adapter._vendor._extract_decode_error_context(
+        source="PacketDecoder._decode_packet",
+        args=(object(), b"abc"),
+        kwargs={},
+        error=err,
+    )
+
+    assert context.error_class == "DummyOpusError"
+    assert context.error_message == "corrupted stream"

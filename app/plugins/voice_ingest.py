@@ -42,6 +42,7 @@ OPUS_SUMMARY_LOG_INTERVAL_SEC = 30
 DECODE_STORM_WINDOW_SEC = 6.0
 DECODE_STORM_ERROR_THRESHOLD = 24
 DECODE_STORM_NO_PCM_SEC = 4.0
+DECODE_EVENT_FINGERPRINT_WINDOW_SEC = 1.0
 DECODE_STORM_RECONNECT_BACKOFF_SEC = 1.2
 MAX_DECODE_STORM_RECOVERIES = 1
 DEFAULT_MIN_SPEECH_RATIO = 0.20
@@ -485,6 +486,7 @@ def setup(registry: ServiceRegistry) -> None:
     setup_invocation_count = 0
     decode_error_window: deque[float] = deque()
     decode_event_ids_seen: set[str] = set()
+    decode_fingerprint_seen_at: dict[tuple[Any, ...], float] = {}
     last_pcm_frame_ts = 0.0
     decode_storm_recovery_count = 0
     decode_storm_recovery_in_progress = False
@@ -502,7 +504,7 @@ def setup(registry: ServiceRegistry) -> None:
     )
 
     def _clear_voice_runtime_buffers(*, keep_counters: bool = False) -> None:
-        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count, decode_event_ids_seen
+        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count, decode_event_ids_seen, decode_fingerprint_seen_at
         audio_buffers_by_user.clear()
         audio_buffers_by_ssrc.clear()
         chunk_stats_by_user.clear()
@@ -521,6 +523,7 @@ def setup(registry: ServiceRegistry) -> None:
             opus_payload_size_count = 0
         decode_error_window.clear()
         decode_event_ids_seen.clear()
+        decode_fingerprint_seen_at.clear()
 
     def _runtime_incompatibility_signature(report: Any) -> tuple[str, str, str, tuple[str, ...]]:
         return (
@@ -731,13 +734,47 @@ def setup(registry: ServiceRegistry) -> None:
             return
         opus_corrupted_count += 1
 
+    def _decode_error_fingerprint(context: DecodeErrorContext, error: Exception) -> tuple[Any, ...]:
+        root_source = context.root_cause_source or context.source
+        return (
+            root_source,
+            context.decoder_instance_id,
+            context.ssrc,
+            context.packet_sequence,
+            context.packet_timestamp,
+            context.error_class or type(error).__name__,
+            context.error_message or str(error),
+            context.payload_len if context.payload_len is not None else context.payload_size,
+        )
+
+    def _is_duplicate_decode_event(context: DecodeErrorContext, error: Exception, now_ts: float) -> bool:
+        if context.event_id:
+            if context.event_id in decode_event_ids_seen:
+                return True
+            decode_event_ids_seen.add(context.event_id)
+            return False
+
+        for key, ts in list(decode_fingerprint_seen_at.items()):
+            if now_ts - ts > DECODE_EVENT_FINGERPRINT_WINDOW_SEC:
+                del decode_fingerprint_seen_at[key]
+
+        key = _decode_error_fingerprint(context, error)
+        if key in decode_fingerprint_seen_at:
+            return True
+        decode_fingerprint_seen_at[key] = now_ts
+        return False
+
     def _log_opus_decode_failure(
         source: str,
         *,
+        event_id: Optional[str],
+        root_cause_source: Optional[str],
         error: Exception,
         payload_size: Optional[int] = None,
         user_id: Optional[int] = None,
         ssrc: Optional[int] = None,
+        packet_sequence: Optional[int] = None,
+        packet_timestamp: Optional[int] = None,
         packet_origin: Optional[str] = None,
         packet_type: Optional[str] = None,
         payload_preview_hex: Optional[str] = None,
@@ -762,21 +799,26 @@ def setup(registry: ServiceRegistry) -> None:
         count = opus_corrupted_count
         if _should_log_corruption_event(count):
             logger.warning(
-                "Voice ingest Opus decode failure source=%s count=%s guild=%s channel=%s session=%s user=%s ssrc=%s payload_size=%s packet_origin=%s packet_type=%s payload_preview_hex=%s payload_looks_like_rtp=%s decoder_instance_id=%s error=%r",
+                "Voice ingest Opus decode failure source=%s root_cause_source=%s event_id=%s count=%s guild=%s channel=%s session=%s user=%s ssrc=%s packet_sequence=%s packet_timestamp=%s payload_len=%s packet_origin=%s packet_type=%s payload_preview_hex=%s payload_looks_like_rtp=%s decoder_instance_id=%s error_class=%s error_message=%s",
                 source,
+                root_cause_source,
+                event_id,
                 count,
                 current_guild_id,
                 current_voice_channel_id,
                 active_session_id,
                 user_id,
                 ssrc,
+                packet_sequence,
+                packet_timestamp,
                 payload_size,
                 packet_origin,
                 packet_type,
                 payload_preview_hex,
                 payload_looks_like_rtp,
                 decoder_instance_id,
-                error,
+                type(error).__name__,
+                str(error),
             )
         else:
             _emit_periodic_opus_summary_if_needed()
@@ -823,7 +865,7 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal active_session_id, active_session_started
         nonlocal current_guild_id, active_session_started_epoch, current_voice_channel_id
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks, stt_empty_chunks
-        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count, decode_event_ids_seen
+        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count, decode_event_ids_seen, decode_fingerprint_seen_at
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count, total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent, stt_success_count
         nonlocal stt_hallucinated_chunks, stt_rejected_boilerplate, chunks_dropped_low_speech, chunks_dropped_low_rms, chunks_dropped_no_speech_after_vad, chunks_sent_to_stt, chunks_saved_to_db
         nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
@@ -1298,25 +1340,27 @@ def setup(registry: ServiceRegistry) -> None:
             )
             return
 
-        event_id = context.event_id
-        if event_id and event_id in decode_event_ids_seen:
+        now_ts = time.time()
+        if _is_duplicate_decode_event(context, error, now_ts):
             logger.debug(
                 "Voice ingest decode error deduplicated event_id=%s source=%s root_cause_source=%s",
-                event_id,
+                context.event_id,
                 source,
                 context.root_cause_source,
             )
             return
-        if event_id:
-            decode_event_ids_seen.add(event_id)
 
         _increment_opus_corrupted(error)
         _log_opus_decode_failure(
             source,
+            event_id=context.event_id,
+            root_cause_source=context.root_cause_source,
             error=error,
-            payload_size=context.payload_size,
+            payload_size=context.payload_len if context.payload_len is not None else context.payload_size,
             user_id=context.user_id,
             ssrc=context.ssrc,
+            packet_sequence=context.packet_sequence,
+            packet_timestamp=context.packet_timestamp,
             packet_origin=context.packet_origin,
             packet_type=context.packet_type,
             payload_preview_hex=context.payload_preview_hex,
@@ -1331,10 +1375,9 @@ def setup(registry: ServiceRegistry) -> None:
                 context.guild_id,
                 context.channel_id,
             )
-        now_ts = time.time()
         decode_error_window.append(now_ts)
         if context.payload_looks_like_rtp:
-            logger.error(
+            logger.warning(
                 "Voice ingest decode payload anomaly source=%s packet_origin=%s payload_size=%s preview=%s decoder_instance_id=%s note=payload_looks_like_rtp_header",
                 source,
                 context.packet_origin,

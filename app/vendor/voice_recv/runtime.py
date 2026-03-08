@@ -17,8 +17,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DecodeErrorContext:
     source: str
+    error_class: Optional[str] = None
+    error_message: Optional[str] = None
     user_id: Optional[int] = None
     ssrc: Optional[int] = None
+    packet_sequence: Optional[int] = None
+    packet_timestamp: Optional[int] = None
+    payload_len: Optional[int] = None
     payload_size: Optional[int] = None
     session_id: Optional[str] = None
     guild_id: Optional[int] = None
@@ -64,6 +69,8 @@ class VendorVoiceReceive:
     _DECODE_HOOK_POINTS = (("discord.ext.voice_recv.opus", "PacketDecoder", "_decode_packet"),)
     _FALLBACK_HOOK_POINT = ("discord.ext.voice_recv.router", "PacketRouter", "_do_run")
     _ACCOUNTED_ERROR_ATTR = "_barcello_decode_error_accounted"
+    _EVENT_ID_ATTR = "_barcello_decode_event_id"
+    _ROOT_CAUSE_SOURCE_ATTR = "_barcello_decode_root_cause_source"
     _AUTHORITATIVE_DECODE_SOURCES = {"PacketDecoder._decode_packet"}
 
     def __init__(self) -> None:
@@ -127,6 +134,22 @@ class VendorVoiceReceive:
 
     def _is_authoritative_source(self, source: str) -> bool:
         return source in self._AUTHORITATIVE_DECODE_SOURCES
+
+    def _bind_decode_error_identity(self, exc: BaseException, *, event_id: str, root_cause_source: str) -> None:
+        try:
+            setattr(exc, self._EVENT_ID_ATTR, event_id)
+            setattr(exc, self._ROOT_CAUSE_SOURCE_ATTR, root_cause_source)
+        except Exception:
+            pass
+
+    def _extract_bound_decode_error_identity(self, exc: BaseException) -> tuple[Optional[str], Optional[str]]:
+        try:
+            return (
+                getattr(exc, self._EVENT_ID_ATTR, None),
+                getattr(exc, self._ROOT_CAUSE_SOURCE_ATTR, None),
+            )
+        except Exception:
+            return None, None
 
     def _emit_decode_summary_if_needed(self, *, source: str) -> None:
         now = time.monotonic()
@@ -266,6 +289,11 @@ class VendorVoiceReceive:
                         self._register_decode_error(exc)
                         self._log_decode_boundary(source=source, args=args, kwargs=kwargs, exc=exc)
                         self._mark_decode_error_accounted(exc)
+                        self._bind_decode_error_identity(
+                            exc,
+                            event_id=event_state.event_id,
+                            root_cause_source=event_state.root_cause_source,
+                        )
                         on_decode_error(
                             exc,
                             self._extract_decode_error_context(
@@ -275,10 +303,16 @@ class VendorVoiceReceive:
                                 event_id=event_state.event_id,
                                 root_cause_source=event_state.root_cause_source,
                                 include_payload_diagnostics=True,
+                                error=exc,
                             ),
                         )
                         self._emit_decode_summary_if_needed(source=source)
                     elif already_accounted:
+                        bound_event_id, bound_root_source = self._extract_bound_decode_error_identity(exc)
+                        if bound_event_id and not event_state.event_id:
+                            event_state.event_id = bound_event_id
+                        if bound_root_source and not event_state.root_cause_source:
+                            event_state.root_cause_source = bound_root_source
                         logger.debug("Voice recv decode error propagated without recount source=%s", source)
 
                     if reraise_decode_errors:
@@ -448,9 +482,12 @@ class VendorVoiceReceive:
         event_id: Optional[str] = None,
         root_cause_source: Optional[str] = None,
         include_payload_diagnostics: bool = False,
+        error: Optional[BaseException] = None,
     ) -> DecodeErrorContext:
         user_id: Optional[int] = None
         ssrc: Optional[int] = None
+        packet_sequence: Optional[int] = None
+        packet_timestamp: Optional[int] = None
         payload_size: Optional[int] = None
         session_id: Optional[str] = None
         guild_id: Optional[int] = None
@@ -493,6 +530,14 @@ class VendorVoiceReceive:
                 )
             if ssrc is None:
                 ssrc = self._coerce_int(getattr(candidate, "ssrc", None) or self._extract_candidate_context_value(candidate, "ssrc"))
+            if packet_sequence is None:
+                packet_sequence = self._coerce_int(
+                    getattr(candidate, "sequence", None) or self._extract_candidate_context_value(candidate, "sequence")
+                )
+            if packet_timestamp is None:
+                packet_timestamp = self._coerce_int(
+                    getattr(candidate, "timestamp", None) or self._extract_candidate_context_value(candidate, "timestamp")
+                )
             if payload_size is None:
                 payload = getattr(candidate, "payload", None)
                 if isinstance(payload, (bytes, bytearray)):
@@ -542,8 +587,13 @@ class VendorVoiceReceive:
 
         return DecodeErrorContext(
             source=source,
+            error_class=type(error).__name__ if error is not None else None,
+            error_message=str(error) if error is not None else None,
             user_id=user_id,
             ssrc=ssrc,
+            packet_sequence=packet_sequence,
+            packet_timestamp=packet_timestamp,
+            payload_len=payload_size,
             payload_size=payload_size,
             session_id=session_id,
             guild_id=guild_id,
@@ -645,17 +695,20 @@ class VendorVoiceReceive:
                     if not outer._is_decode_error(exc):
                         raise
                     if not outer._is_decode_error_accounted(exc):
+                        event_id = uuid4().hex
                         outer._register_decode_error(exc)
                         outer._mark_decode_error_accounted(exc)
+                        outer._bind_decode_error_identity(exc, event_id=event_id, root_cause_source="sink.write")
                         on_decode_error(
                             exc,
                             outer._extract_decode_error_context(
                                 source="sink.write",
                                 args=(user, data),
                                 kwargs={},
-                                event_id=uuid4().hex,
+                                event_id=event_id,
                                 root_cause_source="sink.write",
                                 include_payload_diagnostics=True,
+                                error=exc,
                             ),
                         )
                         outer._emit_decode_summary_if_needed(source="sink.write")
