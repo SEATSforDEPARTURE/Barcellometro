@@ -11,7 +11,18 @@ import discord
 
 logger = logging.getLogger(__name__)
 
-DecodeErrorCallback = Callable[[Exception, str], None]
+@dataclass
+class DecodeErrorContext:
+    source: str
+    user_id: Optional[int] = None
+    ssrc: Optional[int] = None
+    payload_size: Optional[int] = None
+    session_id: Optional[str] = None
+    guild_id: Optional[int] = None
+    channel_id: Optional[int] = None
+
+
+DecodeErrorCallback = Callable[[Exception, DecodeErrorContext], None]
 
 
 @dataclass
@@ -142,7 +153,7 @@ class VendorVoiceReceive:
                     if not self._is_decode_error(exc):
                         raise
                     self._register_decode_error(exc)
-                    on_decode_error(exc, source)
+                    on_decode_error(exc, self._extract_decode_error_context(source=source, args=args, kwargs=kwargs))
                     self._emit_decode_summary_if_needed(source=source)
                     return return_value
 
@@ -150,6 +161,60 @@ class VendorVoiceReceive:
             return _wrapped
 
         return _decorator
+
+    @staticmethod
+    def _coerce_int(value: Any) -> Optional[int]:
+        try:
+            return int(value) if value is not None else None
+        except Exception:
+            return None
+
+    def _extract_decode_error_context(self, *, source: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> DecodeErrorContext:
+        user_id: Optional[int] = None
+        ssrc: Optional[int] = None
+        payload_size: Optional[int] = None
+        session_id: Optional[str] = None
+        guild_id: Optional[int] = None
+        channel_id: Optional[int] = None
+
+        candidates = list(args) + list(kwargs.values())
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            if user_id is None:
+                user_id = self._coerce_int(getattr(candidate, "id", None) or getattr(candidate, "user_id", None))
+            if ssrc is None:
+                ssrc = self._coerce_int(getattr(candidate, "ssrc", None))
+            if payload_size is None:
+                payload = getattr(candidate, "payload", None)
+                if isinstance(payload, (bytes, bytearray)):
+                    payload_size = len(payload)
+                elif isinstance(candidate, (bytes, bytearray)):
+                    payload_size = len(candidate)
+                else:
+                    data = getattr(candidate, "data", None)
+                    if isinstance(data, (bytes, bytearray)):
+                        payload_size = len(data)
+            if session_id is None:
+                maybe_session = getattr(candidate, "session_id", None)
+                if maybe_session is not None:
+                    session_id = str(maybe_session)
+            if guild_id is None:
+                guild = getattr(candidate, "guild", None)
+                guild_id = self._coerce_int(getattr(guild, "id", None) or getattr(candidate, "guild_id", None))
+            if channel_id is None:
+                channel = getattr(candidate, "channel", None)
+                channel_id = self._coerce_int(getattr(channel, "id", None) or getattr(candidate, "channel_id", None))
+
+        return DecodeErrorContext(
+            source=source,
+            user_id=user_id,
+            ssrc=ssrc,
+            payload_size=payload_size,
+            session_id=session_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
 
     def install_decode_guards(self, *, on_decode_error: DecodeErrorCallback) -> int:
         if self._installed_hooks > 0:
@@ -235,7 +300,7 @@ class VendorVoiceReceive:
                     if not outer._is_decode_error(exc):
                         raise
                     outer._register_decode_error(exc)
-                    on_decode_error(exc, "sink.write")
+                    on_decode_error(exc, outer._extract_decode_error_context(source="sink.write", args=(user, data), kwargs={}))
                     outer._emit_decode_summary_if_needed(source="sink.write")
 
             def cleanup(self) -> None:
