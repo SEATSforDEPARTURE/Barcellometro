@@ -475,10 +475,12 @@ def setup(registry: ServiceRegistry) -> None:
     consecutive_discarded_chunks = 0
     max_consecutive_discarded_chunks = 0
     voice_receive_adapter = VoiceReceiveAdapter()
+    setup_invocation_count = 0
     decode_error_window: deque[float] = deque()
     last_pcm_frame_ts = 0.0
     decode_storm_recovery_count = 0
     decode_storm_recovery_in_progress = False
+    decode_storm_recovery_task: Optional[asyncio.Task[None]] = None
     voice_runtime_blocked = False
     voice_runtime_blocked_reasons: tuple[str, ...] = ()
     voice_runtime_blocked_signature: Optional[tuple[str, str, str, tuple[str, ...]]] = None
@@ -1066,7 +1068,7 @@ def setup(registry: ServiceRegistry) -> None:
                     on_decode_error=_on_decode_error,
                 )
                 _set_voice_state(guild.id, state="connected", reason=f"attach_existing:{reason}", channel_id=channel.id, listener_attached=attached_now)
-                logger.info("Voice ingest listen attached guild=%s channel=%s reason=%s state=%s", guild.id, channel.id, reason, "connected")
+                logger.info("Voice ingest listen attached guild=%s channel=%s reason=%s state=%s sink=%s", guild.id, channel.id, reason, "connected", voice_receive_adapter.sink_debug_info())
                 logger.info("Voice ingest join skipped: already connected same channel guild=%s channel=%s reason=%s state=%s", guild.id, channel.id, reason, "connected")
                 return
             if existing and not _safe_is_connected(existing):
@@ -1099,7 +1101,7 @@ def setup(registry: ServiceRegistry) -> None:
                     await _end_session()
                     raise discord.ClientException("Voice client not ready after connect")
                 _set_voice_state(guild.id, state="connected", reason=reason, channel_id=channel.id, listener_attached=True)
-                logger.info("Voice ingest connect done guild=%s channel=%s reason=%s state=%s", guild.id, channel.id, reason, "connected")
+                logger.info("Voice ingest connect done guild=%s channel=%s reason=%s state=%s sink=%s", guild.id, channel.id, reason, "connected", voice_receive_adapter.sink_debug_info())
             except Exception as exc:
                 _set_voice_state(guild.id, state="failed", reason=f"join_exception:{reason}", channel_id=channel.id, listener_attached=False)
                 logger.exception(
@@ -1190,6 +1192,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     async def _recover_from_decode_storm(*, trigger: DecodeErrorContext) -> None:
         nonlocal decode_storm_recovery_count, decode_storm_recovery_in_progress, voice_client
+        nonlocal decode_storm_recovery_task
         if voice_runtime_blocked:
             if current_guild_id is not None:
                 _set_voice_state(current_guild_id, state="failed_runtime_incompatible", reason="voice_stack_incompatible:decode_storm_recovery", channel_id=current_voice_channel_id, listener_attached=False)
@@ -1199,14 +1202,15 @@ def setup(registry: ServiceRegistry) -> None:
             return
         if decode_storm_recovery_count >= MAX_DECODE_STORM_RECOVERIES:
             logger.error(
-                "Voice ingest decode storm recovery exhausted session=%s guild=%s channel=%s errors_in_window=%s",
+                "Voice ingest decode storm recovery exhausted session=%s guild=%s channel=%s errors_in_window=%s recoveries=%s",
                 active_session_id,
                 current_guild_id,
                 current_voice_channel_id,
                 len(decode_error_window),
+                decode_storm_recovery_count,
             )
             if current_guild_id is not None:
-                _set_voice_state(current_guild_id, state="failed", reason="decode_storm_recovery_exhausted", channel_id=current_voice_channel_id, listener_attached=False)
+                _set_voice_state(current_guild_id, state="failed", reason="failed_decode_storm_recovery_exhausted", channel_id=current_voice_channel_id, listener_attached=False)
             return
         decode_storm_recovery_in_progress = True
         decode_storm_recovery_count += 1
@@ -1230,7 +1234,7 @@ def setup(registry: ServiceRegistry) -> None:
                 decode_storm_recovery_count,
             )
             if channel is None:
-                _set_voice_state(guild_id, state="failed", reason="decode_storm_channel_missing", channel_id=channel_id, listener_attached=False)
+                _set_voice_state(guild_id, state="failed", reason="failed_decode_storm_channel_missing", channel_id=channel_id, listener_attached=False)
                 return
             _set_voice_state(guild_id, state="reconnecting", reason="decode_storm", channel_id=channel_id, listener_attached=False)
             await _safe_disconnect(voice_client, guild_id=guild_id, channel_id=channel_id, reason="decode_storm")
@@ -1240,10 +1244,11 @@ def setup(registry: ServiceRegistry) -> None:
             await ensure_voice_connected(guild, channel, reason="decode_storm_recovery")
         except Exception:
             if current_guild_id is not None:
-                _set_voice_state(current_guild_id, state="failed", reason="decode_storm_reconnect_failed", channel_id=current_voice_channel_id, listener_attached=False)
+                _set_voice_state(current_guild_id, state="failed", reason="failed_decode_storm_reconnect_failed", channel_id=current_voice_channel_id, listener_attached=False)
             logger.exception("Voice ingest decode storm recovery failed")
         finally:
             decode_storm_recovery_in_progress = False
+            decode_storm_recovery_task = None
 
     def _on_decode_error(error: Exception, context: DecodeErrorContext) -> None:
         nonlocal opus_corrupted_count
@@ -1268,7 +1273,7 @@ def setup(registry: ServiceRegistry) -> None:
         _increment_opus_corrupted(error)
         _log_opus_decode_failure(source, error=error, payload_size=context.payload_size, user_id=context.user_id, ssrc=context.ssrc)
         logger.warning(
-            "Voice ingest opus decode error source=%s opus_corrupted_total=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s",
+            "Voice ingest opus decode error source=%s opus_corrupted_total=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s packet_type=%s decoder_instance_id=%s context_session=%s context_guild=%s context_channel=%s",
             source,
             counters.opus_corrupted_total,
             active_session_id,
@@ -1277,11 +1282,19 @@ def setup(registry: ServiceRegistry) -> None:
             context.user_id,
             context.ssrc,
             context.payload_size,
+            context.packet_type,
+            context.decoder_instance_id,
+            context.session_id,
+            context.guild_id,
+            context.channel_id,
         )
         now_ts = time.time()
         decode_error_window.append(now_ts)
         if _decode_storm_detected(now_ts):
-            asyncio.create_task(_recover_from_decode_storm(trigger=context))
+            if decode_storm_recovery_task is None or decode_storm_recovery_task.done():
+                decode_storm_recovery_task = asyncio.create_task(_recover_from_decode_storm(trigger=context))
+            else:
+                logger.debug("Voice ingest decode storm recovery already scheduled task_id=%s", id(decode_storm_recovery_task))
 
     def _on_voice_data(user: Optional[discord.User], data: Any) -> None:
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks, last_pcm_frame_ts
@@ -1302,6 +1315,14 @@ def setup(registry: ServiceRegistry) -> None:
                     f"Voice ingest received unsupported audio payload: {type(data)}",
                 )
                 return
+            sink_wants_opus = voice_receive_adapter.sink_wants_opus()
+            if sink_wants_opus:
+                _throttled_log(
+                    "voice_ingest.boundary.opus_pcm_mismatch",
+                    logging.ERROR,
+                    "Voice ingest boundary mismatch: sink advertises opus frames but PCM-like payload reached on_voice_data",
+                    every_sec=10,
+                )
             now = time.time()
             last_pcm_frame_ts = now
             ssrc = getattr(data, "ssrc", None)
@@ -1484,18 +1505,11 @@ def setup(registry: ServiceRegistry) -> None:
             _safe_increment("stt_enqueued_chunks", lambda: _set_nonlocal_counter("stt_enqueued_chunks"))
             _safe_increment("chunks_sent_to_stt", lambda: _set_nonlocal_counter("chunks_sent_to_stt"))
             _safe_increment("total_chunks_ok", lambda: _set_nonlocal_counter("total_chunks_ok"))
-            wants_opus = False
-            sink = getattr(voice_receive_adapter, "_sink", None)
-            sink_wants_opus = getattr(sink, "wants_opus", None)
-            if callable(sink_wants_opus):
-                try:
-                    wants_opus = bool(sink_wants_opus())
-                except Exception:
-                    wants_opus = False
+            wants_opus = voice_receive_adapter.sink_wants_opus()
             if job_id not in pcm_format_logged_chunks:
                 pcm_format_logged_chunks.add(job_id)
                 logger.info(
-                    "Voice ingest pcm format job_id=%s bytes=%s frames_total=%s sample_rate=%s channels=%s sample_width=%s wants_opus=%s",
+                    "Voice ingest pcm format job_id=%s bytes=%s frames_total=%s sample_rate=%s channels=%s sample_width=%s sink_wants_opus=%s sink=%s",
                     job_id,
                     len(chunk_data),
                     chunk_stats.total_frames,
@@ -1503,6 +1517,7 @@ def setup(registry: ServiceRegistry) -> None:
                     PCM_CHANNELS,
                     PCM_SAMPLE_WIDTH_BYTES,
                     wants_opus,
+                    voice_receive_adapter.sink_debug_info(),
                 )
             logger.info(
                 "Voice ingest chunk finalized job_id=%s user_id=%s bytes=%s duration=%.2fs frames_total=%s frames_corrupted=%s corruption_ratio=%.2f enqueue=yes reason=ok",
@@ -2055,11 +2070,38 @@ def setup(registry: ServiceRegistry) -> None:
         )
 
     controller_registered = False
+    startup_initialized = False
 
     async def handle_ready() -> None:
         nonlocal worker_task
         nonlocal controller_registered
         nonlocal enforcer_task
+        nonlocal startup_initialized
+        nonlocal setup_invocation_count
+
+        setup_invocation_count += 1
+        worker_running = worker_task is not None and not worker_task.done()
+        enforcer_running = enforcer_task is not None and not enforcer_task.done()
+        logger.info(
+            "Voice ingest on_ready invoked count=%s startup_initialized=%s worker_task_id=%s worker_running=%s enforcer_task_id=%s enforcer_running=%s listeners_on_ready=%s listeners_voice_state=%s listeners_message=%s",
+            setup_invocation_count,
+            startup_initialized,
+            id(worker_task) if worker_task is not None else None,
+            worker_running,
+            id(enforcer_task) if enforcer_task is not None else None,
+            enforcer_running,
+            len(getattr(bot, "_listeners", {}).get("on_ready", [])),
+            len(getattr(bot, "_listeners", {}).get("on_voice_state_update", [])),
+            len(getattr(bot, "_listeners", {}).get("on_message", [])),
+        )
+        if startup_initialized:
+            logger.info(
+                "Voice ingest startup already initialized; skipping duplicate on_ready init worker_task_id=%s enforcer_task_id=%s",
+                id(worker_task) if worker_task is not None else None,
+                id(enforcer_task) if enforcer_task is not None else None,
+            )
+            return
+
         before = await database.fetchone(
             "SELECT COUNT(*) AS c FROM voice_sessions WHERE ended_ts IS NULL",
             (),
@@ -2079,25 +2121,39 @@ def setup(registry: ServiceRegistry) -> None:
             (after["c"] if after else None),
         )
         _log_voice_stack_versions()
-        if worker_task is None:
+        if worker_task is None or worker_task.done():
             worker_task = asyncio.create_task(_worker())
+
             def _log_worker_result(task_future: Any) -> None:
                 try:
                     task_future.result()
                 except Exception:
                     logger.exception("Voice ingest worker task failed")
+
             worker_task.add_done_callback(_log_worker_result)
-        if enforcer_task is None:
+            logger.info("Voice ingest worker task started task_id=%s", id(worker_task))
+        else:
+            logger.info("Voice ingest worker task already running task_id=%s", id(worker_task))
+        if enforcer_task is None or enforcer_task.done():
             enforcer_task = asyncio.create_task(_enforce_privacy())
+
             def _log_enforcer_result(task_future: Any) -> None:
                 try:
                     task_future.result()
                 except Exception:
                     logger.exception("Voice ingest privacy enforcer task failed")
+
             enforcer_task.add_done_callback(_log_enforcer_result)
+            logger.info("Voice ingest privacy enforcer task started task_id=%s", id(enforcer_task))
+        else:
+            logger.info("Voice ingest privacy enforcer task already running task_id=%s", id(enforcer_task))
         if not controller_registered:
             registry.register("voice_ingest", VoiceIngestController(_handle_join_command, _handle_leave_command))
             controller_registered = True
+            logger.info("Voice ingest controller registered")
+        else:
+            logger.info("Voice ingest controller already registered")
+        startup_initialized = True
 
     bot.add_listener(handle_ready, "on_ready")
     bot.add_listener(_handle_voice_state, "on_voice_state_update")

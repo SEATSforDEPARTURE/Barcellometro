@@ -20,6 +20,8 @@ class DecodeErrorContext:
     session_id: Optional[str] = None
     guild_id: Optional[int] = None
     channel_id: Optional[int] = None
+    packet_type: Optional[str] = None
+    decoder_instance_id: Optional[int] = None
 
 
 DecodeErrorCallback = Callable[[Exception, DecodeErrorContext], None]
@@ -176,8 +178,14 @@ class VendorVoiceReceive:
         session_id: Optional[str] = None
         guild_id: Optional[int] = None
         channel_id: Optional[int] = None
+        packet_type: Optional[str] = None
+        decoder_instance_id: Optional[int] = None
+
+        if args:
+            decoder_instance_id = id(args[0])
 
         candidates = list(args) + list(kwargs.values())
+        first_candidate = candidates[0] if candidates else None
         for candidate in candidates:
             if candidate is None:
                 continue
@@ -205,6 +213,21 @@ class VendorVoiceReceive:
             if channel_id is None:
                 channel = getattr(candidate, "channel", None)
                 channel_id = self._coerce_int(getattr(channel, "id", None) or getattr(candidate, "channel_id", None))
+            if packet_type is None:
+                if isinstance(candidate, (bytes, bytearray)):
+                    packet_type = type(candidate).__name__
+                else:
+                    payload = getattr(candidate, "payload", None)
+                    data = getattr(candidate, "data", None)
+                    pcm = getattr(candidate, "pcm", None)
+                    if isinstance(payload, (bytes, bytearray)):
+                        packet_type = type(payload).__name__
+                    elif isinstance(data, (bytes, bytearray)):
+                        packet_type = type(data).__name__
+                    elif isinstance(pcm, (bytes, bytearray)):
+                        packet_type = type(pcm).__name__
+                    elif candidate is not first_candidate:
+                        packet_type = type(candidate).__name__
 
         return DecodeErrorContext(
             source=source,
@@ -214,6 +237,8 @@ class VendorVoiceReceive:
             session_id=session_id,
             guild_id=guild_id,
             channel_id=channel_id,
+            packet_type=packet_type,
+            decoder_instance_id=decoder_instance_id,
         )
 
     def install_decode_guards(self, *, on_decode_error: DecodeErrorCallback) -> int:

@@ -334,3 +334,36 @@ def test_voice_recv_really_lower_version_is_rejected() -> None:
 
     assert incompatible is True
     assert detail == "0.5.1 not in supported range <0.5.3,>=0.5.2a0"
+
+
+def test_sink_boundary_reports_pcm_expected_by_default() -> None:
+    FakeChannel, _PacketRouter, _PacketDecoder, _Decoder = _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    channel = FakeChannel()
+    asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=lambda *_a: None))
+
+    assert adapter.sink_wants_opus() is False
+    info = adapter.sink_debug_info()
+    assert info["sink_present"] is True
+    assert info["sink_wants_opus"] is False
+
+
+def test_decode_error_context_includes_packet_type_and_decoder_id() -> None:
+    FakeChannel, _PacketRouter, _PacketDecoder, Decoder = _install_fake_voice_recv(router_exc=DummyOpusError("corrupted stream"))
+    adapter = VoiceReceiveAdapter()
+    contexts: list[DecodeErrorContext] = []
+
+    def on_decode_error(_exc: Exception, context: DecodeErrorContext) -> None:
+        contexts.append(context)
+
+    channel = FakeChannel()
+    asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=on_decode_error))
+
+    decoder = Decoder()
+    decoder.decode(b"packet")
+
+    assert contexts
+    context = contexts[-1]
+    assert context.packet_type in {"bytes", "bytearray"}
+    assert context.decoder_instance_id is not None
