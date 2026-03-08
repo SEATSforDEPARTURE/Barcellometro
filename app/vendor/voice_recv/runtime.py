@@ -187,27 +187,6 @@ class VendorVoiceReceive:
             payload_preview_hex,
         )
 
-    def _sanitize_decoder_decode_args(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any], bool]:
-        payload = self._extract_payload_candidate("Decoder.decode", args, kwargs)
-        if not isinstance(payload, (bytes, bytearray)):
-            return args, kwargs, False
-        opus_payload = self._extract_opus_from_rtp(payload)
-        if opus_payload is None:
-            return args, kwargs, False
-        if len(args) >= 2:
-            new_args = list(args)
-            new_args[1] = opus_payload
-            return tuple(new_args), kwargs, True
-        if "data" in kwargs:
-            new_kwargs = dict(kwargs)
-            new_kwargs["data"] = opus_payload
-            return args, new_kwargs, True
-        if "packet" in kwargs:
-            new_kwargs = dict(kwargs)
-            new_kwargs["packet"] = opus_payload
-            return args, new_kwargs, True
-        return args, kwargs, False
-
     def _guard(self, *, on_decode_error: DecodeErrorCallback, source: str, return_value: Any = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def _decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             if getattr(fn, "_barcello_vendor_decode_guard", False):
@@ -216,24 +195,21 @@ class VendorVoiceReceive:
             @wraps(fn)
             def _wrapped(*args: Any, **kwargs: Any) -> Any:
                 self._trace_decode_stage(source=source, args=args, kwargs=kwargs)
-                call_args = args
-                call_kwargs = kwargs
                 if source == "Decoder.decode":
-                    call_args, call_kwargs, sanitized = self._sanitize_decoder_decode_args(args, kwargs)
-                    if sanitized:
+                    payload = self._extract_payload_candidate(source, args, kwargs)
+                    if isinstance(payload, (bytes, bytearray)) and self._looks_like_rtp(payload):
                         logger.warning(
-                            "Voice recv corrected RTP payload boundary before Decoder.decode decoder_instance_id=%s original_size=%s corrected_size=%s",
+                            "Voice recv observed RTP-like payload at Decoder.decode boundary decoder_instance_id=%s payload_size=%s",
                             id(args[0]) if args else None,
-                            len(args[1]) if len(args) >= 2 and isinstance(args[1], (bytes, bytearray)) else None,
-                            len(call_args[1]) if len(call_args) >= 2 and isinstance(call_args[1], (bytes, bytearray)) else None,
+                            len(payload),
                         )
                 try:
-                    return fn(*call_args, **call_kwargs)
+                    return fn(*args, **kwargs)
                 except Exception as exc:
                     if not self._is_decode_error(exc):
                         raise
                     self._register_decode_error(exc)
-                    on_decode_error(exc, self._extract_decode_error_context(source=source, args=call_args, kwargs=call_kwargs))
+                    on_decode_error(exc, self._extract_decode_error_context(source=source, args=args, kwargs=kwargs))
                     self._emit_decode_summary_if_needed(source=source)
                     return return_value
 
@@ -331,6 +307,18 @@ class VendorVoiceReceive:
             return kwargs.get("data")
         return None
 
+    @staticmethod
+    def _extract_candidate_context_value(candidate: Any, attr: str) -> Any:
+        current = candidate
+        for _ in range(3):
+            if current is None:
+                return None
+            value = getattr(current, attr, None)
+            if value is not None:
+                return value
+            current = getattr(current, "packet", None) or getattr(current, "data", None) or getattr(current, "voice_client", None)
+        return None
+
     def _extract_decode_error_context(self, *, source: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> DecodeErrorContext:
         user_id: Optional[int] = None
         ssrc: Optional[int] = None
@@ -367,9 +355,13 @@ class VendorVoiceReceive:
             if candidate is None:
                 continue
             if user_id is None:
-                user_id = self._coerce_int(getattr(candidate, "id", None) or getattr(candidate, "user_id", None))
+                user_id = self._coerce_int(
+                    getattr(candidate, "id", None)
+                    or getattr(candidate, "user_id", None)
+                    or self._extract_candidate_context_value(candidate, "user_id")
+                )
             if ssrc is None:
-                ssrc = self._coerce_int(getattr(candidate, "ssrc", None))
+                ssrc = self._coerce_int(getattr(candidate, "ssrc", None) or self._extract_candidate_context_value(candidate, "ssrc"))
             if payload_size is None:
                 payload = getattr(candidate, "payload", None)
                 if isinstance(payload, (bytes, bytearray)):
@@ -381,15 +373,26 @@ class VendorVoiceReceive:
                     if isinstance(data, (bytes, bytearray)):
                         payload_size = len(data)
             if session_id is None:
-                maybe_session = getattr(candidate, "session_id", None)
+                maybe_session = (
+                    getattr(candidate, "session_id", None)
+                    or self._extract_candidate_context_value(candidate, "session_id")
+                )
                 if maybe_session is not None:
                     session_id = str(maybe_session)
             if guild_id is None:
-                guild = getattr(candidate, "guild", None)
-                guild_id = self._coerce_int(getattr(guild, "id", None) or getattr(candidate, "guild_id", None))
+                guild = getattr(candidate, "guild", None) or self._extract_candidate_context_value(candidate, "guild")
+                guild_id = self._coerce_int(
+                    getattr(guild, "id", None)
+                    or getattr(candidate, "guild_id", None)
+                    or self._extract_candidate_context_value(candidate, "guild_id")
+                )
             if channel_id is None:
-                channel = getattr(candidate, "channel", None)
-                channel_id = self._coerce_int(getattr(channel, "id", None) or getattr(candidate, "channel_id", None))
+                channel = getattr(candidate, "channel", None) or self._extract_candidate_context_value(candidate, "channel")
+                channel_id = self._coerce_int(
+                    getattr(channel, "id", None)
+                    or getattr(candidate, "channel_id", None)
+                    or self._extract_candidate_context_value(candidate, "channel_id")
+                )
             if packet_type is None:
                 if isinstance(candidate, (bytes, bytearray)):
                     packet_type = type(candidate).__name__

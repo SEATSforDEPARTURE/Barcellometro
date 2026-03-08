@@ -436,7 +436,7 @@ def test_decode_guard_preserves_decoder_signature_metadata() -> None:
 
 
 
-def test_decoder_guard_strips_rtp_header_before_decode() -> None:
+def test_decoder_guard_does_not_strip_rtp_header_before_decode() -> None:
     _install_fake_voice_recv()
     adapter = VoiceReceiveAdapter()
 
@@ -458,7 +458,7 @@ def test_decoder_guard_strips_rtp_header_before_decode() -> None:
     rtp_packet = rtp_header + opus_payload
 
     assert decoder.decode(rtp_packet) == b"ok"
-    assert seen_payloads == [opus_payload]
+    assert seen_payloads == [rtp_packet]
 
 
 def test_rtp_payload_is_detected_upstream_at_packet_decoder_stage() -> None:
@@ -470,3 +470,30 @@ def test_rtp_payload_is_detected_upstream_at_packet_decoder_stage() -> None:
 
     assert context.packet_origin == "packet_decoder._process_packet"
     assert context.payload_looks_like_rtp is True
+
+
+def test_decode_context_propagates_nested_session_guild_channel() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    packet = types.SimpleNamespace(
+        session_id="sess-1",
+        guild=types.SimpleNamespace(id=10),
+        channel=types.SimpleNamespace(id=20),
+        ssrc=30,
+        user_id=40,
+        payload=b"abc",
+    )
+    wrapped = types.SimpleNamespace(packet=packet)
+
+    context = adapter._vendor._extract_decode_error_context(
+        source="PacketDecoder._process_packet",
+        args=(object(), wrapped),
+        kwargs={},
+    )
+
+    assert context.session_id == "sess-1"
+    assert context.guild_id == 10
+    assert context.channel_id == 20
+    assert context.ssrc == 30
+    assert context.user_id == 40
