@@ -53,7 +53,6 @@ class VendorVoiceReceive:
         ("discord.ext.voice_recv.opus", "PacketDecoder", "pop_data"),
         ("discord.ext.voice_recv.opus", "PacketDecoder", "_process_packet"),
         ("discord.ext.voice_recv.opus", "PacketDecoder", "_decode_packet"),
-        ("discord.ext.voice_recv.opus", "Decoder", "decode"),
     )
     _FALLBACK_HOOK_POINT = ("discord.ext.voice_recv.router", "PacketRouter", "_do_run")
 
@@ -66,6 +65,8 @@ class VendorVoiceReceive:
         self._patched_sources: list[str] = []
         self._last_stage_trace_ts: dict[str, float] = {}
         self._stage_trace_interval_sec = 2.0
+        self._detailed_log_limit = 6
+        self._detailed_log_count = 0
 
     def _classify_decode_error(self, exc: BaseException) -> Optional[str]:
         message = str(exc).lower()
@@ -194,6 +195,7 @@ class VendorVoiceReceive:
 
             @wraps(fn)
             def _wrapped(*args: Any, **kwargs: Any) -> Any:
+                args, kwargs = self._normalize_decoder_input(source=source, args=args, kwargs=kwargs)
                 self._trace_decode_stage(source=source, args=args, kwargs=kwargs)
                 if source == "Decoder.decode":
                     payload = self._extract_payload_candidate(source, args, kwargs)
@@ -209,6 +211,7 @@ class VendorVoiceReceive:
                     if not self._is_decode_error(exc):
                         raise
                     self._register_decode_error(exc)
+                    self._log_decode_boundary(source=source, args=args, kwargs=kwargs, exc=exc)
                     on_decode_error(exc, self._extract_decode_error_context(source=source, args=args, kwargs=kwargs))
                     self._emit_decode_summary_if_needed(source=source)
                     return return_value
@@ -217,6 +220,84 @@ class VendorVoiceReceive:
             return _wrapped
 
         return _decorator
+
+    @staticmethod
+    def _extract_payload_bytes(candidate: Any) -> Optional[bytes | bytearray]:
+        if isinstance(candidate, (bytes, bytearray)):
+            return candidate
+        for attr in ("decrypted_data", "payload", "data"):
+            value = getattr(candidate, attr, None)
+            if isinstance(value, (bytes, bytearray)):
+                return value
+        return None
+
+    def _log_decode_boundary(self, *, source: str, args: tuple[Any, ...], kwargs: dict[str, Any], exc: BaseException) -> None:
+        if self._detailed_log_count >= self._detailed_log_limit:
+            return
+        payload = self._extract_payload_candidate(source, args, kwargs)
+        payload_bytes = self._extract_payload_bytes(payload)
+        stack_frames = inspect.stack(context=0)[2:6]
+        stack = " > ".join(f"{frame.function}@{frame.lineno}" for frame in stack_frames)
+        logger.warning(
+            "Voice recv decode boundary source=%s error=%s arg_type=%s payload_len=%s payload_preview_hex=%s payload_looks_like_rtp=%s hook=%s stack=%s",
+            source,
+            type(exc).__name__,
+            type(payload).__name__ if payload is not None else None,
+            len(payload_bytes) if payload_bytes is not None else None,
+            self._payload_preview(payload_bytes) if payload_bytes is not None else None,
+            self._looks_like_rtp(payload_bytes) if payload_bytes is not None else None,
+            source,
+            stack,
+        )
+        self._detailed_log_count += 1
+
+    def _normalize_decoder_input(self, *, source: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        if source not in {"PacketDecoder.pop_data", "PacketDecoder._process_packet", "PacketDecoder._decode_packet"}:
+            return args, kwargs
+        payload = self._extract_payload_candidate(source, args, kwargs)
+        payload_bytes = self._extract_payload_bytes(payload)
+        if not isinstance(payload_bytes, (bytes, bytearray)):
+            return args, kwargs
+        if not self._looks_like_rtp(payload_bytes):
+            return args, kwargs
+        opus_payload = self._extract_opus_from_rtp(payload_bytes)
+        if not opus_payload:
+            return args, kwargs
+        if isinstance(payload, (bytes, bytearray)):
+            new_args = list(args)
+            new_kwargs = dict(kwargs)
+            if len(new_args) >= 2:
+                new_args[1] = opus_payload
+            elif "packet" in new_kwargs:
+                new_kwargs["packet"] = opus_payload
+            elif "data" in new_kwargs:
+                new_kwargs["data"] = opus_payload
+            else:
+                return args, kwargs
+            logger.warning(
+                "Voice recv normalized RTP packet before decoder source=%s payload_len=%s opus_len=%s",
+                source,
+                len(payload_bytes),
+                len(opus_payload),
+            )
+            return tuple(new_args), new_kwargs
+
+        for attr in ("decrypted_data", "payload", "data"):
+            value = getattr(payload, attr, None)
+            if isinstance(value, (bytes, bytearray)) and self._looks_like_rtp(value):
+                try:
+                    setattr(payload, attr, opus_payload)
+                    logger.warning(
+                        "Voice recv normalized RTP field before decoder source=%s field=%s payload_len=%s opus_len=%s",
+                        source,
+                        attr,
+                        len(value),
+                        len(opus_payload),
+                    )
+                except Exception:
+                    return args, kwargs
+                break
+        return args, kwargs
 
     @staticmethod
     def _coerce_int(value: Any) -> Optional[int]:

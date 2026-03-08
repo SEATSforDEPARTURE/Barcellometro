@@ -242,7 +242,7 @@ def test_runtime_introspection_and_hook_installation_finds_multiple_methods() ->
 
     hooks = adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
 
-    assert hooks == 5
+    assert hooks == 4
 
 
 def test_do_run_is_fallback_only_when_packet_level_hooks_exist() -> None:
@@ -256,7 +256,7 @@ def test_do_run_is_fallback_only_when_packet_level_hooks_exist() -> None:
     assert "PacketDecoder.pop_data" in patched
     assert "PacketDecoder._process_packet" in patched
     assert "PacketDecoder._decode_packet" in patched
-    assert "Decoder.decode" in patched
+    assert "Decoder.decode" not in patched
 
 
 def test_packet_level_decode_error_is_handled_without_fallback() -> None:
@@ -351,7 +351,7 @@ def test_sink_boundary_reports_pcm_expected_by_default() -> None:
 
 
 def test_decode_error_context_includes_packet_type_and_decoder_id() -> None:
-    FakeChannel, _PacketRouter, _PacketDecoder, Decoder = _install_fake_voice_recv(router_exc=DummyOpusError("corrupted stream"))
+    FakeChannel, _PacketRouter, PacketDecoder, _Decoder = _install_fake_voice_recv(router_exc=DummyOpusError("corrupted stream"))
     adapter = VoiceReceiveAdapter()
     contexts: list[DecodeErrorContext] = []
 
@@ -361,8 +361,8 @@ def test_decode_error_context_includes_packet_type_and_decoder_id() -> None:
     channel = FakeChannel()
     asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=on_decode_error))
 
-    decoder = Decoder()
-    decoder.decode(b"packet")
+    decoder = PacketDecoder()
+    decoder.pop_data(b"packet")
 
     assert contexts
     context = contexts[-1]
@@ -375,21 +375,21 @@ def test_decode_guard_preserves_decode_call_arguments_and_binding() -> None:
     adapter = VoiceReceiveAdapter()
     adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
 
-    Decoder = sys.modules["discord.ext.voice_recv.opus"].Decoder
+    PacketDecoder = sys.modules["discord.ext.voice_recv.opus"].PacketDecoder
 
     calls: list[tuple[int, bytes]] = []
-    original = Decoder.decode
+    original = PacketDecoder.pop_data
 
     def traced(self: Any, packet: bytes) -> bytes:
         calls.append((id(self), packet))
         return original(self, packet)
 
-    Decoder.decode = traced
+    PacketDecoder.pop_data = traced
     adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
 
-    decoder = Decoder()
+    decoder = PacketDecoder()
     payload = b"\x90\xab\x01\x02"
-    out = decoder.decode(payload)
+    out = decoder.pop_data(payload)
 
     assert out == b"ok"
     assert calls == [(id(decoder), payload)]
@@ -425,40 +425,51 @@ def test_packet_decoder_guard_does_not_mutate_packet_argument() -> None:
 
 def test_decode_guard_preserves_decoder_signature_metadata() -> None:
     _install_fake_voice_recv()
-    Decoder = sys.modules["discord.ext.voice_recv.opus"].Decoder
-    original_sig = inspect.signature(Decoder.decode)
+    PacketDecoder = sys.modules["discord.ext.voice_recv.opus"].PacketDecoder
+    original_sig = inspect.signature(PacketDecoder.pop_data)
 
     adapter = VoiceReceiveAdapter()
     adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
 
-    wrapped_sig = inspect.signature(Decoder.decode)
+    wrapped_sig = inspect.signature(PacketDecoder.pop_data)
     assert wrapped_sig == original_sig
 
 
 
-def test_decoder_guard_does_not_strip_rtp_header_before_decode() -> None:
+def test_packet_decoder_guard_strips_rtp_header_before_decode() -> None:
     _install_fake_voice_recv()
     adapter = VoiceReceiveAdapter()
 
-    Decoder = sys.modules["discord.ext.voice_recv.opus"].Decoder
+    PacketDecoder = sys.modules["discord.ext.voice_recv.opus"].PacketDecoder
 
     seen_payloads: list[bytes] = []
-    original_decode = Decoder.decode
+    original_decode = PacketDecoder.pop_data
 
     def traced(self: Any, packet: bytes) -> bytes:
         seen_payloads.append(packet)
         return original_decode(self, packet)
 
-    Decoder.decode = traced
+    PacketDecoder.pop_data = traced
     adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
 
-    decoder = Decoder()
+    decoder = PacketDecoder()
     opus_payload = bytes.fromhex("f8fffe006f707573")
     rtp_header = bytes.fromhex("807812340000000100000002")
     rtp_packet = rtp_header + opus_payload
 
-    assert decoder.decode(rtp_packet) == b"ok"
-    assert seen_payloads == [rtp_packet]
+    assert decoder.pop_data(rtp_packet) == b"ok"
+    assert seen_payloads == [opus_payload]
+
+
+def test_decoder_decode_is_not_monkeypatched() -> None:
+    _install_fake_voice_recv()
+    Decoder = sys.modules["discord.ext.voice_recv.opus"].Decoder
+    original_decode = Decoder.decode
+
+    adapter = VoiceReceiveAdapter()
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    assert Decoder.decode is original_decode
 
 
 def test_rtp_payload_is_detected_upstream_at_packet_decoder_stage() -> None:
