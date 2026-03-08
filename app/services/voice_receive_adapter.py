@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import importlib
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import discord
+from packaging.version import InvalidVersion, Version
 
 from app.vendor.voice_recv import DecodeErrorContext, VendorVoiceReceive
 
@@ -46,29 +46,18 @@ class VoiceReceiveAdapter:
         self._decode_counters = AdapterDecodeCounters()
 
     @staticmethod
-    def _parse_version_parts(version: str) -> tuple[int, int, int]:
-        if not version:
-            return (0, 0, 0)
-        parts = re.findall(r"\d+", version)
-        if not parts:
-            return (0, 0, 0)
-        numbers = [int(p) for p in parts[:3]]
-        while len(numbers) < 3:
-            numbers.append(0)
-        return tuple(numbers)  # type: ignore[return-value]
-
-    @staticmethod
-    def _is_prerelease(version: str) -> bool:
-        return bool(re.search(r"[a-zA-Z]", version or ""))
-
-    @staticmethod
-    def _version_lt(version: str, minimum: tuple[int, int, int]) -> bool:
-        parsed = VoiceReceiveAdapter._parse_version_parts(version)
-        if parsed < minimum:
-            return True
-        if parsed == minimum and VoiceReceiveAdapter._is_prerelease(version):
-            return True
-        return False
+    def _version_lt(version: str, minimum: tuple[int, int, int]) -> tuple[bool, Optional[str]]:
+        minimum_str = VoiceReceiveAdapter._fmt_minimum(minimum)
+        try:
+            parsed = Version(version)
+        except InvalidVersion:
+            return True, f"unparseable version '{version}'"
+        minimum_version = Version(minimum_str)
+        if parsed < minimum_version:
+            if parsed.is_prerelease and parsed.release == minimum_version.release:
+                return True, f"{version} is a prerelease and lower than required stable {minimum_str}"
+            return True, f"{version} < {minimum_str}"
+        return False, None
 
     @staticmethod
     def _fmt_minimum(minimum: tuple[int, int, int]) -> str:
@@ -80,28 +69,27 @@ class VoiceReceiveAdapter:
         voice_recv_version = "missing"
         davey_version = "missing"
 
-        if self._version_lt(discord_version, self.MIN_DISCORD_VERSION):
-            reasons.append(
-                f"discord.py={discord_version} < {self._fmt_minimum(self.MIN_DISCORD_VERSION)}"
-            )
+        discord_incompatible, discord_detail = self._version_lt(discord_version, self.MIN_DISCORD_VERSION)
+        if discord_incompatible:
+            reasons.append(f"discord.py={discord_detail}")
 
         voice_recv_available = False
         try:
             voice_recv = importlib.import_module("discord.ext.voice_recv")
             voice_recv_version = getattr(voice_recv, "__version__", "unknown")
             voice_recv_available = True
-            if self._version_lt(voice_recv_version, self.MIN_VOICE_RECV_VERSION):
-                reasons.append(
-                    f"discord-ext-voice-recv={voice_recv_version} < {self._fmt_minimum(self.MIN_VOICE_RECV_VERSION)}"
-                )
+            voice_recv_incompatible, voice_recv_detail = self._version_lt(voice_recv_version, self.MIN_VOICE_RECV_VERSION)
+            if voice_recv_incompatible:
+                reasons.append(f"discord-ext-voice-recv={voice_recv_detail}")
         except Exception:
             reasons.append("discord.ext.voice_recv module missing")
 
         try:
             davey = importlib.import_module("davey")
             davey_version = getattr(davey, "__version__", "unknown")
-            if self._version_lt(davey_version, self.MIN_DAVEY_VERSION):
-                reasons.append(f"davey={davey_version} < {self._fmt_minimum(self.MIN_DAVEY_VERSION)}")
+            davey_incompatible, davey_detail = self._version_lt(davey_version, self.MIN_DAVEY_VERSION)
+            if davey_incompatible:
+                reasons.append(f"davey={davey_detail}")
         except Exception:
             reasons.append("davey module missing")
 

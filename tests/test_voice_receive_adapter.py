@@ -302,7 +302,7 @@ def test_stack_report_detects_pre_release_and_old_davey(monkeypatch: Any) -> Non
 
     assert report.available is True
     assert report.compatible is False
-    assert any("discord-ext-voice-recv=0.5.2a < 0.5.2" in reason for reason in report.reasons)
+    assert any("discord-ext-voice-recv=0.5.2a is a prerelease and lower than required stable 0.5.2" in reason for reason in report.reasons)
     assert any("davey=0.1.4 < 0.2.0" in reason for reason in report.reasons)
 
 
@@ -321,3 +321,10 @@ def test_decode_context_extracts_payload_user_and_ssrc() -> None:
     assert context.user_id == 44
     assert context.ssrc == 55
     assert context.payload_size == 3
+
+
+def test_prerelease_version_is_lower_than_required_stable() -> None:
+    incompatible, detail = VoiceReceiveAdapter._version_lt("0.5.2a", VoiceReceiveAdapter.MIN_VOICE_RECV_VERSION)
+
+    assert incompatible is True
+    assert detail == "0.5.2a is a prerelease and lower than required stable 0.5.2"

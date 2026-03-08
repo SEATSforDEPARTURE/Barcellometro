@@ -38,9 +38,10 @@ class _FakeDatabase:
     def __init__(self) -> None:
         self.started = 0
         self.ended = 0
+        self.settings: dict[str, str] = {}
 
-    async def get_setting(self, _key: str) -> None:
-        return None
+    async def get_setting(self, key: str) -> Any:
+        return self.settings.get(key)
 
     async def get_active_voice_session(self, _guild_id: str, _channel_id: str) -> None:
         return None
@@ -56,6 +57,9 @@ class _FakeDatabase:
 
     async def fetchone(self, *_args: Any, **_kwargs: Any) -> dict[str, int]:
         return {"c": 0}
+
+    async def insert_voice_participant_event(self, **_kwargs: Any) -> None:
+        return
 
 
 class _FakeIngest:
@@ -324,3 +328,146 @@ def test_join_fails_fast_when_voice_stack_incompatible(monkeypatch: Any, caplog:
     assert client.listen_calls == 0
     assert db.started == 0
     assert "runtime stack incompatible" in caplog.text
+
+
+def test_incompatible_stack_logs_once_and_blocks_followup_join_attempts(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    report = types.SimpleNamespace(
+        available=True,
+        compatible=False,
+        discord_version="2.7.1",
+        voice_recv_version="0.5.2a",
+        davey_version="0.1.4",
+        reasons=["discord-ext-voice-recv=0.5.2a is a prerelease and lower than required stable 0.5.2"],
+    )
+    monkeypatch.setattr(
+        "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
+        lambda _self: report,
+    )
+
+    registry, bot, _db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=47, voice_client=None)
+    channel = _FakeChannel(guild, 783, client)
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(controller.join(channel))
+        asyncio.run(controller.join(channel))
+
+    assert channel.connect_calls == 0
+    assert caplog.text.count("runtime stack incompatible") == 1
+
+
+def test_voice_state_autojoin_respects_runtime_block(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    report = types.SimpleNamespace(
+        available=True,
+        compatible=False,
+        discord_version="2.7.1",
+        voice_recv_version="0.5.2a",
+        davey_version="0.1.4",
+        reasons=["davey=0.1.4 < 0.2.0"],
+    )
+    monkeypatch.setattr(
+        "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
+        lambda _self: report,
+    )
+
+    registry, bot, db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    target_channel_id = 784
+    db.settings[f"voice_ingest.{bot.user.id}.target_voice_channel_id"] = str(target_channel_id)
+    db.settings[f"voice_ingest.{bot.user.id}.auto_join"] = "true"
+    db.settings[f"voice_ingest.{bot.user.id}.enabled"] = "true"
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=48, voice_client=None)
+    member = types.SimpleNamespace(id=1001, bot=False, guild=guild, display_name="member")
+    channel = _FakeChannel(guild, target_channel_id, client)
+    channel.members = [member]
+    guild.get_channel = lambda _id: channel
+
+    # first explicit join marks runtime as permanently blocked for this process
+    asyncio.run(controller.join(channel))
+
+    handler = bot.get_listener("on_voice_state_update")
+    before = types.SimpleNamespace(channel=None)
+    after = types.SimpleNamespace(channel=channel)
+
+    with caplog.at_level("DEBUG"):
+        asyncio.run(handler(member, before, after))
+
+    assert channel.connect_calls == 0
+    assert caplog.text.count("runtime stack incompatible") == 1
+
+
+def test_runtime_block_sets_fatal_state(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    report = types.SimpleNamespace(
+        available=True,
+        compatible=False,
+        discord_version="2.7.1",
+        voice_recv_version="0.5.2a",
+        davey_version="0.1.4",
+        reasons=["davey=0.1.4 < 0.2.0"],
+    )
+    monkeypatch.setattr(
+        "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
+        lambda _self: report,
+    )
+
+    registry, bot, _db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=49, voice_client=None)
+    channel = _FakeChannel(guild, 785, client)
+
+    with caplog.at_level("INFO"):
+        asyncio.run(controller.join(channel))
+
+    assert "state=failed_runtime_incompatible" in caplog.text
+
+
+def test_runtime_block_does_not_trigger_reconnect_recovery(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    report = types.SimpleNamespace(
+        available=True,
+        compatible=False,
+        discord_version="2.7.1",
+        voice_recv_version="0.5.2a",
+        davey_version="0.1.4",
+        reasons=["davey=0.1.4 < 0.2.0"],
+    )
+    monkeypatch.setattr(
+        "app.services.voice_receive_adapter.VoiceReceiveAdapter.get_voice_stack_report",
+        lambda _self: report,
+    )
+
+    registry, bot, _db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=50, voice_client=None)
+    channel = _FakeChannel(guild, 786, client)
+
+    with caplog.at_level("DEBUG"):
+        asyncio.run(controller.join(channel))
+        asyncio.run(controller.join(channel))
+
+    assert "decode storm recovery" not in caplog.text.lower()
