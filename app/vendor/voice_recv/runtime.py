@@ -55,6 +55,8 @@ class VendorVoiceReceive:
         ("discord.ext.voice_recv.opus", "PacketDecoder", "_decode_packet"),
     )
     _FALLBACK_HOOK_POINT = ("discord.ext.voice_recv.router", "PacketRouter", "_do_run")
+    _ACCOUNTED_ERROR_ATTR = "_barcello_decode_error_accounted"
+    _AUTHORITATIVE_DECODE_SOURCES = {"PacketDecoder._decode_packet"}
 
     def __init__(self) -> None:
         self.counters = DecodeErrorCounters()
@@ -97,6 +99,22 @@ class VendorVoiceReceive:
             self.counters.corrupted_stream_count += 1
         if "invalid argument" in message:
             self.counters.invalid_argument_count += 1
+
+    def _mark_decode_error_accounted(self, exc: BaseException) -> None:
+        try:
+            setattr(exc, self._ACCOUNTED_ERROR_ATTR, True)
+        except Exception:
+            # Some exceptions may not allow dynamic attributes.
+            pass
+
+    def _is_decode_error_accounted(self, exc: BaseException) -> bool:
+        try:
+            return bool(getattr(exc, self._ACCOUNTED_ERROR_ATTR, False))
+        except Exception:
+            return False
+
+    def _is_authoritative_source(self, source: str) -> bool:
+        return source in self._AUTHORITATIVE_DECODE_SOURCES
 
     def _emit_decode_summary_if_needed(self, *, source: str) -> None:
         now = time.monotonic()
@@ -218,10 +236,21 @@ class VendorVoiceReceive:
                 except Exception as exc:
                     if not self._is_decode_error(exc):
                         raise
-                    self._register_decode_error(exc)
-                    self._log_decode_boundary(source=source, args=args, kwargs=kwargs, exc=exc)
-                    on_decode_error(exc, self._extract_decode_error_context(source=source, args=args, kwargs=kwargs))
-                    self._emit_decode_summary_if_needed(source=source)
+
+                    already_accounted = self._is_decode_error_accounted(exc)
+                    should_account_here = not already_accounted and (
+                        self._is_authoritative_source(source) or not reraise_decode_errors
+                    )
+
+                    if should_account_here:
+                        self._register_decode_error(exc)
+                        self._log_decode_boundary(source=source, args=args, kwargs=kwargs, exc=exc)
+                        self._mark_decode_error_accounted(exc)
+                        on_decode_error(exc, self._extract_decode_error_context(source=source, args=args, kwargs=kwargs))
+                        self._emit_decode_summary_if_needed(source=source)
+                    elif already_accounted:
+                        logger.debug("Voice recv decode error propagated without recount source=%s", source)
+
                     if reraise_decode_errors:
                         raise
                     return return_value
@@ -568,9 +597,13 @@ class VendorVoiceReceive:
                 except Exception as exc:
                     if not outer._is_decode_error(exc):
                         raise
-                    outer._register_decode_error(exc)
-                    on_decode_error(exc, outer._extract_decode_error_context(source="sink.write", args=(user, data), kwargs={}))
-                    outer._emit_decode_summary_if_needed(source="sink.write")
+                    if not outer._is_decode_error_accounted(exc):
+                        outer._register_decode_error(exc)
+                        outer._mark_decode_error_accounted(exc)
+                        on_decode_error(exc, outer._extract_decode_error_context(source="sink.write", args=(user, data), kwargs={}))
+                        outer._emit_decode_summary_if_needed(source="sink.write")
+                    else:
+                        logger.debug("Voice recv sink decode error propagated without recount")
 
             def cleanup(self) -> None:
                 cleanup = getattr(self._inner, "cleanup", None)
