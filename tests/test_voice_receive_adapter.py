@@ -40,9 +40,13 @@ def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[An
     router_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.router", loader=None)
 
     class PacketRouter:
+        decoder_cls: Any = None
+
         def _do_run(self) -> None:
-            if router_exc is not None:
-                raise router_exc
+            decoder_cls = self.decoder_cls
+            if decoder_cls is None:
+                return None
+            decoder_cls().pop_data(b"router-packet")
     
     router_module.PacketRouter = PacketRouter
 
@@ -62,15 +66,11 @@ def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[An
     opus_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.opus", loader=None)
 
     class PacketDecoder:
-        def pop_data(self, _packet: Any) -> bytes:
-            if router_exc is not None:
-                raise router_exc
-            return b"ok"
+        def pop_data(self, packet: Any) -> bytes:
+            return self._process_packet(packet)
 
-        def _process_packet(self, _packet: Any) -> bytes:
-            if router_exc is not None:
-                raise router_exc
-            return b"ok"
+        def _process_packet(self, packet: Any) -> bytes:
+            return self._decode_packet(packet)
 
         def _decode_packet(self, _packet: Any) -> bytes:
             if router_exc is not None:
@@ -85,6 +85,7 @@ def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[An
 
     opus_module.PacketDecoder = PacketDecoder
     opus_module.Decoder = Decoder
+    PacketRouter.decoder_cls = PacketDecoder
 
     sys.modules["discord.ext.voice_recv"] = module
     sys.modules["discord.ext.voice_recv.router"] = router_module
@@ -278,7 +279,7 @@ def test_packet_level_decode_error_is_handled_without_fallback() -> None:
     else:
         raise AssertionError("expected decode error to be re-raised")
 
-    assert any(error.startswith("PacketDecoder.pop_data:") for error in errors)
+    assert any(error.startswith("PacketDecoder._decode_packet:") for error in errors)
 
 
 def test_crypto_and_opus_errors_are_classified_in_vendor_counters() -> None:
@@ -586,3 +587,44 @@ def test_decode_context_propagates_nested_session_guild_channel() -> None:
     assert context.channel_id == 20
     assert context.ssrc == 30
     assert context.user_id == 40
+
+
+def test_propagated_single_opus_error_is_counted_once() -> None:
+    FakeChannel, _PacketRouter, PacketDecoder, _Decoder = _install_fake_voice_recv(router_exc=DummyOpusError("corrupted stream"))
+    adapter = VoiceReceiveAdapter()
+    contexts: list[DecodeErrorContext] = []
+
+    channel = FakeChannel()
+    asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=lambda exc, ctx: contexts.append(ctx)))
+
+    decoder = PacketDecoder()
+    try:
+        decoder.pop_data(b"frame")
+    except DummyOpusError:
+        pass
+    else:
+        raise AssertionError("expected corrupted stream to be re-raised")
+
+    counters = adapter.counters
+    assert counters.opus_corrupted_total == 1
+    assert counters.corrupted_stream_count == 1
+    assert counters.invalid_argument_count == 0
+    assert len(contexts) == 1
+    assert contexts[0].source == "PacketDecoder._decode_packet"
+
+
+def test_router_survives_same_propagated_error_without_recounting() -> None:
+    FakeChannel, PacketRouter, _PacketDecoder, _Decoder = _install_fake_voice_recv(router_exc=DummyOpusError("corrupted stream"))
+    adapter = VoiceReceiveAdapter()
+    contexts: list[DecodeErrorContext] = []
+
+    asyncio.run(adapter.connect_and_listen(channel=FakeChannel(), on_pcm_frame=lambda *_a: None, on_decode_error=lambda exc, ctx: contexts.append(ctx)))
+
+    router = PacketRouter()
+    assert router._do_run() is None
+
+    counters = adapter.counters
+    assert counters.opus_corrupted_total == 1
+    assert counters.corrupted_stream_count == 1
+    assert len(contexts) == 1
+    assert contexts[0].source == "PacketDecoder._decode_packet"
