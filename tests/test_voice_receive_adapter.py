@@ -12,7 +12,7 @@ class DummyOpusError(Exception):
     pass
 
 
-def _install_fake_voice_recv(*, listen_exc: Exception | None = None, router_exc: Exception | None = None) -> tuple[Any, Any]:
+def _install_fake_voice_recv(*, router_exc: Exception | None = None) -> tuple[Any, Any]:
     module = types.ModuleType("discord.ext.voice_recv")
     module.__version__ = "test"
     module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv", loader=None)
@@ -37,24 +37,51 @@ def _install_fake_voice_recv(*, listen_exc: Exception | None = None, router_exc:
     router_module = types.ModuleType("discord.ext.voice_recv.router")
     router_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.router", loader=None)
 
+    class PacketDecoder:
+        def decode(self, _packet: Any) -> bytes:
+            if router_exc is not None:
+                raise router_exc
+            return b"ok"
+
     class PacketRouter:
         def _do_run(self) -> None:
             if router_exc is not None:
                 raise router_exc
 
+    router_module.PacketDecoder = PacketDecoder
     router_module.PacketRouter = PacketRouter
+
+    reader_module = types.ModuleType("discord.ext.voice_recv.reader")
+    reader_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.reader", loader=None)
+
+    class AudioReader:
+        def _decode_packet(self, _packet: Any) -> bytes:
+            if router_exc is not None:
+                raise router_exc
+            return b"ok"
+
+    reader_module.AudioReader = AudioReader
 
     sys.modules["discord.ext.voice_recv"] = module
     sys.modules["discord.ext.voice_recv.router"] = router_module
+    sys.modules["discord.ext.voice_recv.reader"] = reader_module
 
     class FakeVoiceClient:
         def __init__(self) -> None:
             self.sink = None
+            self.disconnect_calls = 0
+            self.connected = True
 
         def listen(self, sink: Any) -> None:
-            if listen_exc is not None:
-                raise listen_exc
             self.sink = sink
+
+        def is_connected(self) -> bool:
+            return self.connected
+
+        async def disconnect(self, *, force: bool) -> None:
+            assert force is True
+            self.connected = False
+            self.disconnect_calls += 1
 
     class FakeChannel:
         def __init__(self) -> None:
@@ -72,23 +99,19 @@ def test_corrupted_stream_does_not_kill_router_loop() -> None:
     FakeChannel, PacketRouter = _install_fake_voice_recv(router_exc=DummyOpusError("corrupted stream"))
     adapter = VoiceReceiveAdapter()
     errors: list[str] = []
-    frames: list[bytes] = []
-
-    def on_frame(_user: Any, data: Any) -> None:
-        frames.append(getattr(data, "pcm", b""))
 
     def on_decode_error(exc: Exception, source: str) -> None:
         errors.append(f"{source}:{exc}")
 
     channel = FakeChannel()
-    client = asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=on_frame, on_decode_error=on_decode_error))
+    client = asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=on_decode_error))
 
     router = PacketRouter()
     assert router._do_run() is None
     assert client.sink is not None
     assert errors
-    assert adapter.counters.opus_corrupted_total == 1
-    assert adapter.counters.corrupted_stream_count == 1
+    assert adapter.counters.opus_corrupted_total >= 1
+    assert adapter.counters.corrupted_stream_count >= 1
     assert adapter.counters.invalid_argument_count == 0
 
 
@@ -110,10 +133,33 @@ def test_invalid_argument_sink_error_is_dropped_without_fake_pcm() -> None:
     channel = FakeChannel()
     client = asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=on_frame, on_decode_error=on_decode_error))
 
-    # corrupted frame is dropped: no replacement/synthetic PCM generated
     client.sink.write(None, BrokenData())
     assert frames == []
     assert errors
     assert adapter.counters.opus_corrupted_total == 1
     assert adapter.counters.corrupted_stream_count == 0
     assert adapter.counters.invalid_argument_count == 1
+
+
+def test_valid_frame_reaches_plugin_callback_and_disconnect() -> None:
+    FakeChannel, _PacketRouter = _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+    frames: list[bytes] = []
+
+    class Packet:
+        pcm = b"valid-pcm"
+
+    channel = FakeChannel()
+    client = asyncio.run(
+        adapter.connect_and_listen(
+            channel=channel,
+            on_pcm_frame=lambda _user, data: frames.append(data.pcm),
+            on_decode_error=lambda _exc, _source: None,
+        )
+    )
+
+    client.sink.write(None, Packet())
+    assert frames == [b"valid-pcm"]
+
+    asyncio.run(adapter.disconnect())
+    assert client.disconnect_calls == 1

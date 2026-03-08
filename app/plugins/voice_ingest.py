@@ -927,8 +927,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     async def _leave_voice_channel() -> None:
         nonlocal voice_client
-        if voice_client and voice_client.is_connected():
-            await voice_client.disconnect(force=True)
+        await voice_receive_adapter.disconnect()
         voice_client = None
         await _end_session()
 
