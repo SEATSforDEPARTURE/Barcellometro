@@ -132,8 +132,10 @@ class VoiceReceiveAdapter:
             decode_type = self._classify_decode_error(exc)
             if decode_type == "crypto":
                 logger.error(
-                    "Voice receive adapter crypto decode failure source=%s error=%s user=%s ssrc=%s payload_size=%s",
+                    "Voice receive adapter crypto decode failure source=%s root_cause_source=%s event_id=%s error=%s user=%s ssrc=%s payload_size=%s",
                     context.source,
+                    context.root_cause_source,
+                    context.event_id,
                     type(exc).__name__,
                     context.user_id,
                     context.ssrc,
@@ -141,8 +143,10 @@ class VoiceReceiveAdapter:
                 )
             elif decode_type == "opus":
                 logger.warning(
-                    "Voice receive adapter opus decode failure source=%s error=%s user=%s ssrc=%s payload_size=%s packet_origin=%s packet_type=%s payload_preview_hex=%s payload_looks_like_rtp=%s decoder_instance_id=%s context_session=%s context_guild=%s context_channel=%s",
+                    "Voice receive adapter opus decode failure source=%s root_cause_source=%s event_id=%s error=%s user=%s ssrc=%s payload_size=%s packet_origin=%s packet_type=%s payload_preview_hex=%s payload_looks_like_rtp=%s decoder_instance_id=%s context_session=%s context_guild=%s context_channel=%s",
                     context.source,
+                    context.root_cause_source,
+                    context.event_id,
                     type(exc).__name__,
                     context.user_id,
                     context.ssrc,

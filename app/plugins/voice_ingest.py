@@ -484,6 +484,7 @@ def setup(registry: ServiceRegistry) -> None:
     voice_receive_adapter = VoiceReceiveAdapter()
     setup_invocation_count = 0
     decode_error_window: deque[float] = deque()
+    decode_event_ids_seen: set[str] = set()
     last_pcm_frame_ts = 0.0
     decode_storm_recovery_count = 0
     decode_storm_recovery_in_progress = False
@@ -501,7 +502,7 @@ def setup(registry: ServiceRegistry) -> None:
     )
 
     def _clear_voice_runtime_buffers(*, keep_counters: bool = False) -> None:
-        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count
+        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count, decode_event_ids_seen
         audio_buffers_by_user.clear()
         audio_buffers_by_ssrc.clear()
         chunk_stats_by_user.clear()
@@ -519,6 +520,7 @@ def setup(registry: ServiceRegistry) -> None:
             opus_payload_size_total = 0
             opus_payload_size_count = 0
         decode_error_window.clear()
+        decode_event_ids_seen.clear()
 
     def _runtime_incompatibility_signature(report: Any) -> tuple[str, str, str, tuple[str, ...]]:
         return (
@@ -821,7 +823,7 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal active_session_id, active_session_started
         nonlocal current_guild_id, active_session_started_epoch, current_voice_channel_id
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks, stt_empty_chunks
-        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count
+        nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count, decode_event_ids_seen
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count, total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent, stt_success_count
         nonlocal stt_hallucinated_chunks, stt_rejected_boilerplate, chunks_dropped_low_speech, chunks_dropped_low_rms, chunks_dropped_no_speech_after_vad, chunks_sent_to_stt, chunks_saved_to_db
         nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
@@ -1280,8 +1282,10 @@ def setup(registry: ServiceRegistry) -> None:
         message = str(error).lower()
         if "cryptoerror" in message or "decoding packet data" in message:
             logger.error(
-                "Voice ingest crypto decode error source=%s state=%s reason=%s crypto_decode_errors=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s",
+                "Voice ingest crypto decode error source=%s event_id=%s root_cause_source=%s state=%s reason=%s crypto_decode_errors=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s",
                 source,
+                context.event_id,
+                context.root_cause_source,
                 _state_for(current_guild_id).state if current_guild_id is not None else "idle",
                 _state_for(current_guild_id).reason if current_guild_id is not None else "n/a",
                 counters.crypto_decode_errors,
@@ -1293,6 +1297,19 @@ def setup(registry: ServiceRegistry) -> None:
                 context.payload_size,
             )
             return
+
+        event_id = context.event_id
+        if event_id and event_id in decode_event_ids_seen:
+            logger.debug(
+                "Voice ingest decode error deduplicated event_id=%s source=%s root_cause_source=%s",
+                event_id,
+                source,
+                context.root_cause_source,
+            )
+            return
+        if event_id:
+            decode_event_ids_seen.add(event_id)
+
         _increment_opus_corrupted(error)
         _log_opus_decode_failure(
             source,
@@ -1305,25 +1322,6 @@ def setup(registry: ServiceRegistry) -> None:
             payload_preview_hex=context.payload_preview_hex,
             payload_looks_like_rtp=context.payload_looks_like_rtp,
             decoder_instance_id=context.decoder_instance_id,
-        )
-        logger.warning(
-            "Voice ingest opus decode error source=%s opus_corrupted_total=%s session=%s guild=%s channel=%s user=%s ssrc=%s payload_size=%s packet_origin=%s packet_type=%s payload_preview_hex=%s payload_looks_like_rtp=%s decoder_instance_id=%s context_session=%s context_guild=%s context_channel=%s",
-            source,
-            counters.opus_corrupted_total,
-            active_session_id,
-            current_guild_id,
-            current_voice_channel_id,
-            context.user_id,
-            context.ssrc,
-            context.payload_size,
-            context.packet_origin,
-            context.packet_type,
-            context.payload_preview_hex,
-            context.payload_looks_like_rtp,
-            context.decoder_instance_id,
-            context.session_id,
-            context.guild_id,
-            context.channel_id,
         )
         if context.session_id is None or context.guild_id is None or context.channel_id is None:
             logger.debug(
@@ -2136,6 +2134,19 @@ def setup(registry: ServiceRegistry) -> None:
         return startup_initialized and controller_registered and worker_running and enforcer_running
 
     def _defer_connect(guild: discord.Guild, channel: discord.VoiceChannel, *, reason: str) -> None:
+        existing = deferred_connects.get(guild.id)
+        if existing is not None:
+            _existing_guild, existing_channel, existing_reason = existing
+            if existing_channel.id == channel.id:
+                merged_reason = f"{existing_reason}|{reason}" if reason != existing_reason else existing_reason
+                deferred_connects[guild.id] = (guild, channel, merged_reason)
+                logger.info(
+                    "Voice ingest connect deferred merged guild=%s channel=%s reason=%s",
+                    guild.id,
+                    channel.id,
+                    merged_reason,
+                )
+                return
         deferred_connects[guild.id] = (guild, channel, reason)
         logger.info(
             "Voice ingest connect deferred guild=%s channel=%s reason=%s startup_initialized=%s controller_registered=%s worker_running=%s enforcer_running=%s",

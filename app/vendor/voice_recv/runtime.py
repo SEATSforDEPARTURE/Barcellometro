@@ -4,6 +4,8 @@ import importlib
 import inspect
 import logging
 import time
+import contextvars
+from uuid import uuid4
 from functools import wraps
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
@@ -26,6 +28,16 @@ class DecodeErrorContext:
     packet_origin: Optional[str] = None
     payload_preview_hex: Optional[str] = None
     payload_looks_like_rtp: Optional[bool] = None
+    event_id: Optional[str] = None
+    root_cause_source: Optional[str] = None
+
+
+@dataclass
+class _DecodeEventState:
+    event_id: str
+    depth: int = 0
+    accounted: bool = False
+    root_cause_source: Optional[str] = None
 
 
 DecodeErrorCallback = Callable[[Exception, DecodeErrorContext], None]
@@ -49,11 +61,7 @@ class VendorVoiceReceive:
     )
     _OPUS_ERROR_TOKENS = ("corrupted stream", "invalid argument", "buffer too small", "decode failed")
     _CRYPTO_ERROR_TOKENS = ("cryptoerror", "decoding packet data", "decrypt")
-    _DECODE_HOOK_POINTS = (
-        ("discord.ext.voice_recv.opus", "PacketDecoder", "pop_data"),
-        ("discord.ext.voice_recv.opus", "PacketDecoder", "_process_packet"),
-        ("discord.ext.voice_recv.opus", "PacketDecoder", "_decode_packet"),
-    )
+    _DECODE_HOOK_POINTS = (("discord.ext.voice_recv.opus", "PacketDecoder", "_decode_packet"),)
     _FALLBACK_HOOK_POINT = ("discord.ext.voice_recv.router", "PacketRouter", "_do_run")
     _ACCOUNTED_ERROR_ATTR = "_barcello_decode_error_accounted"
     _AUTHORITATIVE_DECODE_SOURCES = {"PacketDecoder._decode_packet"}
@@ -71,6 +79,10 @@ class VendorVoiceReceive:
         self._detailed_log_count = 0
         self._session_detailed_log_count: dict[str, int] = {}
         self._session_detailed_log_limit = 3
+        self._decode_event_state: contextvars.ContextVar[Optional[_DecodeEventState]] = contextvars.ContextVar(
+            "barcello_decode_event_state",
+            default=None,
+        )
 
     def _classify_decode_error(self, exc: BaseException) -> Optional[str]:
         message = str(exc).lower()
@@ -147,7 +159,7 @@ class VendorVoiceReceive:
                     if callable(member) and not method_name.startswith("__")
                 ]
                 discovered[(module_name, class_name)] = set(methods)
-                logger.info(
+                logger.debug(
                     "voice_recv runtime discovered class=%s methods=%s module=%s file=%s",
                     class_name,
                     methods,
@@ -222,7 +234,13 @@ class VendorVoiceReceive:
 
             @wraps(fn)
             def _wrapped(*args: Any, **kwargs: Any) -> Any:
-                self._trace_decode_stage(source=source, args=args, kwargs=kwargs)
+                event_state = self._decode_event_state.get()
+                if event_state is None:
+                    event_state = _DecodeEventState(event_id=uuid4().hex)
+                    self._decode_event_state.set(event_state)
+                event_state.depth += 1
+                if self._is_authoritative_source(source):
+                    self._trace_decode_stage(source=source, args=args, kwargs=kwargs)
                 if source == "Decoder.decode":
                     payload = self._extract_payload_candidate(source, args, kwargs)
                     if isinstance(payload, (bytes, bytearray)) and self._looks_like_rtp(payload):
@@ -237,16 +255,28 @@ class VendorVoiceReceive:
                     if not self._is_decode_error(exc):
                         raise
 
-                    already_accounted = self._is_decode_error_accounted(exc)
+                    already_accounted = self._is_decode_error_accounted(exc) or event_state.accounted
                     should_account_here = not already_accounted and (
                         self._is_authoritative_source(source) or not reraise_decode_errors
                     )
 
                     if should_account_here:
+                        event_state.accounted = True
+                        event_state.root_cause_source = source
                         self._register_decode_error(exc)
                         self._log_decode_boundary(source=source, args=args, kwargs=kwargs, exc=exc)
                         self._mark_decode_error_accounted(exc)
-                        on_decode_error(exc, self._extract_decode_error_context(source=source, args=args, kwargs=kwargs))
+                        on_decode_error(
+                            exc,
+                            self._extract_decode_error_context(
+                                source=source,
+                                args=args,
+                                kwargs=kwargs,
+                                event_id=event_state.event_id,
+                                root_cause_source=event_state.root_cause_source,
+                                include_payload_diagnostics=True,
+                            ),
+                        )
                         self._emit_decode_summary_if_needed(source=source)
                     elif already_accounted:
                         logger.debug("Voice recv decode error propagated without recount source=%s", source)
@@ -254,6 +284,10 @@ class VendorVoiceReceive:
                     if reraise_decode_errors:
                         raise
                     return return_value
+                finally:
+                    event_state.depth = max(0, event_state.depth - 1)
+                    if event_state.depth == 0:
+                        self._decode_event_state.set(None)
 
             setattr(_wrapped, "_barcello_vendor_decode_guard", True)
             return _wrapped
@@ -405,7 +439,16 @@ class VendorVoiceReceive:
             current = getattr(current, "packet", None) or getattr(current, "data", None) or getattr(current, "voice_client", None)
         return None
 
-    def _extract_decode_error_context(self, *, source: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> DecodeErrorContext:
+    def _extract_decode_error_context(
+        self,
+        *,
+        source: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        event_id: Optional[str] = None,
+        root_cause_source: Optional[str] = None,
+        include_payload_diagnostics: bool = False,
+    ) -> DecodeErrorContext:
         user_id: Optional[int] = None
         ssrc: Optional[int] = None
         payload_size: Optional[int] = None
@@ -425,15 +468,17 @@ class VendorVoiceReceive:
         if isinstance(payload_candidate, (bytes, bytearray)):
             payload_size = len(payload_candidate)
             packet_type = type(payload_candidate).__name__
-            payload_preview_hex = self._payload_preview(payload_candidate)
-            payload_looks_like_rtp = self._looks_like_rtp(payload_candidate)
+            if include_payload_diagnostics:
+                payload_preview_hex = self._payload_preview(payload_candidate)
+                payload_looks_like_rtp = self._looks_like_rtp(payload_candidate)
         else:
             candidate_payload = getattr(payload_candidate, "payload", None)
             if isinstance(candidate_payload, (bytes, bytearray)):
                 payload_size = len(candidate_payload)
                 packet_type = type(candidate_payload).__name__
-                payload_preview_hex = self._payload_preview(candidate_payload)
-                payload_looks_like_rtp = self._looks_like_rtp(candidate_payload)
+                if include_payload_diagnostics:
+                    payload_preview_hex = self._payload_preview(candidate_payload)
+                    payload_looks_like_rtp = self._looks_like_rtp(candidate_payload)
 
         candidates = list(args) + list(kwargs.values())
         first_candidate = candidates[0] if candidates else None
@@ -508,6 +553,8 @@ class VendorVoiceReceive:
             packet_origin=packet_origin,
             payload_preview_hex=payload_preview_hex,
             payload_looks_like_rtp=payload_looks_like_rtp,
+            event_id=event_id,
+            root_cause_source=root_cause_source,
         )
 
     def install_decode_guards(self, *, on_decode_error: DecodeErrorCallback) -> int:
@@ -566,7 +613,7 @@ class VendorVoiceReceive:
             unresolved["discord.ext.voice_recv.router.PacketRouter._do_run"] = "fallback_install_failed"
 
         self._installed_hooks = hooks
-        logger.info("Vendor voice receive decode guards installed hooks=%s patched=%s", hooks, self._patched_sources)
+        logger.info("Vendor voice receive decode guards installed hooks=%s patched=%s unresolved=%s", hooks, self._patched_sources, unresolved)
         if fallback_installed and hooks == 1:
             logger.warning(
                 "Vendor voice receive decode guards using PacketRouter._do_run fallback only unresolved=%s",
@@ -600,7 +647,17 @@ class VendorVoiceReceive:
                     if not outer._is_decode_error_accounted(exc):
                         outer._register_decode_error(exc)
                         outer._mark_decode_error_accounted(exc)
-                        on_decode_error(exc, outer._extract_decode_error_context(source="sink.write", args=(user, data), kwargs={}))
+                        on_decode_error(
+                            exc,
+                            outer._extract_decode_error_context(
+                                source="sink.write",
+                                args=(user, data),
+                                kwargs={},
+                                event_id=uuid4().hex,
+                                root_cause_source="sink.write",
+                                include_payload_diagnostics=True,
+                            ),
+                        )
                         outer._emit_decode_summary_if_needed(source="sink.write")
                     else:
                         logger.debug("Voice recv sink decode error propagated without recount")
