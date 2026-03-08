@@ -52,7 +52,12 @@ KNOWN_HALLUCINATION_TEXTS = {
     "sottotitoli creati dalla comunita amara org",
 }
 
-_VOICE_INGEST_STARTUP_GUARD = {"initialized_bots": set(), "listeners_registered_bots": set()}
+_VOICE_INGEST_STARTUP_GUARD = {
+    "initialized_bots": set(),
+    "listeners_registered_bots": set(),
+    "controllers_registered_bots": set(),
+    "cleanup_completed_bots": set(),
+}
 
 
 def _is_known_corrupted_opus_error(error: Exception) -> bool:
@@ -1031,8 +1036,14 @@ def setup(registry: ServiceRegistry) -> None:
 
     async def ensure_voice_connected(guild: discord.Guild, channel: discord.VoiceChannel, *, reason: str) -> None:
         nonlocal voice_client
+        if not _startup_components_ready():
+            _defer_connect(guild, channel, reason=reason)
+            return
         lock = join_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
+            if not _startup_components_ready():
+                _defer_connect(guild, channel, reason=reason)
+                return
             conn_state = _state_for(guild.id)
             logger.info(
                 "Voice ingest connect requested guild=%s channel=%s reason=%s state=%s",
@@ -2105,14 +2116,52 @@ def setup(registry: ServiceRegistry) -> None:
         )
 
     bot_key = id(bot)
-    controller_registered = bot_key in _VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"]
+    controller_registered = bot_key in _VOICE_INGEST_STARTUP_GUARD["controllers_registered_bots"]
+    cleanup_completed = bot_key in _VOICE_INGEST_STARTUP_GUARD["cleanup_completed_bots"]
     startup_initialized = bot_key in _VOICE_INGEST_STARTUP_GUARD["initialized_bots"]
+    startup_lock = asyncio.Lock()
+    deferred_connects: dict[int, tuple[discord.Guild, discord.VoiceChannel, str]] = {}
+
+    def _startup_components_ready() -> bool:
+        worker_running = worker_task is not None and not worker_task.done()
+        enforcer_running = enforcer_task is not None and not enforcer_task.done()
+        return startup_initialized and controller_registered and worker_running and enforcer_running
+
+    def _defer_connect(guild: discord.Guild, channel: discord.VoiceChannel, *, reason: str) -> None:
+        deferred_connects[guild.id] = (guild, channel, reason)
+        logger.info(
+            "Voice ingest connect deferred guild=%s channel=%s reason=%s startup_initialized=%s controller_registered=%s worker_running=%s enforcer_running=%s",
+            guild.id,
+            channel.id,
+            reason,
+            startup_initialized,
+            controller_registered,
+            worker_task is not None and not worker_task.done(),
+            enforcer_task is not None and not enforcer_task.done(),
+        )
+
+    async def _flush_deferred_connects() -> None:
+        if not deferred_connects:
+            return
+        pending = list(deferred_connects.values())
+        deferred_connects.clear()
+        for guild, channel, reason in pending:
+            try:
+                await ensure_voice_connected(guild, channel, reason=f"deferred:{reason}")
+            except Exception:
+                logger.exception(
+                    "Voice ingest deferred connect failed guild=%s channel=%s reason=%s",
+                    guild.id,
+                    channel.id,
+                    reason,
+                )
 
     async def handle_ready() -> None:
         nonlocal worker_task
         nonlocal controller_registered
         nonlocal enforcer_task
         nonlocal startup_initialized
+        nonlocal cleanup_completed
         nonlocal setup_invocation_count
 
         setup_invocation_count += 1
@@ -2130,69 +2179,78 @@ def setup(registry: ServiceRegistry) -> None:
             len(getattr(bot, "_listeners", {}).get("on_voice_state_update", [])),
             len(getattr(bot, "_listeners", {}).get("on_message", [])),
         )
-        if startup_initialized or bot_key in _VOICE_INGEST_STARTUP_GUARD["initialized_bots"]:
+
+        async with startup_lock:
+            if not cleanup_completed:
+                before = await database.fetchone(
+                    "SELECT COUNT(*) AS c FROM voice_sessions WHERE ended_ts IS NULL",
+                    (),
+                )
+                closed_count = await database.close_open_voice_sessions(
+                    ended_ts=_now_iso(),
+                    source=None,
+                )
+                after = await database.fetchone(
+                    "SELECT COUNT(*) AS c FROM voice_sessions WHERE ended_ts IS NULL",
+                    (),
+                )
+                logger.warning(
+                    "Voice sessions cleanup on startup: before=%s closed=%s after=%s",
+                    (before["c"] if before else None),
+                    closed_count,
+                    (after["c"] if after else None),
+                )
+                _log_voice_stack_versions()
+                cleanup_completed = True
+                _VOICE_INGEST_STARTUP_GUARD["cleanup_completed_bots"].add(bot_key)
+
+            if worker_task is None or worker_task.done():
+                worker_task = asyncio.create_task(_worker())
+
+                def _log_worker_result(task_future: Any) -> None:
+                    try:
+                        task_future.result()
+                    except Exception:
+                        logger.exception("Voice ingest worker task failed")
+
+                worker_task.add_done_callback(_log_worker_result)
+                logger.info("Voice ingest worker task started task_id=%s", id(worker_task))
+            else:
+                logger.info("Voice ingest worker task already running task_id=%s", id(worker_task))
+
+            if enforcer_task is None or enforcer_task.done():
+                enforcer_task = asyncio.create_task(_enforce_privacy())
+
+                def _log_enforcer_result(task_future: Any) -> None:
+                    try:
+                        task_future.result()
+                    except Exception:
+                        logger.exception("Voice ingest privacy enforcer task failed")
+
+                enforcer_task.add_done_callback(_log_enforcer_result)
+                logger.info("Voice ingest privacy enforcer task started task_id=%s", id(enforcer_task))
+            else:
+                logger.info("Voice ingest privacy enforcer task already running task_id=%s", id(enforcer_task))
+
+            if not controller_registered:
+                registry.register("voice_ingest", VoiceIngestController(_handle_join_command, _handle_leave_command))
+                controller_registered = True
+                _VOICE_INGEST_STARTUP_GUARD["controllers_registered_bots"].add(bot_key)
+                logger.info("Voice ingest controller registered")
+            else:
+                logger.info("Voice ingest controller already registered")
+
             startup_initialized = True
+            _VOICE_INGEST_STARTUP_GUARD["initialized_bots"].add(bot_key)
+
+        if setup_invocation_count > 1:
             logger.info(
-                "Voice ingest startup already initialized; skipping duplicate on_ready init worker_task_id=%s enforcer_task_id=%s",
+                "Voice ingest startup already initialized; verifying readiness worker_task_id=%s enforcer_task_id=%s",
                 id(worker_task) if worker_task is not None else None,
                 id(enforcer_task) if enforcer_task is not None else None,
             )
-            return
 
-        before = await database.fetchone(
-            "SELECT COUNT(*) AS c FROM voice_sessions WHERE ended_ts IS NULL",
-            (),
-        )
-        closed_count = await database.close_open_voice_sessions(
-            ended_ts=_now_iso(),
-            source=None,
-        )
-        after = await database.fetchone(
-            "SELECT COUNT(*) AS c FROM voice_sessions WHERE ended_ts IS NULL",
-            (),
-        )
-        logger.warning(
-            "Voice sessions cleanup on startup: before=%s closed=%s after=%s",
-            (before["c"] if before else None),
-            closed_count,
-            (after["c"] if after else None),
-        )
-        _log_voice_stack_versions()
-        if worker_task is None or worker_task.done():
-            worker_task = asyncio.create_task(_worker())
-
-            def _log_worker_result(task_future: Any) -> None:
-                try:
-                    task_future.result()
-                except Exception:
-                    logger.exception("Voice ingest worker task failed")
-
-            worker_task.add_done_callback(_log_worker_result)
-            logger.info("Voice ingest worker task started task_id=%s", id(worker_task))
-        else:
-            logger.info("Voice ingest worker task already running task_id=%s", id(worker_task))
-        if enforcer_task is None or enforcer_task.done():
-            enforcer_task = asyncio.create_task(_enforce_privacy())
-
-            def _log_enforcer_result(task_future: Any) -> None:
-                try:
-                    task_future.result()
-                except Exception:
-                    logger.exception("Voice ingest privacy enforcer task failed")
-
-            enforcer_task.add_done_callback(_log_enforcer_result)
-            logger.info("Voice ingest privacy enforcer task started task_id=%s", id(enforcer_task))
-        else:
-            logger.info("Voice ingest privacy enforcer task already running task_id=%s", id(enforcer_task))
-        if not controller_registered:
-            registry.register("voice_ingest", VoiceIngestController(_handle_join_command, _handle_leave_command))
-            controller_registered = True
-            _VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"].add(bot_key)
-            logger.info("Voice ingest controller registered")
-        else:
-            logger.info("Voice ingest controller already registered")
-        startup_initialized = True
-        _VOICE_INGEST_STARTUP_GUARD["initialized_bots"].add(bot_key)
+        await _flush_deferred_connects()
 
     if bot_key not in _VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"]:
         bot.add_listener(handle_ready, "on_ready")

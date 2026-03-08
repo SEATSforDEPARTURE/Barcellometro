@@ -546,6 +546,8 @@ def test_setup_does_not_register_duplicate_listeners_across_reinit(monkeypatch: 
     monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
     voice_ingest._VOICE_INGEST_STARTUP_GUARD["initialized_bots"].clear()
     voice_ingest._VOICE_INGEST_STARTUP_GUARD["listeners_registered_bots"].clear()
+    voice_ingest._VOICE_INGEST_STARTUP_GUARD["controllers_registered_bots"].clear()
+    voice_ingest._VOICE_INGEST_STARTUP_GUARD["cleanup_completed_bots"].clear()
 
     registry, bot, _db = _build_registry()
     voice_ingest.setup(registry)
@@ -554,3 +556,50 @@ def test_setup_does_not_register_duplicate_listeners_across_reinit(monkeypatch: 
     assert len(bot._listeners.get("on_ready", [])) == 1
     assert len(bot._listeners.get("on_voice_state_update", [])) == 1
     assert len(bot._listeners.get("on_message", [])) == 1
+
+
+def test_voice_state_auto_join_is_deferred_until_startup_ready(monkeypatch: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    registry, bot, db = _build_registry()
+    db.settings = {
+        f"voice_ingest.{bot.user.id}.enabled": "true",
+        f"voice_ingest.{bot.user.id}.auto_join": "true",
+        f"voice_ingest.{bot.user.id}.privacy_mode": "false",
+        f"voice_ingest.{bot.user.id}.min_users_to_join": "1",
+        f"voice_ingest.{bot.user.id}.target_voice_channel_id": "555",
+    }
+    voice_ingest.setup(registry)
+
+    listener = bot.get_listener("on_voice_state_update")
+    client = _FakeVoiceClient(connected=True)
+    channel = types.SimpleNamespace(id=555, guild=None, members=[])
+    guild = types.SimpleNamespace(id=77, voice_client=None, get_channel=lambda _id: channel)
+    channel.guild = guild
+    member = types.SimpleNamespace(id=123, bot=False, guild=guild, display_name="u")
+    channel.members = [member]
+    before = types.SimpleNamespace(channel=None)
+    after = types.SimpleNamespace(channel=channel)
+
+    asyncio.run(listener(member, before, after))
+
+    assert guild.voice_client is None
+
+
+def test_on_ready_does_not_duplicate_controller_registration(monkeypatch: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+
+    registry, bot, _db = _build_registry()
+    voice_ingest.setup(registry)
+    on_ready = bot.get_listener("on_ready")
+
+    asyncio.run(on_ready())
+    first_controller = registry.get("voice_ingest")
+    asyncio.run(on_ready())
+    second_controller = registry.get("voice_ingest")
+
+    assert first_controller is second_controller
