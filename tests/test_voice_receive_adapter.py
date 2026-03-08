@@ -271,7 +271,12 @@ def test_packet_level_decode_error_is_handled_without_fallback() -> None:
     asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=on_decode_error))
 
     packet_decoder = PacketDecoder()
-    assert packet_decoder.pop_data(b"x") is None
+    try:
+        packet_decoder.pop_data(b"x")
+    except DummyOpusError as exc:
+        assert str(exc) == "corrupted stream"
+    else:
+        raise AssertionError("expected decode error to be re-raised")
 
     assert any(error.startswith("PacketDecoder.pop_data:") for error in errors)
 
@@ -362,7 +367,12 @@ def test_decode_error_context_includes_packet_type_and_decoder_id() -> None:
     asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=on_decode_error))
 
     decoder = PacketDecoder()
-    decoder.pop_data(b"packet")
+    try:
+        decoder.pop_data(b"packet")
+    except DummyOpusError:
+        pass
+    else:
+        raise AssertionError("expected corrupted stream to be re-raised")
 
     assert contexts
     context = contexts[-1]
@@ -458,7 +468,75 @@ def test_packet_decoder_guard_strips_rtp_header_before_decode() -> None:
     rtp_packet = rtp_header + opus_payload
 
     assert decoder.pop_data(rtp_packet) == b"ok"
-    assert seen_payloads == [opus_payload]
+    assert seen_payloads == [rtp_packet]
+
+
+def test_decode_packet_wrapper_preserves_tuple_return_contract() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    PacketDecoder = sys.modules["discord.ext.voice_recv.opus"].PacketDecoder
+
+    packet = object()
+    pcm = b"pcm"
+
+    def tuple_decode(self: Any, incoming: Any) -> tuple[Any, bytes]:
+        return incoming, pcm
+
+    PacketDecoder._decode_packet = tuple_decode
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    out_packet, out_pcm = PacketDecoder()._decode_packet(packet)
+    assert out_packet is packet
+    assert out_pcm == pcm
+
+
+def test_decode_packet_wrapper_reraises_original_decode_error() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+    errors: list[DecodeErrorContext] = []
+    PacketDecoder = sys.modules["discord.ext.voice_recv.opus"].PacketDecoder
+
+    def broken_decode(self: Any, _incoming: Any) -> tuple[Any, bytes]:
+        raise DummyOpusError("invalid argument")
+
+    PacketDecoder._decode_packet = broken_decode
+    adapter._vendor.install_decode_guards(on_decode_error=lambda _exc, ctx: errors.append(ctx))
+
+    try:
+        PacketDecoder()._decode_packet(object())
+    except DummyOpusError as exc:
+        assert str(exc) == "invalid argument"
+    else:
+        raise AssertionError("expected invalid argument to be re-raised")
+
+    assert errors
+
+
+def test_process_packet_never_observes_none_from_decode_packet() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    PacketDecoder = sys.modules["discord.ext.voice_recv.opus"].PacketDecoder
+
+    def process_packet(self: Any, packet: Any) -> tuple[Any, bytes]:
+        decoded_packet, pcm = self._decode_packet(packet)
+        assert decoded_packet is not None
+        assert pcm is not None
+        return decoded_packet, pcm
+
+    def decode_packet(self: Any, packet: Any) -> tuple[Any, bytes]:
+        return packet, b"pcm"
+
+    PacketDecoder._process_packet = process_packet
+    PacketDecoder._decode_packet = decode_packet
+    adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
+
+    out_packet, out_pcm = PacketDecoder()._process_packet(object())
+    assert out_packet is not None
+    assert out_pcm == b"pcm"
 
 
 def test_decoder_decode_is_not_monkeypatched() -> None:
