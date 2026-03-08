@@ -104,7 +104,7 @@ def _install_opus_decode_guard() -> None:
             _increment_opus_corruption()
             if target_name == "_decode_packet":
                 packet = args[0] if args else None
-                return packet, b""
+                return None
             return None
 
     setattr(_wrapped, "_barcello_guard", True)
@@ -154,6 +154,7 @@ class _VoiceJob:
     total_frames: int = 0
     corrupted_frames: int = 0
     silent_frames: int = 0
+    non_silent_frames: int = 0
     first_frame_ts: float = 0.0
     last_frame_ts: float = 0.0
     chunk_duration_sec: float = 0.0
@@ -337,6 +338,7 @@ def _build_session_summary(
     chunks_dropped_high_corruption: int,
     chunks_dropped_low_speech: int,
     chunks_dropped_low_rms: int,
+    chunks_dropped_no_speech_after_vad: int,
     opus_corrupted_total: int,
     avg_corruption_ratio: float,
 ) -> dict[str, float | int]:
@@ -355,9 +357,31 @@ def _build_session_summary(
         "chunks_dropped_high_corruption": max(0, chunks_dropped_high_corruption),
         "chunks_dropped_low_speech": max(0, chunks_dropped_low_speech),
         "chunks_dropped_low_rms": max(0, chunks_dropped_low_rms),
+        "chunks_dropped_no_speech_after_vad": max(0, chunks_dropped_no_speech_after_vad),
         "opus_corrupted_total": max(0, opus_corrupted_total),
         "avg_corruption_ratio": max(0.0, avg_corruption_ratio),
     }
+
+
+def _should_drop_no_speech_after_vad(
+    *,
+    text_len: int,
+    min_chars: int,
+    duration_sec: float,
+    total_frames: int,
+    non_silent_frames: int,
+    corruption_ratio: float,
+    max_corruption_ratio: float,
+) -> bool:
+    if text_len >= min_chars:
+        return False
+    if duration_sec < MIN_WAV_SECONDS:
+        return False
+    if total_frames <= 0 or non_silent_frames <= 0:
+        return False
+    if corruption_ratio > max_corruption_ratio:
+        return False
+    return True
 
 
 def _pcm_rms(data: bytes) -> float:
@@ -447,6 +471,7 @@ def setup(registry: ServiceRegistry) -> None:
     stt_rejected_boilerplate = 0
     chunks_dropped_low_speech = 0
     chunks_dropped_low_rms = 0
+    chunks_dropped_no_speech_after_vad = 0
     chunks_sent_to_stt = 0
     chunks_saved_to_db = 0
     consecutive_discarded_chunks = 0
@@ -672,7 +697,7 @@ def setup(registry: ServiceRegistry) -> None:
                 packet_data = getattr(packet, "decrypted_data", None)
                 packet_len = len(packet_data) if isinstance(packet_data, (bytes, bytearray)) else None
                 _log_opus_decode_failure("voice_recv.OpusDecoder._decode_packet", error=exc, payload_size=packet_len)
-                return packet, b""
+                return None
 
         setattr(wrapped, "_barcello_guard", True)
         decoder._decode_packet = wrapped
@@ -681,46 +706,10 @@ def setup(registry: ServiceRegistry) -> None:
 
     def _install_discord_opus_decode_guard() -> None:
         nonlocal opus_decode_guard_installed
-        global _OPUS_GUARD_ORIGINAL_DECODE
         if opus_decode_guard_installed:
             return
-        try:
-            import discord.opus as d_opus
-            from discord.opus import OpusError
-        except Exception:
-            logger.debug("discord.opus not available; skipping global opus decode guard")
-            return
-        current = d_opus.Decoder.decode
-        if getattr(current, "_barcello_guard", False):
-            opus_decode_guard_installed = True
-            return
-        _OPUS_GUARD_ORIGINAL_DECODE = current
-
-        def wrapped(self: Any, data: Any, *, fec: bool = False) -> bytes:
-            try:
-                return current(self, data, fec=fec)
-            except OpusError as exc:
-                if not _is_known_corrupted_opus_error(exc):
-                    logger.exception("Unexpected OpusError in global Decoder.decode")
-                    raise
-                _increment_opus_corrupted(exc)
-                payload_size = len(data) if isinstance(data, (bytes, bytearray)) else None
-                decode_ssrc = getattr(self, "ssrc", None) or getattr(self, "_ssrc", None)
-                _log_opus_decode_failure(
-                    "discord.opus.Decoder.decode",
-                    error=exc,
-                    payload_size=payload_size,
-                    ssrc=int(decode_ssrc) if decode_ssrc is not None else None,
-                )
-                frame_size = getattr(self, "_frame_size", 960)
-                channels = getattr(self, "_channels", 2)
-                return b"\x00" * (frame_size * channels * 2)
-
-        setattr(wrapped, "_barcello_guard", True)
-        setattr(wrapped, "_barcello_guard_original", current)
-        d_opus.Decoder.decode = wrapped
         opus_decode_guard_installed = True
-        logger.info("Installed GLOBAL OpusError guard on discord.opus.Decoder.decode")
+        logger.info("Skipping GLOBAL OpusError guard on discord.opus.Decoder.decode to avoid fake-silence PCM")
 
     try:
         from discord.ext.voice_recv import AudioSink as _AudioSink  # type: ignore
@@ -801,7 +790,7 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal processed_chunks, dropped_chunks, stt_enqueued_chunks, stt_empty_chunks
         nonlocal opus_corrupted_count, opus_last_summary_ts, opus_payload_size_min, opus_payload_size_max, opus_payload_size_total, opus_payload_size_count
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count, total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent, stt_success_count
-        nonlocal stt_hallucinated_chunks, stt_rejected_boilerplate, chunks_dropped_low_speech, chunks_dropped_low_rms, chunks_sent_to_stt, chunks_saved_to_db
+        nonlocal stt_hallucinated_chunks, stt_rejected_boilerplate, chunks_dropped_low_speech, chunks_dropped_low_rms, chunks_dropped_no_speech_after_vad, chunks_sent_to_stt, chunks_saved_to_db
         nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
         existing_session = await database.get_active_voice_session(str(guild_id), str(voice_channel_id))
         if existing_session is not None:
@@ -842,6 +831,7 @@ def setup(registry: ServiceRegistry) -> None:
             stt_rejected_boilerplate = 0
             chunks_dropped_low_speech = 0
             chunks_dropped_low_rms = 0
+            chunks_dropped_no_speech_after_vad = 0
             chunks_sent_to_stt = 0
             chunks_saved_to_db = 0
             consecutive_discarded_chunks = 0
@@ -874,6 +864,7 @@ def setup(registry: ServiceRegistry) -> None:
         stt_rejected_boilerplate = 0
         chunks_dropped_low_speech = 0
         chunks_dropped_low_rms = 0
+        chunks_dropped_no_speech_after_vad = 0
         chunks_sent_to_stt = 0
         chunks_saved_to_db = 0
         consecutive_discarded_chunks = 0
@@ -966,11 +957,12 @@ def setup(registry: ServiceRegistry) -> None:
             chunks_dropped_high_corruption=total_chunks_discarded_high_corruption,
             chunks_dropped_low_speech=chunks_dropped_low_speech,
             chunks_dropped_low_rms=chunks_dropped_low_rms,
+            chunks_dropped_no_speech_after_vad=chunks_dropped_no_speech_after_vad,
             opus_corrupted_total=opus_corrupted_count,
             avg_corruption_ratio=_safe_average(chunk_corruption_ratio_total, chunk_corruption_ratio_count),
         )
         logger.info(
-            "Voice ingest session stt metrics voice_session_id=%s chunks_processed=%s chunks_dropped=%s chunks_enqueued=%s chunks_sent_to_stt=%s chunks_saved_to_db=%s stt_success_count=%s stt_empty_count=%s stt_hallucinated_chunks=%s stt_rejected_boilerplate=%s chunks_dropped_high_corruption=%s chunks_dropped_low_speech=%s chunks_dropped_low_rms=%s opus_corrupted_total=%s avg_corruption_ratio=%.3f",
+            "Voice ingest session stt metrics voice_session_id=%s chunks_processed=%s chunks_dropped=%s chunks_enqueued=%s chunks_sent_to_stt=%s chunks_saved_to_db=%s stt_success_count=%s stt_empty_count=%s stt_hallucinated_chunks=%s stt_rejected_boilerplate=%s chunks_dropped_high_corruption=%s chunks_dropped_low_speech=%s chunks_dropped_low_rms=%s chunks_dropped_no_speech_after_vad=%s opus_corrupted_total=%s avg_corruption_ratio=%.3f",
             active_session_id,
             summary["chunks_processed"],
             summary["chunks_dropped"],
@@ -984,6 +976,7 @@ def setup(registry: ServiceRegistry) -> None:
             summary["chunks_dropped_high_corruption"],
             summary["chunks_dropped_low_speech"],
             summary["chunks_dropped_low_rms"],
+            summary["chunks_dropped_no_speech_after_vad"],
             summary["opus_corrupted_total"],
             summary["avg_corruption_ratio"],
         )
@@ -1046,7 +1039,6 @@ def setup(registry: ServiceRegistry) -> None:
             from discord.ext import voice_recv  # type: ignore
 
             _install_opus_guard()
-            _install_discord_opus_decode_guard()
             connecting_guilds.add(guild.id)
             try:
                 logger.info("Voice ingest connect start guild=%s channel=%s", guild.id, channel.id)
@@ -1152,7 +1144,7 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count
         nonlocal total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent
         nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
-        nonlocal chunks_dropped_low_speech, chunks_dropped_low_rms
+        nonlocal chunks_dropped_low_speech, chunks_dropped_low_rms, chunks_dropped_no_speech_after_vad
         try:
             if active_session_id is None or active_session_started is None:
                 return
@@ -1298,6 +1290,12 @@ def setup(registry: ServiceRegistry) -> None:
                     chunks_dropped_low_speech += 1
                 elif drop_reason == "low_rms":
                     chunks_dropped_low_rms += 1
+                if drop_reason == "high_corruption":
+                    logger.info("Voice ingest chunk drop reason=high_corruption job_status=%s user_id=%s", "discarded", user.id)
+                elif drop_reason in {"low_speech", "likely_noise_only"}:
+                    logger.info("Voice ingest chunk drop reason=low_speech job_status=%s user_id=%s", "discarded", user.id)
+                elif drop_reason == "low_rms":
+                    logger.info("Voice ingest chunk drop reason=low_rms job_status=%s user_id=%s", "discarded", user.id)
                 if corruption_ratio >= CRITICAL_CORRUPTION_RATIO:
                     logger.warning(
                         "Voice ingest high corruption ratio user_id=%s frames_total=%s frames_corrupted=%s ratio=%.2f",
@@ -1327,6 +1325,7 @@ def setup(registry: ServiceRegistry) -> None:
                 total_frames=chunk_stats.total_frames,
                 corrupted_frames=chunk_stats.corrupted_frames,
                 silent_frames=chunk_stats.silent_frames,
+                non_silent_frames=chunk_stats.non_silent_frames,
                 first_frame_ts=chunk_stats.first_frame_ts,
                 last_frame_ts=chunk_stats.last_frame_ts,
                 chunk_duration_sec=chunk_duration_sec,
@@ -1417,7 +1416,7 @@ def setup(registry: ServiceRegistry) -> None:
             chunks_saved_to_db += 1
 
     async def _worker() -> None:
-        nonlocal breaker_failures, breaker_until, stt_empty_chunks, stt_success_count, stt_hallucinated_chunks, stt_rejected_boilerplate, chunks_saved_to_db
+        nonlocal breaker_failures, breaker_until, stt_empty_chunks, stt_success_count, stt_hallucinated_chunks, stt_rejected_boilerplate, chunks_saved_to_db, chunks_dropped_no_speech_after_vad
         logger.info("Voice ingest worker started")
         semaphore = asyncio.Semaphore(int(os.getenv("VOICE_INGEST_MAX_CONCURRENT_STT", "1")))
         timeout_sec = int(os.getenv("VOICE_INGEST_STT_TIMEOUT_SEC", "60"))
@@ -1458,16 +1457,40 @@ def setup(registry: ServiceRegistry) -> None:
                     transcript = await asyncio.wait_for(stt_local.transcribe(wav_path), timeout=timeout_sec)
                     logger.info("Voice ingest STT done job_id=%s chars=%s", job.job_id, len(transcript.text))
                 text = transcript.text.strip()
-                if len(text) < min_chars:
+                text_len = len(text)
+                corruption_ratio = _chunk_corruption_ratio(job.total_frames, job.corrupted_frames)
+                if _should_drop_no_speech_after_vad(
+                    text_len=text_len,
+                    min_chars=min_chars,
+                    duration_sec=duration or job.chunk_duration_sec,
+                    total_frames=job.total_frames,
+                    non_silent_frames=job.non_silent_frames,
+                    corruption_ratio=corruption_ratio,
+                    max_corruption_ratio=configured_max_corruption_ratio,
+                ):
+                    chunks_dropped_no_speech_after_vad += 1
+                    _safe_increment("stt_empty_chunks", lambda: _set_worker_counter("stt_empty_chunks"))
+                    logger.info(
+                        "Voice ingest STT dropped job_id=%s reason=no_speech_after_vad chars=%s duration=%.2fs frames_total=%s frames_non_silent=%s frames_corrupted=%s corruption_ratio=%.2f",
+                        job.job_id,
+                        text_len,
+                        duration or job.chunk_duration_sec,
+                        job.total_frames,
+                        job.non_silent_frames,
+                        job.corrupted_frames,
+                        corruption_ratio,
+                    )
+                    continue
+                if text_len < min_chars:
                     _safe_increment("stt_empty_chunks", lambda: _set_worker_counter("stt_empty_chunks"))
                     logger.info(
                         "Voice ingest STT empty/short job_id=%s chars=%s duration=%.2fs frames_total=%s frames_corrupted=%s corruption_ratio=%.2f",
                         job.job_id,
-                        len(text),
+                        text_len,
                         job.chunk_duration_sec,
                         job.total_frames,
                         job.corrupted_frames,
-                        _chunk_corruption_ratio(job.total_frames, job.corrupted_frames),
+                        corruption_ratio,
                     )
                     continue
                 normalized_text = _normalize_text(text)
@@ -1480,7 +1503,7 @@ def setup(registry: ServiceRegistry) -> None:
                         _safe_increment("stt_hallucinated_chunks", lambda: _set_worker_counter("stt_hallucinated_chunks"))
                         _safe_increment("stt_rejected_boilerplate", lambda: _set_worker_counter("stt_rejected_boilerplate"))
                         logger.info(
-                            "Voice ingest STT rejected as known boilerplate job_id=%s user_id=%s reason=boilerplate text=%r",
+                            "Voice ingest STT rejected job_id=%s user_id=%s reason=boilerplate_hallucination text=%r",
                             job.job_id,
                             job.user_id,
                             text,

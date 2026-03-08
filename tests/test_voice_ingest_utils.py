@@ -135,9 +135,7 @@ def test_install_opus_decode_guard_swallows_repeated_invalid_argument(monkeypatc
     packet = object()
 
     for _ in range(10):
-        returned_packet, decoded = decoder._decode_packet(packet)
-        assert returned_packet is packet
-        assert decoded == b""
+        assert decoder._decode_packet(packet) is None
 
     assert voice_ingest._OPUS_GUARD_CORRUPTED_COUNT == 10
 
@@ -258,6 +256,7 @@ def test_session_summary_is_coherent() -> None:
         chunks_dropped_high_corruption=2,
         chunks_dropped_low_speech=1,
         chunks_dropped_low_rms=0,
+        chunks_dropped_no_speech_after_vad=0,
         opus_corrupted_total=9,
         avg_corruption_ratio=0.5,
     )
@@ -267,3 +266,30 @@ def test_session_summary_is_coherent() -> None:
 
 def test_safe_increment_does_not_raise() -> None:
     voice_ingest._safe_increment("bad_metric", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+
+
+def test_should_drop_no_speech_after_vad_gate() -> None:
+    assert (
+        voice_ingest._should_drop_no_speech_after_vad(
+            text_len=0,
+            min_chars=3,
+            duration_sec=1.5,
+            total_frames=120,
+            non_silent_frames=40,
+            corruption_ratio=0.1,
+            max_corruption_ratio=0.45,
+        )
+        is True
+    )
+    assert (
+        voice_ingest._should_drop_no_speech_after_vad(
+            text_len=5,
+            min_chars=3,
+            duration_sec=1.5,
+            total_frames=120,
+            non_silent_frames=40,
+            corruption_ratio=0.1,
+            max_corruption_ratio=0.45,
+        )
+        is False
+    )

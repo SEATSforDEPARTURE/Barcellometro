@@ -140,6 +140,7 @@ def _bootstrap_controller(registry: ServiceRegistry, bot: _FakeBot) -> Any:
 
 def test_join_does_not_listen_when_client_never_ready(monkeypatch: Any) -> None:
     _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
     monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
     monkeypatch.setattr(voice_ingest.importlib.util, "find_spec", lambda name: object() if name == "discord.ext.voice_recv" else None)
 
@@ -162,6 +163,7 @@ def test_join_does_not_listen_when_client_never_ready(monkeypatch: Any) -> None:
 
 def test_join_cleanup_when_listen_not_connected_exception(monkeypatch: Any) -> None:
     _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
     monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
     monkeypatch.setattr(voice_ingest.importlib.util, "find_spec", lambda name: object() if name == "discord.ext.voice_recv" else None)
 
