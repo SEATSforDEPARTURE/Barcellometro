@@ -243,7 +243,7 @@ def test_runtime_introspection_and_hook_installation_finds_multiple_methods() ->
 
     hooks = adapter._vendor.install_decode_guards(on_decode_error=lambda *_a: None)
 
-    assert hooks == 4
+    assert hooks == 2
 
 
 def test_do_run_is_fallback_only_when_packet_level_hooks_exist() -> None:
@@ -254,9 +254,9 @@ def test_do_run_is_fallback_only_when_packet_level_hooks_exist() -> None:
 
     patched = adapter._vendor._patched_sources
     assert "PacketRouter._do_run" in patched
-    assert "PacketDecoder.pop_data" in patched
-    assert "PacketDecoder._process_packet" in patched
     assert "PacketDecoder._decode_packet" in patched
+    assert "PacketDecoder.pop_data" not in patched
+    assert "PacketDecoder._process_packet" not in patched
     assert "Decoder.decode" not in patched
 
 
@@ -412,7 +412,7 @@ def test_decode_context_detects_rtp_like_payload_at_decoder_boundary() -> None:
 
     # 0x80 starts RTP version-2 header in the first two bits.
     payload = bytes.fromhex("807800010000000100000002") + b"payload"
-    context = adapter._vendor._extract_decode_error_context(source="Decoder.decode", args=(object(), payload), kwargs={})
+    context = adapter._vendor._extract_decode_error_context(source="Decoder.decode", args=(object(), payload), kwargs={}, include_payload_diagnostics=True)
 
     assert context.packet_origin == "decoder.decode.payload"
     assert context.payload_size == len(payload)
@@ -556,7 +556,7 @@ def test_rtp_payload_is_detected_upstream_at_packet_decoder_stage() -> None:
     adapter = VoiceReceiveAdapter()
 
     payload = bytes.fromhex("807812340000000100000002") + b"abc"
-    context = adapter._vendor._extract_decode_error_context(source="PacketDecoder._process_packet", args=(object(), payload), kwargs={})
+    context = adapter._vendor._extract_decode_error_context(source="PacketDecoder._process_packet", args=(object(), payload), kwargs={}, include_payload_diagnostics=True)
 
     assert context.packet_origin == "packet_decoder._process_packet"
     assert context.payload_looks_like_rtp is True
@@ -588,6 +588,23 @@ def test_decode_context_propagates_nested_session_guild_channel() -> None:
     assert context.ssrc == 30
     assert context.user_id == 40
 
+
+
+
+def test_decode_error_context_includes_event_id_and_root_cause() -> None:
+    _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    context = adapter._vendor._extract_decode_error_context(
+        source="PacketDecoder._decode_packet",
+        args=(object(), b"abc"),
+        kwargs={},
+        event_id="evt-1",
+        root_cause_source="PacketDecoder._decode_packet",
+    )
+
+    assert context.event_id == "evt-1"
+    assert context.root_cause_source == "PacketDecoder._decode_packet"
 
 def test_propagated_single_opus_error_is_counted_once() -> None:
     FakeChannel, _PacketRouter, PacketDecoder, _Decoder = _install_fake_voice_recv(router_exc=DummyOpusError("corrupted stream"))
