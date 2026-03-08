@@ -674,35 +674,136 @@ def setup(registry: ServiceRegistry) -> None:
         try:
             from discord.opus import OpusError
             from discord.ext.voice_recv import opus as vr_opus  # type: ignore
+            from discord.ext.voice_recv import router as vr_router  # type: ignore
         except Exception:
             logger.debug("voice_recv opus module not available; skipping Opus guard")
             return
+
+        def _extract_decode_context(decoder_obj: Any, *args: Any, **kwargs: Any) -> tuple[Optional[int], Optional[int], Optional[int]]:
+            packet = args[0] if args else kwargs.get("packet")
+            if packet is None:
+                packet = getattr(decoder_obj, "_packet", None)
+            if packet is None:
+                packet = getattr(decoder_obj, "packet", None)
+            if packet is None:
+                packet = getattr(decoder_obj, "_current_packet", None)
+
+            payload = getattr(packet, "decrypted_data", None)
+            if payload is None:
+                payload = getattr(packet, "data", None)
+            payload_size = len(payload) if isinstance(payload, (bytes, bytearray)) else None
+
+            ssrc = getattr(packet, "ssrc", None)
+            if ssrc is None:
+                ssrc = getattr(decoder_obj, "ssrc", None)
+
+            user_obj = getattr(packet, "member", None)
+            if user_obj is None:
+                user_obj = getattr(packet, "user", None)
+            user_id = getattr(user_obj, "id", None)
+            return payload_size, user_id, ssrc
+
+        def _install_decoder_method_guard(method_name: str) -> bool:
+            decoder = getattr(vr_opus, "OpusDecoder", None)
+            if decoder is None:
+                logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.opus class=OpusDecoder missing")
+                return False
+            if not hasattr(decoder, method_name):
+                logger.warning(
+                    "Unable to install OpusError guard: module=discord.ext.voice_recv.opus class=OpusDecoder method=%s missing",
+                    method_name,
+                )
+                return False
+
+            original = getattr(decoder, method_name)
+            if getattr(original, "_barcello_guard", False):
+                logger.info("OpusError guard already installed on voice_recv.OpusDecoder.%s", method_name)
+                return True
+
+            def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+                try:
+                    return original(self, *args, **kwargs)
+                except OpusError as exc:
+                    if not _is_known_corrupted_opus_error(exc):
+                        logger.exception("Non-recoverable OpusError in voice_recv.OpusDecoder.%s", method_name)
+                        raise
+                    _increment_opus_corrupted(exc)
+                    payload_size, user_id, ssrc = _extract_decode_context(self, *args, **kwargs)
+                    _log_opus_decode_failure(
+                        f"voice_recv.OpusDecoder.{method_name}",
+                        error=exc,
+                        payload_size=payload_size,
+                        user_id=user_id,
+                        ssrc=ssrc,
+                    )
+                    return None
+
+            setattr(wrapped, "_barcello_guard", True)
+            setattr(decoder, method_name, wrapped)
+            assigned = getattr(decoder, method_name)
+            if assigned is wrapped:
+                logger.info(
+                    "Installed OpusError guard on voice_recv.OpusDecoder.%s (module=discord.ext.voice_recv.opus class=OpusDecoder method=%s)",
+                    method_name,
+                    method_name,
+                )
+                return True
+            logger.warning(
+                "Failed to verify OpusError guard assignment on voice_recv.OpusDecoder.%s",
+                method_name,
+            )
+            return False
+
+        def _install_router_guard() -> bool:
+            router = getattr(vr_router, "PacketRouter", None)
+            if router is None:
+                logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.router class=PacketRouter missing")
+                return False
+            if not hasattr(router, "_do_run"):
+                logger.warning(
+                    "Unable to install OpusError guard: module=discord.ext.voice_recv.router class=PacketRouter method=_do_run missing"
+                )
+                return False
+
+            original = getattr(router, "_do_run")
+            if getattr(original, "_barcello_guard", False):
+                logger.info("OpusError guard already installed on voice_recv.PacketRouter._do_run")
+                return True
+
+            def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+                try:
+                    return original(self, *args, **kwargs)
+                except OpusError as exc:
+                    if not _is_known_corrupted_opus_error(exc):
+                        logger.exception("Non-recoverable OpusError in voice_recv.PacketRouter._do_run")
+                        raise
+                    _increment_opus_corrupted(exc)
+                    _log_opus_decode_failure("voice_recv.PacketRouter._do_run", error=exc)
+                    return None
+
+            setattr(wrapped, "_barcello_guard", True)
+            setattr(router, "_do_run", wrapped)
+            assigned = getattr(router, "_do_run")
+            if assigned is wrapped:
+                logger.info(
+                    "Installed OpusError guard on voice_recv.PacketRouter._do_run (module=discord.ext.voice_recv.router class=PacketRouter method=_do_run)"
+                )
+                return True
+            logger.warning("Failed to verify OpusError guard assignment on voice_recv.PacketRouter._do_run")
+            return False
+
         decoder = getattr(vr_opus, "OpusDecoder", None)
-        if decoder is None or not hasattr(decoder, "_decode_packet"):
-            logger.debug("voice_recv OpusDecoder missing _decode_packet; skipping Opus guard")
-            return
-        original = decoder._decode_packet
-        if getattr(original, "_barcello_guard", False):
-            opus_guard_installed = True
+        if decoder is None:
+            logger.debug("voice_recv OpusDecoder missing; skipping Opus guard")
             return
 
-        def wrapped(self: Any, packet: Any) -> Any:
-            try:
-                return original(self, packet)
-            except OpusError as exc:
-                if not _is_known_corrupted_opus_error(exc):
-                    logger.exception("Unexpected OpusError in voice_recv decoder")
-                    raise
-                _increment_opus_corrupted(exc)
-                packet_data = getattr(packet, "decrypted_data", None)
-                packet_len = len(packet_data) if isinstance(packet_data, (bytes, bytearray)) else None
-                _log_opus_decode_failure("voice_recv.OpusDecoder._decode_packet", error=exc, payload_size=packet_len)
-                return None
-
-        setattr(wrapped, "_barcello_guard", True)
-        decoder._decode_packet = wrapped
-        opus_guard_installed = True
-        logger.info("Installed OpusError guard for voice_recv decoder")
+        installed = False
+        installed = _install_decoder_method_guard("pop_data") or installed
+        installed = _install_decoder_method_guard("_decode_packet") or installed
+        installed = _install_router_guard() or installed
+        opus_guard_installed = installed
+        if not installed:
+            logger.warning("Unable to install any OpusError guard for voice_recv receive path")
 
     def _install_discord_opus_decode_guard() -> None:
         nonlocal opus_decode_guard_installed
