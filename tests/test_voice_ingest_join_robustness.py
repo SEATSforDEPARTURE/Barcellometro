@@ -14,8 +14,14 @@ from app.plugins import voice_ingest
 
 
 class _DummyTask:
+    def __init__(self) -> None:
+        self._done = False
+
     def add_done_callback(self, _cb: Any) -> None:
         return
+
+    def done(self) -> bool:
+        return self._done
 
 
 class _FakeBot:
@@ -39,6 +45,7 @@ class _FakeDatabase:
         self.started = 0
         self.ended = 0
         self.settings: dict[str, str] = {}
+        self.cleanup_calls = 0
 
     async def get_setting(self, key: str) -> Any:
         return self.settings.get(key)
@@ -53,6 +60,7 @@ class _FakeDatabase:
         self.ended += 1
 
     async def close_open_voice_sessions(self, **_kwargs: Any) -> int:
+        self.cleanup_calls += 1
         return 0
 
     async def fetchone(self, *_args: Any, **_kwargs: Any) -> dict[str, int]:
@@ -506,3 +514,27 @@ def test_runtime_block_does_not_trigger_reconnect_recovery(monkeypatch: Any, cap
         asyncio.run(controller.join(channel))
 
     assert "decode storm recovery" not in caplog.text.lower()
+
+
+def test_on_ready_is_idempotent_and_skips_duplicate_startup(monkeypatch: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+
+    created_tasks: list[_DummyTask] = []
+
+    def _fake_create_task(_coro: Any) -> _DummyTask:
+        task = _DummyTask()
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", _fake_create_task)
+
+    registry, bot, db = _build_registry()
+    voice_ingest.setup(registry)
+    on_ready = bot.get_listener("on_ready")
+
+    asyncio.run(on_ready())
+    asyncio.run(on_ready())
+
+    assert db.cleanup_calls == 1
+    assert len(created_tasks) == 2

@@ -170,6 +170,33 @@ class VoiceReceiveAdapter:
         report = self.get_voice_stack_report()
         return report.available and report.compatible
 
+    def sink_wants_opus(self) -> Optional[bool]:
+        sink = self._sink
+        if sink is None:
+            return None
+        wants_opus = getattr(sink, "wants_opus", None)
+        if not callable(wants_opus):
+            return None
+        try:
+            return bool(wants_opus())
+        except Exception:
+            return None
+
+    def sink_debug_info(self) -> dict[str, Any]:
+        sink = self._sink
+        info: dict[str, Any] = {
+            "attached_client_id": self._attached_client_id,
+            "sink_present": sink is not None,
+            "sink_type": type(sink).__name__ if sink is not None else None,
+            "sink_wants_opus": self.sink_wants_opus(),
+            "vendor_hooks": self._vendor._installed_hooks,
+            "vendor_patched_sources": list(self._vendor._patched_sources),
+        }
+        inner = getattr(sink, "_inner", None) if sink is not None else None
+        if inner is not None:
+            info["inner_sink_type"] = type(inner).__name__
+        return info
+
     async def connect_and_listen(
         self,
         *,
@@ -194,7 +221,12 @@ class VoiceReceiveAdapter:
         self._sink = sink
         self._attached_client_id = id(voice_client)
 
-        logger.info("Voice receive adapter connected guild=%s channel=%s", channel.guild.id, channel.id)
+        logger.info(
+            "Voice receive adapter connected guild=%s channel=%s sink=%s",
+            channel.guild.id,
+            channel.id,
+            self.sink_debug_info(),
+        )
         return voice_client
 
     def attach_listener(
@@ -220,6 +252,11 @@ class VoiceReceiveAdapter:
         self._voice_client = voice_client
         self._sink = sink
         self._attached_client_id = id(voice_client)
+        logger.info(
+            "Voice receive adapter listener attached client_id=%s sink=%s",
+            self._attached_client_id,
+            self.sink_debug_info(),
+        )
         return True
 
     async def disconnect(self) -> None:
