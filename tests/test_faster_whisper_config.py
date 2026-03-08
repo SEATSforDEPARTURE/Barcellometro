@@ -61,3 +61,44 @@ def test_build_kwargs_adds_conservative_options_when_supported(monkeypatch) -> N
 
     supported = set(inspect.signature(model.transcribe).parameters)
     assert set(kwargs).issubset(supported)
+
+
+def test_transcribe_falls_back_when_kwargs_not_supported_runtime() -> None:
+    class RuntimeRejectingModel:
+        def __init__(self, model: str, compute_type: str) -> None:
+            self.model = model
+            self.compute_type = compute_type
+            self.calls: list[dict[str, object]] = []
+
+        def transcribe(self, audio_path, beam_size=1, language=None, condition_on_previous_text=False):
+            kwargs = {
+                "beam_size": beam_size,
+                "language": language,
+                "condition_on_previous_text": condition_on_previous_text,
+            }
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise TypeError("unexpected keyword argument condition_on_previous_text")
+            return [types.SimpleNamespace(text="ciao")], types.SimpleNamespace(language="it")
+
+    fake_module = types.SimpleNamespace(WhisperModel=RuntimeRejectingModel)
+    sys.modules["faster_whisper"] = fake_module
+    mod_name = "app.services.stt.faster_whisper"
+    if mod_name in sys.modules:
+        del sys.modules[mod_name]
+    module = importlib.import_module(mod_name)
+
+    service = module.FasterWhisperSttService(_DummyDB())
+    config = module._SttConfig(model="small", compute_type="int8", beam_size=1, language_hint="auto")
+    model = RuntimeRejectingModel("small", "int8")
+
+    async def _run():
+        service._model = model
+        service._config = config
+        return await service.transcribe("/tmp/fake.wav")
+
+    import asyncio
+
+    result = asyncio.run(_run())
+    assert result.text == "ciao"
+    assert len(model.calls) == 2
