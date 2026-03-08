@@ -240,3 +240,24 @@ def test_should_drop_no_speech_after_vad_gate() -> None:
         )
         is False
     )
+
+
+def test_pcm_duration_assumes_mono_48k_s16le() -> None:
+    pcm_bytes = 934560
+    duration = voice_ingest._pcm_duration_seconds(pcm_bytes)
+    assert voice_ingest.PCM_SAMPLE_RATE == 48000
+    assert voice_ingest.PCM_CHANNELS == 1
+    assert voice_ingest.PCM_SAMPLE_WIDTH_BYTES == 2
+    assert abs(duration - 9.735) < 0.01
+
+
+def test_duration_mismatch_warning_detects_stereo_misread_pattern() -> None:
+    warning = voice_ingest._duration_mismatch_warning(chunk_duration=10.02, raw_duration=9.73, wav_duration=4.87)
+    assert warning is not None
+    assert "chunk=10.02s" in warning
+    assert "wav=4.87s" in warning
+
+
+def test_duration_mismatch_warning_not_emitted_for_coherent_durations() -> None:
+    warning = voice_ingest._duration_mismatch_warning(chunk_duration=10.02, raw_duration=9.73, wav_duration=9.68)
+    assert warning is None

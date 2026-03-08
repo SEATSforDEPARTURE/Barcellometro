@@ -32,13 +32,13 @@ class VendorVoiceReceive:
     )
     _OPUS_ERROR_TOKENS = ("corrupted stream", "invalid argument", "buffer too small", "decode failed")
     _CRYPTO_ERROR_TOKENS = ("cryptoerror", "decoding packet data", "decrypt")
-    _DECODE_HOOK_CANDIDATES = (
-        ("discord.ext.voice_recv.router", "PacketDecoder", ("decode",)),
-        ("discord.ext.voice_recv.router", "PacketRouter", ("_decode_packet", "decode")),
-        ("discord.ext.voice_recv.reader", "AudioReader", ("_decode_packet", "decode")),
-        ("discord.ext.voice_recv.opus", "OpusDecoder", ("decode",)),
-        ("discord.ext.voice_recv.router", "PacketDecryptor", ("decrypt", "decode")),
+    _DECODE_HOOK_POINTS = (
+        ("discord.ext.voice_recv.opus", "PacketDecoder", "pop_data"),
+        ("discord.ext.voice_recv.opus", "PacketDecoder", "_process_packet"),
+        ("discord.ext.voice_recv.opus", "PacketDecoder", "_decode_packet"),
+        ("discord.ext.voice_recv.opus", "Decoder", "decode"),
     )
+    _FALLBACK_HOOK_POINT = ("discord.ext.voice_recv.router", "PacketRouter", "_do_run")
 
     def __init__(self) -> None:
         self.counters = DecodeErrorCounters()
@@ -90,9 +90,9 @@ class VendorVoiceReceive:
             self.counters.invalid_argument_count,
         )
 
-    def _discover_runtime_hook_points(self) -> list[tuple[str, str, str]]:
+    def _discover_runtime_hook_points(self) -> tuple[list[tuple[str, str, str]], dict[str, str]]:
         if self._introspected:
-            return []
+            return [], {}
         discovered: dict[tuple[str, str], set[str]] = {}
         for module_name in self._RUNTIME_MODULES:
             try:
@@ -116,14 +116,19 @@ class VendorVoiceReceive:
                 )
 
         resolved: list[tuple[str, str, str]] = []
-        for module_name, class_name, method_candidates in self._DECODE_HOOK_CANDIDATES:
+        unresolved: dict[str, str] = {}
+        for module_name, class_name, method_name in self._DECODE_HOOK_POINTS:
             methods = discovered.get((module_name, class_name), set())
-            for method_name in method_candidates:
-                if method_name in methods:
-                    resolved.append((module_name, class_name, method_name))
-                    break
+            target = f"{module_name}.{class_name}.{method_name}"
+            if method_name in methods:
+                resolved.append((module_name, class_name, method_name))
+                continue
+            if not methods:
+                unresolved[target] = "class_not_found_or_no_callable_methods"
+            else:
+                unresolved[target] = f"method_not_found available={sorted(methods)}"
         self._introspected = True
-        return resolved
+        return resolved, unresolved
 
     def _guard(self, *, on_decode_error: DecodeErrorCallback, source: str, return_value: Any = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def _decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -152,39 +157,58 @@ class VendorVoiceReceive:
 
         hooks = 0
         self._patched_sources = []
-        for module_name, class_name, method_name in self._discover_runtime_hook_points():
+        resolved, unresolved = self._discover_runtime_hook_points()
+        for module_name, class_name, method_name in resolved:
             try:
                 module = importlib.import_module(module_name)
             except Exception:
+                unresolved[f"{module_name}.{class_name}.{method_name}"] = "module_import_failed"
                 continue
             cls = getattr(module, class_name, None)
             method = getattr(cls, method_name, None) if cls is not None else None
             if cls is None or method is None:
+                unresolved[f"{module_name}.{class_name}.{method_name}"] = "class_or_method_missing_at_patch_time"
+                continue
+            if not callable(method):
+                unresolved[f"{module_name}.{class_name}.{method_name}"] = "method_not_callable"
                 continue
             wrapped = self._guard(on_decode_error=on_decode_error, source=f"{class_name}.{method_name}")(method)
             setattr(cls, method_name, wrapped)
             hooks += 1
             self._patched_sources.append(f"{class_name}.{method_name}")
+            logger.info(
+                "Installed decode guard target=%s.%s.%s",
+                module_name,
+                class_name,
+                method_name,
+            )
 
         # last-resort safety net: still avoid thread death if decode error bubbles up.
         fallback_installed = False
         try:
-            router_module = importlib.import_module("discord.ext.voice_recv.router")
-            packet_router = getattr(router_module, "PacketRouter", None)
-            do_run = getattr(packet_router, "_do_run", None) if packet_router is not None else None
+            module_name, class_name, method_name = self._FALLBACK_HOOK_POINT
+            router_module = importlib.import_module(module_name)
+            packet_router = getattr(router_module, class_name, None)
+            do_run = getattr(packet_router, method_name, None) if packet_router is not None else None
             if do_run is not None:
                 wrapped = self._guard(on_decode_error=on_decode_error, source="PacketRouter._do_run", return_value=None)(do_run)
-                setattr(packet_router, "_do_run", wrapped)
+                setattr(packet_router, method_name, wrapped)
                 hooks += 1
                 fallback_installed = True
                 self._patched_sources.append("PacketRouter._do_run")
+                logger.info("Installed decode guard target=%s.%s.%s", module_name, class_name, method_name)
+            else:
+                unresolved[f"{module_name}.{class_name}.{method_name}"] = "class_or_method_missing_at_patch_time"
         except Exception:
-            pass
+            unresolved["discord.ext.voice_recv.router.PacketRouter._do_run"] = "fallback_install_failed"
 
         self._installed_hooks = hooks
         logger.info("Vendor voice receive decode guards installed hooks=%s patched=%s", hooks, self._patched_sources)
         if fallback_installed and hooks == 1:
-            logger.warning("Vendor voice receive decode guards using PacketRouter._do_run fallback only")
+            logger.warning(
+                "Vendor voice receive decode guards using PacketRouter._do_run fallback only unresolved=%s",
+                unresolved,
+            )
         return hooks
 
     def build_sink(
