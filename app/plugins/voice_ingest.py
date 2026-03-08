@@ -38,6 +38,8 @@ CRITICAL_CORRUPTION_RATIO = 0.70
 MIN_WAV_SECONDS = 0.6
 OPUS_WARNING_LOG_FIRST = 3
 OPUS_SUMMARY_LOG_INTERVAL_SEC = 30
+LIVE_OPUS_GUARD_RETRY_ATTEMPTS = 8
+LIVE_OPUS_GUARD_RETRY_INTERVAL_SEC = 0.25
 DEFAULT_MIN_SPEECH_RATIO = 0.20
 DEFAULT_MIN_AVG_RMS = 250.0
 DEFAULT_FRAME_SILENCE_RMS = 220.0
@@ -678,16 +680,17 @@ def setup(registry: ServiceRegistry) -> None:
             logger.warning("Unable to install OpusError guard: import failed module=discord.opus", exc_info=True)
             return
 
+        vr_opus = None
         try:
             vr_opus = importlib.import_module("discord.ext.voice_recv.opus")
         except Exception:
             logger.warning("Unable to install OpusError guard: import failed module=discord.ext.voice_recv.opus", exc_info=True)
-            return
+
+        vr_router = None
         try:
             vr_router = importlib.import_module("discord.ext.voice_recv.router")
         except Exception:
             logger.warning("Unable to install OpusError guard: import failed module=discord.ext.voice_recv.router", exc_info=True)
-            return
 
         def _module_file(module_obj: Any) -> str:
             return str(getattr(module_obj, "__file__", "unknown"))
@@ -702,21 +705,23 @@ def setup(registry: ServiceRegistry) -> None:
                 id(target_obj) if target_obj is not None else None,
             )
 
-        _log_runtime_target("OpusDecoder", "discord.ext.voice_recv.opus", vr_opus, getattr(vr_opus, "OpusDecoder", None))
-        _log_runtime_target("OpusDecoder.pop_data", "discord.ext.voice_recv.opus", vr_opus, getattr(getattr(vr_opus, "OpusDecoder", None), "pop_data", None))
-        _log_runtime_target(
-            "OpusDecoder._decode_packet",
-            "discord.ext.voice_recv.opus",
-            vr_opus,
-            getattr(getattr(vr_opus, "OpusDecoder", None), "_decode_packet", None),
-        )
-        _log_runtime_target("PacketRouter", "discord.ext.voice_recv.router", vr_router, getattr(vr_router, "PacketRouter", None))
-        _log_runtime_target(
-            "PacketRouter._do_run",
-            "discord.ext.voice_recv.router",
-            vr_router,
-            getattr(getattr(vr_router, "PacketRouter", None), "_do_run", None),
-        )
+        if vr_opus is not None:
+            _log_runtime_target("OpusDecoder", "discord.ext.voice_recv.opus", vr_opus, getattr(vr_opus, "OpusDecoder", None))
+            _log_runtime_target("OpusDecoder.pop_data", "discord.ext.voice_recv.opus", vr_opus, getattr(getattr(vr_opus, "OpusDecoder", None), "pop_data", None))
+            _log_runtime_target(
+                "OpusDecoder._decode_packet",
+                "discord.ext.voice_recv.opus",
+                vr_opus,
+                getattr(getattr(vr_opus, "OpusDecoder", None), "_decode_packet", None),
+            )
+        if vr_router is not None:
+            _log_runtime_target("PacketRouter", "discord.ext.voice_recv.router", vr_router, getattr(vr_router, "PacketRouter", None))
+            _log_runtime_target(
+                "PacketRouter._do_run",
+                "discord.ext.voice_recv.router",
+                vr_router,
+                getattr(getattr(vr_router, "PacketRouter", None), "_do_run", None),
+            )
 
         def _extract_decode_context(decoder_obj: Any, *args: Any, **kwargs: Any) -> tuple[Optional[int], Optional[int], Optional[int]]:
             packet = args[0] if args else kwargs.get("packet")
@@ -745,7 +750,7 @@ def setup(registry: ServiceRegistry) -> None:
         def _install_decoder_method_guard(method_name: str) -> bool:
             decoder = getattr(vr_opus, "OpusDecoder", None)
             if decoder is None:
-                logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.opus class=OpusDecoder missing")
+                logger.info("OpusDecoder not present in discord.ext.voice_recv.opus; skipping decoder guard")
                 return False
             if not hasattr(decoder, method_name):
                 logger.warning(
@@ -797,6 +802,9 @@ def setup(registry: ServiceRegistry) -> None:
             return False
 
         def _install_router_guard() -> bool:
+            if vr_router is None:
+                logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.router unavailable")
+                return False
             router = getattr(vr_router, "PacketRouter", None)
             if router is None:
                 logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.router class=PacketRouter missing")
@@ -838,25 +846,25 @@ def setup(registry: ServiceRegistry) -> None:
             logger.warning("Failed to verify OpusError guard assignment on voice_recv.PacketRouter._do_run")
             return False
 
-        decoder = getattr(vr_opus, "OpusDecoder", None)
-        if decoder is None:
-            logger.debug("voice_recv OpusDecoder missing; skipping Opus guard")
-            return
-
         installed = False
-        installed = _install_decoder_method_guard("pop_data") or installed
-        installed = _install_decoder_method_guard("_decode_packet") or installed
+        if vr_opus is None:
+            logger.warning("Unable to install OpusError guard: module=discord.ext.voice_recv.opus unavailable")
+        elif getattr(vr_opus, "OpusDecoder", None) is None:
+            logger.info("OpusDecoder not present in discord.ext.voice_recv.opus; skipping decoder guard")
+        else:
+            installed = _install_decoder_method_guard("pop_data") or installed
+            installed = _install_decoder_method_guard("_decode_packet") or installed
         installed = _install_router_guard() or installed
         opus_guard_installed = installed
         if not installed:
             logger.warning("Unable to install any OpusError guard for voice_recv receive path")
 
-    def _install_live_opus_guard(client: Any) -> None:
+    def _install_live_opus_guard(client: Any) -> int:
         try:
             from discord.opus import OpusError
         except Exception:
             logger.warning("Unable to install live OpusError guard: import failed module=discord.opus", exc_info=True)
-            return
+            return 0
 
         patched = 0
 
@@ -939,6 +947,22 @@ def setup(registry: ServiceRegistry) -> None:
 
         if patched == 0:
             logger.warning("Live OpusError guard fallback found no runtime objects to patch")
+        return patched
+
+    async def _install_live_opus_guard_with_retry(client: Any) -> None:
+        patched = _install_live_opus_guard(client)
+        if patched > 0:
+            return
+        for attempt in range(1, LIVE_OPUS_GUARD_RETRY_ATTEMPTS + 1):
+            await asyncio.sleep(LIVE_OPUS_GUARD_RETRY_INTERVAL_SEC)
+            patched = _install_live_opus_guard(client)
+            if patched > 0:
+                logger.info("Live OpusError guard fallback patched runtime objects on retry attempt=%s", attempt)
+                return
+        logger.warning(
+            "Live OpusError guard fallback exhausted retries without patching runtime objects attempts=%s",
+            LIVE_OPUS_GUARD_RETRY_ATTEMPTS,
+        )
 
     def _install_discord_opus_decode_guard() -> None:
         nonlocal opus_decode_guard_installed
@@ -1323,6 +1347,7 @@ def setup(registry: ServiceRegistry) -> None:
                     await _end_session()
                     raise
                 logger.info("Voice ingest listen attached guild=%s channel=%s", guild.id, channel.id)
+                await _install_live_opus_guard_with_retry(voice_client)
                 logger.info("Voice ingest connect done guild=%s channel=%s", guild.id, channel.id)
             except Exception as exc:
                 logger.exception(

@@ -98,7 +98,7 @@ class _FakeChannel:
         return self._voice_client
 
 
-def _install_fake_voice_recv() -> None:
+def _install_fake_voice_recv(*, include_decoder: bool = True) -> None:
     module = types.ModuleType("discord.ext.voice_recv")
     opus_module = types.ModuleType("discord.ext.voice_recv.opus")
     router_module = types.ModuleType("discord.ext.voice_recv.router")
@@ -131,7 +131,8 @@ def _install_fake_voice_recv() -> None:
     module.router = router_module
     module.__version__ = "test"
     module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv", loader=None)
-    opus_module.OpusDecoder = OpusDecoder
+    if include_decoder:
+        opus_module.OpusDecoder = OpusDecoder
     router_module.PacketRouter = PacketRouter
     opus_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.opus", loader=None)
     router_module.__spec__ = importlib.machinery.ModuleSpec("discord.ext.voice_recv.router", loader=None)
@@ -339,3 +340,93 @@ def test_live_guard_patches_runtime_objects(monkeypatch: Any, caplog: Any) -> No
     # no fake PCM fallback: corrupted frame is dropped as None
     assert client.receiver.decoder.pop_data() is None
     assert "Installed OpusError guard on live live._LiveDecoder.pop_data" in caplog.text
+
+
+def test_opus_guard_installs_router_when_opus_decoder_missing(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv(include_decoder=False)
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+    monkeypatch.setattr(voice_ingest.importlib.util, "find_spec", lambda name: object() if name == "discord.ext.voice_recv" else None)
+
+    class DummyOpusError(Exception):
+        pass
+
+    fake_discord_opus = types.ModuleType("discord.opus")
+    fake_discord_opus.OpusError = DummyOpusError
+    monkeypatch.setitem(sys.modules, "discord.opus", fake_discord_opus)
+
+    from discord.ext.voice_recv import router as vr_router  # type: ignore
+
+    def _broken_do_run(self: Any) -> None:
+        raise DummyOpusError("corrupted stream")
+
+    monkeypatch.setattr(vr_router.PacketRouter, "_do_run", _broken_do_run)
+
+    registry, bot, _db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    client = _FakeVoiceClient(connected=True)
+    guild = types.SimpleNamespace(id=78, voice_client=None)
+    channel = _FakeChannel(guild, 988, client)
+
+    with caplog.at_level("INFO"):
+        asyncio.run(controller.join(channel))
+
+    router = vr_router.PacketRouter()
+    assert router._do_run() is None
+    assert "OpusDecoder not present in discord.ext.voice_recv.opus; skipping decoder guard" in caplog.text
+    assert "Installed OpusError guard on voice_recv.PacketRouter._do_run module=discord.ext.voice_recv.router" in caplog.text
+    assert "Opus decode failure source=voice_recv.PacketRouter._do_run" in caplog.text
+
+
+def test_live_guard_retry_patches_runtime_objects_when_created_late(monkeypatch: Any, caplog: Any) -> None:
+    _install_fake_voice_recv()
+    monkeypatch.setenv("VOICE_INGEST_ENABLED", "true")
+    monkeypatch.setattr(voice_ingest.asyncio, "create_task", lambda _coro: _DummyTask())
+    monkeypatch.setattr(voice_ingest.importlib.util, "find_spec", lambda name: object() if name == "discord.ext.voice_recv" else None)
+    monkeypatch.setattr(voice_ingest, "LIVE_OPUS_GUARD_RETRY_ATTEMPTS", 3)
+    monkeypatch.setattr(voice_ingest, "LIVE_OPUS_GUARD_RETRY_INTERVAL_SEC", 0.0)
+
+    class DummyOpusError(Exception):
+        pass
+
+    fake_discord_opus = types.ModuleType("discord.opus")
+    fake_discord_opus.OpusError = DummyOpusError
+    monkeypatch.setitem(sys.modules, "discord.opus", fake_discord_opus)
+
+    class _LiveDecoder:
+        def pop_data(self) -> bytes:
+            raise DummyOpusError("corrupted stream")
+
+    class _RuntimeReceiver:
+        def __init__(self) -> None:
+            self.decoder = _LiveDecoder()
+
+    class _LateRuntimeVoiceClient(_FakeVoiceClient):
+        def __init__(self) -> None:
+            super().__init__(connected=True)
+            self.receiver = None
+
+    retry_counter = {"count": 0}
+    late_client = _LateRuntimeVoiceClient()
+
+    async def _fake_sleep(_delay: float) -> None:
+        retry_counter["count"] += 1
+        if retry_counter["count"] == 1:
+            late_client.receiver = _RuntimeReceiver()
+
+    monkeypatch.setattr(voice_ingest.asyncio, "sleep", _fake_sleep)
+
+    registry, bot, _db = _build_registry()
+    controller = _bootstrap_controller(registry, bot)
+
+    guild = types.SimpleNamespace(id=89, voice_client=None)
+    channel = _FakeChannel(guild, 901, late_client)
+
+    with caplog.at_level("INFO"):
+        asyncio.run(controller.join(channel))
+
+    assert late_client.receiver is not None
+    assert late_client.receiver.decoder.pop_data() is None
+    assert "Live OpusError guard fallback found no runtime objects to patch" in caplog.text
+    assert "Live OpusError guard fallback patched runtime objects on retry attempt=1" in caplog.text
