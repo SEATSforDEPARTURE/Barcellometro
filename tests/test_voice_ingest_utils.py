@@ -62,7 +62,7 @@ def test_evaluate_chunk_quality_discards_short_or_corrupted() -> None:
         max_corruption_ratio=0.45,
     )
     assert ok is False
-    assert reason.startswith("corruption_ratio>")
+    assert reason == "high_corruption"
 
 
 def test_evaluate_chunk_quality_accepts_valid_chunk() -> None:
@@ -188,7 +188,7 @@ def test_evaluate_chunk_quality_rejects_low_speech_or_noise_only() -> None:
         rms_max=520.0,
     )
     assert ok is False
-    assert reason in {"low_speech_ratio", "likely_noise_only"}
+    assert reason in {"low_speech", "likely_noise_only"}
 
 
 def test_repeated_text_guard_rejects_duplicate_burst() -> None:
@@ -237,3 +237,33 @@ def test_repeated_text_guard_rejects_duplicate_burst() -> None:
         )
         is True
     )
+
+
+def test_known_boilerplate_regex_blocks_variants() -> None:
+    assert voice_ingest._is_known_boilerplate_text("Sottotitoli -- creati, dalla comunita: Amara org") is True
+    assert voice_ingest._is_known_boilerplate_text("testo normale") is False
+
+
+def test_session_summary_is_coherent() -> None:
+    summary = voice_ingest._build_session_summary(
+        chunks_processed=10,
+        chunks_dropped=3,
+        chunks_enqueued=2,
+        chunks_sent_to_stt=5,
+        chunks_saved_to_db=7,
+        stt_success_count=1,
+        stt_empty_count=1,
+        stt_hallucinated_chunks=1,
+        stt_rejected_boilerplate=1,
+        chunks_dropped_high_corruption=2,
+        chunks_dropped_low_speech=1,
+        chunks_dropped_low_rms=0,
+        opus_corrupted_total=9,
+        avg_corruption_ratio=0.5,
+    )
+    assert summary["chunks_sent_to_stt"] == 2
+    assert summary["chunks_saved_to_db"] == 2
+
+
+def test_safe_increment_does_not_raise() -> None:
+    voice_ingest._safe_increment("bad_metric", lambda: (_ for _ in ()).throw(RuntimeError("boom")))

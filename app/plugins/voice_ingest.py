@@ -120,6 +120,13 @@ def _normalize_text(text: str) -> str:
     return " ".join(text.lower().strip().split())
 
 
+def _safe_increment(counter_name: str, increment: Callable[[], None]) -> None:
+    try:
+        increment()
+    except Exception:
+        logger.warning("Voice ingest metric update failed for %s", counter_name, exc_info=True)
+
+
 def _extract_pcm_bytes(payload: Any) -> Optional[bytes]:
     if isinstance(payload, (bytes, bytearray)):
         return bytes(payload)
@@ -233,11 +240,11 @@ def _evaluate_chunk_quality(
     if total_frames <= 0:
         return False, "no_frames"
     if _chunk_corruption_ratio(total_frames, corrupted_frames) > max_corruption_ratio:
-        return False, f"corruption_ratio>{max_corruption_ratio:.2f}"
+        return False, "high_corruption"
     speech_ratio = non_silent_frames / float(total_frames)
     spoken_seconds = duration_sec * speech_ratio
     if speech_ratio < min_speech_ratio or spoken_seconds < min_spoken_seconds:
-        return False, "low_speech_ratio"
+        return False, "low_speech"
     if avg_rms < min_avg_rms:
         return False, "low_rms"
     dynamic_range = max(0.0, rms_max - rms_min)
@@ -286,6 +293,17 @@ def _is_likely_hallucinated_text(text: str) -> tuple[bool, str]:
     return False, "ok"
 
 
+def _is_known_boilerplate_text(text: str) -> bool:
+    normalized = _normalize_text_for_match(text)
+    condensed = normalized.replace(" ", "")
+    for known in KNOWN_HALLUCINATION_TEXTS:
+        known_norm = _normalize_text_for_match(known)
+        known_condensed = known_norm.replace(" ", "")
+        if known_norm in normalized or known_condensed in condensed:
+            return True
+    return False
+
+
 def _should_reject_repeated_text(
     *,
     cache: dict[int, dict[str, list[float]]],
@@ -303,6 +321,43 @@ def _should_reject_repeated_text(
     seen = per_user.setdefault(normalized_text, [])
     seen.append(now_ts)
     return len(seen) > max_repeats
+
+
+def _build_session_summary(
+    *,
+    chunks_processed: int,
+    chunks_dropped: int,
+    chunks_enqueued: int,
+    chunks_sent_to_stt: int,
+    chunks_saved_to_db: int,
+    stt_success_count: int,
+    stt_empty_count: int,
+    stt_hallucinated_chunks: int,
+    stt_rejected_boilerplate: int,
+    chunks_dropped_high_corruption: int,
+    chunks_dropped_low_speech: int,
+    chunks_dropped_low_rms: int,
+    opus_corrupted_total: int,
+    avg_corruption_ratio: float,
+) -> dict[str, float | int]:
+    coherent_sent = min(max(0, chunks_sent_to_stt), max(0, chunks_enqueued))
+    coherent_saved = min(max(0, chunks_saved_to_db), coherent_sent)
+    return {
+        "chunks_processed": max(0, chunks_processed),
+        "chunks_dropped": max(0, chunks_dropped),
+        "chunks_enqueued": max(0, chunks_enqueued),
+        "chunks_sent_to_stt": coherent_sent,
+        "chunks_saved_to_db": coherent_saved,
+        "stt_success_count": max(0, stt_success_count),
+        "stt_empty_count": max(0, stt_empty_count),
+        "stt_hallucinated_chunks": max(0, stt_hallucinated_chunks),
+        "stt_rejected_boilerplate": max(0, stt_rejected_boilerplate),
+        "chunks_dropped_high_corruption": max(0, chunks_dropped_high_corruption),
+        "chunks_dropped_low_speech": max(0, chunks_dropped_low_speech),
+        "chunks_dropped_low_rms": max(0, chunks_dropped_low_rms),
+        "opus_corrupted_total": max(0, opus_corrupted_total),
+        "avg_corruption_ratio": max(0.0, avg_corruption_ratio),
+    }
 
 
 def _pcm_rms(data: bytes) -> float:
@@ -396,6 +451,12 @@ def setup(registry: ServiceRegistry) -> None:
     chunks_saved_to_db = 0
     consecutive_discarded_chunks = 0
     max_consecutive_discarded_chunks = 0
+    configured_max_corruption_ratio = _get_configured_max_corruption_ratio()
+    logger.info(
+        "Voice ingest quality config %s=%s",
+        VOICE_INGEST_MAX_CORRUPTION_RATIO_ENV,
+        configured_max_corruption_ratio,
+    )
 
     def _spec_available() -> bool:
         return importlib.util.find_spec("discord.ext.voice_recv") is not None
@@ -892,16 +953,39 @@ def setup(registry: ServiceRegistry) -> None:
             consecutive_discarded_chunks,
             max_consecutive_discarded_chunks,
         )
+        summary = _build_session_summary(
+            chunks_processed=processed_chunks,
+            chunks_dropped=dropped_chunks,
+            chunks_enqueued=stt_enqueued_chunks,
+            chunks_sent_to_stt=chunks_sent_to_stt,
+            chunks_saved_to_db=chunks_saved_to_db,
+            stt_success_count=stt_success_count,
+            stt_empty_count=stt_empty_chunks,
+            stt_hallucinated_chunks=stt_hallucinated_chunks,
+            stt_rejected_boilerplate=stt_rejected_boilerplate,
+            chunks_dropped_high_corruption=total_chunks_discarded_high_corruption,
+            chunks_dropped_low_speech=chunks_dropped_low_speech,
+            chunks_dropped_low_rms=chunks_dropped_low_rms,
+            opus_corrupted_total=opus_corrupted_count,
+            avg_corruption_ratio=_safe_average(chunk_corruption_ratio_total, chunk_corruption_ratio_count),
+        )
         logger.info(
-            "Voice ingest session stt metrics voice_session_id=%s stt_hallucinated_chunks=%s stt_rejected_boilerplate=%s chunks_dropped_low_speech=%s chunks_dropped_low_rms=%s chunks_dropped_high_corruption=%s chunks_sent_to_stt=%s chunks_saved_to_db=%s",
+            "Voice ingest session stt metrics voice_session_id=%s chunks_processed=%s chunks_dropped=%s chunks_enqueued=%s chunks_sent_to_stt=%s chunks_saved_to_db=%s stt_success_count=%s stt_empty_count=%s stt_hallucinated_chunks=%s stt_rejected_boilerplate=%s chunks_dropped_high_corruption=%s chunks_dropped_low_speech=%s chunks_dropped_low_rms=%s opus_corrupted_total=%s avg_corruption_ratio=%.3f",
             active_session_id,
-            stt_hallucinated_chunks,
-            stt_rejected_boilerplate,
-            chunks_dropped_low_speech,
-            chunks_dropped_low_rms,
-            total_chunks_discarded_high_corruption,
-            chunks_sent_to_stt,
-            chunks_saved_to_db,
+            summary["chunks_processed"],
+            summary["chunks_dropped"],
+            summary["chunks_enqueued"],
+            summary["chunks_sent_to_stt"],
+            summary["chunks_saved_to_db"],
+            summary["stt_success_count"],
+            summary["stt_empty_count"],
+            summary["stt_hallucinated_chunks"],
+            summary["stt_rejected_boilerplate"],
+            summary["chunks_dropped_high_corruption"],
+            summary["chunks_dropped_low_speech"],
+            summary["chunks_dropped_low_rms"],
+            summary["opus_corrupted_total"],
+            summary["avg_corruption_ratio"],
         )
         await database.end_voice_session(active_session_id, _now_iso())
         await ingest.emit(
@@ -1034,6 +1118,15 @@ def setup(registry: ServiceRegistry) -> None:
         voice_client = None
         await _end_session()
 
+    def _set_nonlocal_counter(counter_name: str) -> None:
+        nonlocal stt_enqueued_chunks, chunks_sent_to_stt, total_chunks_ok
+        if counter_name == "stt_enqueued_chunks":
+            stt_enqueued_chunks += 1
+        elif counter_name == "chunks_sent_to_stt":
+            chunks_sent_to_stt += 1
+        elif counter_name == "total_chunks_ok":
+            total_chunks_ok += 1
+
     async def _schedule_leave_if_empty(channel: discord.VoiceChannel) -> None:
         nonlocal leave_task
         if leave_task and not leave_task.done():
@@ -1059,6 +1152,7 @@ def setup(registry: ServiceRegistry) -> None:
         nonlocal chunk_corruption_ratio_total, chunk_corruption_ratio_count
         nonlocal total_chunks_ok, total_chunks_discarded_high_corruption, total_chunks_discarded_silent
         nonlocal consecutive_discarded_chunks, max_consecutive_discarded_chunks
+        nonlocal chunks_dropped_low_speech, chunks_dropped_low_rms
         try:
             if active_session_id is None or active_session_started is None:
                 return
@@ -1162,7 +1256,6 @@ def setup(registry: ServiceRegistry) -> None:
             chunk_duration_sec = _estimate_chunk_duration(chunk_stats, chunk_seconds)
             corruption_ratio = _chunk_corruption_ratio(chunk_stats.total_frames, chunk_stats.corrupted_frames)
             avg_rms = _safe_average(chunk_stats.total_rms, chunk_stats.total_frames)
-            max_corruption_ratio = _get_configured_max_corruption_ratio()
             enqueue_allowed, drop_reason = _evaluate_chunk_quality(
                 pcm_bytes=len(chunk_data),
                 duration_sec=chunk_duration_sec,
@@ -1172,7 +1265,7 @@ def setup(registry: ServiceRegistry) -> None:
                 avg_rms=avg_rms,
                 rms_min=chunk_stats.rms_min,
                 rms_max=chunk_stats.rms_max,
-                max_corruption_ratio=max_corruption_ratio,
+                max_corruption_ratio=configured_max_corruption_ratio,
             )
             if _is_silent(chunk_data):
                 enqueue_allowed = False
@@ -1199,9 +1292,9 @@ def setup(registry: ServiceRegistry) -> None:
                     max_consecutive_discarded_chunks = consecutive_discarded_chunks
                 if drop_reason == "silent_chunk":
                     total_chunks_discarded_silent += 1
-                elif drop_reason.startswith("corruption_ratio>"):
+                elif drop_reason == "high_corruption":
                     total_chunks_discarded_high_corruption += 1
-                elif drop_reason in {"low_speech_ratio", "likely_noise_only"}:
+                elif drop_reason in {"low_speech", "likely_noise_only"}:
                     chunks_dropped_low_speech += 1
                 elif drop_reason == "low_rms":
                     chunks_dropped_low_rms += 1
@@ -1244,9 +1337,9 @@ def setup(registry: ServiceRegistry) -> None:
                 _cleanup_file(job.audio_path)
                 dropped_chunks += 1
                 return
-            stt_enqueued_chunks += 1
-            chunks_sent_to_stt += 1
-            total_chunks_ok += 1
+            _safe_increment("stt_enqueued_chunks", lambda: _set_nonlocal_counter("stt_enqueued_chunks"))
+            _safe_increment("chunks_sent_to_stt", lambda: _set_nonlocal_counter("chunks_sent_to_stt"))
+            _safe_increment("total_chunks_ok", lambda: _set_nonlocal_counter("total_chunks_ok"))
             logger.info(
                 "Voice ingest chunk finalized job_id=%s user_id=%s bytes=%s duration=%.2fs frames_total=%s frames_corrupted=%s corruption_ratio=%.2f enqueue=yes reason=ok",
                 job_id,
@@ -1310,6 +1403,19 @@ def setup(registry: ServiceRegistry) -> None:
         pending_by_user[job.user_id] = pending_by_user.get(job.user_id, 0) + 1
         await queue.put(job)
 
+    def _set_worker_counter(counter_name: str) -> None:
+        nonlocal stt_empty_chunks, stt_success_count, stt_hallucinated_chunks, stt_rejected_boilerplate, chunks_saved_to_db
+        if counter_name == "stt_empty_chunks":
+            stt_empty_chunks += 1
+        elif counter_name == "stt_success_count":
+            stt_success_count += 1
+        elif counter_name == "stt_hallucinated_chunks":
+            stt_hallucinated_chunks += 1
+        elif counter_name == "stt_rejected_boilerplate":
+            stt_rejected_boilerplate += 1
+        elif counter_name == "chunks_saved_to_db":
+            chunks_saved_to_db += 1
+
     async def _worker() -> None:
         nonlocal breaker_failures, breaker_until, stt_empty_chunks, stt_success_count, stt_hallucinated_chunks, stt_rejected_boilerplate, chunks_saved_to_db
         logger.info("Voice ingest worker started")
@@ -1353,7 +1459,7 @@ def setup(registry: ServiceRegistry) -> None:
                     logger.info("Voice ingest STT done job_id=%s chars=%s", job.job_id, len(transcript.text))
                 text = transcript.text.strip()
                 if len(text) < min_chars:
-                    stt_empty_chunks += 1
+                    _safe_increment("stt_empty_chunks", lambda: _set_worker_counter("stt_empty_chunks"))
                     logger.info(
                         "Voice ingest STT empty/short job_id=%s chars=%s duration=%.2fs frames_total=%s frames_corrupted=%s corruption_ratio=%.2f",
                         job.job_id,
@@ -1365,15 +1471,26 @@ def setup(registry: ServiceRegistry) -> None:
                     )
                     continue
                 normalized_text = _normalize_text(text)
+                text = " ".join(text.split())
                 cached = last_text_cache.get(job.user_id)
                 if cached and cached[0] == normalized_text and (time.time() - cached[1]) < 30:
                     continue
                 if os.getenv("VOICE_INGEST_REJECT_HALLUCINATION_TEXTS", "true").lower() in {"1", "true", "yes", "y"}:
+                    if _is_known_boilerplate_text(text):
+                        _safe_increment("stt_hallucinated_chunks", lambda: _set_worker_counter("stt_hallucinated_chunks"))
+                        _safe_increment("stt_rejected_boilerplate", lambda: _set_worker_counter("stt_rejected_boilerplate"))
+                        logger.info(
+                            "Voice ingest STT rejected as known boilerplate job_id=%s user_id=%s reason=boilerplate text=%r",
+                            job.job_id,
+                            job.user_id,
+                            text,
+                        )
+                        continue
                     hallucinated, hallucination_reason = _is_likely_hallucinated_text(text)
                     if hallucinated:
-                        stt_hallucinated_chunks += 1
+                        _safe_increment("stt_hallucinated_chunks", lambda: _set_worker_counter("stt_hallucinated_chunks"))
                         if hallucination_reason == "boilerplate":
-                            stt_rejected_boilerplate += 1
+                            _safe_increment("stt_rejected_boilerplate", lambda: _set_worker_counter("stt_rejected_boilerplate"))
                         logger.info(
                             "Voice ingest STT rejected as likely hallucination job_id=%s user_id=%s reason=%s text=%r",
                             job.job_id,
@@ -1392,9 +1509,9 @@ def setup(registry: ServiceRegistry) -> None:
                     window_sec=dedup_window_sec,
                     max_repeats=dedup_max_repeats,
                 ):
-                    stt_hallucinated_chunks += 1
+                    _safe_increment("stt_hallucinated_chunks", lambda: _set_worker_counter("stt_hallucinated_chunks"))
                     logger.info(
-                        "Voice ingest STT rejected as likely hallucination job_id=%s user_id=%s reason=duplicate_burst text=%r",
+                        "Voice ingest duplicate_transcript_rejected job_id=%s user_id=%s reason=duplicate_burst text=%r",
                         job.job_id,
                         job.user_id,
                         text,
@@ -1444,8 +1561,8 @@ def setup(registry: ServiceRegistry) -> None:
                         },
                     )
                 )
-                stt_success_count += 1
-                chunks_saved_to_db += 1
+                _safe_increment("stt_success_count", lambda: _set_worker_counter("stt_success_count"))
+                _safe_increment("chunks_saved_to_db", lambda: _set_worker_counter("chunks_saved_to_db"))
                 breaker_failures = 0
             except Exception:
                 logger.exception("Voice ingest failed")

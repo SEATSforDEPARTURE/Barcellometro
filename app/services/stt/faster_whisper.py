@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -10,6 +11,9 @@ from faster_whisper import WhisperModel
 
 from app.services.database import DatabaseService
 from app.services.stt.base import TranscriptResult
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -33,7 +37,12 @@ class FasterWhisperSttService:
         def _run() -> TranscriptResult:
             language = None if config.language_hint == "auto" else config.language_hint
             transcribe_kwargs = self._build_transcribe_kwargs(model, config, language)
-            segments, info = model.transcribe(audio_path, **transcribe_kwargs)
+            try:
+                segments, info = model.transcribe(audio_path, **transcribe_kwargs)
+            except TypeError as exc:
+                logger.warning("faster-whisper conservative kwargs rejected; retrying with minimal kwargs: %s", exc)
+                minimal_kwargs = {"beam_size": config.beam_size, "language": language}
+                segments, info = model.transcribe(audio_path, **minimal_kwargs)
             text = "".join(segment.text for segment in segments).strip()
             detected_lang = info.language if info and info.language else (language or "auto")
             return TranscriptResult(
@@ -52,7 +61,7 @@ class FasterWhisperSttService:
         }
         supported = set(inspect.signature(model.transcribe).parameters.keys())
         conservative_options: dict[str, object] = {
-            "condition_on_previous_text": False,
+            "condition_on_previous_text": os.getenv("STT_LOCAL_CONDITION_ON_PREVIOUS_TEXT", "false").lower() in {"1", "true", "yes", "y"},
             "vad_filter": os.getenv("STT_LOCAL_VAD_FILTER", "true").lower() in {"1", "true", "yes", "y"},
             "temperature": float(os.getenv("STT_LOCAL_TEMPERATURE", "0.0")),
             "no_speech_threshold": float(os.getenv("STT_LOCAL_NO_SPEECH_THRESHOLD", "0.65")),
