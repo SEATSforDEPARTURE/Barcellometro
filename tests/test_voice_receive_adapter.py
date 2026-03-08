@@ -163,3 +163,58 @@ def test_valid_frame_reaches_plugin_callback_and_disconnect() -> None:
 
     asyncio.run(adapter.disconnect())
     assert client.disconnect_calls == 1
+
+
+def test_listener_attach_is_idempotent() -> None:
+    FakeChannel, _PacketRouter = _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+    channel = FakeChannel()
+    client = asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=lambda *_a: None))
+
+    voice_recv_module = sys.modules["discord.ext.voice_recv"]
+    attached = adapter.attach_listener(
+        voice_client=client,
+        voice_recv_module=voice_recv_module,
+        on_pcm_frame=lambda *_a: None,
+        on_decode_error=lambda *_a: None,
+    )
+
+    assert attached is False
+
+
+def test_crypto_and_opus_errors_are_tracked_separately(monkeypatch: Any) -> None:
+    FakeChannel, _PacketRouter = _install_fake_voice_recv()
+    adapter = VoiceReceiveAdapter()
+
+    class CryptoError(Exception):
+        pass
+
+    original_install = adapter._vendor.install_decode_guards
+
+    def _patched_install_decode_guards(*, on_decode_error: Any) -> int:
+        on_decode_error(CryptoError("CryptoError decoding packet data"), "test.crypto")
+        return original_install(on_decode_error=on_decode_error)
+
+    monkeypatch.setattr(adapter._vendor, "install_decode_guards", _patched_install_decode_guards)
+
+    channel = FakeChannel()
+    client = asyncio.run(adapter.connect_and_listen(channel=channel, on_pcm_frame=lambda *_a: None, on_decode_error=lambda *_a: None))
+
+    class BrokenData:
+        pass
+
+    def on_frame(_user: Any, _data: Any) -> None:
+        raise DummyOpusError("corrupted stream")
+
+    voice_recv_module = sys.modules["discord.ext.voice_recv"]
+    adapter.attach_listener(
+        voice_client=types.SimpleNamespace(listen=lambda sink: client.listen(sink), is_connected=lambda: True),
+        voice_recv_module=voice_recv_module,
+        on_pcm_frame=on_frame,
+        on_decode_error=lambda *_a: None,
+    )
+    client.sink.write(None, BrokenData())
+
+    counters = adapter.counters
+    assert counters.crypto_decode_errors >= 1
+    assert counters.opus_corrupted_total >= 1
