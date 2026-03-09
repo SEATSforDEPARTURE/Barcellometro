@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -23,9 +24,10 @@ class _FakeRepliedMessage:
 
 
 class _FakeTextChannel:
-    def __init__(self, *, message_author=None) -> None:
+    def __init__(self, *, message_author=None, guild=None) -> None:
         self.target = _FakeRepliedMessage(author=message_author)
         self.sent_embeds: list[object] = []
+        self.guild = guild
 
     async def fetch_message(self, _message_id: int):
         return self.target
@@ -42,6 +44,30 @@ class _FakeBot:
         return self._channel
 
 
+class _FakeRole:
+    def __init__(self, role_id: int) -> None:
+        self.id = role_id
+
+
+class _FakeMember:
+    def __init__(self, member_id: int, role_ids: list[int]) -> None:
+        self.id = member_id
+        self.roles = [_FakeRole(role_id) for role_id in role_ids]
+        self.display_name = f"member-{member_id}"
+
+
+class _FakeGuild:
+    def __init__(self, role_ids: list[int], members: dict[int, _FakeMember] | None = None) -> None:
+        self._roles = {role_id: _FakeRole(role_id) for role_id in role_ids}
+        self._members = members or {}
+
+    def get_member(self, member_id: int):
+        return self._members.get(member_id)
+
+    def get_role(self, role_id: int):
+        return self._roles.get(role_id)
+
+
 async def _run_phrase_once(
     db: DatabaseService,
     *,
@@ -50,6 +76,7 @@ async def _run_phrase_once(
     author_id: str = "u1",
     trigger_state: dict | None = None,
     message_author: object | None = None,
+    guild: object | None = None,
 ) -> object:
     if trigger_state is not None:
         await db.set_trigger_state_global("g1", "frasi", trigger_state)
@@ -58,7 +85,7 @@ async def _run_phrase_once(
     await db.add_trigger_phrase("g1", "ch-a", phrase_text, "CONTAINS", False, "#FFAA00")
 
     service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
-    channel = _FakeTextChannel(message_author=message_author)
+    channel = _FakeTextChannel(message_author=message_author, guild=guild or _FakeGuild(role_ids=[], members={}))
     service._bot = _FakeBot(channel)
 
     envelope = EventEnvelope(
@@ -309,3 +336,189 @@ def test_register_triggers_keeps_frasi_top_level() -> None:
     names = [command.name for command in group.commands]
     assert "frasi" not in names
     assert frasi_group.name == "frasi"
+
+
+def test_db_trigger_phrase_columns_backcompat_and_serialization() -> None:
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+
+        await db.add_trigger_phrase("g1", "c1", "frase", "CONTAINS", False, None, 120, ["123", 456])
+        rows = await db.list_trigger_phrases_guild("g1")
+        assert rows[0]["cooldown_seconds"] == 120
+        assert rows[0]["allowed_role_ids"] == ["123", "456"]
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_phrase_cooldown_blocks_second_hit_and_does_not_consume_first() -> None:
+    async def _run() -> None:
+        original_text_channel = triggers_module.discord.TextChannel
+        original_now = triggers_module.datetime.now
+        triggers_module.discord.TextChannel = _FakeTextChannel
+        try:
+            db = DatabaseService(":memory:")
+            await db.connect()
+            await db.initialize_schema()
+            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
+            await db.add_trigger_phrase("g1", "ch-a", "ciao", "CONTAINS", False, None, 120, None)
+            await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "first", "DEFAULT": "default {count_user}"}})
+
+            service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
+            channel = _FakeTextChannel(guild=_FakeGuild(role_ids=[], members={1: _FakeMember(1, [])}))
+            service._bot = _FakeBot(channel)
+
+            now_values = iter(
+                [
+                    datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+                    datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+                    datetime(2026, 1, 1, 10, 1, 0, tzinfo=timezone.utc),
+                    datetime(2026, 1, 1, 10, 3, 1, tzinfo=timezone.utc),
+                    datetime(2026, 1, 1, 10, 3, 1, tzinfo=timezone.utc),
+                ]
+            )
+            triggers_module.datetime.now = Mock(side_effect=lambda tz=None: next(now_values))
+
+            envelope = EventEnvelope(
+                event_id="evt-1",
+                event_type="message.create",
+                platform="discord",
+                ts="2026-01-01T10:00:00+00:00",
+                guild_id="g1",
+                channel_id="ch-z",
+                thread_id=None,
+                author_id="1",
+                content="ciao a tutti",
+                meta={"message_id": "123"},
+            )
+            await service._handle_phrases(envelope)
+            await service._handle_phrases(envelope)
+            await service._handle_phrases(envelope)
+
+            assert len(channel.target.replies) == 2
+            assert channel.target.replies[0].description == "first"
+            assert channel.target.replies[1].description == "default 2"
+
+            phrase_row = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
+            assert phrase_row is not None
+            stats = await db.get_phrase_user_stats(int(phrase_row["id"]), "1")
+            assert int(stats.get("count") or 0) == 2
+            await db.close()
+        finally:
+            triggers_module.discord.TextChannel = original_text_channel
+            triggers_module.datetime.now = original_now
+
+    asyncio.run(_run())
+
+
+def test_phrase_roles_allow_and_block_users() -> None:
+    async def _run() -> None:
+        original_text_channel = triggers_module.discord.TextChannel
+        triggers_module.discord.TextChannel = _FakeTextChannel
+        try:
+            db = DatabaseService(":memory:")
+            await db.connect()
+            await db.initialize_schema()
+            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
+            await db.add_trigger_phrase("g1", "ch-a", "ciao", "CONTAINS", False, None, None, ["100"])
+
+            service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
+            guild = _FakeGuild(
+                role_ids=[100],
+                members={1: _FakeMember(1, [100]), 2: _FakeMember(2, [200])},
+            )
+            channel = _FakeTextChannel(guild=guild)
+            service._bot = _FakeBot(channel)
+
+            allowed = EventEnvelope(
+                event_id="evt-1",
+                event_type="message.create",
+                platform="discord",
+                ts="2026-01-01T10:00:00+00:00",
+                guild_id="g1",
+                channel_id="ch-z",
+                thread_id=None,
+                author_id="1",
+                content="ciao",
+                meta={"message_id": "123"},
+            )
+            blocked = EventEnvelope(
+                event_id="evt-2",
+                event_type="message.create",
+                platform="discord",
+                ts="2026-01-01T10:00:01+00:00",
+                guild_id="g1",
+                channel_id="ch-z",
+                thread_id=None,
+                author_id="2",
+                content="ciao",
+                meta={"message_id": "124"},
+            )
+            await service._handle_phrases(allowed)
+            await service._handle_phrases(blocked)
+
+            assert len(channel.target.replies) == 1
+            phrase_row = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
+            assert phrase_row is not None
+            assert int((await db.get_phrase_user_stats(int(phrase_row["id"]), "1")).get("count") or 0) == 1
+            assert (await db.get_phrase_user_stats(int(phrase_row["id"]), "2")) == {}
+            await db.close()
+        finally:
+            triggers_module.discord.TextChannel = original_text_channel
+
+    asyncio.run(_run())
+
+
+def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
+    async def _run() -> None:
+        from discord import app_commands
+
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        group = app_commands.Group(name="barcellometro", description="x")
+        ctx = SimpleNamespace(
+            database=db,
+            entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
+            timezone=timezone.utc,
+            message_scheduler=Mock(),
+            trigger_engine=Mock(),
+        )
+        frasi_group = register_triggers(group, ctx)
+        add_cmd = next(c for c in frasi_group.commands if c.name == "add")
+        list_cmd = next(c for c in frasi_group.commands if c.name == "list")
+
+        response = Mock()
+        response.send_message = AsyncMock()
+        interaction = SimpleNamespace(
+            guild_id=1,
+            channel_id=2,
+            guild=_FakeGuild(role_ids=[123, 456], members={}),
+            response=response,
+            user=SimpleNamespace(id=99),
+        )
+
+        await add_cmd.callback(
+            interaction,
+            phrase="ciao",
+            match_mode=SimpleNamespace(value="CONTAINS"),
+            colore="#112233",
+            cooldown=120,
+            ruoli="<@&123>, 456",
+        )
+        rows = await db.list_trigger_phrases_guild("1")
+        assert rows[0]["cooldown_seconds"] == 120
+        assert rows[0]["allowed_role_ids"] == ["123", "456"]
+
+        await list_cmd.callback(interaction)
+        calls = response.send_message.await_args_list
+        assert "Cooldown: 120s" in calls[0].kwargs["content"] or "Cooldown: 120s" in calls[0].args[0]
+        list_text = calls[-1].kwargs.get("content") if calls[-1].kwargs else calls[-1].args[0]
+        assert "cooldown=120s" in list_text
+        assert "ruoli=<@&123>,<@&456>" in list_text
+        await db.close()
+
+    asyncio.run(_run())
