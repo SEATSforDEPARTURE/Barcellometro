@@ -765,12 +765,20 @@ class TriggerEngineService:
                 target_message = await channel.fetch_message(int(message_id))
             except (discord.NotFound, discord.HTTPException, ValueError):
                 target_message = None
+        if not self._is_phrase_role_allowed(phrase, channel, target_message, author_id):
+            logger.debug("Phrase trigger ignored: missing required role", extra={"phrase_id": phrase_id, "author_id": author_id})
+            return
+
+        stats_before = await self._database.get_phrase_user_stats(phrase_id, author_id) if author_id else {}
+        if self._is_phrase_in_cooldown(phrase, stats_before):
+            logger.debug("Phrase trigger ignored: cooldown active", extra={"phrase_id": phrase_id, "author_id": author_id})
+            return
+
         author_name = await self._resolve_phrase_author_name(envelope, channel, target_message)
 
         state = await self._database.get_trigger_state_any_channel(envelope.guild_id, "frasi")
         previous_seen = self._build_last_seen_values(phrase.get("last_seen_ts"))
 
-        stats_before = await self._database.get_phrase_user_stats(phrase_id, author_id) if author_id else {}
         previous_count = int(stats_before.get("count") or 0)
         template_kind = "FIRST" if previous_count <= 0 else "DEFAULT"
         template = self._resolve_phrase_template(state, author_id=author_id, kind=template_kind)
@@ -814,6 +822,52 @@ class TriggerEngineService:
         else:
             await channel.send(embed=embed)
         await self._database.update_phrase_last_seen(phrase_id, ts, message_id)
+
+    def _is_phrase_role_allowed(
+        self,
+        phrase: dict[str, object],
+        channel: discord.TextChannel,
+        message: discord.Message | None,
+        author_id: str,
+    ) -> bool:
+        allowed_raw = phrase.get("allowed_role_ids")
+        if not isinstance(allowed_raw, list) or not allowed_raw:
+            return True
+        allowed_ids = {str(role_id).strip() for role_id in allowed_raw if str(role_id).strip()}
+        if not allowed_ids:
+            return True
+        if not author_id or not author_id.isdigit():
+            return False
+
+        member = getattr(message, "author", None)
+        if member is None or not hasattr(member, "roles"):
+            member = channel.guild.get_member(int(author_id))
+        if member is None or not hasattr(member, "roles"):
+            return False
+        member_roles = {str(getattr(role, "id", "")) for role in getattr(member, "roles", [])}
+        return bool(member_roles.intersection(allowed_ids))
+
+    def _is_phrase_in_cooldown(self, phrase: dict[str, object], stats_before: dict[str, object]) -> bool:
+        cooldown_raw = phrase.get("cooldown_seconds")
+        if cooldown_raw in (None, ""):
+            return False
+        try:
+            cooldown_seconds = int(cooldown_raw)
+        except (TypeError, ValueError):
+            return False
+        if cooldown_seconds <= 0:
+            return False
+        last_seen_raw = str(stats_before.get("last_seen_ts") or "").strip()
+        if not last_seen_raw:
+            return False
+        try:
+            last_seen = datetime.fromisoformat(last_seen_raw)
+        except ValueError:
+            return False
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - last_seen).total_seconds()
+        return elapsed < cooldown_seconds
 
 
     def _discord_color_from_phrase(self, phrase: dict[str, object]) -> discord.Color:

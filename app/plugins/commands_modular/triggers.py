@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -139,6 +140,36 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
 
         return state
 
+    def _parse_role_ids_input(raw_roles: str | None) -> list[str]:
+        text = str(raw_roles or "").strip()
+        if not text:
+            return []
+        found = re.findall(r"<@&(\d+)>", text)
+        if found:
+            values = found
+        else:
+            values = re.findall(r"\d+", text)
+        return list(dict.fromkeys(values))
+
+    def _format_phrase_row(row: dict[str, object]) -> str:
+        role_ids = row.get("allowed_role_ids") if isinstance(row.get("allowed_role_ids"), list) else []
+        roles_text = "tutti" if not role_ids else ", ".join(f"<@&{role_id}>" for role_id in role_ids)
+        mode_raw = str(row.get("match_mode") or "CONTAINS").lower()
+        cooldown_raw = row.get("cooldown_seconds")
+        cooldown_text = f"{cooldown_raw}s" if cooldown_raw is not None else "nessuno"
+        enabled = bool(row.get("enabled", 1))
+        return " · ".join(
+            [
+                f"#{row.get('id')}",
+                f'"{row.get("phrase")}"',
+                f"mode: {mode_raw}",
+                f"colore: {row.get('embed_color') or '-'}",
+                f"cooldown: {cooldown_text}",
+                f"ruoli: {roles_text}",
+                f"stato: {'attiva' if enabled else 'disattiva'}",
+            ]
+        )
+
     @barcello_group.command(name="on", description="Abilita trigger barcello")
     async def barcello_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "barcello", "on")
@@ -262,7 +293,13 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await _set_toggle(interaction, "frasi", "status")
 
     @frasi_group.command(name="add", description="Aggiungi frase trigger")
-    @app_commands.describe(phrase="Frase", match_mode="contains|regex", colore="Colore embed opzionale (#RRGGBB)")
+    @app_commands.describe(
+        phrase="Frase",
+        match_mode="contains|regex",
+        colore="Colore embed opzionale (#RRGGBB)",
+        cooldown="Cooldown in secondi (opzionale)",
+        ruoli="Ruoli autorizzati (menzioni o ID separati da virgole/spazi)",
+    )
     @app_commands.choices(
         match_mode=[
             app_commands.Choice(name="contains", value="CONTAINS"),
@@ -274,17 +311,56 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         phrase: str,
         match_mode: app_commands.Choice[str],
         colore: str | None = None,
+        cooldown: int | None = None,
+        ruoli: str | None = None,
     ) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, channel_id = scope
+        if cooldown is not None and cooldown <= 0:
+            await interaction.response.send_message("Cooldown non valido. Inserisci un numero intero positivo di secondi.", ephemeral=True)
+            return
         color = _normalize_embed_color(colore)
         if colore is not None and color is None:
             await interaction.response.send_message("Colore non valido. Usa #RRGGBB, RRGGBB, 0xRRGGBB o valore decimale.", ephemeral=True)
             return
-        await ctx.database.add_trigger_phrase(guild_id, channel_id, phrase, match_mode.value, False, color)
-        await interaction.response.send_message("Frase aggiunta a livello server.", ephemeral=True)
+        role_ids = _parse_role_ids_input(ruoli)
+        if role_ids and interaction.guild is None:
+            await interaction.response.send_message("Impossibile validare i ruoli senza guild.", ephemeral=True)
+            return
+        if role_ids and interaction.guild is not None:
+            invalid_ids = [role_id for role_id in role_ids if interaction.guild.get_role(int(role_id)) is None]
+            if invalid_ids:
+                await interaction.response.send_message(
+                    f"Ruoli non validi per questo server: {', '.join(invalid_ids)}",
+                    ephemeral=True,
+                )
+                return
+        await ctx.database.add_trigger_phrase(
+            guild_id,
+            channel_id,
+            phrase,
+            match_mode.value,
+            False,
+            color,
+            cooldown,
+            role_ids,
+        )
+        role_text = "tutti"
+        if role_ids:
+            role_text = ", ".join(f"<@&{role_id}>" for role_id in role_ids)
+        cooldown_text = f"{cooldown}s" if cooldown is not None else "nessuno"
+        await interaction.response.send_message(
+            "\n".join(
+                [
+                    "Frase aggiunta a livello server.",
+                    f"Cooldown: {cooldown_text}",
+                    f"Ruoli autorizzati: {role_text}",
+                ]
+            ),
+            ephemeral=True,
+        )
 
     @frasi_group.command(name="remove", description="Rimuovi frase trigger")
     async def frasi_remove(interaction: discord.Interaction, id_or_phrase: str) -> None:
@@ -308,11 +384,126 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         if not rows:
             await interaction.response.send_message("Nessuna frase configurata.", ephemeral=True)
             return
-        lines = [
-            f"{r['id']}. {r['phrase']} [{r['match_mode']}] {'cs' if r['case_sensitive'] else 'ci'} color={r.get('embed_color') or '-'}"
-            for r in rows
-        ]
+        lines = [_format_phrase_row(r) for r in rows]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @frasi_group.command(name="edit", description="Modifica frase trigger esistente")
+    @app_commands.describe(
+        id="ID frase da modificare",
+        frase="Nuovo testo frase",
+        match_mode="contains|regex",
+        colore="Nuovo colore (#RRGGBB)",
+        cooldown="Nuovo cooldown in secondi",
+        ruoli="Nuovi ruoli autorizzati (menzioni/ID)",
+        reset_ruoli="Rimuovi allowlist ruoli",
+        reset_cooldown="Rimuovi cooldown",
+        reset_colore="Rimuovi colore personalizzato",
+        attiva="Abilita/disabilita la singola frase",
+    )
+    @app_commands.choices(
+        match_mode=[
+            app_commands.Choice(name="contains", value="CONTAINS"),
+            app_commands.Choice(name="regex", value="REGEX"),
+        ]
+    )
+    async def frasi_edit(
+        interaction: discord.Interaction,
+        id: int,
+        frase: str | None = None,
+        match_mode: app_commands.Choice[str] | None = None,
+        colore: str | None = None,
+        cooldown: int | None = None,
+        ruoli: str | None = None,
+        reset_ruoli: bool = False,
+        reset_cooldown: bool = False,
+        reset_colore: bool = False,
+        attiva: bool | None = None,
+    ) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, _ = scope
+
+        row = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        if not row:
+            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+            return
+
+        if reset_ruoli and ruoli:
+            await interaction.response.send_message("Non puoi usare insieme `ruoli` e `reset_ruoli=true`.", ephemeral=True)
+            return
+        if reset_cooldown and cooldown is not None:
+            await interaction.response.send_message("Non puoi usare insieme `cooldown` e `reset_cooldown=true`.", ephemeral=True)
+            return
+        if reset_colore and colore is not None:
+            await interaction.response.send_message("Non puoi usare insieme `colore` e `reset_colore=true`.", ephemeral=True)
+            return
+
+        if cooldown is not None and cooldown <= 0:
+            await interaction.response.send_message("Cooldown non valido. Inserisci un numero intero positivo di secondi.", ephemeral=True)
+            return
+
+        parsed_color: str | None = None
+        if colore is not None:
+            parsed_color = _normalize_embed_color(colore)
+            if parsed_color is None:
+                await interaction.response.send_message("Colore non valido. Usa #RRGGBB, RRGGBB, 0xRRGGBB o valore decimale.", ephemeral=True)
+                return
+
+        role_ids: list[str] | None = None
+        if ruoli is not None:
+            role_ids = _parse_role_ids_input(ruoli)
+            if interaction.guild is None:
+                await interaction.response.send_message("Impossibile validare i ruoli senza guild.", ephemeral=True)
+                return
+            invalid_ids = [role_id for role_id in role_ids if interaction.guild.get_role(int(role_id)) is None]
+            if invalid_ids:
+                await interaction.response.send_message(f"Ruoli non validi per questo server: {', '.join(invalid_ids)}", ephemeral=True)
+                return
+
+        requested = any(
+            [
+                frase is not None,
+                match_mode is not None,
+                colore is not None,
+                cooldown is not None,
+                ruoli is not None,
+                reset_ruoli,
+                reset_cooldown,
+                reset_colore,
+                attiva is not None,
+            ]
+        )
+        if not requested:
+            await interaction.response.send_message("Nessuna modifica richiesta.", ephemeral=True)
+            return
+
+        updated = await ctx.database.update_trigger_phrase(
+            guild_id,
+            id,
+            phrase=frase,
+            match_mode=match_mode.value if match_mode is not None else None,
+            embed_color=parsed_color if colore is not None else None,
+            set_embed_color=colore is not None or reset_colore,
+            cooldown_seconds=cooldown,
+            set_cooldown_seconds=cooldown is not None or reset_cooldown,
+            allowed_role_ids=role_ids,
+            set_allowed_role_ids=ruoli is not None or reset_ruoli,
+            enabled=attiva,
+        )
+        if not updated:
+            await interaction.response.send_message("Nessuna modifica richiesta.", ephemeral=True)
+            return
+        row_after = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        await interaction.response.send_message(
+            "\n".join(
+                [
+                    f"Frase #{id} aggiornata a livello server.",
+                    _format_phrase_row(row_after),
+                ]
+            ),
+            ephemeral=True,
+        )
 
     @frasi_group.command(name="template_show", description="Mostra template trigger frasi")
     async def frasi_template_show(interaction: discord.Interaction) -> None:
