@@ -41,6 +41,41 @@ class _FakeBot:
         return self._channel
 
 
+async def _run_phrase_once(
+    db: DatabaseService,
+    *,
+    phrase_text: str = "il criccy",
+    content: str = "oggi dico il criccy",
+    author_id: str = "u1",
+    trigger_state: dict | None = None,
+) -> object:
+    if trigger_state is not None:
+        await db.set_trigger_state_global("g1", "frasi", trigger_state)
+
+    await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
+    await db.add_trigger_phrase("g1", "ch-a", phrase_text, "CONTAINS", False, "#FFAA00")
+
+    service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
+    channel = _FakeTextChannel()
+    service._bot = _FakeBot(channel)
+
+    envelope = EventEnvelope(
+        event_id="evt-1",
+        event_type="message.create",
+        platform="discord",
+        ts="2026-01-01T10:00:00+00:00",
+        guild_id="g1",
+        channel_id="ch-z",
+        thread_id=None,
+        author_id=author_id,
+        content=content,
+        meta={"message_id": "123"},
+    )
+    await service._handle_phrases(envelope)
+    assert len(channel.target.replies) == 1
+    return channel.target.replies[0]
+
+
 def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
     async def _run() -> None:
         original_text_channel = triggers_module.discord.TextChannel
@@ -76,11 +111,10 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
             )
             await service._handle_phrases(envelope)
 
-            assert len(channel.target.replies) == 1
             embed = channel.target.replies[0]
             assert embed.title == "💬 FRASI ICONICHE"
-            assert embed.description == "il criccy"
             assert getattr(embed.footer, "text", "") == "Servizio offerto dal vostro Barcellometro di fiducia."
+            assert embed.color.value == 0xFFAA00
 
             stats = await db.get_phrase_user_stats(winner_id, "u1")
             assert int(stats.get("count", 0)) == 1
@@ -93,6 +127,100 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
             other_stats = await db.get_phrase_user_stats(int(other["id"]), "u1")
             assert other_stats == {}
 
+            await db.close()
+        finally:
+            triggers_module.discord.TextChannel = original_text_channel
+
+    asyncio.run(_run())
+
+
+def test_embed_description_uses_default_template_not_raw_phrase() -> None:
+    async def _run() -> None:
+        original_text_channel = triggers_module.discord.TextChannel
+        triggers_module.discord.TextChannel = _FakeTextChannel
+        try:
+            db = DatabaseService(":memory:")
+            await db.connect()
+            await db.initialize_schema()
+            embed = await _run_phrase_once(
+                db,
+                trigger_state={"templates": {"DEFAULT": "template default {count_user}", "FIRST": "template first"}},
+            )
+            assert embed.description == "template first"
+            embed2 = await _run_phrase_once(
+                db,
+                trigger_state={"templates": {"DEFAULT": "template default {count_user}", "FIRST": "template first"}},
+            )
+            assert embed2.description == "template default 2"
+            await db.close()
+        finally:
+            triggers_module.discord.TextChannel = original_text_channel
+
+    asyncio.run(_run())
+
+
+def test_per_user_template_has_priority_over_first_and_default() -> None:
+    async def _run() -> None:
+        original_text_channel = triggers_module.discord.TextChannel
+        triggers_module.discord.TextChannel = _FakeTextChannel
+        try:
+            db = DatabaseService(":memory:")
+            await db.connect()
+            await db.initialize_schema()
+            embed = await _run_phrase_once(
+                db,
+                author_id="42",
+                trigger_state={
+                    "templates": {"DEFAULT": "default", "FIRST": "first"},
+                    "per_user": {"42": {"FIRST": "ciao {author}", "DEFAULT": "x"}},
+                },
+            )
+            assert embed.description == "ciao <@42>"
+            await db.close()
+        finally:
+            triggers_module.discord.TextChannel = original_text_channel
+
+    asyncio.run(_run())
+
+
+def test_template_fallback_does_not_break_trigger() -> None:
+    async def _run() -> None:
+        original_text_channel = triggers_module.discord.TextChannel
+        triggers_module.discord.TextChannel = _FakeTextChannel
+        try:
+            db = DatabaseService(":memory:")
+            await db.connect()
+            await db.initialize_schema()
+            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
+            await db.add_trigger_phrase("g1", "ch-a", "il criccy", "CONTAINS", False, None)
+            await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "ok"}})
+
+            service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
+            channel = _FakeTextChannel()
+            service._bot = _FakeBot(channel)
+
+            original_render = service._render_phrase_template
+            service._render_phrase_template = Mock(side_effect=RuntimeError("boom"))
+            try:
+                envelope = EventEnvelope(
+                    event_id="evt-1",
+                    event_type="message.create",
+                    platform="discord",
+                    ts="2026-01-01T10:00:00+00:00",
+                    guild_id="g1",
+                    channel_id="ch-z",
+                    thread_id=None,
+                    author_id="u1",
+                    content="oggi dico il criccy",
+                    meta={"message_id": "123"},
+                )
+                await service._handle_phrases(envelope)
+            finally:
+                service._render_phrase_template = original_render
+
+            embed = channel.target.replies[0]
+            assert embed.description == "il criccy"
+            assert embed.color.value == 0xFFD700
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel

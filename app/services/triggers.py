@@ -28,8 +28,8 @@ from app.utils.pii import contains_pii
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
 PHRASE_FALLBACK_TEMPLATES = {
-    "DEFAULT": "Questa frase è riapparsa! Ultima volta: {last_seen_human} fa ({last_seen_dt}). È la tua {count_user}ª volta.",
-    "FIRST": "Frase rilevata per la prima volta in questo trigger. È la tua {count_user}ª volta.",
+    "DEFAULT": "È la {count_user}ª volta che lo dici. L'ultima è stata {last_seen_human} fa. 👀",
+    "FIRST": "È la prima volta che lo dici. 👀",
 }
 PHRASE_PLACEHOLDERS = {
     "{author}",
@@ -760,14 +760,44 @@ class TriggerEngineService:
         message_id = str(envelope.meta.get("message_id") or "")
         author_id = str(envelope.author_id or "")
 
-        _ = await self._database.get_trigger_state_any_channel(envelope.guild_id, "frasi")
-        if author_id:
-            await self._database.increment_phrase_user_stats(phrase_id, author_id, ts, message_id)
+        state = await self._database.get_trigger_state_any_channel(envelope.guild_id, "frasi")
+        previous_seen = self._build_last_seen_values(phrase.get("last_seen_ts"))
+
+        stats_before = await self._database.get_phrase_user_stats(phrase_id, author_id) if author_id else {}
+        previous_count = int(stats_before.get("count") or 0)
+        template_kind = "FIRST" if previous_count <= 0 else "DEFAULT"
+        template = self._resolve_phrase_template(state, author_id=author_id, kind=template_kind)
+
+        count_user = await self._database.increment_phrase_user_stats(phrase_id, author_id, ts, message_id) if author_id else 0
+        values = {
+            "author": f"<@{author_id}>" if author_id else "",
+            "author_name": author_name,
+            "phrase": str(phrase.get("phrase") or ""),
+            "count_user": str(count_user),
+            "last_seen_human": previous_seen["human"],
+            "last_seen_dt": previous_seen["dt"],
+        }
+
+        rendered_text = str(phrase.get("phrase") or "")
+        try:
+            candidate = self._render_phrase_template(template, values).strip()
+            if candidate:
+                rendered_text = candidate
+            else:
+                raise ValueError("empty rendered phrase template")
+        except Exception:
+            logger.exception("Failed to render phrase template; using built-in fallback", extra={"phrase_id": phrase_id})
+            try:
+                fallback = self._render_phrase_template(PHRASE_FALLBACK_TEMPLATES[template_kind], values).strip()
+                if fallback:
+                    rendered_text = fallback
+            except Exception:
+                logger.exception("Failed to render phrase fallback template; using raw phrase", extra={"phrase_id": phrase_id})
 
         color = self._discord_color_from_phrase(phrase)
         embed = discord.Embed(
             title="💬 FRASI ICONICHE",
-            description=str(phrase.get("phrase") or ""),
+            description=rendered_text,
             color=color,
         )
         embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia.")
