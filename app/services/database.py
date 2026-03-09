@@ -359,6 +359,24 @@ class DatabaseService:
                 FOREIGN KEY (phrase_id) REFERENCES trigger_phrases(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS trigger_phrase_global_milestones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                threshold_count INTEGER NOT NULL,
+                template_text TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(guild_id, threshold_count)
+            );
+
+            CREATE TABLE IF NOT EXISTS trigger_phrase_global_user_custom_phrases (
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                custom_text TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, user_id)
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_state (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -1763,6 +1781,101 @@ class DatabaseService:
         )
         return dict(row) if row else {}
 
+    async def set_trigger_phrase_global_milestone(self, guild_id: str, threshold_count: int, template_text: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_phrase_global_milestones (guild_id, threshold_count, template_text)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, threshold_count) DO UPDATE SET
+                template_text = excluded.template_text
+            """,
+            (guild_id, threshold_count, template_text),
+        )
+
+    async def delete_trigger_phrase_global_milestone(self, guild_id: str, threshold_count: int) -> bool:
+        existing = await self.fetchone(
+            "SELECT 1 FROM trigger_phrase_global_milestones WHERE guild_id = ? AND threshold_count = ?",
+            (guild_id, threshold_count),
+        )
+        if existing is None:
+            return False
+        await self.execute(
+            "DELETE FROM trigger_phrase_global_milestones WHERE guild_id = ? AND threshold_count = ?",
+            (guild_id, threshold_count),
+        )
+        return True
+
+    async def list_trigger_phrase_global_milestones(self, guild_id: str) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT id, guild_id, threshold_count, template_text, created_at
+            FROM trigger_phrase_global_milestones
+            WHERE guild_id = ?
+            ORDER BY threshold_count ASC
+            """,
+            (guild_id,),
+        )
+        return [dict(row) for row in rows]
+
+    async def get_trigger_phrase_global_milestone(self, guild_id: str, threshold_count: int) -> dict[str, Any]:
+        row = await self.fetchone(
+            """
+            SELECT id, guild_id, threshold_count, template_text, created_at
+            FROM trigger_phrase_global_milestones
+            WHERE guild_id = ? AND threshold_count = ?
+            """,
+            (guild_id, threshold_count),
+        )
+        return dict(row) if row else {}
+
+    async def upsert_trigger_phrase_global_user_custom_text(self, guild_id: str, user_id: str, custom_text: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_phrase_global_user_custom_phrases (guild_id, user_id, custom_text)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                custom_text = excluded.custom_text,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (guild_id, user_id, custom_text),
+        )
+
+    async def delete_trigger_phrase_global_user_custom_text(self, guild_id: str, user_id: str) -> bool:
+        existing = await self.fetchone(
+            "SELECT 1 FROM trigger_phrase_global_user_custom_phrases WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        if existing is None:
+            return False
+        await self.execute(
+            "DELETE FROM trigger_phrase_global_user_custom_phrases WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        return True
+
+    async def get_trigger_phrase_global_user_custom_text(self, guild_id: str, user_id: str) -> str:
+        row = await self.fetchone(
+            """
+            SELECT custom_text
+            FROM trigger_phrase_global_user_custom_phrases
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (guild_id, user_id),
+        )
+        return str(row["custom_text"]) if row and row["custom_text"] is not None else ""
+
+    async def list_trigger_phrase_global_user_custom_texts(self, guild_id: str) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT guild_id, user_id, custom_text, created_at, updated_at
+            FROM trigger_phrase_global_user_custom_phrases
+            WHERE guild_id = ?
+            ORDER BY updated_at DESC, user_id ASC
+            """,
+            (guild_id,),
+        )
+        return [dict(row) for row in rows]
+
     async def get_trigger_phrase_stats_summary(self, guild_id: str, phrase_id: int) -> dict[str, Any]:
         row = await self.fetchone(
             """
@@ -1890,6 +2003,17 @@ class DatabaseService:
         scope_channel_id: str = "__guild__",
     ) -> None:
         await self.set_trigger_state(guild_id, scope_channel_id, trigger_key, state)
+
+    async def get_trigger_phrase_global_milestones_enabled(self, guild_id: str) -> bool:
+        state = await self.get_trigger_state_any_channel(guild_id, "frasi")
+        value = state.get("global_milestones_enabled")
+        return bool(value) if isinstance(value, bool) else False
+
+    async def set_trigger_phrase_global_milestones_enabled(self, guild_id: str, enabled: bool) -> None:
+        state = await self.get_trigger_state_any_channel(guild_id, "frasi")
+        normalized = dict(state) if isinstance(state, dict) else {}
+        normalized["global_milestones_enabled"] = bool(enabled)
+        await self.set_trigger_state_global(guild_id, "frasi", normalized)
 
     async def get_cache(self, key: str) -> Optional[str]:
         now = datetime.now(timezone.utc).isoformat()

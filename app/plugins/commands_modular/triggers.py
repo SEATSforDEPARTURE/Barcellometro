@@ -122,21 +122,9 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         if templates:
             state["templates"] = templates
 
-        per_user: dict[str, dict[str, str]] = {}
-        raw_per_user = raw_state.get("per_user")
-        if isinstance(raw_per_user, dict):
-            for user_id, user_templates_raw in raw_per_user.items():
-                if not isinstance(user_id, str) or not isinstance(user_templates_raw, dict):
-                    continue
-                clean_user_templates: dict[str, str] = {}
-                for kind in ("DEFAULT", "FIRST"):
-                    value = user_templates_raw.get(kind)
-                    if isinstance(value, str):
-                        clean_user_templates[kind] = value
-                if clean_user_templates:
-                    per_user[user_id] = clean_user_templates
-        if per_user:
-            state["per_user"] = per_user
+        global_milestones_enabled = raw_state.get("global_milestones_enabled")
+        if isinstance(global_milestones_enabled, bool):
+            state["global_milestones_enabled"] = global_milestones_enabled
 
         return state
 
@@ -158,7 +146,6 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         cooldown_raw = row.get("cooldown_seconds")
         cooldown_text = f"{cooldown_raw}s" if cooldown_raw is not None else "nessuno"
         enabled = bool(row.get("enabled", 1))
-        milestone_count = int(row.get("milestone_count") or 0)
         return " · ".join(
             [
                 f"#{row.get('id')}",
@@ -167,7 +154,6 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
                 f"colore: {row.get('embed_color') or '-'}",
                 f"cooldown: {cooldown_text}",
                 f"ruoli: {roles_text}",
-                f"milestone: {milestone_count}",
                 f"stato: {'attiva' if enabled else 'disattiva'}",
             ]
         )
@@ -407,10 +393,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             return
         lines: list[str] = []
         for row in rows:
-            milestones = await ctx.database.list_trigger_phrase_milestones(int(row["id"]))
-            row_with_milestones = dict(row)
-            row_with_milestones["milestone_count"] = len(milestones)
-            lines.append(_format_phrase_row(row_with_milestones))
+            lines.append(_format_phrase_row(row))
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @frasi_group.command(name="edit", description="Modifica frase trigger esistente")
@@ -545,7 +528,8 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
 
         summary = await ctx.database.get_trigger_phrase_stats_summary(guild_id, id)
         top_users = await ctx.database.list_trigger_phrase_user_stats(guild_id, id, limit=10)
-        milestones = await ctx.database.list_trigger_phrase_milestones(id)
+        global_milestones_enabled = await ctx.database.get_trigger_phrase_global_milestones_enabled(guild_id)
+        global_milestones = await ctx.database.list_trigger_phrase_global_milestones(guild_id)
 
         embed = discord.Embed(
             title=f"📊 STATISTICHE FRASE #{id}",
@@ -559,7 +543,8 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         embed.add_field(name="Utilizzi totali", value=str(total_uses), inline=True)
         embed.add_field(name="Media per utente", value=f"{avg:.2f}" if unique_users > 0 else "-", inline=True)
         embed.add_field(name="Ultima attività frase", value=_humanize_ts(summary.get("last_seen_ts_max") or phrase.get("last_seen_ts")), inline=False)
-        embed.add_field(name="Milestone configurate", value=str(len(milestones)), inline=True)
+        embed.add_field(name="Milestone globali", value="ON" if global_milestones_enabled else "OFF", inline=True)
+        embed.add_field(name="N. milestone globali", value=str(len(global_milestones)), inline=True)
 
         if not top_users:
             embed.add_field(name="Top utenti", value="Nessun utilizzo registrato.", inline=False)
@@ -580,17 +565,50 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @frasi_group.command(name="milestone_set", description="Imposta/aggiorna milestone per frase")
-    @app_commands.describe(id="ID frase", soglia="Soglia conteggio utente", testo="Template milestone")
-    async def frasi_milestone_set(interaction: discord.Interaction, id: int, soglia: int, testo: str) -> None:
+    @frasi_group.command(name="milestone_global_on", description="Abilita milestone globali")
+    async def frasi_milestone_global_on(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        if not await _require_mod(interaction):
+            return
+        guild_id, _ = scope
+        await ctx.database.set_trigger_phrase_global_milestones_enabled(guild_id, True)
+        await interaction.response.send_message("Milestone globali abilitate.", ephemeral=True)
+
+    @frasi_group.command(name="milestone_global_off", description="Disabilita milestone globali")
+    async def frasi_milestone_global_off(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        if not await _require_mod(interaction):
+            return
+        guild_id, _ = scope
+        await ctx.database.set_trigger_phrase_global_milestones_enabled(guild_id, False)
+        await interaction.response.send_message("Milestone globali disabilitate.", ephemeral=True)
+
+    @frasi_group.command(name="milestone_global_status", description="Stato milestone globali")
+    async def frasi_milestone_global_status(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
-        phrase = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
-        if not phrase:
-            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+        enabled = await ctx.database.get_trigger_phrase_global_milestones_enabled(guild_id)
+        rows = await ctx.database.list_trigger_phrase_global_milestones(guild_id)
+        await interaction.response.send_message(
+            f"Milestone globali: {'ON' if enabled else 'OFF'} · configurate: {len(rows)}",
+            ephemeral=True,
+        )
+
+    @frasi_group.command(name="milestone_global_set", description="Imposta/aggiorna milestone globale")
+    @app_commands.describe(soglia="Soglia conteggio utente", testo="Template milestone globale")
+    async def frasi_milestone_global_set(interaction: discord.Interaction, soglia: int, testo: str) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
             return
+        if not await _require_mod(interaction):
+            return
+        guild_id, _ = scope
         if soglia < 2:
             await interaction.response.send_message("La soglia deve essere >= 2.", ephemeral=True)
             return
@@ -598,55 +616,36 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         if not text_clean:
             await interaction.response.send_message("Il testo milestone non può essere vuoto.", ephemeral=True)
             return
-        await ctx.database.upsert_trigger_phrase_milestone(id, soglia, text_clean)
-        await interaction.response.send_message(
-            f"Milestone impostata per la frase #{id} alla soglia {soglia}.",
-            ephemeral=True,
-        )
+        await ctx.database.set_trigger_phrase_global_milestone(guild_id, soglia, text_clean)
+        await interaction.response.send_message(f"Milestone globale impostata alla soglia {soglia}.", ephemeral=True)
 
-    @frasi_group.command(name="milestone_remove", description="Rimuovi milestone di una frase")
-    @app_commands.describe(id="ID frase", soglia="Soglia milestone")
-    async def frasi_milestone_remove(interaction: discord.Interaction, id: int, soglia: int) -> None:
+    @frasi_group.command(name="milestone_global_remove", description="Rimuovi milestone globale")
+    @app_commands.describe(soglia="Soglia milestone")
+    async def frasi_milestone_global_remove(interaction: discord.Interaction, soglia: int) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        guild_id, _ = scope
-        phrase = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
-        if not phrase:
-            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+        if not await _require_mod(interaction):
             return
-        deleted = await ctx.database.delete_trigger_phrase_milestone(id, soglia)
+        guild_id, _ = scope
+        deleted = await ctx.database.delete_trigger_phrase_global_milestone(guild_id, soglia)
         if not deleted:
-            await interaction.response.send_message(
-                f"Nessuna milestone trovata per frase #{id} alla soglia {soglia}.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(f"Nessuna milestone globale alla soglia {soglia}.", ephemeral=True)
             return
-        await interaction.response.send_message(
-            f"Milestone rimossa per frase #{id} alla soglia {soglia}.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message(f"Milestone globale rimossa alla soglia {soglia}.", ephemeral=True)
 
-    @frasi_group.command(name="milestone_list", description="Lista milestone di una frase")
-    @app_commands.describe(id="ID frase")
-    async def frasi_milestone_list(interaction: discord.Interaction, id: int) -> None:
+    @frasi_group.command(name="milestone_global_list", description="Lista milestone globali")
+    async def frasi_milestone_global_list(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
-        phrase = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
-        if not phrase:
-            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
-            return
-        milestones = await ctx.database.list_trigger_phrase_milestones(id)
+        milestones = await ctx.database.list_trigger_phrase_global_milestones(guild_id)
         if not milestones:
-            await interaction.response.send_message(f"Nessuna milestone configurata per la frase #{id}.", ephemeral=True)
+            await interaction.response.send_message("Nessuna milestone globale configurata.", ephemeral=True)
             return
         lines = [f"{int(m['threshold_count'])} → \"{str(m['template_text'])}\"" for m in milestones]
-        await interaction.response.send_message(
-            "\n".join([f"Milestone frase #{id}:", *lines]),
-            ephemeral=True,
-        )
+        await interaction.response.send_message("\n".join(["Milestone globali:", *lines]), ephemeral=True)
 
     @frasi_group.command(name="template_show", description="Mostra template trigger frasi")
     async def frasi_template_show(interaction: discord.Interaction) -> None:
@@ -661,7 +660,8 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         pretty = json.dumps(normalized, ensure_ascii=False, indent=2)
         guide = (
             "Placeholder disponibili:\n"
-            "{author}, {author_name}, {phrase}, {count_user}, {last_seen_human}, {last_seen_dt}"
+            "{author}, {author_name}, {phrase}, {count_user_prev}, {count_user}, {last_seen_human}, {last_seen_dt}, {milestone}, {custom_user_phrase}\n"
+            "Nota: i template per-user legacy non sono più usati a runtime; usa /frasi userphrase_set."
         )
         await interaction.response.send_message(f"```json\n{pretty}\n```\n{guide}", ephemeral=True)
 
@@ -687,36 +687,6 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await ctx.database.set_trigger_state_global(guild_id, "frasi", normalized)
         await interaction.response.send_message(f"Template {kind.value} aggiornato.", ephemeral=True)
 
-    @frasi_group.command(name="template_set_user", description="Template frasi utente")
-    @app_commands.choices(
-        kind=[
-            app_commands.Choice(name="DEFAULT", value="DEFAULT"),
-            app_commands.Choice(name="FIRST", value="FIRST"),
-        ]
-    )
-    async def frasi_template_set_user(
-        interaction: discord.Interaction,
-        user: discord.Member,
-        kind: app_commands.Choice[str],
-        text: str,
-    ) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        if not await _require_mod(interaction):
-            return
-        guild_id, _ = scope
-        state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
-        normalized = _normalize_phrase_templates_state(state)
-        per_user = dict(normalized.get("per_user") or {})
-        user_id = str(user.id)
-        user_templates = dict(per_user.get(user_id) or {})
-        user_templates[kind.value] = text
-        per_user[user_id] = user_templates
-        normalized["per_user"] = per_user
-        await ctx.database.set_trigger_state_global(guild_id, "frasi", normalized)
-        await interaction.response.send_message(f"Template {kind.value} aggiornato per {user.mention}.", ephemeral=True)
-
     @frasi_group.command(name="template_reset", description="Reset template trigger frasi")
     async def frasi_template_reset(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
@@ -726,7 +696,68 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             return
         guild_id, _ = scope
         await ctx.database.set_trigger_state_global(guild_id, "frasi", {})
-        await interaction.response.send_message("Template trigger frasi globali resettati (fallback legacy attivo).", ephemeral=True)
+        await interaction.response.send_message("Template trigger frasi globali resettati (DEFAULT/FIRST).", ephemeral=True)
+
+    @frasi_group.command(name="userphrase_set", description="Imposta frase custom globale utente")
+    async def frasi_userphrase_set(interaction: discord.Interaction, utente: discord.Member, testo: str) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        if not await _require_mod(interaction):
+            return
+        guild_id, _ = scope
+        text_clean = testo.strip()
+        if not text_clean:
+            await interaction.response.send_message("Il testo non può essere vuoto.", ephemeral=True)
+            return
+        if len(text_clean) > 300:
+            await interaction.response.send_message("Testo troppo lungo (max 300 caratteri).", ephemeral=True)
+            return
+        await ctx.database.upsert_trigger_phrase_global_user_custom_text(guild_id, str(utente.id), text_clean)
+        await interaction.response.send_message(f"Frase custom globale aggiornata per {utente.mention}.", ephemeral=True)
+
+    @frasi_group.command(name="userphrase_remove", description="Rimuovi frase custom globale utente")
+    async def frasi_userphrase_remove(interaction: discord.Interaction, utente: discord.Member) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        if not await _require_mod(interaction):
+            return
+        guild_id, _ = scope
+        removed = await ctx.database.delete_trigger_phrase_global_user_custom_text(guild_id, str(utente.id))
+        if not removed:
+            await interaction.response.send_message(f"Nessuna frase custom globale trovata per {utente.mention}.", ephemeral=True)
+            return
+        await interaction.response.send_message(f"Frase custom globale rimossa per {utente.mention}.", ephemeral=True)
+
+    @frasi_group.command(name="userphrase_show", description="Mostra frase custom globale utente")
+    async def frasi_userphrase_show(interaction: discord.Interaction, utente: discord.Member) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, _ = scope
+        text = await ctx.database.get_trigger_phrase_global_user_custom_text(guild_id, str(utente.id))
+        if not text:
+            await interaction.response.send_message(f"{utente.mention} non ha una frase custom globale.", ephemeral=True)
+            return
+        await interaction.response.send_message(f"{utente.mention} → {text}", ephemeral=True)
+
+    @frasi_group.command(name="userphrase_list", description="Lista frasi custom globali utenti")
+    async def frasi_userphrase_list(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, _ = scope
+        rows = await ctx.database.list_trigger_phrase_global_user_custom_texts(guild_id)
+        if not rows:
+            await interaction.response.send_message("Nessuna frase custom globale configurata.", ephemeral=True)
+            return
+        lines: list[str] = []
+        for row in rows[:30]:
+            user_id = str(row.get("user_id") or "")
+            mention = f"<@{user_id}>" if user_id.isdigit() else user_id
+            lines.append(f"{mention} → {row.get('custom_text')}")
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @prompt_group.command(name="on", description="Abilita trigger prompt")
     async def prompt_on(interaction: discord.Interaction) -> None:
