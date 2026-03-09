@@ -1,4 +1,5 @@
 from .admin import register_admin
+from .ask import register_ask
 from .audio_notes import register_audio_notes
 from .attivita import register_attivita
 from .aura import register_aura
@@ -29,6 +30,7 @@ __all__ = [
     "get_setting",
     "set_setting",
     "register_admin",
+    "register_ask",
     "register_audio_notes",
     "register_attivita",
     "register_aura",

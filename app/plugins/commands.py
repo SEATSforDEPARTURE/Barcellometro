@@ -10,6 +10,7 @@ from app.core.service_registry import ServiceRegistry
 from app.plugins.commands_modular import (
     CommandContext,
     register_admin,
+    register_ask,
     register_audio_notes,
     register_attivita,
     register_aura,
@@ -96,6 +97,7 @@ def setup(registry: ServiceRegistry) -> None:
 
     register_resoconto(resoconto_group, ctx)
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
+    register_ask(bot.tree, guild_obj, ctx)
     logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
     register_barcello(bot.tree, guild_obj, ctx)
     scope_label = "guild" if guild_obj else "global"
