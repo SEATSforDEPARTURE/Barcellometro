@@ -1,14 +1,24 @@
 from pathlib import Path
 
 
-def test_root_namespace_is_bm_and_inattivi_top_level() -> None:
+def test_root_namespaces_include_bm_inattivi_qna_insights_campagne() -> None:
     source = Path("app/plugins/commands.py").read_text()
 
     assert 'app_commands.Group(name="bm"' in source
-    assert 'add_group_once(bm_group, inattivi_group, logger)' not in source
-    assert 'root_commands: list[app_commands.Command | app_commands.Group] = [' in source
-    assert '        bm_group,' in source
-    assert '        inattivi_group,' in source
+    assert 'app_commands.Group(name="inattivi"' in source
+    assert 'app_commands.Group(name="qna"' in source
+    assert 'app_commands.Group(name="insights"' in source
+    assert 'app_commands.Group(name="campagne"' in source
+    assert 'add_group_once(bm_group, qna_group, logger)' not in source
+    assert 'add_group_once(bm_group, insights_group, logger)' not in source
+
+
+def test_calibrate_is_under_bm_barcello_and_not_direct_on_bm() -> None:
+    admin_source = Path("app/plugins/commands_modular/admin.py").read_text()
+    triggers_source = Path("app/plugins/commands_modular/triggers.py").read_text()
+
+    assert '@bm_group.command(name="calibrate"' not in admin_source
+    assert '@barcello_group.command(name="calibrate"' in triggers_source
 
 
 def test_status_subcommand_uses_bm_name_and_permission() -> None:

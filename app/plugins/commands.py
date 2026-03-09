@@ -50,7 +50,9 @@ def setup(registry: ServiceRegistry) -> None:
     stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
     translate_group = app_commands.Group(name="translate", description="Traduzione")
     audio_notes_group = app_commands.Group(name="audio_notes", description="Note vocali")
-    messaggi_group = app_commands.Group(name="messaggi", description="Messaggi auto")
+    campagne_group = app_commands.Group(name="campagne", description="Campagne auto")
+    qna_group = app_commands.Group(name="qna", description="QnA")
+    insights_group = app_commands.Group(name="insights", description="Curiosità utenti")
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Ingest vocale")
     privacy_group = app_commands.Group(name="privacy", description="Privacy vocale")
     status_group = app_commands.Group(name="status", description="Stato servizi")
@@ -64,7 +66,6 @@ def setup(registry: ServiceRegistry) -> None:
     add_group_once(bm_group, stt_group, logger)
     add_group_once(bm_group, translate_group, logger)
     add_group_once(bm_group, audio_notes_group, logger)
-    add_group_once(bm_group, messaggi_group, logger)
     add_group_once(bm_group, voice_ingest_group, logger)
 
     register_admin(bm_group, ctx)
@@ -72,7 +73,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_stt(stt_group, ctx)
     register_translate(translate_group, ctx)
     register_audio_notes(audio_notes_group, ctx)
-    register_messaggi(messaggi_group, ctx)
+    register_messaggi(campagne_group, ctx)
     register_voice_ingest(voice_ingest_group, ctx)
     register_privacy(privacy_group, ctx)
     register_status(status_group, ctx)
@@ -95,7 +96,7 @@ def setup(registry: ServiceRegistry) -> None:
         logger.warning("/inattivi disabled due to registration failure")
 
     register_resoconto(resoconto_group, ctx)
-    frasi_group = register_triggers(bm_group, ctx)
+    frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
     logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
     register_barcello(bot.tree, guild_obj, ctx)
     register_ask(bot.tree, guild_obj, ctx)
@@ -106,6 +107,9 @@ def setup(registry: ServiceRegistry) -> None:
     root_commands: list[app_commands.Command | app_commands.Group] = [
         bm_group,
         inattivi_group,
+        qna_group,
+        insights_group,
+        campagne_group,
         riassunto_group,
         aura_group,
         attivita_group,

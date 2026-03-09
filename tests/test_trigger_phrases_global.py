@@ -332,7 +332,7 @@ def test_register_triggers_keeps_frasi_top_level() -> None:
         message_scheduler=None,
         trigger_engine=None,
     )
-    frasi_group = register_triggers(group, ctx)
+    frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
 
     names = [command.name for command in group.commands]
     assert "frasi" not in names
@@ -488,7 +488,7 @@ def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
             message_scheduler=Mock(),
             trigger_engine=Mock(),
         )
-        frasi_group = register_triggers(group, ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
         add_cmd = next(c for c in frasi_group.commands if c.name == "add")
         list_cmd = next(c for c in frasi_group.commands if c.name == "list")
 
@@ -547,7 +547,7 @@ def test_frasi_edit_updates_in_place_and_preserves_stats() -> None:
             message_scheduler=Mock(),
             trigger_engine=Mock(),
         )
-        frasi_group = register_triggers(group, ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
         edit_cmd = next(c for c in frasi_group.commands if c.name == "edit")
 
         response = Mock()
@@ -609,7 +609,7 @@ def test_frasi_edit_reset_fields_and_missing_id() -> None:
             message_scheduler=Mock(),
             trigger_engine=Mock(),
         )
-        frasi_group = register_triggers(group, ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
         edit_cmd = next(c for c in frasi_group.commands if c.name == "edit")
 
         response = Mock()
@@ -807,7 +807,7 @@ def test_frasi_stats_and_milestone_commands() -> None:
             message_scheduler=Mock(),
             trigger_engine=Mock(),
         )
-        frasi_group = register_triggers(group, ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
         stats_cmd = next(c for c in frasi_group.commands if c.name == "stats")
         set_cmd = next(c for c in frasi_group.commands if c.name == "milestone_global_set")
         list_cmd = next(c for c in frasi_group.commands if c.name == "milestone_global_list")
@@ -858,7 +858,7 @@ def test_template_set_user_command_is_not_registered() -> None:
             message_scheduler=Mock(),
             trigger_engine=Mock(),
         )
-        frasi_group = register_triggers(group, ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
         names = {command.name for command in frasi_group.commands}
         assert "template_set_user" not in names
         await db.close()

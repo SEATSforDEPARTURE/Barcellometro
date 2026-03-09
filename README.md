@@ -92,6 +92,7 @@ finestra configurata in modo idempotente.
 - `/bm ai on` → abilita il servizio AI.
 - `/bm ai off` → disabilita il servizio AI.
 - `/bm ai-model task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `transcription`, `translation`).
+- `/bm barcello calibrate` → calibra i pesi del motore barcello (mod).
 
 ### STT
 - `/bm stt backend local|ai`
@@ -119,18 +120,36 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/privacy off [voice_channel]`
 - `/privacy status [voice_channel]`
 
-### Messaggi community
-- `/bm messaggi on` → abilita invii automatici nel canale corrente.
-- `/bm messaggi off` → disabilita nel canale corrente.
-- `/bm messaggi status` → stato canale + conteggio campagne.
-- `/bm messaggi aggiungi testo:"..." ogni_minuti:<int> ora_inizio:"HH:MM" [testo_verde:"..."] [testo_giallo:"..."] [testo_rosso:"..."] [testo_nero:"..."] [mood_mode:<AUTO|IGNORE_BARCELLO|GREEN_ONLY|YELLOW_ONLY|RED_ONLY|BLACK_ONLY>] [jitter_sec:<int>] [solo_se_inattivo_min:<int>]`
-- `/bm messaggi quiet_status|quiet_on|quiet_off|quiet_set start:"HH:MM" end:"HH:MM"` → gestione quiet hours.
-- `/bm messaggi cap_status|cap_on|cap_off|cap_set n:<int>` → gestione cap giornaliero.
-- `/bm messaggi lista` → elenco campagne con ID reali.
-- `/bm messaggi cancella id:<int>` → soft delete.
-- `/bm messaggi pausa id:<int>` → disabilita.
-- `/bm messaggi riprendi id:<int>` → abilita + ricalcolo next_run.
-- `/bm messaggi test id:<int>` → invio immediato nel canale corrente.
+### Campagne community
+- `/campagne on` → abilita invii automatici nel canale corrente.
+- `/campagne off` → disabilita nel canale corrente.
+- `/campagne status` → stato canale + conteggio campagne.
+- `/campagne aggiungi testo:"..." ogni_minuti:<int> ora_inizio:"HH:MM" [testo_verde:"..."] [testo_giallo:"..."] [testo_rosso:"..."] [testo_nero:"..."] [mood_mode:<AUTO|IGNORE_BARCELLO|GREEN_ONLY|YELLOW_ONLY|RED_ONLY|BLACK_ONLY>] [jitter_sec:<int>] [solo_se_inattivo_min:<int>]`
+- `/campagne quiet_status|quiet_on|quiet_off|quiet_set start:"HH:MM" end:"HH:MM"` → gestione quiet hours.
+- `/campagne cap_status|cap_on|cap_off|cap_set n:<int>` → gestione cap giornaliero.
+- `/campagne lista` → elenco campagne con ID reali.
+- `/campagne cancella id:<int>` → soft delete.
+- `/campagne pausa id:<int>` → disabilita.
+- `/campagne riprendi id:<int>` → abilita + ricalcolo next_run.
+- `/campagne test id:<int>` → invio immediato nel canale corrente.
+- `/campagne prompt on|off|status|create|list|delete|test` → gestione campagne AI prompt.
+
+
+### QnA
+- `/qna on`
+- `/qna off`
+- `/qna status`
+- `/qna limits_show`
+- `/qna limits_set tier_key:<base|role1|role2|role3|mod> limit_int:<int>`
+- `/qna bonus_add user:<utente> amount_int:<int> [hours_valid:<int>]`
+- `/qna bonus_clear user:<utente>`
+- `/qna bonus_show user:<utente>`
+
+### Insights
+- `/insights on`
+- `/insights off`
+- `/insights status`
+- `/insights config testo:"..."`
 
 ### Riassunto
 - `/riassunto ultimi <quantità> <minuti|ore|giorni|settimane>`
