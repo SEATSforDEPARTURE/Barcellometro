@@ -1646,6 +1646,60 @@ class DatabaseService:
             (guild_id, phrase_id),
         )
 
+    async def get_trigger_phrase_by_id(self, guild_id: str, phrase_id: int) -> dict[str, Any]:
+        row = await self.fetchone(
+            "SELECT * FROM trigger_phrases WHERE guild_id = ? AND id = ?",
+            (guild_id, phrase_id),
+        )
+        if row is None:
+            return {}
+        return self._normalize_trigger_phrase_row(row)
+
+    async def update_trigger_phrase(
+        self,
+        guild_id: str,
+        phrase_id: int,
+        *,
+        phrase: str | None = None,
+        match_mode: str | None = None,
+        embed_color: str | None = None,
+        set_embed_color: bool = False,
+        cooldown_seconds: int | None = None,
+        set_cooldown_seconds: bool = False,
+        allowed_role_ids: list[str] | list[int] | None = None,
+        set_allowed_role_ids: bool = False,
+        enabled: bool | None = None,
+    ) -> bool:
+        updates: list[str] = []
+        params: list[Any] = []
+        if phrase is not None:
+            updates.append("phrase = ?")
+            params.append(phrase)
+        if match_mode is not None:
+            updates.append("match_mode = ?")
+            params.append(match_mode)
+        if set_embed_color:
+            updates.append("embed_color = ?")
+            params.append(embed_color)
+        if set_cooldown_seconds:
+            updates.append("cooldown_seconds = ?")
+            params.append(cooldown_seconds)
+        if set_allowed_role_ids:
+            updates.append("allowed_role_ids = ?")
+            params.append(self._serialize_allowed_role_ids(allowed_role_ids))
+        if enabled is not None:
+            updates.append("enabled = ?")
+            params.append(1 if enabled else 0)
+
+        if not updates:
+            return False
+        params.extend([guild_id, phrase_id])
+        await self.execute(
+            f"UPDATE trigger_phrases SET {', '.join(updates)} WHERE guild_id = ? AND id = ?",
+            tuple(params),
+        )
+        return True
+
     async def update_phrase_last_seen(self, phrase_id: int, ts: str, message_id: str) -> None:
         await self.execute(
             "UPDATE trigger_phrases SET last_seen_ts = ?, last_seen_message_id = ? WHERE id = ?",

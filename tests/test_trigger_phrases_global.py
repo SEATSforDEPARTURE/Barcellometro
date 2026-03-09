@@ -517,8 +517,125 @@ def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
         calls = response.send_message.await_args_list
         assert "Cooldown: 120s" in calls[0].kwargs["content"] or "Cooldown: 120s" in calls[0].args[0]
         list_text = calls[-1].kwargs.get("content") if calls[-1].kwargs else calls[-1].args[0]
-        assert "cooldown=120s" in list_text
-        assert "ruoli=<@&123>,<@&456>" in list_text
+        assert "#" in list_text
+        assert "cooldown: 120s" in list_text
+        assert "ruoli: <@&123>, <@&456>" in list_text
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_frasi_edit_updates_in_place_and_preserves_stats() -> None:
+    async def _run() -> None:
+        from discord import app_commands
+
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        await db.add_trigger_phrase("1", "2", "ciao", "CONTAINS", False, "#112233", 120, ["123"])
+        row_before = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("1",))
+        assert row_before is not None
+        phrase_id = int(row_before["id"])
+        await db.increment_phrase_user_stats(phrase_id, "u-1", "2026-01-01T10:00:00+00:00", "m1")
+
+        group = app_commands.Group(name="barcellometro", description="x")
+        ctx = SimpleNamespace(
+            database=db,
+            entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
+            timezone=timezone.utc,
+            message_scheduler=Mock(),
+            trigger_engine=Mock(),
+        )
+        frasi_group = register_triggers(group, ctx)
+        edit_cmd = next(c for c in frasi_group.commands if c.name == "edit")
+
+        response = Mock()
+        response.send_message = AsyncMock()
+        interaction = SimpleNamespace(
+            guild_id=1,
+            channel_id=2,
+            guild=_FakeGuild(role_ids=[999], members={}),
+            response=response,
+            user=SimpleNamespace(id=99),
+        )
+
+        await edit_cmd.callback(
+            interaction,
+            id=phrase_id,
+            frase="ciao aggiornato",
+            match_mode=SimpleNamespace(value="REGEX"),
+            colore="#445566",
+            cooldown=300,
+            ruoli="999",
+            reset_ruoli=False,
+            reset_cooldown=False,
+            reset_colore=False,
+            attiva=False,
+        )
+        row_after = await db.get_trigger_phrase_by_id("1", phrase_id)
+        assert row_after["id"] == phrase_id
+        assert row_after["phrase"] == "ciao aggiornato"
+        assert row_after["match_mode"] == "REGEX"
+        assert row_after["embed_color"] == "#445566"
+        assert row_after["cooldown_seconds"] == 300
+        assert row_after["allowed_role_ids"] == ["999"]
+        assert int(row_after["enabled"]) == 0
+
+        stats = await db.get_phrase_user_stats(phrase_id, "u-1")
+        assert int(stats.get("count") or 0) == 1
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_frasi_edit_reset_fields_and_missing_id() -> None:
+    async def _run() -> None:
+        from discord import app_commands
+
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        await db.add_trigger_phrase("1", "2", "ciao", "CONTAINS", False, "#112233", 120, ["123"])
+        row_before = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("1",))
+        assert row_before is not None
+        phrase_id = int(row_before["id"])
+
+        group = app_commands.Group(name="barcellometro", description="x")
+        ctx = SimpleNamespace(
+            database=db,
+            entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
+            timezone=timezone.utc,
+            message_scheduler=Mock(),
+            trigger_engine=Mock(),
+        )
+        frasi_group = register_triggers(group, ctx)
+        edit_cmd = next(c for c in frasi_group.commands if c.name == "edit")
+
+        response = Mock()
+        response.send_message = AsyncMock()
+        interaction = SimpleNamespace(
+            guild_id=1,
+            channel_id=2,
+            guild=_FakeGuild(role_ids=[123], members={}),
+            response=response,
+            user=SimpleNamespace(id=99),
+        )
+
+        await edit_cmd.callback(
+            interaction,
+            id=phrase_id,
+            reset_ruoli=True,
+            reset_cooldown=True,
+            reset_colore=True,
+        )
+        row_after = await db.get_trigger_phrase_by_id("1", phrase_id)
+        assert row_after["allowed_role_ids"] == []
+        assert row_after["cooldown_seconds"] is None
+        assert row_after["embed_color"] is None
+
+        await edit_cmd.callback(interaction, id=99999)
+        msg = response.send_message.await_args_list[-1].kwargs.get("content") or response.send_message.await_args_list[-1].args[0]
+        assert "non trovata" in msg.lower()
         await db.close()
 
     asyncio.run(_run())
