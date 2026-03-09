@@ -4,13 +4,11 @@ import asyncio
 import logging
 import random
 import re
-from urllib.parse import urljoin
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-import aiohttp
 import discord
 
 from app.services.barcello import BarcelloService
@@ -512,52 +510,7 @@ class MessageSchedulerService:
     ) -> None:
         base_title = str(campaign.get("embed_title") or campaign.get("name") or "📣 Campagna")
         raw_text = str(rendered_text or "")
-        campaign_type = str(campaign.get("type") or "")
         color = self._parse_embed_color(campaign.get("embed_color"))
-
-        if campaign_type == "AI_PROMPT":
-            items, tail_text = self._parse_ai_prompt_news_items(raw_text)
-            if items:
-                limited_items = items[:MAX_EMBEDS_PER_MESSAGE]
-                embeds: list[discord.Embed] = []
-                og_fetches = 0
-                for index, item in enumerate(limited_items):
-                    description = str(item.get("summary") or "").strip()
-                    if index == len(limited_items) - 1 and tail_text.strip():
-                        description = f"{description}\n\n{tail_text.strip()}".strip()
-                    embed_kwargs: dict[str, object] = {
-                        "title": f"{str(item.get('emoji') or '').strip()} {str(item.get('title') or '').strip()}".strip(),
-                        "description": description or None,
-                        "colour": color,
-                    }
-                    source_url = str(item.get("source_url") or "").strip()
-                    if self._is_http_url(source_url):
-                        embed_kwargs["url"] = source_url
-                    embed = discord.Embed(**embed_kwargs)
-
-                    image_url = str(item.get("image_url") or "").strip()
-                    if not self._is_http_url(image_url) and self._is_http_url(source_url) and og_fetches < 3:
-                        og_fetches += 1
-                        try:
-                            image_url = (await self._fetch_og_image(source_url)) or ""
-                        except Exception:  # noqa: BLE001
-                            logger.warning("Failed OG image fetch for source %s", source_url, exc_info=True)
-                            image_url = ""
-                    if self._is_http_url(image_url):
-                        embed.set_image(url=image_url)
-
-                    embed.set_footer(text=CAMPAIGN_EMBED_FOOTER)
-                    embeds.append(embed)
-
-                logger.info(
-                    "campaign_send_embed_news items=%s raw_len=%s title=%s campaign_id=%s",
-                    len(embeds),
-                    len(raw_text),
-                    base_title,
-                    campaign.get("id"),
-                )
-                await channel.send(embeds=embeds)
-                return
 
         pages = split_embed_pages(raw_text, limit=3900)
         if len(pages) > MAX_EMBEDS_PER_MESSAGE:
@@ -590,142 +543,6 @@ class MessageSchedulerService:
         )
         for idx in range(0, total, MAX_EMBEDS_PER_MESSAGE):
             await channel.send(embeds=embeds[idx : idx + MAX_EMBEDS_PER_MESSAGE])
-
-    def _is_http_url(self, value: str) -> bool:
-        return bool(re.match(r"^https?://\S+$", value.strip(), flags=re.IGNORECASE))
-
-    def _extract_url(self, value: str) -> str:
-        match = re.search(r"https?://\S+", value, flags=re.IGNORECASE)
-        if not match:
-            return ""
-        return match.group(0).rstrip(").,;!]")
-
-    def _parse_news_title_line(self, line: str) -> tuple[str, str, str]:
-        content = re.sub(r"^\s*[•*-]\s*", "", line).strip()
-        emoji = ""
-        parts = content.split(maxsplit=1)
-        if parts and not any(ch.isalnum() for ch in parts[0]) and len(parts) > 1:
-            emoji = parts[0].strip()
-            content = parts[1].strip()
-
-        source_url = ""
-        md_link = re.search(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", content)
-        if md_link:
-            title = md_link.group(1).strip()
-            source_url = md_link.group(2).strip()
-            return emoji, title, source_url
-
-        bold = re.search(r"\*\*([^*]+)\*\*", content)
-        if bold:
-            title = bold.group(1).strip()
-        else:
-            title = content.strip()
-        return emoji, title, source_url
-
-    def _parse_ai_prompt_news_items(self, text: str) -> tuple[list[dict[str, str]], str]:
-        lines = text.splitlines()
-        item_start_indexes = [idx for idx, line in enumerate(lines) if re.match(r"^\s*[•*-]\s+", line)]
-        if not item_start_indexes:
-            return [], ""
-
-        items: list[dict[str, str]] = []
-        tail_text = ""
-        for index, start_idx in enumerate(item_start_indexes):
-            end_idx = item_start_indexes[index + 1] if index + 1 < len(item_start_indexes) else len(lines)
-            block = lines[start_idx:end_idx]
-            if not block:
-                continue
-
-            emoji, title, source_url = self._parse_news_title_line(block[0])
-            if not title:
-                continue
-
-            summary_lines: list[str] = []
-            image_url = ""
-            in_tail = False
-            tail_lines: list[str] = []
-
-            for body_line in block[1:]:
-                stripped = body_line.strip()
-                if not stripped:
-                    if summary_lines and index == len(item_start_indexes) - 1:
-                        in_tail = True
-                    if in_tail:
-                        tail_lines.append("")
-                    continue
-
-                source_match = re.match(r"^\s*(?:🔗\s*)?fonte\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
-                if source_match:
-                    maybe_url = self._extract_url(source_match.group(1))
-                    if self._is_http_url(maybe_url):
-                        source_url = maybe_url
-                    continue
-
-                image_match = re.match(r"^\s*(?:📸\s*)?immagine\s*:\s*(.+)$", stripped, flags=re.IGNORECASE)
-                if image_match:
-                    maybe_image = self._extract_url(image_match.group(1))
-                    if self._is_http_url(maybe_image):
-                        image_url = maybe_image
-                    continue
-
-                if in_tail and index == len(item_start_indexes) - 1:
-                    tail_lines.append(body_line)
-                else:
-                    summary_lines.append(body_line)
-
-            cleaned_summary = "\n".join(line.rstrip() for line in summary_lines).strip()
-            items.append(
-                {
-                    "emoji": emoji,
-                    "title": title,
-                    "summary": cleaned_summary,
-                    "source_url": source_url if self._is_http_url(source_url) else "",
-                    "image_url": image_url if self._is_http_url(image_url) else "",
-                }
-            )
-            if index == len(item_start_indexes) - 1 and tail_lines:
-                tail_text = "\n".join(tail_lines).strip()
-
-        return items, tail_text
-
-    async def _fetch_og_image(self, url: str) -> Optional[str]:
-        if not self._is_http_url(url):
-            return None
-
-        timeout = aiohttp.ClientTimeout(total=8)
-        max_bytes = 512 * 1024
-        headers = {"User-Agent": "BarcellometroBot/1.0"}
-        html = ""
-        try:
-            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-                async with session.get(url, allow_redirects=True) as response:
-                    if response.status >= 400:
-                        return None
-                    chunks: list[bytes] = []
-                    total = 0
-                    async for chunk in response.content.iter_chunked(16384):
-                        chunks.append(chunk)
-                        total += len(chunk)
-                        if total >= max_bytes:
-                            break
-                    html = b"".join(chunks).decode("utf-8", errors="ignore")
-        except Exception:  # noqa: BLE001
-            logger.debug("OG image fetch failed for %s", url, exc_info=True)
-            return None
-
-        for tag in re.findall(r"<meta[^>]+>", html, flags=re.IGNORECASE):
-            attrs = {key.lower(): value for key, value in re.findall(r'([a-zA-Z_:]+)\s*=\s*["\']([^"\']+)["\']', tag)}
-            property_name = attrs.get("property", "").lower()
-            name_name = attrs.get("name", "").lower()
-            if property_name not in {"og:image", "twitter:image"} and name_name not in {"og:image", "twitter:image"}:
-                continue
-            content = attrs.get("content", "").strip()
-            if not content:
-                continue
-            resolved = urljoin(url, content)
-            if self._is_http_url(resolved):
-                return resolved
-        return None
 
     async def _skip_for_quiet_hours(self, now: datetime) -> Optional[str]:
         settings = await self._get_quiet_settings()
