@@ -10,6 +10,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.command_helpers import add_group_once
 from app.plugins.commands_modular.ctx import CommandContext
+from app.plugins.commands_modular.permissions import check_permission
 from app.services.config_file_loader import load_json_file
 from app.services.message_scheduler import calculate_initial_next_run
 
@@ -33,7 +34,19 @@ def register_triggers(
     add_group_once(bm_group, barcello_group, logger)
     add_group_once(campagne_group, prompt_group, logger)
 
+    def _command_permission_key(interaction: discord.Interaction) -> str:
+        qualified_name = getattr(getattr(interaction, "command", None), "qualified_name", "")
+        if qualified_name:
+            return qualified_name.replace(" ", ".")
+        data_name = str((interaction.data or {}).get("name") or "").strip()
+        return data_name or "unknown"
+
+    async def _guard(interaction: discord.Interaction) -> bool:
+        return await check_permission(interaction, _command_permission_key(interaction), ctx)
+
     async def _require_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
+        if not await _guard(interaction):
+            return None
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in un canale.", ephemeral=True)
             return None
@@ -51,10 +64,6 @@ def register_triggers(
                     enabled = await ctx.database.get_trigger_enabled_any_channel(guild_id, key)
                 await interaction.response.send_message(f"Trigger {key} (globale server): {'on' if enabled else 'off'}", ephemeral=True)
                 return
-            profile = await ctx.entitlements.resolve_profile(interaction.user)
-            if profile != "mod":
-                await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
-                return
             enabled = action == "on"
             await ctx.database.set_trigger_enabled_global(guild_id, key, enabled)
             await interaction.response.send_message(
@@ -66,20 +75,9 @@ def register_triggers(
             enabled = await ctx.database.get_trigger_enabled(guild_id, channel_id, key)
             await interaction.response.send_message(f"Trigger {key}: {'on' if enabled else 'off'}", ephemeral=True)
             return
-        profile = await ctx.entitlements.resolve_profile(interaction.user)
-        if profile != "mod":
-            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
-            return
         enabled = action == "on"
         await ctx.database.set_trigger_enabled(guild_id, channel_id, key, enabled)
         await interaction.response.send_message(f"Trigger {key} {'abilitato' if enabled else 'disabilitato'}.", ephemeral=True)
-
-    async def _require_mod(interaction: discord.Interaction) -> bool:
-        profile = await ctx.entitlements.resolve_profile(interaction.user)
-        if profile == "mod":
-            return True
-        await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
-        return False
 
 
     def _normalize_embed_color(raw: str | None) -> str | None:
@@ -255,8 +253,6 @@ def register_triggers(
             )
             return
 
-        if not await _require_mod(interaction):
-            return
         normalized = value.strip()
         if not normalized:
             await interaction.response.send_message("Inserisci un mood valido.", ephemeral=True)
@@ -282,8 +278,6 @@ def register_triggers(
     async def barcello_mood_reset(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
-            return
-        if not await _require_mod(interaction):
             return
         guild_id, channel_id = scope
         await ctx.database.set_trigger_state(guild_id, channel_id, "barcello_mood", {})
@@ -572,8 +566,6 @@ def register_triggers(
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        if not await _require_mod(interaction):
-            return
         guild_id, _ = scope
         await ctx.database.set_trigger_phrase_global_milestones_enabled(guild_id, True)
         await interaction.response.send_message("Milestone globali abilitate.", ephemeral=True)
@@ -582,8 +574,6 @@ def register_triggers(
     async def frasi_milestone_global_off(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
-            return
-        if not await _require_mod(interaction):
             return
         guild_id, _ = scope
         await ctx.database.set_trigger_phrase_global_milestones_enabled(guild_id, False)
@@ -608,8 +598,6 @@ def register_triggers(
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        if not await _require_mod(interaction):
-            return
         guild_id, _ = scope
         if soglia < 2:
             await interaction.response.send_message("La soglia deve essere >= 2.", ephemeral=True)
@@ -626,8 +614,6 @@ def register_triggers(
     async def frasi_milestone_global_remove(interaction: discord.Interaction, soglia: int) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
-            return
-        if not await _require_mod(interaction):
             return
         guild_id, _ = scope
         deleted = await ctx.database.delete_trigger_phrase_global_milestone(guild_id, soglia)
@@ -654,8 +640,6 @@ def register_triggers(
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        if not await _require_mod(interaction):
-            return
         guild_id, _ = scope
         state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
         normalized = _normalize_phrase_templates_state(state)
@@ -678,8 +662,6 @@ def register_triggers(
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        if not await _require_mod(interaction):
-            return
         guild_id, _ = scope
         state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
         normalized = _normalize_phrase_templates_state(state)
@@ -694,8 +676,6 @@ def register_triggers(
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        if not await _require_mod(interaction):
-            return
         guild_id, _ = scope
         await ctx.database.set_trigger_state_global(guild_id, "frasi", {})
         await interaction.response.send_message("Template trigger frasi globali resettati (DEFAULT/FIRST).", ephemeral=True)
@@ -704,8 +684,6 @@ def register_triggers(
     async def frasi_userphrase_set(interaction: discord.Interaction, utente: discord.Member, testo: str) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
-            return
-        if not await _require_mod(interaction):
             return
         guild_id, _ = scope
         text_clean = testo.strip()
@@ -722,8 +700,6 @@ def register_triggers(
     async def frasi_userphrase_remove(interaction: discord.Interaction, utente: discord.Member) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
-            return
-        if not await _require_mod(interaction):
             return
         guild_id, _ = scope
         removed = await ctx.database.delete_trigger_phrase_global_user_custom_text(guild_id, str(utente.id))
@@ -764,9 +740,7 @@ def register_triggers(
 
     @barcello_group.command(name="calibrate", description="Calibra pesi barcello")
     async def barcello_calibrate(interaction: discord.Interaction) -> None:
-        profile, _ = await ctx.entitlements.resolve_profile_with_role_id(interaction.user)
-        if profile != "mod":
-            await interaction.response.send_message("Feedback riservato ai mod.", ephemeral=True)
+        if not await _guard(interaction):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         result = await ctx.barcello_calibration_service.run_calibration(days=14, min_samples=20)
@@ -802,6 +776,8 @@ def register_triggers(
         embed_title: str | None = None,
         embed_color: str | None = None,
     ) -> None:
+        if not await _guard(interaction):
+            return
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
             return
@@ -834,6 +810,8 @@ def register_triggers(
 
     @prompt_group.command(name="list", description="Lista campagne AI_PROMPT")
     async def prompt_list(interaction: discord.Interaction) -> None:
+        if not await _guard(interaction):
+            return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
             return
@@ -855,6 +833,8 @@ def register_triggers(
 
     @prompt_group.command(name="delete", description="Elimina campagna AI_PROMPT")
     async def prompt_delete(interaction: discord.Interaction, id_or_name: str) -> None:
+        if not await _guard(interaction):
+            return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
             return
@@ -872,7 +852,7 @@ def register_triggers(
     @prompt_group.command(name="test", description="Genera e invia un test AI_PROMPT")
     @app_commands.describe(id="ID campagna")
     async def prompt_test(interaction: discord.Interaction, id: int) -> None:
-        if not await _require_mod(interaction):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None or interaction.channel is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
@@ -941,10 +921,6 @@ def register_triggers(
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        profile = await ctx.entitlements.resolve_profile(interaction.user)
-        if profile != "mod":
-            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
-            return
         raw = await ctx.database.get_setting("qna.daily_limits")
         defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
         if not raw:
@@ -962,10 +938,6 @@ def register_triggers(
     async def qna_limits_set(interaction: discord.Interaction, tier_key: str, limit_int: int) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
-            return
-        profile = await ctx.entitlements.resolve_profile(interaction.user)
-        if profile != "mod":
-            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
             return
         allowed_keys = {"base", "role1", "role2", "role3", "mod"}
         key = tier_key.strip().lower()
@@ -990,12 +962,10 @@ def register_triggers(
 
     @qna_group.command(name="bonus_add", description="Aggiungi bonus QnA utente")
     async def qna_bonus_add(interaction: discord.Interaction, user: discord.Member, amount_int: int, hours_valid: int | None = None) -> None:
+        if not await _guard(interaction):
+            return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
-            return
-        profile = await ctx.entitlements.resolve_profile(interaction.user)
-        if profile != "mod":
-            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
             return
         if amount_int < 0 or amount_int > 999:
             await interaction.response.send_message("amount_int deve essere tra 0 e 999.", ephemeral=True)
@@ -1016,24 +986,20 @@ def register_triggers(
 
     @qna_group.command(name="bonus_clear", description="Rimuove bonus domande QnA")
     async def qna_bonus_clear(interaction: discord.Interaction, user: discord.Member) -> None:
+        if not await _guard(interaction):
+            return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
-            return
-        profile = await ctx.entitlements.resolve_profile(interaction.user)
-        if profile != "mod":
-            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
             return
         await ctx.database.clear_qna_bonus(str(interaction.guild_id), str(user.id))
         await interaction.response.send_message(f"Bonus rimosso per {user.mention}.", ephemeral=True)
 
     @qna_group.command(name="bonus_show", description="Mostra bonus domande QnA")
     async def qna_bonus_show(interaction: discord.Interaction, user: discord.Member) -> None:
+        if not await _guard(interaction):
+            return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa in una guild.", ephemeral=True)
-            return
-        profile = await ctx.entitlements.resolve_profile(interaction.user)
-        if profile != "mod":
-            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
             return
         bonus, expires_at = await ctx.database.get_qna_bonus(str(interaction.guild_id), str(user.id))
         await interaction.response.send_message(
@@ -1051,6 +1017,8 @@ def register_triggers(
 
     @insights_group.command(name="status", description="Stato curiosità utenti")
     async def insights_status(interaction: discord.Interaction) -> None:
+        if not await _guard(interaction):
+            return
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in un canale.", ephemeral=True)
             return
@@ -1068,9 +1036,7 @@ def register_triggers(
 
     @insights_group.command(name="config", description="Configura curiosità utenti")
     async def insights_config(interaction: discord.Interaction, testo: str) -> None:
-        profile = await ctx.entitlements.resolve_profile(interaction.user)
-        if profile != "mod":
-            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+        if not await _guard(interaction):
             return
         if ctx.trigger_engine is None:
             await interaction.response.send_message("Trigger engine non disponibile.", ephemeral=True)

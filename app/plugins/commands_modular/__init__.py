@@ -1,13 +1,12 @@
 from .admin import register_admin
 from .audio_notes import register_audio_notes
 from .attivita import register_attivita
-from .ask import register_ask
 from .aura import register_aura
 from .barcello import register_barcello
 from .barcellometro_attivita import register_attivita_settings
 from .command_helpers import add_command_once, add_group_once, describe_placeholders
 from .ctx import CommandContext
-from .permissions import check_permission, ensure_admin
+from .permissions import check_permission
 from .privacy import register_privacy
 from .resoconto import register_resoconto
 from .riassunto import register_riassunto
@@ -27,13 +26,11 @@ __all__ = [
     "add_command_once",
     "describe_placeholders",
     "check_permission",
-    "ensure_admin",
     "get_setting",
     "set_setting",
     "register_admin",
     "register_audio_notes",
     "register_attivita",
-    "register_ask",
     "register_aura",
     "register_barcello",
     "register_attivita_settings",

@@ -29,16 +29,3 @@ async def check_permission(interaction: discord.Interaction, command_name: str, 
     else:
         await interaction.response.send_message(message, ephemeral=ephemeral)
     return False
-
-
-async def ensure_admin(interaction: discord.Interaction) -> bool:
-    guild = interaction.guild
-    is_admin = bool(guild and interaction.user.guild_permissions.administrator)
-    if is_admin:
-        return True
-    ephemeral = interaction.guild_id is not None
-    if interaction.response.is_done():
-        await interaction.followup.send("Solo admin.", ephemeral=ephemeral)
-    else:
-        await interaction.response.send_message("Solo admin.", ephemeral=ephemeral)
-    return False

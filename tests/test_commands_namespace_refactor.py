@@ -26,3 +26,20 @@ def test_status_subcommand_uses_bm_name_and_permission() -> None:
 
     assert '@status_group.command(name="bm"' in source
     assert 'check_permission(interaction, "status.bm", ctx)' in source
+
+
+def test_ask_alias_removed_and_domanda_guarded() -> None:
+    source = Path("app/plugins/commands_modular/ask.py").read_text()
+
+    assert 'name="ask"' not in source
+    assert 'Alias di /ask' not in source
+    assert '@tree.command(name="domanda"' in source
+    assert 'check_permission(interaction, "qna.domanda", ctx)' in source
+
+
+def test_triggers_commands_are_guarded_through_central_check() -> None:
+    source = Path("app/plugins/commands_modular/triggers.py").read_text()
+
+    assert 'def _command_permission_key' in source
+    assert 'return await check_permission(interaction, _command_permission_key(interaction), ctx)' in source
+    assert 'resolve_profile(' not in source

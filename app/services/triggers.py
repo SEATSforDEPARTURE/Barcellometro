@@ -314,7 +314,7 @@ class TriggerEngineService:
             limit_pro = int(limits.get("role2", 2))
             limit_promax = int(limits.get("role3", 3))
             if profile == "base":
-                await message.reply("Per fare domande usa /ask e fai upgrade a PLUS/PRO/PRO MAX.", mention_author=False)
+                await message.reply("Per fare domande usa /domanda e fai upgrade a PLUS/PRO/PRO MAX.", mention_author=False)
                 return
 
             limit = await self._resolve_qna_limit_for_member(message.author, profile=profile, limits=limits)
