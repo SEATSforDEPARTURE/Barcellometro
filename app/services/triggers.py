@@ -727,14 +727,27 @@ class TriggerEngineService:
 
     async def _handle_phrases(self, envelope: EventEnvelope) -> None:
         assert envelope.guild_id and envelope.channel_id
-        if not await self._database.get_trigger_enabled(envelope.guild_id, envelope.channel_id, "frasi"):
+        globally_enabled = await self._database.get_trigger_enabled_global(envelope.guild_id, "frasi")
+        if not globally_enabled and not await self._database.get_trigger_enabled_any_channel(envelope.guild_id, "frasi"):
             return
-        phrases = await self._database.get_matching_phrases(envelope.guild_id, envelope.channel_id)
+        phrases = await self._database.get_matching_phrases_guild(envelope.guild_id)
         content = envelope.content or ""
+        winning_by_text: dict[str, dict[str, object]] = {}
         for phrase in phrases:
-            if self._phrase_matches(content, phrase):
-                await self._reply_phrase(envelope, phrase)
-                break
+            if not self._phrase_matches(content, phrase):
+                continue
+            # Legacy compat: stessa frase poteva essere inserita in più canali.
+            # Manteniamo i record ma per un singolo messaggio rispondiamo una sola volta,
+            # scegliendo deterministicamente la riga col min id.
+            key = f"{str(phrase.get('phrase') or '').casefold()}|{str(phrase.get('match_mode') or '').upper()}|{int(bool(phrase.get('case_sensitive')))}"
+            current = winning_by_text.get(key)
+            if current is None or int(phrase.get("id") or 0) < int(current.get("id") or 0):
+                winning_by_text[key] = phrase
+
+        if not winning_by_text:
+            return
+        winner = min(winning_by_text.values(), key=lambda row: int(row.get("id") or 0))
+        await self._reply_phrase(envelope, winner)
 
     async def _reply_phrase(self, envelope: EventEnvelope, phrase: dict[str, object]) -> None:
         if self._bot is None or not envelope.channel_id:
@@ -746,33 +759,39 @@ class TriggerEngineService:
         ts = datetime.now(timezone.utc).isoformat()
         message_id = str(envelope.meta.get("message_id") or "")
         author_id = str(envelope.author_id or "")
-        author_name = await self._resolve_phrase_author_name(envelope, channel)
 
-        state = await self._database.get_trigger_state(envelope.guild_id, envelope.channel_id, "frasi")
+        _ = await self._database.get_trigger_state_any_channel(envelope.guild_id, "frasi")
+        if author_id:
+            await self._database.increment_phrase_user_stats(phrase_id, author_id, ts, message_id)
 
-        previous_seen = self._build_last_seen_values(phrase.get("last_seen_ts"))
-        template_kind = "DEFAULT" if phrase.get("last_seen_ts") else "FIRST"
-        template = self._resolve_phrase_template(state, author_id=author_id, kind=template_kind)
+        color = self._discord_color_from_phrase(phrase)
+        embed = discord.Embed(
+            title="💬 FRASI ICONICHE",
+            description=str(phrase.get("phrase") or ""),
+            color=color,
+        )
+        embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia.")
 
-        count_user = await self._database.increment_phrase_user_stats(phrase_id, author_id, ts, message_id)
-        values = {
-            "author": f"<@{author_id}>" if author_id else "",
-            "author_name": author_name,
-            "phrase": str(phrase.get("phrase") or ""),
-            "count_user": str(count_user),
-            "last_seen_human": previous_seen["human"],
-            "last_seen_dt": previous_seen["dt"],
-        }
-        text = self._render_phrase_template(template, values)
         if message_id:
             try:
                 target = await channel.fetch_message(int(message_id))
-                await target.reply(text)
+                await target.reply(embed=embed)
             except (discord.NotFound, discord.HTTPException, ValueError):
-                await channel.send(text)
+                await channel.send(embed=embed)
         else:
-            await channel.send(text)
+            await channel.send(embed=embed)
         await self._database.update_phrase_last_seen(phrase_id, ts, message_id)
+
+
+    def _discord_color_from_phrase(self, phrase: dict[str, object]) -> discord.Color:
+        raw = str(phrase.get("embed_color") or "").strip()
+        if raw:
+            value = raw[1:] if raw.startswith("#") else raw
+            try:
+                return discord.Color(int(value, 16))
+            except ValueError:
+                pass
+        return discord.Color.gold()
 
     async def _resolve_phrase_author_name(self, envelope: EventEnvelope, channel: discord.TextChannel) -> str:
         author_id = str(envelope.author_id or "")

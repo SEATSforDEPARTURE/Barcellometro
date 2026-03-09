@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
-def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandContext) -> app_commands.Group:
     qna_group = app_commands.Group(name="qna", description="QnA")
     frasi_group = app_commands.Group(name="frasi", description="Frasi")
     barcello_group = app_commands.Group(name="barcello", description="Trigger Barcello")
@@ -26,7 +26,6 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     insights_group = app_commands.Group(name="insights", description="Curiosità utenti")
 
     add_group_once(barcellometro_group, qna_group, logger)
-    add_group_once(barcellometro_group, frasi_group, logger)
     add_group_once(barcellometro_group, barcello_group, logger)
     add_group_once(barcellometro_group, prompt_group, logger)
     add_group_once(barcellometro_group, insights_group, logger)
@@ -42,6 +41,24 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         if scope is None:
             return
         guild_id, channel_id = scope
+        if key == "frasi":
+            if action == "status":
+                enabled = await ctx.database.get_trigger_enabled_global(guild_id, key)
+                if not enabled:
+                    enabled = await ctx.database.get_trigger_enabled_any_channel(guild_id, key)
+                await interaction.response.send_message(f"Trigger {key} (globale server): {'on' if enabled else 'off'}", ephemeral=True)
+                return
+            profile = await ctx.entitlements.resolve_profile(interaction.user)
+            if profile != "mod":
+                await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+                return
+            enabled = action == "on"
+            await ctx.database.set_trigger_enabled_global(guild_id, key, enabled)
+            await interaction.response.send_message(
+                f"Trigger {key} globale nel server {'abilitato' if enabled else 'disabilitato'}.",
+                ephemeral=True,
+            )
+            return
         if action == "status":
             enabled = await ctx.database.get_trigger_enabled(guild_id, channel_id, key)
             await interaction.response.send_message(f"Trigger {key}: {'on' if enabled else 'off'}", ephemeral=True)
@@ -60,6 +77,36 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             return True
         await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
         return False
+
+
+    def _normalize_embed_color(raw: str | None) -> str | None:
+        if raw is None:
+            return None
+        value = raw.strip()
+        if not value:
+            return None
+
+        if value.startswith("#"):
+            candidate = value[1:]
+            if len(candidate) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in candidate):
+                return f"#{candidate.upper()}"
+            return None
+
+        lowered = value.lower()
+        if lowered.startswith("0x"):
+            candidate = value[2:]
+            if len(candidate) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in candidate):
+                return f"#{candidate.upper()}"
+            return None
+
+        if len(value) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in value):
+            return f"#{value.upper()}"
+
+        if value.isdigit():
+            number = int(value, 10)
+            if 0 <= number <= 0xFFFFFF:
+                return f"#{number:06X}"
+        return None
 
     def _normalize_phrase_templates_state(raw_state: dict[str, object]) -> dict[str, object]:
         state: dict[str, object] = {}
@@ -215,36 +262,40 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         await _set_toggle(interaction, "frasi", "status")
 
     @frasi_group.command(name="add", description="Aggiungi frase trigger")
-    @app_commands.describe(phrase="Frase", match_mode="contains|regex")
+    @app_commands.describe(phrase="Frase", match_mode="contains|regex", colore="Colore embed opzionale (#RRGGBB)")
     @app_commands.choices(
         match_mode=[
             app_commands.Choice(name="contains", value="CONTAINS"),
             app_commands.Choice(name="regex", value="REGEX"),
         ]
     )
-    async def frasi_add(interaction: discord.Interaction, phrase: str, match_mode: app_commands.Choice[str]) -> None:
+    async def frasi_add(
+        interaction: discord.Interaction,
+        phrase: str,
+        match_mode: app_commands.Choice[str],
+        colore: str | None = None,
+    ) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, channel_id = scope
-        await ctx.database.add_trigger_phrase(guild_id, channel_id, phrase, match_mode.value, False)
-        await interaction.response.send_message("Frase aggiunta.", ephemeral=True)
+        color = _normalize_embed_color(colore)
+        if colore is not None and color is None:
+            await interaction.response.send_message("Colore non valido. Usa #RRGGBB, RRGGBB, 0xRRGGBB o valore decimale.", ephemeral=True)
+            return
+        await ctx.database.add_trigger_phrase(guild_id, channel_id, phrase, match_mode.value, False, color)
+        await interaction.response.send_message("Frase aggiunta a livello server.", ephemeral=True)
 
     @frasi_group.command(name="remove", description="Rimuovi frase trigger")
     async def frasi_remove(interaction: discord.Interaction, id_or_phrase: str) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        guild_id, channel_id = scope
-        phrase = id_or_phrase
+        guild_id, _ = scope
         if id_or_phrase.isdigit():
-            rows = await ctx.database.list_trigger_phrases(guild_id, channel_id)
-            row = next((r for r in rows if int(r["id"]) == int(id_or_phrase)), None)
-            if row is None:
-                await interaction.response.send_message("Nessuna frase trovata per quell'id.", ephemeral=True)
-                return
-            phrase = str(row["phrase"])
-        await ctx.database.remove_trigger_phrase(guild_id, channel_id, phrase)
+            await ctx.database.remove_trigger_phrase_by_id(guild_id, int(id_or_phrase))
+        else:
+            await ctx.database.remove_trigger_phrase_guild(guild_id, id_or_phrase)
         await interaction.response.send_message("Frase rimossa.", ephemeral=True)
 
     @frasi_group.command(name="list", description="Lista frasi")
@@ -252,12 +303,15 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        guild_id, channel_id = scope
-        rows = await ctx.database.list_trigger_phrases(guild_id, channel_id)
+        guild_id, _ = scope
+        rows = await ctx.database.list_trigger_phrases_guild(guild_id)
         if not rows:
             await interaction.response.send_message("Nessuna frase configurata.", ephemeral=True)
             return
-        lines = [f"{r['id']}. {r['phrase']} [{r['match_mode']}] {'cs' if r['case_sensitive'] else 'ci'}" for r in rows]
+        lines = [
+            f"{r['id']}. {r['phrase']} [{r['match_mode']}] {'cs' if r['case_sensitive'] else 'ci'} color={r.get('embed_color') or '-'}"
+            for r in rows
+        ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @frasi_group.command(name="template_show", description="Mostra template trigger frasi")
@@ -267,8 +321,8 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             return
         if not await _require_mod(interaction):
             return
-        guild_id, channel_id = scope
-        state = await ctx.database.get_trigger_state(guild_id, channel_id, "frasi")
+        guild_id, _ = scope
+        state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
         normalized = _normalize_phrase_templates_state(state)
         pretty = json.dumps(normalized, ensure_ascii=False, indent=2)
         guide = (
@@ -277,7 +331,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         )
         await interaction.response.send_message(f"```json\n{pretty}\n```\n{guide}", ephemeral=True)
 
-    @frasi_group.command(name="template_set", description="Template frasi canale")
+    @frasi_group.command(name="template_set", description="Template frasi server")
     @app_commands.choices(
         kind=[
             app_commands.Choice(name="DEFAULT", value="DEFAULT"),
@@ -290,13 +344,13 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             return
         if not await _require_mod(interaction):
             return
-        guild_id, channel_id = scope
-        state = await ctx.database.get_trigger_state(guild_id, channel_id, "frasi")
+        guild_id, _ = scope
+        state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
         normalized = _normalize_phrase_templates_state(state)
         templates = dict(normalized.get("templates") or {})
         templates[kind.value] = text
         normalized["templates"] = templates
-        await ctx.database.set_trigger_state(guild_id, channel_id, "frasi", normalized)
+        await ctx.database.set_trigger_state_global(guild_id, "frasi", normalized)
         await interaction.response.send_message(f"Template {kind.value} aggiornato.", ephemeral=True)
 
     @frasi_group.command(name="template_set_user", description="Template frasi utente")
@@ -317,8 +371,8 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             return
         if not await _require_mod(interaction):
             return
-        guild_id, channel_id = scope
-        state = await ctx.database.get_trigger_state(guild_id, channel_id, "frasi")
+        guild_id, _ = scope
+        state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
         normalized = _normalize_phrase_templates_state(state)
         per_user = dict(normalized.get("per_user") or {})
         user_id = str(user.id)
@@ -326,7 +380,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         user_templates[kind.value] = text
         per_user[user_id] = user_templates
         normalized["per_user"] = per_user
-        await ctx.database.set_trigger_state(guild_id, channel_id, "frasi", normalized)
+        await ctx.database.set_trigger_state_global(guild_id, "frasi", normalized)
         await interaction.response.send_message(f"Template {kind.value} aggiornato per {user.mention}.", ephemeral=True)
 
     @frasi_group.command(name="template_reset", description="Reset template trigger frasi")
@@ -336,9 +390,9 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             return
         if not await _require_mod(interaction):
             return
-        guild_id, channel_id = scope
-        await ctx.database.set_trigger_state(guild_id, channel_id, "frasi", {})
-        await interaction.response.send_message("Template trigger frasi resettati (fallback attivo).", ephemeral=True)
+        guild_id, _ = scope
+        await ctx.database.set_trigger_state_global(guild_id, "frasi", {})
+        await interaction.response.send_message("Template trigger frasi globali resettati (fallback legacy attivo).", ephemeral=True)
 
     @prompt_group.command(name="on", description="Abilita trigger prompt")
     async def prompt_on(interaction: discord.Interaction) -> None:
@@ -616,3 +670,5 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     @insights_group.command(name="status", description="Stato trigger curiosità utenti")
     async def insights_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "insights", "status")
+
+    return frasi_group

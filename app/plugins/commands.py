@@ -97,7 +97,7 @@ def setup(registry: ServiceRegistry) -> None:
         add_group_once(barcellometro_group, inattivi_group, logger)
 
     register_resoconto(resoconto_group, ctx)
-    register_triggers(barcellometro_group, ctx)
+    frasi_group = register_triggers(barcellometro_group, ctx)
     logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
     register_barcello(bot.tree, guild_obj, ctx)
     register_ask(bot.tree, guild_obj, ctx)
@@ -113,6 +113,7 @@ def setup(registry: ServiceRegistry) -> None:
         status_group,
         resoconto_group,
         privacy_group,
+        frasi_group,
     ]
 
     def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
