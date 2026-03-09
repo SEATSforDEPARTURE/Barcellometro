@@ -8,6 +8,7 @@ import discord
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
+from app.plugins.commands_modular.permissions import check_permission
 
 logger = logging.getLogger(__name__)
 
@@ -76,18 +77,12 @@ async def _handle_ask_like(interaction: discord.Interaction, ctx: CommandContext
 
 
 def register_ask(tree: app_commands.CommandTree, guild: discord.abc.Snowflake | None, ctx: CommandContext) -> None:
-    @tree.command(name="ask", description="Fai una domanda al Q&A", guild=guild)
-    @app_commands.describe(
-        canale="Domanda canale",
-        generale="Domanda generale",
-    )
-    async def ask(interaction: discord.Interaction, canale: str | None = None, generale: str | None = None) -> None:
-        await _handle_ask_like(interaction, ctx, canale, generale)
-
-    @tree.command(name="domanda", description="Alias di /ask", guild=guild)
+    @tree.command(name="domanda", description="Fai una domanda al Q&A", guild=guild)
     @app_commands.describe(
         canale="Domanda canale",
         generale="Domanda generale",
     )
     async def domanda(interaction: discord.Interaction, canale: str | None = None, generale: str | None = None) -> None:
+        if not await check_permission(interaction, "qna.domanda", ctx):
+            return
         await _handle_ask_like(interaction, ctx, canale, generale)

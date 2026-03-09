@@ -28,6 +28,16 @@ ctx_stub = types.ModuleType("app.plugins.commands_modular.ctx")
 ctx_stub.CommandContext = object
 sys.modules["app.plugins.commands_modular.ctx"] = ctx_stub
 
+permissions_stub = types.ModuleType("app.plugins.commands_modular.permissions")
+
+
+async def _allow(*args, **kwargs):
+    return True
+
+
+permissions_stub.check_permission = _allow
+sys.modules["app.plugins.commands_modular.permissions"] = permissions_stub
+
 ask_path = Path(__file__).resolve().parents[1] / "app" / "plugins" / "commands_modular" / "ask.py"
 spec = importlib.util.spec_from_file_location("ask_module_for_tests", ask_path)
 ask_module = importlib.util.module_from_spec(spec)
