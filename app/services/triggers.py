@@ -759,7 +759,6 @@ class TriggerEngineService:
         ts = datetime.now(timezone.utc).isoformat()
         message_id = str(envelope.meta.get("message_id") or "")
         author_id = str(envelope.author_id or "")
-        author_name = await self._resolve_phrase_author_name(envelope, channel)
 
         state = await self._database.get_trigger_state_any_channel(envelope.guild_id, "frasi")
         previous_seen = self._build_last_seen_values(phrase.get("last_seen_ts"))
