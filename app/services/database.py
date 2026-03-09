@@ -335,6 +335,7 @@ class DatabaseService:
                 enabled INTEGER NOT NULL DEFAULT 1,
                 last_seen_ts TEXT NULL,
                 last_seen_message_id TEXT NULL,
+                embed_color TEXT NULL,
                 UNIQUE (guild_id, channel_id, phrase)
             );
 
@@ -533,6 +534,7 @@ class DatabaseService:
         )
         await self._ensure_message_campaign_columns()
         await self._ensure_daily_report_columns()
+        await self._ensure_trigger_phrase_columns()
         await self._conn.commit()
         logger.info("Database schema initialized")
 
@@ -566,6 +568,17 @@ class DatabaseService:
         for name, col_def in missing.items():
             if name not in existing:
                 await self._conn.execute(f"ALTER TABLE daily_reports ADD COLUMN {name} {col_def}")
+
+    async def _ensure_trigger_phrase_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(trigger_phrases)")
+        existing = {row["name"] for row in columns}
+        missing = {
+            "embed_color": "TEXT NULL",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE trigger_phrases ADD COLUMN {name} {col_def}")
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
         assert self._conn is not None
@@ -1313,6 +1326,26 @@ class DatabaseService:
         )
         return bool(row["enabled"]) if row else False
 
+    async def get_trigger_enabled_any_channel(self, guild_id: str, trigger_key: str) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 FROM trigger_channels WHERE guild_id = ? AND trigger_key = ? AND enabled = 1 LIMIT 1",
+            (guild_id, trigger_key),
+        )
+        return row is not None
+
+    async def get_trigger_enabled_global(self, guild_id: str, trigger_key: str, *, scope_channel_id: str = "__guild__") -> bool:
+        return await self.get_trigger_enabled(guild_id, scope_channel_id, trigger_key)
+
+    async def set_trigger_enabled_global(
+        self,
+        guild_id: str,
+        trigger_key: str,
+        enabled: bool,
+        *,
+        scope_channel_id: str = "__guild__",
+    ) -> None:
+        await self.set_trigger_enabled(guild_id, scope_channel_id, trigger_key, enabled)
+
     async def set_trigger_enabled(self, guild_id: str, channel_id: str, trigger_key: str, enabled: bool) -> None:
         now = datetime.now(timezone.utc).isoformat()
         await self.execute(
@@ -1482,17 +1515,19 @@ class DatabaseService:
         phrase: str,
         match_mode: str,
         case_sensitive: bool,
+        embed_color: str | None = None,
     ) -> None:
         await self.execute(
             """
-            INSERT INTO trigger_phrases (guild_id, channel_id, phrase, match_mode, case_sensitive, enabled)
-            VALUES (?, ?, ?, ?, ?, 1)
+            INSERT INTO trigger_phrases (guild_id, channel_id, phrase, match_mode, case_sensitive, enabled, embed_color)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
             ON CONFLICT(guild_id, channel_id, phrase) DO UPDATE SET
                 match_mode = excluded.match_mode,
                 case_sensitive = excluded.case_sensitive,
-                enabled = 1
+                enabled = 1,
+                embed_color = excluded.embed_color
             """,
-            (guild_id, channel_id, phrase, match_mode, 1 if case_sensitive else 0),
+            (guild_id, channel_id, phrase, match_mode, 1 if case_sensitive else 0, embed_color),
         )
 
     async def remove_trigger_phrase(self, guild_id: str, channel_id: str, phrase: str) -> None:
@@ -1508,12 +1543,38 @@ class DatabaseService:
         )
         return [dict(row) for row in rows]
 
+    async def list_trigger_phrases_guild(self, guild_id: str) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            "SELECT * FROM trigger_phrases WHERE guild_id = ? ORDER BY id ASC",
+            (guild_id,),
+        )
+        return [dict(row) for row in rows]
+
     async def get_matching_phrases(self, guild_id: str, channel_id: str) -> list[dict[str, Any]]:
         rows = await self.fetchall(
             "SELECT * FROM trigger_phrases WHERE guild_id = ? AND channel_id = ? AND enabled = 1 ORDER BY id ASC",
             (guild_id, channel_id),
         )
         return [dict(row) for row in rows]
+
+    async def get_matching_phrases_guild(self, guild_id: str) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            "SELECT * FROM trigger_phrases WHERE guild_id = ? AND enabled = 1 ORDER BY id ASC",
+            (guild_id,),
+        )
+        return [dict(row) for row in rows]
+
+    async def remove_trigger_phrase_guild(self, guild_id: str, phrase: str) -> None:
+        await self.execute(
+            "DELETE FROM trigger_phrases WHERE guild_id = ? AND phrase = ?",
+            (guild_id, phrase),
+        )
+
+    async def remove_trigger_phrase_by_id(self, guild_id: str, phrase_id: int) -> None:
+        await self.execute(
+            "DELETE FROM trigger_phrases WHERE guild_id = ? AND id = ?",
+            (guild_id, phrase_id),
+        )
 
     async def update_phrase_last_seen(self, phrase_id: int, ts: str, message_id: str) -> None:
         await self.execute(
@@ -1563,6 +1624,34 @@ class DatabaseService:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    async def get_trigger_state_any_channel(
+        self,
+        guild_id: str,
+        trigger_key: str,
+        *,
+        scope_channel_id: str = "__guild__",
+    ) -> dict[str, Any]:
+        global_state = await self.get_trigger_state(guild_id, scope_channel_id, trigger_key)
+        if global_state:
+            return global_state
+        row = await self.fetchone(
+            """
+            SELECT state_json
+            FROM trigger_state
+            WHERE guild_id = ? AND trigger_key = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (guild_id, trigger_key),
+        )
+        if not row:
+            return {}
+        try:
+            parsed = json.loads(str(row["state_json"] or "{}"))
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
     async def set_trigger_state(self, guild_id: str, channel_id: str, trigger_key: str, state: dict[str, Any]) -> None:
         now = datetime.now(timezone.utc).isoformat()
         await self.execute(
@@ -1575,6 +1664,16 @@ class DatabaseService:
             """,
             (guild_id, channel_id, trigger_key, json.dumps(state, ensure_ascii=False), now),
         )
+
+    async def set_trigger_state_global(
+        self,
+        guild_id: str,
+        trigger_key: str,
+        state: dict[str, Any],
+        *,
+        scope_channel_id: str = "__guild__",
+    ) -> None:
+        await self.set_trigger_state(guild_id, scope_channel_id, trigger_key, state)
 
     async def get_cache(self, key: str) -> Optional[str]:
         now = datetime.now(timezone.utc).isoformat()
