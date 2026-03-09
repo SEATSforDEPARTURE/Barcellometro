@@ -171,6 +171,7 @@ def setup(registry: ServiceRegistry) -> None:
             names = [command.qualified_name for command in commands]
             logger.info("Command tree pre-sync (%s) count=%d names=%s", command_scope, len(names), names)
             logger.info("Pre-sync check /barcello presente=%s scope=%s", "barcello" in names, command_scope)
+            logger.info("Pre-sync check /domanda presente=%s scope=%s", "domanda" in names, command_scope)
             if use_guild:
                 synced = await bot.tree.sync(guild=guild_obj)
                 logger.info("Synced %d commands for %s", len(synced), "guild")
