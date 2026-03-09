@@ -759,6 +759,13 @@ class TriggerEngineService:
         ts = datetime.now(timezone.utc).isoformat()
         message_id = str(envelope.meta.get("message_id") or "")
         author_id = str(envelope.author_id or "")
+        target_message: discord.Message | None = None
+        if message_id:
+            try:
+                target_message = await channel.fetch_message(int(message_id))
+            except (discord.NotFound, discord.HTTPException, ValueError):
+                target_message = None
+        author_name = await self._resolve_phrase_author_name(envelope, channel, target_message)
 
         state = await self._database.get_trigger_state_any_channel(envelope.guild_id, "frasi")
         previous_seen = self._build_last_seen_values(phrase.get("last_seen_ts"))
@@ -802,12 +809,8 @@ class TriggerEngineService:
         )
         embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia.")
 
-        if message_id:
-            try:
-                target = await channel.fetch_message(int(message_id))
-                await target.reply(embed=embed)
-            except (discord.NotFound, discord.HTTPException, ValueError):
-                await channel.send(embed=embed)
+        if target_message is not None:
+            await target_message.reply(embed=embed)
         else:
             await channel.send(embed=embed)
         await self._database.update_phrase_last_seen(phrase_id, ts, message_id)
@@ -823,7 +826,25 @@ class TriggerEngineService:
                 pass
         return discord.Color.gold()
 
-    async def _resolve_phrase_author_name(self, envelope: EventEnvelope, channel: discord.TextChannel) -> str:
+    async def _resolve_phrase_author_name(
+        self,
+        envelope: EventEnvelope,
+        channel: discord.TextChannel,
+        message: discord.Message | None = None,
+    ) -> str:
+        message_author = getattr(message, "author", None)
+        if message_author is not None:
+            display_name = getattr(message_author, "display_name", None)
+            if display_name:
+                return str(display_name)
+            username = getattr(message_author, "name", None)
+            if username:
+                return str(username)
+
+        meta_author_name = str(envelope.meta.get("author_name") or "").strip()
+        if meta_author_name:
+            return meta_author_name
+
         author_id = str(envelope.author_id or "")
         if not author_id:
             return "utente"

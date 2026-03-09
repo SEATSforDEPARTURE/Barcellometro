@@ -14,16 +14,17 @@ import app.services.triggers as triggers_module
 
 
 class _FakeRepliedMessage:
-    def __init__(self) -> None:
+    def __init__(self, *, author=None) -> None:
         self.replies: list[object] = []
+        self.author = author
 
     async def reply(self, *, embed=None, **kwargs):
         self.replies.append(embed)
 
 
 class _FakeTextChannel:
-    def __init__(self) -> None:
-        self.target = _FakeRepliedMessage()
+    def __init__(self, *, message_author=None) -> None:
+        self.target = _FakeRepliedMessage(author=message_author)
         self.sent_embeds: list[object] = []
 
     async def fetch_message(self, _message_id: int):
@@ -48,6 +49,7 @@ async def _run_phrase_once(
     content: str = "oggi dico il criccy",
     author_id: str = "u1",
     trigger_state: dict | None = None,
+    message_author: object | None = None,
 ) -> object:
     if trigger_state is not None:
         await db.set_trigger_state_global("g1", "frasi", trigger_state)
@@ -56,7 +58,7 @@ async def _run_phrase_once(
     await db.add_trigger_phrase("g1", "ch-a", phrase_text, "CONTAINS", False, "#FFAA00")
 
     service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
-    channel = _FakeTextChannel()
+    channel = _FakeTextChannel(message_author=message_author)
     service._bot = _FakeBot(channel)
 
     envelope = EventEnvelope(
@@ -221,6 +223,46 @@ def test_template_fallback_does_not_break_trigger() -> None:
             embed = channel.target.replies[0]
             assert embed.description == "il criccy"
             assert embed.color.value == 0xFFD700
+            await db.close()
+        finally:
+            triggers_module.discord.TextChannel = original_text_channel
+
+    asyncio.run(_run())
+
+
+def test_author_name_placeholder_prefers_display_name_then_name_then_default() -> None:
+    async def _run() -> None:
+        original_text_channel = triggers_module.discord.TextChannel
+        triggers_module.discord.TextChannel = _FakeTextChannel
+        try:
+            db = DatabaseService(":memory:")
+            await db.connect()
+            await db.initialize_schema()
+
+            embed_display = await _run_phrase_once(
+                db,
+                author_id="100",
+                trigger_state={"templates": {"FIRST": "ciao {author_name}"}},
+                message_author=SimpleNamespace(display_name="Display Hero", name="RawName"),
+            )
+            assert embed_display.description == "ciao Display Hero"
+
+            embed_name = await _run_phrase_once(
+                db,
+                author_id="101",
+                trigger_state={"templates": {"FIRST": "ciao {author_name}"}},
+                message_author=SimpleNamespace(display_name=None, name="OnlyName"),
+            )
+            assert embed_name.description == "ciao OnlyName"
+
+            embed_default = await _run_phrase_once(
+                db,
+                author_id=None,
+                trigger_state={"templates": {"FIRST": "ciao {author_name}"}},
+                message_author=SimpleNamespace(display_name=None, name=None),
+            )
+            assert embed_default.description == "ciao utente"
+
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
