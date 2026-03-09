@@ -61,7 +61,7 @@ def validate_campaign_texts(
 def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -> None:
     @messaggi_group.command(name="quiet_status", description="Stato quiet hours")
     async def messaggi_quiet_status(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.quiet.status", ctx):
+        if not await check_permission(interaction, "bm.messaggi.quiet.status", ctx):
             return
         enabled = await _ensure_setting(ctx, "messages_quiet_enabled", "1")
         start = await _ensure_setting(ctx, "messages_quiet_start", QUIET_DEFAULT_START)
@@ -73,14 +73,14 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="quiet_on", description="Abilita quiet hours")
     async def messaggi_quiet_on(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.quiet.on", ctx):
+        if not await check_permission(interaction, "bm.messaggi.quiet.on", ctx):
             return
         await ctx.database.set_setting("messages_quiet_enabled", "1")
         await interaction.response.send_message("Quiet hours abilitate.", ephemeral=True)
 
     @messaggi_group.command(name="quiet_off", description="Disabilita quiet hours")
     async def messaggi_quiet_off(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.quiet.off", ctx):
+        if not await check_permission(interaction, "bm.messaggi.quiet.off", ctx):
             return
         await ctx.database.set_setting("messages_quiet_enabled", "0")
         await interaction.response.send_message("Quiet hours disabilitate.", ephemeral=True)
@@ -88,7 +88,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @messaggi_group.command(name="quiet_set", description="Imposta quiet hours")
     @app_commands.describe(start="Ora inizio (HH:MM)", end="Ora fine (HH:MM)")
     async def messaggi_quiet_set(interaction: discord.Interaction, start: str, end: str) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.quiet.set", ctx):
+        if not await check_permission(interaction, "bm.messaggi.quiet.set", ctx):
             return
         await ctx.database.set_setting("messages_quiet_start", start)
         await ctx.database.set_setting("messages_quiet_end", end)
@@ -96,7 +96,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="cap_status", description="Stato cap giornaliero")
     async def messaggi_cap_status(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.cap.status", ctx):
+        if not await check_permission(interaction, "bm.messaggi.cap.status", ctx):
             return
         enabled = await _ensure_setting(ctx, "messages_daily_cap_enabled", "1")
         cap = await _ensure_setting(ctx, "messages_daily_cap", str(CAP_DEFAULT))
@@ -107,14 +107,14 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="cap_on", description="Abilita cap giornaliero")
     async def messaggi_cap_on(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.cap.on", ctx):
+        if not await check_permission(interaction, "bm.messaggi.cap.on", ctx):
             return
         await ctx.database.set_setting("messages_daily_cap_enabled", "1")
         await interaction.response.send_message("Cap giornaliero abilitato.", ephemeral=True)
 
     @messaggi_group.command(name="cap_off", description="Disabilita cap giornaliero")
     async def messaggi_cap_off(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.cap.off", ctx):
+        if not await check_permission(interaction, "bm.messaggi.cap.off", ctx):
             return
         await ctx.database.set_setting("messages_daily_cap_enabled", "0")
         await interaction.response.send_message("Cap giornaliero disabilitato.", ephemeral=True)
@@ -122,7 +122,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @messaggi_group.command(name="cap_set", description="Imposta cap giornaliero")
     @app_commands.describe(n="Max invii canale")
     async def messaggi_cap_set(interaction: discord.Interaction, n: int) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.cap.set", ctx):
+        if not await check_permission(interaction, "bm.messaggi.cap.set", ctx):
             return
         if n <= 0:
             await interaction.response.send_message("Il cap deve essere > 0.", ephemeral=True)
@@ -132,7 +132,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="on", description="Abilita messaggi nel canale")
     async def messaggi_on(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.on", ctx):
+        if not await check_permission(interaction, "bm.messaggi.on", ctx):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in un canale della guild.", ephemeral=True)
@@ -142,7 +142,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="off", description="Disabilita messaggi nel canale")
     async def messaggi_off(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.off", ctx):
+        if not await check_permission(interaction, "bm.messaggi.off", ctx):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in un canale della guild.", ephemeral=True)
@@ -152,7 +152,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="status", description="Stato messaggi nel canale")
     async def messaggi_status(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.status", ctx):
+        if not await check_permission(interaction, "bm.messaggi.status", ctx):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in un canale della guild.", ephemeral=True)
@@ -196,7 +196,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
         embed_title: Optional[str] = None,
         embed_color: Optional[str] = None,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.aggiungi", ctx):
+        if not await check_permission(interaction, "bm.messaggi.aggiungi", ctx):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
@@ -258,7 +258,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
 
     @messaggi_group.command(name="lista", description="Elenca le campagne attive")
     async def messaggi_lista(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.lista", ctx):
+        if not await check_permission(interaction, "bm.messaggi.lista", ctx):
             return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
@@ -300,7 +300,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @messaggi_group.command(name="cancella", description="Rimuove una campagna")
     @app_commands.describe(id="ID campagna")
     async def messaggi_cancella(interaction: discord.Interaction, id: int) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.cancella", ctx):
+        if not await check_permission(interaction, "bm.messaggi.cancella", ctx):
             return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
@@ -315,7 +315,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @messaggi_group.command(name="pausa", description="Metti in pausa una campagna")
     @app_commands.describe(id="ID campagna")
     async def messaggi_pausa(interaction: discord.Interaction, id: int) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.pausa", ctx):
+        if not await check_permission(interaction, "bm.messaggi.pausa", ctx):
             return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
@@ -330,7 +330,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @messaggi_group.command(name="riprendi", description="Riprendi una campagna")
     @app_commands.describe(id="ID campagna")
     async def messaggi_riprendi(interaction: discord.Interaction, id: int) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.riprendi", ctx):
+        if not await check_permission(interaction, "bm.messaggi.riprendi", ctx):
             return
         if interaction.guild_id is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
@@ -351,7 +351,7 @@ def register_messaggi(messaggi_group: app_commands.Group, ctx: CommandContext) -
     @messaggi_group.command(name="test", description="Invia campagna ora")
     @app_commands.describe(id="ID campagna")
     async def messaggi_test(interaction: discord.Interaction, id: int) -> None:
-        if not await check_permission(interaction, "barcellometro.messaggi.test", ctx):
+        if not await check_permission(interaction, "bm.messaggi.test", ctx):
             return
         if interaction.guild_id is None or interaction.channel is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)

@@ -324,7 +324,7 @@ def test_db_global_phrase_state_and_color_column() -> None:
 def test_register_triggers_keeps_frasi_top_level() -> None:
     from discord import app_commands
 
-    group = app_commands.Group(name="barcellometro", description="x")
+    group = app_commands.Group(name="bm", description="x")
     ctx = SimpleNamespace(
         database=Mock(),
         entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -480,7 +480,7 @@ def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
         db = DatabaseService(":memory:")
         await db.connect()
         await db.initialize_schema()
-        group = app_commands.Group(name="barcellometro", description="x")
+        group = app_commands.Group(name="bm", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -539,7 +539,7 @@ def test_frasi_edit_updates_in_place_and_preserves_stats() -> None:
         phrase_id = int(row_before["id"])
         await db.increment_phrase_user_stats(phrase_id, "u-1", "2026-01-01T10:00:00+00:00", "m1")
 
-        group = app_commands.Group(name="barcellometro", description="x")
+        group = app_commands.Group(name="bm", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -601,7 +601,7 @@ def test_frasi_edit_reset_fields_and_missing_id() -> None:
         assert row_before is not None
         phrase_id = int(row_before["id"])
 
-        group = app_commands.Group(name="barcellometro", description="x")
+        group = app_commands.Group(name="bm", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -799,7 +799,7 @@ def test_frasi_stats_and_milestone_commands() -> None:
         await db.increment_phrase_user_stats(phrase_id, "10", "2026-01-01T11:00:00+00:00", "m2")
         await db.increment_phrase_user_stats(phrase_id, "11", "2026-01-01T12:00:00+00:00", "m3")
 
-        group = app_commands.Group(name="barcellometro", description="x")
+        group = app_commands.Group(name="bm", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -850,7 +850,7 @@ def test_template_set_user_command_is_not_registered() -> None:
         db = DatabaseService(":memory:")
         await db.connect()
         await db.initialize_schema()
-        group = app_commands.Group(name="barcellometro", description="x")
+        group = app_commands.Group(name="bm", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),

@@ -19,17 +19,17 @@ logger = logging.getLogger(__name__)
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
-def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandContext) -> app_commands.Group:
+def register_triggers(bm_group: app_commands.Group, ctx: CommandContext) -> app_commands.Group:
     qna_group = app_commands.Group(name="qna", description="QnA")
     frasi_group = app_commands.Group(name="frasi", description="Frasi")
     barcello_group = app_commands.Group(name="barcello", description="Trigger Barcello")
     prompt_group = app_commands.Group(name="prompt", description="Prompt")
     insights_group = app_commands.Group(name="insights", description="Curiosità utenti")
 
-    add_group_once(barcellometro_group, qna_group, logger)
-    add_group_once(barcellometro_group, barcello_group, logger)
-    add_group_once(barcellometro_group, prompt_group, logger)
-    add_group_once(barcellometro_group, insights_group, logger)
+    add_group_once(bm_group, qna_group, logger)
+    add_group_once(bm_group, barcello_group, logger)
+    add_group_once(bm_group, prompt_group, logger)
+    add_group_once(bm_group, insights_group, logger)
 
     async def _require_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:

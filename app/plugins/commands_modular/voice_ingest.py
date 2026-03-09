@@ -19,7 +19,7 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.voice_ingest.join", ctx):
+        if not await check_permission(interaction, "bm.voice_ingest.join", ctx):
             return
         if not ctx.bot.user:
             await interaction.response.send_message("Bot non pronto.", ephemeral=True)
@@ -34,7 +34,7 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
 
     @voice_ingest_group.command(name="leave", description="Leave manuale del canale vocale")
     async def voice_ingest_leave(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.voice_ingest.leave", ctx):
+        if not await check_permission(interaction, "bm.voice_ingest.leave", ctx):
             return
         await interaction.response.send_message("Richiesto leave dal canale vocale.", ephemeral=True)
         if ctx.voice_ingest:

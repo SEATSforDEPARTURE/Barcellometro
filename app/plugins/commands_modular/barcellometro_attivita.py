@@ -10,7 +10,7 @@ from app.plugins.commands_modular.barcellometro_attivita_logic import send_activ
 
 def register_attivita_settings(attivita_group: app_commands.Group, ctx: CommandContext) -> None:
     async def _ensure(interaction: discord.Interaction) -> bool:
-        return await check_permission(interaction, "barcellometro.attivita.config", ctx)
+        return await check_permission(interaction, "bm.attivita.config", ctx)
 
     @attivita_group.command(name="on", description="Enable daily activity scheduler")
     async def attivita_on(interaction: discord.Interaction) -> None:
