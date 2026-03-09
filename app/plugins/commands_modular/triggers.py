@@ -19,17 +19,19 @@ logger = logging.getLogger(__name__)
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
-def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandContext) -> app_commands.Group:
-    qna_group = app_commands.Group(name="qna", description="QnA")
+def register_triggers(
+    bm_group: app_commands.Group,
+    campagne_group: app_commands.Group,
+    qna_group: app_commands.Group,
+    insights_group: app_commands.Group,
+    ctx: CommandContext,
+) -> app_commands.Group:
     frasi_group = app_commands.Group(name="frasi", description="Frasi")
     barcello_group = app_commands.Group(name="barcello", description="Trigger Barcello")
-    prompt_group = app_commands.Group(name="prompt", description="Prompt")
-    insights_group = app_commands.Group(name="insights", description="Curiosità utenti")
+    prompt_group = app_commands.Group(name="prompt", description="Prompt campagne")
 
-    add_group_once(barcellometro_group, qna_group, logger)
-    add_group_once(barcellometro_group, barcello_group, logger)
-    add_group_once(barcellometro_group, prompt_group, logger)
-    add_group_once(barcellometro_group, insights_group, logger)
+    add_group_once(bm_group, barcello_group, logger)
+    add_group_once(campagne_group, prompt_group, logger)
 
     async def _require_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
@@ -759,6 +761,21 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
             lines.append(f"{mention} → {row.get('custom_text')}")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
+
+    @barcello_group.command(name="calibrate", description="Calibra pesi barcello")
+    async def barcello_calibrate(interaction: discord.Interaction) -> None:
+        profile, _ = await ctx.entitlements.resolve_profile_with_role_id(interaction.user)
+        if profile != "mod":
+            await interaction.response.send_message("Feedback riservato ai mod.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await ctx.barcello_calibration_service.run_calibration(days=14, min_samples=20)
+        if result.get("updated"):
+            message = f"Calibrazione aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
+        else:
+            message = f"Calibrazione non aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
+        await interaction.followup.send(message, ephemeral=True)
+
     @prompt_group.command(name="on", description="Abilita trigger prompt")
     async def prompt_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "prompt", "on")
@@ -1032,8 +1049,36 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
     async def insights_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "insights", "off")
 
-    @insights_group.command(name="status", description="Stato trigger curiosità utenti")
+    @insights_group.command(name="status", description="Stato curiosità utenti")
     async def insights_status(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "insights", "status")
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message("Usa in un canale.", ephemeral=True)
+            return
+        if ctx.trigger_engine is None:
+            await interaction.response.send_message("Trigger engine non disponibile.", ephemeral=True)
+            return
+        status = await ctx.trigger_engine.get_insights_status(str(interaction.guild_id), str(interaction.channel_id))
+        await interaction.response.send_message(
+            f"Insights: {'on' if status['enabled'] else 'off'}\n"
+            f"Intervallo: {status['interval_minutes']} min\n"
+            f"Template: {str(status['template'])[:140]}\n"
+            f"Ultimo invio: {status['last_post_at'] or '-'}",
+            ephemeral=True,
+        )
+
+    @insights_group.command(name="config", description="Configura curiosità utenti")
+    async def insights_config(interaction: discord.Interaction, testo: str) -> None:
+        profile = await ctx.entitlements.resolve_profile(interaction.user)
+        if profile != "mod":
+            await interaction.response.send_message("Non hai permessi per questa azione.", ephemeral=True)
+            return
+        if ctx.trigger_engine is None:
+            await interaction.response.send_message("Trigger engine non disponibile.", ephemeral=True)
+            return
+        config = await ctx.trigger_engine.configure_insights(testo)
+        await interaction.response.send_message(
+            f"Configurazione salvata: ogni {config['interval_minutes']} min. Template: {config['template'][:120]}",
+            ephemeral=True,
+        )
 
     return frasi_group

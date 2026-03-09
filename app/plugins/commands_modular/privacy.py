@@ -83,7 +83,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.privacy.on", ctx):
+        if not await check_permission(interaction, "bm.privacy.on", ctx):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:
@@ -111,7 +111,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.privacy.off", ctx):
+        if not await check_permission(interaction, "bm.privacy.off", ctx):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:
@@ -140,7 +140,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.privacy.status", ctx):
+        if not await check_permission(interaction, "bm.privacy.status", ctx):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:

@@ -20,7 +20,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         interaction: discord.Interaction,
         backend: app_commands.Choice[str],
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.stt.backend", ctx):
+        if not await check_permission(interaction, "bm.stt.backend", ctx):
             return
         await set_setting(ctx, "stt.backend", backend.value)
         await interaction.response.send_message(f"Backend STT impostato su {backend.value}.", ephemeral=True)
@@ -37,7 +37,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         interaction: discord.Interaction,
         model: app_commands.Choice[str],
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.stt.model", ctx):
+        if not await check_permission(interaction, "bm.stt.model", ctx):
             return
         await set_setting(ctx, "stt.local.model", model.value)
         await interaction.response.send_message(f"Modello STT impostato su {model.value}.", ephemeral=True)
@@ -54,7 +54,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         interaction: discord.Interaction,
         compute: app_commands.Choice[str],
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.stt.compute", ctx):
+        if not await check_permission(interaction, "bm.stt.compute", ctx):
             return
         await set_setting(ctx, "stt.local.compute_type", compute.value)
         await interaction.response.send_message(f"Compute STT impostato su {compute.value}.", ephemeral=True)
@@ -71,7 +71,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         interaction: discord.Interaction,
         beam: app_commands.Choice[str],
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.stt.beam", ctx):
+        if not await check_permission(interaction, "bm.stt.beam", ctx):
             return
         await set_setting(ctx, "stt.local.beam_size", beam.value)
         await interaction.response.send_message(f"Beam STT impostato su {beam.value}.", ephemeral=True)
@@ -87,7 +87,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         interaction: discord.Interaction,
         language: app_commands.Choice[str],
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.stt.language", ctx):
+        if not await check_permission(interaction, "bm.stt.language", ctx):
             return
         await set_setting(ctx, "stt.local.language_hint", language.value)
         await interaction.response.send_message(f"Lingua STT impostata su {language.value}.", ephemeral=True)

@@ -20,7 +20,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
         interaction: discord.Interaction,
         backend: app_commands.Choice[str],
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.translate.backend", ctx):
+        if not await check_permission(interaction, "bm.translate.backend", ctx):
             return
         await set_setting(ctx, "translate.backend", backend.value)
         await interaction.response.send_message(
@@ -34,7 +34,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
         interaction: discord.Interaction,
         target: app_commands.Choice[str],
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.translate.target", ctx):
+        if not await check_permission(interaction, "bm.translate.target", ctx):
             return
         await set_setting(ctx, "translate.target_lang", target.value)
         await interaction.response.send_message(

@@ -45,12 +45,14 @@ def setup(registry: ServiceRegistry) -> None:
     if not use_guild:
         logger.warning("GUILD_ID missing/invalid; registering GLOBAL commands")
 
-    barcellometro_group = app_commands.Group(name="barcellometro", description="Comandi Barcellometro")
+    bm_group = app_commands.Group(name="bm", description="Comandi bm")
     role_group = app_commands.Group(name="role", description="Permessi e limiti")
     stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
     translate_group = app_commands.Group(name="translate", description="Traduzione")
     audio_notes_group = app_commands.Group(name="audio_notes", description="Note vocali")
-    messaggi_group = app_commands.Group(name="messaggi", description="Messaggi auto")
+    campagne_group = app_commands.Group(name="campagne", description="Campagne auto")
+    qna_group = app_commands.Group(name="qna", description="QnA")
+    insights_group = app_commands.Group(name="insights", description="Curiosità utenti")
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Ingest vocale")
     privacy_group = app_commands.Group(name="privacy", description="Privacy vocale")
     status_group = app_commands.Group(name="status", description="Stato servizi")
@@ -60,19 +62,18 @@ def setup(registry: ServiceRegistry) -> None:
     inattivi_group = app_commands.Group(name="inattivi", description="Utenti inattivi")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
 
-    add_group_once(barcellometro_group, role_group, logger)
-    add_group_once(barcellometro_group, stt_group, logger)
-    add_group_once(barcellometro_group, translate_group, logger)
-    add_group_once(barcellometro_group, audio_notes_group, logger)
-    add_group_once(barcellometro_group, messaggi_group, logger)
-    add_group_once(barcellometro_group, voice_ingest_group, logger)
+    add_group_once(bm_group, role_group, logger)
+    add_group_once(bm_group, stt_group, logger)
+    add_group_once(bm_group, translate_group, logger)
+    add_group_once(bm_group, audio_notes_group, logger)
+    add_group_once(bm_group, voice_ingest_group, logger)
 
-    register_admin(barcellometro_group, ctx)
+    register_admin(bm_group, ctx)
     register_roles(role_group, ctx)
     register_stt(stt_group, ctx)
     register_translate(translate_group, ctx)
     register_audio_notes(audio_notes_group, ctx)
-    register_messaggi(messaggi_group, ctx)
+    register_messaggi(campagne_group, ctx)
     register_voice_ingest(voice_ingest_group, ctx)
     register_privacy(privacy_group, ctx)
     register_status(status_group, ctx)
@@ -90,14 +91,12 @@ def setup(registry: ServiceRegistry) -> None:
     except Exception:
         inattivi_registered = False
         partial = [cmd.qualified_name for cmd in inattivi_group.walk_commands()]
-        logger.exception("Failed to register inattivi commands; disabling /barcellometro inattivi only")
+        logger.exception("Failed to register inattivi commands; disabling /inattivi only")
         logger.error("Partial inattivi subcommands before failure: %s", partial)
-        logger.warning("/barcellometro inattivi disabled due to registration failure")
-    if inattivi_registered:
-        add_group_once(barcellometro_group, inattivi_group, logger)
+        logger.warning("/inattivi disabled due to registration failure")
 
     register_resoconto(resoconto_group, ctx)
-    frasi_group = register_triggers(barcellometro_group, ctx)
+    frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
     logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
     register_barcello(bot.tree, guild_obj, ctx)
     register_ask(bot.tree, guild_obj, ctx)
@@ -106,7 +105,11 @@ def setup(registry: ServiceRegistry) -> None:
     logger.info("Registered commands scope=%s top_level=%s", scope_label, [c.qualified_name for c in top_level])
 
     root_commands: list[app_commands.Command | app_commands.Group] = [
-        barcellometro_group,
+        bm_group,
+        inattivi_group,
+        qna_group,
+        insights_group,
+        campagne_group,
         riassunto_group,
         aura_group,
         attivita_group,
@@ -115,6 +118,9 @@ def setup(registry: ServiceRegistry) -> None:
         privacy_group,
         frasi_group,
     ]
+
+    if not inattivi_registered:
+        root_commands = [command for command in root_commands if command is not inattivi_group]
 
     def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
         if use_guild:

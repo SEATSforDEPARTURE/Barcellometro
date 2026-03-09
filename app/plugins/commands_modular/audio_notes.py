@@ -13,21 +13,21 @@ from app.plugins.commands_modular.settings import get_setting, set_setting
 def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandContext) -> None:
     @audio_notes_group.command(name="on", description="Abilita le note vocali")
     async def audio_notes_on_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.audio_notes.on", ctx):
+        if not await check_permission(interaction, "bm.audio_notes.on", ctx):
             return
         await set_setting(ctx, "audio_notes.enabled", "true")
         await interaction.response.send_message("Note vocali abilitate.", ephemeral=True)
 
     @audio_notes_group.command(name="off", description="Disabilita le note vocali")
     async def audio_notes_off_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.audio_notes.off", ctx):
+        if not await check_permission(interaction, "bm.audio_notes.off", ctx):
             return
         await set_setting(ctx, "audio_notes.enabled", "false")
         await interaction.response.send_message("Note vocali disabilitate.", ephemeral=True)
 
     @audio_notes_group.command(name="status", description="Mostra lo stato note vocali")
     async def audio_notes_status_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "barcellometro.audio_notes.status", ctx):
+        if not await check_permission(interaction, "bm.audio_notes.status", ctx):
             return
         enabled = (await get_setting(ctx, "audio_notes.enabled", "false")).lower() in {"1", "true", "yes", "y"}
         max_mb = await get_setting(ctx, "audio_notes.max_mb", os.getenv("AUDIO_NOTES_MAX_MB", "25"))
@@ -63,7 +63,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         discord_max_chars: int,
         queue_max: int,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.audio_notes.limits", ctx):
+        if not await check_permission(interaction, "bm.audio_notes.limits", ctx):
             return
         if max_mb <= 0 or max_duration_s <= 0 or discord_max_chars <= 0 or queue_max <= 0:
             await interaction.response.send_message("Specifica limiti validi (> 0).", ephemeral=True)
