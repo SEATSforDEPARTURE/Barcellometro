@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
-from app.plugins.commands_modular.permissions import ensure_admin
+from app.plugins.commands_modular.permissions import check_permission
 
 
 def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -17,7 +17,7 @@ def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
         usage_limit: int | None = None,
         cooldown_seconds: int | None = None,
     ) -> None:
-        if not await ensure_admin(interaction):
+        if not await check_permission(interaction, "bm.role.set_role", ctx):
             return
         if usage_limit is not None and usage_limit <= 0:
             await interaction.response.send_message("Specifica un limite utilizzi valido.", ephemeral=True)
@@ -43,7 +43,7 @@ def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
         usage_limit: int | None = None,
         cooldown_seconds: int | None = None,
     ) -> None:
-        if not await ensure_admin(interaction):
+        if not await check_permission(interaction, "bm.role.set_user", ctx):
             return
         if usage_limit is not None and usage_limit <= 0:
             await interaction.response.send_message("Specifica un limite utilizzi valido.", ephemeral=True)
@@ -67,7 +67,7 @@ def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
         role: discord.Role,
         command: str,
     ) -> None:
-        if not await ensure_admin(interaction):
+        if not await check_permission(interaction, "bm.role.clear_role", ctx):
             return
         await ctx.database.delete_role_policy(
             guild_id=str(interaction.guild_id),
@@ -83,7 +83,7 @@ def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
         user: discord.User,
         command: str,
     ) -> None:
-        if not await ensure_admin(interaction):
+        if not await check_permission(interaction, "bm.role.clear_user", ctx):
             return
         await ctx.database.delete_user_policy(
             guild_id=str(interaction.guild_id),
@@ -95,7 +95,7 @@ def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
     @role_group.command(name="show-role", description="Mostra le policy di un ruolo")
     @app_commands.describe(role="Ruolo")
     async def role_show_command(interaction: discord.Interaction, role: discord.Role) -> None:
-        if not await ensure_admin(interaction):
+        if not await check_permission(interaction, "bm.role.show_role", ctx):
             return
         rows = await ctx.database.fetch_role_policies(str(interaction.guild_id), str(role.id))
         if not rows:
@@ -111,7 +111,7 @@ def register_roles(role_group: app_commands.Group, ctx: CommandContext) -> None:
     @role_group.command(name="show-user", description="Mostra le policy di un utente")
     @app_commands.describe(user="Utente")
     async def user_show_command(interaction: discord.Interaction, user: discord.User) -> None:
-        if not await ensure_admin(interaction):
+        if not await check_permission(interaction, "bm.role.show_user", ctx):
             return
         rows = await ctx.database.fetch_user_policies(str(interaction.guild_id), str(user.id))
         if not rows:

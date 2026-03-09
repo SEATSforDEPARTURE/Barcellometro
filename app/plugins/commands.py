@@ -12,7 +12,6 @@ from app.plugins.commands_modular import (
     register_admin,
     register_audio_notes,
     register_attivita,
-    register_ask,
     register_aura,
     register_barcello,
     register_attivita_settings,
@@ -99,7 +98,6 @@ def setup(registry: ServiceRegistry) -> None:
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
     logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
     register_barcello(bot.tree, guild_obj, ctx)
-    register_ask(bot.tree, guild_obj, ctx)
     scope_label = "guild" if guild_obj else "global"
     top_level = bot.tree.get_commands(guild=guild_obj) if guild_obj else bot.tree.get_commands()
     logger.info("Registered commands scope=%s top_level=%s", scope_label, [c.qualified_name for c in top_level])
