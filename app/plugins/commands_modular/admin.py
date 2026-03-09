@@ -7,12 +7,12 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 
 
-def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext) -> None:
-    @barcellometro_group.command(name="check", description="Attiva/disattiva raccolta eventi")
+def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
+    @bm_group.command(name="check", description="Attiva/disattiva raccolta eventi")
     @app_commands.describe(state="on/off")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
     async def check_command(interaction: discord.Interaction, state: app_commands.Choice[str]) -> None:
-        if not await check_permission(interaction, "barcellometro.check", ctx):
+        if not await check_permission(interaction, "bm.check", ctx):
             return
         if not interaction.channel or not isinstance(interaction.channel, discord.abc.GuildChannel):
             await interaction.response.send_message("Questo comando funziona solo nei canali della guild.", ephemeral=True)
@@ -33,7 +33,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
             ephemeral=True,
         )
 
-    @barcellometro_group.command(name="retention", description="Gestisci la retention dei dati")
+    @bm_group.command(name="retention", description="Gestisci la retention dei dati")
     @app_commands.describe(action="get/set", days="Numero di giorni di retention")
     @app_commands.choices(action=[app_commands.Choice(name="get", value="get"), app_commands.Choice(name="set", value="set")])
     async def retention_command(
@@ -41,7 +41,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
         action: app_commands.Choice[str],
         days: int | None = None,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.retention", ctx):
+        if not await check_permission(interaction, "bm.retention", ctx):
             return
         if action.value == "get":
             current = await ctx.retention.get_retention_days()
@@ -53,7 +53,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
         await ctx.retention.set_retention_days(days)
         await interaction.response.send_message(f"Retention aggiornata a {days} giorni.", ephemeral=True)
 
-    @barcellometro_group.command(name="backfill", description="Gestisci il backfill dei dati")
+    @bm_group.command(name="backfill", description="Gestisci il backfill dei dati")
     @app_commands.describe(state="on/off", days="Numero di giorni di backfill")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
     async def backfill_command(
@@ -61,7 +61,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
         state: app_commands.Choice[str] | None = None,
         days: int | None = None,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.backfill", ctx):
+        if not await check_permission(interaction, "bm.backfill", ctx):
             return
         if interaction.response.is_done():
             responder = interaction.followup
@@ -98,11 +98,11 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
 
         await responder.send_message("Backfill disattivato.", ephemeral=True)
 
-    @barcellometro_group.command(name="ai", description="Abilita o disabilita il servizio AI")
+    @bm_group.command(name="ai", description="Abilita o disabilita il servizio AI")
     @app_commands.describe(state="on/off")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
     async def ai_command(interaction: discord.Interaction, state: app_commands.Choice[str]) -> None:
-        if not await check_permission(interaction, "barcellometro.ai", ctx):
+        if not await check_permission(interaction, "bm.ai", ctx):
             return
         enabled = state.value == "on"
         await ctx.ai.set_enabled(enabled)
@@ -111,7 +111,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
             ephemeral=True,
         )
 
-    @barcellometro_group.command(name="ai-model", description="Imposta il modello AI per un task")
+    @bm_group.command(name="ai-model", description="Imposta il modello AI per un task")
     @app_commands.describe(task="Task AI", model="Nome modello")
     @app_commands.choices(
         task=[
@@ -125,7 +125,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
         task: app_commands.Choice[str],
         model: str,
     ) -> None:
-        if not await check_permission(interaction, "barcellometro.ai-model", ctx):
+        if not await check_permission(interaction, "bm.ai-model", ctx):
             return
         await ctx.ai.set_model(task.value, model)
         await interaction.response.send_message(
@@ -133,7 +133,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
             ephemeral=True,
         )
 
-    @barcellometro_group.command(name="calibrate", description="Calibra pesi barcello")
+    @bm_group.command(name="calibrate", description="Calibra pesi barcello")
     async def barcellometro_calibrate(interaction: discord.Interaction) -> None:
         profile, _ = await ctx.entitlements.resolve_profile_with_role_id(interaction.user)
         if profile != "mod":
@@ -147,9 +147,9 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
             message = f"Calibrazione non aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
         await interaction.followup.send(message, ephemeral=True)
 
-    @barcellometro_group.command(name="insights_config", description="Configura curiosità utenti")
+    @bm_group.command(name="insights_config", description="Configura curiosità utenti")
     async def insights_config(interaction: discord.Interaction, testo: str) -> None:
-        if not await check_permission(interaction, "barcellometro.ai", ctx):
+        if not await check_permission(interaction, "bm.ai", ctx):
             return
         if ctx.trigger_engine is None:
             await interaction.response.send_message("Trigger engine non disponibile.", ephemeral=True)
@@ -160,7 +160,7 @@ def register_admin(barcellometro_group: app_commands.Group, ctx: CommandContext)
             ephemeral=True,
         )
 
-    @barcellometro_group.command(name="insights_status", description="Stato curiosità utenti")
+    @bm_group.command(name="insights_status", description="Stato curiosità utenti")
     async def insights_status(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa in un canale.", ephemeral=True)

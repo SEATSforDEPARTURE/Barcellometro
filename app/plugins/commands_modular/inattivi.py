@@ -13,7 +13,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.discord_embed_utils import FIELD_MAX, truncate
 
-PERM = "barcellometro.inattivi.config"
+PERM = "inattivi.config"
 TEMPLATE_HELP = f"Placeholder supportati: {describe_placeholders()} Es: {{display_name}}, {{days_inactive}}g."
 ROME = ZoneInfo("Europe/Rome")
 

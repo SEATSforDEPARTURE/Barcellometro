@@ -50,7 +50,7 @@ def setup(registry: ServiceRegistry) -> None:
             if channel_id not in warned_disabled_channels:
                 warned_disabled_channels.add(channel_id)
                 logger.info(
-                    "Channel %s is disabled for ingestion. Enable with /barcellometro check on",
+                    "Channel %s is disabled for ingestion. Enable with /bm check on",
                     channel_id,
                 )
         return enabled
