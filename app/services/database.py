@@ -349,6 +349,16 @@ class DatabaseService:
                 FOREIGN KEY (phrase_id) REFERENCES trigger_phrases(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS trigger_phrase_milestones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phrase_id INTEGER NOT NULL,
+                threshold_count INTEGER NOT NULL,
+                template_text TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (phrase_id, threshold_count),
+                FOREIGN KEY (phrase_id) REFERENCES trigger_phrases(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_state (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -575,10 +585,56 @@ class DatabaseService:
         existing = {row["name"] for row in columns}
         missing = {
             "embed_color": "TEXT NULL",
+            "cooldown_seconds": "INTEGER NULL",
+            "allowed_role_ids": "TEXT NULL",
         }
         for name, col_def in missing.items():
             if name not in existing:
                 await self._conn.execute(f"ALTER TABLE trigger_phrases ADD COLUMN {name} {col_def}")
+
+    def _serialize_allowed_role_ids(self, allowed_role_ids: list[str] | list[int] | None) -> str | None:
+        if not allowed_role_ids:
+            return None
+        normalized: list[str] = []
+        for role_id in allowed_role_ids:
+            candidate = str(role_id).strip()
+            if not candidate:
+                continue
+            normalized.append(candidate)
+        if not normalized:
+            return None
+        deduped = list(dict.fromkeys(normalized))
+        return json.dumps(deduped, ensure_ascii=False)
+
+    def _parse_allowed_role_ids(self, raw: Any) -> list[str]:
+        if raw is None:
+            return []
+        text = str(raw).strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        values: list[str] = []
+        if isinstance(parsed, list):
+            for item in parsed:
+                candidate = str(item).strip()
+                if candidate:
+                    values.append(candidate)
+        else:
+            for item in text.split(","):
+                candidate = item.strip()
+                if candidate:
+                    values.append(candidate)
+        return list(dict.fromkeys(values))
+
+    def _normalize_trigger_phrase_row(self, row: aiosqlite.Row) -> dict[str, Any]:
+        data = dict(row)
+        data["allowed_role_ids"] = self._parse_allowed_role_ids(data.get("allowed_role_ids"))
+        cooldown = data.get("cooldown_seconds")
+        data["cooldown_seconds"] = int(cooldown) if cooldown is not None else None
+        return data
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
         assert self._conn is not None
@@ -1516,18 +1572,42 @@ class DatabaseService:
         match_mode: str,
         case_sensitive: bool,
         embed_color: str | None = None,
+        cooldown_seconds: int | None = None,
+        allowed_role_ids: list[str] | list[int] | None = None,
     ) -> None:
+        serialized_role_ids = self._serialize_allowed_role_ids(allowed_role_ids)
         await self.execute(
             """
-            INSERT INTO trigger_phrases (guild_id, channel_id, phrase, match_mode, case_sensitive, enabled, embed_color)
-            VALUES (?, ?, ?, ?, ?, 1, ?)
+            INSERT INTO trigger_phrases (
+                guild_id,
+                channel_id,
+                phrase,
+                match_mode,
+                case_sensitive,
+                enabled,
+                embed_color,
+                cooldown_seconds,
+                allowed_role_ids
+            )
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(guild_id, channel_id, phrase) DO UPDATE SET
                 match_mode = excluded.match_mode,
                 case_sensitive = excluded.case_sensitive,
                 enabled = 1,
-                embed_color = excluded.embed_color
+                embed_color = excluded.embed_color,
+                cooldown_seconds = excluded.cooldown_seconds,
+                allowed_role_ids = excluded.allowed_role_ids
             """,
-            (guild_id, channel_id, phrase, match_mode, 1 if case_sensitive else 0, embed_color),
+            (
+                guild_id,
+                channel_id,
+                phrase,
+                match_mode,
+                1 if case_sensitive else 0,
+                embed_color,
+                cooldown_seconds,
+                serialized_role_ids,
+            ),
         )
 
     async def remove_trigger_phrase(self, guild_id: str, channel_id: str, phrase: str) -> None:
@@ -1541,28 +1621,28 @@ class DatabaseService:
             "SELECT * FROM trigger_phrases WHERE guild_id = ? AND channel_id = ? ORDER BY id ASC",
             (guild_id, channel_id),
         )
-        return [dict(row) for row in rows]
+        return [self._normalize_trigger_phrase_row(row) for row in rows]
 
     async def list_trigger_phrases_guild(self, guild_id: str) -> list[dict[str, Any]]:
         rows = await self.fetchall(
             "SELECT * FROM trigger_phrases WHERE guild_id = ? ORDER BY id ASC",
             (guild_id,),
         )
-        return [dict(row) for row in rows]
+        return [self._normalize_trigger_phrase_row(row) for row in rows]
 
     async def get_matching_phrases(self, guild_id: str, channel_id: str) -> list[dict[str, Any]]:
         rows = await self.fetchall(
             "SELECT * FROM trigger_phrases WHERE guild_id = ? AND channel_id = ? AND enabled = 1 ORDER BY id ASC",
             (guild_id, channel_id),
         )
-        return [dict(row) for row in rows]
+        return [self._normalize_trigger_phrase_row(row) for row in rows]
 
     async def get_matching_phrases_guild(self, guild_id: str) -> list[dict[str, Any]]:
         rows = await self.fetchall(
             "SELECT * FROM trigger_phrases WHERE guild_id = ? AND enabled = 1 ORDER BY id ASC",
             (guild_id,),
         )
-        return [dict(row) for row in rows]
+        return [self._normalize_trigger_phrase_row(row) for row in rows]
 
     async def remove_trigger_phrase_guild(self, guild_id: str, phrase: str) -> None:
         await self.execute(
@@ -1576,11 +1656,147 @@ class DatabaseService:
             (guild_id, phrase_id),
         )
 
+    async def get_trigger_phrase_by_id(self, guild_id: str, phrase_id: int) -> dict[str, Any]:
+        row = await self.fetchone(
+            "SELECT * FROM trigger_phrases WHERE guild_id = ? AND id = ?",
+            (guild_id, phrase_id),
+        )
+        if row is None:
+            return {}
+        return self._normalize_trigger_phrase_row(row)
+
+    async def update_trigger_phrase(
+        self,
+        guild_id: str,
+        phrase_id: int,
+        *,
+        phrase: str | None = None,
+        match_mode: str | None = None,
+        embed_color: str | None = None,
+        set_embed_color: bool = False,
+        cooldown_seconds: int | None = None,
+        set_cooldown_seconds: bool = False,
+        allowed_role_ids: list[str] | list[int] | None = None,
+        set_allowed_role_ids: bool = False,
+        enabled: bool | None = None,
+    ) -> bool:
+        updates: list[str] = []
+        params: list[Any] = []
+        if phrase is not None:
+            updates.append("phrase = ?")
+            params.append(phrase)
+        if match_mode is not None:
+            updates.append("match_mode = ?")
+            params.append(match_mode)
+        if set_embed_color:
+            updates.append("embed_color = ?")
+            params.append(embed_color)
+        if set_cooldown_seconds:
+            updates.append("cooldown_seconds = ?")
+            params.append(cooldown_seconds)
+        if set_allowed_role_ids:
+            updates.append("allowed_role_ids = ?")
+            params.append(self._serialize_allowed_role_ids(allowed_role_ids))
+        if enabled is not None:
+            updates.append("enabled = ?")
+            params.append(1 if enabled else 0)
+
+        if not updates:
+            return False
+        params.extend([guild_id, phrase_id])
+        await self.execute(
+            f"UPDATE trigger_phrases SET {', '.join(updates)} WHERE guild_id = ? AND id = ?",
+            tuple(params),
+        )
+        return True
+
     async def update_phrase_last_seen(self, phrase_id: int, ts: str, message_id: str) -> None:
         await self.execute(
             "UPDATE trigger_phrases SET last_seen_ts = ?, last_seen_message_id = ? WHERE id = ?",
             (ts, message_id, phrase_id),
         )
+
+    async def upsert_trigger_phrase_milestone(self, phrase_id: int, threshold_count: int, template_text: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_phrase_milestones (phrase_id, threshold_count, template_text)
+            VALUES (?, ?, ?)
+            ON CONFLICT(phrase_id, threshold_count) DO UPDATE SET
+                template_text = excluded.template_text
+            """,
+            (phrase_id, threshold_count, template_text),
+        )
+
+    async def delete_trigger_phrase_milestone(self, phrase_id: int, threshold_count: int) -> bool:
+        existing = await self.fetchone(
+            "SELECT 1 FROM trigger_phrase_milestones WHERE phrase_id = ? AND threshold_count = ?",
+            (phrase_id, threshold_count),
+        )
+        if existing is None:
+            return False
+        await self.execute(
+            "DELETE FROM trigger_phrase_milestones WHERE phrase_id = ? AND threshold_count = ?",
+            (phrase_id, threshold_count),
+        )
+        return True
+
+    async def list_trigger_phrase_milestones(self, phrase_id: int) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT id, phrase_id, threshold_count, template_text, created_at
+            FROM trigger_phrase_milestones
+            WHERE phrase_id = ?
+            ORDER BY threshold_count ASC
+            """,
+            (phrase_id,),
+        )
+        return [dict(row) for row in rows]
+
+    async def get_trigger_phrase_milestone(self, phrase_id: int, threshold_count: int) -> dict[str, Any]:
+        row = await self.fetchone(
+            """
+            SELECT id, phrase_id, threshold_count, template_text, created_at
+            FROM trigger_phrase_milestones
+            WHERE phrase_id = ? AND threshold_count = ?
+            """,
+            (phrase_id, threshold_count),
+        )
+        return dict(row) if row else {}
+
+    async def get_trigger_phrase_stats_summary(self, guild_id: str, phrase_id: int) -> dict[str, Any]:
+        row = await self.fetchone(
+            """
+            SELECT
+                p.id AS phrase_id,
+                p.phrase AS phrase,
+                p.last_seen_ts AS phrase_last_seen_ts,
+                p.last_seen_message_id AS phrase_last_seen_message_id,
+                COALESCE(COUNT(s.user_id), 0) AS unique_users,
+                COALESCE(SUM(s.count), 0) AS total_uses,
+                MAX(s.last_seen_ts) AS last_seen_ts_max,
+                MIN(s.last_seen_ts) AS first_seen_ts_min
+            FROM trigger_phrases p
+            LEFT JOIN trigger_phrase_user_stats s ON s.phrase_id = p.id
+            WHERE p.guild_id = ? AND p.id = ?
+            GROUP BY p.id, p.phrase, p.last_seen_ts, p.last_seen_message_id
+            """,
+            (guild_id, phrase_id),
+        )
+        return dict(row) if row else {}
+
+    async def list_trigger_phrase_user_stats(self, guild_id: str, phrase_id: int, limit: int = 10) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT s.user_id, s.count, s.last_seen_ts, s.last_seen_message_id
+            FROM trigger_phrase_user_stats s
+            INNER JOIN trigger_phrases p ON p.id = s.phrase_id
+            WHERE p.guild_id = ? AND p.id = ?
+            ORDER BY s.count DESC, s.last_seen_ts DESC
+            LIMIT ?
+            """,
+            (guild_id, phrase_id, limit),
+        )
+        return [dict(row) for row in rows]
 
     async def get_phrase_user_stats(self, phrase_id: int, user_id: str) -> dict[str, Any]:
         row = await self.fetchone(
