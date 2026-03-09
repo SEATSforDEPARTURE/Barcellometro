@@ -189,7 +189,7 @@ def test_embed_description_uses_default_template_not_raw_phrase() -> None:
     asyncio.run(_run())
 
 
-def test_per_user_template_has_priority_over_first_and_default() -> None:
+def test_custom_user_phrase_is_rendered_in_template() -> None:
     async def _run() -> None:
         original_text_channel = triggers_module.discord.TextChannel
         triggers_module.discord.TextChannel = _FakeTextChannel
@@ -197,15 +197,15 @@ def test_per_user_template_has_priority_over_first_and_default() -> None:
             db = DatabaseService(":memory:")
             await db.connect()
             await db.initialize_schema()
+            await db.upsert_trigger_phrase_global_user_custom_text("g1", "42", "Che micia")
             embed = await _run_phrase_once(
                 db,
                 author_id="42",
                 trigger_state={
-                    "templates": {"DEFAULT": "default", "FIRST": "first"},
-                    "per_user": {"42": {"FIRST": "ciao {author}", "DEFAULT": "x"}},
+                    "templates": {"DEFAULT": "default {custom_user_phrase}", "FIRST": "first {custom_user_phrase}"},
                 },
             )
-            assert embed.description == "ciao <@42>"
+            assert embed.description == "first Che micia"
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
@@ -366,7 +366,7 @@ def test_phrase_cooldown_blocks_second_hit_and_does_not_consume_first() -> None:
             await db.initialize_schema()
             await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
             await db.add_trigger_phrase("g1", "ch-a", "ciao", "CONTAINS", False, None, 120, None)
-            await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "first", "DEFAULT": "default {count_user}"}})
+            await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "first", "DEFAULT": "default {count_user}"}, "global_milestones_enabled": True})
 
             service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
             channel = _FakeTextChannel(guild=_FakeGuild(role_ids=[], members={1: _FakeMember(1, [])}))
@@ -642,7 +642,7 @@ def test_frasi_edit_reset_fields_and_missing_id() -> None:
     asyncio.run(_run())
 
 
-def test_phrase_milestone_priority_and_exact_threshold_trigger() -> None:
+def test_phrase_global_milestone_priority_and_exact_threshold_trigger() -> None:
     async def _run() -> None:
         original_text_channel = triggers_module.discord.TextChannel
         triggers_module.discord.TextChannel = _FakeTextChannel
@@ -655,8 +655,8 @@ def test_phrase_milestone_priority_and_exact_threshold_trigger() -> None:
             phrase = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
             assert phrase is not None
             phrase_id = int(phrase["id"])
-            await db.upsert_trigger_phrase_milestone(phrase_id, 5, "milestone {milestone} {count_user_prev}->{count_user}")
-            await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "first", "DEFAULT": "default {count_user}"}})
+            await db.set_trigger_phrase_global_milestone("g1", 5, "milestone {milestone} {count_user_prev}->{count_user}")
+            await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "first", "DEFAULT": "default {count_user}"}, "global_milestones_enabled": True})
 
             service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
             channel = _FakeTextChannel(guild=_FakeGuild(role_ids=[], members={1: _FakeMember(1, [])}))
@@ -686,7 +686,7 @@ def test_phrase_milestone_priority_and_exact_threshold_trigger() -> None:
     asyncio.run(_run())
 
 
-def test_phrase_per_user_template_has_priority_over_milestone() -> None:
+def test_custom_user_phrase_works_inside_global_milestone() -> None:
     async def _run() -> None:
         original_text_channel = triggers_module.discord.TextChannel
         triggers_module.discord.TextChannel = _FakeTextChannel
@@ -699,11 +699,12 @@ def test_phrase_per_user_template_has_priority_over_milestone() -> None:
             phrase = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
             assert phrase is not None
             phrase_id = int(phrase["id"])
-            await db.upsert_trigger_phrase_milestone(phrase_id, 2, "milestone")
+            await db.set_trigger_phrase_global_milestone("g1", 2, "milestone {custom_user_phrase}")
+            await db.upsert_trigger_phrase_global_user_custom_text("g1", "1", "Che micia")
             await db.set_trigger_state_global(
                 "g1",
                 "frasi",
-                {"templates": {"FIRST": "first", "DEFAULT": "default"}, "per_user": {"1": {"DEFAULT": "utente", "FIRST": "utente first"}}},
+                {"templates": {"FIRST": "first", "DEFAULT": "default"}, "global_milestones_enabled": True},
             )
             service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
             channel = _FakeTextChannel(guild=_FakeGuild(role_ids=[], members={1: _FakeMember(1, [])}))
@@ -722,7 +723,7 @@ def test_phrase_per_user_template_has_priority_over_milestone() -> None:
             )
             await service._handle_phrases(envelope)
             await service._handle_phrases(envelope)
-            assert channel.target.replies[1].description == "utente"
+            assert channel.target.replies[1].description == "milestone Che micia"
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
@@ -730,7 +731,7 @@ def test_phrase_per_user_template_has_priority_over_milestone() -> None:
     asyncio.run(_run())
 
 
-def test_phrase_milestone_not_triggered_when_cooldown_blocks() -> None:
+def test_phrase_global_milestone_not_triggered_when_cooldown_blocks() -> None:
     async def _run() -> None:
         original_text_channel = triggers_module.discord.TextChannel
         original_now = triggers_module.datetime.now
@@ -744,8 +745,8 @@ def test_phrase_milestone_not_triggered_when_cooldown_blocks() -> None:
             phrase = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
             assert phrase is not None
             phrase_id = int(phrase["id"])
-            await db.upsert_trigger_phrase_milestone(phrase_id, 2, "milestone")
-            await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "first", "DEFAULT": "default"}})
+            await db.set_trigger_phrase_global_milestone("g1", 2, "milestone")
+            await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "first", "DEFAULT": "default"}, "global_milestones_enabled": True})
 
             service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
             channel = _FakeTextChannel(guild=_FakeGuild(role_ids=[], members={1: _FakeMember(1, [])}))
@@ -808,9 +809,9 @@ def test_frasi_stats_and_milestone_commands() -> None:
         )
         frasi_group = register_triggers(group, ctx)
         stats_cmd = next(c for c in frasi_group.commands if c.name == "stats")
-        set_cmd = next(c for c in frasi_group.commands if c.name == "milestone_set")
-        list_cmd = next(c for c in frasi_group.commands if c.name == "milestone_list")
-        remove_cmd = next(c for c in frasi_group.commands if c.name == "milestone_remove")
+        set_cmd = next(c for c in frasi_group.commands if c.name == "milestone_global_set")
+        list_cmd = next(c for c in frasi_group.commands if c.name == "milestone_global_list")
+        remove_cmd = next(c for c in frasi_group.commands if c.name == "milestone_global_remove")
 
         response = Mock()
         response.send_message = AsyncMock()
@@ -825,18 +826,41 @@ def test_frasi_stats_and_milestone_commands() -> None:
         assert field_values["Utenti unici"] == "2"
         assert field_values["Utilizzi totali"] == "3"
 
-        await set_cmd.callback(interaction, id=phrase_id, soglia=10, testo="dieci")
-        await set_cmd.callback(interaction, id=phrase_id, soglia=5, testo="cinque")
-        milestones = await db.list_trigger_phrase_milestones(phrase_id)
+        await set_cmd.callback(interaction, soglia=10, testo="dieci")
+        await set_cmd.callback(interaction, soglia=5, testo="cinque")
+        milestones = await db.list_trigger_phrase_global_milestones("1")
         assert [int(m["threshold_count"]) for m in milestones] == [5, 10]
 
-        await list_cmd.callback(interaction, id=phrase_id)
+        await list_cmd.callback(interaction)
         text = response.send_message.await_args_list[-1].kwargs.get("content") or response.send_message.await_args_list[-1].args[0]
         assert "5 →" in text and "10 →" in text
 
-        await remove_cmd.callback(interaction, id=phrase_id, soglia=5)
-        milestones_after = await db.list_trigger_phrase_milestones(phrase_id)
+        await remove_cmd.callback(interaction, soglia=5)
+        milestones_after = await db.list_trigger_phrase_global_milestones("1")
         assert [int(m["threshold_count"]) for m in milestones_after] == [10]
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_template_set_user_command_is_not_registered() -> None:
+    async def _run() -> None:
+        from discord import app_commands
+
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        group = app_commands.Group(name="barcellometro", description="x")
+        ctx = SimpleNamespace(
+            database=db,
+            entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
+            timezone=timezone.utc,
+            message_scheduler=Mock(),
+            trigger_engine=Mock(),
+        )
+        frasi_group = register_triggers(group, ctx)
+        names = {command.name for command in frasi_group.commands}
+        assert "template_set_user" not in names
         await db.close()
 
     asyncio.run(_run())
