@@ -158,6 +158,7 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         cooldown_raw = row.get("cooldown_seconds")
         cooldown_text = f"{cooldown_raw}s" if cooldown_raw is not None else "nessuno"
         enabled = bool(row.get("enabled", 1))
+        milestone_count = int(row.get("milestone_count") or 0)
         return " · ".join(
             [
                 f"#{row.get('id')}",
@@ -166,9 +167,29 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
                 f"colore: {row.get('embed_color') or '-'}",
                 f"cooldown: {cooldown_text}",
                 f"ruoli: {roles_text}",
+                f"milestone: {milestone_count}",
                 f"stato: {'attiva' if enabled else 'disattiva'}",
             ]
         )
+
+    def _humanize_ts(raw_ts: object) -> str:
+        if not raw_ts:
+            return "-"
+        try:
+            dt = datetime.fromisoformat(str(raw_ts))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
+            minutes = max(0, int(delta.total_seconds() // 60))
+            if minutes < 120:
+                rel = f"{minutes}m fa"
+            elif minutes < 60 * 48:
+                rel = f"{minutes // 60}h fa"
+            else:
+                rel = f"{minutes // (60 * 24)}g fa"
+            return f"{dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} ({rel})"
+        except ValueError:
+            return str(raw_ts)
 
     @barcello_group.command(name="on", description="Abilita trigger barcello")
     async def barcello_on(interaction: discord.Interaction) -> None:
@@ -384,7 +405,12 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
         if not rows:
             await interaction.response.send_message("Nessuna frase configurata.", ephemeral=True)
             return
-        lines = [_format_phrase_row(r) for r in rows]
+        lines: list[str] = []
+        for row in rows:
+            milestones = await ctx.database.list_trigger_phrase_milestones(int(row["id"]))
+            row_with_milestones = dict(row)
+            row_with_milestones["milestone_count"] = len(milestones)
+            lines.append(_format_phrase_row(row_with_milestones))
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @frasi_group.command(name="edit", description="Modifica frase trigger esistente")
@@ -502,6 +528,123 @@ def register_triggers(barcellometro_group: app_commands.Group, ctx: CommandConte
                     _format_phrase_row(row_after),
                 ]
             ),
+            ephemeral=True,
+        )
+
+    @frasi_group.command(name="stats", description="Statistiche dettagliate di una frase")
+    @app_commands.describe(id="ID frase")
+    async def frasi_stats(interaction: discord.Interaction, id: int) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, _ = scope
+        phrase = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        if not phrase:
+            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+            return
+
+        summary = await ctx.database.get_trigger_phrase_stats_summary(guild_id, id)
+        top_users = await ctx.database.list_trigger_phrase_user_stats(guild_id, id, limit=10)
+        milestones = await ctx.database.list_trigger_phrase_milestones(id)
+
+        embed = discord.Embed(
+            title=f"📊 STATISTICHE FRASE #{id}",
+            description=str(phrase.get("phrase") or ""),
+            color=discord.Color.blurple(),
+        )
+        unique_users = int(summary.get("unique_users") or 0)
+        total_uses = int(summary.get("total_uses") or 0)
+        avg = (total_uses / unique_users) if unique_users > 0 else 0
+        embed.add_field(name="Utenti unici", value=str(unique_users), inline=True)
+        embed.add_field(name="Utilizzi totali", value=str(total_uses), inline=True)
+        embed.add_field(name="Media per utente", value=f"{avg:.2f}" if unique_users > 0 else "-", inline=True)
+        embed.add_field(name="Ultima attività frase", value=_humanize_ts(summary.get("last_seen_ts_max") or phrase.get("last_seen_ts")), inline=False)
+        embed.add_field(name="Milestone configurate", value=str(len(milestones)), inline=True)
+
+        if not top_users:
+            embed.add_field(name="Top utenti", value="Nessun utilizzo registrato.", inline=False)
+        else:
+            lines: list[str] = []
+            for idx, row in enumerate(top_users, start=1):
+                user_id = str(row.get("user_id") or "")
+                user_label = user_id
+                if interaction.guild is not None and user_id.isdigit():
+                    member = interaction.guild.get_member(int(user_id))
+                    if member is not None:
+                        user_label = member.mention
+                lines.append(
+                    f"{idx}. {user_label} — {int(row.get('count') or 0)} volte — ultima: {_humanize_ts(row.get('last_seen_ts'))}"
+                )
+            embed.add_field(name="Top utenti", value="\n".join(lines), inline=False)
+
+        embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia.")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @frasi_group.command(name="milestone_set", description="Imposta/aggiorna milestone per frase")
+    @app_commands.describe(id="ID frase", soglia="Soglia conteggio utente", testo="Template milestone")
+    async def frasi_milestone_set(interaction: discord.Interaction, id: int, soglia: int, testo: str) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, _ = scope
+        phrase = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        if not phrase:
+            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+            return
+        if soglia < 2:
+            await interaction.response.send_message("La soglia deve essere >= 2.", ephemeral=True)
+            return
+        text_clean = testo.strip()
+        if not text_clean:
+            await interaction.response.send_message("Il testo milestone non può essere vuoto.", ephemeral=True)
+            return
+        await ctx.database.upsert_trigger_phrase_milestone(id, soglia, text_clean)
+        await interaction.response.send_message(
+            f"Milestone impostata per la frase #{id} alla soglia {soglia}.",
+            ephemeral=True,
+        )
+
+    @frasi_group.command(name="milestone_remove", description="Rimuovi milestone di una frase")
+    @app_commands.describe(id="ID frase", soglia="Soglia milestone")
+    async def frasi_milestone_remove(interaction: discord.Interaction, id: int, soglia: int) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, _ = scope
+        phrase = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        if not phrase:
+            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+            return
+        deleted = await ctx.database.delete_trigger_phrase_milestone(id, soglia)
+        if not deleted:
+            await interaction.response.send_message(
+                f"Nessuna milestone trovata per frase #{id} alla soglia {soglia}.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            f"Milestone rimossa per frase #{id} alla soglia {soglia}.",
+            ephemeral=True,
+        )
+
+    @frasi_group.command(name="milestone_list", description="Lista milestone di una frase")
+    @app_commands.describe(id="ID frase")
+    async def frasi_milestone_list(interaction: discord.Interaction, id: int) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, _ = scope
+        phrase = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        if not phrase:
+            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+            return
+        milestones = await ctx.database.list_trigger_phrase_milestones(id)
+        if not milestones:
+            await interaction.response.send_message(f"Nessuna milestone configurata per la frase #{id}.", ephemeral=True)
+            return
+        lines = [f"{int(m['threshold_count'])} → \"{str(m['template_text'])}\"" for m in milestones]
+        await interaction.response.send_message(
+            "\n".join([f"Milestone frase #{id}:", *lines]),
             ephemeral=True,
         )
 

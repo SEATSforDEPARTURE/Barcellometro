@@ -35,9 +35,13 @@ PHRASE_PLACEHOLDERS = {
     "{author}",
     "{author_name}",
     "{phrase}",
+    "{count_user_prev}",
     "{count_user}",
     "{last_seen_human}",
     "{last_seen_dt}",
+    "{milestone}",
+    "{next_milestone}",
+    "{remaining_to_next_milestone}",
 }
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 IT_STOPWORDS = {
@@ -780,17 +784,35 @@ class TriggerEngineService:
         previous_seen = self._build_last_seen_values(phrase.get("last_seen_ts"))
 
         previous_count = int(stats_before.get("count") or 0)
+        count_user = previous_count + 1 if author_id else 0
         template_kind = "FIRST" if previous_count <= 0 else "DEFAULT"
-        template = self._resolve_phrase_template(state, author_id=author_id, kind=template_kind)
 
-        count_user = await self._database.increment_phrase_user_stats(phrase_id, author_id, ts, message_id) if author_id else 0
+        milestones = await self._database.list_trigger_phrase_milestones(phrase_id)
+        active_milestone = next((m for m in milestones if int(m.get("threshold_count") or 0) == count_user), None)
+        next_milestone_value = next((int(m.get("threshold_count") or 0) for m in milestones if int(m.get("threshold_count") or 0) > count_user), None)
+
+        template = self._resolve_phrase_template(
+            state,
+            author_id=author_id,
+            kind=template_kind,
+            milestone_template=str(active_milestone.get("template_text") or "") if active_milestone else "",
+        )
+
+        if author_id:
+            await self._database.increment_phrase_user_stats(phrase_id, author_id, ts, message_id)
         values = {
             "author": f"<@{author_id}>" if author_id else "",
             "author_name": author_name,
             "phrase": str(phrase.get("phrase") or ""),
+            "count_user_prev": str(previous_count),
             "count_user": str(count_user),
             "last_seen_human": previous_seen["human"],
             "last_seen_dt": previous_seen["dt"],
+            "milestone": str(active_milestone.get("threshold_count") or "") if active_milestone else "",
+            "next_milestone": str(next_milestone_value) if next_milestone_value is not None else "",
+            "remaining_to_next_milestone": (
+                str(max(0, next_milestone_value - count_user)) if next_milestone_value is not None else ""
+            ),
         }
 
         rendered_text = str(phrase.get("phrase") or "")
@@ -911,7 +933,14 @@ class TriggerEngineService:
                 return member.display_name
         return author_id
 
-    def _resolve_phrase_template(self, state: dict[str, object], *, author_id: str, kind: str) -> str:
+    def _resolve_phrase_template(
+        self,
+        state: dict[str, object],
+        *,
+        author_id: str,
+        kind: str,
+        milestone_template: str = "",
+    ) -> str:
         templates: dict[str, object] = {}
         if isinstance(state.get("templates"), dict):
             templates = dict(state["templates"])
@@ -921,7 +950,7 @@ class TriggerEngineService:
             if isinstance(raw, dict):
                 per_user_templates = dict(raw)
 
-        selected = per_user_templates.get(kind) or templates.get(kind) or PHRASE_FALLBACK_TEMPLATES[kind]
+        selected = per_user_templates.get(kind) or milestone_template or templates.get(kind) or PHRASE_FALLBACK_TEMPLATES[kind]
         return str(selected)
 
     def _build_last_seen_values(self, last_seen_ts: object) -> dict[str, str]:

@@ -349,6 +349,16 @@ class DatabaseService:
                 FOREIGN KEY (phrase_id) REFERENCES trigger_phrases(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS trigger_phrase_milestones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phrase_id INTEGER NOT NULL,
+                threshold_count INTEGER NOT NULL,
+                template_text TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (phrase_id, threshold_count),
+                FOREIGN KEY (phrase_id) REFERENCES trigger_phrases(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_state (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -1705,6 +1715,88 @@ class DatabaseService:
             "UPDATE trigger_phrases SET last_seen_ts = ?, last_seen_message_id = ? WHERE id = ?",
             (ts, message_id, phrase_id),
         )
+
+    async def upsert_trigger_phrase_milestone(self, phrase_id: int, threshold_count: int, template_text: str) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_phrase_milestones (phrase_id, threshold_count, template_text)
+            VALUES (?, ?, ?)
+            ON CONFLICT(phrase_id, threshold_count) DO UPDATE SET
+                template_text = excluded.template_text
+            """,
+            (phrase_id, threshold_count, template_text),
+        )
+
+    async def delete_trigger_phrase_milestone(self, phrase_id: int, threshold_count: int) -> bool:
+        existing = await self.fetchone(
+            "SELECT 1 FROM trigger_phrase_milestones WHERE phrase_id = ? AND threshold_count = ?",
+            (phrase_id, threshold_count),
+        )
+        if existing is None:
+            return False
+        await self.execute(
+            "DELETE FROM trigger_phrase_milestones WHERE phrase_id = ? AND threshold_count = ?",
+            (phrase_id, threshold_count),
+        )
+        return True
+
+    async def list_trigger_phrase_milestones(self, phrase_id: int) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT id, phrase_id, threshold_count, template_text, created_at
+            FROM trigger_phrase_milestones
+            WHERE phrase_id = ?
+            ORDER BY threshold_count ASC
+            """,
+            (phrase_id,),
+        )
+        return [dict(row) for row in rows]
+
+    async def get_trigger_phrase_milestone(self, phrase_id: int, threshold_count: int) -> dict[str, Any]:
+        row = await self.fetchone(
+            """
+            SELECT id, phrase_id, threshold_count, template_text, created_at
+            FROM trigger_phrase_milestones
+            WHERE phrase_id = ? AND threshold_count = ?
+            """,
+            (phrase_id, threshold_count),
+        )
+        return dict(row) if row else {}
+
+    async def get_trigger_phrase_stats_summary(self, guild_id: str, phrase_id: int) -> dict[str, Any]:
+        row = await self.fetchone(
+            """
+            SELECT
+                p.id AS phrase_id,
+                p.phrase AS phrase,
+                p.last_seen_ts AS phrase_last_seen_ts,
+                p.last_seen_message_id AS phrase_last_seen_message_id,
+                COALESCE(COUNT(s.user_id), 0) AS unique_users,
+                COALESCE(SUM(s.count), 0) AS total_uses,
+                MAX(s.last_seen_ts) AS last_seen_ts_max,
+                MIN(s.last_seen_ts) AS first_seen_ts_min
+            FROM trigger_phrases p
+            LEFT JOIN trigger_phrase_user_stats s ON s.phrase_id = p.id
+            WHERE p.guild_id = ? AND p.id = ?
+            GROUP BY p.id, p.phrase, p.last_seen_ts, p.last_seen_message_id
+            """,
+            (guild_id, phrase_id),
+        )
+        return dict(row) if row else {}
+
+    async def list_trigger_phrase_user_stats(self, guild_id: str, phrase_id: int, limit: int = 10) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT s.user_id, s.count, s.last_seen_ts, s.last_seen_message_id
+            FROM trigger_phrase_user_stats s
+            INNER JOIN trigger_phrases p ON p.id = s.phrase_id
+            WHERE p.guild_id = ? AND p.id = ?
+            ORDER BY s.count DESC, s.last_seen_ts DESC
+            LIMIT ?
+            """,
+            (guild_id, phrase_id, limit),
+        )
+        return [dict(row) for row in rows]
 
     async def get_phrase_user_stats(self, phrase_id: int, user_id: str) -> dict[str, Any]:
         row = await self.fetchone(
