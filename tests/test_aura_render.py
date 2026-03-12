@@ -332,3 +332,86 @@ def test_channel_aura_advice_is_deterministic() -> None:
 
     assert advice[0].startswith("Coinvolgete più persone")
     assert any("missioni" in line for line in advice)
+
+
+def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
+    from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+    from app.utils.embed_limits import MAX_EMBED_CHARS, _estimate_embed_size
+
+    very_long_reason = "per aver mantenuto una conversazione molto articolata e ripetuta con alto coinvolgimento nel periodo " * 8
+    top_users = [
+        ChannelAuraTopUserItem(
+            user_id=str(100 + idx),
+            score=1500 - idx * 20,
+            trend_emoji="⬆️" if idx % 2 == 0 else "↔️",
+            trend_comment=("in crescita rispetto al periodo precedente " * 10).strip(),
+            rank=idx + 1,
+        )
+        for idx in range(10)
+    ]
+    embed = build_channel_aura_embed(
+        title="🗒️ DETTAGLI PUNTI AURA (Pag 2/2)",
+        data=ChannelAuraEmbedData(
+            positive_points=5000,
+            negative_points=-1200,
+            users_count=44,
+            top_users=top_users,
+            positive_reasons=[(very_long_reason + f" #{i}", 500 - i * 7) for i in range(14)],
+            negative_reasons=[(very_long_reason + f" malus #{i}", -(150 - i * 5)) for i in range(10)],
+            missions=ChannelAuraMissionTrend(assigned_count=25, completed_count=14, trend_emoji="⬆️", trend_comment="in crescita rispetto al periodo precedente"),
+            advice_lines=[
+                "Suggerimento molto lungo " * 20,
+                "Secondo suggerimento molto lungo " * 20,
+                "Terzo suggerimento molto lungo " * 20,
+            ],
+        ),
+    )
+
+    names = [f.name for f in embed.fields]
+    assert _estimate_embed_size(embed) <= MAX_EMBED_CHARS
+    assert any(name.startswith("📈 PANORAMICA") for name in names)
+    assert any(name.startswith("🏆 TOP 10 PUNTI AURA") for name in names)
+    assert any(name.startswith("🕹️ PUNTEGGI") for name in names)
+    assert any(name.startswith("📜 MISSIONI") for name in names)
+    assert any(name.startswith("✨ I CONSIGLI DEL BARCELLOMETRO") for name in names)
+
+    top_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🏆 TOP 10 PUNTI AURA"))
+    top_rows = [line for line in top_text.splitlines() if line.strip()]
+    assert len(top_rows) == 10
+    assert all("<@" in row and "**+" in row and "—" in row for row in top_rows)
+
+    punteggi_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🕹️ PUNTEGGI"))
+    punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip().startswith("•")]
+    assert len(punteggi_rows) <= 7
+    assert len(punteggi_rows) < len(top_rows) + 8
+
+
+def test_channel_aura_embed_preserves_all_10_rank_positions_with_compact_comments() -> None:
+    from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+
+    embed = build_channel_aura_embed(
+        data=ChannelAuraEmbedData(
+            positive_points=800,
+            negative_points=-40,
+            users_count=10,
+            top_users=[
+                ChannelAuraTopUserItem(
+                    user_id=str(i),
+                    score=1000 - i,
+                    trend_emoji="⬆️",
+                    trend_comment="in crescita rispetto al periodo precedente e con una descrizione volutamente lunghissima " * 4,
+                    rank=i,
+                )
+                for i in range(1, 11)
+            ],
+            positive_reasons=[("per aver completato missioni", 120), ("per interazioni varie", 100)],
+            negative_reasons=[("per bassa diversità", -15)],
+            missions=ChannelAuraMissionTrend(assigned_count=4, completed_count=3, trend_emoji="↔️", trend_comment="stabile rispetto al periodo precedente"),
+            advice_lines=["Mantenete costanza."],
+        )
+    )
+
+    top_field = next(field.value for field in embed.fields if field.name == "🏆 TOP 10 PUNTI AURA")
+    rows = [line for line in top_field.splitlines() if line.strip()]
+    assert len(rows) == 10
+    assert all("—" in row and len(row.split("—", 1)[1].strip()) > 0 for row in rows)

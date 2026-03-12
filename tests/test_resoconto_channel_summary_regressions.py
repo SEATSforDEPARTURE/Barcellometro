@@ -614,6 +614,11 @@ def test_channel_summary_renderer_supports_aura_page_append() -> None:
     assert "aura_embed.title = f\"🗒️ DETTAGLI (Pag {total}/{total})\"" in source
 
 
+def test_channel_summary_overrides_third_embed_title_to_aura_details() -> None:
+    source = Path("app/services/channel_summary.py").read_text()
+    assert 'embeds[2].title = "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"' in source
+
+
 def test_channel_summary_builds_channel_scoped_aura_with_previous_window() -> None:
     source = Path("app/services/channel_summary.py").read_text()
     assert "fetch_aura_channel_ledger_report(guild_id, channel_id" in source

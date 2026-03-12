@@ -356,49 +356,153 @@ def build_channel_aura_advice(
     return lines[:3]
 
 
-def build_channel_aura_embed(*, data: ChannelAuraEmbedData, title: str = "🗒️ DETTAGLI (Pag 2/2)") -> discord.Embed:
+def _shorten_with_ellipsis(text: str, *, max_len: int) -> str:
+    clean = " ".join(str(text or "").split())
+    if len(clean) <= max_len:
+        return clean
+    return clean[: max(0, max_len - 1)].rstrip() + "…"
+
+
+def _compact_trend_comment(comment: str) -> str:
+    low = str(comment or "").lower()
+    if "nuovo ingresso" in low:
+        return "nuovo ingresso nel ranking"
+    if "sale" in low and "classifica" in low:
+        return "sale in classifica"
+    if "perde" in low and "posizion" in low:
+        return "perde posizioni"
+    if "calo" in low:
+        return "in calo rispetto al periodo precedente"
+    if "crescita" in low or "miglior" in low:
+        return "in crescita rispetto al periodo precedente"
+    if "stabile" in low:
+        return "stabile nel periodo"
+    return _shorten_with_ellipsis(comment, max_len=52) or "stabile nel periodo"
+
+
+def _build_points_lines(
+    *,
+    positive_reasons: list[tuple[str, int]],
+    negative_reasons: list[tuple[str, int]],
+    max_positive: int,
+    max_negative: int,
+) -> list[str]:
+    lines: list[str] = []
+    positives = positive_reasons[:max_positive]
+    for reason, total in positives:
+        lines.append(f"• **+{int(total)} P.A.** {reason}")
+
+    if negative_reasons and max_negative > 0:
+        strongest_positive = max((int(v) for _, v in positives), default=0)
+        significant = [
+            (reason, total)
+            for reason, total in negative_reasons
+            if abs(int(total)) >= max(15, strongest_positive // 3)
+        ]
+        if significant:
+            lines.append("\nMalus più rilevanti:")
+            for reason, total in significant[:max_negative]:
+                lines.append(f"• **{int(total)} P.A.** {reason}")
+    return lines
+
+
+def _add_field_with_chunks(embed: discord.Embed, *, name: str, value: str) -> None:
+    for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
+        embed.add_field(name=name if part_idx == 0 else f"{name} (cont.)", value=piece, inline=False)
+
+
+def _compose_channel_aura_embed(
+    *,
+    title: str,
+    data: ChannelAuraEmbedData,
+    compact_points: tuple[int, int],
+    compact_top_comments: bool,
+    advice_limit: int,
+) -> discord.Embed:
     embed = discord.Embed(title=title, color=0x5865F2)
-    embed.add_field(
+    _add_field_with_chunks(
+        embed,
         name="📈 PANORAMICA",
         value=(
             f"• Punti assegnati: +{int(data.positive_points)}\n"
             f"• Punti rimossi: {int(data.negative_points)}\n"
             f"• Utenti coinvolti: {int(data.users_count)}"
         ),
-        inline=False,
     )
 
     rank_lines = [
-        f"• {_rank_emoji(item.rank)}{item.trend_emoji} **+{item.score} P.A.** → <@{item.user_id}> — {item.trend_comment}"
-        for item in data.top_users
+        f"• {_rank_emoji(item.rank)}{item.trend_emoji} **+{item.score} P.A.** → <@{item.user_id}> — {(_compact_trend_comment(item.trend_comment) if compact_top_comments else _shorten_with_ellipsis(item.trend_comment, max_len=70))}"
+        for item in data.top_users[:10]
     ]
-    embed.add_field(name="🏆 TOP 10 PUNTI AURA", value="\n".join(rank_lines) or "• Nessun dato rilevante nel periodo.", inline=False)
+    _add_field_with_chunks(
+        embed,
+        name="🏆 TOP 10 PUNTI AURA",
+        value="\n".join(rank_lines) or "• Nessun dato rilevante nel periodo.",
+    )
 
-    points_lines: list[str] = []
-    for reason, total in data.positive_reasons[:10]:
-        points_lines.append(f"• **+{int(total)} P.A.** {reason}")
-    for reason, total in data.negative_reasons[:10]:
-        points_lines.append(f"• **{int(total)} P.A.** {reason}")
-    embed.add_field(name="🕹️ PUNTEGGI", value="\n".join(points_lines) or "• Nessun dato rilevante nel periodo.", inline=False)
+    points_lines = _build_points_lines(
+        positive_reasons=data.positive_reasons,
+        negative_reasons=data.negative_reasons,
+        max_positive=compact_points[0],
+        max_negative=compact_points[1],
+    )
+    _add_field_with_chunks(
+        embed,
+        name="🕹️ PUNTEGGI",
+        value="\n".join(points_lines) or "• Nessun dato rilevante nel periodo.",
+    )
 
     m = data.missions
     ratio = f"{m.completed_count}/{m.assigned_count}" if m.assigned_count > 0 else "0/0"
-    embed.add_field(
+    _add_field_with_chunks(
+        embed,
         name="📜 MISSIONI",
         value=(
             "🧭 Assegnate:\n"
             f"• {m.assigned_count} nel canale\n\n"
             "🎯 Risultati:\n"
-            f"• {ratio} completate {m.trend_emoji} {m.trend_comment}"
+            f"• {ratio} completate {m.trend_emoji} {_compact_trend_comment(m.trend_comment)}"
         ),
-        inline=False,
     )
 
-    embed.add_field(
+    advice_lines = [_shorten_with_ellipsis(line, max_len=120) for line in data.advice_lines[:advice_limit]]
+    _add_field_with_chunks(
+        embed,
         name="✨ I CONSIGLI DEL BARCELLOMETRO",
-        value="\n".join(f"• {line}" for line in data.advice_lines) or "• Nessun consiglio disponibile.",
-        inline=False,
+        value="\n".join(f"• {line}" for line in advice_lines) or "• Nessun consiglio disponibile.",
     )
+    return embed
+
+
+def build_channel_aura_embed(*, data: ChannelAuraEmbedData, title: str = "🗒️ DETTAGLI (Pag 2/2)") -> discord.Embed:
+    embed = _compose_channel_aura_embed(
+        title=title,
+        data=data,
+        compact_points=(6, 2),
+        compact_top_comments=False,
+        advice_limit=3,
+    )
+
+    if _estimate_embed_size(embed) > MAX_EMBED_CHARS:
+        embed = _compose_channel_aura_embed(
+            title=title,
+            data=data,
+            compact_points=(4, 1),
+            compact_top_comments=False,
+            advice_limit=3,
+        )
+    if _estimate_embed_size(embed) > MAX_EMBED_CHARS:
+        embed = _compose_channel_aura_embed(
+            title=title,
+            data=data,
+            compact_points=(3, 0),
+            compact_top_comments=True,
+            advice_limit=2,
+        )
+
+    sanitized = _ensure_embed_limits([embed], max_chars=MAX_EMBED_CHARS)
+    if sanitized and _estimate_embed_size(sanitized[0]) <= MAX_EMBED_CHARS:
+        return sanitized[0]
     return embed
 
 
