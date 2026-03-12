@@ -614,9 +614,42 @@ def test_channel_summary_renderer_supports_aura_page_append() -> None:
     assert "aura_embed.title = f\"🗒️ DETTAGLI (Pag {total}/{total})\"" in source
 
 
-def test_channel_summary_overrides_third_embed_title_to_aura_details() -> None:
-    source = Path("app/services/channel_summary.py").read_text()
-    assert 'embeds[2].title = "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"' in source
+def test_channel_summary_keeps_final_aura_embed_title_and_footer_without_post_mutation() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+    from app.utils.embed_limits import _estimate_embed_size
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+
+    class FakeDatabase:
+        async def fetch_aura_channel_ledger_report(self, *_args):  # type: ignore[no-untyped-def]
+            return {
+                "totals": {"users_count": 10, "positive": 1000, "negative": -200},
+                "by_reason": [{"reason_code": "mission_completed", "total": 120} for _ in range(12)],
+            }
+
+        async def fetch_aura_channel_top_users(self, *_args, **kwargs):  # type: ignore[no-untyped-def]
+            limit = int(kwargs.get("limit", 10))
+            return [{"user_id": str(i), "total": 1000 - i * 10} for i in range(1, limit + 1)]
+
+        async def fetch_aura_channel_mission_stats(self, *_args):  # type: ignore[no-untyped-def]
+            return {"assigned_count": 12, "completed_count": 6}
+
+    svc._database = FakeDatabase()  # type: ignore[assignment]
+
+    async def _run() -> None:
+        embed = await svc._build_channel_aura_embed(
+            guild_id="1",
+            channel_id="2",
+            start_local=datetime(2026, 3, 11, 0, 0),
+            end_local=datetime(2026, 3, 11, 23, 59),
+        )
+        assert embed is not None
+        assert embed.title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
+        assert embed.footer and embed.footer.text == "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati."
+        assert _estimate_embed_size(embed) <= 5800
+
+    asyncio.run(_run())
 
 
 def test_channel_summary_builds_channel_scoped_aura_with_previous_window() -> None:
@@ -632,3 +665,82 @@ def test_database_has_channel_scoped_aura_queries() -> None:
     assert "async def fetch_aura_channel_ledger_report" in source
     assert "WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ?" in source
     assert "async def fetch_aura_channel_top_users" in source
+
+
+def test_channel_summary_validates_third_embed_without_mutating_after_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("aiosqlite")
+    import discord
+    from app.plugins.commands_modular.time_windows import TimeWindowResult
+    from app.services.channel_summary import ChannelSummaryService
+    from app.services.summary import SummaryResult
+
+    class FakeChannel:
+        name = "generale"
+
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+
+        async def send(self, **kwargs):  # type: ignore[no-untyped-def]
+            self.sent.append(kwargs)
+
+    class FakeBot:
+        guilds: list[object] = []
+
+        def __init__(self, channel: FakeChannel) -> None:
+            self._channel = channel
+
+        def get_channel(self, _id: int) -> FakeChannel:
+            return self._channel
+
+    class FakeDatabase:
+        async def fetch_messages_in_range(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return [{"ts": "2026-03-11T09:00:00+00:00", "author_id": "1", "content": f"msg {i}", "message_id": f"m{i}", "reply_to_message_id": None, "mentions_json": "[]"} for i in range(10)]
+
+        async def fetch_user_display_name(self, **kwargs):  # type: ignore[no-untyped-def]
+            return f"U{kwargs.get('user_id')}"
+
+        async def fetch_message_by_id(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+        async def resolve_message_ids_for_timestamp(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return []
+
+    class FakeSummary:
+        async def get_config(self):  # type: ignore[no-untyped-def]
+            return {}
+
+        async def build_summary(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return SummaryResult(themes=[], moments=[], quotes=[], dynamics=[], degrade=[], invigorate=[], advice=[], metrics={}, ai_status={"enabled": False}, vibe_line="ok", proverbio="ok", who_interacted_today=[])
+
+    class FakeBar:
+        async def compute_channel_range(self, **_kwargs):  # type: ignore[no-untyped-def]
+            from app.services.barcello import BarcelloResult
+            return BarcelloResult(score=70, color="verde", trend="up", reasons=[], metrics={})
+
+    aura_embed = discord.Embed(title="🗒️ DETTAGLI PUNTI AURA (Pag 2/2)", color=0x5865F2)
+    aura_embed.add_field(name="📈 PANORAMICA", value="• x", inline=False)
+    aura_embed.set_footer(text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.")
+
+    async def fake_build_aura(self, **_kwargs):  # type: ignore[no-untyped-def]
+        return aura_embed
+
+    def fake_renderer(**kwargs):  # type: ignore[no-untyped-def]
+        status = discord.Embed(title="status")
+        details = discord.Embed(title="details")
+        return [status, details, kwargs["aura_embed"]]
+
+    monkeypatch.setattr("app.services.channel_summary.build_channel_summary_embeds", fake_renderer)
+    monkeypatch.setattr(ChannelSummaryService, "_build_channel_aura_embed", fake_build_aura)
+
+    async def _run() -> None:
+        channel = FakeChannel()
+        svc = ChannelSummaryService(database=FakeDatabase(), bot=FakeBot(channel), summary_service=FakeSummary(), barcello_service=FakeBar(), ai_service=None)
+        window = TimeWindowResult(start_dt=datetime(2026, 3, 11, 0, 0), end_dt=datetime(2026, 3, 11, 23, 59), period_label="oggi", label_periodo="oggi")
+        ok = await svc.generate_and_send_for_channel("1", "2", manual=False, window=window)
+        assert ok is True
+        embeds = channel.sent[0]["embeds"]
+        assert isinstance(embeds, list)
+        assert embeds[2].title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
+        assert embeds[2].footer and embeds[2].footer.text == "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati."
+
+    asyncio.run(_run())

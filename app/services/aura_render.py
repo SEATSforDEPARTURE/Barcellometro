@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +10,9 @@ import discord
 from app.services.aura_archetypes import build_dynamic_archetype_reason
 from app.services.config_file_loader import load_json_file
 from app.utils.embed_limits import MAX_EMBED_CHARS, _ensure_embed_limits, _estimate_embed_size, _split_field_chunks
+
+logger = logging.getLogger(__name__)
+AURA_DETAILS_INTERNAL_BUDGET = 5700
 
 ARCHETYPES_CONFIG_PATH = "app/settings/aura_archetypes.json"
 ARCHETYPES_EXAMPLE_PATH = "app/settings/aura_archetypes.example.json"
@@ -418,6 +422,9 @@ def _compose_channel_aura_embed(
     compact_points: tuple[int, int],
     compact_top_comments: bool,
     advice_limit: int,
+    compact_missions: bool,
+    compact_advice: bool,
+    footer_text: str | None,
 ) -> discord.Embed:
     embed = discord.Embed(title=title, color=0x5865F2)
     _add_field_with_chunks(
@@ -454,56 +461,73 @@ def _compose_channel_aura_embed(
 
     m = data.missions
     ratio = f"{m.completed_count}/{m.assigned_count}" if m.assigned_count > 0 else "0/0"
-    _add_field_with_chunks(
-        embed,
-        name="📜 MISSIONI",
-        value=(
+    mission_value = (
+        f"• Assegnate nel canale: {m.assigned_count}\n"
+        f"• Completate: {ratio} {m.trend_emoji} {_compact_trend_comment(m.trend_comment)}"
+        if compact_missions
+        else (
             "🧭 Assegnate:\n"
             f"• {m.assigned_count} nel canale\n\n"
             "🎯 Risultati:\n"
             f"• {ratio} completate {m.trend_emoji} {_compact_trend_comment(m.trend_comment)}"
-        ),
+        )
+    )
+    _add_field_with_chunks(
+        embed,
+        name="📜 MISSIONI",
+        value=mission_value,
     )
 
-    advice_lines = [_shorten_with_ellipsis(line, max_len=120) for line in data.advice_lines[:advice_limit]]
+    advice_max_len = 80 if compact_advice else 120
+    advice_lines = [_shorten_with_ellipsis(line, max_len=advice_max_len) for line in data.advice_lines[:advice_limit]]
     _add_field_with_chunks(
         embed,
         name="✨ I CONSIGLI DEL BARCELLOMETRO",
         value="\n".join(f"• {line}" for line in advice_lines) or "• Nessun consiglio disponibile.",
     )
+    if footer_text:
+        embed.set_footer(text=footer_text)
     return embed
 
 
-def build_channel_aura_embed(*, data: ChannelAuraEmbedData, title: str = "🗒️ DETTAGLI (Pag 2/2)") -> discord.Embed:
-    embed = _compose_channel_aura_embed(
-        title=title,
-        data=data,
-        compact_points=(6, 2),
-        compact_top_comments=False,
-        advice_limit=3,
-    )
+def build_channel_aura_embed(
+    *,
+    data: ChannelAuraEmbedData,
+    title: str = "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)",
+    footer_text: str = "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
+    max_chars: int = AURA_DETAILS_INTERNAL_BUDGET,
+) -> discord.Embed:
+    stages = [
+        ((6, 2), False, 3, False, False),
+        ((4, 1), False, 3, False, False),
+        ((3, 1), True, 2, True, True),
+        ((2, 0), True, 2, True, True),
+    ]
 
-    if _estimate_embed_size(embed) > MAX_EMBED_CHARS:
-        embed = _compose_channel_aura_embed(
+    first_size = 0
+    fallback_embed: discord.Embed | None = None
+    for idx, (compact_points, compact_top_comments, advice_limit, compact_missions, compact_advice) in enumerate(stages):
+        candidate = _compose_channel_aura_embed(
             title=title,
             data=data,
-            compact_points=(4, 1),
-            compact_top_comments=False,
-            advice_limit=3,
+            compact_points=compact_points,
+            compact_top_comments=compact_top_comments,
+            advice_limit=advice_limit,
+            compact_missions=compact_missions,
+            compact_advice=compact_advice,
+            footer_text=footer_text,
         )
-    if _estimate_embed_size(embed) > MAX_EMBED_CHARS:
-        embed = _compose_channel_aura_embed(
-            title=title,
-            data=data,
-            compact_points=(3, 0),
-            compact_top_comments=True,
-            advice_limit=2,
-        )
+        size = _estimate_embed_size(candidate)
+        if idx == 0:
+            first_size = size
+        fallback_embed = candidate
+        if size <= max_chars:
+            logger.debug("aura_embed_chars_before_compaction=%s aura_embed_chars_after_compaction=%s", first_size, size)
+            return candidate
 
-    sanitized = _ensure_embed_limits([embed], max_chars=MAX_EMBED_CHARS)
-    if sanitized and _estimate_embed_size(sanitized[0]) <= MAX_EMBED_CHARS:
-        return sanitized[0]
-    return embed
+    assert fallback_embed is not None
+    logger.debug("aura_embed_chars_before_compaction=%s aura_embed_chars_after_compaction=%s", first_size, _estimate_embed_size(fallback_embed))
+    return fallback_embed
 
 
 def build_aura_embeds(

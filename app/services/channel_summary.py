@@ -655,8 +655,11 @@ class ChannelSummaryService:
             embeds[1].title = "🗒️ DETTAGLI CANALE (Pag 1/2)"
             embeds[1].set_footer(text="Resoconto elaborato con gpt-4o. Eventuali imprecisioni sono possibili.")
         if len(embeds) >= 3:
-            embeds[2].title = "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
-            embeds[2].set_footer(text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.")
+            aura_chars_final = _estimate_embed_size(embeds[2])
+            logger.debug("aura_embed_chars_final_with_footer=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
+            if aura_chars_final > 5800:
+                logger.warning("channel_summary aura_embed_over_budget chars=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
+                embeds = embeds[:2]
         try:
             await channel.send(embeds=embeds)
         except discord.HTTPException:
@@ -706,7 +709,7 @@ class ChannelSummaryService:
         total_users = int(current["totals"].get("users_count") or 0)
         total_positive = int(current["totals"].get("positive") or 0)
         total_negative = int(current["totals"].get("negative") or 0)
-        if total_users <= 0 and total_positive <= 0 and total_negative >= 0:
+        if total_users <= 0 and total_positive <= 0 and total_negative == 0:
             return None
 
         top_now = await self._database.fetch_aura_channel_top_users(guild_id, channel_id, start_ts, end_ts, limit=10)
@@ -751,6 +754,8 @@ class ChannelSummaryService:
         )
 
         aura_embed = build_channel_aura_embed(
+            title="🗒️ DETTAGLI PUNTI AURA (Pag 2/2)",
+            footer_text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
             data=ChannelAuraEmbedData(
                 positive_points=total_positive,
                 negative_points=total_negative,
