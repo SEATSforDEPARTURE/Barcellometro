@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
@@ -158,6 +159,7 @@ def _moment_line(*, moment: SummaryItem, guild_id: int, channel_id: int, message
     ref = message_index.get(primary_id) if primary_id else _resolve_message_meta(moment.message_ids, message_index)
     ts = (ref.ts if ref else None) or moment.ts
     text = str(moment.text or "").replace("{AUTHOR}", "").strip() or "(nessun dettaglio)"
+    # TODO: use per-moment Barcello snapshots when available; we currently render the window-level status.
     emoji = _barcello_emoji_from_color(getattr(barcello_status, "color", None))
     score = getattr(barcello_status, "score", None)
     safe_score = int(score) if isinstance(score, int) or str(score).isdigit() else "--"
@@ -180,6 +182,22 @@ def _dynamic_line(*, dynamic: SummaryItem, guild_id: int, channel_id: int, messa
     if clean_names:
         line += f" — Coinvolti: {', '.join([f'**{name}**' for name in clean_names])}"
     return line
+
+
+def _bold_known_names(text: str, names: list[str]) -> str:
+    out = str(text or "")
+    for name in sorted({str(n).strip() for n in names if str(n).strip()}, key=len, reverse=True):
+        if f"**{name}**" in out:
+            continue
+        out = re.sub(rf"(?<!\*)\b{re.escape(name)}\b(?!\*)", f"**{name}**", out)
+    return out
+
+
+def _bold_leading_actor(text: str) -> str:
+    line = str(text or "").strip()
+    if not line or line.startswith("**"):
+        return line
+    return re.sub(r"^([^\s].*?)(\s+(?:ha|è|si|con|nel|in)\b)", r"**\1**\2", line, count=1, flags=re.IGNORECASE)
 
 
 def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], who_interacted_lines: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False) -> list[discord.Embed]:
@@ -209,10 +227,11 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
         _add_field_chunked(pages, name="💬 FRASI ICONICHE", value="\n".join(quotes), color=0x95A5A6)
 
     dynamics = [_dynamic_line(dynamic=it, guild_id=guild_id, channel_id=channel_id, message_index=message_index, primary_id=dynamic_primary.get(id(it)), display_names=dynamic_names.get(id(it), []), multi_day=multi_day) for it in summary_result.dynamics]
+    dynamics = [_bold_known_names(line, dynamic_names.get(id(it), [])) for it, line in zip(summary_result.dynamics, dynamics)]
     if dynamics:
         _add_field_chunked(pages, name="🔁 DINAMICHE", value="\n".join(dynamics), color=0x95A5A6)
 
-    who_lines = [f"• {line}" for line in (who_interacted_lines or []) if str(line or "").strip()][:8]
+    who_lines = [f"• {_bold_leading_actor(line)}" for line in (who_interacted_lines or []) if str(line or "").strip()][:8]
     if who_lines:
         _add_field_chunked(pages, name="👥 INTERAZIONI", value="\n".join(who_lines), color=0x95A5A6)
 
