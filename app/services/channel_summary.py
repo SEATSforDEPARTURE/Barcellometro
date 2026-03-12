@@ -148,11 +148,19 @@ class ChannelSummaryService:
             return "Qualcuno ha partecipato alla conversazione in modo costruttivo."
         return clean
 
-    def _sanitize_moment_text(self, text: str) -> str:
+    def _sanitize_moment_text(self, text: str, *, multi_day: bool = False) -> str:
         clean = str(text or "").strip()
         if not clean:
             return clean
         clean = re.sub(r"^(?:alba|mattina|pomeriggio|sera)\s*,\s+", "", clean, flags=re.IGNORECASE)
+        if multi_day:
+            # Multi-day windows should be neutral event notes, not single-day time-of-day storytelling.
+            clean = re.sub(
+                r"^(?:di prima mattina|la mattina|durante la tarda mattinata|verso mezzogiorno|in piena giornata|nel pomeriggio|più tardi|in serata|sul finire della giornata|in chiusura)\s*,?\s+",
+                "",
+                clean,
+                flags=re.IGNORECASE,
+            )
         clean = re.sub(r"^[^\wÀ-ÖØ-öø-ÿA-Za-z0-9#]{1,4}\s+", "", clean)
         return " ".join(clean.split())
 
@@ -272,9 +280,12 @@ class ChannelSummaryService:
             start_ts=start_dt.isoformat(),
             end_ts=end_dt.isoformat(),
         )
-        bar_yesterday = None
-        if window.period_label == "oggi":
-            bar_yesterday = await self._compute_yesterday_barcello(guild_id=guild_id, channel_id=channel_id, start_local=start_local)
+        previous_bar = await self._compute_previous_equivalent_barcello(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            current_start_local=start_local,
+            current_end_local=end_local,
+        )
         config = await self._summary.get_config()
         ai_allowed = bool(self._ai and getattr(self._ai, "is_enabled", lambda: False)())
         summary = await self._summary.build_summary(
@@ -307,7 +318,12 @@ class ChannelSummaryService:
             },
         )
 
-        trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday) if window.period_label == "oggi" else ""
+        trend_value = self._build_trend_vs_previous_equivalent(
+            bar_current=bar,
+            bar_previous=previous_bar,
+            current_start_local=start_local,
+            current_end_local=end_local,
+        )
         barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar, period_label=window.period_label)
         advice = [str(x).strip()[:160] for x in (getattr(summary, "advice", []) or []) if str(x).strip()][:5]
         proverbio = str(getattr(summary, "proverbio", "") or "").strip()
@@ -387,7 +403,7 @@ class ChannelSummaryService:
                     count=1,
                     flags=re.IGNORECASE,
                 )
-            moment.text = self._bold_display_name(self._sanitize_moment_text(integrated), display)
+            moment.text = self._bold_display_name(self._sanitize_moment_text(integrated, multi_day=multi_day), display)
 
         for dynamic in summary.dynamics:
             names: list[str] = []
@@ -411,7 +427,7 @@ class ChannelSummaryService:
             dynamic_text = self._apply_author_placeholder(dynamic.text, primary_display)
             if "{AUTHOR}" in dynamic_text:
                 dynamic_text = self._cleanup_placeholder_artifacts(dynamic_text.replace("{AUTHOR}", ""), had_author_placeholder=True, has_display_name=False)
-            dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text), primary_display)
+            dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text, multi_day=multi_day), primary_display)
 
         for message_id in {m for m in [*moment_primary.values(), *quote_primary.values(), *dynamic_primary.values()] if m}:
             if message_id in message_index:
@@ -464,6 +480,15 @@ class ChannelSummaryService:
                 )
             )
 
+        moment_barcello = await self._compute_moment_barcello_map(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            summary=summary,
+            moment_primary=moment_primary,
+            message_index=message_index,
+            fallback=bar,
+        )
+
         channel_name = getattr(channel, "name", None) or channel_id
         embeds = build_channel_summary_embeds(
             guild_id=int(guild_id),
@@ -480,6 +505,7 @@ class ChannelSummaryService:
             dynamic_primary=dynamic_primary,
             dynamic_names=dynamic_names,
             quote_render_items=quote_render_items,
+            moment_barcello=moment_barcello,
             trend_value=trend_value,
             who_interacted_lines=who_lines,
             multi_day=multi_day,
@@ -513,44 +539,100 @@ class ChannelSummaryService:
         logger.info("channel_summary sent guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
         return True
 
-    async def _compute_yesterday_barcello(self, *, guild_id: str, channel_id: str, start_local: datetime) -> BarcelloResult | None:
-        yesterday_local = start_local - timedelta(days=1)
-        y_start_local = yesterday_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        y_end_local = yesterday_local.replace(hour=23, minute=59, second=59, microsecond=999000)
+    async def _compute_previous_equivalent_barcello(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        current_start_local: datetime,
+        current_end_local: datetime,
+    ) -> BarcelloResult | None:
+        # Compare against the immediately previous window with equivalent duration.
+        duration = max(timedelta(minutes=1), current_end_local - current_start_local)
+        previous_start_local = current_start_local - duration
+        previous_end_local = current_start_local
         try:
             return await self._barcello.compute_channel_range(
                 guild_id=guild_id,
                 channel_id=channel_id,
-                start_ts=y_start_local.astimezone(timezone.utc).isoformat(),
-                end_ts=y_end_local.astimezone(timezone.utc).isoformat(),
+                start_ts=previous_start_local.astimezone(timezone.utc).isoformat(),
+                end_ts=previous_end_local.astimezone(timezone.utc).isoformat(),
             )
         except Exception:
-            logger.exception("channel_summary yesterday barcello failed guild=%s channel=%s", guild_id, channel_id)
+            logger.exception("channel_summary previous equivalent barcello failed guild=%s channel=%s", guild_id, channel_id)
             return None
 
-    def _build_trend_vs_yesterday(self, *, bar_today: BarcelloResult, bar_yesterday: BarcelloResult | None) -> str:
-        if bar_yesterday is None:
-            return "Stabile (Δ +0): confronto con ieri non disponibile."
-        delta = int(bar_today.score) - int(bar_yesterday.score)
+    async def _compute_moment_barcello_map(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        summary: SummaryResult,
+        moment_primary: dict[int, str | None],
+        message_index: dict[str, MessageMeta],
+        fallback: BarcelloResult,
+    ) -> dict[int, BarcelloResult]:
+        snapshots: dict[int, BarcelloResult] = {}
+        half_window = timedelta(minutes=30)
+        for moment in summary.moments[:8]:
+            point_ts = moment.ts
+            primary_id = moment_primary.get(id(moment))
+            if primary_id and primary_id in message_index:
+                point_ts = message_index[primary_id].ts or point_ts
+            if not point_ts:
+                snapshots[id(moment)] = fallback
+                continue
+            try:
+                point_dt = datetime.fromisoformat(str(point_ts).replace("Z", "+00:00"))
+                if point_dt.tzinfo is None:
+                    point_dt = point_dt.replace(tzinfo=timezone.utc)
+                start_dt = point_dt - half_window
+                end_dt = point_dt + half_window
+                snapshots[id(moment)] = await self._barcello.compute_channel_range(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    start_ts=start_dt.astimezone(timezone.utc).isoformat(),
+                    end_ts=end_dt.astimezone(timezone.utc).isoformat(),
+                )
+            except Exception:
+                logger.exception("channel_summary moment barcello failed guild=%s channel=%s", guild_id, channel_id)
+                snapshots[id(moment)] = fallback
+        return snapshots
+
+    def _build_trend_vs_previous_equivalent(
+        self,
+        *,
+        bar_current: BarcelloResult,
+        bar_previous: BarcelloResult | None,
+        current_start_local: datetime,
+        current_end_local: datetime,
+    ) -> str:
+        if bar_previous is None:
+            return "Stabile (Δ +0): confronto con finestra equivalente precedente non disponibile."
+        delta = int(bar_current.score) - int(bar_previous.score)
         if delta >= 4:
             direction = "In miglioramento"
         elif delta <= -4:
             direction = "In peggioramento"
         else:
             direction = "Stabile"
-        today_neg = int((bar_today.metrics or {}).get("negativity_hits") or 0)
-        y_neg = int((bar_yesterday.metrics or {}).get("negativity_hits") or 0)
-        today_pos = int((bar_today.metrics or {}).get("positive_hits") or 0)
-        y_pos = int((bar_yesterday.metrics or {}).get("positive_hits") or 0)
-        if today_neg < y_neg and today_pos >= y_pos:
-            reason = "meno tensione e più supporto rispetto a ieri"
-        elif today_neg > y_neg:
-            reason = "più frizioni e callout rispetto a ieri"
-        elif today_pos > y_pos:
-            reason = "più messaggi costruttivi e supporto rispetto a ieri"
+
+        prev_start = (current_start_local - (current_end_local - current_start_local)).strftime("%d/%m %H:%M")
+        prev_end = current_start_local.strftime("%d/%m %H:%M")
+
+        cur_neg = int((bar_current.metrics or {}).get("negativity_hits") or 0)
+        prev_neg = int((bar_previous.metrics or {}).get("negativity_hits") or 0)
+        cur_pos = int((bar_current.metrics or {}).get("positive_hits") or 0)
+        prev_pos = int((bar_previous.metrics or {}).get("positive_hits") or 0)
+        if cur_neg < prev_neg and cur_pos >= prev_pos:
+            reason = "meno tensione e più supporto"
+        elif cur_neg > prev_neg:
+            reason = "più frizioni e callout"
+        elif cur_pos > prev_pos:
+            reason = "più messaggi costruttivi e supporto"
         else:
-            reason = "clima simile a ieri, senza scossoni rilevanti"
-        return f"{direction} (Δ {delta:+d}): {reason}."
+            reason = "clima simile, senza scossoni rilevanti"
+        return f"{direction} (Δ {delta:+d}): {reason} rispetto a {prev_start} → {prev_end}."
 
     def _fallback_advice_proverbio(self, color: str) -> tuple[list[str], str]:
         fallback = {
