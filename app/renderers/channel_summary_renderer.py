@@ -208,7 +208,7 @@ def _bold_leading_actor(text: str, known_names: list[str] | None = None) -> str:
     return re.sub(r"^([^\s].*?)(\s+(?:ha|è|si|con|nel|in)\b)", r"**\1**\2", line, count=1, flags=re.IGNORECASE)
 
 
-def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], moment_barcello: dict[int, BarcelloResult] | None = None, who_interacted_lines: list[str] | None = None, known_display_names: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False) -> list[discord.Embed]:
+def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], moment_barcello: dict[int, BarcelloResult] | None = None, who_interacted_lines: list[str] | None = None, known_display_names: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False, aura_embed: discord.Embed | None = None) -> list[discord.Embed]:
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
@@ -260,9 +260,13 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     if proverbio.strip():
         _add_field_chunked(pages, name="🍀 PROVERBIO", value=proverbio.strip(), color=0x95A5A6)
 
-    total = len(pages)
+    total = len(pages) + (1 if aura_embed is not None else 0)
     for idx, embed in enumerate(pages, start=1):
         embed.title = f"🗒️ DETTAGLI (Pag {idx}/{total})"
+
+    if aura_embed is not None:
+        aura_embed.title = f"🗒️ DETTAGLI (Pag {total}/{total})"
+        return [status_embed, *pages, aura_embed]
 
     return [status_embed, *pages]
 

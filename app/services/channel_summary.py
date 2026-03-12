@@ -14,6 +14,8 @@ import discord
 from app.plugins.commands_modular.time_windows import TimeWindowResult, resolve_ieri_window, resolve_oggi_window
 from app.renderers.channel_summary_renderer import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, format_window_header
 from app.services.barcello import BarcelloResult, BarcelloService
+from app.services.aura import aura_reason_to_human
+from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_advice, build_channel_aura_embed
 from app.services.database import DatabaseService
 from app.services.summary import SummaryResult, SummaryService
 from app.utils.summary_names import resolve_display_name_from_message_id, resolve_primary_message_id, safe_display_name
@@ -617,6 +619,13 @@ class ChannelSummaryService:
         channel_name = getattr(channel, "name", None) or channel_id
         known_display_names = sorted({name for names in dynamic_names.values() for name in names if str(name).strip()}, key=len, reverse=True)
 
+        aura_embed = await self._build_channel_aura_embed(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            start_local=start_local,
+            end_local=end_local,
+        )
+
         embeds = build_channel_summary_embeds(
             guild_id=int(guild_id),
             channel_id=int(channel_id),
@@ -637,6 +646,7 @@ class ChannelSummaryService:
             who_interacted_lines=who_lines,
             known_display_names=known_display_names,
             multi_day=multi_day_style,
+            aura_embed=aura_embed,
         )
 
         embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
@@ -667,6 +677,97 @@ class ChannelSummaryService:
         logger.info("channel_summary sent guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
         return True
 
+
+    def _previous_equivalent_window(self, *, current_start_local: datetime, current_end_local: datetime) -> tuple[datetime, datetime]:
+        duration = max(timedelta(minutes=1), current_end_local - current_start_local)
+        previous_start_local = current_start_local - duration
+        previous_end_local = current_start_local
+        return previous_start_local, previous_end_local
+
+    def _aura_trend(self, current: int, previous: int) -> tuple[str, str]:
+        if current > previous:
+            return "⬆️", "in crescita rispetto al periodo precedente"
+        if current < previous:
+            return "⬇️", "in calo rispetto al periodo precedente"
+        return "↔️", "stabile rispetto al periodo precedente"
+
+    async def _build_channel_aura_embed(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        start_local: datetime,
+        end_local: datetime,
+    ) -> discord.Embed | None:
+        start_ts = start_local.astimezone(timezone.utc).isoformat()
+        end_ts = end_local.astimezone(timezone.utc).isoformat()
+        prev_start_local, prev_end_local = self._previous_equivalent_window(current_start_local=start_local, current_end_local=end_local)
+        prev_start_ts = prev_start_local.astimezone(timezone.utc).isoformat()
+        prev_end_ts = prev_end_local.astimezone(timezone.utc).isoformat()
+
+        current = await self._database.fetch_aura_channel_ledger_report(guild_id, channel_id, start_ts, end_ts)
+        if int(current["totals"]["users_count"] or 0) <= 0 and int(current["totals"]["positive"] or 0) <= 0 and int(current["totals"]["negative"] or 0) >= 0:
+            return None
+
+        top_now = await self._database.fetch_aura_channel_top_users(guild_id, channel_id, start_ts, end_ts, limit=10)
+        top_prev = await self._database.fetch_aura_channel_top_users(guild_id, channel_id, prev_start_ts, prev_end_ts, limit=50)
+        prev_scores = {str(r["user_id"]): int(r["total"] or 0) for r in top_prev}
+        prev_ranks = {str(r["user_id"]): idx for idx, r in enumerate(top_prev, start=1)}
+
+        top_items: list[ChannelAuraTopUserItem] = []
+        for idx, row in enumerate(top_now, start=1):
+            uid = str(row["user_id"])
+            score = max(0, int(row["total"] or 0))
+            prev_score = prev_scores.get(uid, 0)
+            trend_emoji, base_comment = self._aura_trend(score, prev_score)
+            prev_rank = prev_ranks.get(uid)
+            if prev_rank is None:
+                comment = "nuovo ingresso nel ranking"
+            elif prev_rank > idx:
+                comment = "sale in classifica"
+            elif prev_rank < idx:
+                comment = "perde posizioni"
+            else:
+                comment = base_comment
+            top_items.append(ChannelAuraTopUserItem(user_id=uid, score=score, trend_emoji=trend_emoji, trend_comment=comment, rank=idx))
+
+        by_reason = list(current.get("by_reason", []))
+        pos_reasons = [(f"{aura_reason_to_human(str(it['reason_code']))}", int(it["total"] or 0)) for it in by_reason if int(it["total"] or 0) > 0]
+        neg_reasons = [(f"{aura_reason_to_human(str(it['reason_code']))}", int(it["total"] or 0)) for it in by_reason if int(it["total"] or 0) < 0]
+
+        missions_now = await self._database.fetch_aura_channel_mission_stats(guild_id, channel_id, start_ts, end_ts)
+        missions_prev = await self._database.fetch_aura_channel_mission_stats(guild_id, channel_id, prev_start_ts, prev_end_ts)
+        now_completed = int(missions_now.get("completed_count") or 0)
+        prev_completed = int(missions_prev.get("completed_count") or 0)
+        mission_emoji, mission_comment = self._aura_trend(now_completed, prev_completed)
+
+        top_positive_reason = str(pos_reasons[0][0]) if pos_reasons else None
+        advice = build_channel_aura_advice(
+            positive_points=int(current["totals"]["positive"] or 0),
+            negative_points=int(current["totals"]["negative"] or 0),
+            users_count=int(current["totals"]["users_count"] or 0),
+            mission_completed=now_completed,
+            top_positive_reason=top_positive_reason,
+        )
+
+        return build_channel_aura_embed(
+            data=ChannelAuraEmbedData(
+                positive_points=int(current["totals"]["positive"] or 0),
+                negative_points=int(current["totals"]["negative"] or 0),
+                users_count=int(current["totals"]["users_count"] or 0),
+                top_users=top_items,
+                positive_reasons=pos_reasons,
+                negative_reasons=neg_reasons,
+                missions=ChannelAuraMissionTrend(
+                    assigned_count=int(missions_now.get("assigned_count") or 0),
+                    completed_count=now_completed,
+                    trend_emoji=mission_emoji,
+                    trend_comment=mission_comment,
+                ),
+                advice_lines=advice,
+            )
+        )
+
     async def _compute_previous_equivalent_barcello(
         self,
         *,
@@ -676,9 +777,7 @@ class ChannelSummaryService:
         current_end_local: datetime,
     ) -> BarcelloResult | None:
         # Compare against the immediately previous window with equivalent duration.
-        duration = max(timedelta(minutes=1), current_end_local - current_start_local)
-        previous_start_local = current_start_local - duration
-        previous_end_local = current_start_local
+        previous_start_local, previous_end_local = self._previous_equivalent_window(current_start_local=current_start_local, current_end_local=current_end_local)
         try:
             return await self._barcello.compute_channel_range(
                 guild_id=guild_id,

@@ -3873,6 +3873,79 @@ class DatabaseService:
             "by_channel": [{"channel_id": str(r["channel_id"]) if r["channel_id"] else None, "count": int(r["cnt"] or 0)} for r in by_channel],
         }
 
+    async def fetch_aura_channel_ledger_report(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> dict[str, Any]:
+        totals = await self.fetchone(
+            """
+            SELECT
+                SUM(CASE WHEN delta_points > 0 THEN delta_points ELSE 0 END) AS total_positive,
+                SUM(CASE WHEN delta_points < 0 THEN delta_points ELSE 0 END) AS total_negative,
+                COUNT(DISTINCT user_id) AS users_count
+            FROM aura_events_ledger
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ?
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        by_reason = await self.fetchall(
+            """
+            SELECT reason_code, SUM(delta_points) AS total, COUNT(*) AS cnt
+            FROM aura_events_ledger
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ?
+            GROUP BY reason_code
+            ORDER BY ABS(total) DESC
+            LIMIT 20
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        return {
+            "totals": {
+                "positive": int((totals["total_positive"] if totals else 0) or 0),
+                "negative": int((totals["total_negative"] if totals else 0) or 0),
+                "users_count": int((totals["users_count"] if totals else 0) or 0),
+            },
+            "by_reason": [
+                {"reason_code": str(r["reason_code"]), "total": int(r["total"] or 0), "count": int(r["cnt"] or 0)}
+                for r in by_reason
+            ],
+        }
+
+    async def fetch_aura_channel_top_users(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT user_id, SUM(delta_points) AS total
+            FROM aura_events_ledger
+            WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ?
+            GROUP BY user_id
+            ORDER BY total DESC, user_id ASC
+            LIMIT ?
+            """,
+            (guild_id, channel_id, start_ts, end_ts, max(1, int(limit))),
+        )
+        return [{"user_id": str(r["user_id"]), "total": int(r["total"] or 0)} for r in rows if r["user_id"]]
+
+    async def fetch_aura_channel_mission_stats(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> dict[str, int]:
+        row = await self.fetchone(
+            """
+            SELECT
+                COUNT(*) AS completed_count,
+                COUNT(DISTINCT user_id) AS users_count
+            FROM aura_events_ledger
+            WHERE guild_id = ?
+              AND channel_id = ?
+              AND ts >= ? AND ts <= ?
+              AND reason_code = 'mission_completed'
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        if not row:
+            return {"assigned_count": 0, "completed_count": 0, "pending_count": 0, "users_count": 0}
+        completed = int(row["completed_count"] or 0)
+        return {
+            "assigned_count": completed,
+            "completed_count": completed,
+            "pending_count": 0,
+            "users_count": int(row["users_count"] or 0),
+        }
+
     async def get_channel_name_map(self, guild_id: str) -> dict[str, str]:
         rows = await self.fetchall("SELECT channel_id, name FROM channels WHERE guild_id = ?", (guild_id,))
         return {str(r["channel_id"]): f"#{str(r['name'])}" for r in rows if r["channel_id"]}

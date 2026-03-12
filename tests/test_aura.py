@@ -482,3 +482,23 @@ def test_database_insert_aura_ledger_event_generates_unique_ids() -> None:
         await db.close()
 
     run(_scenario())
+
+
+def test_channel_scoped_aura_report_filters_by_channel() -> None:
+    async def _scenario() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        ts = "2026-01-02T10:00:00+00:00"
+        await db.insert_aura_ledger_event("1", "u1", "c1", ts, "mission_completed", 15, {})
+        await db.insert_aura_ledger_event("1", "u2", "c2", ts, "mission_completed", 20, {})
+
+        report = await db.fetch_aura_channel_ledger_report("1", "c1", "2026-01-02T00:00:00+00:00", "2026-01-02T23:59:59+00:00")
+        top = await db.fetch_aura_channel_top_users("1", "c1", "2026-01-02T00:00:00+00:00", "2026-01-02T23:59:59+00:00")
+
+        assert report["totals"]["positive"] == 15
+        assert report["totals"]["users_count"] == 1
+        assert [r["user_id"] for r in top] == ["u1"]
+        await db.close()
+
+    run(_scenario())
