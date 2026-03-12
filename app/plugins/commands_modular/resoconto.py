@@ -4,6 +4,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from io import BytesIO
+from datetime import timezone
 
 import discord
 from discord import app_commands
@@ -104,11 +105,15 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         if every_value is not None and not publish_at:
             await send_ephemeral(interaction, "❌ Per usare `every` devi indicare anche `publish_at`.")
             return
+        assert window is not None
+        await _run_channel_summary_window(interaction, schedule_type="range", window=window, publish_at=publish_at, every=every)
 
         publish_at_dt = parse_italian_datetime(publish_at) if publish_at else None
         if publish_at and publish_at_dt is None:
             await send_ephemeral(interaction, "❌ Formato `publish_at` non valido. Usa DD/MM/YYYY HH:MM.")
             return
+        await ctx.database.set_channel_summary_auto_enabled(str(interaction.guild_id), str(interaction.channel_id), True)
+        await send_ephemeral(interaction, "✅ Resoconto canale automatico attivato per questo canale.")
 
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
