@@ -38,6 +38,7 @@ class CommandContext:
     inactive_members_moderation: Any
     timezone: ZoneInfo
     message_scheduler: Optional[Any] = None
+    channel_summary: Optional[Any] = None
     aura_eligibility: Optional[Any] = None
     aura_rolling: Optional[Any] = None
 
@@ -63,6 +64,7 @@ class CommandContext:
         ai_service = registry.get("ai")
         voice_ingest = registry.get("voice_ingest") if registry.has("voice_ingest") else None
         daily_resoconto = registry.get("daily_resoconto") if registry.has("daily_resoconto") else None
+        channel_summary = daily_resoconto
         trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
         activity_insights = registry.get("activity_insights") if registry.has("activity_insights") else None
         inactivity = registry.get("inactivity") if registry.has("inactivity") else None
@@ -90,6 +92,7 @@ class CommandContext:
             ai=ai_service,
             voice_ingest=voice_ingest,
             daily_resoconto=daily_resoconto,
+            channel_summary=channel_summary,
             trigger_engine=trigger_engine,
             activity_insights=activity_insights,
             inactivity=inactivity,
