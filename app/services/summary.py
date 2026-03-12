@@ -358,6 +358,8 @@ class SummaryService:
                         granularity_hint=granularity_hint,
                         summary_mode=summary_mode,
                         summary_context=summary_context,
+                        start_ts=start_ts,
+                        end_ts=end_ts,
                     )
                     if ai_payload:
                         await self._sanitize_ai_payload(
@@ -479,6 +481,8 @@ class SummaryService:
         granularity_hint: str | None = None,
         summary_mode: str = "default",
         summary_context: dict[str, Any] | None = None,
+        start_ts: str | None = None,
+        end_ts: str | None = None,
     ) -> dict[str, Any] | None:
         sampled_messages = sample_messages_time_distributed(messages, max_items=80, buckets=6)
         snippet = [
@@ -498,6 +502,14 @@ class SummaryService:
         logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
         quotes_target = _tier_limit(config, tier, "quotes", 3)
         dynamics_target = _tier_limit(config, tier, "dynamics", 2)
+        multi_day_window = False
+        try:
+            if start_ts and end_ts:
+                st = datetime.fromisoformat(str(start_ts).replace("Z", "+00:00"))
+                en = datetime.fromisoformat(str(end_ts).replace("Z", "+00:00"))
+                multi_day_window = st.date() != en.date()
+        except Exception:
+            multi_day_window = False
         if summary_mode in {"daily_report", "daily_resoconto", "channel_summary"}:
             narrative_extra = (
                 "Imposta un andamento narrativo della giornata: apertura, sviluppo, chiusura. "
@@ -507,19 +519,26 @@ class SummaryService:
             )
             names_rule = "NON includere mai nomi di persone reali: usa solo il placeholder {AUTHOR} nei moments quando necessario. "
             if summary_mode in {"daily_resoconto", "channel_summary"}:
-                narrative_extra += (
-                    "MOMENTI SALIENTI: scrivi in stile narrativo come un racconto della giornata (inizio, sviluppo, chiusura). "
-                    "Non iniziare mai la frase con il nome della persona. "
-                    "Integra il nickname nel racconto in modo naturale, preferendo strutture come '... quando {AUTHOR} ...'. "
-                    "Evita qualsiasi forma che riveli o presuma il genere. "
-                    "Non usare strutture da elenco tipo '{AUTHOR} ha...'. "
-                    "Usa ganci temporali variati in base all'orario: 06:00-10:59 (La mattina/Di prima mattina/All'avvio della giornata), "
-                    "11:00-14:59 (Durante la tarda mattinata/Verso mezzogiorno/In piena giornata), 15:00-18:59 (Nel pomeriggio/Più tardi), "
-                    "19:00-22:59 (In serata/Sul finire della giornata). "
-                    "L'ultimo momento deve suonare come chiusura (es. 'La giornata si chiude con...' o 'In chiusura...'). "
-                    "Non usare la stessa apertura più di una volta; vietato ripetere esattamente la stessa locuzione in più bullet. "
-                    "Quando barcello_verde=true evita formule vaghe come 'un membro' o 'qualcuno' se {AUTHOR} è disponibile. "
-                )
+                if multi_day_window:
+                    narrative_extra += (
+                        "MOMENTI SALIENTI (intervallo multi-giorno): usa descrizioni neutrali degli eventi, non cronologia di una singola giornata. "
+                        "Non usare ganci orari come 'di prima mattina', 'verso mezzogiorno', 'nel pomeriggio', 'in serata'. "
+                        "Non forzare apertura/sviluppo/chiusura giornaliera: ogni bullet deve restare autonomo e fattuale. "
+                    )
+                else:
+                    narrative_extra += (
+                        "MOMENTI SALIENTI: scrivi in stile narrativo come un racconto della giornata (inizio, sviluppo, chiusura). "
+                        "Non iniziare mai la frase con il nome della persona. "
+                        "Integra il nickname nel racconto in modo naturale, preferendo strutture come '... quando {AUTHOR} ...'. "
+                        "Evita qualsiasi forma che riveli o presuma il genere. "
+                        "Non usare strutture da elenco tipo '{AUTHOR} ha...'. "
+                        "Usa ganci temporali variati in base all'orario: 06:00-10:59 (La mattina/Di prima mattina/All'avvio della giornata), "
+                        "11:00-14:59 (Durante la tarda mattinata/Verso mezzogiorno/In piena giornata), 15:00-18:59 (Nel pomeriggio/Più tardi), "
+                        "19:00-22:59 (In serata/Sul finire della giornata). "
+                        "L'ultimo momento deve suonare come chiusura (es. 'La giornata si chiude con...' o 'In chiusura...'). "
+                        "Non usare la stessa apertura più di una volta; vietato ripetere esattamente la stessa locuzione in più bullet. "
+                    )
+                narrative_extra += "Quando barcello_verde=true evita formule vaghe come 'un membro' o 'qualcuno' se {AUTHOR} è disponibile. "
         else:
             narrative_extra = ""
             names_rule = "NON includere mai nomi di persone. "

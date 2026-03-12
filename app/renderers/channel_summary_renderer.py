@@ -84,9 +84,9 @@ def format_day_label(dt_local: datetime) -> str:
 
 def format_window_header(*, period_label: str, start_dt: datetime, end_dt: datetime) -> str:
     if period_label == "oggi":
-        return f"🗓️ Oggi. {format_day_label(end_dt)}"
+        return f"**🗓️ Oggi. {format_day_label(end_dt)}**"
     if period_label == "ieri":
-        return f"🗓️ Ieri. {format_day_label(start_dt)}"
+        return f"**🗓️ Ieri. {format_day_label(start_dt)}**"
     if period_label == "ultimi":
         delta = end_dt - start_dt
         if delta.days >= 1:
@@ -101,8 +101,8 @@ def format_window_header(*, period_label: str, start_dt: datetime, end_dt: datet
             qty = max(1, int(delta.total_seconds() // 60))
             unit = "minuti" if qty > 1 else "minuto"
             prefix = "Ultimi"
-        return f"🗓️ {prefix} {qty} {unit}\n{start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}"
-    return f"🗓️ {start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}"
+        return f"**🗓️ {prefix} {qty} {unit}\n{start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}**"
+    return f"**🗓️ {start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}**"
 
 
 def _as_hashtag(value: str) -> str:
@@ -159,7 +159,6 @@ def _moment_line(*, moment: SummaryItem, guild_id: int, channel_id: int, message
     ref = message_index.get(primary_id) if primary_id else _resolve_message_meta(moment.message_ids, message_index)
     ts = (ref.ts if ref else None) or moment.ts
     text = str(moment.text or "").replace("{AUTHOR}", "").strip() or "(nessun dettaglio)"
-    # TODO: use per-moment Barcello snapshots when available; we currently render the window-level status.
     emoji = _barcello_emoji_from_color(getattr(barcello_status, "color", None))
     score = getattr(barcello_status, "score", None)
     safe_score = int(score) if isinstance(score, int) or str(score).isdigit() else "--"
@@ -200,7 +199,7 @@ def _bold_leading_actor(text: str) -> str:
     return re.sub(r"^([^\s].*?)(\s+(?:ha|è|si|con|nel|in)\b)", r"**\1**\2", line, count=1, flags=re.IGNORECASE)
 
 
-def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], who_interacted_lines: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False) -> list[discord.Embed]:
+def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], moment_barcello: dict[int, BarcelloResult] | None = None, who_interacted_lines: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False) -> list[discord.Embed]:
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
@@ -218,7 +217,18 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]
     _add_field_chunked(pages, name="🏷️ TEMI", value=", ".join(themes) if themes else "Nessun tema rilevato.", color=0x95A5A6)
 
-    moments = [_moment_line(moment=it, guild_id=guild_id, channel_id=channel_id, message_index=message_index, primary_id=moment_primary.get(id(it)), barcello_status=barcello_status, multi_day=multi_day) for it in summary_result.moments[:8]]
+    moments = [
+        _moment_line(
+            moment=it,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            message_index=message_index,
+            primary_id=moment_primary.get(id(it)),
+            barcello_status=(moment_barcello or {}).get(id(it), barcello_status),
+            multi_day=multi_day,
+        )
+        for it in summary_result.moments[:8]
+    ]
     if moments:
         _add_field_chunked(pages, name="📌 MOMENTI SALIENTI", value="\n".join(moments), color=0x95A5A6)
 

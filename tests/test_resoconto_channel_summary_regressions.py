@@ -46,9 +46,34 @@ def test_schedule_scoped_queries_stay_guild_channel_bound() -> None:
     assert "WHERE guild_id = ? AND channel_id = ?" in source
 
 
-def test_renderer_has_window_level_barcello_todo_for_moments() -> None:
+def test_window_header_is_always_bold_across_period_types() -> None:
     source = Path("app/renderers/channel_summary_renderer.py").read_text()
-    assert "TODO: use per-moment Barcello snapshots" in source
+    assert "**🗓️ Oggi." in source
+    assert "**🗓️ Ieri." in source
+    assert "**🗓️ {prefix}" in source
+    assert "**🗓️ {start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}**" in source
+
+
+def test_renderer_supports_per_moment_barcello_map() -> None:
+    source = Path("app/renderers/channel_summary_renderer.py").read_text()
+    assert "moment_barcello: dict[int, BarcelloResult] | None = None" in source
+    assert "(moment_barcello or {}).get(id(it), barcello_status)" in source
+
+
+def test_channel_summary_trend_uses_previous_equivalent_window() -> None:
+    source = Path("app/services/channel_summary.py").read_text()
+    assert "duration = max(timedelta(minutes=1), current_end_local - current_start_local)" in source
+    assert "previous_start_local = current_start_local - duration" in source
+    assert "previous_end_local = current_start_local" in source
+    assert "confronto con finestra equivalente precedente" in source
+
+
+def test_multi_day_moment_cleanup_removes_time_of_day_hooks() -> None:
+    source = Path("app/services/channel_summary.py").read_text()
+    assert "if multi_day:" in source
+    assert "di prima mattina" in source
+    assert "verso mezzogiorno" in source
+    assert "in serata" in source
 
 
 def test_update_schedule_can_clear_recurrence_and_keep_publish_at() -> None:
@@ -125,3 +150,9 @@ def test_schedule_channel_scope_for_status_edit_delete_clear() -> None:
             await db.close()
 
     asyncio.run(_run())
+
+
+def test_summary_ai_prompt_switches_for_multi_day_windows() -> None:
+    source = Path("app/services/summary.py").read_text()
+    assert "multi_day_window = st.date() != en.date()" in source
+    assert "MOMENTI SALIENTI (intervallo multi-giorno): usa descrizioni neutrali degli eventi" in source
