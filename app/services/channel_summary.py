@@ -20,7 +20,6 @@ from app.utils.summary_names import resolve_display_name_from_message_id, resolv
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
-DUE_WINDOW_SECONDS = 600
 
 
 
@@ -39,7 +38,6 @@ class ChannelSummaryService:
         self._barcello = barcello_service
         self._ai = ai_service
         self._task: asyncio.Task[None] | None = None
-        self._missed_logged: dict[str, str] = {}
         self._loop_started_logged = False
 
     def start(self) -> None:
@@ -49,7 +47,7 @@ class ChannelSummaryService:
     async def _loop(self) -> None:
         await self._bot.wait_until_ready()
         if not self._loop_started_logged:
-            logger.info("channel_summary loop started interval=30s window=%ss", DUE_WINDOW_SECONDS)
+            logger.info("channel_summary loop started interval=30s")
             self._loop_started_logged = True
         while True:
             try:
@@ -67,16 +65,21 @@ class ChannelSummaryService:
         for guild in self._bot.guilds:
             rows = await self._database.list_due_channel_summary_schedules(str(guild.id), now_utc.isoformat())
             for row in rows:
-                channel_id = str(row["channel_id"])
-                enabled = await self._database.get_channel_summary_auto_enabled(str(guild.id), channel_id)
-                if not enabled:
-                    logger.debug("channel_summary skip channel=%s reason=auto_off", channel_id)
-                    continue
-                window = self._resolve_window_from_schedule(dict(row), now_local=now_local)
-                sent = await self.generate_and_send_for_channel(str(guild.id), channel_id, manual=False, window=window)
-                if sent:
-                    await self._database.mark_channel_summary_schedule_sent(int(row["id"]))
-                    logger.info("channel_summary sent ok guild=%s channel=%s schedule_id=%s", guild.id, channel_id, row["id"])
+                schedule = dict(row)
+                channel_id = str(schedule.get("channel_id") or "")
+                schedule_id = int(schedule.get("id") or 0)
+                try:
+                    enabled = await self._database.get_channel_summary_auto_enabled(str(guild.id), channel_id)
+                    if not enabled:
+                        logger.debug("channel_summary skip schedule=%s channel=%s reason=auto_off", schedule_id, channel_id)
+                        continue
+                    window = self._resolve_window_from_schedule(schedule, now_local=now_local)
+                    sent = await self.generate_and_send_for_channel(str(guild.id), channel_id, manual=False, window=window)
+                    if sent:
+                        await self._database.mark_channel_summary_schedule_sent(schedule_id)
+                        logger.info("channel_summary sent ok guild=%s channel=%s schedule_id=%s", guild.id, channel_id, schedule_id)
+                except Exception:
+                    logger.exception("channel_summary scheduled run failed guild=%s channel=%s schedule_id=%s", guild.id, channel_id, schedule_id)
 
     def _resolve_window_from_schedule(self, row: dict[str, Any], *, now_local: datetime) -> TimeWindowResult:
         schedule_type = str(row.get("type") or "oggi").lower()
@@ -84,10 +87,14 @@ class ChannelSummaryService:
             return resolve_ieri_window()
         if schedule_type == "ultimi":
             start_raw = str(row.get("start_ts") or "")
+            end_raw = str(row.get("end_ts") or "")
             try:
                 start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00")).astimezone(ROME_TZ)
+                end_dt = datetime.fromisoformat(end_raw.replace("Z", "+00:00")).astimezone(ROME_TZ)
+                delta = max(timedelta(minutes=1), end_dt - start_dt)
             except Exception:
-                start_dt = now_local - timedelta(hours=1)
+                delta = timedelta(hours=1)
+            start_dt = now_local - delta
             return TimeWindowResult(start_dt=start_dt, end_dt=now_local, period_label="ultimi", label_periodo="ultimi")
         if schedule_type == "range":
             start_raw = str(row.get("start_ts") or "")
@@ -144,7 +151,7 @@ class ChannelSummaryService:
     def _contains_vague_actor(self, text: str) -> bool:
         return bool(re.search(r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b", str(text or ""), flags=re.IGNORECASE))
 
-    def _ensure_past_tense_vibe(self, text: str, bar: BarcelloResult) -> str:
+    def _ensure_past_tense_vibe(self, text: str, bar: BarcelloResult, *, period_label: str) -> str:
         raw = " ".join(str(text or "").split())
         if raw:
             raw = raw.replace("\n", " ").strip()
@@ -154,7 +161,12 @@ class ChannelSummaryService:
                 lower_raw = raw.lower()
                 if not any(tok in lower_raw for tok in banned):
                     return raw
-        return f"Nella giornata di oggi il barcello è rimasto {bar.color} ({bar.score}/100), con un clima complessivamente disteso."
+        lead = "Nel periodo selezionato"
+        if period_label == "oggi":
+            lead = "Nella giornata di oggi"
+        elif period_label == "ieri":
+            lead = "Nella giornata di ieri"
+        return f"{lead} il barcello è rimasto {bar.color} ({bar.score}/100), con un clima complessivamente disteso."
 
     async def _build_who_interacted_candidates(self, *, rows: list[Any], guild_id: str) -> tuple[list[dict[str, Any]], list[str]]:
         stats: dict[str, dict[str, Any]] = {}
@@ -252,7 +264,9 @@ class ChannelSummaryService:
             start_ts=start_dt.isoformat(),
             end_ts=end_dt.isoformat(),
         )
-        bar_yesterday = await self._compute_yesterday_barcello(guild_id=guild_id, channel_id=channel_id, start_local=start_local)
+        bar_yesterday = None
+        if window.period_label == "oggi":
+            bar_yesterday = await self._compute_yesterday_barcello(guild_id=guild_id, channel_id=channel_id, start_local=start_local)
         config = await self._summary.get_config()
         ai_allowed = bool(self._ai and getattr(self._ai, "is_enabled", lambda: False)())
         summary = await self._summary.build_summary(
@@ -285,8 +299,8 @@ class ChannelSummaryService:
             },
         )
 
-        trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday)
-        barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar)
+        trend_value = self._build_trend_vs_yesterday(bar_today=bar, bar_yesterday=bar_yesterday) if window.period_label == "oggi" else ""
+        barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar, period_label=window.period_label)
         advice = [str(x).strip()[:160] for x in (getattr(summary, "advice", []) or []) if str(x).strip()][:5]
         proverbio = str(getattr(summary, "proverbio", "") or "").strip()
         if not advice or not proverbio:
@@ -299,7 +313,8 @@ class ChannelSummaryService:
         if not who_lines:
             who_lines = who_fallback_lines[:8]
         who_lines = [re.sub(r"^(\S+)", r"**\1**", line, count=1) for line in who_lines]
-        day_label = format_window_header(period_label=window.period_label, start_dt=start_local, end_dt=end_local)
+        window_header = format_window_header(period_label=window.period_label, start_dt=start_local, end_dt=end_local)
+        multi_day = start_local.date() != end_local.date()
 
         message_index: dict[str, MessageMeta] = {}
         for row in rows:
@@ -452,13 +467,14 @@ class ChannelSummaryService:
             message_index=message_index,
             advice_bullets=advice,
             proverbio=proverbio,
-            window_header=day_label,
+            window_header=window_header,
             moment_primary=moment_primary,
             dynamic_primary=dynamic_primary,
             dynamic_names=dynamic_names,
             quote_render_items=quote_render_items,
             trend_value=trend_value,
             who_interacted_lines=who_lines,
+            multi_day=multi_day,
         )
 
         embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
