@@ -293,3 +293,42 @@ def test_dynamic_reason_falls_back_to_template_when_metrics_are_insufficient() -
         config={"profile_reason_template": "template statico"},
     )
     assert reason == "template statico"
+
+
+def test_channel_aura_embed_top10_format_and_sections() -> None:
+    from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+
+    embed = build_channel_aura_embed(
+        data=ChannelAuraEmbedData(
+            positive_points=120,
+            negative_points=-15,
+            users_count=4,
+            top_users=[ChannelAuraTopUserItem(user_id="42", score=1046, trend_emoji="⬆️", trend_comment="in crescita rispetto al periodo precedente", rank=1)],
+            positive_reasons=[("per aver completato una missione giornaliera", 35)],
+            negative_reasons=[("per bassa diversità nelle interazioni", -5)],
+            missions=ChannelAuraMissionTrend(assigned_count=8, completed_count=6, trend_emoji="↔️", trend_comment="stabile rispetto al periodo precedente"),
+            advice_lines=["Coinvolgete più persone nel canale."],
+        )
+    )
+
+    fields = {f.name: f.value for f in embed.fields}
+    assert "🏆 TOP 10 PUNTI AURA" in fields
+    assert "**+1046 P.A.**" in fields["🏆 TOP 10 PUNTI AURA"]
+    assert "<@42>" in fields["🏆 TOP 10 PUNTI AURA"]
+    assert "🕹️ PUNTEGGI" in fields
+    assert "**+35 P.A.**" in fields["🕹️ PUNTEGGI"]
+
+
+def test_channel_aura_advice_is_deterministic() -> None:
+    from app.services.aura_render import build_channel_aura_advice
+
+    advice = build_channel_aura_advice(
+        positive_points=0,
+        negative_points=-60,
+        users_count=1,
+        mission_completed=0,
+        top_positive_reason=None,
+    )
+
+    assert advice[0].startswith("Coinvolgete più persone")
+    assert any("missioni" in line for line in advice)
