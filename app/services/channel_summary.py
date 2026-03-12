@@ -148,7 +148,15 @@ class ChannelSummaryService:
             return "Qualcuno ha partecipato alla conversazione in modo costruttivo."
         return clean
 
-    def _sanitize_moment_text(self, text: str, *, multi_day: bool = False) -> str:
+    def _sanitize_moment_text(
+        self,
+        text: str,
+        *,
+        multi_day: bool = False,
+        moment_ts: str | None = None,
+        is_last: bool = False,
+        ordinal: int = 0,
+    ) -> str:
         clean = str(text or "").strip()
         if not clean:
             return clean
@@ -156,13 +164,55 @@ class ChannelSummaryService:
         if multi_day:
             # Multi-day windows should be neutral event notes, not single-day time-of-day storytelling.
             clean = re.sub(
-                r"^(?:di prima mattina|la mattina|durante la tarda mattinata|verso mezzogiorno|in piena giornata|nel pomeriggio|più tardi|in serata|sul finire della giornata|in chiusura)\s*,?\s+",
+                r"^(?:di prima mattina|la mattina|durante la tarda mattinata|verso mezzogiorno|in piena giornata|nel pomeriggio|più tardi|in serata|sul finire della giornata|in chiusura|la giornata si chiude con|all'avvio della giornata)\s*,?\s+",
                 "",
                 clean,
                 flags=re.IGNORECASE,
             )
         clean = re.sub(r"^[^\wÀ-ÖØ-öø-ÿA-Za-z0-9#]{1,4}\s+", "", clean)
-        return " ".join(clean.split())
+        clean = " ".join(clean.split())
+        if multi_day:
+            return clean
+        if self._has_day_narrative_hook(clean):
+            return clean
+        hook = self._single_day_narrative_hook(moment_ts=moment_ts, is_last=is_last, ordinal=ordinal)
+        if re.match(r"^[a-zà-öø-ÿ]", clean):
+            clean = clean[0].upper() + clean[1:]
+        return f"{hook} {clean}"
+
+    def _has_day_narrative_hook(self, text: str) -> bool:
+        return bool(re.match(
+            r"^(?:la giornata inizia|di prima mattina|all'avvio della giornata|la mattina|durante la tarda mattinata|verso mezzogiorno|in piena giornata|nel pomeriggio|più tardi|in serata|sul finire della giornata|in chiusura|la giornata si chiude con)\b",
+            str(text or "").strip(),
+            flags=re.IGNORECASE,
+        ))
+
+    def _single_day_narrative_hook(self, *, moment_ts: str | None, is_last: bool, ordinal: int) -> str:
+        if is_last:
+            return "In chiusura,"
+        hour: int | None = None
+        if moment_ts:
+            try:
+                dt = datetime.fromisoformat(str(moment_ts).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                hour = dt.astimezone(ROME_TZ).hour
+            except Exception:
+                hour = None
+        if hour is None:
+            fallback_hooks = ["La giornata inizia con", "Più tardi,", "Nel pomeriggio,", "In serata,"]
+            return fallback_hooks[ordinal % len(fallback_hooks)]
+        if 6 <= hour <= 10:
+            hooks = ["Di prima mattina,", "All'avvio della giornata,", "La mattina,"]
+        elif 11 <= hour <= 14:
+            hooks = ["Durante la tarda mattinata,", "Verso mezzogiorno,", "In piena giornata,"]
+        elif 15 <= hour <= 18:
+            hooks = ["Nel pomeriggio,", "Più tardi,"]
+        elif 19 <= hour <= 22:
+            hooks = ["In serata,", "Sul finire della giornata,"]
+        else:
+            hooks = ["La giornata inizia con", "Più tardi,"]
+        return hooks[ordinal % len(hooks)]
 
     def _contains_vague_actor(self, text: str) -> bool:
         return bool(re.search(r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b", str(text or ""), flags=re.IGNORECASE))
@@ -385,7 +435,7 @@ class ChannelSummaryService:
         message_cache: dict[str, dict[str, Any]] = {}
         dynamic_names: dict[int, list[str]] = {}
         is_green = (bar.color == "verde" and int(bar.score) >= 70)
-        for moment in summary.moments:
+        for idx, moment in enumerate(summary.moments):
             primary_id = moment_primary.get(id(moment))
             display = safe_display_name(await resolve_display_name_from_message_id(
                 database=self._database,
@@ -403,7 +453,13 @@ class ChannelSummaryService:
                     count=1,
                     flags=re.IGNORECASE,
                 )
-            moment.text = self._bold_display_name(self._sanitize_moment_text(integrated, multi_day=multi_day), display)
+            moment.text = self._bold_display_name(self._sanitize_moment_text(
+                integrated,
+                multi_day=multi_day,
+                moment_ts=moment.ts,
+                is_last=(idx == len(summary.moments) - 1),
+                ordinal=idx,
+            ), display)
 
         for dynamic in summary.dynamics:
             names: list[str] = []
@@ -427,7 +483,7 @@ class ChannelSummaryService:
             dynamic_text = self._apply_author_placeholder(dynamic.text, primary_display)
             if "{AUTHOR}" in dynamic_text:
                 dynamic_text = self._cleanup_placeholder_artifacts(dynamic_text.replace("{AUTHOR}", ""), had_author_placeholder=True, has_display_name=False)
-            dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text, multi_day=multi_day), primary_display)
+            dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text, multi_day=multi_day, moment_ts=dynamic.ts), primary_display)
 
         for message_id in {m for m in [*moment_primary.values(), *quote_primary.values(), *dynamic_primary.values()] if m}:
             if message_id in message_index:
