@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.plugins.commands_modular.time_windows import TimeWindowResult, resolve_ieri_window, resolve_oggi_window
-from app.renderers.channel_summary_renderer import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, format_window_header
+from app.renderers.channel_summary_renderer import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, format_window_header
 from app.services.barcello import BarcelloResult, BarcelloService
 from app.services.database import DatabaseService
 from app.services.summary import SummaryResult, SummaryService
@@ -21,7 +21,9 @@ from app.utils.summary_names import resolve_display_name_from_message_id, resolv
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
 
-
+MIN_CHANNEL_SUMMARY_MESSAGES = 8
+MIN_CHANNEL_SUMMARY_DISTINCT_USERS = 2
+MIN_CHANNEL_SUMMARY_USABLE_CONTENT_MESSAGES = 5
 
 class ChannelSummaryService:
     def __init__(
@@ -312,6 +314,21 @@ class ChannelSummaryService:
 
         return candidates, fallback_lines
 
+    def _channel_summary_data_is_sufficient(self, *, rows: list[Any], messages: list[dict[str, Any]]) -> tuple[bool, dict[str, int]]:
+        total_messages = len(rows)
+        distinct_users = len({str((dict(row) if not isinstance(row, dict) else row).get("author_id") or "").strip() for row in rows if str((dict(row) if not isinstance(row, dict) else row).get("author_id") or "").strip()})
+        usable_content_messages = len(messages)
+        enough = (
+            total_messages >= MIN_CHANNEL_SUMMARY_MESSAGES
+            and distinct_users >= MIN_CHANNEL_SUMMARY_DISTINCT_USERS
+            and usable_content_messages >= MIN_CHANNEL_SUMMARY_USABLE_CONTENT_MESSAGES
+        )
+        return enough, {
+            "messages": total_messages,
+            "users": distinct_users,
+            "usable_messages": usable_content_messages,
+        }
+
     async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False, window: TimeWindowResult | None = None) -> bool:
         channel = self._bot.get_channel(int(channel_id))
         if not isinstance(channel, discord.abc.Messageable):
@@ -339,6 +356,37 @@ class ChannelSummaryService:
             for row in rows
             if str(row["content"] or "").strip()
         ]
+
+        window_header = format_window_header(period_label=window.period_label, start_dt=start_local, end_dt=end_local)
+        data_is_sufficient, data_counts = self._channel_summary_data_is_sufficient(rows=rows, messages=messages)
+        if not data_is_sufficient:
+            logger.info(
+                "channel_summary skipped_ai_insufficient_data guild=%s channel=%s messages=%s users=%s usable_messages=%s",
+                guild_id,
+                channel_id,
+                data_counts["messages"],
+                data_counts["users"],
+                data_counts["usable_messages"],
+            )
+            channel_name = getattr(channel, "name", None) or channel_id
+            embed = build_channel_summary_insufficient_data_embed(channel_name=str(channel_name), window_header=window_header)
+            embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia")
+            try:
+                await channel.send(embed=embed)
+            except discord.HTTPException:
+                logger.exception("channel_summary send failed guild=%s channel=%s", guild_id, channel_id)
+                return False
+            if manual:
+                today = datetime.now(ROME_TZ).date().isoformat()
+                await self._database.mark_daily_report_sent(
+                    guild_id,
+                    channel_id,
+                    today,
+                    local_time_str=datetime.now(ROME_TZ).strftime("%H:%M"),
+                    sent_kind="manual",
+                )
+            logger.info("channel_summary sent_insufficient_data guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
+            return True
 
         bar = await self._barcello.compute_channel_range(
             guild_id=guild_id,
@@ -404,7 +452,6 @@ class ChannelSummaryService:
         who_lines = [str(line).strip() for line in (getattr(summary, "who_interacted_today", []) or []) if str(line).strip()][:8]
         if not who_lines:
             who_lines = who_fallback_lines[:8]
-        window_header = format_window_header(period_label=window.period_label, start_dt=start_local, end_dt=end_local)
         is_single_day_style = self._is_single_day_style(
             period_label=window.period_label,
             start_local=start_local,
