@@ -606,3 +606,24 @@ def test_sufficient_data_keeps_normal_channel_summary_flow() -> None:
         assert len(embeds) >= 2
 
     asyncio.run(_run())
+
+
+def test_channel_summary_renderer_supports_aura_page_append() -> None:
+    source = Path("app/renderers/channel_summary_renderer.py").read_text()
+    assert "aura_embed: discord.Embed | None = None" in source
+    assert "aura_embed.title = f\"🗒️ DETTAGLI (Pag {total}/{total})\"" in source
+
+
+def test_channel_summary_builds_channel_scoped_aura_with_previous_window() -> None:
+    source = Path("app/services/channel_summary.py").read_text()
+    assert "fetch_aura_channel_ledger_report(guild_id, channel_id" in source
+    assert "fetch_aura_channel_top_users(guild_id, channel_id" in source
+    assert "fetch_aura_channel_mission_stats(guild_id, channel_id" in source
+    assert "prev_start_local, prev_end_local = self._previous_equivalent_window" in source
+
+
+def test_database_has_channel_scoped_aura_queries() -> None:
+    source = Path("app/services/database.py").read_text()
+    assert "async def fetch_aura_channel_ledger_report" in source
+    assert "WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ?" in source
+    assert "async def fetch_aura_channel_top_users" in source

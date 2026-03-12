@@ -292,6 +292,116 @@ def _build_advice_lines(metrics: dict[str, Any], *, channel_name: str) -> list[s
     return lines[:3]
 
 
+@dataclass
+class ChannelAuraTopUserItem:
+    user_id: str
+    score: int
+    trend_emoji: str
+    trend_comment: str
+    rank: int
+
+
+@dataclass
+class ChannelAuraMissionTrend:
+    assigned_count: int
+    completed_count: int
+    trend_emoji: str
+    trend_comment: str
+
+
+@dataclass
+class ChannelAuraEmbedData:
+    positive_points: int
+    negative_points: int
+    users_count: int
+    top_users: list[ChannelAuraTopUserItem]
+    positive_reasons: list[tuple[str, int]]
+    negative_reasons: list[tuple[str, int]]
+    missions: ChannelAuraMissionTrend
+    advice_lines: list[str]
+
+
+def _rank_emoji(rank: int) -> str:
+    if rank == 1:
+        return "🥇"
+    if rank == 2:
+        return "🥈"
+    if rank == 3:
+        return "🥉"
+    keycaps = {4: "4️⃣", 5: "5️⃣", 6: "6️⃣", 7: "7️⃣", 8: "8️⃣", 9: "9️⃣", 10: "🔟"}
+    return keycaps.get(rank, f"{rank}.")
+
+
+def build_channel_aura_advice(
+    *,
+    positive_points: int,
+    negative_points: int,
+    users_count: int,
+    mission_completed: int,
+    top_positive_reason: str | None = None,
+) -> list[str]:
+    lines: list[str] = []
+    if users_count <= 1:
+        lines.append("Coinvolgete più persone: la diversità delle interazioni aumenta l'Aura del canale.")
+    if mission_completed <= 0:
+        lines.append("Provate a completare più missioni giornaliere: sono tra le fonti più affidabili di P.A.")
+    if negative_points < 0 and abs(negative_points) >= max(20, positive_points // 2):
+        lines.append("Riducete i comportamenti penalizzati: nel periodo i malus hanno pesato molto.")
+    if positive_points <= 0:
+        lines.append("Aumentate la partecipazione con messaggi utili e continui per generare Aura positiva.")
+    if top_positive_reason:
+        lines.append(f"Potete spingere ancora su '{top_positive_reason}' per consolidare il trend positivo.")
+    if not lines:
+        lines.append("Buon equilibrio Aura: mantenete costanza e coinvolgimento per continuare a crescere.")
+    return lines[:3]
+
+
+def build_channel_aura_embed(*, data: ChannelAuraEmbedData, title: str = "🗒️ DETTAGLI (Pag 2/2)") -> discord.Embed:
+    embed = discord.Embed(title=title, color=0x5865F2)
+    embed.add_field(
+        name="📈 PANORAMICA",
+        value=(
+            f"• Punti assegnati: +{int(data.positive_points)}\n"
+            f"• Punti rimossi: {int(data.negative_points)}\n"
+            f"• Utenti coinvolti: {int(data.users_count)}"
+        ),
+        inline=False,
+    )
+
+    rank_lines = [
+        f"• {_rank_emoji(item.rank)}{item.trend_emoji} **+{item.score} P.A.** → <@{item.user_id}> — {item.trend_comment}"
+        for item in data.top_users
+    ]
+    embed.add_field(name="🏆 TOP 10 PUNTI AURA", value="\n".join(rank_lines) or "• Nessun dato rilevante nel periodo.", inline=False)
+
+    points_lines: list[str] = []
+    for reason, total in data.positive_reasons[:10]:
+        points_lines.append(f"• **+{int(total)} P.A.** {reason}")
+    for reason, total in data.negative_reasons[:10]:
+        points_lines.append(f"• **{int(total)} P.A.** {reason}")
+    embed.add_field(name="🕹️ PUNTEGGI", value="\n".join(points_lines) or "• Nessun dato rilevante nel periodo.", inline=False)
+
+    m = data.missions
+    ratio = f"{m.completed_count}/{m.assigned_count}" if m.assigned_count > 0 else "0/0"
+    embed.add_field(
+        name="📜 MISSIONI",
+        value=(
+            "🧭 Assegnate:\n"
+            f"• {m.assigned_count} nel canale\n\n"
+            "🎯 Risultati:\n"
+            f"• {ratio} completate {m.trend_emoji} {m.trend_comment}"
+        ),
+        inline=False,
+    )
+
+    embed.add_field(
+        name="✨ I CONSIGLI DEL BARCELLOMETRO",
+        value="\n".join(f"• {line}" for line in data.advice_lines) or "• Nessun consiglio disponibile.",
+        inline=False,
+    )
+    return embed
+
+
 def build_aura_embeds(
     *,
     profile_name: str,
