@@ -125,11 +125,26 @@ class ChannelSummaryService:
 
     def _bold_display_name(self, text: str, display_name: str | None) -> str:
         clean_name = str(display_name or "").strip()
-        if not clean_name:
-            return str(text or "")
-        if f"**{clean_name}**" in str(text or ""):
-            return str(text or "")
-        return re.sub(rf"\b{re.escape(clean_name)}\b", f"**{clean_name}**", str(text or ""))
+        raw_text = str(text or "")
+        if not clean_name or not raw_text:
+            return raw_text
+        if f"**{clean_name}**" in raw_text:
+            return raw_text
+
+        chunks = re.split(r"(\*\*[^*]+\*\*)", raw_text)
+        for idx, chunk in enumerate(chunks):
+            if idx % 2 == 1:
+                continue
+            chunks[idx] = chunk.replace(clean_name, f"**{clean_name}**")
+        return "".join(chunks)
+
+    def _is_single_day_style(self, *, period_label: str | None, start_local: datetime, end_local: datetime) -> bool:
+        normalized = str(period_label or "").strip().lower()
+        if normalized in {"oggi", "ieri"}:
+            return True
+        if normalized in {"ultimi", "range"}:
+            return start_local.date() == end_local.date()
+        return start_local.date() == end_local.date()
 
     def _apply_author_placeholder(self, text: str, display_name: str | None) -> str:
         clean = str(text or "").strip()
@@ -173,6 +188,7 @@ class ChannelSummaryService:
         clean = " ".join(clean.split())
         if multi_day:
             return clean
+        clean = re.sub(r"^((?:di prima mattina|all'avvio della giornata|la mattina|durante la tarda mattinata|verso mezzogiorno|in piena giornata|nel pomeriggio|più tardi|in serata|sul finire della giornata|in chiusura|la giornata si chiude con)\s*,?)\s*durante la discussione,\s+", r"\1 ", clean, flags=re.IGNORECASE)
         if self._has_day_narrative_hook(clean):
             return clean
         hook = self._single_day_narrative_hook(moment_ts=moment_ts, is_last=is_last, ordinal=ordinal)
@@ -355,6 +371,7 @@ class ChannelSummaryService:
             granularity_hint="days",
             summary_mode="channel_summary",
             summary_context={
+                "period_label": window.period_label,
                 "score": bar.score,
                 "color": bar.color,
                 "barcello_verde": (bar.color == "verde" and int(bar.score) >= 70),
@@ -388,7 +405,12 @@ class ChannelSummaryService:
         if not who_lines:
             who_lines = who_fallback_lines[:8]
         window_header = format_window_header(period_label=window.period_label, start_dt=start_local, end_dt=end_local)
-        multi_day = start_local.date() != end_local.date()
+        is_single_day_style = self._is_single_day_style(
+            period_label=window.period_label,
+            start_local=start_local,
+            end_local=end_local,
+        )
+        multi_day_style = not is_single_day_style
 
         message_index: dict[str, MessageMeta] = {}
         for row in rows:
@@ -455,7 +477,7 @@ class ChannelSummaryService:
                 )
             moment.text = self._bold_display_name(self._sanitize_moment_text(
                 integrated,
-                multi_day=multi_day,
+                multi_day=multi_day_style,
                 moment_ts=moment.ts,
                 is_last=(idx == len(summary.moments) - 1),
                 ordinal=idx,
@@ -483,7 +505,7 @@ class ChannelSummaryService:
             dynamic_text = self._apply_author_placeholder(dynamic.text, primary_display)
             if "{AUTHOR}" in dynamic_text:
                 dynamic_text = self._cleanup_placeholder_artifacts(dynamic_text.replace("{AUTHOR}", ""), had_author_placeholder=True, has_display_name=False)
-            dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text, multi_day=multi_day, moment_ts=dynamic.ts), primary_display)
+            dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text, multi_day=multi_day_style, moment_ts=dynamic.ts), primary_display)
 
         for message_id in {m for m in [*moment_primary.values(), *quote_primary.values(), *dynamic_primary.values()] if m}:
             if message_id in message_index:
@@ -567,7 +589,7 @@ class ChannelSummaryService:
             trend_value=trend_value,
             who_interacted_lines=who_lines,
             known_display_names=known_display_names,
-            multi_day=multi_day,
+            multi_day=multi_day_style,
         )
 
         embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
