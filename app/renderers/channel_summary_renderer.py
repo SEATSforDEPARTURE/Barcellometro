@@ -162,7 +162,7 @@ def _moment_line(*, moment: SummaryItem, guild_id: int, channel_id: int, message
     emoji = _barcello_emoji_from_color(getattr(barcello_status, "color", None))
     score = getattr(barcello_status, "score", None)
     safe_score = int(score) if isinstance(score, int) or str(score).isdigit() else "--"
-    return f"• {format_time_link(guild_id, channel_id, primary_id or (ref.message_id if ref else None), ts, multi_day=multi_day)} {emoji} {safe_score} — {text}"
+    return f"• {format_time_link(guild_id, channel_id, primary_id or (ref.message_id if ref else None), ts, multi_day=multi_day)} {emoji} **{safe_score}** — {text}"
 
 
 def _quote_line(*, item: QuoteRenderItem, guild_id: int, channel_id: int, multi_day: bool) -> str:
@@ -188,18 +188,27 @@ def _bold_known_names(text: str, names: list[str]) -> str:
     for name in sorted({str(n).strip() for n in names if str(n).strip()}, key=len, reverse=True):
         if f"**{name}**" in out:
             continue
-        out = re.sub(rf"(?<!\*)\b{re.escape(name)}\b(?!\*)", f"**{name}**", out)
+        escaped = re.escape(name)
+        start_guard = r"(?<![0-9A-Za-zÀ-ÖØ-öø-ÿ_])" if re.match(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_]", name[:1]) else ""
+        end_guard = r"(?![0-9A-Za-zÀ-ÖØ-öø-ÿ_])" if re.match(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_]", name[-1:]) else ""
+        out = re.sub(rf"(?<!\*){start_guard}{escaped}{end_guard}(?!\*)", f"**{name}**", out)
     return out
 
 
-def _bold_leading_actor(text: str) -> str:
+def _bold_leading_actor(text: str, known_names: list[str] | None = None) -> str:
     line = str(text or "").strip()
-    if not line or line.startswith("**"):
+    if not line:
+        return line
+    if known_names:
+        line = _bold_known_names(line, known_names)
+        if "**" in line:
+            return line
+    if line.startswith("**"):
         return line
     return re.sub(r"^([^\s].*?)(\s+(?:ha|è|si|con|nel|in)\b)", r"**\1**\2", line, count=1, flags=re.IGNORECASE)
 
 
-def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], moment_barcello: dict[int, BarcelloResult] | None = None, who_interacted_lines: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False) -> list[discord.Embed]:
+def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], moment_barcello: dict[int, BarcelloResult] | None = None, who_interacted_lines: list[str] | None = None, known_display_names: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False) -> list[discord.Embed]:
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
@@ -241,7 +250,7 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     if dynamics:
         _add_field_chunked(pages, name="🔁 DINAMICHE", value="\n".join(dynamics), color=0x95A5A6)
 
-    who_lines = [f"• {_bold_leading_actor(line)}" for line in (who_interacted_lines or []) if str(line or "").strip()][:8]
+    who_lines = [f"• {_bold_leading_actor(line, known_display_names)}" for line in (who_interacted_lines or []) if str(line or "").strip()][:8]
     if who_lines:
         _add_field_chunked(pages, name="👥 INTERAZIONI", value="\n".join(who_lines), color=0x95A5A6)
 
