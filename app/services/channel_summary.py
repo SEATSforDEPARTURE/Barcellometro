@@ -18,7 +18,7 @@ from app.services.aura import aura_reason_to_human
 from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_advice, build_channel_aura_embed
 from app.services.database import DatabaseService
 from app.services.summary import SummaryResult, SummaryService
-from app.utils.embed_limits import _estimate_embed_size
+from app.utils.embed_limits import _estimate_embed_size, estimate_embeds_total_size
 from app.utils.summary_names import resolve_display_name_from_message_id, resolve_primary_message_id, safe_display_name
 
 logger = logging.getLogger(__name__)
@@ -661,7 +661,34 @@ class ChannelSummaryService:
                 logger.warning("channel_summary aura_embed_over_budget chars=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
                 embeds = embeds[:2]
         try:
-            await channel.send(embeds=embeds)
+            if len(embeds) >= 3:
+                first_batch = embeds[:2]
+                second_batch = [embeds[2]]
+                logger.debug(
+                    "channel_summary send_batch1 embeds=%s total_chars=%s guild=%s channel=%s",
+                    len(first_batch),
+                    estimate_embeds_total_size(first_batch),
+                    guild_id,
+                    channel_id,
+                )
+                await channel.send(embeds=first_batch)
+                logger.debug(
+                    "channel_summary send_batch2 embeds=%s total_chars=%s guild=%s channel=%s",
+                    len(second_batch),
+                    estimate_embeds_total_size(second_batch),
+                    guild_id,
+                    channel_id,
+                )
+                await channel.send(embeds=second_batch)
+            else:
+                logger.debug(
+                    "channel_summary send_batch1 embeds=%s total_chars=%s guild=%s channel=%s",
+                    len(embeds),
+                    estimate_embeds_total_size(embeds),
+                    guild_id,
+                    channel_id,
+                )
+                await channel.send(embeds=embeds)
         except discord.HTTPException:
             logger.exception("channel_summary send failed guild=%s channel=%s", guild_id, channel_id)
             return False

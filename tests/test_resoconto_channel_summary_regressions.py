@@ -598,20 +598,66 @@ def test_sufficient_data_keeps_normal_channel_summary_flow() -> None:
         ok = await svc.generate_and_send_for_channel("1", "2", manual=False, window=window)
         assert ok is True
         assert summary.called is True
-        assert len(channel.sent) == 1
-        payload = channel.sent[0]
-        assert "embeds" in payload
-        embeds = payload["embeds"]
-        assert isinstance(embeds, list)
-        assert len(embeds) >= 2
+        assert len(channel.sent) == 2
+        first_payload = channel.sent[0]
+        second_payload = channel.sent[1]
+        assert "embeds" in first_payload
+        assert "embeds" in second_payload
+        first_embeds = first_payload["embeds"]
+        second_embeds = second_payload["embeds"]
+        assert isinstance(first_embeds, list)
+        assert isinstance(second_embeds, list)
+        assert len(first_embeds) == 2
+        assert len(second_embeds) == 1
+        assert first_embeds[1].title == "🗒️ DETTAGLI CANALE (Pag 1/2)"
+        assert second_embeds[0].title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
 
     asyncio.run(_run())
 
 
-def test_channel_summary_renderer_supports_aura_page_append() -> None:
-    source = Path("app/renderers/channel_summary_renderer.py").read_text()
-    assert "aura_embed: discord.Embed | None = None" in source
-    assert "aura_embed.title = f\"🗒️ DETTAGLI (Pag {total}/{total})\"" in source
+def test_channel_summary_renderer_preserves_dedicated_channel_and_aura_titles() -> None:
+    pytest.importorskip("aiosqlite")
+    import discord
+    from app.renderers.channel_summary_renderer import build_channel_summary_embeds
+    from app.services.barcello import BarcelloResult
+    from app.services.summary import SummaryResult
+
+    aura_embed = discord.Embed(title="🗒️ DETTAGLI PUNTI AURA (Pag 2/2)", color=0x5865F2)
+    summary = SummaryResult(
+        themes=["progetti"],
+        moments=[],
+        quotes=[],
+        dynamics=[],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={"enabled": False},
+        vibe_line="ok",
+        proverbio="",
+        who_interacted_today=[],
+    )
+
+    embeds = build_channel_summary_embeds(
+        guild_id=1,
+        channel_id=2,
+        channel_name="generale",
+        barcello_status=BarcelloResult(score=70, color="verde", trend="up", reasons=[], metrics={}),
+        barcello_line="ok",
+        summary_result=summary,
+        message_index={},
+        advice_bullets=[],
+        proverbio="",
+        window_header="**🗓️ Oggi. Mercoledì, 11 Marzo 2026**",
+        moment_primary={},
+        dynamic_primary={},
+        dynamic_names={},
+        quote_render_items=[],
+        aura_embed=aura_embed,
+    )
+
+    assert embeds[1].title == "🗒️ DETTAGLI (Pag 1/2)"
+    assert embeds[2].title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
 
 
 def test_channel_summary_keeps_final_aura_embed_title_and_footer_without_post_mutation() -> None:
@@ -738,9 +784,12 @@ def test_channel_summary_validates_third_embed_without_mutating_after_validation
         window = TimeWindowResult(start_dt=datetime(2026, 3, 11, 0, 0), end_dt=datetime(2026, 3, 11, 23, 59), period_label="oggi", label_periodo="oggi")
         ok = await svc.generate_and_send_for_channel("1", "2", manual=False, window=window)
         assert ok is True
-        embeds = channel.sent[0]["embeds"]
-        assert isinstance(embeds, list)
-        assert embeds[2].title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
-        assert embeds[2].footer and embeds[2].footer.text == "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati."
+        first_embeds = channel.sent[0]["embeds"]
+        second_embeds = channel.sent[1]["embeds"]
+        assert isinstance(first_embeds, list)
+        assert isinstance(second_embeds, list)
+        assert first_embeds[1].title == "🗒️ DETTAGLI CANALE (Pag 1/2)"
+        assert second_embeds[0].title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
+        assert second_embeds[0].footer and second_embeds[0].footer.text == "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati."
 
     asyncio.run(_run())

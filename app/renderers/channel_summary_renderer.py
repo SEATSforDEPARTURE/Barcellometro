@@ -265,7 +265,6 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
         embed.title = f"🗒️ DETTAGLI (Pag {idx}/{total})"
 
     if aura_embed is not None:
-        aura_embed.title = f"🗒️ DETTAGLI (Pag {total}/{total})"
         return [status_embed, *pages, aura_embed]
 
     return [status_embed, *pages]

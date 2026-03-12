@@ -69,6 +69,10 @@ def _estimate_embed_size(embed: discord.Embed) -> int:
     return total
 
 
+def estimate_embeds_total_size(embeds: list[discord.Embed]) -> int:
+    return sum(_estimate_embed_size(embed) for embed in embeds)
+
+
 def _split_embed_fields(embed: discord.Embed, *, max_chars: int) -> list[discord.Embed]:
     if _estimate_embed_size(embed) < max_chars and len(embed.fields) <= 25:
         return [embed]
