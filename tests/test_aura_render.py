@@ -299,6 +299,7 @@ def test_channel_aura_embed_top10_format_and_sections() -> None:
     from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
 
     embed = build_channel_aura_embed(
+        max_chars=2000,
         data=ChannelAuraEmbedData(
             positive_points=120,
             negative_points=-15,
@@ -415,3 +416,66 @@ def test_channel_aura_embed_preserves_all_10_rank_positions_with_compact_comment
     rows = [line for line in top_field.splitlines() if line.strip()]
     assert len(rows) == 10
     assert all("—" in row and len(row.split("—", 1)[1].strip()) > 0 for row in rows)
+
+
+def test_channel_aura_embed_uses_final_title_and_footer_in_size_budget() -> None:
+    from app.services.aura_render import (
+        AURA_DETAILS_INTERNAL_BUDGET,
+        ChannelAuraEmbedData,
+        ChannelAuraMissionTrend,
+        ChannelAuraTopUserItem,
+        build_channel_aura_embed,
+    )
+    from app.utils.embed_limits import _estimate_embed_size
+
+    long_comment = "in crescita rispetto al periodo precedente e con dettaglio esteso " * 8
+    embed = build_channel_aura_embed(
+        title="🗒️ DETTAGLI PUNTI AURA (Pag 2/2)",
+        footer_text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
+        data=ChannelAuraEmbedData(
+            positive_points=1200,
+            negative_points=-300,
+            users_count=25,
+            top_users=[
+                ChannelAuraTopUserItem(user_id=str(i), score=1200 - i, trend_emoji="⬆️", trend_comment=long_comment, rank=i)
+                for i in range(1, 11)
+            ],
+            positive_reasons=[(f"motivo positivo molto lungo {i} " * 6, 400 - i * 8) for i in range(12)],
+            negative_reasons=[(f"malus molto lungo {i} " * 6, -(90 - i * 3)) for i in range(8)],
+            missions=ChannelAuraMissionTrend(assigned_count=16, completed_count=8, trend_emoji="↔️", trend_comment="stabile nel periodo"),
+            advice_lines=["consiglio molto lungo " * 20, "secondo consiglio molto lungo " * 20, "terzo consiglio molto lungo " * 20],
+        ),
+    )
+
+    assert embed.title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
+    assert embed.footer and embed.footer.text == "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati."
+    assert _estimate_embed_size(embed) <= AURA_DETAILS_INTERNAL_BUDGET
+
+
+def test_channel_aura_embed_compacts_punteggi_before_reducing_top10_rows() -> None:
+    from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+
+    embed = build_channel_aura_embed(
+        max_chars=2000,
+        data=ChannelAuraEmbedData(
+            positive_points=2500,
+            negative_points=-700,
+            users_count=33,
+            top_users=[
+                ChannelAuraTopUserItem(user_id=str(i), score=1000 - i * 3, trend_emoji="↔️", trend_comment="stabile rispetto al periodo precedente", rank=i)
+                for i in range(1, 11)
+            ],
+            positive_reasons=[(f"ragione estesa {i} " * 8, 300 - i * 4) for i in range(20)],
+            negative_reasons=[(f"penalita estesa {i} " * 8, -(120 - i * 3)) for i in range(20)],
+            missions=ChannelAuraMissionTrend(assigned_count=22, completed_count=11, trend_emoji="⬆️", trend_comment="in crescita rispetto al periodo precedente"),
+            advice_lines=["suggerimento lungo " * 20, "altro suggerimento lungo " * 20, "terzo suggerimento lungo " * 20],
+        )
+    )
+
+    top_field = next(field.value for field in embed.fields if field.name == "🏆 TOP 10 PUNTI AURA")
+    top_rows = [line for line in top_field.splitlines() if line.strip()]
+    assert len(top_rows) == 10
+
+    punteggi_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🕹️ PUNTEGGI"))
+    punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip().startswith("•")]
+    assert len(punteggi_rows) <= 4
