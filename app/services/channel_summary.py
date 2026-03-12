@@ -650,16 +650,12 @@ class ChannelSummaryService:
         )
 
         embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
-        for embed in embeds[1:]:
-            embed.set_footer(text="")
-        if len(embeds) > 1:
-            ai_status = getattr(summary, "ai_status", {}) or {}
-            ai_used = bool(ai_status.get("enabled"))
-            model_name = str(ai_status.get("model") or getattr(self._ai, "get_model", lambda _k: None)("summary") or "")
-            if ai_used and model_name:
-                embeds[-1].set_footer(text=f"Resoconto elaborato con {model_name}. Eventuali imprecisioni sono possibili.")
-            else:
-                embeds[-1].set_footer(text="Resoconto elaborato in loco. Eventuali imprecisioni sono possibili.")
+        if len(embeds) >= 2:
+            embeds[1].title = "🗒️ DETTAGLI CANALE (Pag 1/2)"
+            embeds[1].set_footer(text="Resoconto elaborato con gpt-4o. Eventuali imprecisioni sono possibili.")
+        if len(embeds) >= 3:
+            embeds[2].title = "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
+            embeds[2].set_footer(text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.")
         try:
             await channel.send(embeds=embeds)
         except discord.HTTPException:
