@@ -267,3 +267,82 @@ def test_single_day_vs_multi_day_moment_cleanup_behavior() -> None:
 
     assert single.lower().startswith("di prima mattina")
     assert not multi.lower().startswith("di prima mattina")
+
+
+def test_single_day_neutral_moment_gets_narrative_hook_by_timestamp_bucket() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+    normalized = svc._sanitize_moment_text(
+        "si apre un confronto costruttivo sul planning",
+        multi_day=False,
+        moment_ts="2026-03-11T09:15:00+00:00",
+        ordinal=0,
+    )
+
+    assert normalized.lower().startswith(("di prima mattina", "all'avvio della giornata", "la mattina"))
+
+
+def test_single_day_last_moment_prefers_closure_hook() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+    normalized = svc._sanitize_moment_text(
+        "la discussione si ricompone con un riepilogo condiviso",
+        multi_day=False,
+        moment_ts="2026-03-11T20:45:00+00:00",
+        is_last=True,
+        ordinal=4,
+    )
+
+    assert normalized.lower().startswith("in chiusura")
+
+
+def test_multi_day_neutral_moment_does_not_gain_time_of_day_hook() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+    normalized = svc._sanitize_moment_text(
+        "si consolida un filone su priorità e prossimi passi",
+        multi_day=True,
+        moment_ts="2026-03-11T16:00:00+00:00",
+        ordinal=2,
+    )
+
+    assert not normalized.lower().startswith((
+        "di prima mattina",
+        "all'avvio della giornata",
+        "la mattina",
+        "durante la tarda mattinata",
+        "verso mezzogiorno",
+        "in piena giornata",
+        "nel pomeriggio",
+        "più tardi",
+        "in serata",
+        "sul finire della giornata",
+        "in chiusura",
+    ))
+
+
+def test_single_day_narrative_hooks_can_vary_across_moments() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+    first = svc._sanitize_moment_text(
+        "si riapre il thread tecnico",
+        multi_day=False,
+        moment_ts="2026-03-11T12:10:00+00:00",
+        ordinal=0,
+    )
+    second = svc._sanitize_moment_text(
+        "emerge una proposta di sintesi",
+        multi_day=False,
+        moment_ts="2026-03-11T12:45:00+00:00",
+        ordinal=1,
+    )
+
+    assert first.split(",", 1)[0].lower() != second.split(",", 1)[0].lower()

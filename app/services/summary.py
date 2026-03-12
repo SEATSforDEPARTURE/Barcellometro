@@ -529,7 +529,8 @@ class SummaryService:
                     )
                 else:
                     narrative_extra += (
-                        "MOMENTI SALIENTI: scrivi in stile narrativo come un racconto della giornata (inizio, sviluppo, chiusura). "
+                        "MOMENTI SALIENTI (OBBLIGATORIO): scrivi in stile narrativo come un racconto della giornata (inizio, sviluppo, chiusura). "
+                        "Ogni bullet DEVE iniziare con un gancio temporale coerente con l'orario del messaggio di riferimento. "
                         "Non iniziare mai la frase con il nome della persona. "
                         "Integra il nickname nel racconto in modo naturale, preferendo strutture come '... quando {AUTHOR} ...'. "
                         "Evita qualsiasi forma che riveli o presuma il genere. "
@@ -544,6 +545,13 @@ class SummaryService:
         else:
             narrative_extra = ""
             names_rule = "NON includere mai nomi di persone. "
+        moments_style_rule = (
+            "Momenti: stile narrativo e descrittivo, frasi complete; niente template tipo 'Si discute di'. "
+        )
+        if summary_mode in {"daily_resoconto", "channel_summary"} and multi_day_window:
+            moments_style_rule = (
+                "Momenti: stile neutro-fattuale, bullet autonomi orientati agli eventi; evita cronologia narrativa della giornata. "
+            )
         system_prompt = (
             "Scrivi in italiano e restituisci SOLO JSON valido. "
             + narrative_extra
@@ -556,8 +564,8 @@ class SummaryService:
             "Non inventare eventi di chiamata: usa solo quelli presenti nella timeline (kind: call/privacy/presence). "
             "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
             "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
-            "Momenti: stile narrativo e descrittivo, frasi complete; niente template tipo 'Si discute di'. "
-            "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
+            + moments_style_rule
+            + "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
             "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
             "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
             "Distribuisci moments/quotes/dynamics su tutto l'intervallo temporale (inizio, metà, fine). "
