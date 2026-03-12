@@ -133,11 +133,13 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
             await interaction.followup.send(f"✅ Timer creato (id={schedule_id}) per {publish_at}{suffix}.", ephemeral=True)
             return
 
+        # Terminal path: immediate execution only (no recursive helper calls).
         sent = await channel_summary_service.generate_and_send_for_channel(guild_id, channel_id, manual=True, window=window)
         await interaction.followup.send(
             "✅ Resoconto canale inviato ora." if sent else "⚠️ Non sono riuscito a inviare il resoconto in questo canale.",
             ephemeral=True,
         )
+        return
 
     canale_group = app_commands.Group(name="canale", description="Resoconto canale")
 

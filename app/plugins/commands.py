@@ -152,10 +152,18 @@ def setup(registry: ServiceRegistry) -> None:
                 logged_tree_once = True
             return
         logger.exception("App command error", exc_info=error)
-        message = (
-            "⚠️ Ho avuto un problema a costruire l’embed (limite Discord). "
-            "Ho allegato un .txt se disponibile. Riprova o riduci la finestra."
-        )
+        root_error: Exception | app_commands.AppCommandError = error
+        if isinstance(error, app_commands.CommandInvokeError) and error.original:
+            root_error = error.original
+        detail = str(root_error).lower()
+        looks_like_embed_error = any(token in detail for token in ["embed", "field", "6000", "1024", "invalid form body"])
+        if looks_like_embed_error:
+            message = (
+                "⚠️ Ho avuto un problema a costruire l’embed (limite Discord). "
+                "Riprova o riduci la finestra."
+            )
+        else:
+            message = "⚠️ Si è verificato un errore interno durante l'esecuzione del comando. Riprova tra poco."
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(message, ephemeral=True)
