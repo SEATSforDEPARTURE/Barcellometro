@@ -346,3 +346,69 @@ def test_single_day_narrative_hooks_can_vary_across_moments() -> None:
     )
 
     assert first.split(",", 1)[0].lower() != second.split(",", 1)[0].lower()
+
+
+def test_semantic_day_style_treats_ieri_as_single_day_even_if_dates_differ() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+
+    assert svc._is_single_day_style(
+        period_label="ieri",
+        start_local=datetime(2026, 3, 11, 0, 0),
+        end_local=datetime(2026, 3, 12, 0, 0),
+    ) is True
+
+
+def test_timestamp_formatting_is_hhmm_for_single_day_style_and_ddmm_hhmm_for_multi_day() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.renderers.channel_summary_renderer import format_time_link
+
+    ts = "2026-03-11T08:45:00+00:00"
+
+    single = format_time_link(1, 2, None, ts, multi_day=False)
+    multi = format_time_link(1, 2, None, ts, multi_day=True)
+
+    assert single == "**09:45**"
+    assert multi == "**11/03 09:45**"
+
+
+def test_channel_summary_name_bolding_handles_full_name_with_emoji_and_punctuation() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+
+    out = svc._bold_display_name("In serata, La Dany Sun 🌞: rilancia il confronto.", "La Dany Sun 🌞")
+
+    assert "**La Dany Sun 🌞**" in out
+    assert "La Dany" not in out.replace("**La Dany Sun 🌞**", "")
+
+
+def test_channel_summary_name_bolding_does_not_double_bold() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+
+    out = svc._bold_display_name("In serata, **Wiwi** aggiorna tutti.", "Wiwi")
+
+    assert out.count("**Wiwi**") == 1
+
+
+def test_single_day_sanitizer_removes_stacked_temporal_opening() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+
+    normalized = svc._sanitize_moment_text(
+        "All'avvio della giornata, Durante la discussione, si allinea il piano",
+        multi_day=False,
+        moment_ts="2026-03-11T08:15:00+00:00",
+        ordinal=0,
+    )
+
+    assert normalized.lower().startswith("all'avvio della giornata")
+    assert "durante la discussione" not in normalized.lower()

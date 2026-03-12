@@ -512,6 +512,9 @@ class SummaryService:
                 multi_day_window = st.astimezone(ROME_TZ).date() != en.astimezone(ROME_TZ).date()
         except Exception:
             multi_day_window = False
+        period_label = str((summary_context or {}).get("period_label") or "").strip().lower()
+        if period_label in {"oggi", "ieri"}:
+            multi_day_window = False
         if summary_mode in {"daily_report", "daily_resoconto", "channel_summary"}:
             narrative_extra = (
                 "Imposta un andamento narrativo della giornata: apertura, sviluppo, chiusura. "
