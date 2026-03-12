@@ -123,6 +123,14 @@ class ChannelSummaryService:
 
         return clean.strip()
 
+    def _bold_display_name(self, text: str, display_name: str | None) -> str:
+        clean_name = str(display_name or "").strip()
+        if not clean_name:
+            return str(text or "")
+        if f"**{clean_name}**" in str(text or ""):
+            return str(text or "")
+        return re.sub(rf"\b{re.escape(clean_name)}\b", f"**{clean_name}**", str(text or ""))
+
     def _apply_author_placeholder(self, text: str, display_name: str | None) -> str:
         clean = str(text or "").strip()
         if not clean:
@@ -379,7 +387,7 @@ class ChannelSummaryService:
                     count=1,
                     flags=re.IGNORECASE,
                 )
-            moment.text = self._sanitize_moment_text(integrated)
+            moment.text = self._bold_display_name(self._sanitize_moment_text(integrated), display)
 
         for dynamic in summary.dynamics:
             names: list[str] = []
@@ -403,7 +411,7 @@ class ChannelSummaryService:
             dynamic_text = self._apply_author_placeholder(dynamic.text, primary_display)
             if "{AUTHOR}" in dynamic_text:
                 dynamic_text = self._cleanup_placeholder_artifacts(dynamic_text.replace("{AUTHOR}", ""), had_author_placeholder=True, has_display_name=False)
-            dynamic.text = self._sanitize_moment_text(dynamic_text)
+            dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text), primary_display)
 
         for message_id in {m for m in [*moment_primary.values(), *quote_primary.values(), *dynamic_primary.values()] if m}:
             if message_id in message_index:

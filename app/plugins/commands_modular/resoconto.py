@@ -4,7 +4,6 @@ import logging
 import re
 from datetime import datetime, timezone
 from io import BytesIO
-from datetime import timezone
 
 import discord
 from discord import app_commands
@@ -84,19 +83,21 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         publish_at: str | None,
         every: str | None,
     ) -> None:
+        # Keep this helper terminal: never recurse into itself.
         if interaction.guild_id is None or interaction.channel_id is None:
             await send_ephemeral(interaction, "Comando disponibile solo in un canale guild.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
 
-        db = ctx.database
-        guild_id = str(interaction.guild_id)
-        channel_id = str(interaction.channel_id)
         channel_summary_service = ctx.channel_summary
         if channel_summary_service is None:
             await send_ephemeral(interaction, "❌ Servizio resoconto non disponibile.")
             return
+
+        db = ctx.database
+        guild_id = str(interaction.guild_id)
+        channel_id = str(interaction.channel_id)
 
         every_value, every_unit = _parse_every(every)
         if every and every_value is None:
@@ -105,19 +106,21 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         if every_value is not None and not publish_at:
             await send_ephemeral(interaction, "❌ Per usare `every` devi indicare anche `publish_at`.")
             return
-        assert window is not None
-        await _run_channel_summary_window(interaction, schedule_type="range", window=window, publish_at=publish_at, every=every)
+        if schedule_type == "range" and every_value is not None:
+            await send_ephemeral(interaction, "❌ I timer `range` supportano solo invio one-shot (senza `every`).")
+            return
 
         publish_at_dt = parse_italian_datetime(publish_at) if publish_at else None
         if publish_at and publish_at_dt is None:
             await send_ephemeral(interaction, "❌ Formato `publish_at` non valido. Usa DD/MM/YYYY HH:MM.")
             return
-        await ctx.database.set_channel_summary_auto_enabled(str(interaction.guild_id), str(interaction.channel_id), True)
-        await send_ephemeral(interaction, "✅ Resoconto canale automatico attivato per questo canale.")
+        assert window is not None
 
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
         if publish_at_dt:
+            # Schedules are executed by the automation loop, keep this enabled for coherence.
+            await ctx.database.set_channel_summary_auto_enabled(guild_id, channel_id, True)
             schedule_id = await db.create_channel_summary_schedule(
                 guild_id=guild_id,
                 channel_id=channel_id,
@@ -262,13 +265,21 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         if publish_at and publish_dt is None:
             await send_ephemeral(interaction, "❌ Formato `publish_at` non valido. Usa DD/MM/YYYY HH:MM.")
             return
-        every_value, every_unit = _parse_every(every)
-        if every and every_value is None:
-            await send_ephemeral(interaction, "❌ Formato `every` non valido. Usa ad esempio 1440min, 24hours, 1days.")
-            return
+        clear_recurrence = False
+        normalized_every = (every or "").strip().lower()
+        if normalized_every in {"off", "none"}:
+            clear_recurrence = True
+            every_value, every_unit = None, None
+        else:
+            every_value, every_unit = _parse_every(every)
+            if every and every_value is None:
+                await send_ephemeral(interaction, "❌ Formato `every` non valido. Usa ad esempio 1440min, 24hours, 1days oppure off/none.")
+                return
         if every is None:
             every_value = int(row["repeat_every_value"]) if row["repeat_every_value"] is not None else None
             every_unit = str(row["repeat_every_unit"] or "") or None
+        elif clear_recurrence:
+            every_value, every_unit = None, None
         status_value: str | None = None
         if enabled is not None:
             status_value = "active" if enabled else "disabled"
