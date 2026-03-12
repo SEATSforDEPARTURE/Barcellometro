@@ -6,6 +6,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Iterable, Optional
 
 from app.services.barcello import NEGATIVE_KEYWORDS
@@ -13,6 +14,7 @@ from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)
 MOMENT_TEXT_LIMIT = 200
+ROME_TZ = ZoneInfo("Europe/Rome")
 
 DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
     "tiers": {
@@ -507,7 +509,7 @@ class SummaryService:
             if start_ts and end_ts:
                 st = datetime.fromisoformat(str(start_ts).replace("Z", "+00:00"))
                 en = datetime.fromisoformat(str(end_ts).replace("Z", "+00:00"))
-                multi_day_window = st.date() != en.date()
+                multi_day_window = st.astimezone(ROME_TZ).date() != en.astimezone(ROME_TZ).date()
         except Exception:
             multi_day_window = False
         if summary_mode in {"daily_report", "daily_resoconto", "channel_summary"}:

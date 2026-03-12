@@ -1,7 +1,13 @@
 import asyncio
+from datetime import datetime
 from pathlib import Path
+import sys
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def test_no_recursive_call_in_channel_summary_window_helper() -> None:
@@ -152,7 +158,112 @@ def test_schedule_channel_scope_for_status_edit_delete_clear() -> None:
     asyncio.run(_run())
 
 
+
+
+def test_trend_wording_oggi_ieri_is_natural_without_explicit_range() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+    from app.services.barcello import BarcelloResult
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+    current = BarcelloResult(score=72, color="verde", trend="up", reasons=[], metrics={"negativity_hits": 2, "positive_hits": 8})
+    previous = BarcelloResult(score=68, color="giallo", trend="down", reasons=[], metrics={"negativity_hits": 4, "positive_hits": 5})
+
+    today = svc._build_trend_vs_previous_equivalent(
+        bar_current=current,
+        bar_previous=previous,
+        current_start_local=datetime(2026, 3, 11, 0, 0),
+        current_end_local=datetime(2026, 3, 11, 12, 0),
+        period_label="oggi",
+    )
+    yesterday = svc._build_trend_vs_previous_equivalent(
+        bar_current=current,
+        bar_previous=previous,
+        current_start_local=datetime(2026, 3, 10, 0, 0),
+        current_end_local=datetime(2026, 3, 10, 23, 59),
+        period_label="ieri",
+    )
+
+    assert "→" not in today
+    assert "→" not in yesterday
+    assert "rispetto a ieri" in today
+    assert "rispetto al giorno precedente" in yesterday
+
+
+def test_trend_wording_ultimi_keeps_explicit_previous_window() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+    from app.services.barcello import BarcelloResult
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+    current = BarcelloResult(score=45, color="giallo", trend="flat", reasons=[], metrics={"negativity_hits": 5, "positive_hits": 3})
+    previous = BarcelloResult(score=50, color="verde", trend="up", reasons=[], metrics={"negativity_hits": 2, "positive_hits": 3})
+
+    trend = svc._build_trend_vs_previous_equivalent(
+        bar_current=current,
+        bar_previous=previous,
+        current_start_local=datetime(2026, 3, 11, 0, 0),
+        current_end_local=datetime(2026, 3, 11, 6, 0),
+        period_label="ultimi",
+    )
+
+    assert "→" in trend
+    assert "rispetto a" in trend
+
+
+def test_moment_line_renders_bold_barcello_score() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.renderers.channel_summary_renderer import _moment_line
+    from app.services.barcello import BarcelloResult
+    from app.services.summary import SummaryItem
+
+    line = _moment_line(
+        moment=SummaryItem(ts="2026-03-11T08:45:00+00:00", text="Evento importante", message_ids=[]),
+        guild_id=1,
+        channel_id=2,
+        message_index={},
+        primary_id=None,
+        barcello_status=BarcelloResult(score=70, color="verde", trend="up", reasons=[], metrics={}),
+        multi_day=False,
+    )
+
+    assert "**70**" in line
+
+
+def test_full_multiword_names_are_fully_bolded() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.renderers.channel_summary_renderer import _bold_known_names
+
+    text = "La Dany Sun 🌞 ha sbloccato la discussione con CRICETO MANNARO."
+    out = _bold_known_names(text, ["La Dany Sun 🌞", "CRICETO MANNARO"])
+
+    assert "**La Dany Sun 🌞**" in out
+    assert "**CRICETO MANNARO**" in out
+
+
+def test_who_interacted_prefers_full_known_display_name() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.renderers.channel_summary_renderer import _bold_leading_actor
+
+    line = "La Dany Sun 🌞 ha tenuto viva la chat con tono positivo."
+    out = _bold_leading_actor(line, ["La Dany Sun 🌞"])
+
+    assert out.startswith("**La Dany Sun 🌞** ha")
+
+
 def test_summary_ai_prompt_switches_for_multi_day_windows() -> None:
     source = Path("app/services/summary.py").read_text()
-    assert "multi_day_window = st.date() != en.date()" in source
+    assert "multi_day_window = st.astimezone(ROME_TZ).date() != en.astimezone(ROME_TZ).date()" in source
     assert "MOMENTI SALIENTI (intervallo multi-giorno): usa descrizioni neutrali degli eventi" in source
+
+
+def test_single_day_vs_multi_day_moment_cleanup_behavior() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+    single = svc._sanitize_moment_text("Di prima mattina, il confronto parte costruttivo.", multi_day=False)
+    multi = svc._sanitize_moment_text("Di prima mattina, il confronto parte costruttivo.", multi_day=True)
+
+    assert single.lower().startswith("di prima mattina")
+    assert not multi.lower().startswith("di prima mattina")

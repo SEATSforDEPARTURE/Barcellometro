@@ -323,6 +323,7 @@ class ChannelSummaryService:
             bar_previous=previous_bar,
             current_start_local=start_local,
             current_end_local=end_local,
+            period_label=window.period_label,
         )
         barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar, period_label=window.period_label)
         advice = [str(x).strip()[:160] for x in (getattr(summary, "advice", []) or []) if str(x).strip()][:5]
@@ -336,7 +337,6 @@ class ChannelSummaryService:
         who_lines = [str(line).strip() for line in (getattr(summary, "who_interacted_today", []) or []) if str(line).strip()][:8]
         if not who_lines:
             who_lines = who_fallback_lines[:8]
-        who_lines = [re.sub(r"^(\S+)", r"**\1**", line, count=1) for line in who_lines]
         window_header = format_window_header(period_label=window.period_label, start_dt=start_local, end_dt=end_local)
         multi_day = start_local.date() != end_local.date()
 
@@ -490,6 +490,8 @@ class ChannelSummaryService:
         )
 
         channel_name = getattr(channel, "name", None) or channel_id
+        known_display_names = sorted({name for names in dynamic_names.values() for name in names if str(name).strip()}, key=len, reverse=True)
+
         embeds = build_channel_summary_embeds(
             guild_id=int(guild_id),
             channel_id=int(channel_id),
@@ -508,6 +510,7 @@ class ChannelSummaryService:
             moment_barcello=moment_barcello,
             trend_value=trend_value,
             who_interacted_lines=who_lines,
+            known_display_names=known_display_names,
             multi_day=multi_day,
         )
 
@@ -606,6 +609,7 @@ class ChannelSummaryService:
         bar_previous: BarcelloResult | None,
         current_start_local: datetime,
         current_end_local: datetime,
+        period_label: str | None = None,
     ) -> str:
         if bar_previous is None:
             return "Stabile (Δ +0): confronto con finestra equivalente precedente non disponibile."
@@ -632,6 +636,11 @@ class ChannelSummaryService:
             reason = "più messaggi costruttivi e supporto"
         else:
             reason = "clima simile, senza scossoni rilevanti"
+        if period_label in {"oggi", "ieri"}:
+            period_cmp = "rispetto al giorno precedente"
+            if period_label == "oggi":
+                period_cmp = "rispetto a ieri"
+            return f"{direction} (Δ {delta:+d}): {reason} {period_cmp}."
         return f"{direction} (Δ {delta:+d}): {reason} rispetto a {prev_start} → {prev_end}."
 
     def _fallback_advice_proverbio(self, color: str) -> tuple[list[str], str]:
