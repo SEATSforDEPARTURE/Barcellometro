@@ -265,3 +265,12 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
         embed.title = f"🗒️ DETTAGLI (Pag {idx}/{total})"
 
     return [status_embed, *pages]
+
+
+def build_channel_summary_insufficient_data_embed(*, channel_name: str, window_header: str) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"📓 RESOCONTO CANALE — #{channel_name}",
+        description=f"{window_header}\n\n⚠️ Dati non sufficienti alla generazione del resoconto.",
+        color=0x2F3136,
+    )
+    return embed

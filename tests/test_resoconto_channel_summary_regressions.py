@@ -412,3 +412,197 @@ def test_single_day_sanitizer_removes_stacked_temporal_opening() -> None:
 
     assert normalized.lower().startswith("all'avvio della giornata")
     assert "durante la discussione" not in normalized.lower()
+
+
+def test_insufficient_data_skips_ai_and_renders_minimal_embed() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.plugins.commands_modular.time_windows import TimeWindowResult
+    from app.services.channel_summary import ChannelSummaryService
+
+    class FakeChannel:
+        name = "generale"
+
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+
+        async def send(self, **kwargs):  # type: ignore[no-untyped-def]
+            self.sent.append(kwargs)
+
+    class FakeBot:
+        guilds: list[object] = []
+
+        def __init__(self, channel: FakeChannel) -> None:
+            self._channel = channel
+
+        def get_channel(self, _id: int) -> FakeChannel:
+            return self._channel
+
+    class FakeDatabase:
+        async def fetch_messages_in_range(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return [
+                {"ts": "2026-03-11T09:00:00+00:00", "author_id": "10", "content": "ciao", "message_id": "m1"},
+                {"ts": "2026-03-11T09:01:00+00:00", "author_id": "10", "content": "ok", "message_id": "m2"},
+            ]
+
+        async def fetch_user_display_name(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return "Utente"
+
+        async def mark_daily_report_sent(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+    class FakeSummary:
+        async def get_config(self):  # type: ignore[no-untyped-def]
+            raise AssertionError("get_config should not be called with insufficient data")
+
+        async def build_summary(self, **_kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("AI/local summary path should not run with insufficient data")
+
+    class FakeBarcello:
+        async def compute_channel_range(self, **_kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("barcello should be skipped with insufficient data")
+
+    async def _run() -> None:
+        channel = FakeChannel()
+        svc = ChannelSummaryService(
+            database=FakeDatabase(),
+            bot=FakeBot(channel),
+            summary_service=FakeSummary(),
+            barcello_service=FakeBarcello(),
+            ai_service=None,
+        )
+        window = TimeWindowResult(
+            start_dt=datetime(2026, 3, 11, 0, 0),
+            end_dt=datetime(2026, 3, 11, 23, 59),
+            period_label="ieri",
+            label_periodo="ieri",
+        )
+        ok = await svc.generate_and_send_for_channel("1", "2", manual=False, window=window)
+        assert ok is True
+        assert len(channel.sent) == 1
+        payload = channel.sent[0]
+        assert "embed" in payload
+        embed = payload["embed"]
+        assert embed is not None
+        assert "Dati non sufficienti alla generazione del resoconto." in (embed.description or "")
+        assert embed.footer.text == "Servizio offerto dal vostro Barcellometro di fiducia"
+
+    asyncio.run(_run())
+
+
+def test_insufficient_data_embed_has_no_detailed_sections() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.renderers.channel_summary_renderer import build_channel_summary_insufficient_data_embed
+
+    embed = build_channel_summary_insufficient_data_embed(
+        channel_name="generale",
+        window_header="**🗓️ Ieri. Mercoledì, 11 Marzo 2026**",
+    )
+
+    assert embed.title == "📓 RESOCONTO CANALE — #generale"
+    assert "Dati non sufficienti" in (embed.description or "")
+    assert len(embed.fields) == 0
+
+
+def test_sufficient_data_keeps_normal_channel_summary_flow() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.plugins.commands_modular.time_windows import TimeWindowResult
+    from app.services.barcello import BarcelloResult
+    from app.services.channel_summary import ChannelSummaryService
+    from app.services.summary import SummaryItem, SummaryQuote, SummaryResult
+
+    class FakeChannel:
+        name = "generale"
+
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+
+        async def send(self, **kwargs):  # type: ignore[no-untyped-def]
+            self.sent.append(kwargs)
+
+    class FakeBot:
+        guilds: list[object] = []
+
+        def __init__(self, channel: FakeChannel) -> None:
+            self._channel = channel
+
+        def get_channel(self, _id: int) -> FakeChannel:
+            return self._channel
+
+    class FakeDatabase:
+        def __init__(self) -> None:
+            self._rows = [
+                {"ts": f"2026-03-11T09:{i:02d}:00+00:00", "author_id": str((i % 3) + 1), "content": f"msg {i}", "message_id": f"m{i}", "reply_to_message_id": None, "mentions_json": "[]"}
+                for i in range(10)
+            ]
+
+        async def fetch_messages_in_range(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return self._rows
+
+        async def fetch_user_display_name(self, **kwargs):  # type: ignore[no-untyped-def]
+            return f"U{kwargs.get('user_id')}"
+
+        async def fetch_message_by_id(self, **kwargs):  # type: ignore[no-untyped-def]
+            mid = kwargs.get("message_id")
+            for row in self._rows:
+                if row["message_id"] == mid:
+                    return row
+            return None
+
+        async def resolve_message_ids_for_timestamp(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return []
+
+    class FakeSummary:
+        def __init__(self) -> None:
+            self.called = False
+
+        async def get_config(self):  # type: ignore[no-untyped-def]
+            return {}
+
+        async def build_summary(self, **_kwargs):  # type: ignore[no-untyped-def]
+            self.called = True
+            return SummaryResult(
+                themes=["progetti"],
+                moments=[SummaryItem(ts="2026-03-11T09:01:00+00:00", text="Si allineano le priorità", author_id="1", message_ids=["m1"])],
+                quotes=[SummaryQuote(ts="2026-03-11T09:02:00+00:00", text="\"Restiamo focalizzati\"", author_id="2", message_ids=["m2"])],
+                dynamics=[SummaryItem(ts="2026-03-11T09:03:00+00:00", text="Confronto collaborativo", author_id="3", message_ids=["m3"])],
+                degrade=[],
+                invigorate=[],
+                advice=["Proseguire con check-in brevi"],
+                metrics={},
+                ai_status={"enabled": False, "reason": "disabled"},
+                vibe_line="Il clima è stato costruttivo.",
+                proverbio="Chi va piano va sano e va lontano.",
+                who_interacted_today=["U1 ha facilitato il confronto."],
+            )
+
+    class FakeBarcello:
+        async def compute_channel_range(self, **_kwargs):  # type: ignore[no-untyped-def]
+            return BarcelloResult(score=72, color="verde", trend="up", reasons=[], metrics={"negativity_hits": 1, "positive_hits": 5})
+
+    async def _run() -> None:
+        channel = FakeChannel()
+        summary = FakeSummary()
+        svc = ChannelSummaryService(
+            database=FakeDatabase(),
+            bot=FakeBot(channel),
+            summary_service=summary,
+            barcello_service=FakeBarcello(),
+            ai_service=None,
+        )
+        window = TimeWindowResult(
+            start_dt=datetime(2026, 3, 11, 0, 0),
+            end_dt=datetime(2026, 3, 11, 23, 59),
+            period_label="oggi",
+            label_periodo="oggi",
+        )
+        ok = await svc.generate_and_send_for_channel("1", "2", manual=False, window=window)
+        assert ok is True
+        assert summary.called is True
+        assert len(channel.sent) == 1
+        payload = channel.sent[0]
+        assert "embeds" in payload
+        embeds = payload["embeds"]
+        assert isinstance(embeds, list)
+        assert len(embeds) >= 2
+
+    asyncio.run(_run())
