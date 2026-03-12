@@ -498,7 +498,7 @@ class SummaryService:
         logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
         quotes_target = _tier_limit(config, tier, "quotes", 3)
         dynamics_target = _tier_limit(config, tier, "dynamics", 2)
-        if summary_mode in {"daily_report", "daily_resoconto"}:
+        if summary_mode in {"daily_report", "daily_resoconto", "channel_summary"}:
             narrative_extra = (
                 "Imposta un andamento narrativo della giornata: apertura, sviluppo, chiusura. "
                 "Niente copia verbatim dai messaggi. "
@@ -506,7 +506,7 @@ class SummaryService:
                 "Se non sei sicuro del testo esatto della frase, non inventare: restituisci il riferimento al messaggio. "
             )
             names_rule = "NON includere mai nomi di persone reali: usa solo il placeholder {AUTHOR} nei moments quando necessario. "
-            if summary_mode == "daily_resoconto":
+            if summary_mode in {"daily_resoconto", "channel_summary"}:
                 narrative_extra += (
                     "MOMENTI SALIENTI: scrivi in stile narrativo come un racconto della giornata (inizio, sviluppo, chiusura). "
                     "Non iniziare mai la frase con il nome della persona. "
@@ -549,9 +549,9 @@ class SummaryService:
             "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
             "advice: lista stringhe brevi."
         )
-        if summary_mode == "daily_resoconto":
+        if summary_mode in {"daily_resoconto", "channel_summary"}:
             system_prompt += (
-                " In modalità daily_resoconto aggiungi anche `vibe_line`: UNA sola frase (max 140 caratteri), "
+                " In modalità channel_summary aggiungi anche `vibe_line`: UNA sola frase (max 140 caratteri), "
                 "in italiano al passato prossimo, riferita solo a colore + punti salute + vibe generale del barcello di oggi. "
                 "NON includere riferimenti a trend/delta/ieri: vietate le parole 'trend', 'stabile', 'miglioramento', 'peggioramento', 'Δ', 'delta', 'rispetto a ieri'. "
                 "Varia stile e lessico ad ogni invio, evita formule standard ripetitive. "

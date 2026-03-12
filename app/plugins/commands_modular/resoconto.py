@@ -3,18 +3,24 @@ from __future__ import annotations
 import logging
 import re
 from io import BytesIO
+from datetime import timezone
 
 import discord
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.plugins.commands_modular.time_windows import build_period_label, resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
+from app.plugins.commands_modular.time_windows import (
+    build_period_label,
+    parse_italian_datetime,
+    resolve_ieri_window,
+    resolve_oggi_window,
+    resolve_range_window,
+    resolve_ultimi_window,
+)
 from app.services.aura import aura_reason_to_human
 
 logger = logging.getLogger(__name__)
-TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
-
 
 def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext) -> None:
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
@@ -23,9 +29,23 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         else:
             await interaction.response.send_message(message, ephemeral=True)
 
-    @resoconto_group.command(name="giornaliero", description="Gestisci il resoconto giornaliero")
-    @app_commands.describe(opzione="on/off/stato/HH:MM")
-    async def giornaliero(interaction: discord.Interaction, opzione: str | None = None) -> None:
+    def _parse_every(raw: str | None) -> tuple[int | None, str | None]:
+        value = str(raw or "").strip().lower()
+        if not value:
+            return None, None
+        m = re.fullmatch(r"(\d+)\s*(min|hours|days)", value)
+        if not m:
+            return None, None
+        return int(m.group(1)), m.group(2)
+
+    async def _run_channel_summary_window(
+        interaction: discord.Interaction,
+        *,
+        schedule_type: str,
+        window,
+        publish_at: str | None,
+        every: str | None,
+    ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await send_ephemeral(interaction, "Comando disponibile solo in un canale guild.")
             return
@@ -35,50 +55,114 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
         db = ctx.database
         guild_id = str(interaction.guild_id)
         channel_id = str(interaction.channel_id)
-        value = (opzione or "").strip().lower()
-
-        if value == "on":
-            await db.set_daily_report_enabled(guild_id, channel_id, True)
-            await send_ephemeral(interaction, "✅ Resoconto giornaliero attivato per questo canale.")
-            return
-        if value == "off":
-            await db.set_daily_report_enabled(guild_id, channel_id, False)
-            await send_ephemeral(interaction, "✅ Resoconto giornaliero disattivato per questo canale.")
-            return
-        if value == "stato":
-            row = await db.get_daily_report_config(guild_id, channel_id)
-            if not row:
-                await send_ephemeral(interaction, "ℹ️ Nessuna configurazione: OFF, orario 00:00.")
-                return
-            enabled = "ON" if bool(row["enabled"]) else "OFF"
-            await send_ephemeral(interaction, f"ℹ️ Stato: {enabled} — orario: {row['send_time_local']} (Europe/Rome)")
-            return
-        if value and TIME_RE.fullmatch(value):
-            await db.set_daily_report_time(guild_id, channel_id, value)
-            await send_ephemeral(interaction, f"✅ Orario resoconto impostato alle {value} (Europe/Rome).")
-            return
-        if value:
-            await send_ephemeral(interaction, "❌ Opzione non valida. Usa on/off/stato/HH:MM oppure niente per invio manuale.")
-            return
-
         daily_service = ctx.daily_resoconto
         if daily_service is None:
             await send_ephemeral(interaction, "❌ Servizio resoconto non disponibile.")
             return
 
+        every_value, every_unit = _parse_every(every)
+        if every and every_value is None:
+            await send_ephemeral(interaction, "❌ Formato `every` non valido. Usa ad esempio 1440min, 24hours, 1days.")
+            return
+
+        publish_at_dt = parse_italian_datetime(publish_at) if publish_at else None
+        if publish_at and publish_at_dt is None:
+            await send_ephemeral(interaction, "❌ Formato `publish_at` non valido. Usa DD/MM/YYYY HH:MM.")
+            return
+
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
-        sent = await daily_service.generate_and_send_for_channel(guild_id, channel_id, manual=True)
-        if sent:
-            await interaction.followup.send(
-                "✅ Resoconto inviato ora. Aggiornata la data odierna per evitare doppio invio automatico.",
-                ephemeral=True,
+        if publish_at_dt:
+            schedule_id = await db.create_channel_summary_schedule(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                schedule_type=schedule_type,
+                start_ts=window.start_dt.astimezone(timezone.utc).isoformat(),
+                end_ts=window.end_dt.astimezone(timezone.utc).isoformat(),
+                publish_at=publish_at_dt.astimezone(timezone.utc).isoformat(),
+                repeat_every_value=every_value,
+                repeat_every_unit=every_unit,
+                created_by=str(interaction.user.id),
             )
-        else:
-            await interaction.followup.send(
-                "⚠️ Non sono riuscito a inviare il resoconto in questo canale.",
-                ephemeral=True,
-            )
+            await interaction.followup.send(f"✅ Schedule creato (id={schedule_id}) per {publish_at}.", ephemeral=True)
+            return
+
+        sent = await daily_service.generate_and_send_for_channel(guild_id, channel_id, manual=True, window=window)
+        await interaction.followup.send(
+            "✅ Resoconto canale inviato ora." if sent else "⚠️ Non sono riuscito a inviare il resoconto in questo canale.",
+            ephemeral=True,
+        )
+
+    canale_group = app_commands.Group(name="canale", description="Resoconto canale")
+
+    @canale_group.command(name="oggi", description="Resoconto canale di oggi")
+    @app_commands.describe(publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)", every="Intervallo ripetizione: es 1440min")
+    async def canale_oggi(interaction: discord.Interaction, publish_at: str | None = None, every: str | None = None) -> None:
+        await _run_channel_summary_window(interaction, schedule_type="oggi", window=resolve_oggi_window(), publish_at=publish_at, every=every)
+
+    @canale_group.command(name="ieri", description="Resoconto canale di ieri")
+    @app_commands.describe(publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)", every="Intervallo ripetizione: es 1440min")
+    async def canale_ieri(interaction: discord.Interaction, publish_at: str | None = None, every: str | None = None) -> None:
+        await _run_channel_summary_window(interaction, schedule_type="ieri", window=resolve_ieri_window(), publish_at=publish_at, every=every)
+
+
+    @canale_group.command(name="ultimi", description="Resoconto canale ultimi N periodi")
+    @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)", every="Intervallo ripetizione: es 1440min")
+    @app_commands.choices(unita=[
+        app_commands.Choice(name="minuti", value="minuti"),
+        app_commands.Choice(name="ore", value="ore"),
+        app_commands.Choice(name="giorni", value="giorni"),
+        app_commands.Choice(name="settimane", value="settimane"),
+    ])
+    async def canale_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str], publish_at: str | None = None, every: str | None = None) -> None:
+        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+        if error:
+            await send_ephemeral(interaction, error)
+            return
+        assert window is not None
+        await _run_channel_summary_window(interaction, schedule_type="ultimi", window=window, publish_at=publish_at, every=every)
+
+    @canale_group.command(name="range", description="Resoconto canale per intervallo")
+    @app_commands.describe(da="Data inizio DD/MM/YYYY HH:MM", a="Data fine DD/MM/YYYY HH:MM", publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)", every="Intervallo ripetizione: es 1440min")
+    async def canale_range(interaction: discord.Interaction, da: str, a: str, publish_at: str | None = None, every: str | None = None) -> None:
+        window, error = resolve_range_window(da, a, ctx.config)
+        if error:
+            await send_ephemeral(interaction, error)
+            return
+        assert window is not None
+        await _run_channel_summary_window(interaction, schedule_type="range", window=window, publish_at=publish_at, every=every)
+
+    @canale_group.command(name="on", description="Abilita pubblicazioni automatiche per il canale")
+    async def canale_on(interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await send_ephemeral(interaction, "Comando disponibile solo in un canale guild.")
+            return
+        await ctx.database.set_channel_summary_auto_enabled(str(interaction.guild_id), str(interaction.channel_id), True)
+        await send_ephemeral(interaction, "✅ Resoconto canale automatico attivato per questo canale.")
+
+    @canale_group.command(name="off", description="Disabilita pubblicazioni automatiche per il canale")
+    async def canale_off(interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await send_ephemeral(interaction, "Comando disponibile solo in un canale guild.")
+            return
+        await ctx.database.set_channel_summary_auto_enabled(str(interaction.guild_id), str(interaction.channel_id), False)
+        await ctx.database.disable_channel_summary_schedules(str(interaction.guild_id), str(interaction.channel_id))
+        await send_ephemeral(interaction, "✅ Resoconto canale automatico disattivato per questo canale.")
+
+    @canale_group.command(name="status", description="Mostra stato e schedule del resoconto canale")
+    async def canale_status(interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await send_ephemeral(interaction, "Comando disponibile solo in un canale guild.")
+            return
+        guild_id = str(interaction.guild_id)
+        channel_id = str(interaction.channel_id)
+        enabled = await ctx.database.get_channel_summary_auto_enabled(guild_id, channel_id)
+        schedules = await ctx.database.list_channel_summary_schedules(guild_id, channel_id)
+        lines = [f"• id={row['id']} tipo={row['type']} publish_at={row['publish_at']} every={row['repeat_every_value'] or '-'}{row['repeat_every_unit'] or ''} stato={row['status']}" for row in schedules]
+        text = "\n".join(lines) if lines else "• Nessuno schedule presente"
+        await send_ephemeral(interaction, f"ℹ️ Automatico: {'ON' if enabled else 'OFF'}\n{text}")
+
+    resoconto_group.add_command(canale_group)
 
     aura_group = app_commands.Group(name="aura", description="Resoconto punti Aura (solo mod)")
 

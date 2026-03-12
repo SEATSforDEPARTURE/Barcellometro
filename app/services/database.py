@@ -206,6 +206,26 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, channel_id)
             );
 
+            CREATE TABLE IF NOT EXISTS channel_summary_schedule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                start_ts TEXT NULL,
+                end_ts TEXT NULL,
+                publish_at TEXT NOT NULL,
+                repeat_every_value INTEGER NULL,
+                repeat_every_unit TEXT NULL,
+                created_by TEXT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_sent_at TEXT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_channel_summary_schedule_due
+            ON channel_summary_schedule (guild_id, channel_id, status, publish_at);
+
             CREATE TABLE IF NOT EXISTS message_channels (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -2510,6 +2530,95 @@ class DatabaseService:
             WHERE guild_id = ? AND channel_id = ?
             """,
             (local_date_str, safe_time, kind, now, guild_id, channel_id),
+        )
+
+    async def create_channel_summary_schedule(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        schedule_type: str,
+        start_ts: str | None,
+        end_ts: str | None,
+        publish_at: str,
+        repeat_every_value: int | None,
+        repeat_every_unit: str | None,
+        created_by: str,
+    ) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            """
+            INSERT INTO channel_summary_schedule (
+                guild_id, channel_id, type, start_ts, end_ts, publish_at,
+                repeat_every_value, repeat_every_unit, created_by, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+            """,
+            (guild_id, channel_id, schedule_type, start_ts, end_ts, publish_at, repeat_every_value, repeat_every_unit, created_by, now, now),
+        )
+        await self._conn.commit()
+        return int(cur.lastrowid)
+
+    async def list_due_channel_summary_schedules(self, guild_id: str, now_iso: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT * FROM channel_summary_schedule
+            WHERE guild_id = ? AND status = 'active' AND publish_at <= ?
+            ORDER BY publish_at ASC
+            """,
+            (guild_id, now_iso),
+        )
+
+    async def mark_channel_summary_schedule_sent(self, schedule_id: int) -> None:
+        row = await self.fetchone(
+            "SELECT publish_at, repeat_every_value, repeat_every_unit FROM channel_summary_schedule WHERE id = ?",
+            (schedule_id,),
+        )
+        if row is None:
+            return
+        now = datetime.now(timezone.utc)
+        next_publish_at: str | None = None
+        rep_val = row["repeat_every_value"]
+        rep_unit = str(row["repeat_every_unit"] or "").strip().lower()
+        if rep_val:
+            value = int(rep_val)
+            mult = 60 if rep_unit == "min" else 3600 if rep_unit == "hours" else 86400 if rep_unit == "days" else 0
+            if mult > 0:
+                next_publish_at = (now + timedelta(seconds=value * mult)).isoformat()
+        if next_publish_at:
+            await self.execute(
+                "UPDATE channel_summary_schedule SET publish_at = ?, last_sent_at = ?, updated_at = ? WHERE id = ?",
+                (next_publish_at, now.isoformat(), now.isoformat(), schedule_id),
+            )
+        else:
+            await self.execute(
+                "UPDATE channel_summary_schedule SET status = 'sent', last_sent_at = ?, updated_at = ? WHERE id = ?",
+                (now.isoformat(), now.isoformat(), schedule_id),
+            )
+
+    async def set_channel_summary_auto_enabled(self, guild_id: str, channel_id: str, enabled: bool) -> None:
+        await self.set_setting(f"channel_summary.auto.{guild_id}.{channel_id}", "1" if enabled else "0")
+
+    async def get_channel_summary_auto_enabled(self, guild_id: str, channel_id: str) -> bool:
+        raw = await self.get_setting(f"channel_summary.auto.{guild_id}.{channel_id}")
+        return str(raw or "0").strip() == "1"
+
+    async def list_channel_summary_schedules(self, guild_id: str, channel_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT id, type, start_ts, end_ts, publish_at, repeat_every_value, repeat_every_unit, status
+            FROM channel_summary_schedule
+            WHERE guild_id = ? AND channel_id = ?
+            ORDER BY publish_at ASC
+            """,
+            (guild_id, channel_id),
+        )
+
+    async def disable_channel_summary_schedules(self, guild_id: str, channel_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            "UPDATE channel_summary_schedule SET status = 'disabled', updated_at = ? WHERE guild_id = ? AND channel_id = ? AND status = 'active'",
+            (now, guild_id, channel_id),
         )
 
     async def set_message_channel_enabled(self, guild_id: str, channel_id: str, enabled: bool) -> None:

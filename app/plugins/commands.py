@@ -60,7 +60,7 @@ def setup(registry: ServiceRegistry) -> None:
     aura_group = app_commands.Group(name="aura", description="Resoconto aura")
     attivita_group = app_commands.Group(name="attivita", description="Comandi attività (utenti) + gestione report (mod/admin)")
     inattivi_group = app_commands.Group(name="inattivi", description="Utenti inattivi")
-    resoconto_group = app_commands.Group(name="resoconto", description="Resoconto giornaliero")
+    resoconto_group = app_commands.Group(name="resoconto", description="Resoconto canale")
 
     add_group_once(bm_group, role_group, logger)
     add_group_once(bm_group, stt_group, logger)
