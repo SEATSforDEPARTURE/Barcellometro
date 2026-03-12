@@ -18,6 +18,7 @@ from app.services.aura import aura_reason_to_human
 from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_advice, build_channel_aura_embed
 from app.services.database import DatabaseService
 from app.services.summary import SummaryResult, SummaryService
+from app.utils.embed_limits import _estimate_embed_size
 from app.utils.summary_names import resolve_display_name_from_message_id, resolve_primary_message_id, safe_display_name
 
 logger = logging.getLogger(__name__)
@@ -702,7 +703,10 @@ class ChannelSummaryService:
         prev_end_ts = prev_end_local.astimezone(timezone.utc).isoformat()
 
         current = await self._database.fetch_aura_channel_ledger_report(guild_id, channel_id, start_ts, end_ts)
-        if int(current["totals"]["users_count"] or 0) <= 0 and int(current["totals"]["positive"] or 0) <= 0 and int(current["totals"]["negative"] or 0) >= 0:
+        total_users = int(current["totals"].get("users_count") or 0)
+        total_positive = int(current["totals"].get("positive") or 0)
+        total_negative = int(current["totals"].get("negative") or 0)
+        if total_users <= 0 and total_positive <= 0 and total_negative >= 0:
             return None
 
         top_now = await self._database.fetch_aura_channel_top_users(guild_id, channel_id, start_ts, end_ts, limit=10)
@@ -739,18 +743,18 @@ class ChannelSummaryService:
 
         top_positive_reason = str(pos_reasons[0][0]) if pos_reasons else None
         advice = build_channel_aura_advice(
-            positive_points=int(current["totals"]["positive"] or 0),
-            negative_points=int(current["totals"]["negative"] or 0),
-            users_count=int(current["totals"]["users_count"] or 0),
+            positive_points=total_positive,
+            negative_points=total_negative,
+            users_count=total_users,
             mission_completed=now_completed,
             top_positive_reason=top_positive_reason,
         )
 
-        return build_channel_aura_embed(
+        aura_embed = build_channel_aura_embed(
             data=ChannelAuraEmbedData(
-                positive_points=int(current["totals"]["positive"] or 0),
-                negative_points=int(current["totals"]["negative"] or 0),
-                users_count=int(current["totals"]["users_count"] or 0),
+                positive_points=total_positive,
+                negative_points=total_negative,
+                users_count=total_users,
                 top_users=top_items,
                 positive_reasons=pos_reasons,
                 negative_reasons=neg_reasons,
@@ -763,6 +767,8 @@ class ChannelSummaryService:
                 advice_lines=advice,
             )
         )
+        logger.debug("channel_summary aura_embed_chars=%s guild=%s channel=%s", _estimate_embed_size(aura_embed), guild_id, channel_id)
+        return aura_embed
 
     async def _compute_previous_equivalent_barcello(
         self,
