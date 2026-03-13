@@ -1009,21 +1009,29 @@ def test_format_qna_answer_text_plain_mode_normalizes_single_line_llm_output() -
     assert "\n- **Comunicazione al Top**" in formatted
 
 
-def test_handle_qna_returns_semantic_plain_and_cache_v2() -> None:
+def test_handle_qna_returns_semantic_plain_and_cache_v4_with_proofs() -> None:
     async def _run() -> None:
         database = Mock()
         database.get_cache = AsyncMock(return_value=None)
         database.set_cache = AsyncMock()
         service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
         service._qna_query_engine = Mock()
-        service._qna_query_engine.answer = AsyncMock(return_value="Risposta semantica")
+        service._qna_query_engine.answer = AsyncMock(
+            return_value={
+                "answer_text": "Risposta semantica",
+                "proofs": [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-03-13T14:38:12+00:00"}],
+            }
+        )
 
         out = await service._handle_qna(scope="channel", guild_id="1", channel_id="2", question="di che ha parlato @BritneySpritz ieri?")
 
         assert out is not None
         assert out.get("answer_mode") == "semantic_plain"
+        assert len(out.get("evidence_pack") or []) == 1
         cache_key = database.set_cache.await_args.args[0]
-        assert ":semantic_v3:" in cache_key
+        assert ":semantic_v4:" in cache_key
+        cache_value = database.set_cache.await_args.args[1]
+        assert '"proofs"' in cache_value
 
     asyncio.run(_run())
 
@@ -1080,6 +1088,74 @@ def test_route_qna_channel_semantic_plain_renders_plain_mode() -> None:
 
         assert called.get("mode") == "plain"
         assert called.get("evidence") == []
+
+    asyncio.run(_run())
+
+
+def test_append_qna_proofs_section_adds_links_with_italian_datetime() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+
+    out = service._append_qna_proofs_section(
+        "Risposta semantica pronta",
+        [
+            {"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-03-13T14:38:12+00:00"},
+            {"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-03-13T14:38:12+00:00"},
+            {"jump_url": "https://discord.com/channels/1/2/4", "created_at_iso": "2026-03-13T14:31:00+00:00"},
+        ],
+    )
+
+    assert "**🧾 Prove:**" in out
+    assert "[13/03" in out
+    assert out.count("https://discord.com/channels/1/2/3") == 1
+
+
+def test_append_qna_proofs_section_returns_unchanged_when_empty() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._append_qna_proofs_section("Risposta", []) == "Risposta"
+
+
+def test_append_qna_proofs_section_drops_proofs_when_too_long() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    long_answer = "x" * 3890
+    out = service._append_qna_proofs_section(
+        long_answer,
+        [
+            {"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-03-13T14:38:12+00:00"},
+            {"jump_url": "https://discord.com/channels/1/2/4", "created_at_iso": "2026-03-13T14:31:00+00:00"},
+            {"jump_url": "https://discord.com/channels/1/2/5", "created_at_iso": "2026-03-13T14:25:00+00:00"},
+            {"jump_url": "https://discord.com/channels/1/2/6", "created_at_iso": "2026-03-13T14:20:00+00:00"},
+        ],
+    )
+    assert len(out) <= 3900
+    assert out.startswith(long_answer)
+
+
+def test_handle_qna_cache_hit_reads_json_payload_with_proofs() -> None:
+    async def _run() -> None:
+        database = Mock()
+        database.get_cache = AsyncMock(
+            return_value='{"answer":"Risposta da cache","proofs":[{"jump_url":"https://discord.com/channels/1/2/3","created_at_iso":"2026-03-13T14:38:12+00:00"}]}'
+        )
+        service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+
+        out = await service._handle_qna(scope="channel", guild_id="1", channel_id="2", question="q")
+        assert out is not None
+        assert out.get("answer") == "Risposta da cache"
+        assert len(out.get("evidence_pack") or []) == 1
+
+    asyncio.run(_run())
+
+
+def test_handle_qna_cache_hit_string_is_backward_compatible() -> None:
+    async def _run() -> None:
+        database = Mock()
+        database.get_cache = AsyncMock(return_value="Risposta cache legacy")
+        service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+
+        out = await service._handle_qna(scope="channel", guild_id="1", channel_id="2", question="q")
+        assert out is not None
+        assert out.get("answer") == "Risposta cache legacy"
+        assert out.get("evidence_pack") == []
 
     asyncio.run(_run())
 

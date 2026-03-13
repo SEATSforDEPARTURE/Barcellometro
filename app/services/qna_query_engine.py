@@ -41,6 +41,13 @@ class QnaIntent:
     limit: int
 
 
+@dataclass
+class QnaAnswerResult:
+    answer_text: str
+    proofs: list[dict[str, str]]
+    response_origin: str = "local_backend"
+
+
 class QnaQueryEngine:
     def __init__(self, *, database: DatabaseService, ai_service: Any, barcello: BarcelloService) -> None:
         self._db = database
@@ -48,15 +55,25 @@ class QnaQueryEngine:
         self._barcello = barcello
         self._intent_response_format_supported: bool | None = None
 
-    async def answer(self, *, guild_id: str, channel_id: str, question: str, source: discord.Interaction | discord.Message | None = None) -> str:
+    async def answer(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        question: str,
+        source: discord.Interaction | discord.Message | None = None,
+    ) -> QnaAnswerResult:
         parsed = await self._parse_intent(question)
         start_ts, end_ts, range_label = self._resolve_time_range(parsed.time_range or "", question)
         target_user_id, target_user_name = await self._resolve_target_user(parsed.target_user, question, guild_id, source)
         if parsed.target_user and target_user_id is None and self._intent_requires_user(parsed.intent):
-            return "Per identificare bene la persona, taggala direttamente nella domanda con @utente."
+            return QnaAnswerResult(
+                answer_text="Per identificare bene la persona, taggala direttamente nella domanda con @utente.",
+                proofs=[],
+            )
         resolved_channel_id, resolved_channel_name = self._resolve_channel(parsed.channel, question, source)
         if parsed.intent == "voice_activity" and parsed.channel and not resolved_channel_id:
-            return "Non riesco a capire quale canale vocale devo analizzare."
+            return QnaAnswerResult(answer_text="Non riesco a capire quale canale vocale devo analizzare.", proofs=[])
         payload = await self._fetch_intent_data(
             intent=parsed.intent,
             guild_id=guild_id,
@@ -74,15 +91,58 @@ class QnaQueryEngine:
         )
         if not payload.get("has_data"):
             if payload.get("needs_user_tag"):
-                return "Per identificare bene le persone, taggale direttamente nella domanda con @utente."
-            return NO_DATA_REPLY
-        return await self._compose_answer(
+                return QnaAnswerResult(
+                    answer_text="Per identificare bene le persone, taggale direttamente nella domanda con @utente.",
+                    proofs=[],
+                )
+            return QnaAnswerResult(answer_text=NO_DATA_REPLY, proofs=[])
+        answer_text = await self._compose_answer(
             question=question,
             intent=parsed.intent,
             target_user_name=target_user_name,
             range_label=range_label,
             payload=payload,
         )
+        proofs = self._extract_proofs(intent=parsed.intent, payload=payload, limit=4)
+        return QnaAnswerResult(answer_text=answer_text, proofs=proofs)
+
+    def _extract_proofs(self, *, intent: str, payload: dict[str, Any], limit: int = 4) -> list[dict[str, str]]:
+        message_based_intents = {
+            "user_activity_summary",
+            "topic_discussion_summary",
+            "server_activity_summary",
+            "user_opinion_on_topic",
+            "conversation_between_users",
+        }
+        if intent not in message_based_intents:
+            return []
+
+        rows = payload.get("messages") or []
+        if not isinstance(rows, list):
+            return []
+
+        proofs: list[dict[str, str]] = []
+        seen_urls: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            jump_url = str(row.get("jump_url") or "").strip()
+            created_at_iso = str(row.get("ts") or "").strip()
+            if not jump_url or not created_at_iso or jump_url in seen_urls:
+                continue
+            snippet = re.sub(r"\s+", " ", str(row.get("content") or "").strip())
+            proofs.append(
+                {
+                    "jump_url": jump_url,
+                    "created_at_iso": created_at_iso,
+                    "author_name": str(row.get("author_name") or "").strip(),
+                    "snippet": snippet[:220],
+                }
+            )
+            seen_urls.add(jump_url)
+
+        proofs.sort(key=lambda item: str(item.get("created_at_iso") or ""), reverse=True)
+        return proofs[: max(1, min(8, int(limit or 4)))]
 
     async def _parse_intent(self, question: str) -> QnaIntent:
         fallback = self._heuristic_intent(question)
