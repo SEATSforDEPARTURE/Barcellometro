@@ -73,6 +73,8 @@ class TriggerEngineService:
         self._community_insights = community_insights or CommunityInsightsService(ai_service)
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
+        self._recovery_task: asyncio.Task[None] | None = None
+        self._barcello_eval_tasks: dict[str, asyncio.Task[None]] = {}
         self._barcello_moods_missing_warned = False
         self._barcello_trigger_cfg: dict[str, Any] | None = None
         self._barcello_trigger_cfg_mtime: float | None = None
@@ -88,13 +90,21 @@ class TriggerEngineService:
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
         if self._task is None:
-            self._task = asyncio.create_task(self._barcello_loop())
+            self._task = asyncio.create_task(self._insights_loop())
+        if self._recovery_task is None:
+            self._recovery_task = asyncio.create_task(self._barcello_recovery_loop())
         asyncio.create_task(self._qna_sessions_repo.delete_expired_sessions())
 
     def stop(self) -> None:
         if self._task is not None:
             self._task.cancel()
             self._task = None
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
+            self._recovery_task = None
+        for task in self._barcello_eval_tasks.values():
+            task.cancel()
+        self._barcello_eval_tasks.clear()
 
     async def on_event(self, envelope: EventEnvelope) -> None:
         if envelope.event_type != "message.create":
@@ -102,6 +112,7 @@ class TriggerEngineService:
         if not envelope.guild_id or not envelope.channel_id or not envelope.content:
             return
         await self._handle_phrases(envelope)
+        await self._on_barcello_message(envelope)
 
     async def _qna_reply(self, interaction: discord.Interaction, text: str, *, ephemeral: bool) -> None:
         if interaction.response.is_done():
@@ -569,13 +580,12 @@ class TriggerEngineService:
             "resets_at_iso": reset_local.isoformat(),
         }
 
-    async def _barcello_loop(self) -> None:
+    async def _insights_loop(self) -> None:
         while True:
             try:
-                await self._poll_barcello()
                 await self._poll_insights()
             except Exception:  # noqa: BLE001
-                logger.exception("Trigger barcello poll failed")
+                logger.exception("Trigger insights poll failed")
             await asyncio.sleep(60)
 
 
@@ -648,6 +658,49 @@ class TriggerEngineService:
         logger.info("Daily random mood set guild_id=%s channel_id=%s chosen=%s", guild_id, channel_id, chosen)
 
     async def _poll_barcello(self) -> None:
+        """Legacy/manual wrapper: evaluates enabled channels once without aggressive scheduling."""
+        rows = await self._database.list_enabled_trigger_channels("barcello")
+        for row in rows:
+            await self._evaluate_barcello_channel(str(row["guild_id"]), str(row["channel_id"]), reason="legacy_poll")
+
+    async def _on_barcello_message(self, envelope: EventEnvelope) -> None:
+        if envelope.event_type != "message.create" or not envelope.guild_id or not envelope.channel_id:
+            return
+        if not await self._database.get_trigger_enabled(envelope.guild_id, envelope.channel_id, "barcello"):
+            return
+        await self._schedule_barcello_eval(envelope.guild_id, envelope.channel_id)
+
+    async def _schedule_barcello_eval(self, guild_id: str, channel_id: str) -> None:
+        key = f"{guild_id}:{channel_id}"
+        existing = self._barcello_eval_tasks.get(key)
+        if existing and not existing.done():
+            logger.debug("barcello debounce skipped task already pending key=%s", key)
+            return
+        task = asyncio.create_task(self._debounced_barcello_eval(guild_id, channel_id))
+        self._barcello_eval_tasks[key] = task
+        logger.debug("barcello debounce scheduled key=%s", key)
+
+    async def _debounced_barcello_eval(self, guild_id: str, channel_id: str) -> None:
+        key = f"{guild_id}:{channel_id}"
+        config = self._load_barcello_trigger_cfg_cached()
+        event_cfg = config.get("event_driven") if isinstance(config.get("event_driven"), dict) else {}
+        debounce_seconds = int(event_cfg.get("debounce_seconds") or 30)
+        try:
+            await asyncio.sleep(max(1, debounce_seconds))
+            logger.debug("barcello event eval start key=%s", key)
+            await self._evaluate_barcello_channel(guild_id, channel_id, reason="event")
+            logger.debug("barcello event eval end key=%s", key)
+        finally:
+            self._barcello_eval_tasks.pop(key, None)
+
+    async def _evaluate_barcello_channel(
+        self,
+        guild_id: str,
+        channel_id: str,
+        *,
+        reason: str = "event",
+        allow_recovery: bool = False,
+    ) -> None:
         if self._bot is None:
             return
         config = self._load_barcello_trigger_cfg_cached()
@@ -660,32 +713,26 @@ class TriggerEngineService:
         min_score_delta_for_notify = config.get("min_score_delta_for_notify")
         if not isinstance(min_score_delta_for_notify, int) or min_score_delta_for_notify < 0:
             min_score_delta_for_notify = 3
-        rows = await self._database.list_enabled_trigger_channels("barcello")
-        changed_count = 0
-        for row in rows:
-            guild_id = str(row["guild_id"])
-            channel_id = str(row["channel_id"])
-            now_rome = datetime.now(ROME_TZ)
-            await self._maybe_set_daily_random_mood(guild_id, channel_id, config, now_rome)
-            window_minutes_effective = self._get_effective_window_minutes(
-                cfg=config,
-                channel_id=channel_id,
-                default_window=window_minutes_global,
-            )
-            if window_minutes_effective != window_minutes_global:
-                previous_window = self._barcello_last_applied_window.get(channel_id)
-                if previous_window != window_minutes_effective:
-                    self._barcello_last_applied_window[channel_id] = window_minutes_effective
-                    changed_count += 1
-                    logger.info(
-                        "barcello window override applied channel_id=%s window=%s (prev=%s)",
-                        channel_id,
-                        window_minutes_effective,
-                        previous_window,
-                    )
-            window_end = datetime.now(timezone.utc)
-            window_start = window_end - timedelta(minutes=window_minutes_effective)
-            count_row = await self._database.fetchone(
+        now_rome = datetime.now(ROME_TZ)
+        await self._maybe_set_daily_random_mood(guild_id, channel_id, config, now_rome)
+        window_minutes_effective = self._get_effective_window_minutes(
+            cfg=config,
+            channel_id=channel_id,
+            default_window=window_minutes_global,
+        )
+        if window_minutes_effective != window_minutes_global:
+            previous_window = self._barcello_last_applied_window.get(channel_id)
+            if previous_window != window_minutes_effective:
+                self._barcello_last_applied_window[channel_id] = window_minutes_effective
+                logger.info(
+                    "barcello window override applied channel_id=%s window=%s (prev=%s)",
+                    channel_id,
+                    window_minutes_effective,
+                    previous_window,
+                )
+        window_end = datetime.now(timezone.utc)
+        window_start = window_end - timedelta(minutes=window_minutes_effective)
+        count_row = await self._database.fetchone(
                 """
                 SELECT COUNT(*) AS count
                 FROM messages AS m
@@ -698,140 +745,310 @@ class TriggerEngineService:
                 """,
                 (channel_id, window_start.isoformat(), window_end.isoformat()),
             )
-            message_count = int(count_row["count"]) if count_row else 0
-            if message_count < min_messages:
-                logger.debug(
-                    "barcello skip low activity",
-                    extra={"channel_id": channel_id, "count": message_count, "min_messages": min_messages},
-                )
-                continue
-            status = await self._barcello.get_current_status(
+        message_count = int(count_row["count"]) if count_row else 0
+        if message_count < min_messages and not allow_recovery:
+            logger.debug(
+                "barcello skip low activity channel=%s count=%s min_messages=%s reason=%s",
+                channel_id,
+                message_count,
+                min_messages,
+                reason,
+            )
+            return
+        status = await self._barcello.get_current_status(
                 guild_id,
                 channel_id=channel_id,
                 window_minutes=window_minutes_effective,
             )
-            raw_color = self._normalize_barcello_color(status.get("color"))
-            score = int(status.get("score") or 0)
-            prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
-            prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
-            prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
-            stable_color = self._apply_hysteresis(prev_color, raw_color, score)
-            stored_color = stable_color or ""
-            now = datetime.now(timezone.utc)
-            now_iso = now.isoformat()
+        raw_color = self._normalize_barcello_color(status.get("color"))
+        if raw_color is None:
+            return
+        score = int(status.get("score") or 0)
+        prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
+        prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
+        prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
+        stable_color = self._apply_hysteresis(prev_color, raw_color, score)
+        stored_color = stable_color or ""
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
 
-            if prev_color is not None and stable_color == prev_color:
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stable_color, score, now_iso)
-                continue
+        recovery_armed = bool((prev or {}).get("recovery_armed"))
+        recovery_from = self._normalize_barcello_color((prev or {}).get("recovery_from"))
+        candidate_color = self._normalize_barcello_color((prev or {}).get("candidate_color"))
+        candidate_since_ts = str((prev or {}).get("candidate_since_ts") or "")
 
-            if prev_score is not None and abs(score - prev_score) < min_score_delta_for_notify and prev_color == stored_color:
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
-                continue
-
-            if prev_color is not None and stored_color == prev_color:
-                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
-                continue
-
-            daily_state = await self._database.get_trigger_state(guild_id, channel_id, "barcello_daily")
-            day_key = datetime.now(ROME_TZ).date().isoformat()
-            if str(daily_state.get("date") or "") != day_key:
-                daily_state = {"date": day_key, "counts": {}, "last_entered_ts": {}}
-            counts = daily_state.get("counts") if isinstance(daily_state.get("counts"), dict) else {}
-            last_entered_ts = daily_state.get("last_entered_ts") if isinstance(daily_state.get("last_entered_ts"), dict) else {}
-
-            previous_same_state_ts = str(last_entered_ts.get(stored_color) or "")
-            state_count_today = int(counts.get(stored_color) or 0) + 1
-            counts[stored_color] = state_count_today
-            last_entered_ts[stored_color] = now.isoformat()
-
-            now_rome = now.astimezone(ROME_TZ)
-            minute_seed = now_rome.strftime("%Y%m%d%H%M")
-            time_bucket = self._get_time_bucket(now_rome, config)
-            drama_label = self._get_drama_label(state_count_today, config)
-            mood = await self._resolve_barcello_mood(guild_id, channel_id, config)
-
-            last_in_state_human = ""
-            if previous_same_state_ts:
-                try:
-                    prev_same_state = datetime.fromisoformat(previous_same_state_ts)
-                    if prev_same_state.tzinfo is None:
-                        prev_same_state = prev_same_state.replace(tzinfo=timezone.utc)
-                    delta = max(now - prev_same_state, timedelta())
-                    total_min = int(delta.total_seconds() // 60)
-                    if total_min < 120:
-                        last_in_state_human = f"{total_min} minuti"
-                    elif total_min < 60 * 24 * 2:
-                        last_in_state_human = f"{total_min // 60} ore"
-                    else:
-                        last_in_state_human = f"{total_min // (60 * 24)} giorni"
-                except ValueError:
-                    last_in_state_human = ""
-
-            main_msg = self._render_barcello_transition(
-                old=prev_color,
-                new=stored_color,
-                old_score=prev_score,
-                new_score=score,
-                cfg=config,
-                guild_id=guild_id,
-                channel_id=channel_id,
-                mood=mood,
-                time_bucket=time_bucket,
-                drama_label=drama_label,
-                state_count_today=state_count_today,
-                last_in_state_human=last_in_state_human,
-            )
-            mod_block_text = ""
-            if stored_color in {"ROSSO", "NERO"} and prev_color != stored_color:
-                mod_key = "MOD_PING_ROSSO" if stored_color == "ROSSO" else "MOD_PING_NERO"
-                selected_mod_template = self._select_barcello_template(
-                    config,
+        confirm_seconds = int(((config.get("event_driven") or {}).get("minor_state_confirm_seconds") or 180))
+        is_minor_flip = prev_color in {"VERDE", "GIALLO"} and stored_color in {"VERDE", "GIALLO"} and prev_color != stored_color
+        if is_minor_flip:
+            if candidate_color != stored_color:
+                await self._database.update_barcello_candidate_state(
+                    guild_id,
                     channel_id,
-                    mood,
-                    time_bucket,
-                    drama_label,
-                    mod_key,
+                    candidate_color=stored_color,
+                    candidate_since_ts=now_iso,
                 )
-                mod_template = self._resolve_template_value(
-                    selected_mod_template,
-                    seed_parts=(guild_id, channel_id, mod_key, mood, time_bucket, drama_label, minute_seed),
-                )
-                mod_role_id = str(config.get("mod_role_id") or "").strip()
-                mod_mention = f"<@&{mod_role_id}>" if mod_role_id else ""
-                mod_block_text = self._render_with_placeholders(mod_template, {"mod_mention": mod_mention}) if mod_template else mod_mention
+                await self._database.upsert_barcello_trigger_state(guild_id, channel_id, prev_color, score, now_iso)
+                logger.debug("barcello minor transition pending confirm channel=%s transition=%s->%s", channel_id, prev_color, stored_color)
+                return
+            try:
+                candidate_since = datetime.fromisoformat(candidate_since_ts) if candidate_since_ts else now
+            except ValueError:
+                candidate_since = now
+            if candidate_since.tzinfo is None:
+                candidate_since = candidate_since.replace(tzinfo=timezone.utc)
+            if (now - candidate_since).total_seconds() < confirm_seconds:
+                logger.debug("barcello minor transition suppressed by confirmation channel=%s transition=%s->%s", channel_id, prev_color, stored_color)
+                return
+        else:
+            await self._database.update_barcello_candidate_state(guild_id, channel_id, candidate_color=None, candidate_since_ts=None)
 
-            message_text = self._build_barcello_status_embed_description(
-                main_msg=main_msg,
-                old_score=prev_score,
-                new_score=score,
-                state_count_today=state_count_today,
-                last_in_state_human=last_in_state_human,
-                new=stored_color,
-                mod_block_text=mod_block_text,
+        should_notify = prev_color is None
+        is_recovery_notify = False
+        transition = f"{prev_color}->{stored_color}" if prev_color else f"INIT->{stored_color}"
+
+        if prev_color is not None and stored_color == prev_color:
+            should_notify = False
+        elif prev_color == "GIALLO" and stored_color == "VERDE":
+            if not recovery_armed:
+                should_notify = False
+                logger.info("barcello giallo->verde suppressed because not recovery channel=%s", channel_id)
+            else:
+                if not allow_recovery:
+                    should_notify = False
+                else:
+                    quiet_minutes = int(((config.get("recovery") or {}).get("min_quiet_minutes") or 12))
+                    last_red = await self._database.get_barcello_last_seen_for_color(guild_id, channel_id, recovery_from or "ROSSO")
+                    enough_quiet = True
+                    if last_red:
+                        try:
+                            last_dt = datetime.fromisoformat(last_red)
+                            if last_dt.tzinfo is None:
+                                last_dt = last_dt.replace(tzinfo=timezone.utc)
+                            enough_quiet = (now - last_dt) >= timedelta(minutes=quiet_minutes)
+                        except ValueError:
+                            enough_quiet = True
+                    should_notify = enough_quiet and await self._is_barcello_cooldown_elapsed(config, guild_id, channel_id, "recovery", now)
+                    is_recovery_notify = should_notify
+        elif prev_color == "VERDE" and stored_color == "GIALLO":
+            fresh = await self._get_recent_barcello_activity(channel_id, int(((config.get("event_driven") or {}).get("fresh_activity_minutes") or 5)))
+            if not self._is_fresh_activity_ok(config, fresh):
+                should_notify = False
+                logger.info("barcello minor transition suppressed fresh-activity channel=%s transition=%s", channel_id, transition)
+            else:
+                should_notify = await self._is_barcello_cooldown_elapsed(config, guild_id, channel_id, "minor", now)
+        elif prev_color and stored_color and {prev_color, stored_color} & {"ROSSO", "NERO"}:
+            should_notify = await self._is_barcello_cooldown_elapsed(config, guild_id, channel_id, "major", now)
+        else:
+            should_notify = False
+
+        if prev_score is not None and abs(score - prev_score) < min_score_delta_for_notify and prev_color == stored_color:
+            should_notify = False
+
+        if stored_color in {"ROSSO", "NERO"} and prev_color != stored_color:
+            await self._database.update_barcello_recovery_state(
+                guild_id,
+                channel_id,
+                recovery_armed=True,
+                recovery_from=stored_color,
+                recovery_armed_ts=now_iso,
             )
+            recovery_armed = True
+            recovery_from = stored_color
+            logger.info("barcello recovery armed guild=%s channel=%s from=%s", guild_id, channel_id, stored_color)
+
+        daily_state = await self._database.get_trigger_state(guild_id, channel_id, "barcello_daily")
+        day_key = datetime.now(ROME_TZ).date().isoformat()
+        if str(daily_state.get("date") or "") != day_key:
+            daily_state = {"date": day_key, "counts": {}, "last_entered_ts": {}}
+        counts = daily_state.get("counts") if isinstance(daily_state.get("counts"), dict) else {}
+        last_entered_ts = daily_state.get("last_entered_ts") if isinstance(daily_state.get("last_entered_ts"), dict) else {}
+
+        previous_same_state_ts = str(last_entered_ts.get(stored_color) or "")
+        state_count_today = int(counts.get(stored_color) or 0) + 1
+        counts[stored_color] = state_count_today
+        last_entered_ts[stored_color] = now.isoformat()
+
+        now_rome = now.astimezone(ROME_TZ)
+        minute_seed = now_rome.strftime("%Y%m%d%H%M")
+        time_bucket = self._get_time_bucket(now_rome, config)
+        drama_label = self._get_drama_label(state_count_today, config)
+        mood = await self._resolve_barcello_mood(guild_id, channel_id, config)
+
+        last_in_state_human = ""
+        if previous_same_state_ts:
+            try:
+                prev_same_state = datetime.fromisoformat(previous_same_state_ts)
+                if prev_same_state.tzinfo is None:
+                    prev_same_state = prev_same_state.replace(tzinfo=timezone.utc)
+                delta = max(now - prev_same_state, timedelta())
+                total_min = int(delta.total_seconds() // 60)
+                if total_min < 120:
+                    last_in_state_human = f"{total_min} minuti"
+                elif total_min < 60 * 24 * 2:
+                    last_in_state_human = f"{total_min // 60} ore"
+                else:
+                    last_in_state_human = f"{total_min // (60 * 24)} giorni"
+            except ValueError:
+                last_in_state_human = ""
+
+        main_msg = self._render_barcello_transition(
+            old=prev_color,
+            new=stored_color,
+            old_score=prev_score,
+            new_score=score,
+            cfg=config,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            mood=mood,
+            time_bucket=time_bucket,
+            drama_label=drama_label,
+            state_count_today=state_count_today,
+            last_in_state_human=last_in_state_human,
+        )
+        mod_block_text = ""
+        if stored_color in {"ROSSO", "NERO"} and prev_color != stored_color:
+            mod_key = "MOD_PING_ROSSO" if stored_color == "ROSSO" else "MOD_PING_NERO"
+            selected_mod_template = self._select_barcello_template(
+                config,
+                channel_id,
+                mood,
+                time_bucket,
+                drama_label,
+                mod_key,
+            )
+            mod_template = self._resolve_template_value(
+                selected_mod_template,
+                seed_parts=(guild_id, channel_id, mod_key, mood, time_bucket, drama_label, minute_seed),
+            )
+            mod_role_id = str(config.get("mod_role_id") or "").strip()
+            mod_mention = f"<@&{mod_role_id}>" if mod_role_id else ""
+            mod_block_text = self._render_with_placeholders(mod_template, {"mod_mention": mod_mention}) if mod_template else mod_mention
+
+        if is_recovery_notify and main_msg:
+            main_msg = f"🟢 Recovery confermato dopo fase critica ({recovery_from or 'ROSSO'}).\n{main_msg}"
+
+        message_text = self._build_barcello_status_embed_description(
+            main_msg=main_msg,
+            old_score=prev_score,
+            new_score=score,
+            state_count_today=state_count_today,
+            last_in_state_human=last_in_state_human,
+            new=stored_color,
+            mod_block_text=mod_block_text,
+        )
+        if should_notify:
             embed = discord.Embed(
-                title="🫛 STATO BARCELLO",
+                title="🫛 AGGIORNAMENTO BARCELLO",
                 description=message_text,
                 color=self._barcello_embed_color(stable_color),
             )
-            embed.set_footer(
-                text=(
-                    f"Dati elaborati in loco sulla base degli ultimi {window_minutes_effective} minuti. "
-                    "Risultati variabili."
-                )
-            )
+            embed.set_footer(text="Dati elaborati in loco · Barcellometro 1.0" if main_msg else "Barcellometro 1.0")
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and main_msg:
                 await channel.send(embed=embed)
-            await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
-            await self._database.set_trigger_state(
-                guild_id,
-                channel_id,
-                "barcello_daily",
-                {"date": day_key, "counts": counts, "last_entered_ts": last_entered_ts},
-            )
+                cooldown_key = "recovery" if is_recovery_notify else ("minor" if stored_color in {"VERDE", "GIALLO"} else "major")
+                await self._database.set_barcello_last_notified(guild_id, channel_id, cooldown_key.upper(), now_iso)
+                if is_recovery_notify:
+                    await self._database.update_barcello_recovery_state(
+                        guild_id,
+                        channel_id,
+                        recovery_armed=False,
+                        recovery_from=None,
+                        recovery_armed_ts=None,
+                        last_recovery_notified_ts=now_iso,
+                    )
+                    logger.info("barcello recovery disarmed guild=%s channel=%s", guild_id, channel_id)
+            elif should_notify:
+                logger.warning("barcello notify skipped: channel unavailable channel=%s", channel_id)
+        else:
+            logger.debug("barcello transition suppressed channel=%s transition=%s", channel_id, transition)
 
-        logger.debug("barcello overrides checked: channels=%d, changed=%d", len(rows), changed_count)
+        await self._database.upsert_barcello_trigger_state(guild_id, channel_id, stored_color, score, now.isoformat())
+        await self._database.set_barcello_last_seen_for_color(guild_id, channel_id, stored_color, now_iso)
+        await self._database.set_trigger_state(
+            guild_id,
+            channel_id,
+            "barcello_daily",
+            {"date": day_key, "counts": counts, "last_entered_ts": last_entered_ts},
+        )
+
+    async def _get_recent_barcello_activity(self, channel_id: str, fresh_minutes: int) -> dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(minutes=max(1, fresh_minutes))
+        row = await self._database.fetchone(
+            """
+            SELECT COUNT(*) AS count, COUNT(DISTINCT author_id) AS authors, MAX(ts) AS last_message_ts
+            FROM messages
+            WHERE channel_id = ?
+              AND ts >= ?
+              AND ts <= ?
+              AND COALESCE(is_deleted, 0) = 0
+            """,
+            (channel_id, start.isoformat(), now.isoformat()),
+        )
+        return {
+            "count": int(row["count"] or 0) if row else 0,
+            "authors": int(row["authors"] or 0) if row else 0,
+            "last_message_ts": str(row["last_message_ts"] or "") if row else "",
+        }
+
+    async def _barcello_recovery_loop(self) -> None:
+        while True:
+            try:
+                config = self._load_barcello_trigger_cfg_cached()
+                recovery_cfg = config.get("recovery") if isinstance(config.get("recovery"), dict) else {}
+                if not bool(recovery_cfg.get("enabled", True)):
+                    await asyncio.sleep(60)
+                    continue
+                rows = await self._database.list_barcello_recovery_armed_channels()
+                logger.info("barcello recovery loop checking channels=%s", len(rows))
+                for row in rows:
+                    await self._evaluate_barcello_channel(str(row["guild_id"]), str(row["channel_id"]), reason="recovery_loop", allow_recovery=True)
+                await asyncio.sleep(max(60, int(recovery_cfg.get("poll_seconds") or 300)))
+            except Exception:  # noqa: BLE001
+                logger.exception("barcello recovery loop failed")
+                await asyncio.sleep(60)
+
+    def _is_fresh_activity_ok(self, cfg: dict[str, Any], activity: dict[str, Any]) -> bool:
+        event_cfg = cfg.get("event_driven") if isinstance(cfg.get("event_driven"), dict) else {}
+        min_recent_messages = int(event_cfg.get("min_recent_messages") or 4)
+        min_recent_authors = int(event_cfg.get("min_recent_authors") or 2)
+        max_age_seconds = int(event_cfg.get("max_last_message_age_seconds") or 120)
+        count = int(activity.get("count") or 0)
+        authors = int(activity.get("authors") or 0)
+        last_ts = str(activity.get("last_message_ts") or "")
+        age_ok = True
+        if last_ts:
+            try:
+                last_dt = datetime.fromisoformat(last_ts)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                age_ok = (datetime.now(timezone.utc) - last_dt) <= timedelta(seconds=max_age_seconds)
+            except ValueError:
+                age_ok = True
+        return count >= min_recent_messages and authors >= min_recent_authors and age_ok
+
+    async def _is_barcello_cooldown_elapsed(self, cfg: dict[str, Any], guild_id: str, channel_id: str, bucket: str, now: datetime) -> bool:
+        cooldown_cfg = cfg.get("cooldown_minutes")
+        if isinstance(cooldown_cfg, dict):
+            cooldown_minutes = int(cooldown_cfg.get(bucket) or cooldown_cfg.get("minor") or 0)
+        else:
+            cooldown_minutes = int(cooldown_cfg or 0)
+        if cooldown_minutes <= 0:
+            return True
+        last_notified = await self._database.get_barcello_last_notified(guild_id, channel_id, bucket.upper())
+        if not last_notified:
+            return True
+        try:
+            last_dt = datetime.fromisoformat(last_notified)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return True
+        allowed = now - last_dt >= timedelta(minutes=cooldown_minutes)
+        if not allowed:
+            logger.info("barcello cooldown blocks notify guild=%s channel=%s bucket=%s", guild_id, channel_id, bucket)
+        return allowed
 
     def _load_barcello_trigger_cfg_cached(self) -> dict[str, Any]:
         path = self._barcello_trigger_cfg_path

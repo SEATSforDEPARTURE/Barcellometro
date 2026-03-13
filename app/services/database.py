@@ -317,6 +317,12 @@ class DatabaseService:
                 last_color TEXT NULL,
                 last_score INTEGER NULL,
                 last_ts TEXT NULL,
+                recovery_armed INTEGER NOT NULL DEFAULT 0,
+                recovery_from TEXT NULL,
+                recovery_armed_ts TEXT NULL,
+                last_recovery_notified_ts TEXT NULL,
+                candidate_color TEXT NULL,
+                candidate_since_ts TEXT NULL,
                 PRIMARY KEY (guild_id, channel_id)
             );
 
@@ -599,8 +605,25 @@ class DatabaseService:
         await self._ensure_daily_report_columns()
         await self._ensure_trigger_phrase_columns()
         await self._ensure_channel_summary_schedule_columns()
+        await self._ensure_trigger_barcello_state_columns()
         await self._conn.commit()
         logger.info("Database schema initialized")
+
+    async def _ensure_trigger_barcello_state_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(trigger_barcello_state)")
+        existing = {row["name"] for row in columns}
+        missing = {
+            "recovery_armed": "INTEGER NOT NULL DEFAULT 0",
+            "recovery_from": "TEXT NULL",
+            "recovery_armed_ts": "TEXT NULL",
+            "last_recovery_notified_ts": "TEXT NULL",
+            "candidate_color": "TEXT NULL",
+            "candidate_since_ts": "TEXT NULL",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE trigger_barcello_state ADD COLUMN {name} {col_def}")
 
     async def _ensure_message_campaign_columns(self) -> None:
         assert self._conn is not None
@@ -1670,7 +1693,13 @@ class DatabaseService:
 
     async def get_barcello_trigger_state(self, guild_id: str, channel_id: str) -> Optional[dict[str, Any]]:
         row = await self.fetchone(
-            "SELECT guild_id, channel_id, last_color, last_score, last_ts FROM trigger_barcello_state WHERE guild_id = ? AND channel_id = ?",
+            """
+            SELECT guild_id, channel_id, last_color, last_score, last_ts,
+                   recovery_armed, recovery_from, recovery_armed_ts, last_recovery_notified_ts,
+                   candidate_color, candidate_since_ts
+            FROM trigger_barcello_state
+            WHERE guild_id = ? AND channel_id = ?
+            """,
             (guild_id, channel_id),
         )
         return dict(row) if row else None
@@ -1693,6 +1722,66 @@ class DatabaseService:
                 last_ts = excluded.last_ts
             """,
             (guild_id, channel_id, last_color, last_score, last_ts),
+        )
+
+    async def update_barcello_recovery_state(
+        self,
+        guild_id: str,
+        channel_id: str,
+        *,
+        recovery_armed: bool,
+        recovery_from: str | None,
+        recovery_armed_ts: str | None,
+        last_recovery_notified_ts: str | None = None,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_barcello_state (
+                guild_id, channel_id, recovery_armed, recovery_from, recovery_armed_ts, last_recovery_notified_ts
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                recovery_armed = excluded.recovery_armed,
+                recovery_from = excluded.recovery_from,
+                recovery_armed_ts = excluded.recovery_armed_ts,
+                last_recovery_notified_ts = COALESCE(excluded.last_recovery_notified_ts, trigger_barcello_state.last_recovery_notified_ts)
+            """,
+            (
+                guild_id,
+                channel_id,
+                1 if recovery_armed else 0,
+                recovery_from,
+                recovery_armed_ts,
+                last_recovery_notified_ts,
+            ),
+        )
+
+    async def update_barcello_candidate_state(
+        self,
+        guild_id: str,
+        channel_id: str,
+        *,
+        candidate_color: str | None,
+        candidate_since_ts: str | None,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_barcello_state (guild_id, channel_id, candidate_color, candidate_since_ts)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                candidate_color = excluded.candidate_color,
+                candidate_since_ts = excluded.candidate_since_ts
+            """,
+            (guild_id, channel_id, candidate_color, candidate_since_ts),
+        )
+
+    async def list_barcello_recovery_armed_channels(self) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT guild_id, channel_id
+            FROM trigger_barcello_state
+            WHERE recovery_armed = 1
+            """
         )
 
     async def get_barcello_last_seen_for_color(self, guild_id: str, channel_id: str, color: str) -> Optional[str]:
