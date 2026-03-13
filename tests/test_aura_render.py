@@ -1,5 +1,5 @@
 from app.services.aura_archetypes import build_dynamic_archetype_reason
-from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
+from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_character_analysis_lines, _build_profile_traits_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
 
 
 def _payload() -> AuraRenderPayload:
@@ -199,8 +199,8 @@ def test_load_archetype_definitions_returns_12_defaults() -> None:
         assert key in defs
 
 
-def test_profile_lines_show_prominent_archetypes_with_emoji_percent_name_reason() -> None:
-    lines = _build_profile_lines(
+def test_profile_traits_lines_show_prominent_archetypes_with_emoji_percent_name_reason() -> None:
+    lines = _build_profile_traits_lines(
         {
             "scores": {"scintilla": 41, "pacificatore": 33, "collante": 26, "agitatore": 1},
             "metrics": {"first_message_of_day": 5, "unique_interactions": 9, "active_days": 15},
@@ -208,17 +208,29 @@ def test_profile_lines_show_prominent_archetypes_with_emoji_percent_name_reason(
         fallback_metrics={},
     )
     assert len(lines) == 3
-    assert "✨ 41% Scintilla" in lines[0]
+    assert "• ✨ 41% Scintilla" in lines[0]
     assert "—" in lines[0]
-    assert "🌿 33% Pacificatore" in lines[1]
+    assert "• 🌿 33% Pacificatore" in lines[1]
 
 
-def test_profile_lines_fallback_with_legacy_payload() -> None:
-    lines = _build_profile_lines({"scores": {}}, fallback_metrics={"invigorate_events": 4, "degrade_events": 1})
+def test_profile_traits_lines_fallback_with_legacy_payload() -> None:
+    lines = _build_profile_traits_lines({"scores": {}}, fallback_metrics={"invigorate_events": 4, "degrade_events": 1})
     assert any("Agitatore" in line for line in lines)
     assert any("Pacificatore" in line for line in lines)
 
 
+
+
+def test_profile_character_analysis_is_deterministic_and_non_empty() -> None:
+    lines = _build_profile_character_analysis_lines(
+        {
+            "scores": {"collante": 39, "esploratore_sociale": 31, "costante": 22},
+            "metrics": {"msg_count": 54, "unique_interactions": 18, "channel_diversity": 6, "active_days": 19, "replies_sent": 15},
+        },
+        fallback_metrics={},
+    )
+    assert 1 <= len(lines) <= 3
+    assert all(line.startswith("• ") for line in lines)
 def test_build_aura_embeds_profile_section_uses_new_title() -> None:
     embeds = build_aura_embeds(
         profile_name="role2",
@@ -229,7 +241,7 @@ def test_build_aura_embeds_profile_section_uses_new_title() -> None:
         ledger_lines=["👍 **+5 P.A.** test"],
     )
     detail_text = "\n".join(field.name for emb in embeds[1:] for field in emb.fields)
-    assert "TOP CARATTERISTICHE PROFILO PERSONALE" in detail_text
+    assert "PROFILO PERSONALE" in detail_text
 
 
 def test_build_aura_embeds_respects_profile_visibility_section() -> None:
@@ -242,7 +254,7 @@ def test_build_aura_embeds_respects_profile_visibility_section() -> None:
         ledger_lines=["👍 **+5 P.A.** test"],
     )
     detail_text = "\n".join(field.name for emb in embeds[1:] for field in emb.fields)
-    assert "TOP CARATTERISTICHE PROFILO PERSONALE" not in detail_text
+    assert "PROFILO PERSONALE" not in detail_text
 
 
 def test_dynamic_reason_dominante_uses_high_monopoly_metrics() -> None:

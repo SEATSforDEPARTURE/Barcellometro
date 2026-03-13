@@ -318,7 +318,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         channel_map = await ctx.database.get_channel_name_map(guild_id)
         ledger_lines = _ledger_lines(ledger_events, channel_map, guild_id)
         missions_assigned = await ctx.database.list_aura_missions_for_user(guild_id, user_id, start_ts, end_ts)
-        archetype = await ctx.database.fetch_latest_archetype_profile(guild_id, user_id, period_days=30)
+        archetype = await ctx.database.fetch_latest_archetype_profile(guild_id, user_id, period_days=90)
         archetype_metrics = json.loads(archetype["metrics_json"]) if archetype and archetype["metrics_json"] else {}
 
         guild_name = interaction.guild.name if interaction.guild else "Server"
