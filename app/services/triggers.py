@@ -321,6 +321,7 @@ class TriggerEngineService:
                             formatted_answer,
                             response_origin="remote_ai",
                             model_name=self._get_qna_remote_model_name(),
+                            is_followup=True,
                         )
                         reply_message = await message.reply(embed=reply_embed, mention_author=False)
                         base_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
@@ -334,6 +335,7 @@ class TriggerEngineService:
                             question_clean,
                             "Non riesco a rispondere qui in questo momento.",
                             response_origin="error",
+                            is_followup=True,
                         )
                         await message.reply(embed=error_embed, mention_author=False)
                     return
@@ -1880,13 +1882,17 @@ class TriggerEngineService:
         *,
         response_origin: Literal["remote_ai", "local_backend", "error"],
         model_name: str | None = None,
+        is_followup: bool = False,
     ) -> discord.Embed:
-        description_raw = (
-            f"✋ **{asker_name} chiede:**\n"
-            f"{(question or '').strip()}\n\n"
-            "**👇 Risposta:**\n"
-            f"{(answer_text or '').strip()}"
-        )
+        if is_followup:
+            description_raw = f"**👇 Risposta:**\n{(answer_text or '').strip()}"
+        else:
+            description_raw = (
+                f"✋ **{asker_name} chiede:**\n"
+                f"{(question or '').strip()}\n\n"
+                "**👇 Risposta:**\n"
+                f"{(answer_text or '').strip()}"
+            )
         description = self._truncate_embed_description(description_raw)
         embed = discord.Embed(
             title="❓BOTTA & RISPOSTA",
