@@ -259,8 +259,8 @@ def _build_profile_traits_lines(archetype_metrics: dict[str, Any], *, fallback_m
     if not normalized_scores:
         climate = max(0, min(100, 50 + (int(fallback_metrics.get("invigorate_events", 0) or 0) - int(fallback_metrics.get("degrade_events", 0) or 0)) * 10))
         return [
-            f"• 🔥 {climate}% Agitatore — Nel periodo hai avuto diversi momenti intensi.",
-            f"• 🌿 {100 - climate}% Pacificatore — Hai anche segnali di dialogo costruttivo.",
+            f"• 🔥 **{climate}% Agitatore** — Nel periodo hai avuto diversi momenti intensi.",
+            f"• 🌿 **{100 - climate}% Pacificatore** — Hai anche segnali di dialogo costruttivo.",
         ]
 
     top = _select_top_profile_archetypes(normalized_scores, profile_defs)
@@ -285,7 +285,7 @@ def _build_profile_traits_lines(archetype_metrics: dict[str, Any], *, fallback_m
         reason = reason[:1].upper() + reason[1:] if reason else "Profilo emerso dalle tue metriche del periodo."
         if not reason.endswith((".", "!", "?")):
             reason = f"{reason}."
-        lines.append(f"• {emoji} {pct}% {label} — {reason}")
+        lines.append(f"• {emoji} **{pct}% {label}** — {reason}")
     return lines
 
 
@@ -644,7 +644,10 @@ def build_aura_embeds(
     for idx in range(0, len(details_sections), page_size):
         page_chunks.append(details_sections[idx : idx + page_size])
     if profile_section is not None:
-        page_chunks.append([profile_section])
+        if page_chunks:
+            page_chunks = [page_chunks[0], [profile_section], *page_chunks[1:]]
+        else:
+            page_chunks = [[profile_section]]
 
     max_pages = max(1, details_embeds_max)
     page_chunks = page_chunks[:max_pages]
