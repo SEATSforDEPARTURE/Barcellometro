@@ -1170,6 +1170,125 @@ class DatabaseService:
         scored.sort(key=lambda item: (int(item.get("score", 0)), str(item.get("created_at", ""))), reverse=True)
         return scored[:safe_limit]
 
+    async def fetch_qna_messages(
+        self,
+        *,
+        guild_id: str,
+        start_ts: str,
+        end_ts: str,
+        limit: int = 12,
+        user_id: str | None = None,
+        topic: str | None = None,
+    ) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(50, int(limit or 12)))
+        params: list[Any] = [guild_id, start_ts, end_ts]
+        where_parts = [
+            "m.guild_id = ?",
+            "m.ts >= ?",
+            "m.ts <= ?",
+            "COALESCE(m.is_deleted, 0) = 0",
+            "COALESCE(u.is_bot, 0) = 0",
+        ]
+        if user_id:
+            where_parts.append("m.author_id = ?")
+            params.append(user_id)
+        if topic:
+            where_parts.append("LOWER(COALESCE(m.content, '')) LIKE ?")
+            params.append(f"%{str(topic).lower()}%")
+        sql = f"""
+            SELECT m.message_id, m.guild_id, m.channel_id, m.author_id,
+                   COALESCE(gm.nickname, u.display_name, u.global_name, u.username, m.author_id) AS author_name,
+                   m.ts, m.content
+            FROM messages m
+            LEFT JOIN users u ON u.user_id = m.author_id
+            LEFT JOIN guild_memberships gm ON gm.guild_id = m.guild_id AND gm.user_id = m.author_id
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY m.ts DESC
+            LIMIT ?
+        """
+        params.append(safe_limit)
+        rows = await self.fetchall(sql, tuple(params))
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            message_id = str(row["message_id"] or "")
+            out.append(
+                {
+                    "message_id": message_id,
+                    "guild_id": str(row["guild_id"] or ""),
+                    "channel_id": str(row["channel_id"] or ""),
+                    "author_id": str(row["author_id"] or ""),
+                    "author_name": str(row["author_name"] or row["author_id"] or ""),
+                    "ts": str(row["ts"] or ""),
+                    "content": str(row["content"] or ""),
+                    "jump_url": f"https://discord.com/channels/{row['guild_id']}/{row['channel_id']}/{message_id}" if message_id else None,
+                }
+            )
+        return out
+
+    async def fetch_qna_user_stats(self, *, guild_id: str, user_id: str, start_ts: str, end_ts: str) -> dict[str, int]:
+        row = await self.fetchone(
+            """
+            SELECT COUNT(*) AS messages,
+                   COUNT(DISTINCT channel_id) AS channels,
+                   COUNT(DISTINCT substr(ts, 1, 10)) AS active_days
+            FROM messages
+            WHERE guild_id = ? AND author_id = ? AND ts >= ? AND ts <= ? AND COALESCE(is_deleted, 0) = 0
+            """,
+            (guild_id, user_id, start_ts, end_ts),
+        )
+        if not row:
+            return {"messages": 0, "channels": 0, "active_days": 0}
+        return {
+            "messages": int(row["messages"] or 0),
+            "channels": int(row["channels"] or 0),
+            "active_days": int(row["active_days"] or 0),
+        }
+
+    async def fetch_qna_conversation_between_users(
+        self,
+        *,
+        guild_id: str,
+        user_a_id: str | None,
+        question: str,
+        start_ts: str,
+        end_ts: str,
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        if not user_a_id:
+            return []
+        mention_ids = re.findall(r"<@!?(\d+)>", question)
+        user_b_id = next((uid for uid in mention_ids if uid != user_a_id), None)
+        if not user_b_id:
+            return []
+        rows = await self.fetchall(
+            """
+            SELECT m.message_id, m.guild_id, m.channel_id, m.author_id,
+                   COALESCE(gm.nickname, u.display_name, u.global_name, u.username, m.author_id) AS author_name,
+                   m.ts, m.content
+            FROM messages m
+            LEFT JOIN users u ON u.user_id = m.author_id
+            LEFT JOIN guild_memberships gm ON gm.guild_id = m.guild_id AND gm.user_id = m.author_id
+            WHERE m.guild_id = ? AND m.ts >= ? AND m.ts <= ?
+              AND m.author_id IN (?, ?)
+              AND COALESCE(m.is_deleted, 0) = 0
+            ORDER BY m.ts DESC
+            LIMIT ?
+            """,
+            (guild_id, start_ts, end_ts, user_a_id, user_b_id, max(1, min(50, int(limit or 12)))),
+        )
+        return [
+            {
+                "message_id": str(r["message_id"] or ""),
+                "guild_id": str(r["guild_id"] or ""),
+                "channel_id": str(r["channel_id"] or ""),
+                "author_id": str(r["author_id"] or ""),
+                "author_name": str(r["author_name"] or r["author_id"] or ""),
+                "ts": str(r["ts"] or ""),
+                "content": str(r["content"] or ""),
+            }
+            for r in rows
+        ]
+
     async def get_qna_session_history(self, guild_id: str, channel_id: str, user_id: str, now_iso: str) -> list[dict[str, str]]:
         row = await self.fetchone(
             """

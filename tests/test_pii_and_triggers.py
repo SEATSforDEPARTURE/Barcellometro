@@ -276,7 +276,7 @@ def test_bulletize_answer_returns_no_direct_evidence_when_target_missing() -> No
     ]
 
     out = service._bulletize_answer("cosa ha detto Daniela?", answer, evidence)
-    assert out == "Non ho trovato prove dirette di un messaggio di Daniela nel periodo richiesto."
+    assert out == "Non risultano messaggi o attività rilevanti per questa richiesta nel periodo indicato."
 
 
 def test_filter_evidence_by_target_matches_decorated_name() -> None:
@@ -311,7 +311,7 @@ def test_bulletize_answer_no_target_evidence_has_no_links() -> None:
     ]
 
     out = service._bulletize_answer("è vero che Daniela ha detto live senza censura alle 20?", answer, evidence)
-    assert out == "Non ho trovato prove dirette di un messaggio di Daniela nel periodo richiesto."
+    assert out == "Non risultano messaggi o attività rilevanti per questa richiesta nel periodo indicato."
     assert "https://discord.com/channels/1/2/3" not in out
 
 
