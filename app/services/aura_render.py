@@ -213,28 +213,28 @@ def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any], 
     return missions[:3] if missions else ["Nessuna per oggi."]
 
 
-def _build_profile_lines(archetype_metrics: dict[str, Any], *, fallback_metrics: dict[str, Any]) -> list[str]:
+def _resolve_profile_payload(archetype_metrics: dict[str, Any], *, fallback_metrics: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, int], dict[str, Any], dict[str, Any]]:
     profile_defs = _load_archetype_definitions()
     scores = archetype_metrics.get("scores", {}) if isinstance(archetype_metrics, dict) else {}
     payload_metrics = archetype_metrics.get("metrics", {}) if isinstance(archetype_metrics, dict) else {}
     reasons = archetype_metrics.get("reasons", {}) if isinstance(archetype_metrics, dict) else {}
 
-    if not isinstance(scores, dict) or not scores:
-        climate = max(0, min(100, 50 + (int(fallback_metrics.get("invigorate_events", 0) or 0) - int(fallback_metrics.get("degrade_events", 0) or 0)) * 10))
-        return [
-            f"**🔥 {climate}% Agitatore** — nel periodo hai avuto diversi momenti intensi.",
-            f"**🌿 {100 - climate}% Pacificatore** — hai anche segnali di dialogo costruttivo.",
-        ]
-
     normalized_scores: dict[str, int] = {}
-    for key, value in scores.items():
-        try:
-            normalized_scores[str(key)] = max(0, int(round(float(value))))
-        except (TypeError, ValueError):
-            continue
-    if not normalized_scores:
-        return ["Nessun dato rilevante nel periodo."]
+    if isinstance(scores, dict):
+        for key, value in scores.items():
+            try:
+                normalized_scores[str(key)] = max(0, int(round(float(value))))
+            except (TypeError, ValueError):
+                continue
 
+    resolved_metrics = dict(fallback_metrics)
+    if isinstance(payload_metrics, dict):
+        resolved_metrics.update(payload_metrics)
+
+    return profile_defs, normalized_scores, resolved_metrics, reasons if isinstance(reasons, dict) else {}
+
+
+def _select_top_profile_archetypes(normalized_scores: dict[str, int], profile_defs: dict[str, dict[str, Any]]) -> list[tuple[str, int]]:
     ordered = sorted(
         (
             (key, val)
@@ -245,20 +245,33 @@ def _build_profile_lines(archetype_metrics: dict[str, Any], *, fallback_metrics:
         reverse=True,
     )
     if not ordered:
-        return ["Nessun dato rilevante nel periodo."]
+        return []
 
     top = ordered[:2]
     if len(ordered) >= 3 and ordered[2][1] > 0 and (ordered[1][1] - ordered[2][1]) <= 8:
         top.append(ordered[2])
+    return top
+
+
+def _build_profile_traits_lines(archetype_metrics: dict[str, Any], *, fallback_metrics: dict[str, Any]) -> list[str]:
+    profile_defs, normalized_scores, resolved_metrics, reasons = _resolve_profile_payload(archetype_metrics, fallback_metrics=fallback_metrics)
+
+    if not normalized_scores:
+        climate = max(0, min(100, 50 + (int(fallback_metrics.get("invigorate_events", 0) or 0) - int(fallback_metrics.get("degrade_events", 0) or 0)) * 10))
+        return [
+            f"• 🔥 {climate}% Agitatore — Nel periodo hai avuto diversi momenti intensi.",
+            f"• 🌿 {100 - climate}% Pacificatore — Hai anche segnali di dialogo costruttivo.",
+        ]
+
+    top = _select_top_profile_archetypes(normalized_scores, profile_defs)
+    if not top:
+        return ["• Nessun dato rilevante nel periodo."]
 
     lines: list[str] = []
     for archetype_key, pct in top:
         cfg = profile_defs.get(archetype_key, {})
         emoji = str(cfg.get("emoji", "✨")).strip() or "✨"
         label = str(cfg.get("label", archetype_key.replace("_", " ").title())).strip() or archetype_key
-        resolved_metrics = dict(fallback_metrics)
-        if isinstance(payload_metrics, dict):
-            resolved_metrics.update(payload_metrics)
         reason = build_dynamic_archetype_reason(
             archetype_key,
             metrics=resolved_metrics,
@@ -266,15 +279,71 @@ def _build_profile_lines(archetype_metrics: dict[str, Any], *, fallback_metrics:
             config=cfg,
         )
 
-        if isinstance(reasons, dict) and reasons.get(archetype_key):
+        if reasons.get(archetype_key):
             reason = str(reasons.get(archetype_key)).strip() or reason
 
         reason = reason[:1].upper() + reason[1:] if reason else "Profilo emerso dalle tue metriche del periodo."
         if not reason.endswith((".", "!", "?")):
             reason = f"{reason}."
-        lines.append(f"**{emoji} {pct}% {label}** — {reason}")
+        lines.append(f"• {emoji} {pct}% {label} — {reason}")
     return lines
 
+
+def _build_profile_character_analysis_lines(archetype_metrics: dict[str, Any], *, fallback_metrics: dict[str, Any]) -> list[str]:
+    profile_defs, normalized_scores, metrics, _ = _resolve_profile_payload(archetype_metrics, fallback_metrics=fallback_metrics)
+    top = _select_top_profile_archetypes(normalized_scores, profile_defs)
+
+    msg = int(metrics.get("msg_count", 0) or 0)
+    unique = int(metrics.get("unique_interactions", 0) or 0)
+    channels = int(metrics.get("channel_diversity", 0) or 0)
+    active_days = int(metrics.get("active_days", 0) or 0)
+    replies_sent = int(metrics.get("replies_sent", 0) or 0)
+    quality = int(metrics.get("quality_counter", 0) or 0)
+
+    if msg <= 0:
+        return ["• Dati ancora limitati: continua a partecipare per ottenere un profilo personale più preciso."]
+
+    key1 = top[0][0] if top else ""
+    key2 = top[1][0] if len(top) > 1 else ""
+    label1 = str(profile_defs.get(key1, {}).get("label", key1.replace("_", " ").title())).strip() if key1 else "profilo"
+    label2 = str(profile_defs.get(key2, {}).get("label", key2.replace("_", " ").title())).strip() if key2 else ""
+
+    lines: list[str] = []
+    if key1 == "dominante":
+        lines.append("• Hai una presenza forte e visibile: occupi spazio nelle conversazioni e ne influenzi spesso il ritmo.")
+    elif key1 in {"collante", "esploratore_sociale"}:
+        lines.append("• Il tuo profilo appare sociale e distributivo: coinvolgi persone diverse e ti muovi tra più contesti.")
+    elif key1 == "costante":
+        lines.append("• Hai una presenza regolare e misurata, più orientata alla continuità che al protagonismo.")
+    elif key1 == "ascoltatore":
+        lines.append("• Ti distingui per interventi mirati e poco invasivi, con attenzione alla qualità dello scambio.")
+    elif label1:
+        lines.append(f"• Nel periodo emerge soprattutto il tuo lato {label1.lower()}, con segnali abbastanza stabili.")
+
+    if key2 and key2 != key1:
+        lines.append(f"• In parallelo compare anche una componente {label2.lower()}, che bilancia il tuo stile principale.")
+
+    if unique >= 10 and channels >= 4:
+        lines.append("• Mostri una buona varietà relazionale: la tua presenza non resta bloccata su pochi canali o pochi utenti.")
+    elif replies_sent >= max(3, msg // 4) and quality >= 2:
+        lines.append("• C'è una componente dialogica chiara: rispondi con continuità e mantieni toni utili nel confronto.")
+    elif active_days >= 12:
+        lines.append("• La frequenza su molti giorni suggerisce affidabilità e continuità nella partecipazione.")
+
+    return lines[:3] if lines else ["• Profilo in evoluzione: con più interazioni emergeranno pattern più definiti."]
+
+
+def _build_profile_section_text(archetype_metrics: dict[str, Any], *, fallback_metrics: dict[str, Any]) -> str:
+    trait_lines = _build_profile_traits_lines(archetype_metrics, fallback_metrics=fallback_metrics)
+    analysis_lines = _build_profile_character_analysis_lines(archetype_metrics, fallback_metrics=fallback_metrics)
+    blocks = [
+        "**Caratteristiche dominanti:**",
+        *trait_lines,
+        "",
+        "**Analisi carattere:**",
+        *analysis_lines,
+    ]
+    return "\n".join(blocks)
 
 def _build_advice_lines(metrics: dict[str, Any], *, channel_name: str) -> list[str]:
     cfg = load_json_file(ARCHETYPES_CONFIG_PATH) or load_json_file(ARCHETYPES_EXAMPLE_PATH) or {}
@@ -547,13 +616,14 @@ def build_aura_embeds(
     main.set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
 
     details_sections: list[tuple[str, str]] = []
+    profile_section: tuple[str, str] | None = None
     metrics = json.loads(aura_payload.metrics_json) if aura_payload.metrics_json else {}
     details_sections.append(("🕹️ PUNTEGGI", _compact_bullets(_score_lines(ledger_lines), fallback="Nessun dato rilevante nel periodo.")))
 
     if "details.missions" in include_sections:
         details_sections.append(("📜 MISSIONI QUOTIDIANE", _compact_bullets(_build_missions(metrics, aura_payload.archetype_metrics, aura_payload.assigned_missions), fallback="Nessuna per oggi.")))
     if "details.profile" in include_sections:
-        details_sections.append(("👤 TOP CARATTERISTICHE PROFILO PERSONALE", _compact_bullets(_build_profile_lines(aura_payload.archetype_metrics, fallback_metrics=metrics), fallback="Nessun dato rilevante nel periodo.")))
+        profile_section = ("👤 PROFILO PERSONALE", _build_profile_section_text(aura_payload.archetype_metrics, fallback_metrics=metrics))
     if "details.advice" in include_sections:
         details_sections.append(("🧭 CONSIGLI PERSONALIZZATI", _compact_bullets(_build_advice_lines(metrics, channel_name=aura_payload.channel_name), fallback="Nessun dato rilevante nel periodo.")))
     if "details.points_timeline" in include_sections and aura_payload.points_timeline_lines is not None:
@@ -566,13 +636,15 @@ def build_aura_embeds(
     if "details.note.role2" in include_sections:
         details_sections.append(("📌 NOTE", "• Per avere i consigli su come migliorare la tua aura, abbonati al piano superiore PRO MAX. 😉"))
 
-    if not details_sections:
+    if not details_sections and profile_section is None:
         return [main]
 
     page_size = 3
     page_chunks: list[list[tuple[str, str]]] = []
     for idx in range(0, len(details_sections), page_size):
         page_chunks.append(details_sections[idx : idx + page_size])
+    if profile_section is not None:
+        page_chunks.append([profile_section])
 
     max_pages = max(1, details_embeds_max)
     page_chunks = page_chunks[:max_pages]

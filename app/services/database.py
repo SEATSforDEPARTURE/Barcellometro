@@ -4166,7 +4166,7 @@ class DatabaseService:
             (guild_id, user_id, period_days, archetype_scores_json, metrics_json, computed_at),
         )
 
-    async def fetch_latest_archetype_profile(self, guild_id: str, user_id: str, period_days: int = 30) -> Optional[aiosqlite.Row]:
+    async def fetch_latest_archetype_profile(self, guild_id: str, user_id: str, period_days: int = 90) -> Optional[aiosqlite.Row]:
         return await self.fetchone(
             "SELECT * FROM archetype_profiles WHERE guild_id = ? AND user_id = ? AND period_days = ? ORDER BY computed_at DESC LIMIT 1",
             (guild_id, user_id, period_days),

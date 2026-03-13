@@ -577,3 +577,89 @@ def test_mission_completed_only_after_all_assigned_done(monkeypatch) -> None:
         assert len(mission_completed_events_again) == 1
 
     run(_scenario())
+
+
+def test_archetype_dominante_not_for_high_volume_with_high_diversity() -> None:
+    service = ArchetypeAnalyzerService(database=None, bot=None, eligibility_service=None)  # type: ignore[arg-type]
+    metrics = {
+        "msg_count": 120,
+        "unique_interactions": 85,
+        "reply_received": 24,
+        "replies_sent": 42,
+        "invigorate_events": 12,
+        "degrade_events": 2,
+        "quality_counter": 30,
+        "channel_diversity": 18,
+        "first_message_of_day": 2,
+        "mentions_count": 30,
+        "missions_completed": 4,
+        "active_days": 36,
+        "daily_regularity": 0.8,
+    }
+    raw = service._compute_archetype_raw_scores(metrics)
+    assert raw["dominante"] < raw["collante"]
+    assert raw["dominante"] < raw["esploratore_sociale"]
+
+
+def test_archetype_dominante_for_high_volume_monopoly_low_distribution() -> None:
+    service = ArchetypeAnalyzerService(database=None, bot=None, eligibility_service=None)  # type: ignore[arg-type]
+    metrics = {
+        "msg_count": 130,
+        "unique_interactions": 12,
+        "reply_received": 10,
+        "replies_sent": 8,
+        "invigorate_events": 10,
+        "degrade_events": 3,
+        "quality_counter": 4,
+        "channel_diversity": 2,
+        "first_message_of_day": 3,
+        "mentions_count": 5,
+        "missions_completed": 1,
+        "active_days": 26,
+        "daily_regularity": 0.55,
+    }
+    raw = service._compute_archetype_raw_scores(metrics)
+    top = max(raw, key=raw.get)
+    assert top == "dominante"
+
+
+def test_archetype_costante_emerges_on_regular_presence() -> None:
+    service = ArchetypeAnalyzerService(database=None, bot=None, eligibility_service=None)  # type: ignore[arg-type]
+    metrics = {
+        "msg_count": 58,
+        "unique_interactions": 20,
+        "reply_received": 14,
+        "replies_sent": 20,
+        "invigorate_events": 5,
+        "degrade_events": 1,
+        "quality_counter": 10,
+        "channel_diversity": 8,
+        "first_message_of_day": 2,
+        "mentions_count": 12,
+        "missions_completed": 3,
+        "active_days": 45,
+        "daily_regularity": 0.93,
+    }
+    raw = service._compute_archetype_raw_scores(metrics)
+    assert raw["costante"] > raw["dominante"]
+
+
+def test_archetype_lampo_can_emerge_with_low_volume_high_impact() -> None:
+    service = ArchetypeAnalyzerService(database=None, bot=None, eligibility_service=None)  # type: ignore[arg-type]
+    metrics = {
+        "msg_count": 8,
+        "unique_interactions": 5,
+        "reply_received": 11,
+        "replies_sent": 4,
+        "invigorate_events": 4,
+        "degrade_events": 0,
+        "quality_counter": 8,
+        "channel_diversity": 3,
+        "first_message_of_day": 2,
+        "mentions_count": 3,
+        "missions_completed": 1,
+        "active_days": 5,
+        "daily_regularity": 0.5,
+    }
+    raw = service._compute_archetype_raw_scores(metrics)
+    assert raw["lampo"] > raw["dominante"]

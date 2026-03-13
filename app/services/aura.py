@@ -958,6 +958,7 @@ class ArchetypeAnalyzerService:
         "selettivo",
         "dominante",
     )
+    ARCHETYPE_PERIOD_DAYS = 90
 
     def __init__(
         self,
@@ -987,7 +988,7 @@ class ArchetypeAnalyzerService:
 
     async def run_once(self) -> None:
         now = datetime.now(timezone.utc)
-        period_start = (now - timedelta(days=30)).isoformat()
+        period_start = (now - timedelta(days=self.ARCHETYPE_PERIOD_DAYS)).isoformat()
         period_end = now.isoformat()
         for guild in self._bot.guilds:
             guild_id = str(guild.id)
@@ -1007,7 +1008,7 @@ class ArchetypeAnalyzerService:
                 await self._db.upsert_archetype_profile(
                     guild_id=guild_id,
                     user_id=str(member.id),
-                    period_days=30,
+                    period_days=self.ARCHETYPE_PERIOD_DAYS,
                     archetype_scores_json=json.dumps(score_payload),
                     metrics_json=json.dumps({"insights": insights, "scores": score_payload, "metrics": metrics_detail, "reasons": reasons}),
                     computed_at=period_end,
@@ -1110,6 +1111,8 @@ class ArchetypeAnalyzerService:
         }
 
     def _compute_archetype_raw_scores(self, m: dict[str, float | int]) -> dict[str, float]:
+        import math
+
         msg = float(m.get("msg_count", 0) or 0)
         unique = float(m.get("unique_interactions", 0) or 0)
         replies = float(m.get("reply_received", 0) or 0)
@@ -1127,25 +1130,46 @@ class ArchetypeAnalyzerService:
         interactions_per_msg = unique / max(msg, 1.0)
         channels_per_msg = channels / max(msg, 1.0)
         mentions_per_msg = mentions / max(msg, 1.0)
+        replies_per_msg = replies_sent / max(msg, 1.0)
         climate_push = invigorate + degrade
         climate_balance = max(0.0, invigorate - degrade)
         monopoly_ratio = max(0.0, (msg - unique) / max(msg, 1.0))
         impact_per_msg = (invigorate * 1.5 + replies + quality + missions * 2.0) / max(msg, 1.0)
         low_presence = max(0.0, 1.0 - min(1.0, msg / 30.0))
 
+        msg_log = math.log1p(msg)
+        volume_factor = min(1.0, msg_log / math.log1p(140.0))
+        low_relational_diversity = max(0.0, 1.0 - min(1.0, interactions_per_msg * 2.2))
+        low_channel_diversity = max(0.0, 1.0 - min(1.0, channels_per_msg * 5.0))
+        low_reciprocity = max(0.0, 1.0 - min(1.0, replies_per_msg * 2.4))
+        low_quality_density = max(0.0, 1.0 - min(1.0, quality / max(msg * 0.35, 1.0)))
+        dominant_behavior_pressure = (
+            monopoly_ratio * 0.35
+            + low_relational_diversity * 0.2
+            + low_channel_diversity * 0.2
+            + low_reciprocity * 0.15
+            + low_quality_density * 0.1
+        )
+
         return {
             "scintilla": 0.50 * first_day + 0.35 * invigorate + 0.2 * missions + 0.12 * replies,
             "pacificatore": 0.45 * climate_balance + 0.3 * quality + 0.25 * regularity * 10.0 + 0.15 * replies_sent - 0.35 * degrade,
             "agitatore": 0.35 * climate_push + 0.25 * max(0.0, degrade * 2.0 - quality) + 0.2 * first_day + 0.1 * msg,
-            "collante": 0.45 * unique + 0.3 * mentions + 0.25 * active_days + 0.15 * replies_sent,
+            "collante": 0.45 * unique + 0.33 * mentions + 0.22 * active_days + 0.2 * replies_sent,
             "mediatore": 0.35 * climate_balance + 0.3 * replies_sent + 0.25 * quality + 0.15 * unique - 0.3 * degrade,
-            "esploratore_sociale": 0.45 * unique + 0.35 * channels + 0.2 * mentions,
-            "costante": 0.5 * active_days + 0.35 * regularity * 20.0 + 0.15 * min(msg, 40.0),
+            "esploratore_sociale": 0.4 * unique + 0.4 * channels + 0.2 * mentions,
+            "costante": 0.55 * active_days + 0.35 * regularity * 20.0 + 0.1 * min(msg, 50.0),
             "lampo": (impact_per_msg * 20.0) * low_presence + 0.25 * first_day,
             "silenzioso": max(0.0, (22.0 - msg) * 0.8 + active_days * 0.6 - monopoly_ratio * 10.0),
-            "ascoltatore": 0.45 * replies_sent + 0.3 * quality + 0.15 * unique + 8.0 * max(0.0, 0.4 - mentions_per_msg),
+            "ascoltatore": 0.5 * replies_sent + 0.32 * quality + 0.12 * unique + 10.0 * max(0.0, 0.42 - mentions_per_msg),
             "selettivo": max(0.0, (1.0 - min(1.0, interactions_per_msg * 1.7)) * 35.0 + active_days * 0.5 + quality * 0.2),
-            "dominante": 0.45 * msg + monopoly_ratio * 35.0 + (1.0 - min(1.0, channels_per_msg * 4.0)) * 14.0 - quality * 0.2,
+            # Dominante is intentionally less volume-driven: raw message count is log-smoothed
+            # and only becomes strong when monopoly + low distribution behaviours coexist.
+            "dominante": 42.0 * volume_factor * dominant_behavior_pressure
+            + monopoly_ratio * 10.0
+            + low_channel_diversity * 5.0
+            + low_relational_diversity * 4.0
+            - quality * 0.25,
         }
 
     def _normalize_archetype_scores(self, raw_scores: dict[str, float]) -> dict[str, int]:
