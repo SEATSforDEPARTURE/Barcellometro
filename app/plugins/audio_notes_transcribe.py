@@ -211,6 +211,7 @@ def setup(registry: ServiceRegistry) -> None:
 
             stt_backend = (await _get_setting("stt.backend", "local")).lower()
             stt_used = "local"
+            language_hint = ((await _get_setting("stt.local.language_hint", "auto")) or "auto").strip().lower()
             try:
                 if stt_backend == "ai":
                     transcript = await stt_ai.transcribe(wav_path)
@@ -228,8 +229,19 @@ def setup(registry: ServiceRegistry) -> None:
             target_lang = await _get_setting("translate.target_lang", "it")
             translate_backend = (await _get_setting("translate.backend", "local")).lower()
             translate_used = translate_backend
-            detected_lang = _normalize_lang(transcript.language)
+            detected_lang = _normalize_lang(transcript.detected_language)
             target_lang_norm = _normalize_lang(target_lang)
+
+            logger.debug(
+                "Audio note STT backend=%s model=%s language_hint=%s stt_hint=%s detected_language=%s text_preview=%r",
+                stt_used,
+                transcript.model,
+                language_hint,
+                transcript.language_hint,
+                transcript.detected_language,
+                original_transcript_text[:120],
+            )
+
             if detected_lang != target_lang_norm:
                 try:
                     if translate_backend == "ai":
@@ -244,6 +256,13 @@ def setup(registry: ServiceRegistry) -> None:
                     logger.exception("Translation failed; skipping translation")
                     translation_text = None
                     translation_model = None
+
+            logger.debug(
+                "Audio note translation decision detected=%s target=%s translated=%s",
+                detected_lang,
+                target_lang_norm,
+                bool(translation_text),
+            )
 
             output_parts = []
             output_parts.append("**✍️ Trascrizione:**")
@@ -270,7 +289,8 @@ def setup(registry: ServiceRegistry) -> None:
                 "attachment_filename": attachment.filename,
                 "size_mb": round(size_mb, 2),
                 "duration_s": duration,
-                "lang": transcript.language,
+                "lang": transcript.detected_language,
+                "language_hint": transcript.language_hint,
                 "stt_backend": stt_used,
                 "stt_model": transcript.model,
                 "translate_backend": translate_used,

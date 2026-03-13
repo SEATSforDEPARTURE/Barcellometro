@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import os
-from typing import Optional
+import logging
 
 from app.services.ai import AiService
 from app.services.database import DatabaseService
 from app.services.stt.base import TranscriptResult
+
+logger = logging.getLogger(__name__)
 
 
 class AiSttService:
@@ -22,7 +23,7 @@ class AiSttService:
         model = self._ai_service.get_model("transcription")
         if model is None:
             raise RuntimeError("AI model not configured")
-        language_hint = (await self._database.get_setting("stt.local.language_hint")) or "auto"
+        language_hint = ((await self._database.get_setting("stt.local.language_hint")) or "auto").strip().lower()
         language = None if language_hint == "auto" else language_hint
 
         with open(audio_path, "rb") as audio_file:
@@ -32,11 +33,20 @@ class AiSttService:
                 language=language,
             )
 
-        detected_language = getattr(response, "language", None) or language or "auto"
+        detected_language = (getattr(response, "language", None) or "unknown").strip().lower()
+        logger.debug(
+            "AI STT completed model=%s language_hint=%s response_language=%s text_preview=%r",
+            model,
+            language_hint,
+            detected_language,
+            (response.text or "")[:120],
+        )
 
         return TranscriptResult(
             text=response.text.strip(),
             language=detected_language,
+            detected_language=detected_language,
+            language_hint=language_hint,
             backend="ai",
             model=model,
         )
