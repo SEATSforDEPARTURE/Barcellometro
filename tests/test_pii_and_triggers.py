@@ -1023,7 +1023,7 @@ def test_handle_qna_returns_semantic_plain_and_cache_v2() -> None:
         assert out is not None
         assert out.get("answer_mode") == "semantic_plain"
         cache_key = database.set_cache.await_args.args[0]
-        assert ":semantic_v2:" in cache_key
+        assert ":semantic_v3:" in cache_key
 
     asyncio.run(_run())
 
@@ -1082,3 +1082,25 @@ def test_route_qna_channel_semantic_plain_renders_plain_mode() -> None:
         assert called.get("evidence") == []
 
     asyncio.run(_run())
+
+
+def test_strip_leading_answer_label_variants() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    assert service._strip_leading_answer_label("Risposta\nciao") == "ciao"
+    assert service._strip_leading_answer_label("Risposta: ciao") == "ciao"
+    assert service._strip_leading_answer_label("**Risposta**\nciao") == "ciao"
+    assert service._strip_leading_answer_label("**Risposta:** ciao") == "ciao"
+    assert service._strip_leading_answer_label("👇 Risposta:\nciao") == "ciao"
+
+
+def test_build_qna_embed_removes_answer_label_duplication() -> None:
+    service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
+    embed = service._build_qna_embed(
+        "Luca",
+        "di che ha parlato lela ieri?",
+        "Risposta:\nHa parlato di Sanremo.",
+        response_origin="local_backend",
+    )
+    description = embed.description or ""
+    assert description.count("**👇 Risposta:**") == 1
+    assert "\nRisposta" not in description
