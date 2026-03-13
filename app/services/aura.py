@@ -30,6 +30,8 @@ class AuraRuleDefinition:
     enabled: bool = True
 
 DEFAULT_AURA_RULES: dict[str, int] = {
+    "message_participation": 1,
+    "voice_participation_minute": 1,
     "first_message_of_day": 5,
     "reply_to_new_user": 8,
     "conversation_starter": 6,
@@ -55,6 +57,8 @@ DEFAULT_AURA_RULES: dict[str, int] = {
 }
 
 AURA_REASON_HUMAN: dict[str, str] = {
+    "message_participation": "per partecipazione ai messaggi",
+    "voice_participation_minute": "per partecipazione vocale al minuto",
     "first_message_of_day": "per aver scritto per prima nel giorno",
     "reply_to_new_user": "per aver risposto a una persona nuova",
     "positive_climate_contribution": "per aver contribuito a un clima più costruttivo",
@@ -77,6 +81,7 @@ AURA_REASON_HUMAN: dict[str, str] = {
     "spam_like_penalty": "per comportamento simile a spam",
     "tension_chain_penalty": "per aver alimentato una catena di tensione",
     "good_morning_first": "per aver dato il buongiorno per prima",
+    "mission_task_reward": "per aver completato una missione assegnata",
     "ondemand.aggregate": "bilancio complessivo del periodo",
     "batch.aggregate": "bilancio aggregato periodico",
 }
@@ -347,19 +352,10 @@ class AuraMissionService:
                     continue
 
             await self._db.complete_aura_mission(guild_id=guild_id, user_id=user_id, mission_id=mission_id, assigned_at=str(mission.get("assigned_at")), completed_at=ts)
-            await self._scoring.apply_rule(
-                guild_id=guild_id,
-                user_id=user_id,
-                rule_code="mission_completed",
-                ts=ts,
-                channel_id=channel_id,
-                message_id=message_id,
-                source_service="mission",
-                source_event="mission.completed",
-                meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id), "completion_text": completion_text, "matched_keyword": "buongiorno" if mission_id == "good_morning" else None},
-            )
             if reward > 0:
-                reward_reason = str(mission_cfg.get("rule_on_complete") or ("good_morning_first" if mission_id == "good_morning" else "mission_completed"))
+                reward_reason = str(mission_cfg.get("rule_on_complete") or ("good_morning_first" if mission_id == "good_morning" else "mission_task_reward"))
+                if reward_reason == "mission_completed":
+                    reward_reason = "mission_task_reward"
                 await self._scoring.award_points(
                     guild_id=guild_id,
                     user_id=user_id,
@@ -372,8 +368,57 @@ class AuraMissionService:
                     source_event="mission.reward",
                     meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id), "completion_text": completion_text, "mission_reward_points": reward},
                 )
+            await self._maybe_apply_all_missions_completion_bonus(
+                guild_id=guild_id,
+                user_id=user_id,
+                day=day,
+                ts=ts,
+                channel_id=channel_id,
+                message_id=message_id,
+                mission_id=mission_id,
+            )
             completed.append(mission_id)
         return completed
+
+    async def _maybe_apply_all_missions_completion_bonus(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        day: str,
+        ts: str,
+        channel_id: str,
+        message_id: str,
+        mission_id: str,
+    ) -> None:
+        assigned = await self._db.list_aura_missions_for_user(guild_id, user_id, f"{day}T00:00:00+00:00", f"{day}T23:59:59+00:00")
+        if not assigned:
+            return
+        if any(str(item.get("status", "")) != "completed" for item in assigned):
+            return
+        completion_event_id = f"mission-all-completed:{day}"
+        if hasattr(self._db, "aura_ledger_event_already_recorded"):
+            already = await self._db.aura_ledger_event_already_recorded(
+                guild_id=guild_id,
+                user_id=user_id,
+                reason_code="mission_completed",
+                message_id=completion_event_id,
+                source_event="mission.all_completed",
+                mission_id=None,
+            )
+            if already:
+                return
+        await self._scoring.apply_rule(
+            guild_id=guild_id,
+            user_id=user_id,
+            rule_code="mission_completed",
+            ts=ts,
+            channel_id=channel_id,
+            message_id=completion_event_id,
+            source_service="mission",
+            source_event="mission.all_completed",
+            meta={"mission_id": mission_id, "trigger_message_id": message_id, "day": day, "all_missions_completed_rewarded": True},
+        )
 
     async def expire_missions(self, *, guild_id: str, user_id: str, ts: str) -> None:
         await self._db.expire_aura_missions(guild_id=guild_id, user_id=user_id, now_ts=ts)
@@ -602,6 +647,16 @@ class AuraRollingStatsService:
             ts=ts,
             unique_increment=max(1, len(set(mentions))),
         )
+        await self._scoring.apply_rule(
+            guild_id=guild_id,
+            user_id=user_id,
+            rule_code="message_participation",
+            ts=ts,
+            channel_id=channel_id,
+            message_id=message_id,
+            source_service="discord_adapter",
+            source_event="message.participation",
+        )
         if await self._db.count_user_messages_for_day(guild_id, user_id, window_key) == 1:
             await self._scoring.apply_rule(
                 guild_id=guild_id,
@@ -625,6 +680,14 @@ class AuraRollingStatsService:
                 source_event="message.mentions",
                 meta={"mentions_count": len(set(mentions))},
             )
+        await self._apply_message_penalties(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=user_id,
+            ts=ts,
+            message_id=message_id,
+            content=content,
+        )
         metrics_today = await self._db.fetch_aura_metrics(guild_id, user_id, f"{window_key}T00:00:00+00:00", f"{window_key}T23:59:59+00:00", channel_id=None)
         await self._missions.expire_missions(guild_id=guild_id, user_id=user_id, ts=ts)
         await self._missions.assign_daily_missions_for_user(guild_id=guild_id, user_id=user_id, ts=ts, metrics=metrics_today)
@@ -658,6 +721,114 @@ class AuraRollingStatsService:
                 source_event="barcello.result",
                 meta={"invigorate": invigorate},
             )
+            await self._scoring.apply_rule(
+                guild_id=guild_id,
+                user_id=str(user_id),
+                rule_code="positive_climate_contribution" if invigorate else "climate_degrade",
+                ts=ts,
+                source_service="barcello",
+                source_event="barcello.climate",
+                meta={"invigorate": invigorate},
+            )
+
+    async def _apply_message_penalties(self, *, guild_id: str, channel_id: str, user_id: str, ts: str, message_id: str | None, content: str) -> None:
+        day = datetime.fromisoformat(ts).date().isoformat()
+        metrics = await self._db.fetch_aura_metrics(guild_id, user_id, f"{day}T00:00:00+00:00", f"{day}T23:59:59+00:00", channel_id=None)
+        msg_count = int(metrics.get("msg_count", 0) or 0)
+        unique_interactions = int(metrics.get("unique_interactions", 0) or 0)
+        degrade_events = int(metrics.get("degrade_events", 0) or 0)
+        source_event = "message.quality.penalty"
+        synthetic_message_id = f"{day}:{channel_id}:{user_id}"
+
+        if msg_count >= 12 and unique_interactions <= 2:
+            await self._scoring.apply_rule(
+                guild_id=guild_id,
+                user_id=user_id,
+                rule_code="monopoly_penalty",
+                ts=ts,
+                channel_id=channel_id,
+                message_id=f"{synthetic_message_id}:monopoly",
+                source_service="discord_adapter",
+                source_event=source_event,
+            )
+        if msg_count >= 8 and unique_interactions <= 1:
+            await self._scoring.apply_rule(
+                guild_id=guild_id,
+                user_id=user_id,
+                rule_code="low_diversity_penalty",
+                ts=ts,
+                channel_id=channel_id,
+                message_id=f"{synthetic_message_id}:low_diversity",
+                source_service="discord_adapter",
+                source_event=source_event,
+            )
+        if degrade_events >= 3:
+            await self._scoring.apply_rule(
+                guild_id=guild_id,
+                user_id=user_id,
+                rule_code="tension_chain_penalty",
+                ts=ts,
+                channel_id=channel_id,
+                message_id=f"{synthetic_message_id}:tension",
+                source_service="discord_adapter",
+                source_event=source_event,
+            )
+        if content and hasattr(self._db, "count_recent_user_messages_with_same_content"):
+            repeated = await self._db.count_recent_user_messages_with_same_content(guild_id=guild_id, user_id=user_id, content=content, until_ts=ts, lookback_minutes=5)
+            if repeated >= 3:
+                await self._scoring.apply_rule(
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    rule_code="spam_like_penalty",
+                    ts=ts,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    source_service="discord_adapter",
+                    source_event="message.spam_like",
+                    meta={"repeated_messages": repeated},
+                )
+
+    async def on_voice_participation(self, *, guild_id: str, voice_channel_id: str, user_id: str, minutes: int, ts: str, voice_session_id: str | None = None) -> None:
+        valid_minutes = max(0, int(minutes))
+        if valid_minutes <= 0:
+            return
+        voice_event_id = f"voice-minutes:{voice_session_id or voice_channel_id}:{user_id}:{valid_minutes}"
+        await self._scoring.award_points(
+            guild_id=guild_id,
+            user_id=user_id,
+            reason_code="voice_participation_minute",
+            ts=ts,
+            channel_id=voice_channel_id,
+            points=valid_minutes,
+            message_id=voice_event_id,
+            source_service="voice",
+            source_event="voice.participation.minutes",
+            meta={"voice_session_id": voice_session_id, "minutes": valid_minutes},
+        )
+
+    async def on_voice_join(self, *, guild_id: str, voice_channel_id: str, user_id: str, ts: str, event_id: str) -> None:
+        await self._scoring.apply_rule(
+            guild_id=guild_id,
+            user_id=user_id,
+            rule_code="voice_join_bonus",
+            ts=ts,
+            channel_id=voice_channel_id,
+            message_id=event_id,
+            source_service="voice",
+            source_event="voice.join",
+        )
+
+    async def on_voice_starter(self, *, guild_id: str, voice_channel_id: str, user_id: str, ts: str, day_key: str) -> None:
+        await self._scoring.apply_rule(
+            guild_id=guild_id,
+            user_id=user_id,
+            rule_code="voice_starter_bonus",
+            ts=ts,
+            channel_id=voice_channel_id,
+            message_id=f"voice-starter:{voice_channel_id}:{day_key}",
+            source_service="voice",
+            source_event="voice.starter",
+        )
 
 
 async def compute_and_store_aura_result(

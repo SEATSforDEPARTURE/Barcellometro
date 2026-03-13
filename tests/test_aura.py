@@ -502,3 +502,78 @@ def test_channel_scoped_aura_report_filters_by_channel() -> None:
         await db.close()
 
     run(_scenario())
+
+
+def test_mission_completed_only_after_all_assigned_done(monkeypatch) -> None:
+    async def _scenario() -> None:
+        db = FakeLedgerDB()
+        db.missions = [
+            {
+                "mission_id": "talk_new_user",
+                "assigned_at": "2026-03-07T07:00:00+00:00",
+                "status": "assigned",
+                "reward_points": 8,
+                "meta": {"label": "Talk"},
+            },
+            {
+                "mission_id": "balanced_participation",
+                "assigned_at": "2026-03-07T07:01:00+00:00",
+                "status": "assigned",
+                "reward_points": 11,
+                "meta": {"label": "Balanced"},
+            },
+        ]
+
+        async def _complete(**kwargs):
+            mid = kwargs["mission_id"]
+            for m in db.missions:
+                if m["mission_id"] == mid:
+                    m["status"] = "completed"
+
+        db.complete_aura_mission = _complete  # type: ignore[method-assign]
+        scoring = AuraScoringService(db)  # type: ignore[arg-type]
+        service = AuraMissionService(db, scoring)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(
+            "app.services.aura.load_aura_missions_config",
+            lambda: {"missions": [{"id": "talk_new_user"}, {"id": "balanced_participation"}]},
+        )
+
+        done_first = await service.process_message_for_missions(
+            guild_id="10",
+            user_id="1",
+            channel_id="99",
+            message_id="m1",
+            ts="2026-03-07T10:00:00+00:00",
+            content="ciao",
+            mentions=["2"],
+        )
+        assert "talk_new_user" in done_first
+        assert all(ev["reason_code"] != "mission_completed" for ev in db.events)
+
+        done_second = await service.process_message_for_missions(
+            guild_id="10",
+            user_id="1",
+            channel_id="99",
+            message_id="m2",
+            ts="2026-03-07T10:05:00+00:00",
+            content="ancora",
+            mentions=["2"],
+        )
+        assert "balanced_participation" in done_second
+        mission_completed_events = [ev for ev in db.events if ev["reason_code"] == "mission_completed"]
+        assert len(mission_completed_events) == 1
+
+        await service.process_message_for_missions(
+            guild_id="10",
+            user_id="1",
+            channel_id="99",
+            message_id="m3",
+            ts="2026-03-07T10:10:00+00:00",
+            content="ancora",
+            mentions=["2"],
+        )
+        mission_completed_events_again = [ev for ev in db.events if ev["reason_code"] == "mission_completed"]
+        assert len(mission_completed_events_again) == 1
+
+    run(_scenario())

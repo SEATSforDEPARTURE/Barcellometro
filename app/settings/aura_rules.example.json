@@ -1,4 +1,6 @@
 {
+  "message_participation": 1,
+  "voice_participation_minute": 1,
   "first_message_of_day": {
     "points": 5,
     "label_user": "per aver scritto per prima nel server",
