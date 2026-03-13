@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -9,6 +10,9 @@ from faster_whisper import WhisperModel
 
 from app.services.database import DatabaseService
 from app.services.stt.base import TranscriptResult
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -37,10 +41,19 @@ class FasterWhisperSttService:
                 language=language,
             )
             text = "".join(segment.text for segment in segments).strip()
-            detected_lang = info.language if info and info.language else (language or "auto")
+            detected_lang = (info.language or "unknown") if info else "unknown"
+            logger.debug(
+                "Local STT completed model=%s language_hint=%s detected_language=%s text_preview=%r",
+                config.model,
+                config.language_hint,
+                detected_lang,
+                text[:120],
+            )
             return TranscriptResult(
                 text=text,
                 language=detected_lang,
+                detected_language=detected_lang,
+                language_hint=config.language_hint,
                 backend="local",
                 model=config.model,
             )

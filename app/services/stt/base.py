@@ -8,6 +8,8 @@ from typing import Protocol
 class TranscriptResult:
     text: str
     language: str
+    detected_language: str
+    language_hint: str
     backend: str
     model: str
 
