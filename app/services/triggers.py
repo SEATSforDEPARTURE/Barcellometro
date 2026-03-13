@@ -24,6 +24,7 @@ from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope
 from app.services.qna_session_store import QnaSession, QnaSessionStore
 from app.services.qna_sessions_repo import QnaSessionsRepo
+from app.services.qna_query_engine import QnaQueryEngine
 from app.utils.pii import contains_pii
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ class TriggerEngineService:
         self._barcello_last_applied_window: dict[str, int] = {}
         self._qna_sessions = QnaSessionStore(ttl_minutes=60)
         self._qna_sessions_repo = QnaSessionsRepo(database)
+        self._qna_query_engine = QnaQueryEngine(database=database, ai_service=ai_service, barcello=barcello)
 
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
@@ -1530,27 +1532,9 @@ class TriggerEngineService:
         normalized_question = self._normalize_question(question)
         cache_scope = "global" if scope == "global" else scope
         cache_channel = channel_id if cache_scope == "channel" else "global"
-        cache_fragment = "default"
-        channel_bundle: dict[str, object] | None = None
+        cache_fragment = "semantic"
         target_ids_fragment = "all"
-        if cache_scope != "global":
-            user_id = ""
-            if isinstance(source, discord.Message):
-                user_id = str(source.author.id)
-            elif isinstance(source, discord.Interaction):
-                user_id = str(source.user.id)
-            channel_bundle = await self._build_qna_payload(
-                guild_id,
-                channel_id,
-                question,
-                source=source,
-                session_user_id=user_id,
-            )
-            cache_fragment = str(channel_bundle.get("cache_fragment") or cache_fragment)
-            target_ids_fragment = str(channel_bundle.get("target_ids_fragment") or target_ids_fragment)
-            session_signature = str(channel_bundle.get("session_signature") or "nosession")
-        else:
-            session_signature = "nosession"
+        session_signature = "nosession"
         cache_key = f"qna:{cache_scope}:{cache_channel}:{target_ids_fragment}:{cache_fragment}:{session_signature}:{normalized_question}"
         cached = await self._database.get_cache(cache_key)
         if cached is not None:
@@ -1564,46 +1548,22 @@ class TriggerEngineService:
                 return {"can_answer": True, "answer": text_answer, "refusal_reason": None, "evidence_pack": []}
             return None
 
-        assert channel_bundle is not None
-        empty_reply = str(channel_bundle.get("empty_reply") or "").strip()
-        if empty_reply:
-            await self._database.set_cache(cache_key, empty_reply, 30 * 60)
-            return {"can_answer": True, "answer": empty_reply, "refusal_reason": None, "evidence_pack": channel_bundle.get("evidence_pack", [])}
+        try:
+            channel_answer_text = await self._qna_query_engine.answer(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                question=question,
+                source=source,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("qna_query_engine_failed")
+            return None
 
-        payload_obj = json.loads(str(channel_bundle.get("payload") or "{}"))
-        payload_obj = self._shrink_payload_for_budget(payload_obj, str(channel_bundle.get("breadth") or "normal"))
-        channel_answer = await self._ask_ai_json(json.dumps(payload_obj, ensure_ascii=False))
-        ambiguous_note = str(channel_bundle.get("ambiguous_note") or "").strip()
-        if channel_answer and channel_answer.get("can_answer") and ambiguous_note:
-            answer_text = str(channel_answer.get("answer") or "").strip()
-            channel_answer["answer"] = f"{ambiguous_note}\n\n{answer_text}" if answer_text else ambiguous_note
+        if not channel_answer_text:
+            return None
 
-        if channel_answer and channel_answer.get("can_answer"):
-            ttl = int(channel_bundle.get("cache_ttl") or 60 * 60)
-            await self._database.set_cache(cache_key, str(channel_answer.get("answer") or ""), ttl)
-            if channel_bundle.get("session_user_id"):
-                await self._store_qna_turn(
-                    guild_id,
-                    channel_id,
-                    str(channel_bundle.get("session_user_id") or ""),
-                    question,
-                    str(channel_answer.get("answer") or ""),
-                )
-
-        if channel_answer and channel_answer.get("can_answer"):
-            channel_answer["evidence_pack"] = channel_bundle.get("evidence_pack", [])
-
-        if scope == "channel":
-            return channel_answer
-
-        if channel_answer and channel_answer.get("can_answer"):
-            return channel_answer
-        global_answer_text = await self._ask_general_answer(question)
-        if not global_answer_text:
-            return channel_answer
-        fallback_text = f"Non trovo abbastanza evidenze nel canale: provo una risposta generale.\n\n{global_answer_text.strip()}"
-        await self._database.set_cache(f"qna:mixed:global:{normalized_question}", fallback_text, 7 * 24 * 3600)
-        return {"can_answer": True, "answer": fallback_text, "refusal_reason": None, "evidence_pack": []}
+        await self._database.set_cache(cache_key, channel_answer_text, 45 * 60)
+        return {"can_answer": True, "answer": channel_answer_text, "refusal_reason": None, "evidence_pack": []}
 
     async def _decide_qna_scope(self, question: str) -> str:
         q = question.lower()
@@ -1997,7 +1957,7 @@ class TriggerEngineService:
                 0,
                 0.0,
             )
-            return f"Non ho trovato prove dirette di un messaggio di {target_raw} nel periodo richiesto."
+            return f"Non risultano messaggi o attività rilevanti per questa richiesta nel periodo indicato."
 
         final_lines: list[str] = []
         produced = 0
@@ -2041,8 +2001,8 @@ class TriggerEngineService:
         if final_lines:
             return "\n".join(final_lines)
         if target_raw:
-            return f"Non ho trovato prove dirette di un messaggio di {target_raw} nel periodo richiesto."
-        return "Non ho trovato prove dirette nel periodo richiesto."
+            return f"Non risultano messaggi o attività rilevanti per questa richiesta nel periodo indicato."
+        return "Non risultano messaggi o attività rilevanti per questa richiesta nel periodo indicato."
 
     def _strip_proof_artifacts(self, text: str) -> str:
         cleaned = text or ""
@@ -2314,7 +2274,7 @@ class TriggerEngineService:
         cache_ttl = int(budgets.get("cache_ttl") or 45 * 60)
         empty_reply = ""
         if not evidence_pack and not targets:
-            empty_reply = "Non ho trovato QnA salvate per questo canale."
+            empty_reply = "Non risultano messaggi o attività rilevanti per questa richiesta nel periodo indicato."
 
         if targets:
             per_target_messages: dict[str, list[dict[str, str]]] = {}
