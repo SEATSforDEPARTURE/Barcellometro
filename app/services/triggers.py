@@ -928,9 +928,6 @@ class TriggerEngineService:
             mod_mention = f"<@&{mod_role_id}>" if mod_role_id else ""
             mod_block_text = self._render_with_placeholders(mod_template, {"mod_mention": mod_mention}) if mod_template else mod_mention
 
-        if is_recovery_notify and main_msg:
-            main_msg = f"🟢 Recovery confermato dopo fase critica ({recovery_from or 'ROSSO'}).\n{main_msg}"
-
         message_text = self._build_barcello_status_embed_description(
             main_msg=main_msg,
             old_score=prev_score,
