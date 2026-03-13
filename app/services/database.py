@@ -1179,8 +1179,10 @@ class DatabaseService:
         limit: int = 12,
         user_id: str | None = None,
         topic: str | None = None,
+        candidate_pool_limit: int | None = None,
     ) -> list[dict[str, Any]]:
         safe_limit = max(1, min(50, int(limit or 12)))
+        safe_pool = max(safe_limit, min(100, int(candidate_pool_limit or safe_limit)))
         params: list[Any] = [guild_id, start_ts, end_ts]
         where_parts = [
             "m.guild_id = ?",
@@ -1192,9 +1194,6 @@ class DatabaseService:
         if user_id:
             where_parts.append("m.author_id = ?")
             params.append(user_id)
-        if topic:
-            where_parts.append("LOWER(COALESCE(m.content, '')) LIKE ?")
-            params.append(f"%{str(topic).lower()}%")
         sql = f"""
             SELECT m.message_id, m.guild_id, m.channel_id, m.author_id,
                    COALESCE(gm.nickname, u.display_name, u.global_name, u.username, m.author_id) AS author_name,
@@ -1206,11 +1205,25 @@ class DatabaseService:
             ORDER BY m.ts DESC
             LIMIT ?
         """
-        params.append(safe_limit)
+        params.append(safe_pool)
         rows = await self.fetchall(sql, tuple(params))
         out: list[dict[str, Any]] = []
+        topic_text = (topic or "").strip().lower()
+        topic_tokens = [tok for tok in re.split(r"\W+", topic_text) if len(tok) >= 3]
         for row in rows:
             message_id = str(row["message_id"] or "")
+            content = str(row["content"] or "")
+            content_lower = content.lower()
+            score = 0
+            if topic_text:
+                if topic_text in content_lower:
+                    score += 4
+                for token in topic_tokens:
+                    hits = content_lower.count(token)
+                    if hits:
+                        score += min(3, hits)
+                if score <= 0:
+                    continue
             out.append(
                 {
                     "message_id": message_id,
@@ -1219,10 +1232,16 @@ class DatabaseService:
                     "author_id": str(row["author_id"] or ""),
                     "author_name": str(row["author_name"] or row["author_id"] or ""),
                     "ts": str(row["ts"] or ""),
-                    "content": str(row["content"] or ""),
+                    "content": content,
                     "jump_url": f"https://discord.com/channels/{row['guild_id']}/{row['channel_id']}/{message_id}" if message_id else None,
+                    "_topic_score": score,
                 }
             )
+        if topic_text:
+            out.sort(key=lambda item: (int(item.get("_topic_score", 0)), str(item.get("ts", ""))), reverse=True)
+        out = out[:safe_limit]
+        for row in out:
+            row.pop("_topic_score", None)
         return out
 
     async def fetch_qna_user_stats(self, *, guild_id: str, user_id: str, start_ts: str, end_ts: str) -> dict[str, int]:

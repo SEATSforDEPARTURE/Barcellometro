@@ -258,6 +258,7 @@ class TriggerEngineService:
             evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
             if not isinstance(evidence_pack, list):
                 evidence_pack = []
+            answer_mode = str(answer.get("answer_mode") or "") if isinstance(answer, dict) else ""
             response_origin = "local_backend"
             model_name = None
 
@@ -265,9 +266,11 @@ class TriggerEngineService:
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
             return
 
-        render_mode: Literal["evidence", "plain"] = "plain" if route_scope == "general_llm" else "evidence"
-        logger.info("qna_render mode=%s scope=%s evidence_items=%d", render_mode, route_scope, len(evidence_pack))
-        formatted_answer = self._format_qna_answer_text(question_clean, text, evidence_pack, scope=route_scope, mode=render_mode)
+        answer_mode = str(answer.get("answer_mode") or "") if route_scope != "general_llm" and isinstance(answer, dict) else ""
+        render_mode: Literal["evidence", "plain"] = "plain" if route_scope == "general_llm" or answer_mode == "semantic_plain" else "evidence"
+        render_evidence = evidence_pack if render_mode == "evidence" else []
+        logger.info("qna_render mode=%s scope=%s evidence_items=%d", render_mode, route_scope, len(render_evidence))
+        formatted_answer = self._format_qna_answer_text(question_clean, text, render_evidence, scope=route_scope, mode=render_mode)
         embed = self._build_qna_embed(
             asker_name,
             question_clean,
@@ -503,18 +506,21 @@ class TriggerEngineService:
             evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
             if not isinstance(evidence_pack, list):
                 evidence_pack = []
+            answer_mode = str(answer.get("answer_mode") or "") if isinstance(answer, dict) else ""
 
             if contains_pii(text):
                 await message.reply("Non posso condividere dati personali.", mention_author=False)
                 return
 
             await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
+            render_mode: Literal["evidence", "plain"] = "plain" if answer_mode == "semantic_plain" else "evidence"
+            render_evidence = evidence_pack if render_mode == "evidence" else []
             formatted_answer = self._format_qna_answer_text(
                 question_clean,
                 text,
-                evidence_pack,
+                render_evidence,
                 scope="channel_qna",
-                mode="evidence",
+                mode=render_mode,
             )
             embed = self._build_qna_embed(
                 getattr(message.author, "display_name", None) or getattr(message.author, "name", None) or "Utente",
@@ -1532,20 +1538,20 @@ class TriggerEngineService:
         normalized_question = self._normalize_question(question)
         cache_scope = "global" if scope == "global" else scope
         cache_channel = channel_id if cache_scope == "channel" else "global"
-        cache_fragment = "semantic"
+        cache_fragment = "semantic_v2"
         target_ids_fragment = "all"
         session_signature = "nosession"
         cache_key = f"qna:{cache_scope}:{cache_channel}:{target_ids_fragment}:{cache_fragment}:{session_signature}:{normalized_question}"
         cached = await self._database.get_cache(cache_key)
         if cached is not None:
             logger.info("qna cache hit scope=%s channel_id=%s", scope, channel_id)
-            return {"can_answer": True, "answer": cached, "refusal_reason": None, "evidence_pack": []}
+            return {"can_answer": True, "answer": cached, "refusal_reason": None, "evidence_pack": [], "answer_mode": "semantic_plain", "response_origin": "local_backend"}
 
         if scope == "global":
             text_answer = await self._ask_general_answer(question)
             if text_answer:
                 await self._database.set_cache(cache_key, text_answer, 7 * 24 * 3600)
-                return {"can_answer": True, "answer": text_answer, "refusal_reason": None, "evidence_pack": []}
+                return {"can_answer": True, "answer": text_answer, "refusal_reason": None, "evidence_pack": [], "answer_mode": "plain", "response_origin": "remote_ai"}
             return None
 
         try:
@@ -1563,7 +1569,7 @@ class TriggerEngineService:
             return None
 
         await self._database.set_cache(cache_key, channel_answer_text, 45 * 60)
-        return {"can_answer": True, "answer": channel_answer_text, "refusal_reason": None, "evidence_pack": []}
+        return {"can_answer": True, "answer": channel_answer_text, "refusal_reason": None, "evidence_pack": [], "answer_mode": "semantic_plain", "response_origin": "local_backend"}
 
     async def _decide_qna_scope(self, question: str) -> str:
         q = question.lower()

@@ -45,15 +45,21 @@ class QnaQueryEngine:
         self._db = database
         self._ai = ai_service
         self._barcello = barcello
+        self._intent_response_format_supported: bool | None = None
 
     async def answer(self, *, guild_id: str, channel_id: str, question: str, source: discord.Interaction | discord.Message | None = None) -> str:
         parsed = await self._parse_intent(question)
         start_ts, end_ts, range_label = self._resolve_time_range(parsed.time_range or "", question)
         target_user_id, target_user_name = await self._resolve_target_user(parsed.target_user, question, guild_id, source)
+        resolved_channel_id, resolved_channel_name = self._resolve_channel(parsed.channel, question, source)
+        if parsed.intent == "voice_activity" and parsed.channel and not resolved_channel_id:
+            return "Non riesco a capire quale canale vocale devo analizzare."
         payload = await self._fetch_intent_data(
             intent=parsed.intent,
             guild_id=guild_id,
             channel_id=channel_id,
+            resolved_channel_id=resolved_channel_id,
+            resolved_channel_name=resolved_channel_name,
             target_user_id=target_user_id,
             topic=parsed.topic,
             metric=parsed.metric,
@@ -79,7 +85,7 @@ class QnaQueryEngine:
             return fallback
         model = self._ai.get_model("summary") or "gpt-4o-mini"
         prompt = {
-            "instruction": "Classifica la domanda Discord in JSON puro.",
+            "instruction": "Classifica la domanda di una community Discord italiana in JSON puro.",
             "schema": {
                 "intent": "one_of:user_activity_summary,topic_discussion_summary,server_activity_summary,user_opinion_on_topic,voice_activity,aura_query,barcello_status,user_stats,conversation_between_users",
                 "target_user": "string|null",
@@ -90,11 +96,21 @@ class QnaQueryEngine:
                 "limit": "int"
             },
             "question": question,
-            "rules": ["Rispondi SOLO JSON valido", "Non aggiungere testo fuori dal JSON"],
+            "rules": [
+                "Rispondi SOLO JSON valido.",
+                "Non aggiungere testo fuori dal JSON.",
+                "Intents disponibili: user_activity_summary, topic_discussion_summary, server_activity_summary, user_opinion_on_topic, voice_activity, aura_query, barcello_status, user_stats, conversation_between_users.",
+                "Usa user_opinion_on_topic per domande come 'cosa pensa X di Y' o 'cosa ha detto X su Y'.",
+                "Usa user_activity_summary per domande come 'di che ha parlato X ieri'.",
+                "Usa topic_discussion_summary per domande come 'di che si è parlato ieri'.",
+                "Copia target_user/topic/time_range/channel quando presenti nella domanda.",
+            ],
         }
         try:
-            response = await self._ai.client().responses.create(model=model, input=json.dumps(prompt, ensure_ascii=False))
-            data = json.loads(str(getattr(response, "output_text", "") or "{}"))
+            logger.info("qna_intent_parse model=%s", model)
+            response = await self._create_intent_response(model, prompt)
+            raw_text = self._extract_response_text(response)
+            data = json.loads(raw_text)
             intent = str(data.get("intent") or "").strip()
             if intent not in SUPPORTED_INTENTS:
                 return fallback
@@ -108,9 +124,26 @@ class QnaQueryEngine:
                 metric=self._clean_opt(data.get("metric")),
                 limit=max(3, min(20, limit)),
             )
-        except Exception:
-            logger.exception("qna_intent_parse_failed")
+        except Exception:  # noqa: BLE001
+            logger.exception("qna_intent_parse_failed raw_text=%s", locals().get("raw_text", "")[:500])
             return fallback
+
+    async def _create_intent_response(self, model: str, prompt: dict[str, Any]) -> Any:
+        if self._intent_response_format_supported is False:
+            return await self._ai.client().responses.create(model=model, input=json.dumps(prompt, ensure_ascii=False))
+        try:
+            response = await self._ai.client().responses.create(
+                model=model,
+                input=json.dumps(prompt, ensure_ascii=False),
+                response_format={"type": "json_object"},
+            )
+            self._intent_response_format_supported = True
+            return response
+        except Exception as exc:  # noqa: BLE001
+            if "response_format" not in str(exc):
+                raise
+            self._intent_response_format_supported = False
+            return await self._ai.client().responses.create(model=model, input=json.dumps(prompt, ensure_ascii=False))
 
     def _heuristic_intent(self, question: str) -> QnaIntent:
         q = question.lower()
@@ -129,19 +162,78 @@ class QnaQueryEngine:
             intent = "user_activity_summary"
         elif re.search(r"di che si è parlato|topic|argomento", q):
             intent = "topic_discussion_summary"
-        return QnaIntent(intent=intent, target_user=None, topic=None, time_range=None, channel=None, metric=None, limit=8)
+        return QnaIntent(
+            intent=intent,
+            target_user=self._extract_target_user_hint(question),
+            topic=self._extract_topic_hint(question),
+            time_range=self._extract_time_range_hint(question),
+            channel=self._extract_channel_hint(question),
+            metric=None,
+            limit=8,
+        )
+
+    def _extract_time_range_hint(self, question: str) -> str | None:
+        q = question.lower()
+        for token in ["ieri", "oggi", "ultima ora", "ultimi 7 giorni", "settimana"]:
+            if token in q:
+                return token
+        return None
+
+    def _extract_target_user_hint(self, question: str) -> str | None:
+        mention = re.search(r"<@!?(\d+)>", question)
+        if mention:
+            return mention.group(1)
+        patterns = [
+            r"di che ha parlato\s+([\w._-]+)",
+            r"cosa pensa\s+([\w._-]+)\s+di",
+            r"cosa ha detto\s+([\w._-]+)\s+su",
+            r"quanta aura ha\s+([\w._-]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, question, re.IGNORECASE)
+            if match:
+                return match.group(1).strip("@ ")
+        return None
+
+    def _extract_topic_hint(self, question: str) -> str | None:
+        patterns = [r"cosa pensa\s+[\w._-]+\s+di\s+(.+?)(?:\?|$)", r"cosa ha detto\s+[\w._-]+\s+su\s+(.+?)(?:\?|$)"]
+        for pattern in patterns:
+            match = re.search(pattern, question, re.IGNORECASE)
+            if match:
+                return match.group(1).strip(" ?")
+        return None
+
+    def _extract_channel_hint(self, question: str) -> str | None:
+        match = re.search(r"in\s+([a-zA-Z0-9_-]{2,})", question, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        if "auditorium" in question.lower():
+            return "auditorium"
+        return None
 
     async def _resolve_target_user(self, target_user: str | None, question: str, guild_id: str, source: discord.Interaction | discord.Message | None) -> tuple[str | None, str | None]:
         mention = re.search(r"<@!?(\d+)>", question)
         if mention:
-            return mention.group(1), None
+            mention_id = mention.group(1)
+            if source and getattr(source, "guild", None):
+                member = source.guild.get_member(int(mention_id))
+                if member is not None:
+                    return mention_id, getattr(member, "display_name", None) or getattr(member, "name", None)
+            return mention_id, None
         candidate = (target_user or "").strip()
         if not candidate:
             return None, None
         if source and getattr(source, "guild", None):
             guild = source.guild
             for member in getattr(guild, "members", []):
-                name = f"{getattr(member, 'display_name', '')} {getattr(member, 'name', '')}".lower()
+                name = " ".join(
+                    [
+                        str(getattr(member, "display_name", "") or ""),
+                        str(getattr(member, "name", "") or ""),
+                        str(getattr(member, "global_name", "") or ""),
+                        str(getattr(member, "nick", "") or ""),
+                    ]
+                ).lower()
                 if candidate.lower() in name:
                     return str(member.id), getattr(member, "display_name", None)
         rows = await self._db.fetchall(
@@ -158,6 +250,23 @@ class QnaQueryEngine:
             if candidate.lower() in display.lower():
                 return str(row["user_id"]), display
         return None, candidate
+
+    def _resolve_channel(self, parsed_channel: str | None, question: str, source: discord.Interaction | discord.Message | None) -> tuple[str | None, str | None]:
+        guild = getattr(source, "guild", None) if source else None
+        if guild is None:
+            return None, parsed_channel
+        query = (parsed_channel or self._extract_channel_hint(question) or "").strip().lower()
+        if not query:
+            return None, None
+        for channel in getattr(guild, "channels", []):
+            name = str(getattr(channel, "name", "") or "").lower()
+            if name == query and isinstance(channel, discord.VoiceChannel):
+                return str(channel.id), getattr(channel, "name", None)
+        for channel in getattr(guild, "channels", []):
+            name = str(getattr(channel, "name", "") or "").lower()
+            if query in name and isinstance(channel, discord.VoiceChannel):
+                return str(channel.id), getattr(channel, "name", None)
+        return None, parsed_channel
 
     def _resolve_time_range(self, parsed: str, question: str) -> tuple[str, str, str]:
         q = f"{parsed} {question}".lower()
@@ -189,9 +298,10 @@ class QnaQueryEngine:
             events = await self._db.fetch_aura_ledger_events(kwargs["guild_id"], user_id, kwargs["start_ts"], kwargs["end_ts"])
             return {"has_data": bool(events) or total != 0, "aura_total": total, "events": events[:8]}
         if intent == "voice_activity":
+            voice_channel_id = kwargs.get("resolved_channel_id") or kwargs.get("channel_id")
             sessions = await self._db.fetch_voice_sessions_in_range(
                 guild_id=kwargs["guild_id"],
-                voice_channel_id=kwargs["channel_id"],
+                voice_channel_id=voice_channel_id,
                 start_ts=kwargs["start_ts"],
                 end_ts=kwargs["end_ts"],
             )
@@ -203,13 +313,16 @@ class QnaQueryEngine:
                 minutes += max(0, int((ended - started).total_seconds() // 60))
             return {"has_data": bool(sessions), "voice_minutes": minutes, "sessions": [dict(r) for r in sessions[:10]]}
 
+        topic = kwargs.get("topic")
+        topic_pool_limit = 80 if topic else kwargs["limit"]
         rows = await self._db.fetch_qna_messages(
             guild_id=kwargs["guild_id"],
             start_ts=kwargs["start_ts"],
             end_ts=kwargs["end_ts"],
             limit=kwargs["limit"],
+            candidate_pool_limit=topic_pool_limit,
             user_id=kwargs.get("target_user_id"),
-            topic=kwargs.get("topic"),
+            topic=topic,
         )
         if intent == "conversation_between_users":
             rows = await self._db.fetch_qna_conversation_between_users(
@@ -252,8 +365,37 @@ class QnaQueryEngine:
             ],
         }
         response = await self._ai.client().responses.create(model=model, input=json.dumps(prompt, ensure_ascii=False))
-        text = str(getattr(response, "output_text", "") or "").strip()
-        return text or NO_DATA_REPLY
+        text = self._extract_response_text(response)
+        if text:
+            return text
+        return self._compose_local_fallback(intent=intent, range_label=range_label, payload=payload)
+
+    def _compose_local_fallback(self, *, intent: str, range_label: str, payload: dict[str, Any]) -> str:
+        if payload.get("barcello"):
+            return f"Barcello ora: {payload['barcello'].get('color')} (score {payload['barcello'].get('score')})."
+        if payload.get("aura_total") is not None:
+            return f"Aura totale nel periodo: {payload.get('aura_total')} punti."
+        if intent == "voice_activity":
+            return f"Nel periodo {range_label} risultano {len(payload.get('sessions') or [])} sessioni vocali per un totale di {payload.get('voice_minutes') or 0} minuti."
+        messages = payload.get("messages") or []
+        if messages:
+            top = messages[:3]
+            bullets = [f"- {str(row.get('author_name') or 'utente')}: {str(row.get('content') or '')[:120]}" for row in top]
+            return "Messaggi trovati:\n" + "\n".join(bullets)
+        return NO_DATA_REPLY
+
+    @staticmethod
+    def _extract_response_text(response: Any) -> str:
+        output_text = str(getattr(response, "output_text", "") or "").strip()
+        if output_text:
+            return output_text
+        chunks: list[str] = []
+        for item in getattr(response, "output", []) or []:
+            for content in getattr(item, "content", []) or []:
+                text = getattr(content, "text", None)
+                if text:
+                    chunks.append(str(text))
+        return "\n".join(chunks).strip()
 
     @staticmethod
     def _clean_opt(value: Any) -> str | None:
