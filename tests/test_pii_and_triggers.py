@@ -17,6 +17,35 @@ if "discord" not in sys.modules:
     sys.modules["discord"] = discord_stub
 
 discord_stub = sys.modules["discord"]
+
+if not hasattr(discord_stub, "Color"):
+    class _FakeColor:
+        @staticmethod
+        def from_str(value: str):
+            return value
+
+        @staticmethod
+        def green():
+            return 1
+
+        @staticmethod
+        def gold():
+            return 2
+
+        @staticmethod
+        def red():
+            return 3
+
+        @staticmethod
+        def dark_grey():
+            return 4
+
+        @staticmethod
+        def blurple():
+            return 5
+
+    discord_stub.Color = _FakeColor
+
 if not hasattr(discord_stub, "Embed"):
     class _FakeEmbed:
         def __init__(self, description: str = "", timestamp=None, **kwargs) -> None:
@@ -744,21 +773,29 @@ def test_handle_qna_question_global_bypasses_retrieval() -> None:
     followup.send.assert_awaited_once()
 
 
-def test_build_qna_embed_plain_mode_keeps_general_answer_text() -> None:
+def test_build_qna_embed_layout_contains_question_and_answer() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    embed = service._build_qna_embed("quanti minuti", "3 ore sono 180 minuti.", [], scope="general_llm", mode="plain")
-    assert embed.description is not None
-    assert "180" in embed.description
+    embed = service._build_qna_embed(
+        "Luca",
+        "quanti minuti?",
+        "3 ore sono 180 minuti.",
+        response_origin="remote_ai",
+        model_name="gpt-4o-mini",
+    )
+    assert embed.title == "❓BOTTA & RISPOSTA"
+    assert embed.color == "#9B59B6"
+    assert "✋ **Luca chiede:**" in (embed.description or "")
+    assert "**👇 Risposta:**" in (embed.description or "")
+    assert "180" in (embed.description or "")
 
 
-def test_build_qna_embed_evidence_mode_adds_proof_links() -> None:
+def test_format_qna_answer_text_evidence_mode_adds_proof_links() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     answer = "• Confermato [prova](https://discord.com/channels/1/2/3)"
     evidence = [{"jump_url": "https://discord.com/channels/1/2/3", "created_at_iso": "2026-02-14T13:26:00+00:00", "content": "confermato", "author_name": "Luca", "author_id": "1"}]
-    embed = service._build_qna_embed("cosa è stato confermato?", answer, evidence, scope="channel_qna", mode="evidence")
-    assert embed.description is not None
-    assert "[🧾" in embed.description
-    assert "https://discord.com/channels/1/2/3" in embed.description
+    formatted = service._format_qna_answer_text("cosa è stato confermato?", answer, evidence, scope="channel_qna", mode="evidence")
+    assert "[🧾" in formatted
+    assert "https://discord.com/channels/1/2/3" in formatted
 
 
 def test_route_qna_general_llm_bypasses_channel_trigger_check() -> None:
@@ -798,6 +835,7 @@ def test_route_qna_general_llm_bypasses_channel_trigger_check() -> None:
     database.get_trigger_enabled.assert_not_called()
     service._handle_qna.assert_not_called()
     service._ask_general_answer.assert_awaited_once()
+    assert "content" not in (followup.send.await_args.kwargs or {})
 
 
 def test_route_qna_general_llm_stores_anchor_session() -> None:
@@ -906,15 +944,15 @@ def test_ask_general_answer_uses_web_when_needed() -> None:
     ai_service.ask_general.assert_not_called()
 
 
-def test_build_qna_embed_footer_has_no_datetime() -> None:
+def test_build_qna_embed_footer_variants() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    general = service._build_qna_embed("q", "risposta", [], scope="general_llm", mode="plain")
-    channel = service._build_qna_embed("q", "risposta", [], scope="channel_qna", mode="evidence")
+    remote = service._build_qna_embed("q", "q?", "risposta", response_origin="remote_ai", model_name="gpt-4o-mini")
+    local = service._build_qna_embed("q", "q?", "risposta", response_origin="local_backend")
+    error = service._build_qna_embed("q", "q?", "errore", response_origin="error")
 
-    assert getattr(general, "footer", "") == "Barcellometro • Generale"
-    assert getattr(channel, "footer", "") == "Barcellometro • Q&A"
-    assert not any(char.isdigit() for char in str(getattr(general, "footer", "")))
-    assert not any(char.isdigit() for char in str(getattr(channel, "footer", "")))
+    assert getattr(remote, "footer", "") == "Dati elaborati con gpt-4o-mini · Barcellometro 1.0"
+    assert getattr(local, "footer", "") == "Dati elaborati in loco · Barcellometro 1.0"
+    assert getattr(error, "footer", "") == "Barcellometro 1.0"
 
 
 def test_format_for_discord_embed_splits_long_general_text_with_bullets_and_emoji() -> None:
@@ -945,11 +983,11 @@ def test_normalize_discord_formatting_forces_multiline_bullets() -> None:
     assert "\n- **Creatività in Crescita**" in out
 
 
-def test_build_qna_embed_plain_mode_normalizes_single_line_llm_output() -> None:
+def test_format_qna_answer_text_plain_mode_normalizes_single_line_llm_output() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
     raw = "✨ - **Energie Altissime**: bene - **Comunicazione al Top**: ok"
 
-    embed = service._build_qna_embed("q", raw, [], scope="general_llm", mode="plain")
+    formatted = service._format_qna_answer_text("q", raw, [], scope="general_llm", mode="plain")
 
-    assert "\n- **Energie Altissime**" in embed.description
-    assert "\n- **Comunicazione al Top**" in embed.description
+    assert "\n- **Energie Altissime**" in formatted
+    assert "\n- **Comunicazione al Top**" in formatted
