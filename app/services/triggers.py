@@ -23,6 +23,7 @@ from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope
 from app.services.qna_session_store import QnaSession, QnaSessionStore
+from app.services.qna_sessions_repo import QnaSessionsRepo
 from app.utils.pii import contains_pii
 
 logger = logging.getLogger(__name__)
@@ -80,11 +81,13 @@ class TriggerEngineService:
         self._barcello_window_override_cache_fingerprint: str | None = None
         self._barcello_last_applied_window: dict[str, int] = {}
         self._qna_sessions = QnaSessionStore(ttl_minutes=60)
+        self._qna_sessions_repo = QnaSessionsRepo(database)
 
     def start(self, bot: discord.Client) -> None:
         self._bot = bot
         if self._task is None:
             self._task = asyncio.create_task(self._barcello_loop())
+        asyncio.create_task(self._qna_sessions_repo.delete_expired_sessions())
 
     def stop(self) -> None:
         if self._task is not None:
@@ -287,7 +290,47 @@ class TriggerEngineService:
                 except (TypeError, ValueError):
                     anchor_key = None
                 if anchor_key is not None:
-                    self._qna_sessions.set(anchor_key, QnaSession(scope="general_llm", history=history))
+                    session = QnaSession(scope="general_llm", history=history)
+                    self._qna_sessions.set(anchor_key, session)
+                    await self._qna_sessions_repo.save_session(
+                        anchor_message_id=anchor_key[2],
+                        guild_id=anchor_key[0],
+                        channel_id=anchor_key[1],
+                        user_id=int(user_id),
+                        scope=session.scope,
+                        history=session.history,
+                        model_name=self._get_qna_remote_model_name(),
+                        created_at=session.created_at,
+                    )
+
+    async def _send_qna_session_unavailable(self, message: discord.Message) -> None:
+        text = "Questa conversazione non è più disponibile. Usa `/domanda` per iniziare una nuova sessione."
+        try:
+            await message.author.send(text)
+        except Exception:
+            logger.info("qna_session_unavailable_dm_failed user_id=%s", getattr(message.author, "id", None))
+
+    async def _resolve_reference_message(self, message: discord.Message) -> discord.Message | None:
+        if not message.reference or not message.reference.message_id:
+            return None
+        resolved = getattr(message.reference, "resolved", None)
+        if isinstance(resolved, discord.Message):
+            return resolved
+        try:
+            return await message.channel.fetch_message(message.reference.message_id)
+        except Exception:
+            return None
+
+    def _is_qna_bot_embed_message(self, message: discord.Message | None) -> bool:
+        if message is None:
+            return False
+        if self._bot is not None and getattr(message.author, "id", None) != getattr(self._bot.user, "id", None):
+            return False
+        embeds = getattr(message, "embeds", None) or []
+        if not embeds:
+            return False
+        title = str(getattr(embeds[0], "title", "") or "").replace(" ", "")
+        return title == "❓BOTTA&RISPOSTA"
 
     async def handle_message_qna(self, message: discord.Message) -> None:
         try:
@@ -300,6 +343,11 @@ class TriggerEngineService:
             if message.reference and message.reference.message_id and message.channel and message.guild:
                 anchor_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
                 session = self._qna_sessions.get(anchor_key)
+                if session is None:
+                    persisted = await self._qna_sessions_repo.get_session(anchor_key[2])
+                    if persisted and persisted.guild_id == anchor_key[0] and persisted.channel_id == anchor_key[1]:
+                        session = persisted.session
+                        self._qna_sessions.set(anchor_key, session)
                 if session and session.scope == "general_llm":
                     question_clean = content if content.endswith("?") else f"{content}?"
                     session.history.append({"role": "user", "content": question_clean})
@@ -328,6 +376,26 @@ class TriggerEngineService:
                         new_anchor_key = (int(message.guild.id), int(message.channel.id), int(reply_message.id))
                         self._qna_sessions.set(base_key, session)
                         self._qna_sessions.set(new_anchor_key, session)
+                        await self._qna_sessions_repo.save_session(
+                            anchor_message_id=base_key[2],
+                            guild_id=base_key[0],
+                            channel_id=base_key[1],
+                            user_id=int(message.author.id),
+                            scope=session.scope,
+                            history=session.history,
+                            model_name=self._get_qna_remote_model_name(),
+                            created_at=session.created_at,
+                        )
+                        await self._qna_sessions_repo.save_session(
+                            anchor_message_id=new_anchor_key[2],
+                            guild_id=new_anchor_key[0],
+                            channel_id=new_anchor_key[1],
+                            user_id=int(message.author.id),
+                            scope=session.scope,
+                            history=session.history,
+                            model_name=self._get_qna_remote_model_name(),
+                            created_at=session.created_at,
+                        )
                         logger.info("qna_session_hit=true scope=general_llm history_len=%s", len(session.history))
                     else:
                         error_embed = self._build_qna_embed(
@@ -338,6 +406,10 @@ class TriggerEngineService:
                             is_followup=True,
                         )
                         await message.reply(embed=error_embed, mention_author=False)
+                    return
+                referenced_message = await self._resolve_reference_message(message)
+                if self._is_qna_bot_embed_message(referenced_message):
+                    await self._send_qna_session_unavailable(message)
                     return
 
             question = content

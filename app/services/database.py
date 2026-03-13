@@ -449,6 +449,19 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, channel_id, user_id)
             );
 
+            CREATE TABLE IF NOT EXISTS qna_followup_sessions (
+                anchor_message_id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                user_id TEXT,
+                scope TEXT NOT NULL,
+                history_json TEXT NOT NULL,
+                model_name TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS activity_monitoring_config (
                 guild_id TEXT PRIMARY KEY,
                 enabled INTEGER NOT NULL DEFAULT 0,
