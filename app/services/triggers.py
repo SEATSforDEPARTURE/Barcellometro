@@ -194,17 +194,25 @@ class TriggerEngineService:
         question_clean = question_text
         if not question_clean.endswith("?"):
             question_clean = f"{question_clean}?"
-        public_content = f"{interaction.user.mention} **chiede:** {question_clean}"
+        asker_name = getattr(interaction.user, "display_name", None) or getattr(interaction.user, "name", None) or "Utente"
 
         if route_scope == "general_llm":
             history = [{"role": "user", "content": question_clean}]
             text = await self._ask_general_answer(question_clean, history=history)
             if not text:
-                await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
+                error_embed = self._build_qna_embed(
+                    asker_name,
+                    question_clean,
+                    "Non riesco a rispondere qui in questo momento.",
+                    response_origin="error",
+                )
+                await interaction.followup.send(embed=error_embed, ephemeral=False)
                 return
             history.append({"role": "assistant", "content": text})
             history = self._trim_qna_history(history)
             evidence_pack: list[dict[str, str]] = []
+            response_origin: Literal["remote_ai", "local_backend", "error"] = "remote_ai"
+            model_name: str | None = self._get_qna_remote_model_name()
         else:
             answer = await self._handle_qna(
                 scope="channel",
@@ -214,27 +222,39 @@ class TriggerEngineService:
                 source=interaction,
             )
             if answer is None:
-                await self._qna_reply(interaction, "AI non disponibile al momento.", ephemeral=True)
+                error_embed = self._build_qna_embed(
+                    asker_name,
+                    question_clean,
+                    "Non riesco a rispondere qui in questo momento.",
+                    response_origin="error",
+                )
+                await interaction.followup.send(embed=error_embed, ephemeral=False)
                 return
             if not answer.get("can_answer"):
-                await self._qna_reply(
-                    interaction,
-                    str(answer.get("refusal_reason") or "In questo canale non ho QnA salvate su questa domanda. Se vuoi una risposta generale usa /domanda generale: ..."),
-                    ephemeral=True,
+                error_embed = self._build_qna_embed(
+                    asker_name,
+                    question_clean,
+                    "Non riesco a rispondere qui in questo momento.",
+                    response_origin="error",
                 )
+                await interaction.followup.send(embed=error_embed, ephemeral=False)
                 return
             text = str(answer.get("answer") or "").strip()
             if not text:
-                await self._qna_reply(
-                    interaction,
-                    "In questo canale non ho QnA salvate su questa domanda. Se vuoi una risposta generale usa /domanda generale: ...",
-                    ephemeral=True,
+                error_embed = self._build_qna_embed(
+                    asker_name,
+                    question_clean,
+                    "Non riesco a rispondere qui in questo momento.",
+                    response_origin="error",
                 )
+                await interaction.followup.send(embed=error_embed, ephemeral=False)
                 return
 
             evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
             if not isinstance(evidence_pack, list):
                 evidence_pack = []
+            response_origin = "local_backend"
+            model_name = None
 
         if contains_pii(text):
             await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
@@ -242,7 +262,14 @@ class TriggerEngineService:
 
         render_mode: Literal["evidence", "plain"] = "plain" if route_scope == "general_llm" else "evidence"
         logger.info("qna_render mode=%s scope=%s evidence_items=%d", render_mode, route_scope, len(evidence_pack))
-        embed = self._build_qna_embed(question_clean, text, evidence_pack, scope=route_scope, mode=render_mode)
+        formatted_answer = self._format_qna_answer_text(question_clean, text, evidence_pack, scope=route_scope, mode=render_mode)
+        embed = self._build_qna_embed(
+            asker_name,
+            question_clean,
+            formatted_answer,
+            response_origin=response_origin,
+            model_name=model_name,
+        )
 
         await self._database.increment_usage(
             guild_id,
@@ -251,7 +278,7 @@ class TriggerEngineService:
             window_date,
             datetime.now(timezone.utc).isoformat(),
         )
-        sent_message = await interaction.followup.send(content=public_content, embed=embed, ephemeral=False, wait=True)
+        sent_message = await interaction.followup.send(embed=embed, ephemeral=False, wait=True)
         if route_scope == "general_llm":
             message_id_raw = getattr(sent_message, "id", None)
             if message_id_raw is not None:
@@ -274,19 +301,41 @@ class TriggerEngineService:
                 anchor_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
                 session = self._qna_sessions.get(anchor_key)
                 if session and session.scope == "general_llm":
-                    session.history.append({"role": "user", "content": content})
+                    question_clean = content if content.endswith("?") else f"{content}?"
+                    session.history.append({"role": "user", "content": question_clean})
                     session.history = self._trim_qna_history(session.history)
-                    answer_text = await self._ask_general_answer(content, history=session.history)
+                    answer_text = await self._ask_general_answer(question_clean, history=session.history)
                     if answer_text:
                         session.history.append({"role": "assistant", "content": answer_text})
                         session.history = self._trim_qna_history(session.history)
-                        reply_embed = self._build_qna_embed(content, answer_text, [], scope="general_llm", mode="plain")
+                        formatted_answer = self._format_qna_answer_text(
+                            question_clean,
+                            answer_text,
+                            [],
+                            scope="general_llm",
+                            mode="plain",
+                        )
+                        reply_embed = self._build_qna_embed(
+                            getattr(message.author, "display_name", None) or getattr(message.author, "name", None) or "Utente",
+                            question_clean,
+                            formatted_answer,
+                            response_origin="remote_ai",
+                            model_name=self._get_qna_remote_model_name(),
+                        )
                         reply_message = await message.reply(embed=reply_embed, mention_author=False)
                         base_key = (int(message.guild.id), int(message.channel.id), int(message.reference.message_id))
                         new_anchor_key = (int(message.guild.id), int(message.channel.id), int(reply_message.id))
                         self._qna_sessions.set(base_key, session)
                         self._qna_sessions.set(new_anchor_key, session)
                         logger.info("qna_session_hit=true scope=general_llm history_len=%s", len(session.history))
+                    else:
+                        error_embed = self._build_qna_embed(
+                            getattr(message.author, "display_name", None) or getattr(message.author, "name", None) or "Utente",
+                            question_clean,
+                            "Non riesco a rispondere qui in questo momento.",
+                            response_origin="error",
+                        )
+                        await message.reply(embed=error_embed, mention_author=False)
                     return
 
             question = content
@@ -355,12 +404,24 @@ class TriggerEngineService:
                 source=message,
             )
             if answer is None or not answer.get("can_answer"):
-                await message.reply((answer or {}).get("refusal_reason") or "Non posso rispondere.", mention_author=False)
+                error_embed = self._build_qna_embed(
+                    getattr(message.author, "display_name", None) or getattr(message.author, "name", None) or "Utente",
+                    question_clean,
+                    "Non riesco a rispondere qui in questo momento.",
+                    response_origin="error",
+                )
+                await message.reply(embed=error_embed, mention_author=False)
                 return
 
             text = str(answer.get("answer") or "").strip()
             if not text:
-                await message.reply("Risposta non valida.", mention_author=False)
+                error_embed = self._build_qna_embed(
+                    getattr(message.author, "display_name", None) or getattr(message.author, "name", None) or "Utente",
+                    question_clean,
+                    "Non riesco a rispondere qui in questo momento.",
+                    response_origin="error",
+                )
+                await message.reply(embed=error_embed, mention_author=False)
                 return
 
             evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
@@ -372,12 +433,20 @@ class TriggerEngineService:
                 return
 
             await self._database.increment_usage(guild_id, str(message.author.id), "qna", window_date, datetime.now(timezone.utc).isoformat())
-            embed = self._build_qna_embed(question_clean, text, evidence_pack, scope="channel_qna", mode="evidence")
-            await message.reply(
-                content=f"{message.author.mention} **chiede:** {question_clean}",
-                embed=embed,
-                mention_author=False,
+            formatted_answer = self._format_qna_answer_text(
+                question_clean,
+                text,
+                evidence_pack,
+                scope="channel_qna",
+                mode="evidence",
             )
+            embed = self._build_qna_embed(
+                getattr(message.author, "display_name", None) or getattr(message.author, "name", None) or "Utente",
+                question_clean,
+                formatted_answer,
+                response_origin="local_backend",
+            )
+            await message.reply(embed=embed, mention_author=False)
         except Exception:  # noqa: BLE001
             logger.exception(
                 "handle_message_qna failed",
@@ -1782,24 +1851,54 @@ class TriggerEngineService:
 
         return normalized.strip()
 
-    def _build_qna_embed(
+    def _get_qna_remote_model_name(self) -> str:
+        if self._ai is None:
+            return "modello AI"
+        return self._ai.get_model("summary") or "gpt-4o-mini"
+
+    def _format_qna_answer_text(
         self,
         question: str,
         answer_text: str,
         evidence: list[dict[str, str]],
         *,
-        scope: Literal["general_llm", "channel_qna"] = "channel_qna",
-        mode: Literal["evidence", "plain"] = "evidence",
-    ) -> discord.Embed:
+        scope: Literal["general_llm", "channel_qna"],
+        mode: Literal["evidence", "plain"],
+    ) -> str:
         if mode == "plain":
             base_text = re.sub(r"\s+", " ", (answer_text or "").strip())
         else:
             base_text = self._bulletize_answer(question, answer_text, evidence)
         formatted = self.format_for_discord_embed(base_text, scope)
-        formatted_text = self.normalize_discord_formatting(formatted)
-        description = self._truncate_embed_description(formatted_text)
-        embed = discord.Embed(description=description)
-        footer_text = "Barcellometro • Generale" if scope == "general_llm" else "Barcellometro • Q&A"
+        return self.normalize_discord_formatting(formatted)
+
+    def _build_qna_embed(
+        self,
+        asker_name: str,
+        question: str,
+        answer_text: str,
+        *,
+        response_origin: Literal["remote_ai", "local_backend", "error"],
+        model_name: str | None = None,
+    ) -> discord.Embed:
+        description_raw = (
+            f"✋ **{asker_name} chiede:**\n"
+            f"{(question or '').strip()}\n\n"
+            "**👇 Risposta:**\n"
+            f"{(answer_text or '').strip()}"
+        )
+        description = self._truncate_embed_description(description_raw)
+        embed = discord.Embed(
+            title="❓BOTTA & RISPOSTA",
+            description=description,
+            color=discord.Color.from_str("#9B59B6"),
+        )
+        if response_origin == "remote_ai":
+            footer_text = f"Dati elaborati con {model_name or 'modello AI'} · Barcellometro 1.0"
+        elif response_origin == "local_backend":
+            footer_text = "Dati elaborati in loco · Barcellometro 1.0"
+        else:
+            footer_text = "Barcellometro 1.0"
         embed.set_footer(text=footer_text)
         return embed
 
