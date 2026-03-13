@@ -1538,7 +1538,7 @@ class TriggerEngineService:
         normalized_question = self._normalize_question(question)
         cache_scope = "global" if scope == "global" else scope
         cache_channel = channel_id if cache_scope == "channel" else "global"
-        cache_fragment = "semantic_v2"
+        cache_fragment = "semantic_v3"
         target_ids_fragment = "all"
         session_signature = "nosession"
         cache_key = f"qna:{cache_scope}:{cache_channel}:{target_ids_fragment}:{cache_fragment}:{session_signature}:{normalized_question}"
@@ -1866,7 +1866,6 @@ class TriggerEngineService:
         answer_lines = [line for line in lines if line not in proof_lines]
         sections: list[str] = []
         if answer_lines:
-            sections.append("**Risposta**")
             sections.extend(answer_lines)
         if proof_lines:
             sections.append("\n**Prove**")
@@ -1896,6 +1895,18 @@ class TriggerEngineService:
             return "modello AI"
         return self._ai.get_model("summary") or "gpt-4o-mini"
 
+    @staticmethod
+    def _strip_leading_answer_label(text: str) -> str:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return cleaned
+        pattern = re.compile(r"^(?:\*\*)?\s*(?:👇\s*)?risposta\s*:?(?:\*\*)?\s*", re.IGNORECASE)
+        while True:
+            updated = pattern.sub("", cleaned, count=1).strip()
+            if updated == cleaned:
+                return cleaned
+            cleaned = updated
+
     def _format_qna_answer_text(
         self,
         question: str,
@@ -1909,7 +1920,9 @@ class TriggerEngineService:
             base_text = re.sub(r"\s+", " ", (answer_text or "").strip())
         else:
             base_text = self._bulletize_answer(question, answer_text, evidence)
+        base_text = self._strip_leading_answer_label(base_text)
         formatted = self.format_for_discord_embed(base_text, scope)
+        formatted = self._strip_leading_answer_label(formatted)
         return self.normalize_discord_formatting(formatted)
 
     def _build_qna_embed(
@@ -1922,14 +1935,15 @@ class TriggerEngineService:
         model_name: str | None = None,
         is_followup: bool = False,
     ) -> discord.Embed:
+        cleaned_answer = self._strip_leading_answer_label(answer_text)
         if is_followup:
-            description_raw = f"**👇 Risposta:**\n{(answer_text or '').strip()}"
+            description_raw = f"**👇 Risposta:**\n{cleaned_answer}"
         else:
             description_raw = (
                 f"✋ **{asker_name} chiede:**\n"
                 f"{(question or '').strip()}\n\n"
                 "**👇 Risposta:**\n"
-                f"{(answer_text or '').strip()}"
+                f"{cleaned_answer}"
             )
         description = self._truncate_embed_description(description_raw)
         embed = discord.Embed(

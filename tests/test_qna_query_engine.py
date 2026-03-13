@@ -120,3 +120,95 @@ def test_compose_answer_falls_back_locally_when_ai_returns_empty_text() -> None:
         assert out.startswith("Messaggi trovati:")
 
     asyncio.run(_run())
+
+
+def test_parse_intent_accepts_fenced_json() -> None:
+    async def _run() -> None:
+        db = Mock()
+        ai = Mock()
+        ai.is_enabled.return_value = True
+        client = Mock()
+        ai.client.return_value = client
+        ai.get_model.return_value = "gpt-4o-mini"
+        payload = """```json
+{"intent":"user_activity_summary","target_user":"Lela","topic":null,"time_range":"ieri","channel":null,"metric":null,"limit":8}
+```"""
+        response = SimpleNamespace(output_text=payload, output=[])
+        client.responses.create = AsyncMock(return_value=response)
+        engine = QnaQueryEngine(database=db, ai_service=ai, barcello=Mock())
+
+        out = await engine._parse_intent("di che ha parlato lela ieri?")
+        assert out.intent == "user_activity_summary"
+        assert out.target_user == "Lela"
+        assert out.time_range == "ieri"
+
+    asyncio.run(_run())
+
+
+def test_answer_requires_user_tag_when_target_not_resolved() -> None:
+    async def _run() -> None:
+        engine = QnaQueryEngine(database=Mock(), ai_service=Mock(), barcello=Mock())
+        engine._parse_intent = AsyncMock(
+            return_value=SimpleNamespace(
+                intent="user_activity_summary",
+                target_user="lela",
+                topic=None,
+                time_range="ieri",
+                channel=None,
+                metric=None,
+                limit=8,
+            )
+        )
+        engine._resolve_target_user = AsyncMock(return_value=(None, "lela"))
+
+        out = await engine.answer(guild_id="1", channel_id="2", question="di che ha parlato lela ieri?")
+        assert "taggala direttamente" in out.lower()
+        assert out != NO_DATA_REPLY
+
+    asyncio.run(_run())
+
+
+def test_extract_topic_hint_ignores_mentions_and_numeric_ids() -> None:
+    engine = QnaQueryEngine(database=Mock(), ai_service=Mock(), barcello=Mock())
+    assert engine._extract_topic_hint("cosa ha detto lela su <@123456789012345678> ieri?") is None
+    assert engine._extract_topic_hint("cosa pensa lela di 1408152223665360977?") is None
+
+
+def test_resolve_target_user_prefers_exact_match_over_substring() -> None:
+    async def _run() -> None:
+        member_exact = SimpleNamespace(id=42, display_name="Lela", name="lela", global_name=None, nick=None)
+        member_sub = SimpleNamespace(id=77, display_name="lelandro", name="lelandro", global_name=None, nick=None)
+        guild = SimpleNamespace(members=[member_sub, member_exact], get_member=lambda _: None)
+        source = SimpleNamespace(guild=guild)
+        db = Mock()
+        db.fetchall = AsyncMock(return_value=[])
+        engine = QnaQueryEngine(database=db, ai_service=Mock(), barcello=Mock())
+
+        user_id, user_name = await engine._resolve_target_user("lela", "di che ha parlato lela ieri?", "1", source)
+        assert user_id == "42"
+        assert user_name == "Lela"
+
+    asyncio.run(_run())
+
+
+def test_fetch_intent_data_user_activity_uses_larger_candidate_pool() -> None:
+    async def _run() -> None:
+        db = Mock()
+        db.fetch_qna_messages = AsyncMock(return_value=[])
+        engine = QnaQueryEngine(database=db, ai_service=Mock(), barcello=Mock())
+
+        await engine._fetch_intent_data(
+            intent="user_activity_summary",
+            guild_id="1",
+            channel_id="2",
+            target_user_id="10",
+            topic=None,
+            limit=8,
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            question="di che ha parlato lela ieri?",
+        )
+        kwargs = db.fetch_qna_messages.await_args.kwargs
+        assert kwargs["candidate_pool_limit"] >= 50
+
+    asyncio.run(_run())

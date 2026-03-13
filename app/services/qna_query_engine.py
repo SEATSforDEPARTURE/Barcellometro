@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -51,6 +52,8 @@ class QnaQueryEngine:
         parsed = await self._parse_intent(question)
         start_ts, end_ts, range_label = self._resolve_time_range(parsed.time_range or "", question)
         target_user_id, target_user_name = await self._resolve_target_user(parsed.target_user, question, guild_id, source)
+        if parsed.target_user and target_user_id is None and self._intent_requires_user(parsed.intent):
+            return "Per identificare bene la persona, taggala direttamente nella domanda con @utente."
         resolved_channel_id, resolved_channel_name = self._resolve_channel(parsed.channel, question, source)
         if parsed.intent == "voice_activity" and parsed.channel and not resolved_channel_id:
             return "Non riesco a capire quale canale vocale devo analizzare."
@@ -70,6 +73,8 @@ class QnaQueryEngine:
             source=source,
         )
         if not payload.get("has_data"):
+            if payload.get("needs_user_tag"):
+                return "Per identificare bene le persone, taggale direttamente nella domanda con @utente."
             return NO_DATA_REPLY
         return await self._compose_answer(
             question=question,
@@ -99,18 +104,31 @@ class QnaQueryEngine:
             "rules": [
                 "Rispondi SOLO JSON valido.",
                 "Non aggiungere testo fuori dal JSON.",
+                "Non usare markdown e non usare code fences.",
                 "Intents disponibili: user_activity_summary, topic_discussion_summary, server_activity_summary, user_opinion_on_topic, voice_activity, aura_query, barcello_status, user_stats, conversation_between_users.",
                 "Usa user_opinion_on_topic per domande come 'cosa pensa X di Y' o 'cosa ha detto X su Y'.",
                 "Usa user_activity_summary per domande come 'di che ha parlato X ieri'.",
                 "Usa topic_discussion_summary per domande come 'di che si è parlato ieri'.",
+                "Le mention Discord come <@123> rappresentano utenti, non topic.",
+                "Non usare l'ID numerico di chi fa la domanda come topic.",
+                "Per 'cosa pensa X di Y', X è target_user e Y è topic.",
+                "Per 'di che ha parlato X ieri', X è target_user e topic deve essere null.",
+                "Se non c'è un topic testuale chiaro, topic = null.",
                 "Copia target_user/topic/time_range/channel quando presenti nella domanda.",
+            ],
+            "examples": [
+                {"question": "di che ha parlato <@123> ieri?", "json": {"intent": "user_activity_summary", "target_user": "<@123>", "topic": None, "time_range": "ieri", "channel": None, "metric": None, "limit": 8}},
+                {"question": "cosa pensa Luca di Sanremo?", "json": {"intent": "user_opinion_on_topic", "target_user": "Luca", "topic": "Sanremo", "time_range": None, "channel": None, "metric": None, "limit": 8}},
+                {"question": "cosa ha detto <@123> su Eurovision ieri?", "json": {"intent": "user_opinion_on_topic", "target_user": "<@123>", "topic": "Eurovision", "time_range": "ieri", "channel": None, "metric": None, "limit": 8}},
+                {"question": "quanta aura ha <@123>?", "json": {"intent": "aura_query", "target_user": "<@123>", "topic": None, "time_range": None, "channel": None, "metric": None, "limit": 8}},
             ],
         }
         try:
             logger.info("qna_intent_parse model=%s", model)
             response = await self._create_intent_response(model, prompt)
             raw_text = self._extract_response_text(response)
-            data = json.loads(raw_text)
+            clean_text = self._strip_json_fences(raw_text)
+            data = json.loads(clean_text)
             intent = str(data.get("intent") or "").strip()
             if intent not in SUPPORTED_INTENTS:
                 return fallback
@@ -125,8 +143,37 @@ class QnaQueryEngine:
                 limit=max(3, min(20, limit)),
             )
         except Exception:  # noqa: BLE001
-            logger.exception("qna_intent_parse_failed raw_text=%s", locals().get("raw_text", "")[:500])
+            logger.exception(
+                "qna_intent_parse_failed raw_text=%s clean_text=%s",
+                locals().get("raw_text", "")[:500],
+                locals().get("clean_text", "")[:500],
+            )
             return fallback
+
+    @staticmethod
+    def _strip_json_fences(text: str) -> str:
+        cleaned = (text or "").strip()
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        if cleaned.startswith("```"):
+            cleaned = cleaned[3:].strip()
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+        if cleaned.startswith("{") and cleaned.endswith("}"):
+            return cleaned
+        start = cleaned.find("{")
+        if start < 0:
+            return cleaned
+        depth = 0
+        for idx in range(start, len(cleaned)):
+            char = cleaned[idx]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return cleaned[start : idx + 1].strip()
+        return cleaned
 
     async def _create_intent_response(self, model: str, prompt: dict[str, Any]) -> Any:
         if self._intent_response_format_supported is False:
@@ -174,7 +221,7 @@ class QnaQueryEngine:
 
     def _extract_time_range_hint(self, question: str) -> str | None:
         q = question.lower()
-        for token in ["ieri", "oggi", "ultima ora", "ultimi 7 giorni", "settimana"]:
+        for token in ["ieri", "oggi", "ultima ora", "ultimi 7 giorni", "settimana", "adesso"]:
             if token in q:
                 return token
         return None
@@ -185,9 +232,12 @@ class QnaQueryEngine:
             return mention.group(1)
         patterns = [
             r"di che ha parlato\s+([\w._-]+)",
+            r"ha parlato\s+con\s+([\w._-]+)",
             r"cosa pensa\s+([\w._-]+)\s+di",
             r"cosa ha detto\s+([\w._-]+)\s+su",
             r"quanta aura ha\s+([\w._-]+)",
+            r"chi ha parlato con\s+([\w._-]+)",
+            r"conversazione tra\s+([\w._-]+)\s+e\s+[\w._-]+",
         ]
         for pattern in patterns:
             match = re.search(pattern, question, re.IGNORECASE)
@@ -196,12 +246,54 @@ class QnaQueryEngine:
         return None
 
     def _extract_topic_hint(self, question: str) -> str | None:
-        patterns = [r"cosa pensa\s+[\w._-]+\s+di\s+(.+?)(?:\?|$)", r"cosa ha detto\s+[\w._-]+\s+su\s+(.+?)(?:\?|$)"]
+        patterns = [
+            r"cosa pensa\s+[\w._-]+\s+di\s+(.+?)(?:\?|$)",
+            r"cosa ha detto\s+[\w._-]+\s+su\s+(.+?)(?:\?|$)",
+            r"ha detto\s+.+?\s+su\s+(.+?)(?:\?|$)",
+        ]
         for pattern in patterns:
             match = re.search(pattern, question, re.IGNORECASE)
             if match:
-                return match.group(1).strip(" ?")
+                return self._sanitize_topic_candidate(match.group(1))
         return None
+
+    @staticmethod
+    def _sanitize_topic_candidate(text: str | None) -> str | None:
+        candidate = str(text or "").strip(" ?!.,")
+        if not candidate:
+            return None
+        if re.fullmatch(r"<@!?\d+>", candidate):
+            return None
+        if re.fullmatch(r"\d{6,}", candidate):
+            return None
+        if "<@" in candidate and re.sub(r"<@!?\d+>", "", candidate).strip() == "":
+            return None
+        return candidate
+
+    @staticmethod
+    def _normalize_match_text(text: str) -> str:
+        lowered = unicodedata.normalize("NFKD", str(text or "").lower())
+        lowered = "".join(ch for ch in lowered if not unicodedata.combining(ch))
+        lowered = re.sub(r"[._-]+", " ", lowered)
+        lowered = re.sub(r"\s+", " ", lowered)
+        return lowered.strip()
+
+    def _score_candidate_match(self, query: str, candidate: str) -> int:
+        q = self._normalize_match_text(query)
+        c = self._normalize_match_text(candidate)
+        if not q or not c:
+            return 0
+        if q == c:
+            return 100
+        if c.startswith(q):
+            return 85
+        q_tokens = [t for t in q.split(" ") if t]
+        c_tokens = set(c.split(" "))
+        if q_tokens and all(token in c_tokens for token in q_tokens):
+            return 70
+        if q in c:
+            return 55
+        return 0
 
     def _extract_channel_hint(self, question: str) -> str | None:
         match = re.search(r"in\s+([a-zA-Z0-9_-]{2,})", question, re.IGNORECASE)
@@ -223,19 +315,32 @@ class QnaQueryEngine:
         candidate = (target_user or "").strip()
         if not candidate:
             return None, None
+        best: tuple[int, str | None, str | None] = (0, None, None)
+        second_best = 0
+
+        def _consider(score: int, user_id: str | None, name: str | None) -> None:
+            nonlocal best, second_best
+            if score <= 0:
+                return
+            if score > best[0]:
+                second_best = best[0]
+                best = (score, user_id, name)
+            elif score == best[0]:
+                second_best = score
+            elif score > second_best:
+                second_best = score
+
         if source and getattr(source, "guild", None):
             guild = source.guild
             for member in getattr(guild, "members", []):
-                name = " ".join(
-                    [
-                        str(getattr(member, "display_name", "") or ""),
-                        str(getattr(member, "name", "") or ""),
-                        str(getattr(member, "global_name", "") or ""),
-                        str(getattr(member, "nick", "") or ""),
-                    ]
-                ).lower()
-                if candidate.lower() in name:
-                    return str(member.id), getattr(member, "display_name", None)
+                candidate_names = [
+                    str(getattr(member, "display_name", "") or ""),
+                    str(getattr(member, "name", "") or ""),
+                    str(getattr(member, "global_name", "") or ""),
+                    str(getattr(member, "nick", "") or ""),
+                ]
+                score = max((self._score_candidate_match(candidate, item) for item in candidate_names if item), default=0)
+                _consider(score, str(member.id), getattr(member, "display_name", None) or getattr(member, "name", None))
         rows = await self._db.fetchall(
             """
             SELECT gm.user_id, COALESCE(gm.nickname, u.display_name, u.global_name, u.username, gm.user_id) AS display
@@ -247,9 +352,21 @@ class QnaQueryEngine:
         )
         for row in rows:
             display = str(row["display"] or "")
-            if candidate.lower() in display.lower():
-                return str(row["user_id"]), display
+            score = self._score_candidate_match(candidate, display)
+            _consider(score, str(row["user_id"]), display)
+        if best[1] and best[0] >= 55 and second_best < best[0]:
+            return best[1], best[2]
         return None, candidate
+
+    @staticmethod
+    def _intent_requires_user(intent: str) -> bool:
+        return intent in {
+            "user_activity_summary",
+            "user_opinion_on_topic",
+            "aura_query",
+            "user_stats",
+            "conversation_between_users",
+        }
 
     def _resolve_channel(self, parsed_channel: str | None, question: str, source: discord.Interaction | discord.Message | None) -> tuple[str | None, str | None]:
         guild = getattr(source, "guild", None) if source else None
@@ -313,18 +430,25 @@ class QnaQueryEngine:
                 minutes += max(0, int((ended - started).total_seconds() // 60))
             return {"has_data": bool(sessions), "voice_minutes": minutes, "sessions": [dict(r) for r in sessions[:10]]}
 
-        topic = kwargs.get("topic")
-        topic_pool_limit = 80 if topic else kwargs["limit"]
+        topic = self._sanitize_topic_candidate(kwargs.get("topic"))
+        if kwargs["intent"] == "user_activity_summary":
+            pool_limit = max(kwargs["limit"], 50)
+        elif kwargs["intent"] == "user_opinion_on_topic" and topic:
+            pool_limit = max(kwargs["limit"], 80)
+        else:
+            pool_limit = max(kwargs["limit"], 30 if kwargs.get("target_user_id") else kwargs["limit"])
         rows = await self._db.fetch_qna_messages(
             guild_id=kwargs["guild_id"],
             start_ts=kwargs["start_ts"],
             end_ts=kwargs["end_ts"],
             limit=kwargs["limit"],
-            candidate_pool_limit=topic_pool_limit,
+            candidate_pool_limit=pool_limit,
             user_id=kwargs.get("target_user_id"),
             topic=topic,
         )
         if intent == "conversation_between_users":
+            if not kwargs.get("target_user_id"):
+                return {"has_data": False, "needs_user_tag": True}
             rows = await self._db.fetch_qna_conversation_between_users(
                 guild_id=kwargs["guild_id"],
                 user_a_id=kwargs.get("target_user_id"),
@@ -352,7 +476,7 @@ class QnaQueryEngine:
             return "Ho raccolto i dati richiesti, ma la generazione AI non è disponibile ora."
         model = self._ai.get_model("summary") or "gpt-4o-mini"
         prompt = {
-            "system": "Sei il motore /domanda del server Discord. Rispondi in italiano, sintetico ma informativo, usando SOLO i dati forniti.",
+            "system": "Sei il motore /domanda del server Discord. Rispondi in italiano, in modo preciso, usando solo i dati forniti.",
             "question": question,
             "intent": intent,
             "target_user": target_user_name,
@@ -361,6 +485,10 @@ class QnaQueryEngine:
             "rules": [
                 "Non inventare.",
                 "Se i dati sono scarsi, dillo in modo trasparente.",
+                "Se la domanda è 'di che ha parlato X', sintetizza temi ricorrenti invece di copiare messaggi casuali.",
+                "Non ripetere la domanda.",
+                "Non usare disclaimer inutili.",
+                "Non iniziare mai con la parola 'Risposta'.",
                 "Massimo 6 bullet o 1 breve paragrafo.",
             ],
         }
