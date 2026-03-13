@@ -1007,3 +1007,78 @@ def test_format_qna_answer_text_plain_mode_normalizes_single_line_llm_output() -
 
     assert "\n- **Energie Altissime**" in formatted
     assert "\n- **Comunicazione al Top**" in formatted
+
+
+def test_handle_qna_returns_semantic_plain_and_cache_v2() -> None:
+    async def _run() -> None:
+        database = Mock()
+        database.get_cache = AsyncMock(return_value=None)
+        database.set_cache = AsyncMock()
+        service = TriggerEngineService(database, Mock(), Mock(), Mock(), community_insights=Mock())
+        service._qna_query_engine = Mock()
+        service._qna_query_engine.answer = AsyncMock(return_value="Risposta semantica")
+
+        out = await service._handle_qna(scope="channel", guild_id="1", channel_id="2", question="di che ha parlato @BritneySpritz ieri?")
+
+        assert out is not None
+        assert out.get("answer_mode") == "semantic_plain"
+        cache_key = database.set_cache.await_args.args[0]
+        assert ":semantic_v2:" in cache_key
+
+    asyncio.run(_run())
+
+
+def test_route_qna_channel_semantic_plain_renders_plain_mode() -> None:
+    async def _run() -> None:
+        database = Mock()
+        database.get_trigger_enabled = AsyncMock(return_value=True)
+        database.get_usage = AsyncMock(return_value=0)
+        database.increment_usage = AsyncMock()
+
+        entitlements = Mock()
+        entitlements.resolve_profile = AsyncMock(return_value="role1")
+
+        service = TriggerEngineService(database, Mock(), entitlements, Mock(), community_insights=Mock())
+        service._get_qna_daily_limits = AsyncMock(return_value={"role1": 3, "role2": 5, "role3": 8})
+        service._resolve_qna_limit = AsyncMock(return_value=3)
+        service._decide_qna_scope = AsyncMock(return_value="channel")
+        service._handle_qna = AsyncMock(
+            return_value={
+                "can_answer": True,
+                "answer": "Risposta semantica pronta",
+                "evidence_pack": [{"jump_url": "https://discord.com/channels/1/2/3"}],
+                "answer_mode": "semantic_plain",
+            }
+        )
+
+        called: dict[str, object] = {}
+
+        def _fmt(question, text, evidence, *, scope, mode):
+            called["mode"] = mode
+            called["evidence"] = evidence
+            return text
+
+        service._format_qna_answer_text = Mock(side_effect=_fmt)
+        service._build_qna_embed = Mock(return_value=Mock())
+
+        response = Mock()
+        response.is_done = Mock(return_value=False)
+        response.defer = AsyncMock()
+
+        followup = Mock()
+        followup.send = AsyncMock(return_value=SimpleNamespace(id=900))
+
+        interaction = SimpleNamespace(
+            guild_id=10,
+            channel_id=20,
+            user=SimpleNamespace(id=30, mention="<@30>", display_name="Luca", name="Luca"),
+            response=response,
+            followup=followup,
+        )
+
+        await service.route_qna(interaction, "di che ha parlato @BritneySpritz ieri?", scope="channel_qna")
+
+        assert called.get("mode") == "plain"
+        assert called.get("evidence") == []
+
+    asyncio.run(_run())
