@@ -29,12 +29,14 @@ class FasterWhisperSttService:
         self._model: Optional[WhisperModel] = None
         self._config: Optional[_SttConfig] = None
 
-    async def transcribe(self, audio_path: str) -> TranscriptResult:
+    async def transcribe(self, audio_path: str, language_hint_override: str | None = None) -> TranscriptResult:
         config = await self._load_config()
         model = await self._get_model(config)
 
+        effective_hint = config.language_hint if language_hint_override is None else language_hint_override.strip().lower()
+
         def _run() -> TranscriptResult:
-            language = None if config.language_hint == "auto" else config.language_hint
+            language = None if effective_hint in {"", "auto"} else effective_hint
             segments, info = model.transcribe(
                 audio_path,
                 beam_size=config.beam_size,
@@ -43,9 +45,10 @@ class FasterWhisperSttService:
             text = "".join(segment.text for segment in segments).strip()
             detected_lang = (info.language or "unknown") if info else "unknown"
             logger.debug(
-                "Local STT completed model=%s language_hint=%s detected_language=%s text_preview=%r",
+                "Local STT completed model=%s configured_hint=%s effective_hint=%s detected_language=%s text_preview=%r",
                 config.model,
                 config.language_hint,
+                effective_hint,
                 detected_lang,
                 text[:120],
             )
@@ -53,7 +56,7 @@ class FasterWhisperSttService:
                 text=text,
                 language=detected_lang,
                 detected_language=detected_lang,
-                language_hint=config.language_hint,
+                language_hint=effective_hint or "auto",
                 backend="local",
                 model=config.model,
             )
@@ -64,7 +67,7 @@ class FasterWhisperSttService:
         model = (await self._database.get_setting("stt.local.model")) or os.getenv("STT_LOCAL_MODEL", "small")
         compute_type = (await self._database.get_setting("stt.local.compute_type")) or os.getenv("STT_LOCAL_COMPUTE_TYPE", "int8")
         beam_raw = (await self._database.get_setting("stt.local.beam_size")) or os.getenv("STT_LOCAL_BEAM_SIZE", "1")
-        language_hint = (await self._database.get_setting("stt.local.language_hint")) or "auto"
+        language_hint = ((await self._database.get_setting("stt.local.language_hint")) or "auto").strip().lower()
         return _SttConfig(
             model=model,
             compute_type=compute_type,
