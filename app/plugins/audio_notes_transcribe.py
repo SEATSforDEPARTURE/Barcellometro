@@ -211,16 +211,17 @@ def setup(registry: ServiceRegistry) -> None:
 
             stt_backend = (await _get_setting("stt.backend", "local")).lower()
             stt_used = "local"
-            language_hint = ((await _get_setting("stt.local.language_hint", "auto")) or "auto").strip().lower()
+            configured_language_hint = ((await _get_setting("stt.local.language_hint", "auto")) or "auto").strip().lower()
+            audio_notes_language_override = "auto"
             try:
                 if stt_backend == "ai":
-                    transcript = await stt_ai.transcribe(wav_path)
+                    transcript = await stt_ai.transcribe(wav_path, language_hint_override=audio_notes_language_override)
                     stt_used = "ai"
                 else:
-                    transcript = await stt_local.transcribe(wav_path)
+                    transcript = await stt_local.transcribe(wav_path, language_hint_override=audio_notes_language_override)
             except Exception:
                 logger.exception("STT failed, falling back to local")
-                transcript = await stt_local.transcribe(wav_path)
+                transcript = await stt_local.transcribe(wav_path, language_hint_override=audio_notes_language_override)
                 stt_used = "local"
 
             original_transcript_text = transcript.text.strip()
@@ -233,16 +234,18 @@ def setup(registry: ServiceRegistry) -> None:
             target_lang_norm = _normalize_lang(target_lang)
 
             logger.debug(
-                "Audio note STT backend=%s model=%s language_hint=%s stt_hint=%s detected_language=%s text_preview=%r",
+                "Audio note STT backend=%s model=%s configured_hint=%s override_hint=%s effective_hint=%s detected_language=%s text_preview=%r",
                 stt_used,
                 transcript.model,
-                language_hint,
+                configured_language_hint,
+                audio_notes_language_override,
                 transcript.language_hint,
                 transcript.detected_language,
                 original_transcript_text[:120],
             )
 
-            if detected_lang != target_lang_norm:
+            should_translate = detected_lang != target_lang_norm
+            if should_translate:
                 try:
                     if translate_backend == "ai":
                         translation = await translate_ai.translate(original_transcript_text, target_lang)
@@ -258,9 +261,10 @@ def setup(registry: ServiceRegistry) -> None:
                     translation_model = None
 
             logger.debug(
-                "Audio note translation decision detected=%s target=%s translated=%s",
+                "Audio note translation decision detected=%s target=%s should_translate=%s translated=%s",
                 detected_lang,
                 target_lang_norm,
+                should_translate,
                 bool(translation_text),
             )
 
