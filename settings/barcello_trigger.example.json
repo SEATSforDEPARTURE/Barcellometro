@@ -1,7 +1,11 @@
 {
   "window_minutes": 60,
   "min_messages": 10,
-  "cooldown_minutes": 10,
+  "cooldown_minutes": {
+    "minor": 20,
+    "major": 8,
+    "recovery": 60
+  },
   "min_score_delta_for_notify": 3,
   "mood_default": "chill",
   "time_buckets": {
@@ -424,5 +428,24 @@
       "window_minutes": 90
     }
   },
-  "mod_role_id": "1379593668645883934"
+  "mod_role_id": "1379593668645883934",
+  "event_driven": {
+    "enabled": true,
+    "debounce_seconds": 30,
+    "fresh_activity_minutes": 5,
+    "min_recent_messages": 4,
+    "min_recent_authors": 2,
+    "max_last_message_age_seconds": 120,
+    "minor_state_confirm_seconds": 180
+  },
+  "recovery": {
+    "enabled": true,
+    "poll_seconds": 300,
+    "arm_on_colors": [
+      "ROSSO",
+      "NERO"
+    ],
+    "notify_only_on_green": true,
+    "min_quiet_minutes": 12
+  }
 }
