@@ -222,6 +222,7 @@ def setup(registry: ServiceRegistry) -> None:
                 transcript = await stt_local.transcribe(wav_path)
                 stt_used = "local"
 
+            original_transcript_text = transcript.text.strip()
             translation_text: Optional[str] = None
             translation_model: Optional[str] = None
             target_lang = await _get_setting("translate.target_lang", "it")
@@ -232,12 +233,12 @@ def setup(registry: ServiceRegistry) -> None:
             if detected_lang != target_lang_norm:
                 try:
                     if translate_backend == "ai":
-                        translation = await translate_ai.translate(transcript.text, target_lang)
+                        translation = await translate_ai.translate(original_transcript_text, target_lang)
                         translate_used = "ai"
                     else:
-                        translation = await translate_local.translate(transcript.text, target_lang)
+                        translation = await translate_local.translate(original_transcript_text, target_lang)
                         translate_used = "local"
-                    translation_text = translation.text
+                    translation_text = translation.text.strip() if translation.text else None
                     translation_model = translation.model
                 except Exception:
                     logger.exception("Translation failed; skipping translation")
@@ -246,15 +247,15 @@ def setup(registry: ServiceRegistry) -> None:
 
             output_parts = []
             output_parts.append("**✍️ Trascrizione:**")
-            output_parts.append(transcript.text)
-            if translation_text:
+            output_parts.append(original_transcript_text)
+            if detected_lang != "it" and translation_text:
                 output_parts.append("")
                 output_parts.append("**🇮🇹 Traduzione:**")
                 output_parts.append(translation_text)
             full_output = "\n".join(output_parts).strip()
 
             footer_text = f"Dati elaborati con {transcript.model} · {_AUDIO_NOTE_FOOTER}"
-            if translation_text and translation_model:
+            if detected_lang != "it" and translation_text and translation_model:
                 footer_text = f"Dati elaborati con {transcript.model} e {translation_model} · {_AUDIO_NOTE_FOOTER}"
 
             chunks = _split_embed_descriptions(full_output, embed_max_chars)
@@ -282,13 +283,13 @@ def setup(registry: ServiceRegistry) -> None:
                 channel_id=str(message.channel.id),
                 author_id=str(message.author.id),
                 ts=_now_iso(),
-                content=transcript.text,
+                content=original_transcript_text,
                 reply_to_message_id=str(message.id),
                 mentions=[],
                 attachments=[],
                 embeds=[{"audio_note_meta": meta, "source": "audio_note_stt"}],
             )
-            if translation_text:
+            if detected_lang != "it" and translation_text:
                 await database.insert_message(
                     message_id=str(uuid4()),
                     guild_id=str(message.guild.id),
