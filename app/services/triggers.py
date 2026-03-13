@@ -24,7 +24,7 @@ from app.services.entitlements import EntitlementsService
 from app.services.ingest import EventEnvelope
 from app.services.qna_session_store import QnaSession, QnaSessionStore
 from app.services.qna_sessions_repo import QnaSessionsRepo
-from app.services.qna_query_engine import QnaQueryEngine
+from app.services.qna_query_engine import QnaAnswerResult, QnaQueryEngine
 from app.utils.pii import contains_pii
 
 logger = logging.getLogger(__name__)
@@ -282,6 +282,8 @@ class TriggerEngineService:
         render_evidence = evidence_pack if render_mode == "evidence" else []
         logger.info("qna_render mode=%s scope=%s evidence_items=%d", render_mode, route_scope, len(render_evidence))
         formatted_answer = self._format_qna_answer_text(question_clean, text, render_evidence, scope=route_scope, mode=render_mode)
+        if route_scope == "channel_qna" and answer_mode == "semantic_plain":
+            formatted_answer = self._append_qna_proofs_section(formatted_answer, evidence_pack)
         embed = self._build_qna_embed(
             asker_name,
             question_clean,
@@ -533,6 +535,8 @@ class TriggerEngineService:
                 scope="channel_qna",
                 mode=render_mode,
             )
+            if answer_mode == "semantic_plain":
+                formatted_answer = self._append_qna_proofs_section(formatted_answer, evidence_pack)
             embed = self._build_qna_embed(
                 getattr(message.author, "display_name", None) or getattr(message.author, "name", None) or "Utente",
                 question_clean,
@@ -1752,14 +1756,32 @@ class TriggerEngineService:
         normalized_question = self._normalize_question(question)
         cache_scope = "global" if scope == "global" else scope
         cache_channel = channel_id if cache_scope == "channel" else "global"
-        cache_fragment = "semantic_v3"
+        cache_fragment = "semantic_v4"
         target_ids_fragment = "all"
         session_signature = "nosession"
         cache_key = f"qna:{cache_scope}:{cache_channel}:{target_ids_fragment}:{cache_fragment}:{session_signature}:{normalized_question}"
         cached = await self._database.get_cache(cache_key)
         if cached is not None:
             logger.info("qna cache hit scope=%s channel_id=%s", scope, channel_id)
-            return {"can_answer": True, "answer": cached, "refusal_reason": None, "evidence_pack": [], "answer_mode": "semantic_plain", "response_origin": "local_backend"}
+            cached_text = str(cached)
+            cached_proofs: list[dict[str, str]] = []
+            try:
+                parsed_cached = json.loads(cached_text)
+                if isinstance(parsed_cached, dict):
+                    cached_text = str(parsed_cached.get("answer") or "")
+                    parsed_proofs = parsed_cached.get("proofs")
+                    if isinstance(parsed_proofs, list):
+                        cached_proofs = [item for item in parsed_proofs if isinstance(item, dict)]
+            except json.JSONDecodeError:
+                pass
+            return {
+                "can_answer": True,
+                "answer": cached_text,
+                "refusal_reason": None,
+                "evidence_pack": cached_proofs,
+                "answer_mode": "semantic_plain",
+                "response_origin": "local_backend",
+            }
 
         if scope == "global":
             text_answer = await self._ask_general_answer(question)
@@ -1769,7 +1791,7 @@ class TriggerEngineService:
             return None
 
         try:
-            channel_answer_text = await self._qna_query_engine.answer(
+            channel_answer = await self._qna_query_engine.answer(
                 guild_id=guild_id,
                 channel_id=channel_id,
                 question=question,
@@ -1779,11 +1801,77 @@ class TriggerEngineService:
             logger.exception("qna_query_engine_failed")
             return None
 
+        if isinstance(channel_answer, QnaAnswerResult):
+            channel_answer_text = channel_answer.answer_text
+            channel_proofs = channel_answer.proofs
+        elif isinstance(channel_answer, dict):
+            channel_answer_text = str(channel_answer.get("answer_text") or "")
+            raw_proofs = channel_answer.get("proofs")
+            channel_proofs = [item for item in raw_proofs if isinstance(item, dict)] if isinstance(raw_proofs, list) else []
+        else:
+            channel_answer_text = str(channel_answer or "")
+            channel_proofs = []
+
         if not channel_answer_text:
             return None
 
-        await self._database.set_cache(cache_key, channel_answer_text, 45 * 60)
-        return {"can_answer": True, "answer": channel_answer_text, "refusal_reason": None, "evidence_pack": [], "answer_mode": "semantic_plain", "response_origin": "local_backend"}
+        cache_payload = json.dumps({"answer": channel_answer_text, "proofs": channel_proofs}, ensure_ascii=False)
+        await self._database.set_cache(cache_key, cache_payload, 45 * 60)
+        return {
+            "can_answer": True,
+            "answer": channel_answer_text,
+            "refusal_reason": None,
+            "evidence_pack": channel_proofs,
+            "answer_mode": "semantic_plain",
+            "response_origin": "local_backend",
+        }
+
+    def _append_qna_proofs_section(
+        self,
+        answer_text: str,
+        proofs: list[dict[str, str]],
+        *,
+        max_links: int = 4,
+    ) -> str:
+        base_text = (answer_text or "").strip()
+        if not base_text or not proofs:
+            return base_text
+
+        unique_proofs: list[dict[str, str]] = []
+        seen_urls: set[str] = set()
+        for proof in proofs:
+            if not isinstance(proof, dict):
+                continue
+            jump_url = str(proof.get("jump_url") or "").strip()
+            if not self._is_valid_jump_url(jump_url) or jump_url in seen_urls:
+                continue
+            created_at_iso = str(proof.get("created_at_iso") or "").strip()
+            if not created_at_iso:
+                continue
+            seen_urls.add(jump_url)
+            unique_proofs.append({"jump_url": jump_url, "created_at_iso": created_at_iso})
+
+        if not unique_proofs:
+            return base_text
+
+        unique_proofs.sort(key=lambda item: str(item.get("created_at_iso") or ""), reverse=True)
+        capped_max = max(1, min(max_links, len(unique_proofs)))
+        for links_count in range(capped_max, 0, -1):
+            lines: list[str] = ["", "**🧾 Prove:**"]
+            valid_links = 0
+            for item in unique_proofs[:links_count]:
+                ts = self._format_proof_timestamp(str(item.get("created_at_iso") or ""))
+                jump_url = str(item.get("jump_url") or "").strip()
+                if not ts:
+                    continue
+                lines.append(f"• [{ts}]({jump_url})")
+                valid_links += 1
+            if valid_links == 0:
+                continue
+            candidate = base_text + "\n".join(lines)
+            if len(candidate) <= 3900:
+                return candidate
+        return base_text
 
     async def _decide_qna_scope(self, question: str) -> str:
         q = question.lower()

@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from app.services.qna_query_engine import NO_DATA_REPLY, QnaQueryEngine
+from app.services.qna_query_engine import NO_DATA_REPLY, QnaAnswerResult, QnaQueryEngine
 
 
 def test_qna_query_engine_returns_no_data_fallback_when_empty_payload() -> None:
@@ -18,7 +18,9 @@ def test_qna_query_engine_returns_no_data_fallback_when_empty_payload() -> None:
         engine._fetch_intent_data = AsyncMock(return_value={"has_data": False})
 
         out = await engine.answer(guild_id="1", channel_id="2", question="di che si è parlato ieri?")
-        assert out == NO_DATA_REPLY
+        assert isinstance(out, QnaAnswerResult)
+        assert out.answer_text == NO_DATA_REPLY
+        assert out.proofs == []
 
     asyncio.run(_run())
 
@@ -35,8 +37,10 @@ def test_qna_query_engine_uses_barcello_data_without_ai_generation() -> None:
         engine._parse_intent = AsyncMock(return_value=engine._heuristic_intent("com'è il barcello ora?"))
 
         out = await engine.answer(guild_id="1", channel_id="2", question="com'è il barcello ora?")
-        assert "Barcello ora" in out
-        assert "VERDE" in out
+        assert isinstance(out, QnaAnswerResult)
+        assert "Barcello ora" in out.answer_text
+        assert "VERDE" in out.answer_text
+        assert out.proofs == []
 
     asyncio.run(_run())
 
@@ -162,8 +166,9 @@ def test_answer_requires_user_tag_when_target_not_resolved() -> None:
         engine._resolve_target_user = AsyncMock(return_value=(None, "lela"))
 
         out = await engine.answer(guild_id="1", channel_id="2", question="di che ha parlato lela ieri?")
-        assert "taggala direttamente" in out.lower()
-        assert out != NO_DATA_REPLY
+        assert isinstance(out, QnaAnswerResult)
+        assert "taggala direttamente" in out.answer_text.lower()
+        assert out.answer_text != NO_DATA_REPLY
 
     asyncio.run(_run())
 
@@ -210,5 +215,76 @@ def test_fetch_intent_data_user_activity_uses_larger_candidate_pool() -> None:
         )
         kwargs = db.fetch_qna_messages.await_args.kwargs
         assert kwargs["candidate_pool_limit"] >= 50
+
+    asyncio.run(_run())
+
+
+def test_extract_proofs_deduplicates_and_limits_message_links() -> None:
+    engine = QnaQueryEngine(database=Mock(), ai_service=Mock(), barcello=Mock())
+    payload = {
+        "messages": [
+            {
+                "jump_url": "https://discord.com/channels/1/2/10",
+                "ts": "2026-03-13T14:38:12+00:00",
+                "author_name": "Meg",
+                "content": "Pollock e altri dettagli" * 20,
+            },
+            {
+                "jump_url": "https://discord.com/channels/1/2/9",
+                "ts": "2026-03-13T14:31:00+00:00",
+                "author_name": "Luca",
+                "content": "Secondo messaggio",
+            },
+            {
+                "jump_url": "https://discord.com/channels/1/2/10",
+                "ts": "2026-03-13T14:38:12+00:00",
+                "author_name": "Meg",
+                "content": "Duplicato",
+            },
+        ]
+    }
+
+    proofs = engine._extract_proofs(intent="user_activity_summary", payload=payload, limit=2)
+    assert len(proofs) == 2
+    assert proofs[0]["jump_url"] == "https://discord.com/channels/1/2/10"
+    assert proofs[0]["created_at_iso"] == "2026-03-13T14:38:12+00:00"
+    assert len(proofs[0]["snippet"]) <= 220
+
+
+def test_answer_returns_structured_result_with_proofs_for_message_intent() -> None:
+    async def _run() -> None:
+        engine = QnaQueryEngine(database=Mock(), ai_service=Mock(), barcello=Mock())
+        engine._parse_intent = AsyncMock(
+            return_value=SimpleNamespace(
+                intent="user_activity_summary",
+                target_user=None,
+                topic=None,
+                time_range="ieri",
+                channel=None,
+                metric=None,
+                limit=8,
+            )
+        )
+        engine._resolve_target_user = AsyncMock(return_value=(None, None))
+        engine._fetch_intent_data = AsyncMock(
+            return_value={
+                "has_data": True,
+                "messages": [
+                    {
+                        "jump_url": "https://discord.com/channels/1/2/3",
+                        "ts": "2026-03-13T14:38:12+00:00",
+                        "author_name": "Meg",
+                        "content": "Test",
+                    }
+                ],
+            }
+        )
+        engine._compose_answer = AsyncMock(return_value="Risposta semantica")
+
+        out = await engine.answer(guild_id="1", channel_id="2", question="di che ha parlato ieri?")
+        assert isinstance(out, QnaAnswerResult)
+        assert out.answer_text == "Risposta semantica"
+        assert len(out.proofs) == 1
+        assert out.proofs[0]["jump_url"] == "https://discord.com/channels/1/2/3"
 
     asyncio.run(_run())
