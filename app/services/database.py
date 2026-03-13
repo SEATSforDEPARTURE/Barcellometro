@@ -1408,6 +1408,29 @@ class DatabaseService:
         )
         return [dict(row) for row in rows]
 
+    async def fetch_latest_voice_participant_join(
+        self,
+        *,
+        guild_id: str,
+        voice_channel_id: str,
+        user_id: str,
+        before_ts: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT event_id, ts, meta_json
+            FROM voice_participant_events
+            WHERE guild_id = ?
+              AND voice_channel_id = ?
+              AND user_id = ?
+              AND event_type = 'join'
+              AND ts <= ?
+            ORDER BY ts DESC
+            LIMIT 1
+            """,
+            (guild_id, voice_channel_id, user_id, before_ts),
+        )
+
     async def fetch_last_privacy_event_before(
         self,
         *,
@@ -3642,6 +3665,32 @@ class DatabaseService:
             WHERE guild_id = ? AND author_id = ? AND substr(ts, 1, 10) = ? AND COALESCE(is_deleted, 0) = 0
             """,
             (guild_id, user_id, day_iso),
+        )
+        return int(row["cnt"] or 0) if row else 0
+
+    async def count_recent_user_messages_with_same_content(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        content: str,
+        until_ts: str,
+        lookback_minutes: int = 5,
+    ) -> int:
+        end_dt = datetime.fromisoformat(until_ts)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        start_ts = (end_dt - timedelta(minutes=max(1, int(lookback_minutes)))).isoformat()
+        row = await self.fetchone(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM messages
+            WHERE guild_id = ? AND author_id = ?
+              AND ts >= ? AND ts <= ?
+              AND COALESCE(is_deleted, 0) = 0
+              AND LOWER(TRIM(COALESCE(content, ''))) = LOWER(TRIM(?))
+            """,
+            (guild_id, user_id, start_ts, end_dt.isoformat(), content),
         )
         return int(row["cnt"] or 0) if row else 0
 

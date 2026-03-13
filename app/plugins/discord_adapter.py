@@ -438,5 +438,89 @@ def setup(registry: ServiceRegistry) -> None:
                 "nickname": after.nick,
             },
         )
+
+    @bot.event
+    async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
+        if member.bot and config.ignore_bots:
+            return
+        if not member.guild:
+            return
+        ts = _now_iso()
+        before_channel = before.channel
+        after_channel = after.channel
+        if before_channel == after_channel:
+            return
+
+        if before_channel is not None:
+            await database.insert_voice_participant_event(
+                event_id=str(uuid4()),
+                guild_id=str(member.guild.id),
+                voice_channel_id=str(before_channel.id),
+                user_id=str(member.id),
+                username=member.display_name,
+                event_type="leave",
+                ts=ts,
+                from_channel_id=str(before_channel.id),
+                to_channel_id=str(after_channel.id) if after_channel else None,
+                meta={"source": "discord_adapter.voice_state"},
+            )
+            if aura_rolling is not None:
+                join_row = await database.fetch_latest_voice_participant_join(
+                    guild_id=str(member.guild.id),
+                    voice_channel_id=str(before_channel.id),
+                    user_id=str(member.id),
+                    before_ts=ts,
+                )
+                if join_row is not None:
+                    try:
+                        joined_ts = datetime.fromisoformat(str(join_row["ts"]))
+                        if joined_ts.tzinfo is None:
+                            joined_ts = joined_ts.replace(tzinfo=timezone.utc)
+                        now_dt = datetime.fromisoformat(ts)
+                        if now_dt.tzinfo is None:
+                            now_dt = now_dt.replace(tzinfo=timezone.utc)
+                        minutes = int(max(0, (now_dt - joined_ts).total_seconds()) // 60)
+                    except Exception:  # noqa: BLE001
+                        minutes = 0
+                    if minutes > 0:
+                        await aura_rolling.on_voice_participation(
+                            guild_id=str(member.guild.id),
+                            voice_channel_id=str(before_channel.id),
+                            user_id=str(member.id),
+                            minutes=minutes,
+                            ts=ts,
+                            voice_session_id=None,
+                        )
+
+        if after_channel is not None:
+            await database.insert_voice_participant_event(
+                event_id=str(uuid4()),
+                guild_id=str(member.guild.id),
+                voice_channel_id=str(after_channel.id),
+                user_id=str(member.id),
+                username=member.display_name,
+                event_type="join",
+                ts=ts,
+                from_channel_id=str(before_channel.id) if before_channel else None,
+                to_channel_id=str(after_channel.id),
+                meta={"source": "discord_adapter.voice_state"},
+            )
+            if aura_rolling is not None:
+                await aura_rolling.on_voice_join(
+                    guild_id=str(member.guild.id),
+                    voice_channel_id=str(after_channel.id),
+                    user_id=str(member.id),
+                    ts=ts,
+                    event_id=f"voice-join:{member.id}:{after_channel.id}:{int(datetime.fromisoformat(ts).timestamp())}",
+                )
+                non_bot_members = [m for m in after_channel.members if not m.bot]
+                if len(non_bot_members) == 1:
+                    await aura_rolling.on_voice_starter(
+                        guild_id=str(member.guild.id),
+                        voice_channel_id=str(after_channel.id),
+                        user_id=str(member.id),
+                        ts=ts,
+                        day_key=datetime.fromisoformat(ts).date().isoformat(),
+                    )
     if trigger_engine is not None:
         ingest.register_consumer(trigger_engine.on_event)
