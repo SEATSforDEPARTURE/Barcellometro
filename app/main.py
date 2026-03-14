@@ -44,6 +44,9 @@ def main() -> None:
         await database.initialize_schema()
         config_overrides = ConfigOverridesService(database)
         await config_overrides.apply_overrides_once()
+        footer_service = registry.get("footer") if registry.has("footer") else None
+        if footer_service is not None:
+            await footer_service.sync_known_services_on_startup()
         if os.getenv("ENTITLEMENTS_CONFIG_RELOAD", "").lower() in {"1", "true", "yes", "y"}:
             asyncio.create_task(config_overrides.watch_for_changes())
         if instance_mode == "main":

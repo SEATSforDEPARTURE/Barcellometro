@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 from weakref import WeakKeyDictionary
 
@@ -8,9 +11,13 @@ import discord
 
 from app.services.database import DatabaseService
 
+logger = logging.getLogger(__name__)
+
 FOOTER_VERSION_KEY = "footer.version"
 FOOTER_GLOBAL_PHRASE_KEY = "footer.global_phrase"
 FOOTER_SERVICE_PHRASE_PREFIX = "footer.service_phrase."
+FOOTER_KNOWN_SERVICES_KEY = "footer.known_services"
+FOOTER_KNOWN_SERVICE_SOURCES_KEY = "footer.known_service_sources"
 FOOTER_SEPARATOR = " · "
 FOOTER_MAX_LEN = 2048
 
@@ -36,6 +43,39 @@ SUPPORTED_FOOTER_SERVICES: tuple[str, ...] = (
     "channel_summary",
 )
 
+_STARTUP_SERVICE_SCAN_DIRS: tuple[Path, ...] = (
+    Path("app/plugins"),
+    Path("app/plugins/commands_modular"),
+    Path("app/services"),
+    Path("app/renderers"),
+)
+
+_SERVICE_NAME_OVERRIDES: dict[str, str | None] = {
+    "audio_notes_transcribe": "audio_notes",
+    "voice_ingest": "voice_ingest",
+    "daily_resoconto_renderer": "daily_resoconto",
+    "daily_activity_report_renderer": "daily_activity_report",
+    "activity_daily_report_renderer": "daily_activity_report",
+    "activity_dm_renderer": "activity_dm",
+    "user_activity_renderer": "user_activity",
+    "channel_summary": "channel_summary",
+    "triggers": "triggers",
+    "riassunto": "riassunto",
+    "resoconto": "resoconto",
+    "aura": "aura",
+    "aura_render": "aura",
+    "attivita": "attivita",
+    "barcello": "barcello",
+    "message_scheduler": "message_scheduler",
+    "admin": None,
+    "commands": None,
+    "command_helpers": None,
+    "ctx": None,
+    "settings": None,
+    "permissions": None,
+    "__init__": None,
+}
+
 
 @dataclass(slots=True)
 class FooterMeta:
@@ -56,6 +96,22 @@ def _truncate(text: str, max_len: int = FOOTER_MAX_LEN) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1].rstrip() + "…"
+
+
+def _normalize_service_name_from_stem(stem: str) -> str | None:
+    override = _SERVICE_NAME_OVERRIDES.get(stem)
+    if override is not None:
+        return override
+    if stem in _SERVICE_NAME_OVERRIDES and override is None:
+        return None
+
+    name = stem
+    for suffix in ("_renderer", "_service", "_transcribe", "_render"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    name = name.strip("_")
+    return name or None
 
 
 def attach_footer_meta(
@@ -103,6 +159,9 @@ def copy_footer_meta(source: discord.Embed, target: discord.Embed) -> discord.Em
 class FooterService:
     def __init__(self, database: DatabaseService) -> None:
         self._database = database
+        self._known_services: set[str] = set()
+        self._known_service_sources: dict[str, set[str]] = {}
+        self._known_services_loaded = False
 
     async def set_version(self, version: str | None) -> None:
         await self._set_or_clear(FOOTER_VERSION_KEY, version)
@@ -111,7 +170,11 @@ class FooterService:
         await self._set_or_clear(FOOTER_GLOBAL_PHRASE_KEY, phrase)
 
     async def set_service_phrase(self, service_name: str, phrase: str | None) -> None:
-        await self._set_or_clear(f"{FOOTER_SERVICE_PHRASE_PREFIX}{_clean(service_name)}", phrase)
+        service = _clean(service_name)
+        if not service:
+            return
+        await self._set_or_clear(f"{FOOTER_SERVICE_PHRASE_PREFIX}{service}", phrase)
+        await self.register_known_service(service, source="db")
 
     async def get_version(self) -> str | None:
         return _clean(await self._database.get_setting(FOOTER_VERSION_KEY)) or None
@@ -133,6 +196,62 @@ class FooterService:
             out[key.replace(FOOTER_SERVICE_PHRASE_PREFIX, "", 1)] = value
         return out
 
+    async def sync_known_services_on_startup(self) -> list[str]:
+        startup_services = self._scan_services_from_codebase()
+        db_services = await self._load_services_from_phrase_keys()
+        persisted_services, persisted_sources = await self._load_known_services_from_settings()
+
+        merged: set[str] = set(startup_services) | set(db_services) | set(persisted_services) | set(SUPPORTED_FOOTER_SERVICES)
+        sources: dict[str, set[str]] = {}
+        for service in merged:
+            origins: set[str] = set()
+            if service in startup_services:
+                origins.add("startup")
+            if service in db_services:
+                origins.add("db")
+            if service in persisted_services:
+                origins.update(persisted_sources.get(service, {"db"}))
+            sources[service] = origins or {"startup"}
+
+        self._known_services = merged
+        self._known_service_sources = sources
+        self._known_services_loaded = True
+        await self._persist_known_services()
+        logger.info("footer known services sync completed: count=%s", len(self._known_services))
+        return self.get_known_services_cached()
+
+    async def register_known_service(self, service_name: str, *, source: str) -> None:
+        service = _clean(service_name)
+        if not service:
+            return
+        if not self._known_services_loaded:
+            persisted, persisted_sources = await self._load_known_services_from_settings()
+            self._known_services = set(persisted)
+            self._known_service_sources = {k: set(v) for k, v in persisted_sources.items()}
+            self._known_services_loaded = True
+
+        before = service in self._known_services and source in self._known_service_sources.get(service, set())
+        self._known_services.add(service)
+        self._known_service_sources.setdefault(service, set()).add(source)
+        if before:
+            return
+        await self._persist_known_services()
+
+    async def get_known_services(self) -> list[str]:
+        if not self._known_services_loaded:
+            persisted, persisted_sources = await self._load_known_services_from_settings()
+            self._known_services = set(persisted)
+            self._known_service_sources = {k: set(v) for k, v in persisted_sources.items()}
+            self._known_services_loaded = True
+        return self.get_known_services_cached()
+
+    def get_known_services_cached(self) -> list[str]:
+        return sorted(self._known_services)
+
+    async def get_known_service_sources(self) -> dict[str, list[str]]:
+        await self.get_known_services()
+        return {service: sorted(origins) for service, origins in sorted(self._known_service_sources.items())}
+
     async def render_footer(self, *, service_name: str, contributors: Iterable[str], used_local_processing: bool) -> tuple[str, str | None]:
         version = await self.get_version()
         global_phrase = await self.get_global_phrase()
@@ -151,9 +270,7 @@ class FooterService:
         if used_local_processing and "in loco" not in seen:
             contributors_deduped.append("in loco")
 
-        if not contributors_deduped:
-            processing = "Dati elaborati in loco"
-        elif contributors_deduped == ["in loco"]:
+        if not contributors_deduped or contributors_deduped == ["in loco"]:
             processing = "Dati elaborati in loco"
         elif len(contributors_deduped) == 1:
             processing = f"Dati elaborati con {contributors_deduped[0]}"
@@ -171,6 +288,7 @@ class FooterService:
         meta = get_footer_meta(embed)
         if meta is None:
             meta = FooterMeta(service_name=default_service_name, contributors=[], used_local_processing=False)
+        await self.register_known_service(meta.service_name, source="runtime")
         text, _ = await self.render_footer(
             service_name=meta.service_name,
             contributors=meta.contributors,
@@ -178,6 +296,68 @@ class FooterService:
         )
         embed.set_footer(text=text, icon_url=meta.footer_icon_url)
         return embed
+
+    def _scan_services_from_codebase(self) -> set[str]:
+        found: set[str] = set()
+        for directory in _STARTUP_SERVICE_SCAN_DIRS:
+            if not directory.exists():
+                continue
+            for path in directory.glob("*.py"):
+                stem = path.stem
+                service_name = _normalize_service_name_from_stem(stem)
+                if not service_name:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                if "discord.Embed" not in text and "attach_footer_meta(" not in text:
+                    continue
+                found.add(service_name)
+        return found
+
+    async def _load_services_from_phrase_keys(self) -> set[str]:
+        phrases = await self.get_service_phrases()
+        return set(phrases.keys())
+
+    async def _load_known_services_from_settings(self) -> tuple[list[str], dict[str, set[str]]]:
+        raw = await self._database.get_setting(FOOTER_KNOWN_SERVICES_KEY)
+        raw_sources = await self._database.get_setting(FOOTER_KNOWN_SERVICE_SOURCES_KEY)
+
+        services: list[str] = []
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    services = sorted({_clean(str(item)) for item in parsed if _clean(str(item))})
+            except json.JSONDecodeError:
+                logger.warning("invalid JSON in %s", FOOTER_KNOWN_SERVICES_KEY)
+
+        sources: dict[str, set[str]] = {}
+        if raw_sources:
+            try:
+                parsed_sources = json.loads(raw_sources)
+                if isinstance(parsed_sources, dict):
+                    for service, origin_list in parsed_sources.items():
+                        service_clean = _clean(str(service))
+                        if not service_clean:
+                            continue
+                        if isinstance(origin_list, list):
+                            cleaned_origins = {_clean(str(origin)) for origin in origin_list if _clean(str(origin))}
+                            if cleaned_origins:
+                                sources[service_clean] = cleaned_origins
+            except json.JSONDecodeError:
+                logger.warning("invalid JSON in %s", FOOTER_KNOWN_SERVICE_SOURCES_KEY)
+
+        for service in services:
+            sources.setdefault(service, {"db"})
+        return services, sources
+
+    async def _persist_known_services(self) -> None:
+        services = sorted(self._known_services)
+        sources = {service: sorted(self._known_service_sources.get(service, {"startup"})) for service in services}
+        await self._database.set_setting(FOOTER_KNOWN_SERVICES_KEY, json.dumps(services, ensure_ascii=False))
+        await self._database.set_setting(FOOTER_KNOWN_SERVICE_SOURCES_KEY, json.dumps(sources, ensure_ascii=False))
 
     async def _set_or_clear(self, key: str, value: str | None) -> None:
         cleaned = _clean(value)

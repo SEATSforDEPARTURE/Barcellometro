@@ -6,9 +6,6 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 
-from app.services.footer import SUPPORTED_FOOTER_SERVICES
-
-
 def _clean_opt(value: str | None) -> str | None:
     if value is None:
         return None
@@ -209,15 +206,22 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
 
         service_phrases = await ctx.footer.get_service_phrases()
         global_phrase = await ctx.footer.get_global_phrase()
+        known_services = await ctx.footer.get_known_services()
+        service_sources = await ctx.footer.get_known_service_sources()
         lines: list[str] = []
-        for service_name in SUPPORTED_FOOTER_SERVICES:
+        for service_name in known_services:
             footer, _ = await ctx.footer.render_footer(
                 service_name=service_name,
                 contributors=[],
                 used_local_processing=True,
             )
             phrase = service_phrases.get(service_name) or global_phrase or "(nessuna)"
-            lines.append(f"{service_name} → {footer}\n  frase: {phrase}")
+            source = ",".join(service_sources.get(service_name, [])) or "unknown"
+            lines.append(f"{service_name} → {footer}\n  frase: {phrase}\n  origine: {source}")
+
+        if not lines:
+            await interaction.response.send_message("Nessun servizio footer noto.", ephemeral=True)
+            return
 
         chunks: list[str] = []
         current = ""
