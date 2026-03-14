@@ -71,6 +71,42 @@ def _build_audio_note_embed(description: str, *, contributors: list[str] | None 
     return attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
 
 
+def _build_audio_footer_contributors(
+    *,
+    stt_backend_used: str,
+    stt_model: str | None,
+    translate_backend_used: str,
+    translation_model: str | None,
+    has_translation_text: bool,
+) -> tuple[list[str], bool]:
+    contributors: list[str] = []
+    used_local_processing = False
+
+    normalized_stt_backend = (stt_backend_used or "").strip().lower()
+    normalized_translate_backend = (translate_backend_used or "").strip().lower()
+    stt_name = (stt_model or "").strip()
+    if stt_name:
+        contributors.append(stt_name)
+    if normalized_stt_backend == "local":
+        used_local_processing = True
+
+    if has_translation_text:
+        translation_name = (translation_model or "").strip()
+        if translation_name:
+            contributors.append(translation_name)
+        if normalized_translate_backend == "local":
+            used_local_processing = True
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for contributor in contributors:
+        if contributor in seen:
+            continue
+        seen.add(contributor)
+        deduped.append(contributor)
+    return deduped, used_local_processing
+
+
 def _normalize_lang(value: str) -> str:
     lowered = value.strip().lower()
     if not lowered:
@@ -276,15 +312,19 @@ def setup(registry: ServiceRegistry) -> None:
                 output_parts.append(translation_text)
             full_output = "\n".join(output_parts).strip()
 
-            contributors = [transcript.model]
-            if detected_lang != "it" and translation_text and translation_model:
-                contributors.append(translation_model)
+            contributors, used_local_processing = _build_audio_footer_contributors(
+                stt_backend_used=stt_used,
+                stt_model=transcript.model,
+                translate_backend_used=translate_used,
+                translation_model=translation_model,
+                has_translation_text=bool(detected_lang != "it" and translation_text),
+            )
 
             chunks = _split_embed_descriptions(full_output, embed_max_chars)
-            await reply.edit(content=None, embed=_build_audio_note_embed(chunks[0], contributors=contributors, used_local_processing=True))
+            await reply.edit(content=None, embed=_build_audio_note_embed(chunks[0], contributors=contributors, used_local_processing=used_local_processing))
             for idx, chunk in enumerate(chunks[1:], start=2):
                 part_description = f"**Parte {idx}/{len(chunks)}**\n\n{chunk}"
-                await message.reply(embed=_build_audio_note_embed(part_description, contributors=contributors, used_local_processing=True))
+                await message.reply(embed=_build_audio_note_embed(part_description, contributors=contributors, used_local_processing=used_local_processing))
 
             meta: dict[str, Any] = {
                 "discord_message_id": str(message.id),
