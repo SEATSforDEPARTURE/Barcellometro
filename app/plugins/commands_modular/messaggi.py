@@ -356,8 +356,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             ephemeral=True,
         )
 
-    @campagne_group.command(name="test", description="Invia campagna ora")
-    @app_commands.describe(id="ID campagna")
+    @campagne_group.command(name="test", description="Invia ora una campagna messaggi (storica)")
+    @app_commands.describe(id="ID campagna messaggi")
     async def messaggi_test(interaction: discord.Interaction, id: int) -> None:
         if not await check_permission(interaction, "campagne.test", ctx):
             return
@@ -366,6 +366,13 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return
         campaign = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
         if not campaign:
+            service_campaign = await ctx.database.get_campaign_content_config(str(interaction.guild_id), id)
+            if service_campaign:
+                await interaction.response.send_message(
+                    "Questo ID appartiene a un servizio editoriale. Usa /campagne servizi test.",
+                    ephemeral=True,
+                )
+                return
             await interaction.response.send_message("Campagna non trovata.", ephemeral=True)
             return
         if not isinstance(campaign, dict) and hasattr(campaign, "keys"):
@@ -530,7 +537,16 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         lines = []
         for row in rows:
             lines.append(
-                f"ID {row['id']} | {row['service_type']} | {'on' if row['enabled'] else 'off'} | ogni {row['interval_minutes']}m | start {row['time_local']} | next {row['next_run_at']}"
+                " | ".join(
+                    [
+                        f"ID {row['id']}",
+                        f"tipo {row['service_type']}",
+                        f"stato {'on' if row['enabled'] else 'off'}",
+                        f"canale {row['channel_id']}",
+                        f"start {row['time_local']}",
+                        f"next {row['next_run_at']}",
+                    ]
+                )
             )
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
@@ -579,8 +595,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.soft_delete_campaign_content_config(str(interaction.guild_id), id)
         await interaction.response.send_message(f"Servizio {id} eliminato.", ephemeral=True)
 
-    @servizi_group.command(name="test", description="Esegue subito un servizio editoriale")
-    @app_commands.describe(id="ID servizio")
+    @servizi_group.command(name="test", description="Esegue subito un servizio editoriale (notizie, meteo, oroscopo)")
+    @app_commands.describe(id="ID servizio editoriale")
     async def campagne_servizi_test(interaction: discord.Interaction, id: int) -> None:
         if not await check_permission(interaction, "campagne.servizi_test", ctx):
             return
@@ -595,7 +611,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         if service is None:
             await interaction.response.send_message("Servizio campagne editoriali non disponibile.", ephemeral=True)
             return
-        await interaction.response.send_message("Invio test in corso.", ephemeral=True)
+        await interaction.response.send_message("Invio test servizio editoriale in corso.", ephemeral=True)
         payload = dict(row)
         stype = str(payload.get("service_type") or "").upper()
         if stype == "NEWS":
