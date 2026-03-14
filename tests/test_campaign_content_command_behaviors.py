@@ -23,6 +23,7 @@ sys.modules["app.plugins.commands_modular.command_helpers"] = helpers_stub
 
 scheduler_stub = types.ModuleType("app.services.scheduler_utils")
 scheduler_stub.calculate_initial_next_run = lambda now, ora_inizio, every, timezone: now
+scheduler_stub.calculate_next_run_after_send = lambda now, every, timezone: now
 sys.modules["app.services.scheduler_utils"] = scheduler_stub
 
 module_path = Path(__file__).resolve().parents[1] / "app" / "plugins" / "commands_modular" / "messaggi.py"

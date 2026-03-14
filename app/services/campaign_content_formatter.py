@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -162,6 +163,28 @@ def similarity_title(a: str, b: str) -> float:
     return SequenceMatcher(None, sanitize_plain_text(a).lower(), sanitize_plain_text(b).lower()).ratio()
 
 
+def _time_of_day_label(dt: datetime) -> str:
+    hour = dt.hour
+    if 6 <= hour < 12:
+        return "mattina"
+    if 12 <= hour < 18:
+        return "pomeriggio"
+    if 18 <= hour < 23:
+        return "sera"
+    return "notte"
+
+
+def _overview_now(payload: dict[str, Any]) -> datetime:
+    raw = payload.get("generated_at") or payload.get("published_at") or payload.get("created_at")
+    if isinstance(raw, str):
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
 def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     categories = payload.get("categories", {})
     color = resolve_color(config.get("embed_color"))
@@ -187,17 +210,18 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             break
 
     overview = discord.Embed(title=f"{title} • Inizio", color=color)
+    tone = _time_of_day_label(_overview_now(payload))
     if highlights:
         overview.description = (
-            "🐹 Il Barcellometro ha acceso la redazione: oggi il notiziario frulla tra chicche, drammi e aggiornamenti da non perdere.\n"
-            "Ecco cosa sta facendo girare le rotelle del giorno:\n\n"
+            f"🐹 Edizione di **{tone}**: il Barcellometro è in conduzione e la redazione oggi gira come una ruota da corsa.\n"
+            "Ecco i titoli che stanno facendo squittire il notiziario:\n\n"
             + "\n".join(highlights)
-            + "\n\nApri i pulsanti qui sotto e scegli la tana di notizie che vuoi esplorare."
+            + "\n\nPer l'approfondimento categoria per categoria, clicca i pulsanti qui sotto."
         )
     else:
         overview.description = (
-            "🐹 Oggi in redazione c'è calma apparente: poche notizie affidabili da rosicchiare.\n"
-            "Apri comunque le sezioni qui sotto: potresti trovare una chicca dell'ultimo minuto."
+            f"🐹 Turno di **{tone}** in redazione: il Barcellometro ha trovato pochi lanci solidi, ma niente panico.\n"
+            "Apri i pulsanti in basso e controlla le categorie: può sempre saltare fuori la chicca dell'ultimo minuto."
         )
     embeds.append(overview)
     for category, items in categories.items():
@@ -218,7 +242,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
 
 
 def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    page_map: list[dict[str, Any]] = [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}]
+    page_map: list[dict[str, Any]] = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
     for index, category in enumerate(payload.get("categories", {}).keys(), start=1):
         page_map.append(
             {
@@ -252,15 +276,18 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
     most_unstable = max(area_scores.items(), key=lambda x: x[1])[0] if area_scores else "n/d"
     most_calm = min(area_scores.items(), key=lambda x: x[1])[0] if area_scores else "n/d"
     thermal_range = f"{round(min(all_temps), 1)}°C - {round(max(all_temps), 1)}°C" if all_temps else "n/d"
+    tone = _time_of_day_label(_overview_now(payload))
 
     pages: list[tuple[str, str, str]] = [
         (
             "Overview Italia",
             (
                 "🇮🇹 Situazione generale aggregata dalle aree monitorate.\n"
+                f"🐹 Buona {tone}: il Barcellometro ha preso il microfono del meteo nazionale.\n"
                 f"⚡ Area più instabile: **{most_unstable}**\n"
                 f"🌤️ Area più serena: **{most_calm}**\n"
-                f"🌡️ Range termico nazionale: **{thermal_range}**"
+                f"🌡️ Range termico nazionale: **{thermal_range}**\n"
+                "Clicca i pulsanti qui sotto per il dettaglio di ogni area."
             ),
             "Consiglio cricetoso: controlla il meteo prima di uscire e vesti a strati intelligenti.",
         )
@@ -291,7 +318,7 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
 
 def build_weather_page_map() -> list[dict[str, Any]]:
     return [
-        {"type": "overview", "key": "overview", "label": "⏮️ INIZIO", "page": 0},
+        {"type": "overview", "key": "overview", "label": "Overview Italia", "page": 0},
         {"type": "area", "key": "nord", "label": get_weather_area_label("Nord"), "page": 1},
         {"type": "area", "key": "centro", "label": get_weather_area_label("Centro"), "page": 2},
         {"type": "area", "key": "sud_e_isole", "label": get_weather_area_label("Sud e Isole"), "page": 3},
@@ -314,14 +341,16 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
 
     mood_parts = [str(signs.get(sign, {}).get("tone") or "") for sign in SIGN_ORDER if signs.get(sign)]
     mood = ", ".join(mood_parts[:4]) or "variegato"
+    tone = _time_of_day_label(_overview_now(payload))
 
     embeds: list[discord.Embed] = []
     overview = discord.Embed(title=f"{title} • Inizio", color=color)
     overview.description = (
-        f"Atmosfera zodiacale: **{mood}**\n"
+        f"🐹 Speciale oroscopo di **{tone}**: il Barcellometro ha lucidato le sfere e acceso lo studio stellare.\n"
+        f"Clima zodiacale generale: **{mood}**.\n"
         f"Segni in forma: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in top)}\n"
-        f"Segni da coccolare: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in delicate)}\n"
-        "Apri il tuo segno dai pulsanti qui sotto."
+        f"Segni da trattare con più tatto: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in delicate)}\n"
+        "Per il dettaglio del tuo segno, clicca i pulsanti qui sotto."
     )
     embeds.append(overview)
     for sign in SIGN_ORDER:
@@ -338,7 +367,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
 
 
 def build_horoscope_page_map() -> list[dict[str, Any]]:
-    page_map: list[dict[str, Any]] = [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}]
+    page_map: list[dict[str, Any]] = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
     for i, sign in enumerate(SIGN_ORDER, start=1):
         page_map.append({"type": "sign", "key": slugify_label(sign), "label": f"{SIGN_EMOJIS.get(sign, '✨')} {sign.upper()}", "page": i})
     return page_map

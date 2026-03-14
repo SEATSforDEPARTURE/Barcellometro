@@ -24,19 +24,13 @@ class BaseCampaignNavigatorView(discord.ui.View):
         self._embeds = embeds
         self._page_map = page_map
         self._current_index = max(0, min(current_index, max(0, len(embeds) - 1)))
-        self._build_nav_buttons()
         self._build_dynamic_buttons()
         self._sync_controls()
-
-    def _build_nav_buttons(self) -> None:
-        self.add_item(PageJumpButton(label="⏮️ INIZIO", custom_id=f"campaign_content:nav:start:{id(self)}", target_index=0, row=0))
-        self.add_item(PageJumpButton(label="⬅️ INDIETRO", custom_id=f"campaign_content:nav:prev:{id(self)}", target_index=max(0, self._current_index - 1), row=0))
-        self.add_item(PageJumpButton(label="➡️ AVANTI", custom_id=f"campaign_content:nav:next:{id(self)}", target_index=min(len(self._embeds) - 1, self._current_index + 1), row=0, style=discord.ButtonStyle.primary))
 
     def _build_dynamic_buttons(self) -> None:
         dynamic = [entry for entry in self._page_map if entry.get("type") not in {"overview"}]
         for idx, entry in enumerate(dynamic):
-            row = 1 + (idx // 5)
+            row = idx // 5
             label = str(entry.get("label") or "Pagina")[:80]
             key = str(entry.get("key") or idx)
             self.add_item(
@@ -49,16 +43,9 @@ class BaseCampaignNavigatorView(discord.ui.View):
             )
 
     def _sync_controls(self) -> None:
-        first = self._current_index <= 0
-        last = self._current_index >= len(self._embeds) - 1
-        nav_buttons = [item for item in self.children if isinstance(item, PageJumpButton)][:3]
-        if len(nav_buttons) == 3:
-            nav_buttons[0].disabled = first
-            nav_buttons[0]._target_index = 0
-            nav_buttons[1].disabled = first
-            nav_buttons[1]._target_index = max(0, self._current_index - 1)
-            nav_buttons[2].disabled = last
-            nav_buttons[2]._target_index = min(len(self._embeds) - 1, self._current_index + 1)
+        for item in self.children:
+            if isinstance(item, PageJumpButton):
+                item.disabled = item._target_index == self._current_index
 
     async def navigate(self, interaction: discord.Interaction, target_index: int) -> None:
         self._current_index = max(0, min(target_index, len(self._embeds) - 1))
