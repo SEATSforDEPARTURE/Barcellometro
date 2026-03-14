@@ -17,7 +17,7 @@ from app.services.campaign_content_formatter import (
 )
 from app.services.campaign_content_views import CampaignContentPaginationView, HoroscopePaginationView
 from app.services.database import DatabaseService
-from app.services.message_scheduler import calculate_next_run_after_send
+from app.services.scheduler_utils import calculate_next_run_after_send
 
 logger = logging.getLogger(__name__)
 
