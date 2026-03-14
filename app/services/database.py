@@ -513,6 +513,18 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, user_id)
             );
 
+            CREATE TABLE IF NOT EXISTS daily_report_pagination_state (
+                message_id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                guild_id TEXT NOT NULL,
+                report_type TEXT NOT NULL,
+                embeds_json TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                current_index INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS temp_bans (
                 guild_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
@@ -606,8 +618,30 @@ class DatabaseService:
         await self._ensure_trigger_phrase_columns()
         await self._ensure_channel_summary_schedule_columns()
         await self._ensure_trigger_barcello_state_columns()
+        await self._ensure_daily_report_pagination_state_columns()
         await self._conn.commit()
         logger.info("Database schema initialized")
+
+    async def _ensure_daily_report_pagination_state_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(daily_report_pagination_state)")
+        if not columns:
+            return
+        existing = {row["name"] for row in columns}
+        missing = {
+            "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+            "current_index": "INTEGER NOT NULL DEFAULT 0",
+            "updated_at": "TEXT NULL",
+            "created_at": "TEXT NULL",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE daily_report_pagination_state ADD COLUMN {name} {col_def}")
+        now = datetime.now(timezone.utc).isoformat()
+        if "updated_at" not in existing:
+            await self._conn.execute("UPDATE daily_report_pagination_state SET updated_at = ? WHERE updated_at IS NULL", (now,))
+        if "created_at" not in existing:
+            await self._conn.execute("UPDATE daily_report_pagination_state SET created_at = ? WHERE created_at IS NULL", (now,))
 
     async def _ensure_trigger_barcello_state_columns(self) -> None:
         assert self._conn is not None
@@ -2818,6 +2852,61 @@ class DatabaseService:
             WHERE guild_id = ? AND channel_id = ?
             """,
             (local_date_str, safe_time, kind, now, guild_id, channel_id),
+        )
+
+    async def upsert_daily_report_pagination_state(
+        self,
+        *,
+        message_id: str,
+        channel_id: str,
+        guild_id: str,
+        report_type: str,
+        embeds_json: str,
+        metadata_json: str,
+        current_index: int,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO daily_report_pagination_state (
+                message_id,
+                channel_id,
+                guild_id,
+                report_type,
+                embeds_json,
+                metadata_json,
+                current_index,
+                updated_at,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                guild_id = excluded.guild_id,
+                report_type = excluded.report_type,
+                embeds_json = excluded.embeds_json,
+                metadata_json = excluded.metadata_json,
+                current_index = excluded.current_index,
+                updated_at = excluded.updated_at
+            """,
+            (message_id, channel_id, guild_id, report_type, embeds_json, metadata_json, int(current_index), now, now),
+        )
+
+    async def get_daily_report_pagination_state(self, *, message_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT message_id, channel_id, guild_id, report_type, embeds_json, metadata_json, current_index
+            FROM daily_report_pagination_state
+            WHERE message_id = ?
+            """,
+            (message_id,),
+        )
+
+    async def update_daily_report_pagination_current_index(self, *, message_id: str, current_index: int) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            "UPDATE daily_report_pagination_state SET current_index = ?, updated_at = ? WHERE message_id = ?",
+            (int(current_index), now, message_id),
         )
 
     async def create_channel_summary_schedule(
