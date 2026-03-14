@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import discord
+
+from app.services.footer import attach_footer_meta
 from discord import Forbidden, app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
@@ -184,14 +186,14 @@ def _build_user_activity_embeds_safe(
         ),
         4000,
     )
-    embed1.set_footer(text="Barcellometro")
+    attach_footer_meta(embed1, service_name="attivita", used_local_processing=True)
 
     embed2 = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
     add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value=_with_blank_lines(stats_lines))
     add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI MAGGIORI", value="\n".join(interaction_lines))
     add_field_safe(embed2, name="🔎 TEMI E PAROLE PIÙ USATE", value="\n".join(topics_lines))
     add_field_safe(embed2, name="💡 CONSIGLI PER LA MODERAZIONE", value="\n".join(f"• {line}" for line in advice_lines[:4]))
-    embed2.set_footer(text="Barcellometro")
+    attach_footer_meta(embed2, service_name="attivita", used_local_processing=True)
 
     too_long = (
         embed_total_len(embed1) > MAX_EMBED_TOTAL
@@ -542,7 +544,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
                     f"🕒 **{window.label_periodo}**\n\n{emoji} **ATTIVITÀ {label}**\n🫀 **PUNTI ATTIVITÀ** {b(f'{score}/100')}\n📈 {trend_text}\n\nDettagli completi nel file allegato.",
                     3000,
                 )
-                fallback.set_footer(text="Barcellometro")
+                attach_footer_meta(fallback, service_name="attivita", used_local_processing=True)
                 try:
                     period_slug = _safe_filename(window.label_periodo)
                     fallback_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=f"attivita_{utente.id}_{period_slug}.txt")

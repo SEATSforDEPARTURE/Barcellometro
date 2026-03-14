@@ -14,13 +14,13 @@ import discord
 import imageio_ffmpeg
 
 from app.core.service_registry import ServiceRegistry
+from app.services.footer import attach_footer_meta
 
 logger = logging.getLogger(__name__)
 
 _AUDIO_EXTENSIONS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".webm"}
 _AUDIO_NOTE_TITLE = "🗣️ NOTE AUDIO"
 _AUDIO_NOTE_COLOR = discord.Color(0xFFFFFF)
-_AUDIO_NOTE_FOOTER = "Barcellometro 1.0"
 _DISCORD_EMBED_DESCRIPTION_MAX = 4096
 
 
@@ -66,10 +66,9 @@ def _split_embed_descriptions(text: str, max_chars: int = _DISCORD_EMBED_DESCRIP
     return split_parts or [""]
 
 
-def _build_audio_note_embed(description: str, footer_text: str = _AUDIO_NOTE_FOOTER) -> discord.Embed:
+def _build_audio_note_embed(description: str, *, contributors: list[str] | None = None, used_local_processing: bool = True) -> discord.Embed:
     embed = discord.Embed(title=_AUDIO_NOTE_TITLE, description=description, color=_AUDIO_NOTE_COLOR)
-    embed.set_footer(text=footer_text)
-    return embed
+    return attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
 
 
 def _normalize_lang(value: str) -> str:
@@ -177,9 +176,9 @@ def setup(registry: ServiceRegistry) -> None:
                 continue
             queue_max = int(await _get_setting("audio_notes.queue_max", os.getenv("AUDIO_NOTES_QUEUE_MAX", "50")))
             if queue.qsize() >= queue_max:
-                await message.reply(embed=_build_audio_note_embed("⏳ Troppi audio in coda, riprova tra poco."))
+                await message.reply(embed=_build_audio_note_embed("⏳ Troppi audio in coda, riprova tra poco.", used_local_processing=True))
                 return
-            reply = await message.reply(embed=_build_audio_note_embed("🎙️ Nota audio ricevuta, sto trascrivendo…"))
+            reply = await message.reply(embed=_build_audio_note_embed("🎙️ Nota audio ricevuta, sto trascrivendo…", used_local_processing=True))
             await queue.put((message, attachment, reply))
             return
 
@@ -277,15 +276,15 @@ def setup(registry: ServiceRegistry) -> None:
                 output_parts.append(translation_text)
             full_output = "\n".join(output_parts).strip()
 
-            footer_text = f"Dati elaborati con {transcript.model} · {_AUDIO_NOTE_FOOTER}"
+            contributors = [transcript.model]
             if detected_lang != "it" and translation_text and translation_model:
-                footer_text = f"Dati elaborati con {transcript.model} e {translation_model} · {_AUDIO_NOTE_FOOTER}"
+                contributors.append(translation_model)
 
             chunks = _split_embed_descriptions(full_output, embed_max_chars)
-            await reply.edit(content=None, embed=_build_audio_note_embed(chunks[0], footer_text=footer_text))
+            await reply.edit(content=None, embed=_build_audio_note_embed(chunks[0], contributors=contributors, used_local_processing=True))
             for idx, chunk in enumerate(chunks[1:], start=2):
                 part_description = f"**Parte {idx}/{len(chunks)}**\n\n{chunk}"
-                await message.reply(embed=_build_audio_note_embed(part_description, footer_text=footer_text))
+                await message.reply(embed=_build_audio_note_embed(part_description, contributors=contributors, used_local_processing=True))
 
             meta: dict[str, Any] = {
                 "discord_message_id": str(message.id),

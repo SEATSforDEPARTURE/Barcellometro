@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 
 def _bar(score: int, emoji: str) -> str:
     filled = max(0, min(10, int(round(max(0, min(score, 100)) / 10))))
@@ -56,7 +58,7 @@ def build_user_activity_embeds(
         f"📈 **TREND**\n"
         f"• 📨 {trend_text}"
     )
-    overview.set_footer(text="Barcellometro")
+    attach_footer_meta(overview, service_name="user_activity", used_local_processing=True)
 
     details = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
     details.add_field(name="📊 STATISTICHE UTENTE", value="\n".join(stats_lines) if stats_lines else "—", inline=False)
@@ -65,7 +67,7 @@ def build_user_activity_embeds(
         value="\n".join(f"• {line}" for line in advice_lines) if advice_lines else "• Nessun consiglio disponibile.",
         inline=False,
     )
-    details.set_footer(text="Barcellometro")
+    attach_footer_meta(details, service_name="user_activity", used_local_processing=True)
     return [overview, details]
 
 

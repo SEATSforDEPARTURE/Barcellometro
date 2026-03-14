@@ -7,6 +7,8 @@ from typing import Any
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 from app.services.aura_archetypes import build_dynamic_archetype_reason
 from app.services.config_file_loader import load_json_file
 from app.utils.embed_limits import MAX_EMBED_CHARS, _ensure_embed_limits, _estimate_embed_size, _split_field_chunks
@@ -554,8 +556,7 @@ def _compose_channel_aura_embed(
         name="✨ I CONSIGLI DEL BARCELLOMETRO",
         value="\n".join(f"• {line}" for line in advice_lines) or "• Nessun consiglio disponibile.",
     )
-    if footer_text:
-        embed.set_footer(text=footer_text)
+    attach_footer_meta(embed, service_name="aura", used_local_processing=True)
     return embed
 
 
@@ -613,7 +614,7 @@ def build_aura_embeds(
         color=0x5865F2,
         description=_build_main_aura_description(aura_payload=aura_payload),
     )
-    main.set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
+    attach_footer_meta(main, service_name="aura", used_local_processing=True)
 
     details_sections: list[tuple[str, str]] = []
     profile_section: tuple[str, str] | None = None
@@ -662,7 +663,7 @@ def build_aura_embeds(
         for name, value in chunk:
             for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
                 embed.add_field(name=name if part_idx == 0 else f"{name} (cont.)", value=piece, inline=False)
-        embed.set_footer(text="Dati elaborati in loco. Eventuali imprecisioni sono possibili.")
+        attach_footer_meta(embed, service_name="aura", used_local_processing=True)
         details.append(embed)
 
     embeds = [main, *details]

@@ -12,6 +12,7 @@ from app.services.barcello_calibration import BarcelloCalibrationService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import IngestService
 from app.services.summary import SummaryService
+from app.services.footer import FooterService
 
 
 @dataclass
@@ -41,6 +42,7 @@ class CommandContext:
     channel_summary: Optional[Any] = None
     aura_eligibility: Optional[Any] = None
     aura_rolling: Optional[Any] = None
+    footer: Optional[FooterService] = None
 
     @classmethod
     def from_registry(cls, registry: ServiceRegistry) -> "CommandContext":
@@ -74,6 +76,7 @@ class CommandContext:
         aura_eligibility = registry.get("aura_eligibility") if registry.has("aura_eligibility") else None
         aura_rolling = registry.get("aura_rolling") if registry.has("aura_rolling") else None
         ingest: IngestService = registry.get("ingest")
+        footer = registry.get("footer") if registry.has("footer") else None
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
         return cls(
@@ -101,5 +104,6 @@ class CommandContext:
             message_scheduler=message_scheduler,
             aura_eligibility=aura_eligibility,
             aura_rolling=aura_rolling,
+            footer=footer,
             timezone=timezone,
         )
