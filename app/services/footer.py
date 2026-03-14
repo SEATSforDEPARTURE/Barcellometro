@@ -5,7 +5,6 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-from weakref import WeakKeyDictionary
 
 import discord
 
@@ -85,7 +84,7 @@ class FooterMeta:
     footer_icon_url: str | None = None
 
 
-_EMBED_META: WeakKeyDictionary[discord.Embed, FooterMeta] = WeakKeyDictionary()
+_EMBED_META: dict[int, tuple[discord.Embed, FooterMeta]] = {}
 
 
 def _clean(value: str | None) -> str:
@@ -122,6 +121,9 @@ def attach_footer_meta(
     used_local_processing: bool = False,
     footer_icon_url: str | None = None,
 ) -> discord.Embed:
+    if embed is None:
+        raise ValueError("attach_footer_meta requires a discord.Embed instance, got None")
+
     deduped: list[str] = []
     seen: set[str] = set()
     for entry in contributors or []:
@@ -130,17 +132,41 @@ def attach_footer_meta(
             continue
         seen.add(item)
         deduped.append(item)
-    _EMBED_META[embed] = FooterMeta(
-        service_name=_clean(service_name) or "unknown",
-        contributors=deduped,
-        used_local_processing=used_local_processing,
-        footer_icon_url=_clean(footer_icon_url) or None,
+    _EMBED_META[id(embed)] = (
+        embed,
+        FooterMeta(
+            service_name=_clean(service_name) or "unknown",
+            contributors=deduped,
+            used_local_processing=used_local_processing,
+            footer_icon_url=_clean(footer_icon_url) or None,
+        ),
     )
     return embed
 
 
 def get_footer_meta(embed: discord.Embed) -> FooterMeta | None:
-    return _EMBED_META.get(embed)
+    if embed is None:
+        return None
+    stored = _EMBED_META.get(id(embed))
+    if stored is None:
+        return None
+    stored_embed, meta = stored
+    if stored_embed is not embed:
+        _EMBED_META.pop(id(embed), None)
+        return None
+    return meta
+
+
+def pop_footer_meta(embed: discord.Embed) -> FooterMeta | None:
+    if embed is None:
+        return None
+    stored = _EMBED_META.pop(id(embed), None)
+    if stored is None:
+        return None
+    stored_embed, meta = stored
+    if stored_embed is not embed:
+        return None
+    return meta
 
 
 def copy_footer_meta(source: discord.Embed, target: discord.Embed) -> discord.Embed:
@@ -285,9 +311,9 @@ class FooterService:
         return _truncate(FOOTER_SEPARATOR.join(parts)), phrase
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
-        meta = get_footer_meta(embed)
+        meta = pop_footer_meta(embed)
         if meta is None:
-            meta = FooterMeta(service_name=default_service_name, contributors=[], used_local_processing=False)
+            meta = FooterMeta(service_name=_clean(default_service_name) or "unknown", contributors=[], used_local_processing=False)
         await self.register_known_service(meta.service_name, source="runtime")
         text, _ = await self.render_footer(
             service_name=meta.service_name,
