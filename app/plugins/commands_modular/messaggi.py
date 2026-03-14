@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from typing import Optional
 
 import discord
@@ -376,3 +377,223 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                 channel_id_override=str(interaction.channel_id),
             )
             await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
+
+    @campagne_group.command(name="notizie", description="Configura campagna editoriale notizie")
+    @app_commands.describe(
+        time_local="Ora invio (HH:MM)",
+        interval_minutes="Intervallo in minuti",
+        embed_title="Titolo embed",
+        embed_color="Colore embed (#RRGGBB)",
+        sources="Fonti CSV o URL RSS separate da virgola",
+        categories="Categorie CSV (es: trash,spettacolo,viral)",
+    )
+    async def campagne_notizie(
+        interaction: discord.Interaction,
+        time_local: str,
+        interval_minutes: int,
+        embed_title: Optional[str] = None,
+        embed_color: Optional[str] = None,
+        sources: Optional[str] = None,
+        categories: Optional[str] = None,
+    ) -> None:
+        if not await check_permission(interaction, "campagne.notizie", ctx):
+            return
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
+            return
+        if interval_minutes <= 0:
+            await interaction.response.send_message("interval_minutes deve essere > 0.", ephemeral=True)
+            return
+        now = datetime.now(timezone.utc)
+        try:
+            next_run = calculate_initial_next_run(now, time_local, interval_minutes, ctx.timezone)
+        except ValueError as exc:
+            await interaction.response.send_message(f"Errore time_local: {exc}", ephemeral=True)
+            return
+        cfg_id = await ctx.database.create_campaign_content_config(
+            guild_id=str(interaction.guild_id),
+            channel_id=str(interaction.channel_id),
+            service_type="NEWS",
+            enabled=True,
+            time_local=time_local,
+            interval_minutes=interval_minutes,
+            embed_title=embed_title,
+            embed_color=embed_color,
+            sources_json=json.dumps([s.strip() for s in (sources or "").split(",") if s.strip()]),
+            categories_json=categories,
+            next_run_at=next_run.isoformat(),
+        )
+        await interaction.response.send_message(f"Servizio notizie creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
+
+    @campagne_group.command(name="meteo", description="Configura campagna editoriale meteo")
+    @app_commands.describe(
+        time_local="Ora invio (HH:MM)",
+        interval_minutes="Intervallo in minuti",
+        embed_title="Titolo embed",
+        embed_color="Colore embed (#RRGGBB)",
+        sources="Fonti CSV",
+    )
+    async def campagne_meteo(
+        interaction: discord.Interaction,
+        time_local: str,
+        interval_minutes: int,
+        embed_title: Optional[str] = None,
+        embed_color: Optional[str] = None,
+        sources: Optional[str] = None,
+    ) -> None:
+        if not await check_permission(interaction, "campagne.meteo", ctx):
+            return
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
+            return
+        now = datetime.now(timezone.utc)
+        try:
+            next_run = calculate_initial_next_run(now, time_local, interval_minutes, ctx.timezone)
+        except ValueError as exc:
+            await interaction.response.send_message(f"Errore time_local: {exc}", ephemeral=True)
+            return
+        cfg_id = await ctx.database.create_campaign_content_config(
+            guild_id=str(interaction.guild_id),
+            channel_id=str(interaction.channel_id),
+            service_type="WEATHER",
+            enabled=True,
+            time_local=time_local,
+            interval_minutes=interval_minutes,
+            embed_title=embed_title,
+            embed_color=embed_color,
+            sources_json=json.dumps([s.strip() for s in (sources or "").split(",") if s.strip()]),
+            categories_json=None,
+            next_run_at=next_run.isoformat(),
+        )
+        await interaction.response.send_message(f"Servizio meteo creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
+
+    @campagne_group.command(name="oroscopo", description="Configura campagna editoriale oroscopo")
+    @app_commands.describe(
+        time_local="Ora invio (HH:MM)",
+        interval_minutes="Intervallo in minuti",
+        embed_title="Titolo embed",
+        embed_color="Colore embed (#RRGGBB)",
+        sources="Fonti CSV",
+    )
+    async def campagne_oroscopo(
+        interaction: discord.Interaction,
+        time_local: str,
+        interval_minutes: int,
+        embed_title: Optional[str] = None,
+        embed_color: Optional[str] = None,
+        sources: Optional[str] = None,
+    ) -> None:
+        if not await check_permission(interaction, "campagne.oroscopo", ctx):
+            return
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
+            return
+        now = datetime.now(timezone.utc)
+        try:
+            next_run = calculate_initial_next_run(now, time_local, interval_minutes, ctx.timezone)
+        except ValueError as exc:
+            await interaction.response.send_message(f"Errore time_local: {exc}", ephemeral=True)
+            return
+        cfg_id = await ctx.database.create_campaign_content_config(
+            guild_id=str(interaction.guild_id),
+            channel_id=str(interaction.channel_id),
+            service_type="HOROSCOPE",
+            enabled=True,
+            time_local=time_local,
+            interval_minutes=interval_minutes,
+            embed_title=embed_title,
+            embed_color=embed_color,
+            sources_json=json.dumps([s.strip() for s in (sources or "").split(",") if s.strip()]),
+            categories_json=None,
+            next_run_at=next_run.isoformat(),
+        )
+        await interaction.response.send_message(f"Servizio oroscopo creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
+
+    @campagne_group.command(name="servizi_lista", description="Lista servizi editoriali")
+    async def campagne_servizi_lista(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "campagne.servizi_lista", ctx):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
+            return
+        rows = await ctx.database.list_campaign_content_configs(str(interaction.guild_id), include_disabled=True)
+        if not rows:
+            await interaction.response.send_message("Nessun servizio editoriale configurato.", ephemeral=True)
+            return
+        lines = []
+        for row in rows:
+            lines.append(
+                f"ID {row['id']} | {row['service_type']} | {'on' if row['enabled'] else 'off'} | ogni {row['interval_minutes']}m | start {row['time_local']} | next {row['next_run_at']}"
+            )
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @campagne_group.command(name="servizi_on", description="Riattiva servizio editoriale")
+    @app_commands.describe(id="ID servizio")
+    async def campagne_servizi_on(interaction: discord.Interaction, id: int) -> None:
+        if not await check_permission(interaction, "campagne.servizi_on", ctx):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
+            return
+        row = await ctx.database.get_campaign_content_config(str(interaction.guild_id), id)
+        if not row:
+            await interaction.response.send_message("Servizio non trovato.", ephemeral=True)
+            return
+        await ctx.database.set_campaign_content_enabled(str(interaction.guild_id), id, True)
+        await interaction.response.send_message(f"Servizio {id} attivato.", ephemeral=True)
+
+    @campagne_group.command(name="servizi_off", description="Disattiva servizio editoriale")
+    @app_commands.describe(id="ID servizio")
+    async def campagne_servizi_off(interaction: discord.Interaction, id: int) -> None:
+        if not await check_permission(interaction, "campagne.servizi_off", ctx):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
+            return
+        row = await ctx.database.get_campaign_content_config(str(interaction.guild_id), id)
+        if not row:
+            await interaction.response.send_message("Servizio non trovato.", ephemeral=True)
+            return
+        await ctx.database.set_campaign_content_enabled(str(interaction.guild_id), id, False)
+        await interaction.response.send_message(f"Servizio {id} in pausa.", ephemeral=True)
+
+    @campagne_group.command(name="servizi_delete", description="Cancella servizio editoriale")
+    @app_commands.describe(id="ID servizio")
+    async def campagne_servizi_delete(interaction: discord.Interaction, id: int) -> None:
+        if not await check_permission(interaction, "campagne.servizi_delete", ctx):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
+            return
+        row = await ctx.database.get_campaign_content_config(str(interaction.guild_id), id)
+        if not row:
+            await interaction.response.send_message("Servizio non trovato.", ephemeral=True)
+            return
+        await ctx.database.soft_delete_campaign_content_config(str(interaction.guild_id), id)
+        await interaction.response.send_message(f"Servizio {id} eliminato.", ephemeral=True)
+
+    @campagne_group.command(name="servizi_test", description="Esegue subito un servizio editoriale")
+    @app_commands.describe(id="ID servizio")
+    async def campagne_servizi_test(interaction: discord.Interaction, id: int) -> None:
+        if not await check_permission(interaction, "campagne.servizi_test", ctx):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
+            return
+        row = await ctx.database.get_campaign_content_config(str(interaction.guild_id), id)
+        if not row:
+            await interaction.response.send_message("Servizio non trovato.", ephemeral=True)
+            return
+        service = getattr(ctx.message_scheduler, "_campaign_content_service", None) if ctx.message_scheduler is not None else None
+        if service is None:
+            await interaction.response.send_message("Servizio campagne editoriali non disponibile.", ephemeral=True)
+            return
+        await interaction.response.send_message("Invio test in corso.", ephemeral=True)
+        payload = dict(row)
+        stype = str(payload.get("service_type") or "").upper()
+        if stype == "NEWS":
+            await service.execute_news_service(payload)
+        elif stype == "WEATHER":
+            await service.execute_weather_service(payload)
+        elif stype == "HOROSCOPE":
+            await service.execute_horoscope_service(payload)

@@ -17,6 +17,7 @@ from app.services.permissions import CommandGuardService
 from app.services.retention import RetentionService
 from app.services.barcello import BarcelloService
 from app.services.message_scheduler import MessageSchedulerService
+from app.services.campaign_content_service import CampaignContentService
 from app.services.status import StatusService
 from app.services.summary import SummaryService
 from app.services.daily_resoconto import DailyResocontoService
@@ -93,6 +94,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     translate_local_service = None
     translate_ai_service = None
     message_scheduler = None
+    campaign_content_service = None
     barcello_service = None
     community_insights = None
     daily_resoconto = None
@@ -125,12 +127,14 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         stt_ai_service = AiSttService(database_service, ai_service)
         translate_local_service = ArgosTranslateService()
         translate_ai_service = AiTranslateService(ai_service)
+        campaign_content_service = CampaignContentService(database_service, bot, ai_service=ai_service)
         message_scheduler = MessageSchedulerService(
             database_service,
             bot,
             community_insights=community_insights,
             barcello_service=barcello_service,
             ai_service=ai_service,
+            campaign_content_service=campaign_content_service,
         )
         summary_service = SummaryService(database_service, ai_service=ai_service)
         daily_resoconto = DailyResocontoService(database_service, bot, summary_service, barcello_service, ai_service=ai_service)
@@ -161,6 +165,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("barcello", barcello_service)
         registry.register("community_insights", community_insights)
         registry.register("message_scheduler", message_scheduler)
+        registry.register("campaign_content_service", campaign_content_service)
         registry.register("daily_resoconto", daily_resoconto)
         registry.register("trigger_engine", trigger_engine)
         registry.register("inactivity", inactivity_service)
@@ -239,6 +244,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
 
     if instance_mode == "main" and message_scheduler is not None:
         async def handle_ready() -> None:
+            if campaign_content_service is not None:
+                campaign_content_service.register_views()
             message_scheduler.start()
             if daily_activity_report is not None:
                 daily_activity_report.start()

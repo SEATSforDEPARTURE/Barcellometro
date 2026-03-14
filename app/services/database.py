@@ -301,6 +301,41 @@ class DatabaseService:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS campaign_content_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                time_local TEXT NOT NULL,
+                interval_minutes INTEGER NOT NULL,
+                embed_title TEXT NULL,
+                embed_color TEXT NULL,
+                sources_json TEXT NOT NULL DEFAULT '[]',
+                categories_json TEXT NULL,
+                last_sent_at TEXT NULL,
+                next_run_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_campaign_content_configs_due
+            ON campaign_content_configs (guild_id, enabled, next_run_at);
+
+            CREATE TABLE IF NOT EXISTS campaign_content_messages (
+                message_id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                config_id INTEGER,
+                embeds_json TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                current_index INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_channels (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -3645,6 +3680,165 @@ class DatabaseService:
                 updated_at = excluded.updated_at
             """,
             (guild_id, last_campaign_id, now),
+        )
+
+
+
+    async def create_campaign_content_config(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        service_type: str,
+        enabled: bool,
+        time_local: str,
+        interval_minutes: int,
+        embed_title: Optional[str],
+        embed_color: Optional[str],
+        sources_json: str,
+        categories_json: Optional[str],
+        next_run_at: str,
+    ) -> int:
+        assert self._conn is not None
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self._conn.execute(
+            """
+            INSERT INTO campaign_content_configs (
+                guild_id, channel_id, service_type, enabled, time_local, interval_minutes,
+                embed_title, embed_color, sources_json, categories_json,
+                last_sent_at, next_run_at, created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL)
+            """,
+            (
+                guild_id,
+                channel_id,
+                service_type,
+                1 if enabled else 0,
+                time_local,
+                interval_minutes,
+                embed_title,
+                embed_color,
+                sources_json,
+                categories_json,
+                next_run_at,
+                now,
+                now,
+            ),
+        )
+        await self._conn.commit()
+        return int(cursor.lastrowid)
+
+    async def list_campaign_content_configs(self, guild_id: str, *, include_disabled: bool = True) -> list[aiosqlite.Row]:
+        conditions = ["guild_id = ?", "deleted_at IS NULL"]
+        params: list[Any] = [guild_id]
+        if not include_disabled:
+            conditions.append("enabled = 1")
+        query = f"SELECT * FROM campaign_content_configs WHERE {' AND '.join(conditions)} ORDER BY id ASC"
+        return await self.fetchall(query, tuple(params))
+
+    async def get_campaign_content_config(self, guild_id: str, config_id: int) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM campaign_content_configs
+            WHERE guild_id = ? AND id = ? AND deleted_at IS NULL
+            """,
+            (guild_id, config_id),
+        )
+
+    async def set_campaign_content_enabled(self, guild_id: str, config_id: int, enabled: bool) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE campaign_content_configs
+            SET enabled = ?, updated_at = ?
+            WHERE guild_id = ? AND id = ? AND deleted_at IS NULL
+            """,
+            (1 if enabled else 0, now, guild_id, config_id),
+        )
+
+    async def soft_delete_campaign_content_config(self, guild_id: str, config_id: int) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE campaign_content_configs
+            SET enabled = 0, deleted_at = ?, updated_at = ?
+            WHERE guild_id = ? AND id = ?
+            """,
+            (now, now, guild_id, config_id),
+        )
+
+    async def due_campaign_content_configs(self, now_iso: str) -> list[dict[str, object]]:
+        rows = await self.fetchall(
+            """
+            SELECT *
+            FROM campaign_content_configs
+            WHERE enabled = 1 AND deleted_at IS NULL AND next_run_at <= ?
+            ORDER BY next_run_at ASC
+            """,
+            (now_iso,),
+        )
+        return [dict(row) for row in rows]
+
+    async def update_campaign_content_next_run(self, *, guild_id: str, config_id: int, next_run_at: str, last_sent_at: Optional[str]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE campaign_content_configs
+            SET next_run_at = ?, last_sent_at = ?, updated_at = ?
+            WHERE guild_id = ? AND id = ? AND deleted_at IS NULL
+            """,
+            (next_run_at, last_sent_at, now, guild_id, config_id),
+        )
+
+    async def upsert_campaign_content_message(
+        self,
+        *,
+        message_id: str,
+        guild_id: str,
+        channel_id: str,
+        service_type: str,
+        config_id: int,
+        embeds_json: str,
+        metadata_json: str,
+        current_index: int,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO campaign_content_messages (
+                message_id, guild_id, channel_id, service_type, config_id,
+                embeds_json, metadata_json, current_index, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET
+                guild_id = excluded.guild_id,
+                channel_id = excluded.channel_id,
+                service_type = excluded.service_type,
+                config_id = excluded.config_id,
+                embeds_json = excluded.embeds_json,
+                metadata_json = excluded.metadata_json,
+                current_index = excluded.current_index,
+                updated_at = excluded.updated_at
+            """,
+            (message_id, guild_id, channel_id, service_type, config_id, embeds_json, metadata_json, current_index, now, now),
+        )
+
+    async def get_campaign_content_message(self, message_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT * FROM campaign_content_messages WHERE message_id = ?
+            """,
+            (message_id,),
+        )
+
+    async def update_campaign_content_current_index(self, message_id: str, current_index: int) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE campaign_content_messages
+            SET current_index = ?, updated_at = ?
+            WHERE message_id = ?
+            """,
+            (current_index, now, message_id),
         )
 
     async def get_inactivity_config(self, guild_id: str) -> Optional[aiosqlite.Row]:
