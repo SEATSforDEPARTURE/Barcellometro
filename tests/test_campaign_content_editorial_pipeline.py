@@ -233,3 +233,37 @@ def test_open_personal_navigator_clamps_target_index() -> None:
         assert (high_embed.title or "") == "P1"
 
     asyncio.run(_run())
+
+
+def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
+    class _Ai:
+        def __init__(self, output: str):
+            self.ask_general = AsyncMock(return_value=output)
+
+        def is_enabled(self):
+            return True
+
+        def get_model(self, _):
+            return "gpt-4o"
+
+    payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}}}
+    for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
+        payload["signs"][s] = {"sign": s, "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}
+
+    async def _run_valid() -> None:
+        ai = _Ai(json.dumps({k: {"love": "x", "work": "y", "money": "z", "energy": "w", "friction": "q", "advice": "p"} for k in payload["signs"]}))
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
+        await service._rewrite_horoscope_payload(payload)
+        ai.ask_general.assert_awaited_once()
+
+    async def _run_invalid() -> None:
+        ai = _Ai("not-json")
+        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
+            local_payload["signs"][s] = {"sign": s, "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
+        await service._rewrite_horoscope_payload(local_payload)
+        assert local_payload["signs"]["Ariete"]["love"] == "orig"
+
+    asyncio.run(_run_valid())
+    asyncio.run(_run_invalid())

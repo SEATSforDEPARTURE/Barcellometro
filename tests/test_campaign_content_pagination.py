@@ -129,4 +129,10 @@ def test_launcher_button_handles_open_personal_navigator_failure_without_public_
         service.edit_public_message.assert_not_called()
         interaction.response.send_message.assert_awaited_once()
 
-    asyncio.run(_run())
+def test_personal_navigator_disables_edges() -> None:
+    embeds = [{"title": "p0"}, {"title": "p1"}, {"title": "p2"}]
+    page_map = [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}, {"type": "category", "key": "a", "label": "📌 A", "page": 1}]
+    view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, current_index=0, timeout=60)
+    assert view.children[0].disabled is True
+    assert view.children[1].disabled is True
+    assert view.children[2].disabled is False
