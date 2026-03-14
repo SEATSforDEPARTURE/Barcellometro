@@ -17,6 +17,7 @@ from app.services.barcello import BarcelloService
 from app.services.community_insights import CommunityInsightsService
 from app.services.database import DatabaseService
 from app.services.ai import AiService
+from app.services.campaign_content_service import CampaignContentService
 
 logger = logging.getLogger(__name__)
 
@@ -228,12 +229,14 @@ class MessageSchedulerService:
         community_insights: Optional[CommunityInsightsService] = None,
         barcello_service: Optional[BarcelloService] = None,
         ai_service: Optional[AiService] = None,
+        campaign_content_service: Optional[CampaignContentService] = None,
     ) -> None:
         self._database = database
         self._bot = bot
         self._community_insights = community_insights
         self._barcello_service = barcello_service
         self._ai_service = ai_service
+        self._campaign_content_service = campaign_content_service
         self._task: Optional[asyncio.Task[None]] = None
         self._barcello_cache: dict[str, tuple[datetime, str, Optional[int]]] = {}
         self._metrics = {
@@ -263,6 +266,8 @@ class MessageSchedulerService:
         for campaign in due:
             if str(campaign.get("type")) != "CUSTOM":
                 await self._process_campaign(campaign, now)
+        if self._campaign_content_service is not None:
+            await self._campaign_content_service.process_due_services(now)
         self._metrics["last_tick_ts"] = now.isoformat()
 
     async def _process_guild(self, guild_id: str, now: datetime) -> None:
