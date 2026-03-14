@@ -76,21 +76,10 @@ class PersistentCampaignLauncherView(discord.ui.View):
         self._build()
 
     def _build(self) -> None:
-        self.add_item(PageJumpButton(label="⏮️ INIZIO", custom_id=f"campaign_content:{self._service_type}:start", target_index=0, row=0))
-        self.add_item(PageJumpButton(label="⬅️ INDIETRO", custom_id=f"campaign_content:{self._service_type}:prev", target_index=0, row=0))
-        self.add_item(PageJumpButton(label="➡️ AVANTI", custom_id=f"campaign_content:{self._service_type}:next", target_index=min(1, self._total_pages - 1), row=0, style=discord.ButtonStyle.primary))
         dynamic = [entry for entry in self._page_map if entry.get("type") != "overview"]
         for idx, entry in enumerate(dynamic):
-            row = 1 + (idx // 5)
+            row = idx // 5
             self.add_item(PageJumpButton(label=str(entry.get("label") or "Pagina")[:80], custom_id=f"campaign_content:{self._service_type}:jump:{entry.get('key', idx)}", target_index=int(entry.get("page", 0)), row=row))
-        self._sync()
-
-    def _sync(self) -> None:
-        nav = [item for item in self.children if isinstance(item, PageJumpButton)][:3]
-        if len(nav) == 3:
-            nav[0].disabled = True
-            nav[1].disabled = True
-            nav[2].disabled = self._total_pages <= 1
 
     async def _open_ephemeral(self, interaction: discord.Interaction, target_index: int) -> None:
         try:

@@ -8,7 +8,7 @@ from app.services.campaign_content_formatter import (
 )
 
 
-def test_weather_embeds_have_page_in_title_and_shared_footer() -> None:
+def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
     embeds = build_weather_embeds(
         {"embed_title": "🌞 METEO CRICETOSO"},
         {
@@ -21,16 +21,16 @@ def test_weather_embeds_have_page_in_title_and_shared_footer() -> None:
     )
     apply_shared_footer_and_pagination(embeds, "Barcellometro dev6 · Dati elaborati con open-meteo, meteoam, 3bmeteo e gpt-4o")
 
-    assert embeds[0].title == "🌞 METEO CRICETOSO • Overview Italia • Pagina 1/4"
-    assert embeds[1].title == "🌞 METEO CRICETOSO • Nord • Pagina 2/4"
-    assert embeds[2].title == "🌞 METEO CRICETOSO • Centro • Pagina 3/4"
-    assert embeds[3].title == "🌞 METEO CRICETOSO • Sud e Isole • Pagina 4/4"
+    assert embeds[0].title == "🌞 METEO CRICETOSO • Overview Italia"
+    assert embeds[1].title == "🌞 METEO CRICETOSO • Nord"
+    assert embeds[2].title == "🌞 METEO CRICETOSO • Centro"
+    assert embeds[3].title == "🌞 METEO CRICETOSO • Sud e Isole"
     footers = [embed.footer.text for embed in embeds]
     assert len(set(footers)) == 1
     assert all("Pagina" not in (f or "") for f in footers)
 
 
-def test_news_and_horoscope_embeds_have_shared_footer_and_page_in_title() -> None:
+def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() -> None:
     news = build_news_embeds(
         {"embed_title": "📰 NOTIZIARIO CRICETOSO"},
         {
@@ -49,14 +49,35 @@ def test_news_and_horoscope_embeds_have_shared_footer_and_page_in_title() -> Non
     apply_shared_footer_and_pagination(news, footer_text)
     apply_shared_footer_and_pagination(horoscope, footer_text)
 
-    assert news[0].title.endswith("• Pagina 1/3")
-    assert news[1].title.endswith("• Pagina 2/3")
-    assert news[2].title.endswith("• Pagina 3/3")
-    assert horoscope[0].title == "🔮 OROSCOPO DEL GIORNO • Overview • Pagina 1/13"
-    assert horoscope[1].title == "🔮 OROSCOPO DEL GIORNO • Ariete • Pagina 2/13"
+    assert news[0].title == "📰 NOTIZIARIO CRICETOSO • Inizio"
+    assert news[1].title == "📰 NOTIZIARIO CRICETOSO • Trash"
+    assert news[2].title == "📰 NOTIZIARIO CRICETOSO • Viral"
+    assert horoscope[0].title == "🔮 OROSCOPO DEL GIORNO • Inizio"
+    assert horoscope[1].title == "🔮 OROSCOPO DEL GIORNO • Ariete"
     assert all(embed.footer.text == footer_text for embed in news)
     assert all(embed.footer.text == footer_text for embed in horoscope)
     assert all("Pagina" not in (embed.footer.text or "") for embed in news + horoscope)
+
+
+def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
+    news = build_news_embeds(
+        {"embed_title": "📰 NOTIZIARIO CRICETOSO"},
+        {
+            "categories": {
+                "spettacolo": [{"title": "Gran finale in diretta", "summary": "S1", "source": "s1", "link": "https://example.com/1"}],
+                "gossip": [{"title": "Ritorno clamoroso", "summary": "S2", "source": "s2", "link": "https://example.com/2"}],
+                "viral": [{"title": "Nuovo trend impazza", "summary": "S3", "source": "s3", "link": "https://example.com/3"}],
+            }
+        },
+    )
+
+    overview = news[0]
+    description = overview.description or ""
+    assert "Categorie attive" not in description
+    assert "Notizie uniche aggregate" not in description
+    assert "Barcellometro" in description
+    assert "Spettacolo" in description
+    assert "Gossip" in description
 
 
 def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fields() -> None:
