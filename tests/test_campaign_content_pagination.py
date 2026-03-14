@@ -99,3 +99,40 @@ def test_personal_navigator_disables_edges() -> None:
     assert view.children[0].disabled is True
     assert view.children[1].disabled is True
     assert view.children[2].disabled is False
+
+
+def test_launcher_button_handles_open_personal_navigator_failure_without_public_edit() -> None:
+    async def _run() -> None:
+        service = _FakeService()
+        service.open_personal_navigator = AsyncMock(return_value=False)
+        view = PersistentCampaignLauncherView(
+            service,
+            service_type="WEATHER",
+            total_pages=4,
+            page_map=[
+                {"type": "overview", "label": "⏮️ INIZIO", "page": 0},
+                {"type": "area", "key": "nord", "label": "🧊 NORD", "page": 1},
+            ],
+        )
+
+        class _Resp:
+            def __init__(self):
+                self.send_message = AsyncMock()
+            def is_done(self):
+                return False
+
+        interaction = SimpleNamespace(message=SimpleNamespace(id=999), response=_Resp(), followup=SimpleNamespace(send=AsyncMock()))
+        button = view.children[3]
+        await button.callback(interaction)
+
+        service.open_personal_navigator.assert_awaited_once()
+        service.edit_public_message.assert_not_called()
+        interaction.response.send_message.assert_awaited_once()
+
+def test_personal_navigator_disables_edges() -> None:
+    embeds = [{"title": "p0"}, {"title": "p1"}, {"title": "p2"}]
+    page_map = [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}, {"type": "category", "key": "a", "label": "📌 A", "page": 1}]
+    view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, current_index=0, timeout=60)
+    assert view.children[0].disabled is True
+    assert view.children[1].disabled is True
+    assert view.children[2].disabled is False

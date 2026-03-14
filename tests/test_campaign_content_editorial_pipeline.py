@@ -143,3 +143,127 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
 
     asyncio.run(_run_valid())
     asyncio.run(_run_invalid())
+
+
+def test_load_message_record_accepts_aiosqlite_row_like_payload() -> None:
+    class _RowLike:
+        def __iter__(self):
+            yield ("message_id", "123")
+            yield ("guild_id", "1")
+            yield ("channel_id", "2")
+            yield ("service_type", "weather")
+            yield ("config_id", 99)
+            yield ("embeds_json", '[{"title":"A"},{"title":"B"}]')
+            yield ("metadata_json", '{"page_map":[{"type":"overview","page":0}]}')
+            yield ("current_index", "4")
+
+    class _Db:
+        async def get_campaign_content_message(self, _message_id):
+            return _RowLike()
+
+    async def _run() -> None:
+        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
+        row = await service.load_message_record("123")
+        assert row is not None
+        assert row["message_id"] == "123"
+        assert row["service_type"] == "WEATHER"
+        assert row["config_id"] == "99"
+        assert len(row["embeds"]) == 2
+        assert isinstance(row["metadata"], dict)
+        assert row["current_index"] == 4
+
+    asyncio.run(_run())
+
+
+def test_load_message_record_handles_invalid_json() -> None:
+    class _RowLike:
+        def __iter__(self):
+            yield ("message_id", "123")
+            yield ("guild_id", "1")
+            yield ("channel_id", "2")
+            yield ("service_type", "news")
+            yield ("config_id", 99)
+            yield ("embeds_json", '{invalid')
+            yield ("metadata_json", '{invalid')
+            yield ("current_index", "0")
+
+    class _Db:
+        async def get_campaign_content_message(self, _message_id):
+            return _RowLike()
+
+    async def _run() -> None:
+        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
+        row = await service.load_message_record("123")
+        assert row is not None
+        assert row["embeds"] == []
+        assert row["metadata"] == {}
+
+    asyncio.run(_run())
+
+
+def test_open_personal_navigator_clamps_target_index() -> None:
+    class _Db:
+        async def get_campaign_content_message(self, _message_id):
+            return {
+                "message_id": "777",
+                "guild_id": "1",
+                "channel_id": "2",
+                "service_type": "WEATHER",
+                "config_id": "9",
+                "embeds_json": '[{"title":"P0"},{"title":"P1"}]',
+                "metadata_json": '{"page_map": [{"type": "overview", "page": 0}]}',
+                "current_index": 0,
+            }
+
+    class _Response:
+        def __init__(self):
+            self.send_message = AsyncMock()
+
+    interaction = SimpleNamespace(message=SimpleNamespace(id=777), response=_Response())
+
+    async def _run() -> None:
+        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
+        ok_low = await service.open_personal_navigator(interaction, target_index=-5, service_type="WEATHER")
+        ok_high = await service.open_personal_navigator(interaction, target_index=55, service_type="WEATHER")
+        assert ok_low is True and ok_high is True
+        calls = interaction.response.send_message.await_args_list
+        low_embed = calls[0].kwargs["embed"]
+        high_embed = calls[1].kwargs["embed"]
+        assert (low_embed.title or "") == "P0"
+        assert (high_embed.title or "") == "P1"
+
+    asyncio.run(_run())
+
+
+def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
+    class _Ai:
+        def __init__(self, output: str):
+            self.ask_general = AsyncMock(return_value=output)
+
+        def is_enabled(self):
+            return True
+
+        def get_model(self, _):
+            return "gpt-4o"
+
+    payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}}}
+    for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
+        payload["signs"][s] = {"sign": s, "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}
+
+    async def _run_valid() -> None:
+        ai = _Ai(json.dumps({k: {"love": "x", "work": "y", "money": "z", "energy": "w", "friction": "q", "advice": "p"} for k in payload["signs"]}))
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
+        await service._rewrite_horoscope_payload(payload)
+        ai.ask_general.assert_awaited_once()
+
+    async def _run_invalid() -> None:
+        ai = _Ai("not-json")
+        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
+            local_payload["signs"][s] = {"sign": s, "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
+        await service._rewrite_horoscope_payload(local_payload)
+        assert local_payload["signs"]["Ariete"]["love"] == "orig"
+
+    asyncio.run(_run_valid())
+    asyncio.run(_run_invalid())

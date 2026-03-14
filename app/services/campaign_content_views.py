@@ -93,11 +93,22 @@ class PersistentCampaignLauncherView(discord.ui.View):
             nav[2].disabled = self._total_pages <= 1
 
     async def _open_ephemeral(self, interaction: discord.Interaction, target_index: int) -> None:
-        ok = await self._service.open_personal_navigator(interaction, target_index=target_index, service_type=self._service_type)
+        try:
+            ok = await self._service.open_personal_navigator(interaction, target_index=target_index, service_type=self._service_type)
+        except Exception:
+            if interaction.response.is_done():
+                await interaction.followup.send("Navigazione non disponibile.", ephemeral=True)
+            else:
+                await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+            return
+
         if ok:
             return
-        # fallback legacy
-        await self._service.edit_public_message(interaction, target_index=target_index)
+
+        if interaction.response.is_done():
+            await interaction.followup.send("Navigazione non disponibile.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return True
