@@ -55,10 +55,42 @@ class CampaignContentPaginationView(discord.ui.View):
         await self._navigate(interaction, self._current_index + 1)
 
 
+class HoroscopeNavButton(discord.ui.Button["HoroscopePaginationView"]):
+    def __init__(self, *, label: str, custom_id: str, target_index: int, row: int, style: discord.ButtonStyle = discord.ButtonStyle.primary) -> None:
+        super().__init__(label=label, style=style, custom_id=custom_id, row=row)
+        self._target_index = target_index
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if view is None:
+            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+            return
+        await view._go_to(interaction, self._target_index)
+
+
 class HoroscopePaginationView(discord.ui.View):
     def __init__(self, service: Any) -> None:
         super().__init__(timeout=None)
         self._service = service
+        self.add_item(
+            HoroscopeNavButton(
+                label="OVERVIEW",
+                style=discord.ButtonStyle.secondary,
+                custom_id="campaign_content:sign:overview",
+                target_index=0,
+                row=0,
+            )
+        )
+        for index, sign in enumerate(SIGN_ORDER, start=1):
+            row = 1 + ((index - 1) // 5)
+            self.add_item(
+                HoroscopeNavButton(
+                    label=sign.upper(),
+                    custom_id=f"campaign_content:sign:{sign.lower()}",
+                    target_index=index,
+                    row=row,
+                )
+            )
 
     async def _go_to(self, interaction: discord.Interaction, index: int) -> None:
         message = interaction.message
@@ -75,26 +107,3 @@ class HoroscopePaginationView(discord.ui.View):
             return
         await self._service.persist_current_index(str(message.id), index)
         await interaction.response.edit_message(embed=discord.Embed.from_dict(embeds[index]), view=self)
-
-    @discord.ui.button(label="OVERVIEW", style=discord.ButtonStyle.secondary, custom_id="campaign_content:sign:overview", row=0)
-    async def overview(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
-        _ = button
-        await self._go_to(interaction, 0)
-
-
-def _add_sign_button(sign: str, index: int) -> None:
-    custom_id = f"campaign_content:sign:{sign.lower()}"
-
-    async def handler(self: HoroscopePaginationView, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
-        _ = button
-        await self._go_to(interaction, index)
-
-    setattr(
-        HoroscopePaginationView,
-        f"sign_{sign.lower()}",
-        discord.ui.button(label=sign.upper(), style=discord.ButtonStyle.primary, custom_id=custom_id, row=(index - 1) // 5 + 1)(handler),
-    )
-
-
-for _idx, _sign in enumerate(SIGN_ORDER, start=1):
-    _add_sign_button(_sign, _idx)
