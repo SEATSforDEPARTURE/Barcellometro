@@ -156,6 +156,26 @@ def attach_footer_meta(
     return embed
 
 
+def attach_footer_meta_to_all(
+    embeds: Iterable[discord.Embed] | None,
+    *,
+    service_name: str,
+    contributors: Iterable[str] | None = None,
+    used_local_processing: bool = False,
+    footer_icon_url: str | None = None,
+) -> list[discord.Embed]:
+    embed_list = list(embeds or [])
+    for embed in embed_list:
+        attach_footer_meta(
+            embed,
+            service_name=service_name,
+            contributors=contributors,
+            used_local_processing=used_local_processing,
+            footer_icon_url=footer_icon_url,
+        )
+    return embed_list
+
+
 def get_footer_meta(embed: discord.Embed) -> FooterMeta | None:
     if embed is None:
         return None
