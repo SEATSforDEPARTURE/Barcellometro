@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -20,49 +21,93 @@ ROME_TZ = ZoneInfo("Europe/Rome")
 DUE_WINDOW_SECONDS = 600
 
 
+def build_combined_activity_inactive_txt(
+    *,
+    activity_txt_payload: str | None,
+    inactive_txt_payload: str | None,
+    filename_prefix: str = "report_attivita_e_inattivi",
+    now: datetime | None = None,
+) -> tuple[str, str, discord.File]:
+    timestamp = (now or datetime.now()).strftime("%Y%m%d_%H%M")
+    filename = f"{filename_prefix}_{timestamp}.txt"
+
+    sections: list[str] = []
+    if activity_txt_payload:
+        sections.append(
+            "\n".join(
+                [
+                    "==================================================",
+                    "SEZIONE 1 — REPORT ATTIVITÀ DETTAGLIATO",
+                    "==================================================",
+                    "",
+                    activity_txt_payload.strip(),
+                ]
+            )
+        )
+    if inactive_txt_payload:
+        sections.append(
+            "\n".join(
+                [
+                    "==================================================",
+                    "SEZIONE 2 — INATTIVI SERVER-WIDE",
+                    "==================================================",
+                    "",
+                    inactive_txt_payload.strip(),
+                ]
+            )
+        )
+
+    final_payload = "\n\n\n".join(sections).strip() if sections else "Nessun dettaglio disponibile."
+    txt_file = discord.File(io.BytesIO(final_payload.encode("utf-8")), filename=filename)
+    return final_payload, filename, txt_file
+
+
 class DailyReportPaginationView(discord.ui.View):
-    def __init__(self, embeds: list[discord.Embed], *, timeout: float = 600) -> None:
-        super().__init__(timeout=timeout)
-        self._embeds = embeds
-        self._index = 0
-        self.message: discord.Message | None = None
-        self._sync_buttons()
+    def __init__(self, report_service: "DailyActivityReportService") -> None:
+        super().__init__(timeout=None)
+        self._report_service = report_service
 
-    @property
-    def current_embed(self) -> discord.Embed:
-        return self._embeds[self._index]
+    async def _navigate(self, interaction: discord.Interaction, *, action: str) -> None:
+        message = interaction.message
+        if message is None:
+            await interaction.response.send_message("⚠️ Messaggio non disponibile.", ephemeral=True)
+            return
+        record = await self._report_service.load_pagination_record(message_id=str(message.id))
+        if record is None:
+            await interaction.response.send_message("⚠️ Report non più disponibile per la navigazione.", ephemeral=True)
+            return
+        embeds_payload = record.get("embeds")
+        if not isinstance(embeds_payload, list) or not embeds_payload:
+            await interaction.response.send_message("⚠️ Pagine report non valide.", ephemeral=True)
+            return
 
-    def _sync_buttons(self) -> None:
-        self.prev_button.disabled = self._index <= 0
-        self.next_button.disabled = self._index >= len(self._embeds) - 1
+        current_index = int(record.get("current_index", 0))
+        max_index = len(embeds_payload) - 1
+        if action == "start":
+            target_index = 0
+        elif action == "prev":
+            target_index = max(0, current_index - 1)
+        else:
+            target_index = min(max_index, current_index + 1)
 
-    async def _edit(self, interaction: discord.Interaction) -> None:
-        self._sync_buttons()
-        await interaction.response.edit_message(embed=self.current_embed, view=self)
+        embed = discord.Embed.from_dict(embeds_payload[target_index])
+        await self._report_service.persist_pagination_current_index(message_id=str(message.id), current_index=target_index)
+        await interaction.response.edit_message(embed=embed, view=self)
 
-    async def on_timeout(self) -> None:
-        for child in self.children:
-            if isinstance(child, discord.ui.Button):
-                child.disabled = True
-        if self.message is not None:
-            try:
-                await self.message.edit(view=self)
-            except Exception:
-                logger.debug("daily report pagination timeout edit failed", exc_info=True)
+    @discord.ui.button(label="⏮️ INIZIO", style=discord.ButtonStyle.secondary, custom_id="daily_report:nav:start")
+    async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        _ = button
+        await self._navigate(interaction, action="start")
 
-    @discord.ui.button(label="⬅️ INDIETRO", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="⬅️ INDIETRO", style=discord.ButtonStyle.secondary, custom_id="daily_report:nav:prev")
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
-        if self._index > 0:
-            self._index -= 1
-        await self._edit(interaction)
+        await self._navigate(interaction, action="prev")
 
-    @discord.ui.button(label="➡️ AVANTI", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="➡️ AVANTI", style=discord.ButtonStyle.primary, custom_id="daily_report:nav:next")
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
-        if self._index < len(self._embeds) - 1:
-            self._index += 1
-        await self._edit(interaction)
+        await self._navigate(interaction, action="next")
 
 
 class DailyActivityReportService:
@@ -78,10 +123,80 @@ class DailyActivityReportService:
         self._activity = activity_service
         self._task: asyncio.Task[None] | None = None
         self._inactive_moderation = inactive_members_moderation
+        self._persistent_view_registered = False
+
+    def _ensure_persistent_view_registered(self) -> None:
+        if self._persistent_view_registered:
+            return
+        self._bot.add_view(DailyReportPaginationView(self))
+        self._persistent_view_registered = True
 
     def start(self) -> None:
+        self._ensure_persistent_view_registered()
         if self._task is None:
             self._task = asyncio.create_task(self._loop())
+
+    async def persist_pagination_record(
+        self,
+        *,
+        message_id: str,
+        channel_id: str,
+        guild_id: str,
+        embeds: list[discord.Embed],
+        metadata: dict[str, Any] | None = None,
+        current_index: int = 0,
+    ) -> None:
+        embeds_payload = [embed.to_dict() for embed in embeds]
+        await self._database.upsert_daily_report_pagination_state(
+            message_id=message_id,
+            channel_id=channel_id,
+            guild_id=guild_id,
+            report_type="activity_inactive",
+            embeds_json=json.dumps(embeds_payload, ensure_ascii=False),
+            metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+            current_index=current_index,
+        )
+
+    async def persist_pagination_current_index(self, *, message_id: str, current_index: int) -> None:
+        await self._database.update_daily_report_pagination_current_index(message_id=message_id, current_index=current_index)
+
+    async def load_pagination_record(self, *, message_id: str) -> dict[str, Any] | None:
+        row = await self._database.get_daily_report_pagination_state(message_id=message_id)
+        if not row:
+            return None
+        try:
+            embeds = json.loads(str(row["embeds_json"] or "[]"))
+        except json.JSONDecodeError:
+            embeds = []
+        try:
+            metadata = json.loads(str(row["metadata_json"] or "{}"))
+        except json.JSONDecodeError:
+            metadata = {}
+        return {
+            "message_id": str(row["message_id"]),
+            "embeds": embeds,
+            "metadata": metadata,
+            "current_index": int(row["current_index"] or 0),
+        }
+
+    @staticmethod
+    def _extract_txt_payload(file: discord.File | None) -> str | None:
+        if file is None:
+            return None
+        fp = getattr(file, "fp", None)
+        if fp is None:
+            return None
+        try:
+            if hasattr(fp, "seek"):
+                fp.seek(0)
+            data = fp.read()
+            if isinstance(data, bytes):
+                return data.decode("utf-8")
+            if isinstance(data, str):
+                return data
+        except Exception:
+            logger.debug("daily_activity_report: failed reading txt payload from discord.File", exc_info=True)
+        return None
 
     async def _loop(self) -> None:
         await self._bot.wait_until_ready()
@@ -453,11 +568,11 @@ class DailyActivityReportService:
         }
 
         embeds = build_daily_activity_embeds(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)
-        txt_payload = build_daily_activity_details_txt(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)
-        txt_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename="attivita_dettagli_giornalieri.txt")
+        activity_txt_payload = build_daily_activity_details_txt(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)
 
         report_embeds = list(embeds)
         inactive_txt_file: discord.File | None = None
+        inactive_txt_payload: str | None = None
         if self._inactive_moderation is not None:
             try:
                 inactive_embeds, inactive_txt_file, _ = await self._inactive_moderation.build_serverwide_inactive_embeds(
@@ -466,6 +581,7 @@ class DailyActivityReportService:
                     include_actions_view=False,
                 )
                 report_embeds.extend(inactive_embeds)
+                inactive_txt_payload = self._extract_txt_payload(inactive_txt_file)
 
                 cfg = await self._inactive_moderation._get_config(guild_id)
                 if cfg and bool(cfg.get("enabled")) and bool(cfg.get("auto_enabled")):
@@ -478,13 +594,22 @@ class DailyActivityReportService:
         if not report_embeds:
             return
 
-        view = DailyReportPaginationView(report_embeds)
+        _, _, txt_file = build_combined_activity_inactive_txt(
+            activity_txt_payload=activity_txt_payload,
+            inactive_txt_payload=inactive_txt_payload,
+        )
+
+        view = DailyReportPaginationView(self)
         try:
-            if inactive_txt_file is not None:
-                message = await channel.send(embed=report_embeds[0], view=view, files=[txt_file, inactive_txt_file])
-            else:
-                message = await channel.send(embed=report_embeds[0], view=view, file=txt_file)
+            message = await channel.send(embed=report_embeds[0], view=view, file=txt_file)
         except Exception:
             logger.warning("daily_activity_report: failed sending txt attachment guild=%s channel=%s", guild_id, mod_channel_id)
             message = await channel.send(embed=report_embeds[0], view=view)
-        view.message = message
+        await self.persist_pagination_record(
+            message_id=str(message.id),
+            channel_id=str(message.channel.id),
+            guild_id=guild_id,
+            embeds=report_embeds,
+            metadata={"has_activity": bool(activity_txt_payload), "has_inactive": bool(inactive_txt_payload)},
+            current_index=0,
+        )
