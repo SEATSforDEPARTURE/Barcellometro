@@ -34,8 +34,17 @@ def resolve_color(color_raw: str | None) -> int:
 
 
 def _with_footer(embed: discord.Embed, page: int, total: int) -> discord.Embed:
-    embed.set_footer(text=f"Barcellometro • Pagina {page}/{total}")
+    title = (embed.title or "").strip()
+    embed.title = f"{title} • Pagina {page}/{total}" if title else f"Pagina {page}/{total}"
     return embed
+
+
+def apply_shared_footer_and_pagination(embeds: list[discord.Embed], footer_text: str) -> list[discord.Embed]:
+    total = max(1, len(embeds))
+    for idx, embed in enumerate(embeds, start=1):
+        _with_footer(embed, idx, total)
+        embed.set_footer(text=footer_text)
+    return embeds
 
 
 def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
@@ -63,8 +72,6 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             lines.append("")
         embed.description = "\n".join(lines)[:3900] or "Nessuna notizia valida."
         embeds.append(embed)
-    for idx, emb in enumerate(embeds, start=1):
-        _with_footer(emb, idx, len(embeds))
     return embeds
 
 
@@ -83,7 +90,6 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
     for idx, (page_title, description) in enumerate(pages, start=1):
         e = discord.Embed(title=f"{title} • {page_title}", description=description[:3900], color=color)
         e.add_field(name="Commento", value="Ombrellino in borsa e drama sotto controllo.", inline=False)
-        _with_footer(e, idx, len(pages))
         embeds.append(e)
     return embeds
 
@@ -105,8 +111,6 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         e.add_field(name="Con chi barcellerai oggi", value="Con chi ti fa ridere davvero.", inline=False)
         e.add_field(name="Consiglio cricetoso", value="Respira, sorridi, poi conquista il feed.", inline=False)
         embeds.append(e)
-    for idx, emb in enumerate(embeds, start=1):
-        _with_footer(emb, idx, len(embeds))
     return embeds
 
 
@@ -119,5 +123,4 @@ def build_fallback_embed(config: dict[str, Any], sources: list[str]) -> list[dis
         color=color,
     )
     embed.add_field(name="Fonti tentate", value="\n".join(sources) or "n/d", inline=False)
-    _with_footer(embed, 1, 1)
     return [embed]
