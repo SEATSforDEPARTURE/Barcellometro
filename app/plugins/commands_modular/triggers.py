@@ -6,6 +6,8 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import discord
+
+from app.services.footer import attach_footer_meta
 from discord import app_commands
 
 from app.plugins.commands_modular.command_helpers import add_group_once
@@ -558,7 +560,7 @@ def register_triggers(
                 )
             embed.add_field(name="Top utenti", value="\n".join(lines), inline=False)
 
-        embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia.")
+        attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @frasi_group.command(name="milestone_global_on", description="Abilita milestone globali")
