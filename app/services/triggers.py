@@ -15,6 +15,8 @@ from typing import Any, Literal
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 from app.services.barcello import BarcelloService
 from app.services.barcello_window import resolve_window_minutes
 from app.services.community_insights import CommunityInsightsService
@@ -943,7 +945,7 @@ class TriggerEngineService:
                 description=message_text,
                 color=self._barcello_embed_color(stable_color),
             )
-            embed.set_footer(text="Dati elaborati in loco · Barcellometro 1.0" if main_msg else "Barcellometro 1.0")
+            attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and main_msg:
                 await channel.send(embed=embed)
@@ -1225,7 +1227,7 @@ class TriggerEngineService:
             description=rendered_text,
             color=color,
         )
-        embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia.")
+        attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
 
         if target_message is not None:
             await target_message.reply(embed=embed)
@@ -2253,13 +2255,12 @@ class TriggerEngineService:
             description=description,
             color=discord.Color.from_str("#9B59B6"),
         )
-        if response_origin == "remote_ai":
-            footer_text = f"Dati elaborati con {model_name or 'modello AI'} · Barcellometro 1.0"
-        elif response_origin == "local_backend":
-            footer_text = "Dati elaborati in loco · Barcellometro 1.0"
-        else:
-            footer_text = "Barcellometro 1.0"
-        embed.set_footer(text=footer_text)
+        attach_footer_meta(
+            embed,
+            service_name="qna",
+            contributors=[model_name] if response_origin == "remote_ai" and model_name else [],
+            used_local_processing=response_origin != "remote_ai",
+        )
         return embed
 
     def _bulletize_answer(self, question: str, answer_text: str, evidence: list[dict[str, str]]) -> str:

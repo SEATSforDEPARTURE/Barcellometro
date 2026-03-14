@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 from app.services.barcello import BarcelloService
 from app.services.community_insights import CommunityInsightsService
 from app.services.database import DatabaseService
@@ -27,7 +29,6 @@ CAP_DEFAULT = 6
 CAP_DEFAULT_ENABLED = True
 BARCELLO_CACHE_TTL_SECONDS = 60
 DEFAULT_CAMPAIGN_EMBED_COLOR = 0x2F3136
-CAMPAIGN_EMBED_FOOTER = "Questo servizio è offerto dal vostro Barcellometruccio di fiducia."
 MAX_EMBEDS_PER_MESSAGE = 10
 
 BARCELLO_COLOR_MAP = {
@@ -521,7 +522,7 @@ class MessageSchedulerService:
         for page_index, page in enumerate(pages, start=1):
             title = base_title if total == 1 else f"{base_title} • PAG {page_index}/{total}"
             embed = discord.Embed(title=title, description=page, colour=color)
-            embed.set_footer(text=CAMPAIGN_EMBED_FOOTER)
+            attach_footer_meta(embed, service_name="message_scheduler", used_local_processing=True)
             embeds.append(embed)
 
         logger.info(

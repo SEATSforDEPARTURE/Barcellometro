@@ -5,6 +5,8 @@ from typing import Any, Callable
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 from app.services.summary import SummaryImpact, SummaryItem, SummaryQuote, SummaryResult
 from app.utils.embed_limits import (
     MAX_EMBED_CHARS,
@@ -200,7 +202,7 @@ def build_summary_detail_embeds(
 
     def build_shell() -> discord.Embed:
         e = discord.Embed(title=f"🗒️ DETTAGLI RIASSUNTO — {tier_label}", color=details_color)
-        e.set_footer(text="Barcellometro")
+        attach_footer_meta(e, service_name="riassunto", used_local_processing=True)
         return e
 
     def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:

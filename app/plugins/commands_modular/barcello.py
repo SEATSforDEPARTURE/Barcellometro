@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import discord
+
+from app.services.footer import attach_footer_meta
 from discord import app_commands
 
 from app.services.entitlements import EntitlementsService
@@ -536,7 +538,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             name="🫀 **PUNTI SALUTE**",
             value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
         )
-        embed.set_footer(text=f"Barcellometro • 🕒 Finestra: ultimi {window_minutes} min")
+        attach_footer_meta(embed, service_name="barcello", used_local_processing=True)
         return embed
 
     def _build_barcello_no_data_embed(
@@ -555,7 +557,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             description="\n".join(description_lines),
             color=0x95A5A6,
         )
-        embed.set_footer(text=f"Barcellometro • 🕒 Finestra: ultimi {window_minutes} min")
+        attach_footer_meta(embed, service_name="barcello", used_local_processing=True)
         return embed
 
     def _build_barcello_details_embed(
@@ -630,7 +632,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             note_value = notes_by_profile.get(profile, "")
             if note_value:
                 _add_section(embed, name="📌 **NOTE**", value=_with_spacing(note_value))
-        embed.set_footer(text=f"Barcellometro • 🕒 Finestra: ultimi {window_minutes} min")
+        attach_footer_meta(embed, service_name="barcello", used_local_processing=True)
         return embed
 
     class _BarcelloFeedbackView(discord.ui.View):

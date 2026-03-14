@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import discord
 
+from app.services.footer import copy_footer_meta
+
 MAX_EMBED_CHARS: int = 5800
 RETRY_MAX_EMBED_CHARS: int = 5200
 
@@ -53,11 +55,9 @@ def _clone_embed_shell(source: discord.Embed, *, title: str | None = None) -> di
         description=source.description,
         color=source.color,
     )
-    if source.footer:
-        new_embed.set_footer(text=source.footer.text or "")
     if source.author:
         new_embed.set_author(name=source.author.name or "")
-    return new_embed
+    return copy_footer_meta(source, new_embed)
 
 
 def _estimate_embed_size(embed: discord.Embed) -> int:

@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 from app.services.activity_insights import ChannelActivityDetails, UserActivityEntry
 
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -212,7 +214,7 @@ def _ensure_field(embeds: list[discord.Embed], title_base: str, value: str) -> N
     if len(embeds[-1].fields) >= MAX_FIELDS_PER_EMBED:
         idx = len([e for e in embeds if e.title.startswith("📄 DETTAGLI ATTIVITÀ — Staff")]) + 1
         new_embed = discord.Embed(title=f"📄 DETTAGLI ATTIVITÀ — Staff ({idx}/?)", color=discord.Color.dark_grey())
-        new_embed.set_footer(text="Barcellometro")
+        attach_footer_meta(new_embed, service_name="activity_dm", used_local_processing=True)
         embeds.append(new_embed)
     embeds[-1].add_field(name=title_base[:FIELD_NAME_MAX], value=safe_value, inline=False)
 
@@ -329,10 +331,10 @@ def build_activity_dm_embeds(
         f"*Ritmo del canale valutato su volume, persone attive e continuità.*\n\n"
         f"🫀 **PUNTI ATTIVITÀ**\n{_bar(s.score, s.emoji)} **({s.score}/100)**\n*{s.trend_text}*"
     )
-    status.set_footer(text="Barcellometro")
+    attach_footer_meta(status, service_name="activity_dm", used_local_processing=True)
 
     detail = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
-    detail.set_footer(text="Barcellometro")
+    attach_footer_meta(detail, service_name="activity_dm", used_local_processing=True)
     embeds = [detail]
 
     _add_chunked_field(embeds, "📌 STATISTICHE CANALE", "\n".join(details.stats_lines or ["n/d"]))

@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 from app.services.barcello import BarcelloResult
 from app.services.summary import SummaryItem, SummaryResult
 from app.utils.trend_render import render_trend_value
@@ -186,7 +188,7 @@ def build_daily_resoconto_embeds(
     trend_text = trend_value or render_trend_value(barcello_status.trend)
     if trend_text:
         status_embed.add_field(name="📈 TREND", value=trend_text, inline=False)
-    status_embed.set_footer(text="")
+    attach_footer_meta(status_embed, service_name="daily_resoconto", used_local_processing=True)
 
     pages: list[discord.Embed] = [discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)]
     themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]

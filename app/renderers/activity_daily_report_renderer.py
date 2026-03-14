@@ -5,6 +5,8 @@ from typing import Any
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 ITALIAN_WEEKDAYS = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 ITALIAN_MONTHS = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
 
@@ -98,7 +100,7 @@ def build_daily_activity_embeds(
         inline=False,
     )
     overview.add_field(name="💡 CONSIGLI", value=_truncate_field("\n".join(f"• {x}" for x in advice[:4])), inline=False)
-    overview.set_footer(text="Barcellometro")
+    attach_footer_meta(overview, service_name="daily_activity_report", used_local_processing=True)
 
     embeds = [overview]
     for item in channel_payloads:
@@ -131,7 +133,7 @@ def build_daily_activity_embeds(
         )
         embed.add_field(name="📌 STATISTICHE CANALE", value=_truncate_field("\n".join(stats_lines)), inline=False)
         embed.add_field(name="📈 TREND", value=_truncate_field(s.trend_text or "n/d"), inline=False)
-        embed.set_footer(text="Barcellometro")
+        attach_footer_meta(embed, service_name="daily_activity_report", used_local_processing=True)
         embeds.append(embed)
 
     return embeds

@@ -31,6 +31,7 @@ from app.services.triggers import TriggerEngineService
 from app.services.translate.ai_translate import AiTranslateService
 from app.services.translate.argos import ArgosTranslateService
 from app.services.aura import AuraAggregationJob, AuraEligibilityService, AuraRollingStatsService, ArchetypeAnalyzerService
+from app.services.footer import FooterService
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +144,13 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         activity_insights = ActivityInsightsService(database_service)
         inactive_members_moderation = InactiveMembersModerationService(database_service, bot)
         daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights, inactive_members_moderation=inactive_members_moderation)
+    footer_service = FooterService(database_service)
 
     registry.register("config", config)
     registry.register("bot", bot)
     registry.register("database", database_service)
     registry.register("ingest", ingest_service)
+    registry.register("footer", footer_service)
     registry.register("stt.local", stt_local_service)
     if instance_mode == "main":
         registry.register("status", status_service)
