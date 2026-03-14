@@ -223,6 +223,56 @@ def _resolve_horoscope_sources(sources: list[str]) -> list[str]:
     return resolved
 
 
+
+def normalize_news_key(title: str, link: str) -> str:
+    normalized_link = re.sub(r"[#?].*$", "", (link or "").strip().lower())
+    normalized_link = normalized_link.rstrip("/")
+    if normalized_link:
+        return f"link:{normalized_link}"
+    title_key = re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+    return f"title:{title_key}"
+
+
+def similarity_title(a: str, b: str) -> float:
+    a_tokens = re.sub(r"[^a-z0-9]+", " ", (a or "").lower()).split()
+    b_tokens = re.sub(r"[^a-z0-9]+", " ", (b or "").lower()).split()
+    if not a_tokens or not b_tokens:
+        return 0.0
+    a_set = set(a_tokens)
+    b_set = set(b_tokens)
+    jaccard = len(a_set & b_set) / max(1, len(a_set | b_set))
+    return jaccard
+
+
+def _item_quality(item: dict[str, str]) -> tuple[int, int]:
+    source = (item.get("source") or "").lower()
+    reliability_bonus = 2 if any(k in source for k in ["ansa", "repubblica", "corriere", "ilpost"]) else 0
+    return (len(item.get("summary") or ""), reliability_bonus)
+
+
+def dedupe_news_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    deduped: list[dict[str, str]] = []
+    key_index: dict[str, int] = {}
+    for item in items:
+        key = normalize_news_key(item.get("title", ""), item.get("link", ""))
+        if key in key_index:
+            existing_idx = key_index[key]
+            if _item_quality(item) > _item_quality(deduped[existing_idx]):
+                deduped[existing_idx] = item
+            continue
+        duplicate_idx = None
+        for idx, existing in enumerate(deduped):
+            if similarity_title(existing.get("title", ""), item.get("title", "")) >= 0.86:
+                duplicate_idx = idx
+                break
+        if duplicate_idx is not None:
+            if _item_quality(item) > _item_quality(deduped[duplicate_idx]):
+                deduped[duplicate_idx] = item
+            continue
+        key_index[key] = len(deduped)
+        deduped.append(item)
+    return deduped
+
 def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, Any]:
     normalized_categories = [c.strip().lower() for c in categories if c.strip()]
     effective_sources = _resolve_news_sources(sources)
@@ -239,16 +289,19 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                 title = (node.findtext("title") or "").strip()
                 link = (node.findtext("link") or "").strip()
                 description = re.sub(r"\s+", " ", (node.findtext("description") or "").strip())
-                category = (node.findtext("category") or "varie").strip().lower()
-                if normalized_categories and not any(tag in f"{title} {description} {category}".lower() for tag in normalized_categories):
+                raw_category = (node.findtext("category") or "varie").strip().lower()
+                text_blob = f"{title} {description} {raw_category}".lower()
+                matched = [cat for cat in normalized_categories if cat in text_blob]
+                if normalized_categories and not matched:
                     continue
+                selected_category = matched[0] if matched else raw_category or "varie"
                 found_for_source = True
                 items.append(
                     {
                         "title": title[:160],
                         "link": link,
                         "summary": description[:500],
-                        "category": category or "varie",
+                        "category": selected_category or "varie",
                         "source": urllib.parse.urlparse(source).netloc or source,
                     }
                 )
@@ -256,10 +309,21 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                 used_sources.append(source)
         except Exception:
             continue
+
+    items = dedupe_news_items(items)
     grouped: dict[str, list[dict[str, str]]] = {}
     for item in items:
         grouped.setdefault(item["category"], []).append(item)
-    return {"categories": grouped, "sources": attempted, "used_sources": used_sources, "configured_sources": sources}
+
+    ordered: dict[str, list[dict[str, str]]] = {}
+    for cat in normalized_categories:
+        if cat in grouped and grouped[cat]:
+            ordered[cat] = grouped[cat]
+    for cat, cat_items in grouped.items():
+        if cat not in ordered and cat_items:
+            ordered[cat] = cat_items
+
+    return {"categories": ordered, "sources": attempted, "used_sources": used_sources, "configured_sources": sources}
 
 
 def fetch_weather_content(sources: list[str]) -> dict[str, Any]:

@@ -4,106 +4,118 @@ from typing import Any
 
 import discord
 
-from app.services.campaign_content_formatter import SIGN_EMOJIS, SIGN_ORDER
 
-
-class CampaignContentPaginationView(discord.ui.View):
-    def __init__(self, service: Any, *, current_index: int = 0, total_pages: int = 1) -> None:
-        super().__init__(timeout=None)
-        self._service = service
-        self._current_index = current_index
-        self._total_pages = max(1, total_pages)
-        self._sync()
-
-    def _sync(self) -> None:
-        is_first = self._current_index <= 0
-        is_last = self._current_index >= self._total_pages - 1
-        self.start_button.disabled = is_first
-        self.prev_button.disabled = is_first
-        self.next_button.disabled = is_last
-
-    async def _navigate(self, interaction: discord.Interaction, target: int) -> None:
-        message = interaction.message
-        if message is None:
-            await interaction.response.send_message("Messaggio non disponibile.", ephemeral=True)
-            return
-        record = await self._service.load_message_record(str(message.id))
-        if record is None:
-            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
-            return
-        embeds = record.get("embeds", [])
-        target_index = max(0, min(target, len(embeds) - 1))
-        self._current_index = target_index
-        self._total_pages = len(embeds)
-        self._sync()
-        await self._service.persist_current_index(str(message.id), target_index)
-        await interaction.response.edit_message(embed=discord.Embed.from_dict(embeds[target_index]), view=self)
-
-    @discord.ui.button(label="⏮️ INIZIO", style=discord.ButtonStyle.secondary, custom_id="campaign_content:nav:start")
-    async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
-        _ = button
-        await self._navigate(interaction, 0)
-
-    @discord.ui.button(label="⬅️ INDIETRO", style=discord.ButtonStyle.secondary, custom_id="campaign_content:nav:prev")
-    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
-        _ = button
-        await self._navigate(interaction, self._current_index - 1)
-
-    @discord.ui.button(label="➡️ AVANTI", style=discord.ButtonStyle.primary, custom_id="campaign_content:nav:next")
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
-        _ = button
-        await self._navigate(interaction, self._current_index + 1)
-
-
-class HoroscopeNavButton(discord.ui.Button["HoroscopePaginationView"]):
-    def __init__(self, *, label: str, custom_id: str, target_index: int, row: int, style: discord.ButtonStyle = discord.ButtonStyle.primary) -> None:
+class PageJumpButton(discord.ui.Button["BaseCampaignNavigatorView"]):
+    def __init__(self, *, label: str, custom_id: str, target_index: int, row: int, style: discord.ButtonStyle = discord.ButtonStyle.secondary) -> None:
         super().__init__(label=label, style=style, custom_id=custom_id, row=row)
         self._target_index = target_index
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        view = self.view
-        if view is None:
+        if self.view is None:
             await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
             return
-        await view._go_to(interaction, self._target_index)
+        await self.view.navigate(interaction, self._target_index)
 
 
-class HoroscopePaginationView(discord.ui.View):
-    def __init__(self, service: Any) -> None:
-        super().__init__(timeout=None)
+class BaseCampaignNavigatorView(discord.ui.View):
+    def __init__(self, service: Any, *, embeds: list[dict[str, Any]], page_map: list[dict[str, Any]], current_index: int = 0, timeout: float | None = None) -> None:
+        super().__init__(timeout=timeout)
         self._service = service
-        self.add_item(
-            HoroscopeNavButton(
-                label="OVERVIEW",
-                style=discord.ButtonStyle.secondary,
-                custom_id="campaign_content:sign:overview",
-                target_index=0,
-                row=0,
-            )
-        )
-        for index, sign in enumerate(SIGN_ORDER, start=1):
-            row = 1 + ((index - 1) // 5)
+        self._embeds = embeds
+        self._page_map = page_map
+        self._current_index = max(0, min(current_index, max(0, len(embeds) - 1)))
+        self._build_nav_buttons()
+        self._build_dynamic_buttons()
+        self._sync_controls()
+
+    def _build_nav_buttons(self) -> None:
+        self.add_item(PageJumpButton(label="⏮️ INIZIO", custom_id=f"campaign_content:nav:start:{id(self)}", target_index=0, row=0))
+        self.add_item(PageJumpButton(label="⬅️ INDIETRO", custom_id=f"campaign_content:nav:prev:{id(self)}", target_index=max(0, self._current_index - 1), row=0))
+        self.add_item(PageJumpButton(label="➡️ AVANTI", custom_id=f"campaign_content:nav:next:{id(self)}", target_index=min(len(self._embeds) - 1, self._current_index + 1), row=0, style=discord.ButtonStyle.primary))
+
+    def _build_dynamic_buttons(self) -> None:
+        dynamic = [entry for entry in self._page_map if entry.get("type") not in {"overview"}]
+        for idx, entry in enumerate(dynamic):
+            row = 1 + (idx // 5)
+            label = str(entry.get("label") or "Pagina")[:80]
+            key = str(entry.get("key") or idx)
             self.add_item(
-                HoroscopeNavButton(
-                    label=f"{SIGN_EMOJIS.get(sign, '✨')} {sign.upper()}",
-                    custom_id=f"campaign_content:sign:{sign.lower()}",
-                    target_index=index,
+                PageJumpButton(
+                    label=label,
+                    custom_id=f"campaign_content:jump:{key}:{id(self)}",
+                    target_index=int(entry.get("page", 0)),
                     row=row,
                 )
             )
 
-    async def _go_to(self, interaction: discord.Interaction, index: int) -> None:
-        message = interaction.message
-        if message is None:
-            await interaction.response.send_message("Messaggio non disponibile.", ephemeral=True)
+    def _sync_controls(self) -> None:
+        first = self._current_index <= 0
+        last = self._current_index >= len(self._embeds) - 1
+        nav_buttons = [item for item in self.children if isinstance(item, PageJumpButton)][:3]
+        if len(nav_buttons) == 3:
+            nav_buttons[0].disabled = first
+            nav_buttons[0]._target_index = 0
+            nav_buttons[1].disabled = first
+            nav_buttons[1]._target_index = max(0, self._current_index - 1)
+            nav_buttons[2].disabled = last
+            nav_buttons[2]._target_index = min(len(self._embeds) - 1, self._current_index + 1)
+
+    async def navigate(self, interaction: discord.Interaction, target_index: int) -> None:
+        self._current_index = max(0, min(target_index, len(self._embeds) - 1))
+        self._sync_controls()
+        await interaction.response.edit_message(embed=discord.Embed.from_dict(self._embeds[self._current_index]), view=self)
+
+
+class PersistentCampaignLauncherView(discord.ui.View):
+    def __init__(self, service: Any, *, service_type: str, total_pages: int, page_map: list[dict[str, Any]]) -> None:
+        super().__init__(timeout=None)
+        self._service = service
+        self._service_type = service_type
+        self._total_pages = total_pages
+        self._page_map = page_map
+        self._build()
+
+    def _build(self) -> None:
+        self.add_item(PageJumpButton(label="⏮️ INIZIO", custom_id=f"campaign_content:{self._service_type}:start", target_index=0, row=0))
+        self.add_item(PageJumpButton(label="⬅️ INDIETRO", custom_id=f"campaign_content:{self._service_type}:prev", target_index=0, row=0))
+        self.add_item(PageJumpButton(label="➡️ AVANTI", custom_id=f"campaign_content:{self._service_type}:next", target_index=min(1, self._total_pages - 1), row=0, style=discord.ButtonStyle.primary))
+        dynamic = [entry for entry in self._page_map if entry.get("type") != "overview"]
+        for idx, entry in enumerate(dynamic):
+            row = 1 + (idx // 5)
+            self.add_item(PageJumpButton(label=str(entry.get("label") or "Pagina")[:80], custom_id=f"campaign_content:{self._service_type}:jump:{entry.get('key', idx)}", target_index=int(entry.get("page", 0)), row=row))
+        self._sync()
+
+    def _sync(self) -> None:
+        nav = [item for item in self.children if isinstance(item, PageJumpButton)][:3]
+        if len(nav) == 3:
+            nav[0].disabled = True
+            nav[1].disabled = True
+            nav[2].disabled = self._total_pages <= 1
+
+    async def _open_ephemeral(self, interaction: discord.Interaction, target_index: int) -> None:
+        ok = await self._service.open_personal_navigator(interaction, target_index=target_index, service_type=self._service_type)
+        if ok:
             return
-        record = await self._service.load_message_record(str(message.id))
-        if record is None:
-            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
-            return
-        embeds = record.get("embeds", [])
-        if index >= len(embeds):
-            await interaction.response.send_message("Pagina non disponibile.", ephemeral=True)
-            return
-        await self._service.persist_current_index(str(message.id), index)
-        await interaction.response.edit_message(embed=discord.Embed.from_dict(embeds[index]), view=self)
+        # fallback legacy
+        await self._service.edit_public_message(interaction, target_index=target_index)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return True
+
+
+# patch button callback routing for launcher buttons
+PageJumpButton._orig_callback = PageJumpButton.callback  # type: ignore[attr-defined]
+
+
+async def _page_jump_callback(self: PageJumpButton, interaction: discord.Interaction) -> None:
+    view = self.view
+    if isinstance(view, PersistentCampaignLauncherView):
+        await view._open_ephemeral(interaction, self._target_index)
+        return
+    if isinstance(view, BaseCampaignNavigatorView):
+        await view.navigate(interaction, self._target_index)
+        return
+    await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+
+
+PageJumpButton.callback = _page_jump_callback  # type: ignore[method-assign]

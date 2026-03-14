@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
 from typing import Any
 
 import discord
@@ -37,6 +39,48 @@ SIGN_EMOJIS = {
     "Pesci": "♓",
 }
 
+CATEGORY_DISPLAY_NAMES = {
+    "cronaca": "Cronaca",
+    "politica": "Politica",
+    "sport": "Sport",
+    "spettacolo": "Spettacolo",
+    "gossip": "Gossip",
+    "tecnologia": "Tecnologia",
+    "tech": "Tecnologia",
+    "economia": "Economia",
+    "mondo": "Mondo",
+    "viral": "Viral",
+    "trash": "Trash",
+    "curiosita": "Curiosità",
+    "curiosità": "Curiosità",
+    "varie": "Varie",
+}
+
+CATEGORY_EMOJIS = {
+    "cronaca": "📰",
+    "politica": "🏛️",
+    "sport": "⚽",
+    "spettacolo": "🎭",
+    "gossip": "👀",
+    "tecnologia": "💻",
+    "tech": "💻",
+    "economia": "💸",
+    "mondo": "🌍",
+    "viral": "🚀",
+    "trash": "🐔",
+    "curiosita": "✨",
+    "curiosità": "✨",
+    "varie": "📌",
+}
+
+WEATHER_AREA_LABELS = {
+    "nord": "🧊 NORD",
+    "centro": "🏛️ CENTRO",
+    "sud e isole": "🌋 SUD E ISOLE",
+}
+
+HOROSCOPE_SECTIONS = ["love", "work", "money", "energy", "friction", "advice"]
+
 
 def resolve_color(color_raw: str | None) -> int:
     if not color_raw:
@@ -62,37 +106,106 @@ def apply_shared_footer_and_pagination(embeds: list[discord.Embed], footer_text:
     return embeds
 
 
+def slugify_label(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") or "default"
+
+
+def get_category_display_name(category: str) -> str:
+    key = slugify_label(category).replace("_", " ")
+    if key in CATEGORY_DISPLAY_NAMES:
+        return CATEGORY_DISPLAY_NAMES[key]
+    return " ".join(part.capitalize() for part in key.split()) or "Varie"
+
+
+def get_category_emoji(category: str) -> str:
+    key = slugify_label(category).replace("_", " ")
+    return CATEGORY_EMOJIS.get(key, "📌")
+
+
+def get_weather_area_label(area: str) -> str:
+    key = slugify_label(area).replace("_", " ")
+    return WEATHER_AREA_LABELS.get(key, f"📍 {get_category_display_name(area).upper()}")
+
+
+def sanitize_plain_text(text: str, *, remove_category_hint: str | None = None) -> str:
+    cleaned = re.sub(r"[`*_>#\-]{1,3}\s*", "", str(text or ""), flags=re.MULTILINE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if remove_category_hint:
+        cleaned = re.sub(rf"^{re.escape(remove_category_hint)}\s*[:\-–|]+\s*", "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def sanitize_horoscope_text(sign: str, text: str) -> str:
+    cleaned = sanitize_plain_text(text)
+    if not cleaned:
+        return ""
+    heading_pattern = (
+        rf"^({re.escape(sign)}\s*[:\-–|]+\s*|{re.escape(sign)}\s+)?"
+        r"(love\s*alert|money\s*vibes|energia\s*del\s*genio|amore|lavoro|soldi|energia|consiglio|friction)\s*[:\-–|]+\s*"
+    )
+    cleaned = re.sub(heading_pattern, "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def trim_sentence_block(text: str, *, limit: int = 320) -> str:
+    normalized = sanitize_plain_text(text)
+    if len(normalized) <= limit:
+        return normalized
+    clipped = normalized[:limit]
+    cut = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
+    if cut >= int(limit * 0.6):
+        return clipped[: cut + 1].strip()
+    return clipped.rstrip() + "…"
+
+
+def similarity_title(a: str, b: str) -> float:
+    return SequenceMatcher(None, sanitize_plain_text(a).lower(), sanitize_plain_text(b).lower()).ratio()
+
+
 def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     categories = payload.get("categories", {})
     color = resolve_color(config.get("embed_color"))
     title = config.get("embed_title") or "🗞️ Notizie del giorno"
     embeds: list[discord.Embed] = []
     total_news = sum(len(v) for v in categories.values())
-    ordered_categories = sorted(categories.items(), key=lambda item: len(item[1]), reverse=True)
-    noisy = ordered_categories[0][0].title() if ordered_categories else "Nessuna"
-    top_title = ordered_categories[0][1][0].get("title") if ordered_categories and ordered_categories[0][1] else "Niente di affidabile"
-    overview = discord.Embed(title=f"{title} • Overview", color=color)
+    ordered_keys = list(categories.keys())
+    overview = discord.Embed(title=f"{title} • Inizio", color=color)
     overview.description = (
-        "Panoramica editoriale della giornata, derivata dalle fonti raccolte.\n"
-        f"Categorie monitorate ({len(categories)}): {', '.join(k.title() for k in categories.keys()) or 'nessuna'}\n"
-        f"Totale notizie aggregate: **{total_news}**\n"
-        f"🔊 Cosa fa più rumore oggi: **{noisy}**\n"
-        f"⭐ Top highlight: **{str(top_title)[:140]}**"
+        "Panoramica editoriale della giornata.\n"
+        f"Categorie attive ({len(ordered_keys)}): {', '.join(get_category_display_name(k) for k in ordered_keys) or 'nessuna'}\n"
+        f"Notizie uniche aggregate: **{total_news}**"
     )
-    overview.add_field(name="🧭 Intro", value="Scorri le pagine categoria per i dettagli 3-5 notizie con fonte e link.", inline=False)
-    overview.add_field(name="🐹 Chicca del giorno", value=f"La categoria **{noisy}** è quella con più movimento in questo run.", inline=False)
+    overview.add_field(name="🧭 Navigazione", value="Usa i pulsanti categoria per aprire la sezione che ti interessa.", inline=False)
     embeds.append(overview)
     for category, items in categories.items():
-        embed = discord.Embed(title=f"{title} • {category.title()}", color=color)
+        display = get_category_display_name(category)
+        emoji = get_category_emoji(category)
+        embed = discord.Embed(title=f"{title} • {display}", color=color)
         lines: list[str] = []
         for idx, item in enumerate(items[:5], start=1):
-            lines.append(f"**{idx}. {item.get('title', 'Titolo')}**")
-            lines.append(f"{item.get('summary', 'Nessun riassunto disponibile')[:320]}")
-            lines.append(f"Fonte: {item.get('source', 'n/d')} • [Link]({item.get('link', 'https://example.com')})")
+            summary = trim_sentence_block(item.get("summary", "Nessun riassunto disponibile"), limit=280)
+            summary = sanitize_plain_text(summary, remove_category_hint=display)
+            lines.append(f"**{idx}. {sanitize_plain_text(item.get('title', 'Titolo'))[:160]}**")
+            lines.append(summary or "Aggiornamento in arrivo.")
+            lines.append(f"`Fonte: {sanitize_plain_text(item.get('source', 'n/d'))[:80]}` • [Apri link]({item.get('link', 'https://example.com')})")
             lines.append("")
-        embed.description = "\n".join(lines)[:3900] or "Nessuna notizia valida."
+        embed.description = "\n".join(lines)[:3900] or f"Nessuna notizia valida per {emoji} {display}."
         embeds.append(embed)
     return embeds
+
+
+def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    page_map: list[dict[str, Any]] = [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}]
+    for index, category in enumerate(payload.get("categories", {}).keys(), start=1):
+        page_map.append(
+            {
+                "type": "category",
+                "key": slugify_label(category),
+                "label": f"{get_category_emoji(category)} {get_category_display_name(category).upper()}",
+                "page": index,
+            }
+        )
+    return page_map
 
 
 def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
@@ -121,11 +234,10 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         (
             "Overview Italia",
             (
-                "🇮🇹 Situazione generale: quadro meteo aggregato dalle aree monitorate.\n"
+                "🇮🇹 Situazione generale aggregata dalle aree monitorate.\n"
                 f"⚡ Area più instabile: **{most_unstable}**\n"
                 f"🌤️ Area più serena: **{most_calm}**\n"
-                f"🌡️ Range termico nazionale: **{thermal_range}**\n"
-                f"☂️ Nota pratica: {'Porta ombrello pieghevole' if most_unstable != most_calm else 'Giornata gestibile, tieni una felpa leggera'}"
+                f"🌡️ Range termico nazionale: **{thermal_range}**"
             ),
             "Consiglio cricetoso: controlla il meteo prima di uscire e vesti a strati intelligenti.",
         )
@@ -154,6 +266,15 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
     return embeds
 
 
+def build_weather_page_map() -> list[dict[str, Any]]:
+    return [
+        {"type": "overview", "key": "overview", "label": "⏮️ INIZIO", "page": 0},
+        {"type": "area", "key": "nord", "label": get_weather_area_label("Nord"), "page": 1},
+        {"type": "area", "key": "centro", "label": get_weather_area_label("Centro"), "page": 2},
+        {"type": "area", "key": "sud_e_isole", "label": get_weather_area_label("Sud e Isole"), "page": 3},
+    ]
+
+
 def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
     title = config.get("embed_title") or "🔮 Oroscopo cricetoso"
@@ -170,34 +291,34 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
 
     mood_parts = [str(signs.get(sign, {}).get("tone") or "") for sign in SIGN_ORDER if signs.get(sign)]
     mood = ", ".join(mood_parts[:4]) or "variegato"
-    focus_love = next((str(signs.get(s, {}).get("love")) for s in top if signs.get(s, {}).get("love")), "Ascolta di più e reagisci di meno.")
-    focus_work = next((str(signs.get(s, {}).get("work")) for s in top if signs.get(s, {}).get("work")), "Scegli priorità chiare.")
 
     embeds: list[discord.Embed] = []
-    overview = discord.Embed(title=f"{title} • Overview", color=color)
+    overview = discord.Embed(title=f"{title} • Inizio", color=color)
     overview.description = (
-        "✨ **Mood del giorno**\n"
-        f"Atmosfera zodiacale: {mood}.\n\n"
-        f"🔥 **Segni più frizzanti**\n{', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in top)}\n\n"
-        f"🌧️ **Segni da trattare con dolcezza**\n{', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in delicate)}\n\n"
-        f"💘 **Focus amore**\n{focus_love[:220]}\n\n"
-        f"💼 **Focus lavoro/energia**\n{focus_work[:220]}\n\n"
-        "🐹 **Consiglio cricetoso**\nScegli il tuo segno nei pulsanti: oggi conta la precisione emotiva, non il copia-incolla cosmico."
+        f"Atmosfera zodiacale: **{mood}**\n"
+        f"Segni in forma: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in top)}\n"
+        f"Segni da coccolare: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in delicate)}\n"
+        "Apri il tuo segno dai pulsanti qui sotto."
     )
     embeds.append(overview)
     for sign in SIGN_ORDER:
         data = signs.get(sign, {})
         e = discord.Embed(title=f"{title} • {sign}", color=color)
-        e.add_field(name="❤️ Amore", value=str(data.get("love") or "Cuore in fase di analisi")[:1024], inline=False)
-        e.add_field(name="💼 Lavoro / Studio", value=str(data.get("work") or "Organizzati per priorità")[:1024], inline=False)
-        e.add_field(name="💰 Soldi", value=str(data.get("money") or "Gestione prudente")[:1024], inline=False)
-        e.add_field(name="⚡ Energia", value=str(data.get("energy") or "Energia variabile")[:1024], inline=False)
-        e.add_field(name="🔥 Con chi barcellerai oggi", value=str(data.get("friction") or "Con chi ti mette fretta")[:1024], inline=False)
-        e.add_field(name="🐹 Consiglio cricetoso", value=str(data.get("advice") or "Piccoli passi, grandi risultati")[:1024], inline=False)
-        if data.get("tone"):
-            e.add_field(name="✨ Tono del giorno", value=str(data.get("tone"))[:200], inline=False)
+        e.add_field(name="❤️ Amore", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("love") or "Cuore in fase di analisi")), limit=280)[:1024], inline=False)
+        e.add_field(name="💼 Lavoro / Studio", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("work") or "Organizzati per priorità")), limit=280)[:1024], inline=False)
+        e.add_field(name="💰 Soldi", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("money") or "Gestione prudente")), limit=240)[:1024], inline=False)
+        e.add_field(name="⚡ Energia", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("energy") or "Energia variabile")), limit=220)[:1024], inline=False)
+        e.add_field(name="🔥 Con chi barcellerai oggi", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("friction") or "Con chi ti mette fretta")), limit=220)[:1024], inline=False)
+        e.add_field(name="🐹 Consiglio cricetoso", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("advice") or "Piccoli passi, grandi risultati")), limit=220)[:1024], inline=False)
         embeds.append(e)
     return embeds
+
+
+def build_horoscope_page_map() -> list[dict[str, Any]]:
+    page_map: list[dict[str, Any]] = [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}]
+    for i, sign in enumerate(SIGN_ORDER, start=1):
+        page_map.append({"type": "sign", "key": slugify_label(sign), "label": f"{SIGN_EMOJIS.get(sign, '✨')} {sign.upper()}", "page": i})
+    return page_map
 
 
 def build_fallback_embed(config: dict[str, Any], sources: list[str]) -> list[discord.Embed]:
