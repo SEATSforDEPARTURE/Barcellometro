@@ -49,6 +49,26 @@ def _fmt_active_ratio(active: int, total: int | None, *, fallback_label: str) ->
     return f"{active}/{fallback_label} ({pct}%)"
 
 
+def _fmt_channel_name(channel: Any) -> str:
+    name = str(getattr(channel, "name", "sconosciuto"))
+    return f"#{name}"
+
+
+def _truncate_overview_channels(lines: list[str], *, max_chars: int = 1400, max_rows: int = 18) -> str:
+    selected: list[str] = []
+    total = 0
+    for line in lines[:max_rows]:
+        add = len(line) + (1 if selected else 0)
+        if total + add > max_chars:
+            break
+        selected.append(line)
+        total += add
+    remaining = len(lines) - len(selected)
+    if remaining > 0:
+        selected.append(f"… e altri {remaining} canali")
+    return "\n".join(selected) if selected else "—"
+
+
 def build_daily_activity_embeds(
     guild: discord.Guild,
     guild_name: str,
@@ -76,6 +96,11 @@ def build_daily_activity_embeds(
     if not advice:
         advice = ["Ritmo regolare: mantenete costanza e coinvolgimento."]
 
+    channel_score_lines = [
+        f"{item['details'].score.emoji} **({int(item['details'].score.score)}/100)** - {_fmt_channel_name(item['channel'])}"
+        for item in channel_payloads
+    ]
+
     overview = discord.Embed(
         title=f"🗣️ RESOCONTO ATTIVITÀ “{guild_name}”",
         color=_color_for_emoji(emoji),
@@ -83,7 +108,9 @@ def build_daily_activity_embeds(
             f"**🗓️ {_format_italian_date(reference_ts)}**\n\n"
             f"{emoji} **ATTIVITÀ {label}**\n"
             "*Ritmo del server valutato su volume, persone attive e continuità.*\n\n"
-            f"🫀 **PUNTI ATTIVITÀ**\n{_bar(score, emoji)} **({score}/100)**"
+            f"🫀 **PUNTI ATTIVITÀ SERVER**\n{_bar(score, emoji)} **({score}/100)**\n\n"
+            "🫀 **PUNTI ATTIVITÀ CANALI**\n"
+            f"{_truncate_overview_channels(channel_score_lines)}"
         ),
     )
     overview.add_field(name="📈 TREND", value=_truncate_field(trend), inline=False)
@@ -131,8 +158,8 @@ def build_daily_activity_embeds(
                 f"🫀 **PUNTI ATTIVITÀ**\n{_bar(s.score, s.emoji)} **({s.score}/100)**"
             ),
         )
-        embed.add_field(name="📌 STATISTICHE CANALE", value=_truncate_field("\n".join(stats_lines)), inline=False)
         embed.add_field(name="📈 TREND", value=_truncate_field(s.trend_text or "n/d"), inline=False)
+        embed.add_field(name="📌 STATISTICHE CANALE", value=_truncate_field("\n".join(stats_lines)), inline=False)
         attach_footer_meta(embed, service_name="daily_activity_report", used_local_processing=True)
         embeds.append(embed)
 

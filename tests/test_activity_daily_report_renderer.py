@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import sys
+
+if "aiosqlite" not in sys.modules:
+    sys.modules["aiosqlite"] = SimpleNamespace(Row=dict)
+
+from types import SimpleNamespace
 
 from app.renderers.activity_daily_report_renderer import _format_italian_date, build_daily_activity_details_txt, build_daily_activity_embeds
 
@@ -61,7 +67,7 @@ def test_format_italian_date() -> None:
     assert _format_italian_date("2026-02-19T10:00:00+00:00") == "Giovedì, 19 Febbraio 2026"
 
 
-def test_daily_renderer_embeds_include_silence_and_overview_sections() -> None:
+def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fields() -> None:
     guild = _Guild()
     embeds = build_daily_activity_embeds(
         guild,
@@ -85,6 +91,9 @@ def test_daily_renderer_embeds_include_silence_and_overview_sections() -> None:
     )
 
     assert "🗓️ Venerdì, 20 Febbraio 2026" in (embeds[0].description or "")
+    assert "🫀 **PUNTI ATTIVITÀ SERVER**" in (embeds[0].description or "")
+    assert "🫀 **PUNTI ATTIVITÀ CANALI**" in (embeds[0].description or "")
+    assert "🟢 **(72/100)** - #general" in (embeds[0].description or "")
     first_names = [f.name for f in embeds[0].fields]
     assert "📈 TREND" in first_names
     stats_server = next(f.value for f in embeds[0].fields if f.name == "📌 STATISTICHE SERVER")
@@ -93,6 +102,7 @@ def test_daily_renderer_embeds_include_silence_and_overview_sections() -> None:
     channel_stats = next(f.value for f in embeds[1].fields if f.name == "📌 STATISTICHE CANALE")
     assert "Ora di silenzio" in channel_stats
     assert "Utenti attivi: **2/10 (20%)**" in channel_stats
+    assert [f.name for f in embeds[1].fields][:2] == ["📈 TREND", "📌 STATISTICHE CANALE"]
 
 
 def test_daily_renderer_txt_contains_required_headers_and_silence() -> None:

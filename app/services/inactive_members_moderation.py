@@ -515,7 +515,7 @@ class InactiveMembersModerationService:
         if bool(cfg.get("auto_enabled")):
             reminder_stats = await self.execute_reminders(guild_id)
             kick_stats = await self.execute_kick_pipeline(guild_id, require_grace=True)
-            await channel.send(embed=self.build_action_embed("🤖 Auto inattivi completata", reminder_stats, kick_stats))
+            await channel.send(embed=self.build_auto_inactive_completed_embed(reminder_stats, kick_stats))
             return
 
         expired = await self._collect_expired_grace_users(guild_id, inactive, cfg)
@@ -549,11 +549,19 @@ class InactiveMembersModerationService:
         message = await channel.send(embed=embed, view=view)
         view.message = message
 
-    async def post_manual_panel(self, guild_id: str, mod_channel_id: str, *, inactive: list[InactiveCandidate] | None = None, cfg: dict[str, Any] | None = None, considered: int | None = None) -> None:
+    async def build_serverwide_inactive_embeds(
+        self,
+        guild_id: str,
+        mod_channel_id: str,
+        *,
+        inactive: list[InactiveCandidate] | None = None,
+        cfg: dict[str, Any] | None = None,
+        considered: int | None = None,
+        include_actions_view: bool = True,
+    ) -> tuple[list[discord.Embed], discord.File | None, InactivityActionsView | None]:
         guild = self._bot.get_guild(int(guild_id))
-        channel = self._bot.get_channel(int(mod_channel_id))
-        if guild is None or not isinstance(channel, discord.abc.Messageable):
-            return
+        if guild is None:
+            return [], None, None
         if inactive is None or cfg is None or considered is None:
             inactive, considered, cfg = await self.scan_inactive_members(guild_id)
         policy = cfg.get("default_policy", {}) if cfg else {}
@@ -637,7 +645,23 @@ class InactiveMembersModerationService:
             payload = ("\n".join(txt_lines) + policy_sections).encode("utf-8")
             txt_file = discord.File(io.BytesIO(payload), filename=filename)
 
-        view = InactivityActionsView(self, guild_id, mod_channel_id)
+        view = InactivityActionsView(self, guild_id, mod_channel_id) if include_actions_view else None
+        return embeds, txt_file, view
+
+    async def post_manual_panel(self, guild_id: str, mod_channel_id: str, *, inactive: list[InactiveCandidate] | None = None, cfg: dict[str, Any] | None = None, considered: int | None = None) -> None:
+        channel = self._bot.get_channel(int(mod_channel_id))
+        if not isinstance(channel, discord.abc.Messageable):
+            return
+        embeds, txt_file, view = await self.build_serverwide_inactive_embeds(
+            guild_id,
+            mod_channel_id,
+            inactive=inactive,
+            cfg=cfg,
+            considered=considered,
+            include_actions_view=True,
+        )
+        if not embeds or view is None:
+            return
         if txt_file is not None:
             message = await channel.send(embed=embeds[0], view=view, file=txt_file)
         else:
@@ -808,6 +832,9 @@ class InactiveMembersModerationService:
         )
         stats["errors"] = stats["errors"][:10]
         return stats
+
+    def build_auto_inactive_completed_embed(self, reminder_stats: dict[str, Any], kick_stats: dict[str, Any]) -> discord.Embed:
+        return self.build_action_embed("🤖 Auto inattivi completata", reminder_stats, kick_stats)
 
     def build_action_embed(self, title: str, stats: dict[str, Any], extra: dict[str, Any] | None = None) -> discord.Embed:
         embed = discord.Embed(title=title, color=0x57F287)

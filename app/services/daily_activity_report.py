@@ -20,6 +20,51 @@ ROME_TZ = ZoneInfo("Europe/Rome")
 DUE_WINDOW_SECONDS = 600
 
 
+class DailyReportPaginationView(discord.ui.View):
+    def __init__(self, embeds: list[discord.Embed], *, timeout: float = 600) -> None:
+        super().__init__(timeout=timeout)
+        self._embeds = embeds
+        self._index = 0
+        self.message: discord.Message | None = None
+        self._sync_buttons()
+
+    @property
+    def current_embed(self) -> discord.Embed:
+        return self._embeds[self._index]
+
+    def _sync_buttons(self) -> None:
+        self.prev_button.disabled = self._index <= 0
+        self.next_button.disabled = self._index >= len(self._embeds) - 1
+
+    async def _edit(self, interaction: discord.Interaction) -> None:
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.current_embed, view=self)
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                logger.debug("daily report pagination timeout edit failed", exc_info=True)
+
+    @discord.ui.button(label="⬅️ INDIETRO", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        _ = button
+        if self._index > 0:
+            self._index -= 1
+        await self._edit(interaction)
+
+    @discord.ui.button(label="➡️ AVANTI", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        _ = button
+        if self._index < len(self._embeds) - 1:
+            self._index += 1
+        await self._edit(interaction)
+
+
 class DailyActivityReportService:
     def __init__(
         self,
@@ -411,19 +456,35 @@ class DailyActivityReportService:
         txt_payload = build_daily_activity_details_txt(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)
         txt_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename="attivita_dettagli_giornalieri.txt")
 
-        for idx in range(0, len(embeds), 10):
-            batch = embeds[idx : idx + 10]
-            if idx == 0:
-                try:
-                    await channel.send(embeds=batch, file=txt_file)
-                except Exception:
-                    logger.warning("daily_activity_report: failed sending txt attachment guild=%s channel=%s", guild_id, mod_channel_id)
-                    await channel.send(embeds=batch)
-            else:
-                await channel.send(embeds=batch)
-
+        report_embeds = list(embeds)
+        inactive_txt_file: discord.File | None = None
         if self._inactive_moderation is not None:
             try:
-                await self._inactive_moderation.handle_post_activity_report(guild_id, mod_channel_id)
+                inactive_embeds, inactive_txt_file, _ = await self._inactive_moderation.build_serverwide_inactive_embeds(
+                    guild_id,
+                    mod_channel_id,
+                    include_actions_view=False,
+                )
+                report_embeds.extend(inactive_embeds)
+
+                cfg = await self._inactive_moderation._get_config(guild_id)
+                if cfg and bool(cfg.get("enabled")) and bool(cfg.get("auto_enabled")):
+                    reminder_stats = await self._inactive_moderation.execute_reminders(guild_id)
+                    kick_stats = await self._inactive_moderation.execute_kick_pipeline(guild_id, require_grace=True)
+                    report_embeds.append(self._inactive_moderation.build_auto_inactive_completed_embed(reminder_stats, kick_stats))
             except Exception:
                 logger.exception("daily_activity_report: inactive moderation post-processing failed guild=%s", guild_id)
+
+        if not report_embeds:
+            return
+
+        view = DailyReportPaginationView(report_embeds)
+        try:
+            if inactive_txt_file is not None:
+                message = await channel.send(embed=report_embeds[0], view=view, files=[txt_file, inactive_txt_file])
+            else:
+                message = await channel.send(embed=report_embeds[0], view=view, file=txt_file)
+        except Exception:
+            logger.warning("daily_activity_report: failed sending txt attachment guild=%s channel=%s", guild_id, mod_channel_id)
+            message = await channel.send(embed=report_embeds[0], view=view)
+        view.message = message

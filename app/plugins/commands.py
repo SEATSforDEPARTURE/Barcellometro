@@ -16,7 +16,6 @@ from app.plugins.commands_modular import (
     register_aura,
     register_barcello,
     register_attivita_settings,
-    register_inattivi,
     register_messaggi,
     register_privacy,
     register_riassunto,
@@ -62,7 +61,6 @@ def setup(registry: ServiceRegistry) -> None:
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunti")
     aura_group = app_commands.Group(name="aura", description="Resoconto aura")
     attivita_group = app_commands.Group(name="attivita", description="Comandi attività (utenti) + gestione report (mod/admin)")
-    inattivi_group = app_commands.Group(name="inattivi", description="Utenti inattivi")
     resoconto_group = app_commands.Group(name="resoconto", description="Resoconto canale")
 
     add_group_once(bm_group, role_group, logger)
@@ -85,19 +83,6 @@ def setup(registry: ServiceRegistry) -> None:
     register_attivita(attivita_group, ctx)
     register_attivita_settings(attivita_group, ctx)
 
-    inattivi_registered = True
-    try:
-        register_inattivi(inattivi_group, ctx)
-        inattivi_subcommands = [cmd.qualified_name for cmd in inattivi_group.walk_commands()]
-        logger.info("register_inattivi ok: subcommands=%s", inattivi_subcommands)
-        logger.info("inattivi group commands=%s", [c.qualified_name for c in inattivi_group.walk_commands()])
-    except Exception:
-        inattivi_registered = False
-        partial = [cmd.qualified_name for cmd in inattivi_group.walk_commands()]
-        logger.exception("Failed to register inattivi commands; disabling /inattivi only")
-        logger.error("Partial inattivi subcommands before failure: %s", partial)
-        logger.warning("/inattivi disabled due to registration failure")
-
     register_resoconto(resoconto_group, ctx)
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
     register_ask(bot.tree, guild_obj, ctx)
@@ -109,7 +94,6 @@ def setup(registry: ServiceRegistry) -> None:
 
     root_commands: list[app_commands.Command | app_commands.Group] = [
         bm_group,
-        inattivi_group,
         qna_group,
         insights_group,
         campagne_group,
@@ -122,8 +106,6 @@ def setup(registry: ServiceRegistry) -> None:
         frasi_group,
     ]
 
-    if not inattivi_registered:
-        root_commands = [command for command in root_commands if command is not inattivi_group]
 
     def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
         if use_guild:

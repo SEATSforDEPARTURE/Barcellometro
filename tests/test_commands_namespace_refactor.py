@@ -1,11 +1,11 @@
 from pathlib import Path
 
 
-def test_root_namespaces_include_bm_inattivi_qna_insights_campagne() -> None:
+def test_root_namespaces_include_bm_attivita_qna_insights_campagne_and_not_inattivi() -> None:
     source = Path("app/plugins/commands.py").read_text()
 
     assert 'app_commands.Group(name="bm"' in source
-    assert 'app_commands.Group(name="inattivi"' in source
+    assert 'app_commands.Group(name="inattivi"' not in source
     assert 'app_commands.Group(name="qna"' in source
     assert 'app_commands.Group(name="insights"' in source
     assert 'app_commands.Group(name="campagne"' in source
@@ -43,3 +43,11 @@ def test_triggers_commands_are_guarded_through_central_check() -> None:
     assert 'def _command_permission_key' in source
     assert 'return await check_permission(interaction, _command_permission_key(interaction), ctx)' in source
     assert 'resolve_profile(' not in source
+
+
+def test_inattivi_registered_as_attivita_subgroup() -> None:
+    source = Path("app/plugins/commands_modular/attivita.py").read_text()
+
+    assert "app_commands.Group(name=\"inattivi\"" in source
+    assert "attivita_group.add_command(inattivi_group)" in source
+    assert "register_inattivi(inattivi_group, ctx)" in source
