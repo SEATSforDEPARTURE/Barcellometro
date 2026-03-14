@@ -71,6 +71,72 @@ def _build_audio_note_embed(description: str, *, contributors: list[str] | None 
     return attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
 
 
+def _parse_chars_summary_limit(raw_value: str | None) -> int:
+    cleaned = (raw_value or "").strip()
+    if not cleaned:
+        return 0
+    try:
+        parsed = int(cleaned)
+    except ValueError:
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+def _should_generate_audio_summary(transcript_text: str, chars_summary_limit: int) -> bool:
+    cleaned = transcript_text.strip()
+    return chars_summary_limit > 0 and len(cleaned) >= 20 and len(cleaned) > chars_summary_limit
+
+
+def _build_audio_note_output(*, transcript_text: str, detected_lang: str, translation_text: str | None, summary_text: str | None) -> str:
+    output_parts = ["**✍️ Trascrizione:**", transcript_text]
+    if detected_lang != "it" and translation_text:
+        output_parts.extend(["", "**🇮🇹 Traduzione:**", translation_text])
+    if summary_text:
+        output_parts.extend(["", "⏲️ **Riassunto:**", summary_text])
+    return "\n".join(output_parts).strip()
+
+
+async def _build_audio_note_summary(ai_service: Any, transcript_text: str) -> tuple[str | None, str | None]:
+    if ai_service is None:
+        return None, None
+    cleaned_transcript = transcript_text.strip()
+    if len(cleaned_transcript) < 20:
+        return None, None
+    if not ai_service.is_enabled():
+        return None, None
+    client = ai_service.client()
+    if client is None:
+        return None, None
+    model = ai_service.get_model("summary")
+    if not model:
+        return None, None
+
+    system_prompt = (
+        "Riassumi fedelmente la seguente trascrizione di una nota audio in italiano. "
+        "Massimo 2 frasi brevi. Non aggiungere informazioni non presenti. "
+        "Non usare elenchi puntati. Non iniziare con formule introduttive. "
+        "Tono neutro e fedele al testo originale."
+    )
+    try:
+        response = await asyncio.wait_for(
+            client.responses.create(
+                model=model,
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": cleaned_transcript},
+                ],
+            ),
+            timeout=20,
+        )
+    except Exception:
+        logger.warning("Audio note summary generation failed", exc_info=True)
+        return None, None
+    summary_text = str(getattr(response, "output_text", "") or "").strip()
+    if not summary_text:
+        return None, None
+    return summary_text, model
+
+
 def _build_audio_footer_contributors(
     *,
     stt_backend_used: str,
@@ -78,6 +144,7 @@ def _build_audio_footer_contributors(
     translate_backend_used: str,
     translation_model: str | None,
     has_translation_text: bool,
+    summary_model: str | None = None,
 ) -> tuple[list[str], bool]:
     contributors: list[str] = []
     used_local_processing = False
@@ -96,6 +163,10 @@ def _build_audio_footer_contributors(
             contributors.append(translation_name)
         if normalized_translate_backend == "local":
             used_local_processing = True
+
+    summary_name = (summary_model or "").strip()
+    if summary_name:
+        contributors.append(summary_name)
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -179,6 +250,7 @@ def setup(registry: ServiceRegistry) -> None:
     stt_ai = registry.get("stt.ai")
     translate_local = registry.get("translate.local")
     translate_ai = registry.get("translate.ai")
+    ai_service = registry.get("ai") if registry.has("ai") else None
     config = registry.get("config")
 
     queue: asyncio.Queue[tuple[discord.Message, discord.Attachment, discord.Message]] = asyncio.Queue()
@@ -222,7 +294,9 @@ def setup(registry: ServiceRegistry) -> None:
         max_mb = int(await _get_setting("audio_notes.max_mb", os.getenv("AUDIO_NOTES_MAX_MB", "25")))
         max_duration = int(await _get_setting("audio_notes.max_duration_s", os.getenv("AUDIO_NOTES_MAX_DURATION_S", "180")))
         max_chars = int(await _get_setting("audio_notes.discord_max_chars", os.getenv("AUDIO_NOTES_DISCORD_MAX_CHARS", "1900")))
+        chars_summary_raw = await _get_setting("audio_notes.chars_summary", "")
         embed_max_chars = max(1, min(max_chars, _DISCORD_EMBED_DESCRIPTION_MAX))
+        chars_summary_limit = _parse_chars_summary_limit(chars_summary_raw)
 
         size_mb = attachment.size / (1024 * 1024)
         if size_mb > max_mb:
@@ -262,6 +336,8 @@ def setup(registry: ServiceRegistry) -> None:
             original_transcript_text = transcript.text.strip()
             translation_text: Optional[str] = None
             translation_model: Optional[str] = None
+            summary_text: Optional[str] = None
+            summary_model: Optional[str] = None
             target_lang = await _get_setting("translate.target_lang", "it")
             translate_backend = (await _get_setting("translate.backend", "local")).lower()
             translate_used = translate_backend
@@ -295,6 +371,10 @@ def setup(registry: ServiceRegistry) -> None:
                     translation_text = None
                     translation_model = None
 
+            should_summarize = _should_generate_audio_summary(original_transcript_text, chars_summary_limit)
+            if should_summarize:
+                summary_text, summary_model = await _build_audio_note_summary(ai_service, original_transcript_text)
+
             logger.debug(
                 "Audio note translation decision detected=%s target=%s should_translate=%s translated=%s",
                 detected_lang,
@@ -303,14 +383,12 @@ def setup(registry: ServiceRegistry) -> None:
                 bool(translation_text),
             )
 
-            output_parts = []
-            output_parts.append("**✍️ Trascrizione:**")
-            output_parts.append(original_transcript_text)
-            if detected_lang != "it" and translation_text:
-                output_parts.append("")
-                output_parts.append("**🇮🇹 Traduzione:**")
-                output_parts.append(translation_text)
-            full_output = "\n".join(output_parts).strip()
+            full_output = _build_audio_note_output(
+                transcript_text=original_transcript_text,
+                detected_lang=detected_lang,
+                translation_text=translation_text,
+                summary_text=summary_text,
+            )
 
             contributors, used_local_processing = _build_audio_footer_contributors(
                 stt_backend_used=stt_used,
@@ -318,6 +396,7 @@ def setup(registry: ServiceRegistry) -> None:
                 translate_backend_used=translate_used,
                 translation_model=translation_model,
                 has_translation_text=bool(detected_lang != "it" and translation_text),
+                summary_model=summary_model if summary_text else None,
             )
 
             chunks = _split_embed_descriptions(full_output, embed_max_chars)
