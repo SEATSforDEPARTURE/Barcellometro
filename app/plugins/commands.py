@@ -85,6 +85,8 @@ def setup(registry: ServiceRegistry) -> None:
 
     register_resoconto(resoconto_group, ctx)
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
+
+    logger.info("Group children summary bm=%d campagne=%d qna=%d insights=%d", len(bm_group.commands), len(campagne_group.commands), len(qna_group.commands), len(insights_group.commands))
     register_ask(bot.tree, guild_obj, ctx)
     logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
     register_barcello(bot.tree, guild_obj, ctx)

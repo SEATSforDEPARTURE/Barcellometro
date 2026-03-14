@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
 from typing import Optional
 
 import discord
@@ -9,11 +10,14 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.plugins.commands_modular.command_helpers import add_group_once, count_child_commands
 from app.services.scheduler_utils import calculate_initial_next_run
 
 QUIET_DEFAULT_START = "01:00"
 QUIET_DEFAULT_END = "08:30"
 CAP_DEFAULT = 6
+
+logger = logging.getLogger(__name__)
 
 MOOD_CHOICES = [
     app_commands.Choice(name="AUTO", value="AUTO"),
@@ -60,6 +64,9 @@ def validate_campaign_texts(
 
 
 def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -> None:
+    servizi_group = app_commands.Group(name="servizi", description="Servizi editoriali campagne")
+    add_group_once(campagne_group, servizi_group, logger)
+    logger.debug("Registered /%s with children=%d", campagne_group.qualified_name or campagne_group.name, count_child_commands(campagne_group))
     @campagne_group.command(name="quiet_status", description="Stato quiet hours")
     async def messaggi_quiet_status(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "campagne.quiet.status", ctx):
@@ -378,7 +385,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             )
             await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
 
-    @campagne_group.command(name="notizie", description="Configura campagna editoriale notizie")
+    @servizi_group.command(name="notizie", description="Configura campagna editoriale notizie")
     @app_commands.describe(
         time_local="Ora invio (HH:MM)",
         interval_minutes="Intervallo in minuti",
@@ -425,7 +432,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         )
         await interaction.response.send_message(f"Servizio notizie creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
 
-    @campagne_group.command(name="meteo", description="Configura campagna editoriale meteo")
+    @servizi_group.command(name="meteo", description="Configura campagna editoriale meteo")
     @app_commands.describe(
         time_local="Ora invio (HH:MM)",
         interval_minutes="Intervallo in minuti",
@@ -467,7 +474,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         )
         await interaction.response.send_message(f"Servizio meteo creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
 
-    @campagne_group.command(name="oroscopo", description="Configura campagna editoriale oroscopo")
+    @servizi_group.command(name="oroscopo", description="Configura campagna editoriale oroscopo")
     @app_commands.describe(
         time_local="Ora invio (HH:MM)",
         interval_minutes="Intervallo in minuti",
@@ -509,7 +516,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         )
         await interaction.response.send_message(f"Servizio oroscopo creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
 
-    @campagne_group.command(name="servizi_lista", description="Lista servizi editoriali")
+    @servizi_group.command(name="lista", description="Lista servizi editoriali")
     async def campagne_servizi_lista(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "campagne.servizi_lista", ctx):
             return
@@ -527,7 +534,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             )
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-    @campagne_group.command(name="servizi_on", description="Riattiva servizio editoriale")
+    @servizi_group.command(name="on", description="Riattiva servizio editoriale")
     @app_commands.describe(id="ID servizio")
     async def campagne_servizi_on(interaction: discord.Interaction, id: int) -> None:
         if not await check_permission(interaction, "campagne.servizi_on", ctx):
@@ -542,7 +549,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.set_campaign_content_enabled(str(interaction.guild_id), id, True)
         await interaction.response.send_message(f"Servizio {id} attivato.", ephemeral=True)
 
-    @campagne_group.command(name="servizi_off", description="Disattiva servizio editoriale")
+    @servizi_group.command(name="off", description="Disattiva servizio editoriale")
     @app_commands.describe(id="ID servizio")
     async def campagne_servizi_off(interaction: discord.Interaction, id: int) -> None:
         if not await check_permission(interaction, "campagne.servizi_off", ctx):
@@ -557,7 +564,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.set_campaign_content_enabled(str(interaction.guild_id), id, False)
         await interaction.response.send_message(f"Servizio {id} in pausa.", ephemeral=True)
 
-    @campagne_group.command(name="servizi_delete", description="Cancella servizio editoriale")
+    @servizi_group.command(name="delete", description="Cancella servizio editoriale")
     @app_commands.describe(id="ID servizio")
     async def campagne_servizi_delete(interaction: discord.Interaction, id: int) -> None:
         if not await check_permission(interaction, "campagne.servizi_delete", ctx):
@@ -572,7 +579,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.soft_delete_campaign_content_config(str(interaction.guild_id), id)
         await interaction.response.send_message(f"Servizio {id} eliminato.", ephemeral=True)
 
-    @campagne_group.command(name="servizi_test", description="Esegue subito un servizio editoriale")
+    @servizi_group.command(name="test", description="Esegue subito un servizio editoriale")
     @app_commands.describe(id="ID servizio")
     async def campagne_servizi_test(interaction: discord.Interaction, id: int) -> None:
         if not await check_permission(interaction, "campagne.servizi_test", ctx):
