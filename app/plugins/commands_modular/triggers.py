@@ -14,7 +14,7 @@ from app.plugins.commands_modular.command_helpers import add_group_once
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.config_file_loader import load_json_file
-from app.services.message_scheduler import calculate_initial_next_run
+from app.services.scheduler_utils import calculate_initial_next_run
 
 logger = logging.getLogger(__name__)
 

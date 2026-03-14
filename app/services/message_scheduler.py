@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import re
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
-from typing import Optional
-from zoneinfo import ZoneInfo
+from typing import TYPE_CHECKING, Optional
 
 import discord
 
@@ -17,11 +15,17 @@ from app.services.barcello import BarcelloService
 from app.services.community_insights import CommunityInsightsService
 from app.services.database import DatabaseService
 from app.services.ai import AiService
-from app.services.campaign_content_service import CampaignContentService
+from app.services.scheduler_utils import (
+    ROME_TZ,
+    calculate_initial_next_run,
+    calculate_next_run_after_send,
+    is_in_quiet_hours,
+)
+
+if TYPE_CHECKING:
+    from app.services.campaign_content_service import CampaignContentService
 
 logger = logging.getLogger(__name__)
-
-ROME_TZ = ZoneInfo("Europe/Rome")
 
 QUIET_DEFAULT_START = "01:00"
 QUIET_DEFAULT_END = "08:30"
@@ -51,41 +55,6 @@ BARCELLO_COLOR_MAP = {
     "⚫": "BLACK",
 }
 
-
-def _parse_local_time(value: str) -> time:
-    parts = value.split(":")
-    if len(parts) != 2:
-        raise ValueError("start_time_local must be HH:MM")
-    hour = int(parts[0])
-    minute = int(parts[1])
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        raise ValueError("start_time_local must be HH:MM")
-    return time(hour=hour, minute=minute)
-
-
-def calculate_initial_next_run(now_utc: datetime, start_time_local: str, interval_minutes: int, tz: ZoneInfo = ROME_TZ) -> datetime:
-    if interval_minutes <= 0:
-        raise ValueError("interval_minutes must be > 0")
-    start_clock = _parse_local_time(start_time_local)
-    now_local = now_utc.astimezone(tz)
-    candidate_local = now_local.replace(
-        hour=start_clock.hour,
-        minute=start_clock.minute,
-        second=0,
-        microsecond=0,
-    )
-    if candidate_local <= now_local:
-        delta_minutes = int((now_local - candidate_local).total_seconds() // 60)
-        steps = delta_minutes // interval_minutes + 1
-        candidate_local = candidate_local + timedelta(minutes=steps * interval_minutes)
-    return candidate_local.astimezone(timezone.utc)
-
-
-def calculate_next_run_after_send(now_utc: datetime, interval_minutes: int, jitter_seconds: int) -> datetime:
-    jitter = random.randint(0, max(jitter_seconds, 0))
-    return now_utc + timedelta(minutes=interval_minutes, seconds=jitter)
-
-
 def should_skip_for_idle(
     *,
     last_activity: Optional[datetime],
@@ -97,15 +66,6 @@ def should_skip_for_idle(
     if last_activity is None:
         return False
     return now_utc - last_activity < timedelta(minutes=only_if_idle_minutes)
-
-
-def is_in_quiet_hours(now_local_time: time, start_str: str, end_str: str) -> bool:
-    start = _parse_local_time(start_str)
-    end = _parse_local_time(end_str)
-    if start <= end:
-        return start <= now_local_time < end
-    return now_local_time >= start or now_local_time < end
-
 
 def should_skip_for_daily_cap(sent_today: int, cap: int) -> bool:
     if cap <= 0:
@@ -229,7 +189,7 @@ class MessageSchedulerService:
         community_insights: Optional[CommunityInsightsService] = None,
         barcello_service: Optional[BarcelloService] = None,
         ai_service: Optional[AiService] = None,
-        campaign_content_service: Optional[CampaignContentService] = None,
+        campaign_content_service: Optional["CampaignContentService"] = None,
     ) -> None:
         self._database = database
         self._bot = bot
