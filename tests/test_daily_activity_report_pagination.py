@@ -95,6 +95,25 @@ def test_daily_report_view_buttons_order_timeout_and_custom_ids_are_present() ->
     assert 'custom_id="daily_report:nav:next"' in report_source
 
 
+def test_daily_report_view_button_states_sync_logic_is_present() -> None:
+    report_source = Path("app/services/daily_activity_report.py").read_text()
+
+    assert "def _sync_button_states(self) -> None:" in report_source
+    assert "is_first = self._current_index <= 0" in report_source
+    assert "is_last = self._current_index >= self._total_pages - 1" in report_source
+    assert "self.start_button.disabled = is_first" in report_source
+    assert "self.prev_button.disabled = is_first" in report_source
+    assert "self.next_button.disabled = is_last" in report_source
+
+
+def test_daily_report_view_sync_is_called_at_init_and_after_navigation() -> None:
+    report_source = Path("app/services/daily_activity_report.py").read_text()
+
+    assert "self._sync_button_states()" in report_source
+    assert "self._current_index = target_index" in report_source
+    assert "self._total_pages = len(embeds_payload)" in report_source
+
+
 def test_daily_report_uses_single_file_send_and_never_two_txt_attachments() -> None:
     report_source = Path("app/services/daily_activity_report.py").read_text()
 

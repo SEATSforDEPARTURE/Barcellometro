@@ -63,9 +63,19 @@ def build_combined_activity_inactive_txt(
 
 
 class DailyReportPaginationView(discord.ui.View):
-    def __init__(self, report_service: "DailyActivityReportService") -> None:
+    def __init__(self, report_service: "DailyActivityReportService", *, current_index: int = 0, total_pages: int = 1) -> None:
         super().__init__(timeout=None)
         self._report_service = report_service
+        self._current_index = current_index
+        self._total_pages = max(1, int(total_pages))
+        self._sync_button_states()
+
+    def _sync_button_states(self) -> None:
+        is_first = self._current_index <= 0
+        is_last = self._current_index >= self._total_pages - 1
+        self.start_button.disabled = is_first
+        self.prev_button.disabled = is_first
+        self.next_button.disabled = is_last
 
     async def _navigate(self, interaction: discord.Interaction, *, action: str) -> None:
         message = interaction.message
@@ -90,6 +100,9 @@ class DailyReportPaginationView(discord.ui.View):
         else:
             target_index = min(max_index, current_index + 1)
 
+        self._current_index = target_index
+        self._total_pages = len(embeds_payload)
+        self._sync_button_states()
         embed = discord.Embed.from_dict(embeds_payload[target_index])
         await self._report_service.persist_pagination_current_index(message_id=str(message.id), current_index=target_index)
         await interaction.response.edit_message(embed=embed, view=self)
@@ -599,7 +612,7 @@ class DailyActivityReportService:
             inactive_txt_payload=inactive_txt_payload,
         )
 
-        view = DailyReportPaginationView(self)
+        view = DailyReportPaginationView(self, current_index=0, total_pages=len(report_embeds))
         try:
             message = await channel.send(embed=report_embeds[0], view=view, file=txt_file)
         except Exception:
