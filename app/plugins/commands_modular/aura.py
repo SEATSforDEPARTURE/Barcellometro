@@ -6,6 +6,8 @@ from io import BytesIO
 from datetime import timezone
 
 import discord
+
+from app.services.footer import attach_footer_meta
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
@@ -273,7 +275,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         if not eligibility.eligible:
             embed = discord.Embed(title="✨ RESOCONTO AURA", description=f"{eligibility.reason}\nPer attivarla: aumenta i messaggi nel periodo.", color=0x5865F2)
             embed.add_field(name="Periodo", value=f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}", inline=False)
-            embed.set_footer(text="Stima calcolata in loco: nessuna chiamata AI.")
+            attach_footer_meta(embed, service_name="aura", used_local_processing=True)
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 

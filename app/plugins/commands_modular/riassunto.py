@@ -10,8 +10,11 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import discord
+
+from app.services.footer import attach_footer_meta
 from discord import app_commands
 
+from app.services.footer import attach_footer_meta, copy_footer_meta
 from app.services.summary import SummaryImpact, SummaryItem, SummaryQuote
 from app.utils.discord_send import send_dm_or_followup
 from app.utils.embed_limits import (
@@ -305,8 +308,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     url=embed.author.url,
                     icon_url=embed.author.icon_url,
                 )
-            if embed.footer and embed.footer.text:
-                clone.set_footer(text=_truncate_text(embed.footer.text, 2048), icon_url=embed.footer.icon_url)
+            copy_footer_meta(embed, clone)
             if embed.thumbnail and embed.thumbnail.url:
                 clone.set_thumbnail(url=embed.thumbnail.url)
             if embed.image and embed.image.url:
@@ -1454,7 +1456,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             )
             if dm_mode:
                 status_embed.title = _bold_header(status_embed.title)
-                status_embed.set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
+                attach_footer_meta(status_embed, service_name="riassunto", used_local_processing=True)
 
             model_name = ctx.ai.get_model("summary") if ctx.ai else None
             cache_key = ctx.summary_service.build_cache_key(
@@ -1741,12 +1743,13 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             embeds = build_embeds()
             if dm_mode and embeds:
                 ai_used = bool(summary.ai_status.get("reason") == "ok")
-                if ai_used:
-                    ai_model_name = str(summary.ai_status.get("model") or model_name or "unknown-model")
-                    footer_text = f"Riassunto elaborato con {ai_model_name}. Eventuali imprecisioni sono possibili."
-                else:
-                    footer_text = "Riassunto elaborato in loco. Eventuali imprecisioni sono possibili."
-                embeds[-1].set_footer(text=footer_text)
+                ai_model_name = str(summary.ai_status.get("model") or model_name or "unknown-model") if ai_used else ""
+                attach_footer_meta(
+                    embeds[-1],
+                    service_name="riassunto",
+                    contributors=[ai_model_name] if ai_used else [],
+                    used_local_processing=not ai_used,
+                )
 
             logger.info(
                 "riassunto: report id=%s user=%s channel=%s range=%s-%s tier=%s ai=%s cache=%s voice=%s",

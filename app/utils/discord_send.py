@@ -6,6 +6,8 @@ from typing import Iterable
 import discord
 
 from app.utils.embed_limits import RETRY_MAX_EMBED_CHARS, normalize_embeds_for_discord
+from app.services.footer import FooterService
+from app.utils.footer_pipeline import finalize_embeds
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +23,12 @@ async def safe_followup_send(
     content: str | None = None,
     files: list[discord.File] | None = None,
     ephemeral: bool = True,
+    footer_service: FooterService | None = None,
+    default_service_name: str = "unknown",
 ) -> None:
     embed_list = list(embeds) if embeds is not None else []
+    if footer_service is not None and embed_list:
+        embed_list = await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
     try:
         await interaction.followup.send(
             content=content,
@@ -57,8 +63,12 @@ async def send_dm_or_followup(
     content: str | None = None,
     files: list[discord.File] | None = None,
     ephemeral_fallback: bool = True,
+    footer_service: FooterService | None = None,
+    default_service_name: str = "unknown",
 ) -> bool:
     embed_list = list(embeds) if embeds is not None else []
+    if footer_service is not None and embed_list:
+        embed_list = await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
     try:
         if embed_list or files:
             await interaction.user.send(embeds=embed_list if embed_list else None, files=files)

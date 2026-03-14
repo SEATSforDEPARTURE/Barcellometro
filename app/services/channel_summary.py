@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from app.services.footer import attach_footer_meta
+
 from app.plugins.commands_modular.time_windows import TimeWindowResult, resolve_ieri_window, resolve_oggi_window
 from app.renderers.channel_summary_renderer import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, format_window_header
 from app.services.barcello import BarcelloResult, BarcelloService
@@ -373,7 +375,7 @@ class ChannelSummaryService:
             )
             channel_name = getattr(channel, "name", None) or channel_id
             embed = build_channel_summary_insufficient_data_embed(channel_name=str(channel_name), window_header=window_header)
-            embed.set_footer(text="Servizio offerto dal vostro Barcellometro di fiducia")
+            attach_footer_meta(embed, service_name="channel_summary", used_local_processing=True)
             try:
                 await channel.send(embed=embed)
             except discord.HTTPException:
@@ -650,10 +652,10 @@ class ChannelSummaryService:
             aura_embed=aura_embed,
         )
 
-        embeds[0].set_footer(text="Stima calcolata in loco. Può variare in base ai dati disponibili.")
+        attach_footer_meta(embeds[0], service_name="channel_summary", used_local_processing=True)
         if len(embeds) >= 2:
             embeds[1].title = "🗒️ DETTAGLI CANALE (Pag 1/2)"
-            embeds[1].set_footer(text="Resoconto elaborato con gpt-4o. Eventuali imprecisioni sono possibili.")
+            attach_footer_meta(embeds[1], service_name="channel_summary", contributors=["gpt-4o"], used_local_processing=False)
         if len(embeds) >= 3:
             aura_chars_final = _estimate_embed_size(embeds[2])
             logger.debug("aura_embed_chars_final_with_footer=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)

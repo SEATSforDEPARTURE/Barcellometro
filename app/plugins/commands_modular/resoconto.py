@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 import discord
+
+from app.services.footer import attach_footer_meta
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
@@ -404,7 +406,7 @@ def register_resoconto(resoconto_group: app_commands.Group, ctx: CommandContext)
             ),
             inline=False,
         )
-        embed.set_footer(text="Dati elaborati in loco. Eventuali imprecisioni sono possibili.")
+        attach_footer_meta(embed, service_name="resoconto", used_local_processing=True)
 
         txt_lines = [
             "=== RESOCONTO AURA MOD ===",
