@@ -7,7 +7,14 @@ import discord
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Connection=object)
 
-from app.services.footer import FooterService, attach_footer_meta, copy_footer_meta, get_footer_meta
+from app.services.footer import (
+    FooterService,
+    attach_footer_meta,
+    attach_footer_meta_to_all,
+    copy_footer_meta,
+    get_footer_meta,
+)
+from app.utils.embed_limits import normalize_embeds_for_discord
 from app.utils.footer_pipeline import finalize_embeds
 
 
@@ -94,6 +101,68 @@ def test_finalize_embeds_multi_embed_does_not_crash() -> None:
 
         assert embeds[0].footer and "Barcellometro" in (embeds[0].footer.text or "")
         assert embeds[1].footer and "Barcellometro" in (embeds[1].footer.text or "")
+
+    asyncio.run(_run())
+
+
+def test_normalize_embeds_for_discord_preserves_footer_meta_on_split_pages() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="Split me")
+        embed.add_field(name="F1", value="x" * 4000, inline=False)
+        embed.add_field(name="F2", value="y" * 4000, inline=False)
+        attach_footer_meta(embed, service_name="riassunto", contributors=["gpt-4o"], used_local_processing=False)
+
+        normalized = normalize_embeds_for_discord([embed], max_chars=4500)
+        assert len(normalized) >= 2
+
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await finalize_embeds(normalized, service, default_service_name="riassunto")
+
+        footer_texts = [item.footer.text for item in normalized]
+        assert len(set(footer_texts)) == 1
+        assert footer_texts[0] == "Barcellometro dev6 · Dati elaborati con gpt-4o"
+
+    asyncio.run(_run())
+
+
+def test_attach_footer_meta_to_all_applies_consistent_meta() -> None:
+    embeds = [discord.Embed(title=f"page {idx}") for idx in range(1, 4)]
+
+    out = attach_footer_meta_to_all(
+        embeds,
+        service_name="riassunto",
+        contributors=["gpt-4o"],
+        used_local_processing=False,
+    )
+
+    assert out == embeds
+    for embed in embeds:
+        meta = get_footer_meta(embed)
+        assert meta is not None
+        assert meta.service_name == "riassunto"
+        assert meta.contributors == ["gpt-4o"]
+        assert meta.used_local_processing is False
+
+
+def test_finalize_embeds_multipage_riassunto_keeps_same_ai_footer_on_all_pages() -> None:
+    async def _run() -> None:
+        embeds = [discord.Embed(title=f"Dettagli {idx}") for idx in range(1, 4)]
+        attach_footer_meta_to_all(
+            embeds,
+            service_name="riassunto",
+            contributors=["gpt-4o"],
+            used_local_processing=False,
+        )
+        service = _build_footer_service()
+        await service.set_version("dev6")
+
+        await finalize_embeds(embeds, service, default_service_name="riassunto")
+
+        footers = [embed.footer.text for embed in embeds]
+        assert len(set(footers)) == 1
+        assert footers[0] == "Barcellometro dev6 · Dati elaborati con gpt-4o"
+        assert all("in loco" not in (text or "") for text in footers)
 
     asyncio.run(_run())
 
