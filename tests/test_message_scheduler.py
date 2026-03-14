@@ -5,13 +5,16 @@ from zoneinfo import ZoneInfo
 from app.services.database import DatabaseService
 from app.services.message_scheduler import (
     MessageSchedulerService,
-    calculate_initial_next_run,
-    is_in_quiet_hours,
     select_round_robin_campaign,
     select_text_for_mood,
     should_skip_for_daily_cap,
     should_skip_for_idle,
     split_embed_pages,
+)
+from app.services.scheduler_utils import (
+    calculate_initial_next_run,
+    calculate_next_run_after_send,
+    is_in_quiet_hours,
 )
 from app.plugins.commands_modular.messaggi import validate_campaign_texts
 
@@ -25,6 +28,11 @@ def test_next_run_calculation() -> None:
     now_late = datetime(2024, 1, 1, 10, 30, tzinfo=timezone.utc)
     next_run_late = calculate_initial_next_run(now_late, "10:00", 120, tz)
     assert next_run_late == datetime(2024, 1, 1, 11, 0, tzinfo=timezone.utc)
+
+
+def test_next_run_after_send_without_jitter() -> None:
+    now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert calculate_next_run_after_send(now, 15, 0) == datetime(2024, 1, 1, 12, 15, tzinfo=timezone.utc)
 
 
 def test_idle_skip() -> None:
