@@ -11,13 +11,19 @@ import discord
 from app.services.ai import AiService
 from app.services.campaign_content_fetchers import fetch_horoscope_content, fetch_news_content, fetch_weather_content
 from app.services.campaign_content_formatter import (
+    HOROSCOPE_SECTIONS,
+    SIGN_ORDER,
     apply_shared_footer_and_pagination,
     build_fallback_embed,
     build_horoscope_embeds,
+    build_horoscope_page_map,
     build_news_embeds,
+    build_news_page_map,
     build_weather_embeds,
+    build_weather_page_map,
+    sanitize_horoscope_text,
 )
-from app.services.campaign_content_views import CampaignContentPaginationView, HoroscopePaginationView
+from app.services.campaign_content_views import BaseCampaignNavigatorView, PersistentCampaignLauncherView
 from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta_to_all
 from app.services.scheduler_utils import calculate_next_run_after_send
@@ -36,8 +42,7 @@ class CampaignContentService:
     def register_views(self) -> None:
         if self._registered:
             return
-        self._bot.add_view(CampaignContentPaginationView(self))
-        self._bot.add_view(HoroscopePaginationView(self))
+        # Dynamic persistent views are re-created per message from DB metadata.
         self._registered = True
 
     async def process_due_services(self, now: datetime) -> None:
@@ -72,6 +77,7 @@ class CampaignContentService:
             used_sources=used_sources,
             used_model=used_model,
             fallback_used=fallback_used,
+            payload=payload,
         )
 
     async def execute_weather_service(self, config: dict[str, Any]) -> None:
@@ -88,6 +94,7 @@ class CampaignContentService:
             used_sources=used_sources,
             used_model=used_model,
             fallback_used=bool(payload.get("fallback_used")),
+            payload=payload,
         )
 
     async def execute_horoscope_service(self, config: dict[str, Any]) -> None:
@@ -104,6 +111,7 @@ class CampaignContentService:
             used_sources=used_sources,
             used_model=used_model,
             fallback_used=bool(payload.get("fallback_used")),
+            payload=payload,
         )
 
     async def _send_and_store(
@@ -116,6 +124,7 @@ class CampaignContentService:
         used_sources: list[str],
         used_model: str | None,
         fallback_used: bool,
+        payload: dict[str, Any] | None = None,
     ) -> None:
         now = datetime.now(timezone.utc)
         guild_id = str(config["guild_id"])
@@ -139,11 +148,13 @@ class CampaignContentService:
                 return
         if not isinstance(channel, discord.abc.Messageable):
             return
-        view: discord.ui.View | None = None
-        if service_type in {"NEWS", "WEATHER"}:
-            view = CampaignContentPaginationView(self, current_index=0, total_pages=len(embeds))
-        elif service_type == "HOROSCOPE":
-            view = HoroscopePaginationView(self)
+        page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=payload)
+        view: discord.ui.View | None = PersistentCampaignLauncherView(
+            self,
+            service_type=service_type,
+            total_pages=len(embeds),
+            page_map=page_map,
+        )
         message = await channel.send(embed=embeds[0], view=view)
         metadata = {
             "footer_text": footer_text,
@@ -152,6 +163,7 @@ class CampaignContentService:
             "ai_model_used": used_model,
             "used_model": used_model,
             "fallback_used": fallback_used,
+            "page_map": page_map,
         }
         await self._database.upsert_campaign_content_message(
             message_id=str(message.id),
@@ -193,19 +205,40 @@ class CampaignContentService:
         return self._resolve_ai_model_name() if used_ai else None
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
-        used_ai = False
-        for sign_payload in payload.get("signs", {}).values():
-            sign = sign_payload.get("sign") or "segno"
-            for key in ["love", "work", "money", "energy", "friction", "advice"]:
-                rewritten, ai_used = await self._rewrite_text(
-                    str(sign_payload.get(key) or ""),
-                    context="oroscopo",
-                    extra=[str(sign), key],
-                )
-                sign_payload[key] = rewritten
-                used_ai = used_ai or ai_used
+        if self._ai is None or not self._ai.is_enabled():
+            self._enforce_horoscope_diversity(payload)
+            return None
+        signs = payload.get("signs", {})
+        compact = {
+            sign: {section: str(sign_payload.get(section) or "") for section in HOROSCOPE_SECTIONS}
+            for sign, sign_payload in signs.items()
+        }
+        prompt = (
+            "Riscrivi il seguente JSON oroscopo in italiano con tono ironico/cricetoso ma leggibile. "
+            "Devi restituire SOLO JSON valido con la stessa struttura in input. "
+            "Non inventare fatti, non aggiungere markdown, non aggiungere titoletti interni o il nome del segno davanti al testo. "
+            "Ogni sezione deve avere massimo 2-3 frasi brevi e naturali.\n"
+            f"JSON input:\n{json.dumps(compact, ensure_ascii=False)}"
+        )
+        output = await self._ai.ask_general(prompt, "Assistente editoriale")
+        parsed: dict[str, Any] = {}
+        try:
+            parsed = json.loads(output or "{}")
+            if not isinstance(parsed, dict):
+                parsed = {}
+        except json.JSONDecodeError:
+            parsed = {}
+        for sign in SIGN_ORDER:
+            sign_payload = signs.get(sign, {})
+            rewritten_sign = parsed.get(sign, {}) if isinstance(parsed.get(sign), dict) else {}
+            for key in HOROSCOPE_SECTIONS:
+                candidate = rewritten_sign.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    sign_payload[key] = sanitize_horoscope_text(sign, candidate)
+                else:
+                    sign_payload[key] = sanitize_horoscope_text(sign, str(sign_payload.get(key) or ""))
         self._enforce_horoscope_diversity(payload)
-        return self._resolve_ai_model_name() if used_ai else None
+        return self._resolve_ai_model_name()
 
     @staticmethod
     def _simple_similarity(a: str, b: str) -> float:
@@ -246,13 +279,97 @@ class CampaignContentService:
         row = await self._database.get_campaign_content_message(message_id)
         if row is None:
             return None
+
+        payload = dict(row)
+
+        embeds: list[dict[str, Any]] = []
+        metadata: dict[str, Any] = {}
+        try:
+            raw_embeds = json.loads(str(payload.get("embeds_json") or "[]"))
+            if isinstance(raw_embeds, list):
+                embeds = [item for item in raw_embeds if isinstance(item, dict)]
+        except json.JSONDecodeError:
+            embeds = []
+
+        try:
+            raw_metadata = json.loads(str(payload.get("metadata_json") or "{}"))
+            if isinstance(raw_metadata, dict):
+                metadata = raw_metadata
+        except json.JSONDecodeError:
+            metadata = {}
+
+        try:
+            current_index = int(payload.get("current_index") or 0)
+        except (TypeError, ValueError):
+            current_index = 0
+
         return {
-            "embeds": json.loads(str(row["embeds_json"] or "[]")),
-            "current_index": int(row["current_index"] or 0),
+            "message_id": str(payload.get("message_id") or ""),
+            "guild_id": str(payload.get("guild_id") or ""),
+            "channel_id": str(payload.get("channel_id") or ""),
+            "service_type": str(payload.get("service_type") or "").upper(),
+            "config_id": str(payload.get("config_id") or ""),
+            "embeds": embeds,
+            "metadata": metadata,
+            "current_index": current_index,
         }
 
-    async def persist_current_index(self, message_id: str, current_index: int) -> None:
-        await self._database.update_campaign_content_current_index(message_id, current_index)
+    async def open_personal_navigator(self, interaction: discord.Interaction, *, target_index: int, service_type: str) -> bool:
+        message = interaction.message
+        if message is None:
+            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+            return False
+        record = await self.load_message_record(str(message.id))
+        if record is None:
+            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+            return False
+
+        embeds = record.get("embeds", [])
+        if not isinstance(embeds, list) or not embeds:
+            await interaction.response.send_message("Pagina non disponibile.", ephemeral=True)
+            return False
+
+        metadata = record.get("metadata", {})
+        page_map = metadata.get("page_map") if isinstance(metadata, dict) else None
+        if not isinstance(page_map, list):
+            page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=None)
+
+        index = max(0, min(target_index, len(embeds) - 1))
+        view = BaseCampaignNavigatorView(self, embeds=embeds, page_map=page_map, current_index=index, timeout=600)
+        await interaction.response.send_message(embed=discord.Embed.from_dict(embeds[index]), view=view, ephemeral=True)
+        return True
+
+    async def edit_public_message(self, interaction: discord.Interaction, *, target_index: int) -> bool:
+        message = interaction.message
+        if message is None:
+            return False
+        record = await self.load_message_record(str(message.id))
+        if record is None:
+            return False
+        embeds = record.get("embeds", [])
+        if not embeds:
+            return False
+        index = max(0, min(target_index, len(embeds) - 1))
+        metadata = record.get("metadata", {})
+        page_map = metadata.get("page_map") if isinstance(metadata, dict) else []
+        view = PersistentCampaignLauncherView(self, service_type=record.get("service_type") or "NEWS", total_pages=len(embeds), page_map=page_map if isinstance(page_map, list) else [])
+        await interaction.response.edit_message(embed=discord.Embed.from_dict(embeds[index]), view=view)
+        return True
+
+    def _build_page_map(self, service_type: str, *, payload_embeds: list[Any], payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+        if service_type == "NEWS":
+            if payload is not None:
+                return build_news_page_map(payload)
+            categories = list(range(max(0, len(payload_embeds) - 1)))
+            return [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}] + [
+                {"type": "category", "key": f"cat_{idx+1}", "label": f"📌 CATEGORIA {idx+1}", "page": idx + 1}
+                for idx in categories
+            ]
+        if service_type == "WEATHER":
+            return build_weather_page_map()
+        if service_type == "HOROSCOPE":
+            return build_horoscope_page_map()
+        return [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}]
 
     @staticmethod
     def _json_to_list(raw: Any) -> list[str]:

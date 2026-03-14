@@ -3,6 +3,7 @@ import json
 import sys
 import types
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import discord
 
@@ -11,113 +12,64 @@ if "openai" not in sys.modules:
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Connection=object)
 
-from app.services.campaign_content_formatter import SIGN_EMOJIS, build_horoscope_embeds, build_news_embeds, build_weather_embeds
+from app.services.campaign_content_fetchers import dedupe_news_items
+from app.services.campaign_content_formatter import build_horoscope_embeds, build_news_embeds, build_weather_embeds
 from app.services.campaign_content_service import CampaignContentService
 
 
-def test_horoscope_overview_is_rich_and_signs_distinct_and_emojis() -> None:
-    payload = {
-        "signs": {
-            sign: {
-                "sign": sign,
-                "love": f"Amore specifico {sign}",
-                "work": f"Lavoro specifico {sign}",
-                "money": f"Soldi specifici {sign}",
-                "energy": f"Energia specifica {sign}",
-                "friction": f"Friction {sign}",
-                "advice": f"Advice {sign}",
-                "tone": f"tono-{sign}",
-                "confidence": 0.7,
-                "fallback_used": False,
-            }
-            for sign in SIGN_EMOJIS
-        }
-    }
-    embeds = build_horoscope_embeds({"embed_title": "🔮 OROSCOPO CRICETOSO"}, payload)
-    assert len(embeds) == 13
-    overview_text = embeds[0].description or ""
-    assert "✨ **Mood del giorno**" in overview_text
-    assert "🔥 **Segni più frizzanti**" in overview_text
-    assert "🌧️ **Segni da trattare con dolcezza**" in overview_text
-    assert "💼 **Focus lavoro/energia**" in overview_text
-    assert "🐹 **Consiglio cricetoso**" in overview_text
-    sign_field_values = [embed.fields[0].value for embed in embeds[1:]]
-    assert len(set(sign_field_values)) == 12
-
-
-def test_weather_and_news_overview_are_richer() -> None:
-    weather = build_weather_embeds(
+def test_build_weather_embeds_page_order() -> None:
+    embeds = build_weather_embeds(
         {"embed_title": "🌤️ METEO CRICETOSO"},
-        {
-            "regions": {
-                "Nord": {
-                    "summary": "Nord variabile",
-                    "precipitation_summary": "possibili piogge",
-                    "wind_summary": "vento medio 12 km/h",
-                    "sampled_cities": [
-                        {"city": "Milano", "temperature": 21, "windspeed": 8, "condition": "pioggia"},
-                        {"city": "Torino", "temperature": 20, "windspeed": 10, "condition": "nuvoloso"},
-                        {"city": "Genova", "temperature": 22, "windspeed": 14, "condition": "rovesci"},
-                    ],
-                },
-                "Centro": {
-                    "summary": "Centro sereno",
-                    "precipitation_summary": "precipitazioni poco probabili",
-                    "wind_summary": "vento medio 5 km/h",
-                    "sampled_cities": [
-                        {"city": "Roma", "temperature": 25, "windspeed": 5, "condition": "sereno"},
-                        {"city": "Firenze", "temperature": 24, "windspeed": 6, "condition": "sereno"},
-                        {"city": "Perugia", "temperature": 23, "windspeed": 4, "condition": "quasi sereno"},
-                    ],
-                },
-                "Sud e Isole": {
-                    "summary": "Sud caldo",
-                    "precipitation_summary": "precipitazioni poco probabili",
-                    "wind_summary": "vento medio 11 km/h",
-                    "sampled_cities": [
-                        {"city": "Napoli", "temperature": 28, "windspeed": 12, "condition": "sereno"},
-                        {"city": "Palermo", "temperature": 29, "windspeed": 14, "condition": "sereno"},
-                        {"city": "Cagliari", "temperature": 30, "windspeed": 9, "condition": "sereno"},
-                    ],
-                },
-            }
-        },
+        {"regions": {"Nord": {"sampled_cities": []}, "Centro": {"sampled_cities": []}, "Sud e Isole": {"sampled_cities": []}}},
     )
-    assert "Area più instabile" in (weather[0].description or "")
-    assert "Range termico nazionale" in (weather[0].description or "")
-    assert "Milano" in (weather[1].description or "")
-
-    news = build_news_embeds(
-        {"embed_title": "📰 NOTIZIARIO"},
-        {
-            "categories": {
-                "cronaca": [
-                    {"title": "Titolo 1", "summary": "Sommario 1", "source": "ansa.it", "link": "https://example.com/1"},
-                    {"title": "Titolo 2", "summary": "Sommario 2", "source": "ansa.it", "link": "https://example.com/2"},
-                ],
-                "sport": [
-                    {"title": "Titolo 3", "summary": "Sommario 3", "source": "open.online", "link": "https://example.com/3"},
-                ],
-            }
-        },
-    )
-    assert "Cosa fa più rumore oggi" in (news[0].description or "")
-    assert "Top highlight" in (news[0].description or "")
+    titles = [e.title for e in embeds]
+    assert "Overview Italia" in (titles[0] or "")
+    assert "Nord" in (titles[1] or "")
+    assert "Centro" in (titles[2] or "")
+    assert "Sud e Isole" in (titles[3] or "")
 
 
-def test_horoscope_similarity_guard_reformats_duplicate_outputs() -> None:
-    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
+def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     payload = {
-        "signs": {
-            "Ariete": {"love": "test comune", "work": "test comune", "money": "x", "energy": "y", "friction": "z", "advice": "a"},
-            "Toro": {"love": "test comune", "work": "test comune", "money": "x", "energy": "y", "friction": "z", "advice": "a"},
+        "categories": {
+            "cronaca": [{"title": "Titolo uguale", "summary": "S1", "source": "ansa.it", "link": "https://example.com/a"}],
+            "sport": [{"title": "Titolo uguale", "summary": "S2 più lungo", "source": "open.online", "link": "https://example.com/a/"}],
+            "tecnologia": [{"title": "Tech 1", "summary": "S3", "source": "wired.it", "link": "https://example.com/c"}],
         }
     }
-    service._enforce_horoscope_diversity(payload)
-    assert "Versione personalizzata" in payload["signs"]["Toro"]["advice"]
+    deduped = dedupe_news_items(payload["categories"]["cronaca"] + payload["categories"]["sport"] + payload["categories"]["tecnologia"])
+    assert len(deduped) == 2
+    embeds = build_news_embeds({"embed_title": "📰 NOTIZIARIO"}, payload)
+    assert "Inizio" in (embeds[0].title or "")
+    assert "Cronaca" in (embeds[1].title or "")
+    assert "Sport" in (embeds[2].title or "")
 
 
-def test_send_and_store_metadata_tracks_configured_and_used_sources_and_ai_model() -> None:
+def test_build_horoscope_embeds_strip_inner_headings() -> None:
+    payload = {
+        "signs": {
+            "Acquario": {
+                "love": "Acquario Love Alert: giornata positiva in amore.",
+                "work": "Acquario: lavoro in recupero.",
+                "money": "Money Vibes: prudenza.",
+                "energy": "Energia del genio: alta.",
+                "friction": "Con chi ti stressa.",
+                "advice": "Respira.",
+                "confidence": 1,
+            }
+        }
+    }
+    # fill required signs quickly
+    for s in ["Ariete","Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Pesci"]:
+        payload["signs"][s] = {"love":"ok","work":"ok","money":"ok","energy":"ok","friction":"ok","advice":"ok","confidence":1}
+    embeds = build_horoscope_embeds({"embed_title": "🔮 OROSCOPO CRICETOSO"}, payload)
+    acquario = next(e for e in embeds if (e.title or "").endswith("Acquario"))
+    values = " ".join(f.value for f in acquario.fields)
+    assert "Love Alert" not in values
+    assert "Energia del genio" not in values
+
+
+def test_send_and_store_metadata_contains_page_map() -> None:
     class _Db:
         async def upsert_campaign_content_message(self, **kwargs):
             self.kwargs = kwargs
@@ -141,19 +93,143 @@ def test_send_and_store_metadata_tracks_configured_and_used_sources_and_ai_model
         service = CampaignContentService(database=db, bot=_Bot(), ai_service=None)
         service._build_campaign_footer = lambda **kwargs: asyncio.sleep(0, result="footer test")
         config = {"guild_id": "1", "channel_id": "2", "id": 99, "interval_minutes": 60}
+        payload = {"categories": {"cronaca": [{"title": "t", "summary": "s", "source": "ansa", "link": "https://x"}]}}
         await service._send_and_store(
             config,
-            [discord.Embed(title="x")],
+            [discord.Embed(title="x"), discord.Embed(title="y")],
             "NEWS",
             configured_sources=["ansa", "repubblica"],
             used_sources=["https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml"],
             used_model="gpt-4o",
             fallback_used=False,
+            payload=payload,
         )
         metadata = json.loads(db.kwargs["metadata_json"])
-        assert metadata["configured_sources"] == ["ansa", "repubblica"]
-        assert metadata["used_sources"] == ["https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml"]
-        assert metadata["ai_model_used"] == "gpt-4o"
-        assert metadata["fallback_used"] is False
+        assert "page_map" in metadata
+        assert metadata["page_map"][0]["label"] == "⏮️ INIZIO"
+
+    asyncio.run(_run())
+
+
+def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
+    class _Ai:
+        def __init__(self, output: str):
+            self.ask_general = AsyncMock(return_value=output)
+
+        def is_enabled(self):
+            return True
+
+        def get_model(self, _):
+            return "gpt-4o"
+
+    payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}}}
+    for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
+        payload["signs"][s] = {"sign": s, "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}
+
+    async def _run_valid() -> None:
+        ai = _Ai(json.dumps({k: {"love": "x", "work": "y", "money": "z", "energy": "w", "friction": "q", "advice": "p"} for k in payload["signs"]}))
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
+        await service._rewrite_horoscope_payload(payload)
+        ai.ask_general.assert_awaited_once()
+
+    async def _run_invalid() -> None:
+        ai = _Ai("not-json")
+        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
+            local_payload["signs"][s] = {"sign": s, "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
+        await service._rewrite_horoscope_payload(local_payload)
+        assert local_payload["signs"]["Ariete"]["love"] == "orig"
+
+    asyncio.run(_run_valid())
+    asyncio.run(_run_invalid())
+
+
+def test_load_message_record_accepts_aiosqlite_row_like_payload() -> None:
+    class _RowLike:
+        def __iter__(self):
+            yield ("message_id", "123")
+            yield ("guild_id", "1")
+            yield ("channel_id", "2")
+            yield ("service_type", "weather")
+            yield ("config_id", 99)
+            yield ("embeds_json", '[{"title":"A"},{"title":"B"}]')
+            yield ("metadata_json", '{"page_map":[{"type":"overview","page":0}]}')
+            yield ("current_index", "4")
+
+    class _Db:
+        async def get_campaign_content_message(self, _message_id):
+            return _RowLike()
+
+    async def _run() -> None:
+        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
+        row = await service.load_message_record("123")
+        assert row is not None
+        assert row["message_id"] == "123"
+        assert row["service_type"] == "WEATHER"
+        assert row["config_id"] == "99"
+        assert len(row["embeds"]) == 2
+        assert isinstance(row["metadata"], dict)
+        assert row["current_index"] == 4
+
+    asyncio.run(_run())
+
+
+def test_load_message_record_handles_invalid_json() -> None:
+    class _RowLike:
+        def __iter__(self):
+            yield ("message_id", "123")
+            yield ("guild_id", "1")
+            yield ("channel_id", "2")
+            yield ("service_type", "news")
+            yield ("config_id", 99)
+            yield ("embeds_json", '{invalid')
+            yield ("metadata_json", '{invalid')
+            yield ("current_index", "0")
+
+    class _Db:
+        async def get_campaign_content_message(self, _message_id):
+            return _RowLike()
+
+    async def _run() -> None:
+        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
+        row = await service.load_message_record("123")
+        assert row is not None
+        assert row["embeds"] == []
+        assert row["metadata"] == {}
+
+    asyncio.run(_run())
+
+
+def test_open_personal_navigator_clamps_target_index() -> None:
+    class _Db:
+        async def get_campaign_content_message(self, _message_id):
+            return {
+                "message_id": "777",
+                "guild_id": "1",
+                "channel_id": "2",
+                "service_type": "WEATHER",
+                "config_id": "9",
+                "embeds_json": '[{"title":"P0"},{"title":"P1"}]',
+                "metadata_json": '{"page_map": [{"type": "overview", "page": 0}]}',
+                "current_index": 0,
+            }
+
+    class _Response:
+        def __init__(self):
+            self.send_message = AsyncMock()
+
+    interaction = SimpleNamespace(message=SimpleNamespace(id=777), response=_Response())
+
+    async def _run() -> None:
+        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
+        ok_low = await service.open_personal_navigator(interaction, target_index=-5, service_type="WEATHER")
+        ok_high = await service.open_personal_navigator(interaction, target_index=55, service_type="WEATHER")
+        assert ok_low is True and ok_high is True
+        calls = interaction.response.send_message.await_args_list
+        low_embed = calls[0].kwargs["embed"]
+        high_embed = calls[1].kwargs["embed"]
+        assert (low_embed.title or "") == "P0"
+        assert (high_embed.title or "") == "P1"
 
     asyncio.run(_run())

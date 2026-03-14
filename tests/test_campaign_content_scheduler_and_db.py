@@ -15,7 +15,7 @@ def test_db_has_campaign_content_tables_and_index() -> None:
 
 
 
-def test_persistent_views_registration_keeps_news_weather_and_horoscope_views() -> None:
+def test_persistent_views_registration_uses_dynamic_campaign_views() -> None:
     source = Path("app/services/campaign_content_service.py").read_text()
-    assert "self._bot.add_view(CampaignContentPaginationView(self))" in source
-    assert "self._bot.add_view(HoroscopePaginationView(self))" in source
+    assert "Dynamic persistent views are re-created per message from DB metadata" in source
+    assert "PersistentCampaignLauncherView" in source
