@@ -5,6 +5,8 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.services.footer import ServiceFooterProfile
+
 
 def _clean_opt(value: str | None) -> str | None:
     if value is None:
@@ -15,6 +17,64 @@ def _clean_opt(value: str | None) -> str | None:
 
 def _format_value(value: str | None) -> str:
     return value if value else "(non impostata)"
+
+
+async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
+    stt_backend = ((await ctx.database.get_setting("stt.backend")) or "local").strip().lower()
+    translate_backend = ((await ctx.database.get_setting("translate.backend")) or "local").strip().lower()
+    stt_local_model = ((await ctx.database.get_setting("stt.local.model")) or "small").strip()
+    stt_ai_model = ctx.ai.get_model("transcription") if ctx.ai is not None else "gpt-4o-transcribe"
+    translate_ai_model = ctx.ai.get_model("translation") if ctx.ai is not None else "gpt-4o-mini"
+
+    stt_model = stt_local_model if stt_backend != "ai" else (stt_ai_model or "gpt-4o-transcribe")
+    translation_model = "argos" if translate_backend != "ai" else (translate_ai_model or "gpt-4o-mini")
+
+    contributors: list[str] = []
+    if stt_model:
+        contributors.append(stt_model)
+    if translation_model:
+        contributors.append(translation_model)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in contributors:
+        clean = item.strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        deduped.append(clean)
+
+    return ServiceFooterProfile(
+        service_name="audio_notes",
+        contributors=deduped,
+        used_local_processing=(stt_backend != "ai" or translate_backend != "ai"),
+        last_rendered_footer=None,
+        updated_at=None,
+        origins={"inference"},
+    )
+
+
+async def _infer_service_profile(service_name: str, ctx: CommandContext) -> ServiceFooterProfile:
+    if service_name == "audio_notes":
+        return await _infer_audio_notes_profile(ctx)
+    return ServiceFooterProfile(
+        service_name=service_name,
+        contributors=[],
+        used_local_processing=True,
+        last_rendered_footer=None,
+        updated_at=None,
+        origins={"fallback"},
+    )
+
+
+def _format_service_status_block(
+    *,
+    service_name: str,
+    footer_text: str,
+    phrase: str,
+    origin: str,
+) -> str:
+    return f"**{service_name}**\n→ {footer_text}\nfrase: {phrase}\norigine: {origin}"
 
 
 def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -143,14 +203,17 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             ephemeral=True,
         )
 
-    @bm_group.command(name="footer", description="Configura footer globali e per servizio")
+    footer_group = app_commands.Group(name="footer", description="Gestione footer")
+    bm_group.add_command(footer_group)
+
+    @footer_group.command(name="set", description="Configura footer globali e per servizio")
     @app_commands.describe(
         version="Versione branding footer",
         frase_globale="Frase finale globale",
         servizio="Nome servizio per frase specifica",
         frase_servizio="Frase finale specifica servizio (vuota = reset)",
     )
-    async def footer_command(
+    async def footer_set_command(
         interaction: discord.Interaction,
         version: str | None = None,
         frase_globale: str | None = None,
@@ -196,7 +259,7 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
 
         await interaction.response.send_message("Configurazione footer aggiornata.", ephemeral=True)
 
-    @bm_group.command(name="footer_status", description="Mostra footer renderizzato per tutti i servizi")
+    @footer_group.command(name="status", description="Mostra footer renderizzato per tutti i servizi")
     async def footer_status_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.footer_status", ctx):
             return
@@ -208,25 +271,56 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         global_phrase = await ctx.footer.get_global_phrase()
         known_services = await ctx.footer.get_known_services()
         service_sources = await ctx.footer.get_known_service_sources()
-        lines: list[str] = []
-        for service_name in known_services:
-            footer, _ = await ctx.footer.render_footer(
-                service_name=service_name,
-                contributors=[],
-                used_local_processing=True,
-            )
-            phrase = service_phrases.get(service_name) or global_phrase or "(nessuna)"
-            source = ",".join(service_sources.get(service_name, [])) or "unknown"
-            lines.append(f"{service_name} → {footer}\n  frase: {phrase}\n  origine: {source}")
 
-        if not lines:
+        if not known_services:
             await interaction.response.send_message("Nessun servizio footer noto.", ephemeral=True)
             return
+
+        profile_map = await ctx.footer.get_service_footer_profiles()
+        detailed_blocks: list[str] = []
+        compact_services: list[str] = []
+
+        for service_name in known_services:
+            profile = profile_map.get(service_name)
+            origin_tags: set[str] = set(service_sources.get(service_name, []))
+
+            if profile is None:
+                profile = await _infer_service_profile(service_name, ctx)
+                origin_tags.update(profile.origins or set())
+            else:
+                origin_tags.update(profile.origins or set())
+
+            footer, _ = await ctx.footer.render_footer(
+                service_name=service_name,
+                contributors=profile.contributors,
+                used_local_processing=profile.used_local_processing,
+            )
+            phrase = service_phrases.get(service_name) or global_phrase or "(nessuna)"
+            origin = ",".join(sorted(origin_tags)) or "unknown"
+            has_specific_phrase = service_name in service_phrases
+            has_interesting_profile = bool(profile.contributors) or (profile.used_local_processing is False)
+
+            if has_specific_phrase or has_interesting_profile:
+                detailed_blocks.append(
+                    _format_service_status_block(
+                        service_name=service_name,
+                        footer_text=footer,
+                        phrase=phrase,
+                        origin=origin,
+                    )
+                )
+            else:
+                compact_services.append(service_name)
+
+        lines: list[str] = []
+        lines.extend(detailed_blocks)
+        if compact_services:
+            lines.append(f"Servizi senza footer personalizzato: {', '.join(compact_services)}")
 
         chunks: list[str] = []
         current = ""
         for line in lines:
-            candidate = f"{current}\n{line}" if current else line
+            candidate = f"{current}\n\n{line}" if current else line
             if len(candidate) > 1800 and current:
                 chunks.append(current)
                 current = line

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -17,6 +18,7 @@ FOOTER_GLOBAL_PHRASE_KEY = "footer.global_phrase"
 FOOTER_SERVICE_PHRASE_PREFIX = "footer.service_phrase."
 FOOTER_KNOWN_SERVICES_KEY = "footer.known_services"
 FOOTER_KNOWN_SERVICE_SOURCES_KEY = "footer.known_service_sources"
+FOOTER_LAST_META_PREFIX = "footer.last_meta."
 FOOTER_SEPARATOR = " · "
 FOOTER_MAX_LEN = 2048
 
@@ -82,6 +84,16 @@ class FooterMeta:
     contributors: list[str]
     used_local_processing: bool = False
     footer_icon_url: str | None = None
+
+
+@dataclass(slots=True)
+class ServiceFooterProfile:
+    service_name: str
+    contributors: list[str]
+    used_local_processing: bool
+    last_rendered_footer: str | None = None
+    updated_at: str | None = None
+    origins: set[str] | None = None
 
 
 _EMBED_META: dict[int, tuple[discord.Embed, FooterMeta]] = {}
@@ -187,6 +199,7 @@ class FooterService:
         self._database = database
         self._known_services: set[str] = set()
         self._known_service_sources: dict[str, set[str]] = {}
+        self._service_profiles: dict[str, ServiceFooterProfile] = {}
         self._known_services_loaded = False
 
     async def set_version(self, version: str | None) -> None:
@@ -278,6 +291,66 @@ class FooterService:
         await self.get_known_services()
         return {service: sorted(origins) for service, origins in sorted(self._known_service_sources.items())}
 
+    async def record_service_footer_profile(
+        self,
+        *,
+        service_name: str,
+        contributors: Iterable[str],
+        used_local_processing: bool,
+        last_rendered_footer: str | None = None,
+        origin: str = "runtime",
+    ) -> ServiceFooterProfile:
+        service = _clean(service_name) or "unknown"
+        deduped = self._dedupe_contributors(contributors)
+        existing = await self.get_service_footer_profile(service)
+        origins = set(existing.origins) if existing and existing.origins else set()
+        if origin:
+            origins.add(_clean(origin) or origin)
+        profile = ServiceFooterProfile(
+            service_name=service,
+            contributors=deduped,
+            used_local_processing=used_local_processing,
+            last_rendered_footer=_clean(last_rendered_footer) or None,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            origins=origins or {"runtime"},
+        )
+        self._service_profiles[service] = profile
+        await self._database.set_setting(
+            f"{FOOTER_LAST_META_PREFIX}{service}",
+            json.dumps(self._profile_to_dict(profile), ensure_ascii=False),
+        )
+        await self.register_known_service(service, source=origin)
+        return profile
+
+    async def get_service_footer_profile(self, service_name: str) -> ServiceFooterProfile | None:
+        service = _clean(service_name)
+        if not service:
+            return None
+        if service in self._service_profiles:
+            return self._service_profiles[service]
+        raw = await self._database.get_setting(f"{FOOTER_LAST_META_PREFIX}{service}")
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("invalid JSON in %s%s", FOOTER_LAST_META_PREFIX, service)
+            return None
+        profile = self._parse_profile(service, parsed)
+        if profile is None:
+            return None
+        self._service_profiles[service] = profile
+        return profile
+
+    async def get_service_footer_profiles(self) -> dict[str, ServiceFooterProfile]:
+        await self.get_known_services()
+        profiles: dict[str, ServiceFooterProfile] = {}
+        for service in self._known_services:
+            profile = await self.get_service_footer_profile(service)
+            if profile is not None:
+                profiles[service] = profile
+        return profiles
+
     async def render_footer(self, *, service_name: str, contributors: Iterable[str], used_local_processing: bool) -> tuple[str, str | None]:
         version = await self.get_version()
         global_phrase = await self.get_global_phrase()
@@ -320,8 +393,59 @@ class FooterService:
             contributors=meta.contributors,
             used_local_processing=meta.used_local_processing,
         )
+        await self.record_service_footer_profile(
+            service_name=meta.service_name,
+            contributors=meta.contributors,
+            used_local_processing=meta.used_local_processing,
+            last_rendered_footer=text,
+            origin="runtime",
+        )
         embed.set_footer(text=text, icon_url=meta.footer_icon_url)
         return embed
+
+    def _dedupe_contributors(self, contributors: Iterable[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in contributors:
+            clean = _clean(item)
+            if not clean or clean in seen:
+                continue
+            out.append(clean)
+            seen.add(clean)
+        return out
+
+    def _parse_profile(self, service_name: str, payload: object) -> ServiceFooterProfile | None:
+        if not isinstance(payload, dict):
+            return None
+        contributors_raw = payload.get("contributors", [])
+        contributors = self._dedupe_contributors(contributors_raw if isinstance(contributors_raw, list) else [])
+        used_local_processing = bool(payload.get("used_local_processing", False))
+        last_rendered_footer = _clean(str(payload.get("last_rendered_footer") or "")) or None
+        updated_at = _clean(str(payload.get("updated_at") or "")) or None
+        origins_raw = payload.get("origins", [])
+        origins = {
+            _clean(str(item))
+            for item in origins_raw
+            if _clean(str(item))
+        } if isinstance(origins_raw, list) else set()
+        return ServiceFooterProfile(
+            service_name=service_name,
+            contributors=contributors,
+            used_local_processing=used_local_processing,
+            last_rendered_footer=last_rendered_footer,
+            updated_at=updated_at,
+            origins=origins or {"runtime"},
+        )
+
+    def _profile_to_dict(self, profile: ServiceFooterProfile) -> dict[str, object]:
+        return {
+            "service_name": profile.service_name,
+            "contributors": list(profile.contributors),
+            "used_local_processing": profile.used_local_processing,
+            "last_rendered_footer": profile.last_rendered_footer,
+            "updated_at": profile.updated_at,
+            "origins": sorted(profile.origins or []),
+        }
 
     def _scan_services_from_codebase(self) -> set[str]:
         found: set[str] = set()
