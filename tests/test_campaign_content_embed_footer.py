@@ -76,8 +76,35 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Categorie attive" not in description
     assert "Notizie uniche aggregate" not in description
     assert "Barcellometro" in description
+    assert "redazione" in description.lower()
     assert "Spettacolo" in description
     assert "Gossip" in description
+
+
+def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
+    weather = build_weather_embeds(
+        {"embed_title": "🌞 METEO CRICETOSO"},
+        {
+            "generated_at": "2026-01-01T20:30:00+00:00",
+            "regions": {
+                "Nord": {"sampled_cities": [{"city": "Milano", "temperature": 21, "windspeed": 10, "condition": "pioggia"}]},
+                "Centro": {"sampled_cities": [{"city": "Roma", "temperature": 24, "windspeed": 8, "condition": "sereno"}]},
+                "Sud e Isole": {"sampled_cities": [{"city": "Palermo", "temperature": 29, "windspeed": 6, "condition": "sereno"}]},
+            },
+        },
+    )
+    horoscope = build_horoscope_embeds(
+        {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
+        {
+            "generated_at": "2026-01-01T20:30:00+00:00",
+            "signs": {sign: {"love": "ok", "work": "ok", "money": "ok", "energy": "alta", "friction": "ok", "advice": "ok", "confidence": 1.0, "tone": "frizzante"} for sign in ["Ariete", "Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]},
+        },
+    )
+
+    assert "Barcellometro" in (weather[0].description or "")
+    assert "Clicca i pulsanti" in (weather[0].description or "")
+    assert "Barcellometro" in (horoscope[0].description or "")
+    assert "pulsanti" in (horoscope[0].description or "").lower()
 
 
 def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fields() -> None:

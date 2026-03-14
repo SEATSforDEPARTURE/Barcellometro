@@ -361,7 +361,7 @@ class CampaignContentService:
             if payload is not None:
                 return build_news_page_map(payload)
             categories = list(range(max(0, len(payload_embeds) - 1)))
-            return [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}] + [
+            return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}] + [
                 {"type": "category", "key": f"cat_{idx+1}", "label": f"📌 CATEGORIA {idx+1}", "page": idx + 1}
                 for idx in categories
             ]
@@ -369,7 +369,7 @@ class CampaignContentService:
             return build_weather_page_map()
         if service_type == "HOROSCOPE":
             return build_horoscope_page_map()
-        return [{"type": "overview", "label": "⏮️ INIZIO", "page": 0}]
+        return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
     @staticmethod
     def _json_to_list(raw: Any) -> list[str]:

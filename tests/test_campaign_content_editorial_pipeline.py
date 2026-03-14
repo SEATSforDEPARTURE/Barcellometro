@@ -106,7 +106,7 @@ def test_send_and_store_metadata_contains_page_map() -> None:
         )
         metadata = json.loads(db.kwargs["metadata_json"])
         assert "page_map" in metadata
-        assert metadata["page_map"][0]["label"] == "⏮️ INIZIO"
+        assert metadata["page_map"][0]["type"] == "overview"
 
     asyncio.run(_run())
 
@@ -218,6 +218,10 @@ def test_open_personal_navigator_clamps_target_index() -> None:
     class _Response:
         def __init__(self):
             self.send_message = AsyncMock()
+            self._done = False
+
+        def is_done(self):
+            return self._done
 
     interaction = SimpleNamespace(message=SimpleNamespace(id=777), response=_Response())
 
