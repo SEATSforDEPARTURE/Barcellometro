@@ -4,7 +4,7 @@ from typing import Any
 
 import discord
 
-from app.services.campaign_content_formatter import SIGN_ORDER
+from app.services.campaign_content_formatter import SIGN_EMOJIS, SIGN_ORDER
 
 
 class CampaignContentPaginationView(discord.ui.View):
@@ -85,7 +85,7 @@ class HoroscopePaginationView(discord.ui.View):
             row = 1 + ((index - 1) // 5)
             self.add_item(
                 HoroscopeNavButton(
-                    label=sign.upper(),
+                    label=f"{SIGN_EMOJIS.get(sign, '✨')} {sign.upper()}",
                     custom_id=f"campaign_content:sign:{sign.lower()}",
                     target_index=index,
                     row=row,

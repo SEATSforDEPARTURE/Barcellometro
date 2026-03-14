@@ -46,18 +46,18 @@ def test_horoscope_has_overview_plus_all_sign_buttons_and_unique_custom_ids() ->
     labels = [item.label for item in view.children]
     assert labels[0] == "OVERVIEW"
     for sign in [
-        "ARIETE",
-        "TORO",
-        "GEMELLI",
-        "CANCRO",
-        "LEONE",
-        "VERGINE",
-        "BILANCIA",
-        "SCORPIONE",
-        "SAGITTARIO",
-        "CAPRICORNO",
-        "ACQUARIO",
-        "PESCI",
+        "♈ ARIETE",
+        "♉ TORO",
+        "♊ GEMELLI",
+        "♋ CANCRO",
+        "♌ LEONE",
+        "♍ VERGINE",
+        "♎ BILANCIA",
+        "♏ SCORPIONE",
+        "♐ SAGITTARIO",
+        "♑ CAPRICORNO",
+        "♒ ACQUARIO",
+        "♓ PESCI",
     ]:
         assert sign in labels
 
@@ -69,7 +69,7 @@ def test_horoscope_sign_callback_navigates_to_expected_index() -> None:
     async def _run() -> None:
         service = _FakeService()
         view = HoroscopePaginationView(service)
-        ariete_button = next(item for item in view.children if item.label == "ARIETE")
+        ariete_button = next(item for item in view.children if item.label == "♈ ARIETE")
         interaction = _FakeInteraction()
 
         await ariete_button.callback(interaction)

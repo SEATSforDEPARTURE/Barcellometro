@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -52,28 +53,58 @@ class CampaignContentService:
 
     async def execute_news_service(self, config: dict[str, Any]) -> None:
         categories = self._csv_to_list(config.get("categories_json"))
-        sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
-        payload = fetch_news_content(sources, categories)
+        configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
+        payload = fetch_news_content(configured_sources, categories)
+        used_sources = self._normalize_sources(payload.get("used_sources", []))
         used_model: str | None = None
+        fallback_used = False
         if not payload.get("categories"):
+            fallback_used = True
             embeds = build_fallback_embed(config, payload.get("sources", []))
         else:
             used_model = await self._rewrite_news_payload(payload)
             embeds = build_news_embeds(config, payload)
-        await self._send_and_store(config, embeds, "NEWS", used_sources=sources, used_model=used_model)
+        await self._send_and_store(
+            config,
+            embeds,
+            "NEWS",
+            configured_sources=configured_sources,
+            used_sources=used_sources,
+            used_model=used_model,
+            fallback_used=fallback_used,
+        )
 
     async def execute_weather_service(self, config: dict[str, Any]) -> None:
-        sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
-        payload = fetch_weather_content(sources)
+        configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
+        payload = fetch_weather_content(configured_sources)
+        used_model = await self._rewrite_weather_payload(payload)
+        used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_weather_embeds(config, payload)
-        await self._send_and_store(config, embeds, "WEATHER", used_sources=sources, used_model=None)
+        await self._send_and_store(
+            config,
+            embeds,
+            "WEATHER",
+            configured_sources=configured_sources,
+            used_sources=used_sources,
+            used_model=used_model,
+            fallback_used=bool(payload.get("fallback_used")),
+        )
 
     async def execute_horoscope_service(self, config: dict[str, Any]) -> None:
-        sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
-        payload = fetch_horoscope_content(sources)
+        configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
+        payload = fetch_horoscope_content(configured_sources)
         used_model = await self._rewrite_horoscope_payload(payload)
+        used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_horoscope_embeds(config, payload)
-        await self._send_and_store(config, embeds, "HOROSCOPE", used_sources=sources, used_model=used_model)
+        await self._send_and_store(
+            config,
+            embeds,
+            "HOROSCOPE",
+            configured_sources=configured_sources,
+            used_sources=used_sources,
+            used_model=used_model,
+            fallback_used=bool(payload.get("fallback_used")),
+        )
 
     async def _send_and_store(
         self,
@@ -81,14 +112,17 @@ class CampaignContentService:
         embeds: list[discord.Embed],
         service_type: str,
         *,
+        configured_sources: list[str],
         used_sources: list[str],
         used_model: str | None,
+        fallback_used: bool,
     ) -> None:
         now = datetime.now(timezone.utc)
         guild_id = str(config["guild_id"])
         channel_id = str(config["channel_id"])
-        footer_text = await self._build_campaign_footer(used_sources=used_sources, used_model=used_model)
-        contributors = [*used_sources, *([used_model] if used_model else [])]
+        footer_sources = used_sources or configured_sources
+        footer_text = await self._build_campaign_footer(used_sources=footer_sources, used_model=used_model)
+        contributors = [*footer_sources, *([used_model] if used_model else [])]
         attach_footer_meta_to_all(
             embeds,
             service_name="campagne",
@@ -111,6 +145,14 @@ class CampaignContentService:
         elif service_type == "HOROSCOPE":
             view = HoroscopePaginationView(self)
         message = await channel.send(embed=embeds[0], view=view)
+        metadata = {
+            "footer_text": footer_text,
+            "configured_sources": configured_sources,
+            "used_sources": used_sources,
+            "ai_model_used": used_model,
+            "used_model": used_model,
+            "fallback_used": fallback_used,
+        }
         await self._database.upsert_campaign_content_message(
             message_id=str(message.id),
             guild_id=guild_id,
@@ -118,14 +160,7 @@ class CampaignContentService:
             service_type=service_type,
             config_id=int(config["id"]),
             embeds_json=json.dumps([e.to_dict() for e in embeds], ensure_ascii=False),
-            metadata_json=json.dumps(
-                {
-                    "footer_text": footer_text,
-                    "used_sources": used_sources,
-                    "used_model": used_model,
-                },
-                ensure_ascii=False,
-            ),
+            metadata_json=json.dumps(metadata, ensure_ascii=False),
             current_index=0,
         )
         next_run = calculate_next_run_after_send(now, int(config["interval_minutes"]), 0)
@@ -135,27 +170,74 @@ class CampaignContentService:
         used_ai = False
         for items in payload.get("categories", {}).values():
             for item in items[:5]:
-                rewritten, ai_used = await self._rewrite_text(item.get("summary", ""))
+                rewritten, ai_used = await self._rewrite_text(
+                    item.get("summary", ""),
+                    context="notizie",
+                    extra=[item.get("title", ""), item.get("category", "")],
+                )
                 item["summary"] = rewritten
                 used_ai = used_ai or ai_used
+        return self._resolve_ai_model_name() if used_ai else None
+
+    async def _rewrite_weather_payload(self, payload: dict[str, Any]) -> str | None:
+        used_ai = False
+        for region in payload.get("regions", {}).values():
+            summary = str(region.get("summary") or "")
+            rewritten, ai_used = await self._rewrite_text(
+                summary,
+                context="meteo",
+                extra=region.get("source_points", []),
+            )
+            region["summary"] = rewritten
+            used_ai = used_ai or ai_used
         return self._resolve_ai_model_name() if used_ai else None
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
         used_ai = False
         for sign_payload in payload.get("signs", {}).values():
-            rewritten, ai_used = await self._rewrite_text(sign_payload.get("text", ""))
-            sign_payload["text"] = rewritten
-            used_ai = used_ai or ai_used
+            sign = sign_payload.get("sign") or "segno"
+            for key in ["love", "work", "money", "energy", "friction", "advice"]:
+                rewritten, ai_used = await self._rewrite_text(
+                    str(sign_payload.get(key) or ""),
+                    context="oroscopo",
+                    extra=[str(sign), key],
+                )
+                sign_payload[key] = rewritten
+                used_ai = used_ai or ai_used
+        self._enforce_horoscope_diversity(payload)
         return self._resolve_ai_model_name() if used_ai else None
 
-    async def _rewrite_text(self, text: str) -> tuple[str, bool]:
+    @staticmethod
+    def _simple_similarity(a: str, b: str) -> float:
+        tokens_a = {token for token in re.findall(r"\w+", a.lower()) if len(token) > 3}
+        tokens_b = {token for token in re.findall(r"\w+", b.lower()) if len(token) > 3}
+        if not tokens_a or not tokens_b:
+            return 0.0
+        return len(tokens_a.intersection(tokens_b)) / max(1, len(tokens_a.union(tokens_b)))
+
+    def _enforce_horoscope_diversity(self, payload: dict[str, Any]) -> None:
+        signs = payload.get("signs", {})
+        rendered: dict[str, str] = {}
+        for sign, sign_payload in signs.items():
+            combined = " ".join(str(sign_payload.get(k) or "") for k in ["love", "work", "money", "energy", "friction", "advice"])
+            for seen_sign, seen_text in rendered.items():
+                if self._simple_similarity(combined, seen_text) >= 0.78:
+                    sign_payload["advice"] = f"Versione personalizzata per {sign}: {sign_payload.get('advice', '')}".strip()
+                    sign_payload["friction"] = f"{sign_payload.get('friction', '')} (dinamica diversa da {seen_sign})".strip()
+                    combined = " ".join(str(sign_payload.get(k) or "") for k in ["love", "work", "money", "energy", "friction", "advice"])
+                    break
+            rendered[sign] = combined
+
+    async def _rewrite_text(self, text: str, *, context: str, extra: list[str] | None = None) -> tuple[str, bool]:
         if not text:
             return text, False
         if self._ai is None or not self._ai.is_enabled():
             return text, False
+        extra_info = " | ".join(x for x in (extra or []) if x)
         prompt = (
-            "Riscrivi senza inventare dati, tono simpatico ironico semplice per cricetine/polle, frasi brevi:\n"
-            f"{text}"
+            f"Servizio: {context}. Riscrivi in italiano per Discord con tono leggero e ironico ma sostanzioso. "
+            "Non inventare dati/fatti/valori e non cambiare numeri. Evita frasi generiche fotocopia. "
+            f"Contesto: {extra_info}.\nTesto:\n{text}"
         )
         output = await self._ai.ask_general(prompt, "Assistente editoriale")
         return (output or text).strip(), True
