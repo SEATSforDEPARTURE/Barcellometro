@@ -93,8 +93,8 @@ def resolve_color(color_raw: str | None) -> int:
 
 
 def _with_footer(embed: discord.Embed, page: int, total: int) -> discord.Embed:
-    title = (embed.title or "").strip()
-    embed.title = f"{title} • Pagina {page}/{total}" if title else f"Pagina {page}/{total}"
+    # Keep signature for backwards compatibility: pagination numbering removed.
+    _ = (page, total)
     return embed
 
 
@@ -167,15 +167,38 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     color = resolve_color(config.get("embed_color"))
     title = config.get("embed_title") or "🗞️ Notizie del giorno"
     embeds: list[discord.Embed] = []
-    total_news = sum(len(v) for v in categories.values())
-    ordered_keys = list(categories.keys())
+    seen_titles: set[str] = set()
+    highlights: list[str] = []
+    for category, items in categories.items():
+        display = get_category_display_name(category)
+        emoji = get_category_emoji(category)
+        for item in items:
+            title_clean = sanitize_plain_text(item.get("title", ""))[:160]
+            if not title_clean:
+                continue
+            dedupe_key = title_clean.casefold()
+            if dedupe_key in seen_titles:
+                continue
+            seen_titles.add(dedupe_key)
+            highlights.append(f"• {emoji} {display} — {title_clean}")
+            if len(highlights) >= 3:
+                break
+        if len(highlights) >= 3:
+            break
+
     overview = discord.Embed(title=f"{title} • Inizio", color=color)
-    overview.description = (
-        "Panoramica editoriale della giornata.\n"
-        f"Categorie attive ({len(ordered_keys)}): {', '.join(get_category_display_name(k) for k in ordered_keys) or 'nessuna'}\n"
-        f"Notizie uniche aggregate: **{total_news}**"
-    )
-    overview.add_field(name="🧭 Navigazione", value="Usa i pulsanti categoria per aprire la sezione che ti interessa.", inline=False)
+    if highlights:
+        overview.description = (
+            "🐹 Il Barcellometro ha acceso la redazione: oggi il notiziario frulla tra chicche, drammi e aggiornamenti da non perdere.\n"
+            "Ecco cosa sta facendo girare le rotelle del giorno:\n\n"
+            + "\n".join(highlights)
+            + "\n\nApri i pulsanti qui sotto e scegli la tana di notizie che vuoi esplorare."
+        )
+    else:
+        overview.description = (
+            "🐹 Oggi in redazione c'è calma apparente: poche notizie affidabili da rosicchiare.\n"
+            "Apri comunque le sezioni qui sotto: potresti trovare una chicca dell'ultimo minuto."
+        )
     embeds.append(overview)
     for category, items in categories.items():
         display = get_category_display_name(category)
