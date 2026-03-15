@@ -404,7 +404,7 @@ class CampaignContentService:
             "WEATHER": "campagne_meteo",
             "HOROSCOPE": "campagne_oroscopo",
         }
-        return mapped.get(str(service_type or "").upper(), "campagne_timer")
+        return mapped.get(str(service_type or "").upper(), "campagne_notizie")
 
     async def _build_campaign_footer(self, *, service_name: str, used_sources: list[str], used_model: str | None) -> str:
         contributors = list(used_sources)
