@@ -19,6 +19,7 @@ FOOTER_SERVICE_PHRASE_PREFIX = "footer.service_phrase."
 FOOTER_KNOWN_SERVICES_KEY = "footer.known_services"
 FOOTER_KNOWN_SERVICE_SOURCES_KEY = "footer.known_service_sources"
 FOOTER_LAST_META_PREFIX = "footer.last_meta."
+FOOTER_VARIANTS_PREFIX = "footer.variants."
 FOOTER_SEPARATOR = " · "
 FOOTER_MAX_LEN = 2048
 
@@ -31,7 +32,11 @@ SUPPORTED_FOOTER_SERVICES: tuple[str, ...] = (
     "barcello",
     "qna",
     "frasi",
-    "campagne",
+    "campagne_notizie",
+    "campagne_meteo",
+    "campagne_oroscopo",
+    "campagne_prompt",
+    "campagne_timer",
     "status",
     "privacy",
     "voice_ingest",
@@ -96,6 +101,17 @@ class ServiceFooterProfile:
     origins: set[str] | None = None
 
 
+@dataclass(slots=True)
+class ServiceFooterVariant:
+    service_name: str
+    variant_key: str
+    contributors: list[str]
+    used_local_processing: bool
+    last_rendered_footer: str | None = None
+    updated_at: str | None = None
+    origins: set[str] | None = None
+
+
 _EMBED_META: dict[int, tuple[discord.Embed, FooterMeta]] = {}
 
 
@@ -107,6 +123,11 @@ def _truncate(text: str, max_len: int = FOOTER_MAX_LEN) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1].rstrip() + "…"
+
+
+def _is_persistable_service_name(name: str | None) -> bool:
+    service = _clean(name)
+    return bool(service and service not in {"unknown", "default", "fallback"})
 
 
 def _normalize_service_name_from_stem(stem: str) -> str | None:
@@ -220,6 +241,7 @@ class FooterService:
         self._known_services: set[str] = set()
         self._known_service_sources: dict[str, set[str]] = {}
         self._service_profiles: dict[str, ServiceFooterProfile] = {}
+        self._service_variants: dict[str, dict[str, ServiceFooterVariant]] = {}
         self._known_services_loaded = False
 
     async def set_version(self, version: str | None) -> None:
@@ -260,7 +282,11 @@ class FooterService:
         db_services = await self._load_services_from_phrase_keys()
         persisted_services, persisted_sources = await self._load_known_services_from_settings()
 
-        merged: set[str] = set(startup_services) | set(db_services) | set(persisted_services) | set(SUPPORTED_FOOTER_SERVICES)
+        merged: set[str] = {
+            service
+            for service in (set(startup_services) | set(db_services) | set(persisted_services) | set(SUPPORTED_FOOTER_SERVICES))
+            if _is_persistable_service_name(service)
+        }
         sources: dict[str, set[str]] = {}
         for service in merged:
             origins: set[str] = set()
@@ -281,7 +307,7 @@ class FooterService:
 
     async def register_known_service(self, service_name: str, *, source: str) -> None:
         service = _clean(service_name)
-        if not service:
+        if not _is_persistable_service_name(service):
             return
         if not self._known_services_loaded:
             persisted, persisted_sources = await self._load_known_services_from_settings()
@@ -305,11 +331,61 @@ class FooterService:
         return self.get_known_services_cached()
 
     def get_known_services_cached(self) -> list[str]:
-        return sorted(self._known_services)
+        return sorted(service for service in self._known_services if _is_persistable_service_name(service))
 
     async def get_known_service_sources(self) -> dict[str, list[str]]:
         await self.get_known_services()
-        return {service: sorted(origins) for service, origins in sorted(self._known_service_sources.items())}
+        return {
+            service: sorted(origins)
+            for service, origins in sorted(self._known_service_sources.items())
+            if _is_persistable_service_name(service)
+        }
+
+    def _build_variant_key(self, *, service_name: str, contributors: Iterable[str], used_local_processing: bool) -> str:
+        deduped_sorted = sorted(set(self._dedupe_contributors(contributors)))
+        mode = "local" if used_local_processing else "remote"
+        contributors_token = "+".join(deduped_sorted) if deduped_sorted else "none"
+        return f"{service_name}|{mode}|{contributors_token}"
+
+    async def record_service_footer_variant(
+        self,
+        *,
+        service_name: str,
+        contributors: Iterable[str],
+        used_local_processing: bool,
+        last_rendered_footer: str | None = None,
+        origin: str = "runtime",
+    ) -> ServiceFooterVariant | None:
+        service = _clean(service_name)
+        if not _is_persistable_service_name(service):
+            return None
+        deduped = self._dedupe_contributors(contributors)
+        variant_key = self._build_variant_key(
+            service_name=service,
+            contributors=deduped,
+            used_local_processing=used_local_processing,
+        )
+        existing = (await self.get_service_footer_variants(service)).get(variant_key)
+        origins = set(existing.origins) if existing and existing.origins else set()
+        if origin:
+            origins.add(_clean(origin) or origin)
+        variant = ServiceFooterVariant(
+            service_name=service,
+            variant_key=variant_key,
+            contributors=deduped,
+            used_local_processing=used_local_processing,
+            last_rendered_footer=_clean(last_rendered_footer) or None,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            origins=origins or {"runtime"},
+        )
+        service_variants = await self.get_service_footer_variants(service)
+        service_variants[variant_key] = variant
+        await self._database.set_setting(
+            f"{FOOTER_VARIANTS_PREFIX}{service}",
+            json.dumps([self._variant_to_dict(item) for item in service_variants.values()], ensure_ascii=False),
+        )
+        await self.register_known_service(service, source=origin)
+        return variant
 
     async def record_service_footer_profile(
         self,
@@ -321,6 +397,15 @@ class FooterService:
         origin: str = "runtime",
     ) -> ServiceFooterProfile:
         service = _clean(service_name) or "unknown"
+        if not _is_persistable_service_name(service):
+            return ServiceFooterProfile(
+                service_name=service,
+                contributors=self._dedupe_contributors(contributors),
+                used_local_processing=used_local_processing,
+                last_rendered_footer=_clean(last_rendered_footer) or None,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+                origins={origin} if origin else {"runtime"},
+            )
         deduped = self._dedupe_contributors(contributors)
         existing = await self.get_service_footer_profile(service)
         origins = set(existing.origins) if existing and existing.origins else set()
@@ -340,7 +425,56 @@ class FooterService:
             json.dumps(self._profile_to_dict(profile), ensure_ascii=False),
         )
         await self.register_known_service(service, source=origin)
+        await self.record_service_footer_variant(
+            service_name=service,
+            contributors=deduped,
+            used_local_processing=used_local_processing,
+            last_rendered_footer=last_rendered_footer,
+            origin=origin,
+        )
         return profile
+
+    async def get_service_footer_variants(self, service_name: str) -> dict[str, ServiceFooterVariant]:
+        service = _clean(service_name)
+        if not _is_persistable_service_name(service):
+            return {}
+        if service in self._service_variants:
+            return self._service_variants[service]
+        raw = await self._database.get_setting(f"{FOOTER_VARIANTS_PREFIX}{service}")
+        parsed_variants: dict[str, ServiceFooterVariant] = {}
+        if raw:
+            try:
+                payload = json.loads(raw)
+                if isinstance(payload, list):
+                    for item in payload:
+                        variant = self._parse_variant(service, item)
+                        if variant is not None:
+                            parsed_variants[variant.variant_key] = variant
+            except json.JSONDecodeError:
+                logger.warning("invalid JSON in %s%s", FOOTER_VARIANTS_PREFIX, service)
+        if not parsed_variants:
+            profile = await self.get_service_footer_profile(service)
+            if profile is not None:
+                key = self._build_variant_key(
+                    service_name=service,
+                    contributors=profile.contributors,
+                    used_local_processing=profile.used_local_processing,
+                )
+                parsed_variants[key] = ServiceFooterVariant(
+                    service_name=service,
+                    variant_key=key,
+                    contributors=profile.contributors,
+                    used_local_processing=profile.used_local_processing,
+                    last_rendered_footer=profile.last_rendered_footer,
+                    updated_at=profile.updated_at,
+                    origins=profile.origins,
+                )
+        self._service_variants[service] = parsed_variants
+        return parsed_variants
+
+    async def get_all_service_footer_variants(self) -> dict[str, dict[str, ServiceFooterVariant]]:
+        await self.get_known_services()
+        return {service: await self.get_service_footer_variants(service) for service in self._known_services}
 
     async def get_service_footer_profile(self, service_name: str) -> ServiceFooterProfile | None:
         service = _clean(service_name)
@@ -407,19 +541,22 @@ class FooterService:
         meta = pop_footer_meta(embed)
         if meta is None:
             meta = FooterMeta(service_name=_clean(default_service_name) or "unknown", contributors=[], used_local_processing=False)
-        await self.register_known_service(meta.service_name, source="runtime")
+        persistable = _is_persistable_service_name(meta.service_name)
+        if persistable:
+            await self.register_known_service(meta.service_name, source="runtime")
         text, _ = await self.render_footer(
             service_name=meta.service_name,
             contributors=meta.contributors,
             used_local_processing=meta.used_local_processing,
         )
-        await self.record_service_footer_profile(
-            service_name=meta.service_name,
-            contributors=meta.contributors,
-            used_local_processing=meta.used_local_processing,
-            last_rendered_footer=text,
-            origin="runtime",
-        )
+        if persistable:
+            await self.record_service_footer_profile(
+                service_name=meta.service_name,
+                contributors=meta.contributors,
+                used_local_processing=meta.used_local_processing,
+                last_rendered_footer=text,
+                origin="runtime",
+            )
         embed.set_footer(text=text, icon_url=meta.footer_icon_url)
         return embed
 
@@ -467,6 +604,44 @@ class FooterService:
             "origins": sorted(profile.origins or []),
         }
 
+    def _parse_variant(self, service_name: str, payload: object) -> ServiceFooterVariant | None:
+        if not isinstance(payload, dict):
+            return None
+        contributors_raw = payload.get("contributors", [])
+        contributors = self._dedupe_contributors(contributors_raw if isinstance(contributors_raw, list) else [])
+        used_local_processing = bool(payload.get("used_local_processing", False))
+        variant_key = _clean(str(payload.get("variant_key") or "")) or self._build_variant_key(
+            service_name=service_name,
+            contributors=contributors,
+            used_local_processing=used_local_processing,
+        )
+        origins_raw = payload.get("origins", [])
+        origins = {
+            _clean(str(item))
+            for item in origins_raw
+            if _clean(str(item))
+        } if isinstance(origins_raw, list) else set()
+        return ServiceFooterVariant(
+            service_name=service_name,
+            variant_key=variant_key,
+            contributors=contributors,
+            used_local_processing=used_local_processing,
+            last_rendered_footer=_clean(str(payload.get("last_rendered_footer") or "")) or None,
+            updated_at=_clean(str(payload.get("updated_at") or "")) or None,
+            origins=origins or {"runtime"},
+        )
+
+    def _variant_to_dict(self, variant: ServiceFooterVariant) -> dict[str, object]:
+        return {
+            "service_name": variant.service_name,
+            "variant_key": variant.variant_key,
+            "contributors": list(variant.contributors),
+            "used_local_processing": variant.used_local_processing,
+            "last_rendered_footer": variant.last_rendered_footer,
+            "updated_at": variant.updated_at,
+            "origins": sorted(variant.origins or []),
+        }
+
     def _scan_services_from_codebase(self) -> set[str]:
         found: set[str] = set()
         for directory in _STARTUP_SERVICE_SCAN_DIRS:
@@ -481,7 +656,9 @@ class FooterService:
                     text = path.read_text(encoding="utf-8")
                 except OSError:
                     continue
-                if "discord.Embed" not in text and "attach_footer_meta(" not in text:
+                if "attach_footer_meta(" not in text and "attach_footer_meta_to_all(" not in text:
+                    continue
+                if not _is_persistable_service_name(service_name):
                     continue
                 found.add(service_name)
         return found
@@ -499,7 +676,7 @@ class FooterService:
             try:
                 parsed = json.loads(raw)
                 if isinstance(parsed, list):
-                    services = sorted({_clean(str(item)) for item in parsed if _clean(str(item))})
+                    services = sorted({s for item in parsed if _is_persistable_service_name(s := _clean(str(item)))})
             except json.JSONDecodeError:
                 logger.warning("invalid JSON in %s", FOOTER_KNOWN_SERVICES_KEY)
 
@@ -510,7 +687,7 @@ class FooterService:
                 if isinstance(parsed_sources, dict):
                     for service, origin_list in parsed_sources.items():
                         service_clean = _clean(str(service))
-                        if not service_clean:
+                        if not _is_persistable_service_name(service_clean):
                             continue
                         if isinstance(origin_list, list):
                             cleaned_origins = {_clean(str(origin)) for origin in origin_list if _clean(str(origin))}
@@ -524,7 +701,7 @@ class FooterService:
         return services, sources
 
     async def _persist_known_services(self) -> None:
-        services = sorted(self._known_services)
+        services = sorted(service for service in self._known_services if _is_persistable_service_name(service))
         sources = {service: sorted(self._known_service_sources.get(service, {"startup"})) for service in services}
         await self._database.set_setting(FOOTER_KNOWN_SERVICES_KEY, json.dumps(services, ensure_ascii=False))
         await self._database.set_setting(FOOTER_KNOWN_SERVICE_SOURCES_KEY, json.dumps(sources, ensure_ascii=False))
