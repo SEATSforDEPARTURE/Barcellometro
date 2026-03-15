@@ -1,6 +1,11 @@
+import sys
+import types
 from pathlib import Path
 
-from app.plugins.commands_modular.admin import _service_section
+if "aiosqlite" not in sys.modules:
+    sys.modules["aiosqlite"] = types.SimpleNamespace(Connection=object)
+
+from app.plugins.commands_modular.admin import _chunk_status_blocks, _service_section, _split_long_text
 
 
 def test_footer_status_groups_campaign_sections_separately() -> None:
@@ -15,7 +20,7 @@ def test_footer_status_groups_campaign_sections_separately() -> None:
 def test_footer_status_source_uses_variants_and_excludes_legacy_campagne() -> None:
     source = Path("app/plugins/commands_modular/admin.py").read_text()
     assert "get_all_service_footer_variants" in source
-    assert "Campagne servizi editoriali" in source
+    assert "Campagne editoriali" in source
     assert "Campagne prompt" in source
     assert "Campagne timer" in source
     assert 'service_name="campagne"' not in source
@@ -23,4 +28,30 @@ def test_footer_status_source_uses_variants_and_excludes_legacy_campagne() -> No
 
 def test_message_scheduler_uses_prompt_vs_timer_footer_service() -> None:
     source = Path("app/services/message_scheduler.py").read_text()
-    assert 'footer_service = "campagne_prompt" if campaign_type == "AI_PROMPT" else "campagne_timer"' in source
+    assert "def _campaign_footer_service_name" in source
+    assert 'return "campagne_prompt" if str(campaign_type or "").upper() == "AI_PROMPT" else "campagne_timer"' in source
+
+
+def test_split_long_text_handles_very_long_line() -> None:
+    text = "a" * 4500
+    parts = _split_long_text(text, max_len=1900)
+    assert len(parts) == 3
+    assert all(len(part) <= 1900 for part in parts)
+
+
+def test_chunk_status_blocks_handles_big_block_and_long_line() -> None:
+    blocks = [
+        "blocco breve",
+        "riga1\n" + ("x" * 2200) + "\n" + ("y" * 2100),
+        "blocco finale",
+    ]
+    chunks = _chunk_status_blocks(blocks, max_len=1900)
+    assert chunks
+    assert all(0 < len(chunk) <= 1900 for chunk in chunks)
+
+
+def test_chunk_status_blocks_scales_with_many_services() -> None:
+    blocks = [f"**service_{idx}**\nvariante: local | model\n→ footer" for idx in range(200)]
+    chunks = _chunk_status_blocks(blocks, max_len=1900)
+    assert len(chunks) > 1
+    assert all(0 < len(chunk) <= 1900 for chunk in chunks)

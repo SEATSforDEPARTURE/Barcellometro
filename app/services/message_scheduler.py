@@ -128,6 +128,10 @@ def select_text_for_mood(
     return base_text, "barcello_unavailable", "base"
 
 
+def _campaign_footer_service_name(campaign_type: str) -> str:
+    return "campagne_prompt" if str(campaign_type or "").upper() == "AI_PROMPT" else "campagne_timer"
+
+
 def split_embed_pages(text: str, limit: int = 3900) -> list[str]:
     if limit <= 0:
         raise ValueError("limit must be > 0")
@@ -488,7 +492,7 @@ class MessageSchedulerService:
             title = base_title if total == 1 else f"{base_title} • PAG {page_index}/{total}"
             embed = discord.Embed(title=title, description=page, colour=color)
             campaign_type = str(campaign.get("type") or "").upper()
-            footer_service = "campagne_prompt" if campaign_type == "AI_PROMPT" else "campagne_timer"
+            footer_service = _campaign_footer_service_name(campaign_type)
             attach_footer_meta(embed, service_name=footer_service, used_local_processing=True)
             embeds.append(embed)
 

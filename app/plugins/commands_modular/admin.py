@@ -5,7 +5,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.services.footer import ServiceFooterProfile, ServiceFooterVariant
+from app.services.footer import ServiceFooterProfile, ServiceFooterVariant, _is_persistable_service_name
 
 
 def _clean_opt(value: str | None) -> str | None:
@@ -61,6 +61,62 @@ def _service_section(service_name: str) -> int:
     if service_name == "campagne_timer":
         return 3
     return 0
+
+
+def _split_long_text(text: str, max_len: int = 1900) -> list[str]:
+    clean_text = text.strip()
+    if not clean_text:
+        return []
+    if len(clean_text) <= max_len:
+        return [clean_text]
+
+    parts: list[str] = []
+    for line in clean_text.split("\n"):
+        if len(line) <= max_len:
+            parts.append(line)
+            continue
+        for idx in range(0, len(line), max_len):
+            parts.append(line[idx : idx + max_len])
+
+    chunks: list[str] = []
+    current = ""
+    for part in parts:
+        candidate = f"{current}\n{part}" if current else part
+        if len(candidate) <= max_len:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        current = part
+    if current:
+        chunks.append(current)
+    return [chunk for chunk in chunks if chunk]
+
+
+def _chunk_status_blocks(blocks: list[str], max_len: int = 1900) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+
+    for raw_block in blocks:
+        block = raw_block.strip()
+        if not block:
+            continue
+        if len(block) > max_len:
+            split_blocks = _split_long_text(block, max_len=max_len)
+        else:
+            split_blocks = [block]
+
+        for split_block in split_blocks:
+            candidate = f"{current}\n\n{split_block}" if current else split_block
+            if len(candidate) <= max_len:
+                current = candidate
+                continue
+            if current:
+                chunks.append(current)
+            current = split_block
+    if current:
+        chunks.append(current)
+    return [chunk for chunk in chunks if chunk]
 
 
 async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
@@ -315,13 +371,15 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         services = sorted(set(known_services), key=lambda name: (_service_section(name), name))
         sections: dict[str, list[str]] = {
             "Servizi standard": [],
-            "Campagne servizi editoriali": [],
+            "Campagne editoriali": [],
             "Campagne prompt": [],
             "Campagne timer": [],
         }
         minimal_services: list[str] = []
 
         for service_name in services:
+            if not _is_persistable_service_name(service_name):
+                continue
             variants = all_variants.get(service_name, {})
             if not variants:
                 profile = profile_map.get(service_name)
@@ -352,7 +410,7 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             service_block = f"{_format_service_header(service_name)}\n\n" + "\n\n".join(variant_blocks)
             section_idx = _service_section(service_name)
             if section_idx == 1:
-                sections["Campagne servizi editoriali"].append(service_block)
+                sections["Campagne editoriali"].append(service_block)
             elif section_idx == 2:
                 sections["Campagne prompt"].append(service_block)
             elif section_idx == 3:
@@ -361,24 +419,17 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
                 sections["Servizi standard"].append(service_block)
 
         lines: list[str] = []
-        for title in ["Servizi standard", "Campagne servizi editoriali", "Campagne prompt", "Campagne timer"]:
+        for title in ["Servizi standard", "Campagne editoriali", "Campagne prompt", "Campagne timer"]:
             blocks = sections[title]
             if blocks:
                 lines.append(f"__{title}__\n" + "\n\n".join(blocks))
         if minimal_services:
-            lines.append("__Servizi senza footer personalizzato / senza varianti registrate__\n" + "\n\n".join(minimal_services))
+            lines.append("__Servizi senza footer personalizzato__\n" + "\n\n".join(minimal_services))
 
-        chunks: list[str] = []
-        current = ""
-        for line in lines:
-            candidate = f"{current}\n\n{line}" if current else line
-            if len(candidate) > 1800 and current:
-                chunks.append(current)
-                current = line
-            else:
-                current = candidate
-        if current:
-            chunks.append(current)
+        chunks = _chunk_status_blocks(lines, max_len=1900)
+        if not chunks:
+            await interaction.response.send_message("Nessun dato footer disponibile.", ephemeral=True)
+            return
 
         await interaction.response.send_message(chunks[0], ephemeral=True)
         for extra in chunks[1:]:
