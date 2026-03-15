@@ -145,10 +145,10 @@ def test_scores_section_uses_single_bullet_and_keeps_bold_delta() -> None:
         include_sections=["details.missions"],
         details_title_prefix="🗒️ DETTAGLI AURA",
         details_embeds_max=1,
-        ledger_lines=["👍 **+15 P.A.** per aver completato una missione giornaliera in #pollaio."],
+        ledger_lines=["👍 **+15 P.A.** per aver completato le missioni giornaliere in #pollaio."],
     )
     detail_text = "\n".join(field.value for field in embeds[1].fields)
-    assert "• 👍 **+15 P.A.** per aver completato una missione giornaliera in #pollaio." in detail_text
+    assert "• 👍 **+15 P.A.** per aver completato le missioni giornaliere in #pollaio." in detail_text
     assert "• •" not in detail_text
 
 
@@ -307,6 +307,21 @@ def test_dynamic_reason_falls_back_to_template_when_metrics_are_insufficient() -
     assert reason == "template statico"
 
 
+def _mission_trend_sample(**overrides):
+    base = dict(
+        assigned_role1=12,
+        assigned_role2=30,
+        completed_role1=4,
+        completed_role2=6,
+        eligible_role1=10,
+        eligible_role2=10,
+        trend_role1=("⬆️", "in crescita"),
+        trend_role2=("↔️", "stabile"),
+    )
+    base.update(overrides)
+    return base
+
+
 def test_channel_aura_embed_top10_format_and_sections() -> None:
     from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
 
@@ -317,19 +332,20 @@ def test_channel_aura_embed_top10_format_and_sections() -> None:
             negative_points=-15,
             users_count=4,
             top_users=[ChannelAuraTopUserItem(user_id="42", score=1046, trend_emoji="⬆️", trend_comment="in crescita rispetto al periodo precedente", rank=1)],
-            positive_reasons=[("per aver completato una missione giornaliera", 35)],
+            positive_reasons=[("per aver completato le missioni giornaliere", 35)],
             negative_reasons=[("per bassa diversità nelle interazioni", -5)],
-            missions=ChannelAuraMissionTrend(assigned_count=8, completed_count=6, trend_emoji="↔️", trend_comment="stabile rispetto al periodo precedente"),
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample()),
             advice_lines=["Coinvolgete più persone nel canale."],
         )
     )
 
     fields = {f.name: f.value for f in embed.fields}
-    assert "🏆 TOP 10 PUNTI AURA" in fields
-    assert "**+1046 P.A.**" in fields["🏆 TOP 10 PUNTI AURA"]
-    assert "<@42>" in fields["🏆 TOP 10 PUNTI AURA"]
-    assert "🕹️ PUNTEGGI" in fields
-    assert "**+35 P.A.**" in fields["🕹️ PUNTEGGI"]
+    assert "🏆 CLASSIFICA" in fields
+    assert "**+1046 P.A.**" in fields["🏆 CLASSIFICA"]
+    assert "<@42>" in fields["🏆 CLASSIFICA"]
+    assert "🕹️ MOTIVAZIONI" in fields
+    assert "😇 Punti assegnati:" in fields["🕹️ MOTIVAZIONI"]
+    assert "😈 Punti revocati:" in fields["🕹️ MOTIVAZIONI"]
 
 
 def test_channel_aura_advice_is_deterministic() -> None:
@@ -371,7 +387,7 @@ def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
             top_users=top_users,
             positive_reasons=[(very_long_reason + f" #{i}", 500 - i * 7) for i in range(14)],
             negative_reasons=[(very_long_reason + f" malus #{i}", -(150 - i * 5)) for i in range(10)],
-            missions=ChannelAuraMissionTrend(assigned_count=25, completed_count=14, trend_emoji="⬆️", trend_comment="in crescita rispetto al periodo precedente"),
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample(assigned_role1=25, assigned_role2=40, completed_role1=14, completed_role2=9, eligible_role1=30, eligible_role2=20, trend_role1=("⬆️", "in crescita rispetto al periodo precedente"), trend_role2=("↔️", "stabile rispetto al periodo precedente"))),
             advice_lines=[
                 "Suggerimento molto lungo " * 20,
                 "Secondo suggerimento molto lungo " * 20,
@@ -383,18 +399,22 @@ def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
     names = [f.name for f in embed.fields]
     assert _estimate_embed_size(embed) <= MAX_EMBED_CHARS
     assert any(name.startswith("📈 PANORAMICA") for name in names)
-    assert any(name.startswith("🏆 TOP 10 PUNTI AURA") for name in names)
-    assert any(name.startswith("🕹️ PUNTEGGI") for name in names)
+    pano_text = "\n".join(field.value for field in embed.fields if field.name.startswith("📈 PANORAMICA"))
+    assert "Punti assegnati: **+5000**" in pano_text
+    assert "Punti rimossi: **1200**" in pano_text
+    assert "Utenti coinvolti: **44**" in pano_text
+    assert any(name.startswith("🏆 CLASSIFICA") for name in names)
+    assert any(name.startswith("🕹️ MOTIVAZIONI") for name in names)
     assert any(name.startswith("📜 MISSIONI") for name in names)
     assert any(name.startswith("✨ I CONSIGLI DEL BARCELLOMETRO") for name in names)
 
-    top_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🏆 TOP 10 PUNTI AURA"))
+    top_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🏆 CLASSIFICA"))
     top_rows = [line for line in top_text.splitlines() if line.strip()]
     assert len(top_rows) == 10
     assert all("<@" in row and "**+" in row and "—" in row for row in top_rows)
 
-    punteggi_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🕹️ PUNTEGGI"))
-    punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip().startswith("•")]
+    punteggi_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🕹️ MOTIVAZIONI"))
+    punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
     assert len(punteggi_rows) <= 7
     assert len(punteggi_rows) < len(top_rows) + 8
 
@@ -419,12 +439,12 @@ def test_channel_aura_embed_preserves_all_10_rank_positions_with_compact_comment
             ],
             positive_reasons=[("per aver completato missioni", 120), ("per interazioni varie", 100)],
             negative_reasons=[("per bassa diversità", -15)],
-            missions=ChannelAuraMissionTrend(assigned_count=4, completed_count=3, trend_emoji="↔️", trend_comment="stabile rispetto al periodo precedente"),
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample(assigned_role1=4, assigned_role2=6, completed_role1=3, completed_role2=2, eligible_role1=4, eligible_role2=5)),
             advice_lines=["Mantenete costanza."],
         )
     )
 
-    top_field = next(field.value for field in embed.fields if field.name == "🏆 TOP 10 PUNTI AURA")
+    top_field = next(field.value for field in embed.fields if field.name == "🏆 CLASSIFICA")
     rows = [line for line in top_field.splitlines() if line.strip()]
     assert len(rows) == 10
     assert all("—" in row and len(row.split("—", 1)[1].strip()) > 0 for row in rows)
@@ -454,7 +474,7 @@ def test_channel_aura_embed_uses_final_title_and_footer_in_size_budget() -> None
             ],
             positive_reasons=[(f"motivo positivo molto lungo {i} " * 6, 400 - i * 8) for i in range(12)],
             negative_reasons=[(f"malus molto lungo {i} " * 6, -(90 - i * 3)) for i in range(8)],
-            missions=ChannelAuraMissionTrend(assigned_count=16, completed_count=8, trend_emoji="↔️", trend_comment="stabile nel periodo"),
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample(assigned_role1=16, assigned_role2=20, completed_role1=8, completed_role2=7, eligible_role1=16, eligible_role2=18, trend_role1=("↔️", "stabile nel periodo"), trend_role2=("↔️", "stabile nel periodo"))),
             advice_lines=["consiglio molto lungo " * 20, "secondo consiglio molto lungo " * 20, "terzo consiglio molto lungo " * 20],
         ),
     )
@@ -479,15 +499,15 @@ def test_channel_aura_embed_compacts_punteggi_before_reducing_top10_rows() -> No
             ],
             positive_reasons=[(f"ragione estesa {i} " * 8, 300 - i * 4) for i in range(20)],
             negative_reasons=[(f"penalita estesa {i} " * 8, -(120 - i * 3)) for i in range(20)],
-            missions=ChannelAuraMissionTrend(assigned_count=22, completed_count=11, trend_emoji="⬆️", trend_comment="in crescita rispetto al periodo precedente"),
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample(assigned_role1=22, assigned_role2=28, completed_role1=11, completed_role2=9, eligible_role1=20, eligible_role2=15, trend_role1=("⬆️", "in crescita rispetto al periodo precedente"), trend_role2=("⬆️", "in crescita rispetto al periodo precedente"))),
             advice_lines=["suggerimento lungo " * 20, "altro suggerimento lungo " * 20, "terzo suggerimento lungo " * 20],
         )
     )
 
-    top_field = next(field.value for field in embed.fields if field.name == "🏆 TOP 10 PUNTI AURA")
+    top_field = next(field.value for field in embed.fields if field.name == "🏆 CLASSIFICA")
     top_rows = [line for line in top_field.splitlines() if line.strip()]
     assert len(top_rows) == 10
 
-    punteggi_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🕹️ PUNTEGGI"))
-    punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip().startswith("•")]
+    punteggi_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🕹️ MOTIVAZIONI"))
+    punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
     assert len(punteggi_rows) <= 4

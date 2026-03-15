@@ -378,10 +378,14 @@ class ChannelAuraTopUserItem:
 
 @dataclass
 class ChannelAuraMissionTrend:
-    assigned_count: int
-    completed_count: int
-    trend_emoji: str
-    trend_comment: str
+    assigned_role1: int
+    assigned_role2: int
+    completed_role1: int
+    completed_role2: int
+    eligible_role1: int
+    eligible_role2: int
+    trend_role1: tuple[str, str]
+    trend_role2: tuple[str, str]
 
 
 @dataclass
@@ -463,21 +467,23 @@ def _build_points_lines(
     max_negative: int,
 ) -> list[str]:
     lines: list[str] = []
-    positives = positive_reasons[:max_positive]
-    for reason, total in positives:
-        lines.append(f"• **+{int(total)} P.A.** {reason}")
+    positives = sorted(((reason, int(total)) for reason, total in positive_reasons if int(total) > 0), key=lambda item: item[1], reverse=True)
+    negatives = sorted(((reason, int(total)) for reason, total in negative_reasons if int(total) < 0), key=lambda item: abs(item[1]), reverse=True)
 
-    if negative_reasons and max_negative > 0:
-        strongest_positive = max((int(v) for _, v in positives), default=0)
-        significant = [
-            (reason, total)
-            for reason, total in negative_reasons
-            if abs(int(total)) >= max(15, strongest_positive // 3)
-        ]
-        if significant:
-            lines.append("\nMalus più rilevanti:")
-            for reason, total in significant[:max_negative]:
-                lines.append(f"• **{int(total)} P.A.** {reason}")
+    if positives:
+        lines.append("😇 Punti assegnati:")
+        for idx, (reason, total) in enumerate(positives[:max_positive], start=1):
+            lines.append(f"{idx}) +{total} P.A. {reason}")
+
+    if negatives and max_negative > 0:
+        if lines:
+            lines.append("")
+        lines.append("😈 Punti revocati:")
+        for idx, (reason, total) in enumerate(negatives[:max_negative], start=1):
+            lines.append(f"{idx}) {total} P.A. {reason}")
+
+    if not lines:
+        lines.append("• Nessun dato rilevante nel periodo.")
     return lines
 
 
@@ -502,9 +508,9 @@ def _compose_channel_aura_embed(
         embed,
         name="📈 PANORAMICA",
         value=(
-            f"• Punti assegnati: +{int(data.positive_points)}\n"
-            f"• Punti rimossi: {int(data.negative_points)}\n"
-            f"• Utenti coinvolti: {int(data.users_count)}"
+            f"• Punti assegnati: **+{int(data.positive_points)}**\n"
+            f"• Punti rimossi: **{abs(int(data.negative_points))}**\n"
+            f"• Utenti coinvolti: **{int(data.users_count)}**"
         ),
     )
 
@@ -514,7 +520,7 @@ def _compose_channel_aura_embed(
     ]
     _add_field_with_chunks(
         embed,
-        name="🏆 TOP 10 PUNTI AURA",
+        name="🏆 CLASSIFICA",
         value="\n".join(rank_lines) or "• Nessun dato rilevante nel periodo.",
     )
 
@@ -526,21 +532,30 @@ def _compose_channel_aura_embed(
     )
     _add_field_with_chunks(
         embed,
-        name="🕹️ PUNTEGGI",
-        value="\n".join(points_lines) or "• Nessun dato rilevante nel periodo.",
+        name="🕹️ MOTIVAZIONI",
+        value="\n".join(points_lines),
     )
 
     m = data.missions
-    ratio = f"{m.completed_count}/{m.assigned_count}" if m.assigned_count > 0 else "0/0"
+    role1_emoji, role1_comment = m.trend_role1
+    role2_emoji, role2_comment = m.trend_role2
+    role1_ratio = f"{m.completed_role1}/{m.eligible_role1}" if m.eligible_role1 > 0 else "0/0"
+    role2_ratio = f"{m.completed_role2}/{m.eligible_role2}" if m.eligible_role2 > 0 else "0/0"
     mission_value = (
-        f"• Assegnate nel canale: {m.assigned_count}\n"
-        f"• Completate: {ratio} {m.trend_emoji} {_compact_trend_comment(m.trend_comment)}"
+        f"🧭 Assegnate:\n"
+        f"• {m.assigned_role1} missioni da completare a ruolo1\n"
+        f"• {m.assigned_role2} missioni da completare a ruolo2\n\n"
+        f"🎯 Risultati:\n"
+        f"• {role1_ratio} completate da ruolo1 {role1_emoji} {_compact_trend_comment(role1_comment)}\n"
+        f"• {role2_ratio} completate da ruolo2 {role2_emoji} {_compact_trend_comment(role2_comment)}"
         if compact_missions
         else (
             "🧭 Assegnate:\n"
-            f"• {m.assigned_count} nel canale\n\n"
+            f"• {m.assigned_role1} missioni da completare a ruolo1\n"
+            f"• {m.assigned_role2} missioni da completare a ruolo2\n\n"
             "🎯 Risultati:\n"
-            f"• {ratio} completate {m.trend_emoji} {_compact_trend_comment(m.trend_comment)}"
+            f"• {role1_ratio} completate da ruolo1 {role1_emoji} {_compact_trend_comment(role1_comment)}\n"
+            f"• {role2_ratio} completate da ruolo2 {role2_emoji} {_compact_trend_comment(role2_comment)}"
         )
     )
     _add_field_with_chunks(
@@ -619,7 +634,7 @@ def build_aura_embeds(
     details_sections: list[tuple[str, str]] = []
     profile_section: tuple[str, str] | None = None
     metrics = json.loads(aura_payload.metrics_json) if aura_payload.metrics_json else {}
-    details_sections.append(("🕹️ PUNTEGGI", _compact_bullets(_score_lines(ledger_lines), fallback="Nessun dato rilevante nel periodo.")))
+    details_sections.append(("🕹️ MOTIVAZIONI", _compact_bullets(_score_lines(ledger_lines), fallback="Nessun dato rilevante nel periodo.")))
 
     if "details.missions" in include_sections:
         details_sections.append(("📜 MISSIONI QUOTIDIANE", _compact_bullets(_build_missions(metrics, aura_payload.archetype_metrics, aura_payload.assigned_missions), fallback="Nessuna per oggi.")))

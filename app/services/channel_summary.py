@@ -713,6 +713,16 @@ class ChannelSummaryService:
         previous_end_local = current_start_local
         return previous_start_local, previous_end_local
 
+
+    def _rank_trend(self, prev_rank: int | None, current_rank: int) -> tuple[str, str]:
+        if prev_rank is None:
+            return "🆕", "nuovo ingresso nel ranking"
+        if prev_rank > current_rank:
+            return "⬆️", "sale in classifica"
+        if prev_rank < current_rank:
+            return "⬇️", "perde posizioni"
+        return "↔️", "stabile nel ranking"
+
     def _aura_trend(self, current: int, previous: int) -> tuple[str, str]:
         if current > previous:
             return "⬆️", "in crescita rispetto al periodo precedente"
@@ -743,24 +753,14 @@ class ChannelSummaryService:
 
         top_now = await self._database.fetch_aura_channel_top_users(guild_id, channel_id, start_ts, end_ts, limit=10)
         top_prev = await self._database.fetch_aura_channel_top_users(guild_id, channel_id, prev_start_ts, prev_end_ts, limit=50)
-        prev_scores = {str(r["user_id"]): int(r["total"] or 0) for r in top_prev}
         prev_ranks = {str(r["user_id"]): idx for idx, r in enumerate(top_prev, start=1)}
 
         top_items: list[ChannelAuraTopUserItem] = []
         for idx, row in enumerate(top_now, start=1):
             uid = str(row["user_id"])
             score = max(0, int(row["total"] or 0))
-            prev_score = prev_scores.get(uid, 0)
-            trend_emoji, base_comment = self._aura_trend(score, prev_score)
             prev_rank = prev_ranks.get(uid)
-            if prev_rank is None:
-                comment = "nuovo ingresso nel ranking"
-            elif prev_rank > idx:
-                comment = "sale in classifica"
-            elif prev_rank < idx:
-                comment = "perde posizioni"
-            else:
-                comment = base_comment
+            trend_emoji, comment = self._rank_trend(prev_rank, idx)
             top_items.append(ChannelAuraTopUserItem(user_id=uid, score=score, trend_emoji=trend_emoji, trend_comment=comment, rank=idx))
 
         by_reason = list(current.get("by_reason", []))
@@ -769,16 +769,19 @@ class ChannelSummaryService:
 
         missions_now = await self._database.fetch_aura_channel_mission_stats(guild_id, channel_id, start_ts, end_ts)
         missions_prev = await self._database.fetch_aura_channel_mission_stats(guild_id, channel_id, prev_start_ts, prev_end_ts)
-        now_completed = int(missions_now.get("completed_count") or 0)
-        prev_completed = int(missions_prev.get("completed_count") or 0)
-        mission_emoji, mission_comment = self._aura_trend(now_completed, prev_completed)
+        now_completed_role1 = int(missions_now.get("completed_role1") or 0)
+        now_completed_role2 = int(missions_now.get("completed_role2") or 0)
+        prev_completed_role1 = int(missions_prev.get("completed_role1") or 0)
+        prev_completed_role2 = int(missions_prev.get("completed_role2") or 0)
+        mission_role1 = self._aura_trend(now_completed_role1, prev_completed_role1)
+        mission_role2 = self._aura_trend(now_completed_role2, prev_completed_role2)
 
         top_positive_reason = str(pos_reasons[0][0]) if pos_reasons else None
         advice = build_channel_aura_advice(
             positive_points=total_positive,
             negative_points=total_negative,
             users_count=total_users,
-            mission_completed=now_completed,
+            mission_completed=now_completed_role1 + now_completed_role2,
             top_positive_reason=top_positive_reason,
         )
 
@@ -793,10 +796,14 @@ class ChannelSummaryService:
                 positive_reasons=pos_reasons,
                 negative_reasons=neg_reasons,
                 missions=ChannelAuraMissionTrend(
-                    assigned_count=int(missions_now.get("assigned_count") or 0),
-                    completed_count=now_completed,
-                    trend_emoji=mission_emoji,
-                    trend_comment=mission_comment,
+                    assigned_role1=int(missions_now.get("assigned_role1") or 0),
+                    assigned_role2=int(missions_now.get("assigned_role2") or 0),
+                    completed_role1=now_completed_role1,
+                    completed_role2=now_completed_role2,
+                    eligible_role1=int(missions_now.get("eligible_role1") or 0),
+                    eligible_role2=int(missions_now.get("eligible_role2") or 0),
+                    trend_role1=mission_role1,
+                    trend_role2=mission_role2,
                 ),
                 advice_lines=advice,
             )

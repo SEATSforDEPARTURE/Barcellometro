@@ -4495,27 +4495,81 @@ class DatabaseService:
         return [{"user_id": str(r["user_id"]), "total": int(r["total"] or 0)} for r in rows if r["user_id"]]
 
     async def fetch_aura_channel_mission_stats(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> dict[str, int]:
-        row = await self.fetchone(
+        assigned_rows = await self.fetchall(
             """
             SELECT
-                COUNT(*) AS completed_count,
-                COUNT(DISTINCT user_id) AS users_count
-            FROM aura_events_ledger
-            WHERE guild_id = ?
-              AND channel_id = ?
-              AND ts >= ? AND ts <= ?
-              AND reason_code = 'mission_completed'
+                COALESCE(p.role_tier, 'unknown') AS role_tier,
+                COUNT(*) AS assigned_count
+            FROM aura_mission_assignments a
+            LEFT JOIN aura_user_profile p
+              ON p.guild_id = a.guild_id AND p.user_id = a.user_id
+            WHERE a.guild_id = ?
+              AND a.assigned_at >= ? AND a.assigned_at <= ?
+              AND EXISTS (
+                SELECT 1
+                FROM aura_events_ledger l
+                WHERE l.guild_id = a.guild_id
+                  AND l.user_id = a.user_id
+                  AND l.channel_id = ?
+                  AND l.ts >= ? AND l.ts <= ?
+              )
+            GROUP BY COALESCE(p.role_tier, 'unknown')
+            """,
+            (guild_id, start_ts, end_ts, channel_id, start_ts, end_ts),
+        )
+
+        completed_rows = await self.fetchall(
+            """
+            SELECT
+                COALESCE(p.role_tier, 'unknown') AS role_tier,
+                COUNT(DISTINCT l.user_id) AS completed_count
+            FROM aura_events_ledger l
+            LEFT JOIN aura_user_profile p
+              ON p.guild_id = l.guild_id AND p.user_id = l.user_id
+            WHERE l.guild_id = ?
+              AND l.channel_id = ?
+              AND l.ts >= ? AND l.ts <= ?
+              AND l.reason_code = 'mission_completed'
+            GROUP BY COALESCE(p.role_tier, 'unknown')
             """,
             (guild_id, channel_id, start_ts, end_ts),
         )
-        if not row:
-            return {"assigned_count": 0, "completed_count": 0, "pending_count": 0, "users_count": 0}
-        completed = int(row["completed_count"] or 0)
+
+        eligible_rows = await self.fetchall(
+            """
+            SELECT
+                COALESCE(p.role_tier, 'unknown') AS role_tier,
+                COUNT(DISTINCT p.user_id) AS eligible_count
+            FROM aura_user_profile p
+            JOIN aura_mission_assignments a
+              ON a.guild_id = p.guild_id AND a.user_id = p.user_id
+            WHERE p.guild_id = ?
+              AND p.eligible = 1
+              AND a.assigned_at >= ? AND a.assigned_at <= ?
+              AND EXISTS (
+                SELECT 1
+                FROM aura_events_ledger l
+                WHERE l.guild_id = p.guild_id
+                  AND l.user_id = p.user_id
+                  AND l.channel_id = ?
+                  AND l.ts >= ? AND l.ts <= ?
+              )
+            GROUP BY COALESCE(p.role_tier, 'unknown')
+            """,
+            (guild_id, start_ts, end_ts, channel_id, start_ts, end_ts),
+        )
+
+        assigned_by_role = {str(r['role_tier']): int(r['assigned_count'] or 0) for r in assigned_rows}
+        completed_by_role = {str(r['role_tier']): int(r['completed_count'] or 0) for r in completed_rows}
+        eligible_by_role = {str(r['role_tier']): int(r['eligible_count'] or 0) for r in eligible_rows}
+
         return {
-            "assigned_count": completed,
-            "completed_count": completed,
-            "pending_count": 0,
-            "users_count": int(row["users_count"] or 0),
+            'assigned_role1': assigned_by_role.get('role1', 0),
+            'assigned_role2': assigned_by_role.get('role2', 0),
+            'completed_role1': completed_by_role.get('role1', 0),
+            'completed_role2': completed_by_role.get('role2', 0),
+            'eligible_role1': eligible_by_role.get('role1', 0),
+            'eligible_role2': eligible_by_role.get('role2', 0),
         }
 
     async def get_channel_name_map(self, guild_id: str) -> dict[str, str]:
