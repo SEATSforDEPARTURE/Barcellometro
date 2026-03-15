@@ -263,7 +263,7 @@ def test_normalize_text_for_matching_good_morning_variants() -> None:
     assert "buongiorno" in out
 
 
-def test_mission_good_morning_completes_and_records_points(monkeypatch) -> None:
+def test_mission_good_morning_completes_without_single_mission_reward(monkeypatch) -> None:
     async def _scenario() -> None:
         db = FakeLedgerDB()
         db.missions = [
@@ -293,7 +293,8 @@ def test_mission_good_morning_completes_and_records_points(monkeypatch) -> None:
             mentions=[],
         )
         assert "good_morning" in done
-        assert len(db.events) >= 1
+        assert len(db.events) == 1
+        assert all(ev["reason_code"] == "mission_completed" for ev in db.events)
 
     run(_scenario())
 
@@ -353,7 +354,7 @@ def test_load_aura_rule_definitions_supports_number_and_object(monkeypatch) -> N
     assert defs["good_morning_first"].label_user.startswith("per aver dato")
 
 
-def test_mission_good_morning_records_separate_rule_and_completion_events(monkeypatch) -> None:
+def test_single_mission_completion_does_not_assign_reward_points(monkeypatch) -> None:
     async def _scenario() -> None:
         db = FakeLedgerDB()
         db.missions = [
@@ -363,24 +364,19 @@ def test_mission_good_morning_records_separate_rule_and_completion_events(monkey
                 "status": "assigned",
                 "reward_points": 12,
                 "meta": {"label": "Dai il buongiorno per prima."},
-            }
+            },
+            {
+                "mission_id": "talk_new_user",
+                "assigned_at": "2026-03-07T07:01:00+00:00",
+                "status": "assigned",
+                "reward_points": 8,
+                "meta": {"label": "Talk"},
+            },
         ]
         scoring = AuraScoringService(db)  # type: ignore[arg-type]
         service = AuraMissionService(db, scoring)  # type: ignore[arg-type]
 
-        def _fake_cfg():
-            return {
-                "good_morning": {"start_hour": 5, "end_hour": 11, "keywords": ["buongiorno"]},
-                "missions": [
-                    {
-                        "id": "good_morning",
-                        "completion_text": "aver completato la missione 'Dai il buongiorno per prima'",
-                        "rule_on_complete": "good_morning_first",
-                    }
-                ],
-            }
-
-        monkeypatch.setattr("app.services.aura.load_aura_missions_config", _fake_cfg)
+        monkeypatch.setattr("app.services.aura.load_aura_missions_config", lambda: {"good_morning": {"start_hour": 5, "end_hour": 11, "keywords": ["buongiorno"]}})
 
         done = await service.process_message_for_missions(
             guild_id="10",
@@ -392,12 +388,9 @@ def test_mission_good_morning_records_separate_rule_and_completion_events(monkey
             mentions=[],
         )
         assert "good_morning" in done
-        mission_events = [e for e in db.events if e["reason_code"] == "mission_completed"]
-        rule_events = [e for e in db.events if e["reason_code"] == "good_morning_first"]
-        assert len(mission_events) == 1
-        assert len(rule_events) == 1
-        assert int(mission_events[0]["delta_points"]) == 15
-        assert int(rule_events[0]["delta_points"]) == 12
+        assert all(e["reason_code"] != "good_morning_first" for e in db.events)
+        assert all(e["reason_code"] != "mission_task_reward" for e in db.events)
+        assert all(e["reason_code"] != "mission_completed" for e in db.events)
 
     run(_scenario())
 

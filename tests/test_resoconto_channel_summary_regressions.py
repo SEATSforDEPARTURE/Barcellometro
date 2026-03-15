@@ -679,7 +679,7 @@ def test_channel_summary_keeps_final_aura_embed_title_and_footer_without_post_mu
             return [{"user_id": str(i), "total": 1000 - i * 10} for i in range(1, limit + 1)]
 
         async def fetch_aura_channel_mission_stats(self, *_args):  # type: ignore[no-untyped-def]
-            return {"assigned_count": 12, "completed_count": 6}
+            return {"assigned_role1": 12, "assigned_role2": 30, "completed_role1": 4, "completed_role2": 6, "eligible_role1": 10, "eligible_role2": 10}
 
     svc._database = FakeDatabase()  # type: ignore[assignment]
 
@@ -711,6 +711,46 @@ def test_database_has_channel_scoped_aura_queries() -> None:
     assert "async def fetch_aura_channel_ledger_report" in source
     assert "WHERE guild_id = ? AND channel_id = ? AND ts >= ? AND ts <= ?" in source
     assert "async def fetch_aura_channel_top_users" in source
+
+
+def test_channel_summary_ranking_arrow_and_comment_are_consistent() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.channel_summary import ChannelSummaryService
+
+    svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
+
+    class FakeDatabase:
+        async def fetch_aura_channel_ledger_report(self, *_args):  # type: ignore[no-untyped-def]
+            return {
+                "totals": {"users_count": 2, "positive": 100, "negative": -10},
+                "by_reason": [{"reason_code": "message_participation", "total": 100}],
+            }
+
+        async def fetch_aura_channel_top_users(self, *_args, **kwargs):  # type: ignore[no-untyped-def]
+            limit = int(kwargs.get("limit", 10))
+            if limit == 50:
+                return [{"user_id": "1", "total": 200}, {"user_id": "2", "total": 199}]
+            return [{"user_id": "2", "total": 300}, {"user_id": "1", "total": 250}]
+
+        async def fetch_aura_channel_mission_stats(self, *_args):  # type: ignore[no-untyped-def]
+            return {"assigned_role1": 2, "assigned_role2": 0, "completed_role1": 1, "completed_role2": 0, "eligible_role1": 2, "eligible_role2": 0}
+
+    svc._database = FakeDatabase()  # type: ignore[assignment]
+
+    async def _run() -> None:
+        embed = await svc._build_channel_aura_embed(
+            guild_id="1",
+            channel_id="2",
+            start_local=datetime(2026, 3, 11, 0, 0),
+            end_local=datetime(2026, 3, 11, 23, 59),
+        )
+        assert embed is not None
+        ranking = next(field.value for field in embed.fields if field.name == "🏆 CLASSIFICA")
+        assert "⬆️" in ranking
+        assert "sale in classifica" in ranking
+        assert "⬆️" in ranking and "perde posizioni" not in ranking
+
+    asyncio.run(_run())
 
 
 def test_channel_summary_validates_third_embed_without_mutating_after_validation(monkeypatch: pytest.MonkeyPatch) -> None:

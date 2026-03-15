@@ -65,7 +65,7 @@ AURA_REASON_HUMAN: dict[str, str] = {
     "climate_degrade": "per aver abbassato il clima in una discussione",
     "monopoly_penalty": "per aver monopolizzato la conversazione",
     "voice_join_bonus": "per aver partecipato in canale vocale",
-    "mission_completed": "per aver completato una missione giornaliera",
+    "mission_completed": "per aver completato le missioni giornaliere",
     "conversation_starter": "per aver avviato una conversazione",
     "cross_user_interaction": "per aver coinvolto utenti diversi",
     "low_diversity_penalty": "per bassa diversità nelle interazioni",
@@ -292,8 +292,6 @@ class AuraMissionService:
         now = datetime.fromisoformat(ts)
         day = now.date().isoformat()
         cfg = load_aura_missions_config()
-        mission_defs = cfg.get("missions", []) if isinstance(cfg.get("missions", []), list) else []
-        mission_by_id = {str(item.get("id", "")): item for item in mission_defs if isinstance(item, dict)}
         active = await self._db.list_aura_missions_for_user(guild_id, user_id, f"{day}T00:00:00+00:00", f"{day}T23:59:59+00:00")
         completed: list[str] = []
         normalized = normalize_text_for_matching(content)
@@ -301,10 +299,7 @@ class AuraMissionService:
             if mission.get("status") != "assigned":
                 continue
             mission_id = str(mission.get("mission_id", ""))
-            reward = int(mission.get("reward_points", 0) or 0)
             meta = mission.get("meta", {}) if isinstance(mission.get("meta"), dict) else {}
-            mission_cfg = mission_by_id.get(mission_id, {})
-            completion_text = str(mission_cfg.get("completion_text") or f"aver completato la missione '{meta.get('label', mission_id)}'")
             if mission_id == "good_morning":
                 gm = cfg.get("good_morning", {}) if isinstance(cfg, dict) else {}
                 start_hour = int(gm.get("start_hour", 5) or 5)
@@ -352,22 +347,6 @@ class AuraMissionService:
                     continue
 
             await self._db.complete_aura_mission(guild_id=guild_id, user_id=user_id, mission_id=mission_id, assigned_at=str(mission.get("assigned_at")), completed_at=ts)
-            if reward > 0:
-                reward_reason = str(mission_cfg.get("rule_on_complete") or ("good_morning_first" if mission_id == "good_morning" else "mission_task_reward"))
-                if reward_reason == "mission_completed":
-                    reward_reason = "mission_task_reward"
-                await self._scoring.award_points(
-                    guild_id=guild_id,
-                    user_id=user_id,
-                    reason_code=reward_reason,
-                    ts=ts,
-                    channel_id=channel_id,
-                    points=reward,
-                    message_id=message_id,
-                    source_service="mission",
-                    source_event="mission.reward",
-                    meta={"mission_id": mission_id, "mission_label": meta.get("label", mission_id), "completion_text": completion_text, "mission_reward_points": reward},
-                )
             await self._maybe_apply_all_missions_completion_bonus(
                 guild_id=guild_id,
                 user_id=user_id,
