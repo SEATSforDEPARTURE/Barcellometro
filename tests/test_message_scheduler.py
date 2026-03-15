@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app.services.database import DatabaseService
+from app.services.footer import get_footer_meta
 from app.services.message_scheduler import (
     MessageSchedulerService,
     select_round_robin_campaign,
@@ -247,8 +248,35 @@ def test_send_campaign_embed_multi_page() -> None:
         assert len(embeds) == 2
         assert embeds[0].title == "Campagna prova • PAG 1/2"
         assert embeds[1].title == "Campagna prova • PAG 2/2"
-        assert embeds[0].footer.text == "Questo servizio è offerto dal vostro Barcellometruccio di fiducia."
+        assert get_footer_meta(embeds[0]) is not None
+        assert get_footer_meta(embeds[0]).service_name == "campagne_timer"
         assert embeds[0].colour.value == 0x112233
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_send_campaign_embed_ai_prompt_uses_prompt_footer_service() -> None:
+    class DummyChannel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, **kwargs):
+            self.sent.append(kwargs)
+
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        scheduler = MessageSchedulerService(db, bot=None)  # type: ignore[arg-type]
+        channel = DummyChannel()
+        campaign = {"id": 8, "name": "Prompt test", "type": "AI_PROMPT"}
+        await scheduler.send_campaign_embed(channel, campaign, "ciao")
+
+        embeds = channel.sent[0]["embeds"]
+        meta = get_footer_meta(embeds[0])
+        assert meta is not None
+        assert meta.service_name == "campagne_prompt"
         await db.close()
 
     asyncio.run(_run())

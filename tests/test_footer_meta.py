@@ -178,3 +178,48 @@ def test_footer_meta_is_cleaned_up_after_apply() -> None:
         assert get_footer_meta(embed) is None
 
     asyncio.run(_run())
+
+
+def test_footer_service_tracks_multiple_variants_for_same_service() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.record_service_footer_profile(
+            service_name="audio_notes",
+            contributors=["small", "argos"],
+            used_local_processing=True,
+            last_rendered_footer="f1",
+        )
+        await service.record_service_footer_profile(
+            service_name="audio_notes",
+            contributors=["gpt-4o-transcribe", "gpt-4o-mini"],
+            used_local_processing=False,
+            last_rendered_footer="f2",
+        )
+
+        variants = await service.get_service_footer_variants("audio_notes")
+        keys = sorted(variants.keys())
+        assert keys == [
+            "audio_notes|local|argos+small",
+            "audio_notes|remote|gpt-4o-mini+gpt-4o-transcribe",
+        ]
+
+    asyncio.run(_run())
+
+
+def test_unknown_service_is_not_persisted_or_returned_as_known() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.record_service_footer_profile(
+            service_name="unknown",
+            contributors=[],
+            used_local_processing=True,
+            last_rendered_footer="fallback",
+        )
+        embed = discord.Embed(title="x")
+        await service.apply(embed, default_service_name="unknown")
+
+        assert await service.get_known_services() == []
+        assert await service.get_service_footer_profile("unknown") is None
+        assert await service.get_service_footer_variants("unknown") == {}
+
+    asyncio.run(_run())

@@ -130,11 +130,12 @@ class CampaignContentService:
         guild_id = str(config["guild_id"])
         channel_id = str(config["channel_id"])
         footer_sources = used_sources or configured_sources
-        footer_text = await self._build_campaign_footer(used_sources=footer_sources, used_model=used_model)
+        footer_service_name = self._campaign_footer_service_name(service_type)
+        footer_text = await self._build_campaign_footer(service_name=footer_service_name, used_sources=footer_sources, used_model=used_model)
         contributors = [*footer_sources, *([used_model] if used_model else [])]
         attach_footer_meta_to_all(
             embeds,
-            service_name="campagne",
+            service_name=footer_service_name,
             contributors=contributors,
             used_local_processing=not contributors,
         )
@@ -397,18 +398,26 @@ class CampaignContentService:
                 return []
         return [v.strip() for v in value.split(",") if v.strip()]
 
-    async def _build_campaign_footer(self, *, used_sources: list[str], used_model: str | None) -> str:
+    def _campaign_footer_service_name(self, service_type: str) -> str:
+        mapped = {
+            "NEWS": "campagne_notizie",
+            "WEATHER": "campagne_meteo",
+            "HOROSCOPE": "campagne_oroscopo",
+        }
+        return mapped.get(str(service_type or "").upper(), "campagne_timer")
+
+    async def _build_campaign_footer(self, *, service_name: str, used_sources: list[str], used_model: str | None) -> str:
         contributors = list(used_sources)
         model = (used_model or "").strip()
         if model and model not in contributors:
             contributors.append(model)
         text, _ = await self._footer.render_footer(
-            service_name="campagne",
+            service_name=service_name,
             contributors=contributors,
             used_local_processing=not contributors,
         )
         await self._footer.record_service_footer_profile(
-            service_name="campagne",
+            service_name=service_name,
             contributors=contributors,
             used_local_processing=not contributors,
             last_rendered_footer=text,

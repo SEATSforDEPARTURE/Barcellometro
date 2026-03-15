@@ -12,6 +12,7 @@ from app.plugins.commands_modular.command_helpers import describe_placeholders
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.discord_embed_utils import FIELD_MAX, truncate
+from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 
 PERM = "inattivi.config"
 TEMPLATE_HELP = f"Placeholder supportati: {describe_placeholders()} Es: {{display_name}}, {{days_inactive}}g."
@@ -91,6 +92,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
 
         if not lines:
             embed = discord.Embed(title=title, description="Nessun risultato.", colour=discord.Colour.blue())
+            attach_footer_meta(embed, service_name="inattivi", used_local_processing=True)
             await interaction.response.send_message(embed=embed, ephemeral=True, file=txt_file)
             return
 
@@ -114,6 +116,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         if total > 10:
             embeds[-1].add_field(name="Nota", value="Lista completa in allegato .txt", inline=False)
 
+        attach_footer_meta_to_all(embeds, service_name="inattivi", used_local_processing=True)
         await interaction.response.send_message(embeds=embeds, ephemeral=True, file=txt_file)
 
     @inattivi_group.command(name="on", description="Abilita gestione inattivi")
@@ -345,6 +348,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         atrio_preview = _render_preview(atrio_raw)
 
         embed = discord.Embed(title="🧩 Template inattivi", colour=discord.Colour.blue())
+        attach_footer_meta(embed, service_name="inattivi", used_local_processing=True)
         extra_sections: list[str] = []
 
         def add_template_field(name: str, text: str) -> None:

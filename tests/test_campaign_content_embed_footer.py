@@ -110,9 +110,19 @@ def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
 def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fields() -> None:
     source = Path("app/services/campaign_content_service.py").read_text()
     assert "def _normalize_sources" in source
-    assert 'service_name="campagne"' in source
+    assert '"campagne_notizie"' in source
+    assert '"campagne_meteo"' in source
+    assert '"campagne_oroscopo"' in source
     assert '"footer_text": footer_text' in source
     assert '"used_sources": used_sources' in source
     assert '"used_model": used_model' in source
     assert "attach_footer_meta_to_all" in source
     assert "apply_shared_footer_and_pagination" in source
+
+
+def test_campaign_content_service_maps_editorial_footer_service_names() -> None:
+    source = Path("app/services/campaign_content_service.py").read_text()
+    assert 'def _campaign_footer_service_name' in source
+    assert '"NEWS": "campagne_notizie"' in source
+    assert '"WEATHER": "campagne_meteo"' in source
+    assert '"HOROSCOPE": "campagne_oroscopo"' in source

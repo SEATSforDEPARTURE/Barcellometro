@@ -5,7 +5,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.services.footer import ServiceFooterProfile
+from app.services.footer import ServiceFooterProfile, ServiceFooterVariant
 
 
 def _clean_opt(value: str | None) -> str | None:
@@ -17,6 +17,50 @@ def _clean_opt(value: str | None) -> str | None:
 
 def _format_value(value: str | None) -> str:
     return value if value else "(non impostata)"
+
+
+def _human_service_name(service_name: str) -> str:
+    labels = {
+        "campagne_notizie": "campagne_notizie",
+        "campagne_meteo": "campagne_meteo",
+        "campagne_oroscopo": "campagne_oroscopo",
+        "campagne_prompt": "campagne_prompt",
+        "campagne_timer": "campagne_timer",
+    }
+    return labels.get(service_name, service_name.replace("_", " ").title())
+
+
+def _format_contributors(contributors: list[str]) -> str:
+    return " + ".join(contributors) if contributors else "(nessuno)"
+
+
+def _format_variant_block(service_name: str, variant: ServiceFooterVariant, phrase: str) -> str:
+    mode = "local" if variant.used_local_processing else "remote"
+    footer_text = variant.last_rendered_footer or "(footer non ancora renderizzato)"
+    origins = ",".join(sorted(variant.origins or [])) or "(n/d)"
+    updated = variant.updated_at or "(n/d)"
+    return (
+        f"variante: {mode} | {_format_contributors(variant.contributors)}\n"
+        f"→ {footer_text}\n"
+        f"frase: {phrase}\n"
+        f"origine: {origins}\n"
+        f"aggiornato: {updated}\n"
+        f"chiave: {variant.variant_key}"
+    )
+
+
+def _format_service_header(service_name: str) -> str:
+    return f"**{service_name}**\nlabel: {_human_service_name(service_name)}\nalias tecnico: `{service_name}`"
+
+
+def _service_section(service_name: str) -> int:
+    if service_name in {"campagne_notizie", "campagne_meteo", "campagne_oroscopo"}:
+        return 1
+    if service_name == "campagne_prompt":
+        return 2
+    if service_name == "campagne_timer":
+        return 3
+    return 0
 
 
 async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
@@ -65,16 +109,6 @@ async def _infer_service_profile(service_name: str, ctx: CommandContext) -> Serv
         updated_at=None,
         origins={"fallback"},
     )
-
-
-def _format_service_status_block(
-    *,
-    service_name: str,
-    footer_text: str,
-    phrase: str,
-    origin: str,
-) -> str:
-    return f"**{service_name}**\n→ {footer_text}\nfrase: {phrase}\norigine: {origin}"
 
 
 def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -271,51 +305,68 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         global_phrase = await ctx.footer.get_global_phrase()
         known_services = await ctx.footer.get_known_services()
         service_sources = await ctx.footer.get_known_service_sources()
+        all_variants = await ctx.footer.get_all_service_footer_variants()
+        profile_map = await ctx.footer.get_service_footer_profiles()
 
         if not known_services:
             await interaction.response.send_message("Nessun servizio footer noto.", ephemeral=True)
             return
 
-        profile_map = await ctx.footer.get_service_footer_profiles()
-        detailed_blocks: list[str] = []
-        compact_services: list[str] = []
+        services = sorted(set(known_services), key=lambda name: (_service_section(name), name))
+        sections: dict[str, list[str]] = {
+            "Servizi standard": [],
+            "Campagne servizi editoriali": [],
+            "Campagne prompt": [],
+            "Campagne timer": [],
+        }
+        minimal_services: list[str] = []
 
-        for service_name in known_services:
-            profile = profile_map.get(service_name)
-            origin_tags: set[str] = set(service_sources.get(service_name, []))
-
-            if profile is None:
-                profile = await _infer_service_profile(service_name, ctx)
-                origin_tags.update(profile.origins or set())
-            else:
-                origin_tags.update(profile.origins or set())
-
-            footer, _ = await ctx.footer.render_footer(
-                service_name=service_name,
-                contributors=profile.contributors,
-                used_local_processing=profile.used_local_processing,
-            )
-            phrase = service_phrases.get(service_name) or global_phrase or "(nessuna)"
-            origin = ",".join(sorted(origin_tags)) or "unknown"
-            has_specific_phrase = service_name in service_phrases
-            has_interesting_profile = bool(profile.contributors) or (profile.used_local_processing is False)
-
-            if has_specific_phrase or has_interesting_profile:
-                detailed_blocks.append(
-                    _format_service_status_block(
-                        service_name=service_name,
-                        footer_text=footer,
-                        phrase=phrase,
-                        origin=origin,
-                    )
+        for service_name in services:
+            variants = all_variants.get(service_name, {})
+            if not variants:
+                profile = profile_map.get(service_name)
+                if profile is None:
+                    profile = await _infer_service_profile(service_name, ctx)
+                footer_text, _ = await ctx.footer.render_footer(
+                    service_name=service_name,
+                    contributors=profile.contributors,
+                    used_local_processing=profile.used_local_processing,
                 )
+                phrase = service_phrases.get(service_name) or global_phrase or "(nessuna)"
+                origins = sorted(set(service_sources.get(service_name, [])) | set(profile.origins or set()))
+                minimal_services.append(
+                    f"**{service_name}**\n"
+                    f"label: {_human_service_name(service_name)}\n"
+                    f"alias tecnico: `{service_name}`\n"
+                    f"→ {footer_text}\n"
+                    f"frase: {phrase}\n"
+                    f"origine: {','.join(origins) if origins else '(n/d)'}"
+                )
+                continue
+
+            variant_blocks: list[str] = []
+            for variant in sorted(variants.values(), key=lambda item: item.variant_key):
+                phrase = service_phrases.get(service_name) or global_phrase or "(nessuna)"
+                variant_blocks.append(_format_variant_block(service_name, variant, phrase))
+
+            service_block = f"{_format_service_header(service_name)}\n\n" + "\n\n".join(variant_blocks)
+            section_idx = _service_section(service_name)
+            if section_idx == 1:
+                sections["Campagne servizi editoriali"].append(service_block)
+            elif section_idx == 2:
+                sections["Campagne prompt"].append(service_block)
+            elif section_idx == 3:
+                sections["Campagne timer"].append(service_block)
             else:
-                compact_services.append(service_name)
+                sections["Servizi standard"].append(service_block)
 
         lines: list[str] = []
-        lines.extend(detailed_blocks)
-        if compact_services:
-            lines.append(f"Servizi senza footer personalizzato: {', '.join(compact_services)}")
+        for title in ["Servizi standard", "Campagne servizi editoriali", "Campagne prompt", "Campagne timer"]:
+            blocks = sections[title]
+            if blocks:
+                lines.append(f"__{title}__\n" + "\n\n".join(blocks))
+        if minimal_services:
+            lines.append("__Servizi senza footer personalizzato / senza varianti registrate__\n" + "\n\n".join(minimal_services))
 
         chunks: list[str] = []
         current = ""

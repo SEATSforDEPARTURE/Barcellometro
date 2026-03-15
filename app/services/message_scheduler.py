@@ -487,7 +487,9 @@ class MessageSchedulerService:
         for page_index, page in enumerate(pages, start=1):
             title = base_title if total == 1 else f"{base_title} • PAG {page_index}/{total}"
             embed = discord.Embed(title=title, description=page, colour=color)
-            attach_footer_meta(embed, service_name="message_scheduler", used_local_processing=True)
+            campaign_type = str(campaign.get("type") or "").upper()
+            footer_service = "campagne_prompt" if campaign_type == "AI_PROMPT" else "campagne_timer"
+            attach_footer_meta(embed, service_name=footer_service, used_local_processing=True)
             embeds.append(embed)
 
         logger.info(
