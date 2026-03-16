@@ -730,6 +730,25 @@ class ChannelSummaryService:
             return "⬇️", "in calo rispetto al periodo precedente"
         return "↔️", "stabile rispetto al periodo precedente"
 
+    async def generate_channel_aura_embed(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        start_local: datetime,
+        end_local: datetime,
+        title: str = "🗒️ DETTAGLI PUNTI AURA",
+    ) -> discord.Embed | None:
+        embed = await self._build_channel_aura_embed(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            start_local=start_local,
+            end_local=end_local,
+        )
+        if embed is not None:
+            embed.title = title
+        return embed
+
     async def _build_channel_aura_embed(
         self,
         *,
@@ -786,7 +805,7 @@ class ChannelSummaryService:
         )
 
         aura_embed = build_channel_aura_embed(
-            title="🗒️ DETTAGLI PUNTI AURA (Pag 2/2)",
+            title="🗒️ DETTAGLI PUNTI AURA",
             footer_text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
             data=ChannelAuraEmbedData(
                 positive_points=total_positive,

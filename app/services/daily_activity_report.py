@@ -6,6 +6,9 @@ import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+
+from dataclasses import dataclass
+
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,6 +22,13 @@ from app.services.daily_activity_sorting import sort_channels_like_discord, sort
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
 DUE_WINDOW_SECONDS = 600
+
+
+@dataclass
+class ReportWindow:
+    start_dt: datetime
+    end_dt: datetime
+    period_label: str
 
 
 def build_combined_activity_inactive_txt(
@@ -221,6 +231,10 @@ class DailyActivityReportService:
             await asyncio.sleep(30)
 
     async def run_once(self) -> None:
+        await self._run_legacy_activity_monitoring_once()
+        await self._run_server_summary_schedules_once()
+
+    async def _run_legacy_activity_monitoring_once(self) -> None:
         now_local = datetime.now(timezone.utc).astimezone(ROME_TZ)
         rows = await self._database.list_enabled_activity_monitoring_configs()
         for row in rows:
@@ -235,12 +249,39 @@ class DailyActivityReportService:
             delta = (now_local - send_local).total_seconds()
             if delta < 0 or delta > DUE_WINDOW_SECONDS:
                 continue
-            await self._send_daily_report(guild_id=guild_id, mod_channel_id=str(row["mod_channel_id"] or ""))
+            await self._send_daily_report(guild_id=guild_id, mod_channel_id=str(row["mod_channel_id"] or ""), window=None)
             await self._database.mark_activity_monitoring_sent(guild_id, now_local.date().isoformat())
+
+    async def _run_server_summary_schedules_once(self) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for guild in self._bot.guilds:
+            guild_id = str(guild.id)
+            enabled = await self._database.get_server_summary_auto_enabled(guild_id)
+            if not enabled:
+                continue
+            target_channel_id = await self._database.get_server_summary_target_channel(guild_id)
+            if not target_channel_id:
+                continue
+            rows = await self._database.list_due_server_summary_schedules(guild_id, now_iso)
+            for row in rows:
+                start_ts = str(row["start_ts"] or "")
+                end_ts = str(row["end_ts"] or "")
+                try:
+                    start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00")).astimezone(ROME_TZ)
+                    end_dt = datetime.fromisoformat(end_ts.replace("Z", "+00:00")).astimezone(ROME_TZ)
+                except Exception:
+                    continue
+                window = ReportWindow(start_dt=start_dt, end_dt=end_dt, period_label=str(row["schedule_type"] or "oggi"))
+                await self._send_daily_report(guild_id=guild_id, mod_channel_id=target_channel_id, window=window)
+                await self._database.mark_server_summary_schedule_sent(int(row["id"]))
 
     async def send_now(self, *, guild_id: str, mod_channel_id: str) -> None:
         logger.info("daily_activity_report: manual send guild=%s channel=%s", guild_id, mod_channel_id)
-        await self._send_daily_report(guild_id=guild_id, mod_channel_id=mod_channel_id)
+        await self._send_daily_report(guild_id=guild_id, mod_channel_id=mod_channel_id, window=None)
+
+    async def send_window(self, *, guild_id: str, mod_channel_id: str, window: ReportWindow) -> None:
+        logger.info("daily_activity_report: manual window send guild=%s channel=%s window=%s", guild_id, mod_channel_id, window.period_label)
+        await self._send_daily_report(guild_id=guild_id, mod_channel_id=mod_channel_id, window=window)
 
     @staticmethod
     def _hour_stats_from_timestamps(ts_list: list[str]) -> tuple[int | None, int | None, int]:
@@ -303,7 +344,7 @@ class DailyActivityReportService:
                 continue
         return total
 
-    async def _send_daily_report(self, *, guild_id: str, mod_channel_id: str) -> None:
+    async def _send_daily_report(self, *, guild_id: str, mod_channel_id: str, window: ReportWindow | None) -> None:
         if not mod_channel_id:
             return
         guild = self._bot.get_guild(int(guild_id))
@@ -312,9 +353,16 @@ class DailyActivityReportService:
             return
 
         now_local = datetime.now(ROME_TZ)
-        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        if window is None:
+            start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_local = now_local
+            period_label = "oggi"
+        else:
+            start_local = window.start_dt.astimezone(ROME_TZ)
+            end_local = window.end_dt.astimezone(ROME_TZ)
+            period_label = window.period_label
         start_ts = start_local.astimezone(timezone.utc).isoformat()
-        end_ts = now_local.astimezone(timezone.utc).isoformat()
+        end_ts = end_local.astimezone(timezone.utc).isoformat()
         lookback_start = (datetime.fromisoformat(end_ts) - timedelta(days=90)).isoformat()
 
         total_non_bot_members = await self._count_non_bot_members(guild)
@@ -577,7 +625,9 @@ class DailyActivityReportService:
             "trend_text": server_trend,
             "global_active_rows": global_active_rows,
             "global_inactive_rows": global_inactive_rows,
-            "window_end_local": now_local.strftime("%H:%M"),
+            "window_start_local": start_local.strftime("%d/%m/%Y %H:%M"),
+            "window_end_local": end_local.strftime("%d/%m/%Y %H:%M"),
+            "period_label": period_label,
         }
 
         embeds = build_daily_activity_embeds(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)

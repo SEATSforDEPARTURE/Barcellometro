@@ -15,7 +15,7 @@ def test_no_recursive_call_in_channel_summary_window_helper() -> None:
     marker = "async def _run_channel_summary_window"
     start = source.find(marker)
     assert start >= 0
-    end = source.find("@canale_group.command", start)
+    end = source.find("@resocontocanale_group.command", start)
     helper_body = source[start:end]
     assert "await _run_channel_summary_window(" not in helper_body
 
@@ -25,7 +25,7 @@ def test_manual_window_helper_does_not_auto_enable_channel_summary() -> None:
     marker = "async def _run_channel_summary_window"
     start = source.find(marker)
     assert start >= 0
-    end = source.find("@canale_group.command", start)
+    end = source.find("@resocontocanale_group.command", start)
     helper_body = source[start:end]
     assert "set_channel_summary_auto_enabled" in helper_body
     assert "if publish_at_dt:" in helper_body
