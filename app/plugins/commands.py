@@ -60,8 +60,9 @@ def setup(registry: ServiceRegistry) -> None:
     status_group = app_commands.Group(name="status", description="Stato servizi")
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunti")
     aura_group = app_commands.Group(name="aura", description="Resoconto aura")
-    attivita_group = app_commands.Group(name="attivita", description="Comandi attività (utenti) + gestione report (mod/admin)")
-    resoconto_group = app_commands.Group(name="resoconto", description="Resoconto canale")
+    attivita_group = app_commands.Group(name="attivita", description="Comandi attività utenti")
+    resocontocanale_group = app_commands.Group(name="resocontocanale", description="Resoconto canale")
+    resocontoserver_group = app_commands.Group(name="resocontoserver", description="Resoconto server")
 
     add_group_once(bm_group, role_group, logger)
     add_group_once(bm_group, stt_group, logger)
@@ -83,7 +84,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_attivita(attivita_group, ctx)
     register_attivita_settings(attivita_group, ctx)
 
-    register_resoconto(resoconto_group, ctx)
+    register_resoconto(resocontocanale_group, resocontoserver_group, ctx)
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
 
     logger.info("Group children summary bm=%d campagne=%d qna=%d insights=%d", len(bm_group.commands), len(campagne_group.commands), len(qna_group.commands), len(insights_group.commands))
@@ -103,7 +104,8 @@ def setup(registry: ServiceRegistry) -> None:
         aura_group,
         attivita_group,
         status_group,
-        resoconto_group,
+        resocontocanale_group,
+        resocontoserver_group,
         privacy_group,
         frasi_group,
     ]

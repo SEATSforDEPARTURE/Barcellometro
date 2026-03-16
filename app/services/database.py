@@ -238,6 +238,28 @@ class DatabaseService:
             CREATE INDEX IF NOT EXISTS idx_channel_summary_schedule_due
             ON channel_summary_schedule (guild_id, channel_id, status, next_run_at);
 
+            CREATE TABLE IF NOT EXISTS server_summary_schedule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                schedule_type TEXT NOT NULL,
+                start_ts TEXT NULL,
+                end_ts TEXT NULL,
+                publish_at TEXT NOT NULL,
+                repeat_every_value INTEGER NULL,
+                repeat_every_unit TEXT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_by TEXT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                last_run_at TEXT NULL,
+                next_run_at TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_sent_at TEXT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_server_summary_schedule_due
+            ON server_summary_schedule (guild_id, status, next_run_at);
+
             CREATE TABLE IF NOT EXISTS message_channels (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -662,6 +684,7 @@ class DatabaseService:
         await self._ensure_daily_report_columns()
         await self._ensure_trigger_phrase_columns()
         await self._ensure_channel_summary_schedule_columns()
+        await self._ensure_server_summary_schedule_columns()
         await self._ensure_trigger_barcello_state_columns()
         await self._ensure_daily_report_pagination_state_columns()
         await self._conn.commit()
@@ -767,6 +790,33 @@ class DatabaseService:
             now = datetime.now(timezone.utc).isoformat()
             await self._conn.execute(
                 "UPDATE channel_summary_schedule SET created_at = COALESCE(created_at, ?), updated_at = COALESCE(updated_at, ?) WHERE created_at IS NULL OR updated_at IS NULL",
+                (now, now),
+            )
+
+    async def _ensure_server_summary_schedule_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(server_summary_schedule)")
+        if not columns:
+            return
+        existing = {row["name"] for row in columns}
+        missing = {
+            "enabled": "INTEGER NOT NULL DEFAULT 1",
+            "status": "TEXT NOT NULL DEFAULT 'active'",
+            "last_run_at": "TEXT NULL",
+            "next_run_at": "TEXT NULL",
+            "created_at": "TEXT NULL",
+            "updated_at": "TEXT NULL",
+            "last_sent_at": "TEXT NULL",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE server_summary_schedule ADD COLUMN {name} {col_def}")
+        if "next_run_at" not in existing:
+            await self._conn.execute("UPDATE server_summary_schedule SET next_run_at = publish_at WHERE next_run_at IS NULL")
+        if "created_at" not in existing or "updated_at" not in existing:
+            now = datetime.now(timezone.utc).isoformat()
+            await self._conn.execute(
+                "UPDATE server_summary_schedule SET created_at = COALESCE(created_at, ?), updated_at = COALESCE(updated_at, ?) WHERE created_at IS NULL OR updated_at IS NULL",
                 (now, now),
             )
 
@@ -3174,6 +3224,195 @@ class DatabaseService:
         )
         await self._conn.commit()
         return int(cursor.rowcount or 0)
+
+    async def create_server_summary_schedule(
+        self,
+        *,
+        guild_id: str,
+        schedule_type: str,
+        start_ts: str | None,
+        end_ts: str | None,
+        publish_at: str,
+        repeat_every_value: int | None,
+        repeat_every_unit: str | None,
+        created_by: str,
+        enabled: bool = True,
+    ) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            """
+            INSERT INTO server_summary_schedule (
+                guild_id, schedule_type, start_ts, end_ts, publish_at,
+                repeat_every_value, repeat_every_unit, enabled, created_by, status,
+                last_run_at, next_run_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?, ?)
+            """,
+            (
+                guild_id,
+                schedule_type,
+                start_ts,
+                end_ts,
+                publish_at,
+                repeat_every_value,
+                repeat_every_unit,
+                1 if enabled else 0,
+                created_by,
+                publish_at,
+                now,
+                now,
+            ),
+        )
+        await self._conn.commit()
+        return int(cur.lastrowid)
+
+    async def list_due_server_summary_schedules(self, guild_id: str, now_iso: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT * FROM server_summary_schedule
+            WHERE guild_id = ? AND enabled = 1 AND status = 'active' AND COALESCE(next_run_at, publish_at) <= ?
+            ORDER BY COALESCE(next_run_at, publish_at) ASC
+            """,
+            (guild_id, now_iso),
+        )
+
+    async def mark_server_summary_schedule_sent(self, schedule_id: int) -> None:
+        row = await self.fetchone(
+            "SELECT publish_at, next_run_at, repeat_every_value, repeat_every_unit FROM server_summary_schedule WHERE id = ?",
+            (schedule_id,),
+        )
+        if row is None:
+            return
+        now = datetime.now(timezone.utc)
+        next_publish_at: str | None = None
+        rep_val = row["repeat_every_value"]
+        rep_unit = str(row["repeat_every_unit"] or "").strip().lower()
+        if rep_val:
+            value = int(rep_val)
+            mult = 60 if rep_unit == "min" else 3600 if rep_unit == "hours" else 86400 if rep_unit == "days" else 0
+            if mult > 0:
+                base_raw = str(row["next_run_at"] or row["publish_at"] or "")
+                try:
+                    base_dt = datetime.fromisoformat(base_raw.replace("Z", "+00:00"))
+                    if base_dt.tzinfo is None:
+                        base_dt = base_dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    base_dt = now
+                next_publish_at = (base_dt + timedelta(seconds=value * mult)).isoformat()
+        if next_publish_at:
+            await self.execute(
+                "UPDATE server_summary_schedule SET last_run_at = ?, last_sent_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?",
+                (now.isoformat(), now.isoformat(), next_publish_at, now.isoformat(), schedule_id),
+            )
+        else:
+            await self.execute(
+                "UPDATE server_summary_schedule SET status = 'completed', last_run_at = ?, last_sent_at = ?, next_run_at = NULL, updated_at = ? WHERE id = ?",
+                (now.isoformat(), now.isoformat(), now.isoformat(), schedule_id),
+            )
+
+    async def list_server_summary_schedules(self, guild_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT id, schedule_type, start_ts, end_ts, publish_at, repeat_every_value, repeat_every_unit, enabled, status, last_run_at, next_run_at
+            FROM server_summary_schedule
+            WHERE guild_id = ?
+            ORDER BY COALESCE(next_run_at, publish_at) ASC
+            """,
+            (guild_id,),
+        )
+
+    async def get_server_summary_schedule(self, *, schedule_id: int, guild_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT id, guild_id, schedule_type, start_ts, end_ts, publish_at,
+                   repeat_every_value, repeat_every_unit, enabled, status, last_run_at, next_run_at
+            FROM server_summary_schedule
+            WHERE id = ? AND guild_id = ?
+            """,
+            (schedule_id, guild_id),
+        )
+
+    async def update_server_summary_schedule(
+        self,
+        *,
+        schedule_id: int,
+        guild_id: str,
+        publish_at: str | None,
+        repeat_every_value: int | None,
+        repeat_every_unit: str | None,
+        enabled: bool | None = None,
+        status: str | None = None,
+    ) -> bool:
+        row = await self.fetchone(
+            "SELECT id, enabled, status FROM server_summary_schedule WHERE id = ? AND guild_id = ?",
+            (schedule_id, guild_id),
+        )
+        if row is None:
+            return False
+        safe_status = str(status or row["status"] or "active").strip().lower()
+        if safe_status not in {"active", "disabled", "completed"}:
+            safe_status = "active"
+        enabled_value = int(enabled) if enabled is not None else int(row["enabled"] or 0)
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE server_summary_schedule
+            SET publish_at = COALESCE(?, publish_at),
+                next_run_at = COALESCE(?, next_run_at, publish_at),
+                repeat_every_value = ?,
+                repeat_every_unit = ?,
+                enabled = ?,
+                status = ?,
+                updated_at = ?
+            WHERE id = ? AND guild_id = ?
+            """,
+            (
+                publish_at,
+                publish_at,
+                repeat_every_value,
+                repeat_every_unit,
+                enabled_value,
+                safe_status,
+                now,
+                schedule_id,
+                guild_id,
+            ),
+        )
+        return True
+
+    async def delete_server_summary_schedule(self, *, schedule_id: int, guild_id: str) -> bool:
+        assert self._conn is not None
+        cursor = await self._conn.execute(
+            "DELETE FROM server_summary_schedule WHERE id = ? AND guild_id = ?",
+            (schedule_id, guild_id),
+        )
+        await self._conn.commit()
+        return int(cursor.rowcount or 0) > 0
+
+    async def clear_server_summary_schedules(self, *, guild_id: str) -> int:
+        assert self._conn is not None
+        cursor = await self._conn.execute(
+            "DELETE FROM server_summary_schedule WHERE guild_id = ?",
+            (guild_id,),
+        )
+        await self._conn.commit()
+        return int(cursor.rowcount or 0)
+
+
+    async def set_server_summary_auto_enabled(self, guild_id: str, enabled: bool) -> None:
+        await self.set_setting(f"server_summary.auto.{guild_id}", "1" if enabled else "0")
+
+    async def get_server_summary_auto_enabled(self, guild_id: str) -> bool:
+        raw = await self.get_setting(f"server_summary.auto.{guild_id}")
+        return str(raw or "0").strip() == "1"
+
+    async def set_server_summary_target_channel(self, guild_id: str, channel_id: str) -> None:
+        await self.set_setting(f"server_summary.target_channel.{guild_id}", channel_id)
+
+    async def get_server_summary_target_channel(self, guild_id: str) -> str | None:
+        raw = await self.get_setting(f"server_summary.target_channel.{guild_id}")
+        value = str(raw or "").strip()
+        return value or None
 
     async def set_message_channel_enabled(self, guild_id: str, channel_id: str, enabled: bool) -> None:
         now = datetime.now(timezone.utc).isoformat()

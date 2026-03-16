@@ -102,7 +102,7 @@ def build_daily_activity_embeds(
     ]
 
     overview = discord.Embed(
-        title=f"🗣️ RESOCONTO ATTIVITÀ “{guild_name}”",
+        title=f"🗣️ RESOCONTO SERVER “{guild_name}”",
         color=_color_for_emoji(emoji),
         description=(
             f"**🗓️ {_format_italian_date(reference_ts)}**\n\n"
@@ -184,8 +184,8 @@ def build_daily_activity_details_txt(
     lines = [
         f"RESOCONTO ATTIVITÀ SERVER — 🗝 {guild_name}",
         "",
-        f"Data: {_format_italian_date(reference_ts)}",
-        f"Finestra temporale: 00:00 → {server_summary.get('window_end_local', datetime.fromisoformat(reference_ts.replace('Z', '+00:00')).strftime('%H:%M'))}",
+        f"Data riferimento: {_format_italian_date(reference_ts)}",
+        f"Finestra temporale: {server_summary.get('window_start_local', '—')} → {server_summary.get('window_end_local', '—')}",
         "",
         f"• Attività generale: {server_summary.get('label', 'ASSENTE')}",
         f"• Punti attività generali: {server_summary.get('score', 0)}/100",
