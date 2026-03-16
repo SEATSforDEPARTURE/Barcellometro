@@ -550,13 +550,19 @@ class FooterService:
             used_local_processing=meta.used_local_processing,
         )
         if persistable:
-            await self.record_service_footer_profile(
-                service_name=meta.service_name,
-                contributors=meta.contributors,
-                used_local_processing=meta.used_local_processing,
-                last_rendered_footer=text,
-                origin="runtime",
-            )
+            try:
+                await self.record_service_footer_profile(
+                    service_name=meta.service_name,
+                    contributors=meta.contributors,
+                    used_local_processing=meta.used_local_processing,
+                    last_rendered_footer=text,
+                    origin="runtime",
+                )
+            except Exception as exc:  # noqa: BLE001
+                if "database is locked" in str(exc).lower():
+                    logger.warning("Footer profile persistence skipped due to SQLite lock service=%s", meta.service_name)
+                else:
+                    logger.warning("Footer profile persistence failed service=%s err=%s", meta.service_name, exc)
         embed.set_footer(text=text, icon_url=meta.footer_icon_url)
         return embed
 

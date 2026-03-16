@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 import uuid
+import asyncio
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 
@@ -11,6 +13,9 @@ import aiosqlite
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+_LOCKED_MAX_RETRIES = 3
+_LOCKED_BACKOFF_SECONDS = 0.15
 
 
 class DatabaseService:
@@ -21,6 +26,8 @@ class DatabaseService:
     async def connect(self) -> None:
         self._conn = await aiosqlite.connect(self.db_path)
         await self._conn.execute("PRAGMA journal_mode=WAL;")
+        await self._conn.execute("PRAGMA busy_timeout=5000;")
+        await self._conn.execute("PRAGMA synchronous=NORMAL;")
         await self._conn.execute("PRAGMA foreign_keys=ON;")
         await self._conn.commit()
 
@@ -83,6 +90,9 @@ class DatabaseService:
                 attachments_json TEXT,
                 embeds_json TEXT
             );
+
+            CREATE INDEX IF NOT EXISTS idx_messages_ts
+            ON messages (ts);
 
             CREATE TABLE IF NOT EXISTS reactions (
                 message_id TEXT,
@@ -806,8 +816,25 @@ class DatabaseService:
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
         assert self._conn is not None
-        await self._conn.execute(query, params)
-        await self._conn.commit()
+        await self._execute_write_with_retry(query, params)
+
+    async def _execute_write_with_retry(self, query: str, params: tuple[Any, ...] = ()) -> None:
+        assert self._conn is not None
+        for attempt in range(1, _LOCKED_MAX_RETRIES + 1):
+            try:
+                await self._conn.execute(query, params)
+                await self._conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                is_locked = "database is locked" in str(exc).lower()
+                if not is_locked or attempt >= _LOCKED_MAX_RETRIES:
+                    raise
+                logger.warning(
+                    "SQLite locked during write, retrying (%s/%s)",
+                    attempt,
+                    _LOCKED_MAX_RETRIES,
+                )
+                await asyncio.sleep(_LOCKED_BACKOFF_SECONDS * attempt)
 
     async def fetchone(self, query: str, params: tuple[Any, ...] = ()) -> Optional[aiosqlite.Row]:
         assert self._conn is not None
@@ -2816,15 +2843,41 @@ class DatabaseService:
 
     async def prune_messages(self, cutoff_ts: str) -> int:
         assert self._conn is not None
-        cursor = await self._conn.execute("DELETE FROM messages WHERE ts < ?", (cutoff_ts,))
-        await self._conn.commit()
-        return cursor.rowcount
+        total_deleted = 0
+        batch_size = 1000
+        while True:
+            cursor = await self._conn.execute(
+                "DELETE FROM messages WHERE rowid IN (SELECT rowid FROM messages WHERE ts < ? LIMIT ?)",
+                (cutoff_ts, batch_size),
+            )
+            await self._conn.commit()
+            deleted = cursor.rowcount
+            if deleted <= 0:
+                break
+            total_deleted += deleted
+            logger.info("Retention prune messages batch deleted=%s total=%s", deleted, total_deleted)
+            if deleted < batch_size:
+                break
+        return total_deleted
 
     async def prune_events(self, cutoff_ts: str) -> int:
         assert self._conn is not None
-        cursor = await self._conn.execute("DELETE FROM events WHERE ts < ?", (cutoff_ts,))
-        await self._conn.commit()
-        return cursor.rowcount
+        total_deleted = 0
+        batch_size = 1000
+        while True:
+            cursor = await self._conn.execute(
+                "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE ts < ? LIMIT ?)",
+                (cutoff_ts, batch_size),
+            )
+            await self._conn.commit()
+            deleted = cursor.rowcount
+            if deleted <= 0:
+                break
+            total_deleted += deleted
+            logger.info("Retention prune events batch deleted=%s total=%s", deleted, total_deleted)
+            if deleted < batch_size:
+                break
+        return total_deleted
 
 
     def _validate_hhmm(self, value: str) -> str:

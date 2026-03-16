@@ -33,6 +33,7 @@ QUIET_DEFAULT_ENABLED = True
 CAP_DEFAULT = 6
 CAP_DEFAULT_ENABLED = True
 BARCELLO_CACHE_TTL_SECONDS = 60
+AI_PROMPT_SLOT_CACHE_TTL_SECONDS = 600
 DEFAULT_CAMPAIGN_EMBED_COLOR = 0x2F3136
 MAX_EMBEDS_PER_MESSAGE = 10
 
@@ -203,6 +204,7 @@ class MessageSchedulerService:
         self._campaign_content_service = campaign_content_service
         self._task: Optional[asyncio.Task[None]] = None
         self._barcello_cache: dict[str, tuple[datetime, str, Optional[int]]] = {}
+        self._ai_prompt_slot_cache: dict[tuple[int, str], tuple[datetime, str]] = {}
         self._metrics = {
             "last_tick_ts": None,
             "errors": 0,
@@ -249,6 +251,7 @@ class MessageSchedulerService:
         guild_id = str(campaign["guild_id"])
         campaign_id = int(campaign["id"])
         campaign_type = str(campaign["type"])
+        next_run_at = calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat()
         campaign_channel_id = campaign.get("channel_id")
         if not campaign_channel_id:
             logger.error("Campaign %s missing channel_id", campaign_id)
@@ -264,11 +267,18 @@ class MessageSchedulerService:
             await self._database.update_campaign_next_run(
                 guild_id=guild_id,
                 campaign_id=campaign_id,
-                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                next_run_at=next_run_at,
                 last_sent_at=None,
             )
             return
         channel_id = str(campaign_channel_id)
+        due_slot = str(campaign.get("next_run_at") or now.isoformat())
+        await self._database.update_campaign_next_run(
+            guild_id=guild_id,
+            campaign_id=campaign_id,
+            next_run_at=next_run_at,
+            last_sent_at=None,
+        )
 
         if campaign_type == "AI_PROMPT":
             enabled_prompt = await self._database.get_trigger_enabled(guild_id, channel_id, "prompt")
@@ -285,7 +295,7 @@ class MessageSchedulerService:
                 await self._database.update_campaign_next_run(
                     guild_id=guild_id,
                     campaign_id=campaign_id,
-                    next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                    next_run_at=next_run_at,
                     last_sent_at=None,
                 )
                 return
@@ -313,12 +323,12 @@ class MessageSchedulerService:
             await self._database.update_campaign_next_run(
                 guild_id=guild_id,
                 campaign_id=campaign_id,
-                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                next_run_at=next_run_at,
                 last_sent_at=None,
             )
             return
 
-        resolved_text, send_reason, debug_payload = await self._resolve_campaign_text(campaign, guild_id, channel_id)
+        resolved_text, send_reason, debug_payload = await self._resolve_campaign_text(campaign, guild_id, channel_id, due_slot=due_slot)
         logger.info(
             "Campaign selection guild=%s campaign=%s channel_id=%s mode=%s color=%s score=%s source=%s cache=%s",
             guild_id,
@@ -350,7 +360,7 @@ class MessageSchedulerService:
             await self._database.update_campaign_next_run(
                 guild_id=guild_id,
                 campaign_id=campaign_id,
-                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                next_run_at=next_run_at,
                 last_sent_at=None,
             )
             return
@@ -373,7 +383,7 @@ class MessageSchedulerService:
                 await self._database.update_campaign_next_run(
                     guild_id=guild_id,
                     campaign_id=campaign_id,
-                    next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                    next_run_at=next_run_at,
                     last_sent_at=None,
                 )
                 return
@@ -390,7 +400,7 @@ class MessageSchedulerService:
             await self._database.update_campaign_next_run(
                 guild_id=guild_id,
                 campaign_id=campaign_id,
-                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                next_run_at=next_run_at,
                 last_sent_at=None,
             )
             return
@@ -410,7 +420,7 @@ class MessageSchedulerService:
             await self._database.update_campaign_next_run(
                 guild_id=guild_id,
                 campaign_id=campaign_id,
-                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                next_run_at=next_run_at,
                 last_sent_at=now.isoformat(),
             )
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
@@ -427,7 +437,24 @@ class MessageSchedulerService:
             await self._database.update_campaign_next_run(
                 guild_id=guild_id,
                 campaign_id=campaign_id,
-                next_run_at=calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat(),
+                next_run_at=next_run_at,
+                last_sent_at=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Campaign %s failed during processing/send", campaign_id)
+            await self._database.insert_send_log(
+                campaign_id=campaign_id,
+                guild_id=guild_id,
+                channel_id=channel_id,
+                sent_at=now.isoformat(),
+                status="error",
+                reason="processing_failed",
+                error=str(exc),
+            )
+            await self._database.update_campaign_next_run(
+                guild_id=guild_id,
+                campaign_id=campaign_id,
+                next_run_at=next_run_at,
                 last_sent_at=None,
             )
 
@@ -439,7 +466,7 @@ class MessageSchedulerService:
     ) -> tuple[Optional[str], Optional[str], dict[str, object]]:
         guild_id = str(campaign["guild_id"])
         channel_id = channel_id_override or str(campaign.get("channel_id") or "")
-        return await self._resolve_campaign_text(campaign, guild_id, channel_id)
+        return await self._resolve_campaign_text(campaign, guild_id, channel_id, due_slot=None)
 
     def is_valid_embed_color(self, value: Optional[str]) -> bool:
         if value is None:
@@ -563,6 +590,8 @@ class MessageSchedulerService:
         campaign: dict[str, object],
         guild_id: str,
         channel_id: str,
+        *,
+        due_slot: str | None = None,
     ) -> tuple[Optional[str], Optional[str], dict[str, object]]:
         campaign_type = str(campaign["type"])
         if campaign_type == "AI_INSIGHTS":
@@ -594,6 +623,16 @@ class MessageSchedulerService:
             )
             if self._ai_service is None or not self._ai_service.is_enabled() or self._ai_service.client() is None:
                 return None, "ai_disabled", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "fallback", "cache_status": "n/a"}
+
+            slot = due_slot or datetime.now(timezone.utc).isoformat()
+            cache_key = (int(campaign["id"]), slot)
+            cached = self._ai_prompt_slot_cache.get(cache_key)
+            now_utc = datetime.now(timezone.utc)
+            if cached and cached[0] > now_utc:
+                logger.info("AI cache hit campaign=%s slot=%s", campaign.get("id"), slot)
+                return cached[1], "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "hit"}
+            logger.info("AI cache miss campaign=%s slot=%s", campaign.get("id"), slot)
+
             model = self._ai_service.get_model("summary") or "gpt-4o-mini"
             web_enabled_raw = await self._get_setting_with_default("messages_ai_prompt_web_enabled", "true")
             web_enabled = web_enabled_raw.lower() in {"1", "true", "yes", "y"}
@@ -613,7 +652,8 @@ class MessageSchedulerService:
                 text = await self._ai_service.ask_general(resolved_prompt, persona_system)
 
             text = (text or "").strip() or "AI non disponibile"
-            return text, "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "n/a"}
+            self._ai_prompt_slot_cache[cache_key] = (now_utc + timedelta(seconds=AI_PROMPT_SLOT_CACHE_TTL_SECONDS), text)
+            return text, "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "miss"}
 
         mood_mode = str(campaign.get("mood_mode") or "AUTO")
         barcello_color, barcello_score, cache_status, barcello_reason = await self._get_barcello_color(guild_id, channel_id)
