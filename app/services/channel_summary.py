@@ -13,7 +13,7 @@ import discord
 
 from app.services.footer import attach_footer_meta
 
-from app.plugins.commands_modular.time_windows import TimeWindowResult, resolve_ieri_window, resolve_oggi_window
+from app.plugins.commands_modular.time_windows import TimeWindowResult, infer_rolling_window_request, resolve_ieri_window, resolve_oggi_window
 from app.renderers.channel_summary_renderer import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, format_window_header
 from app.services.barcello import BarcelloResult, BarcelloService
 from app.services.aura import aura_reason_to_human
@@ -102,7 +102,15 @@ class ChannelSummaryService:
             except Exception:
                 delta = timedelta(hours=1)
             start_dt = now_local - delta
-            return TimeWindowResult(start_dt=start_dt, end_dt=now_local, period_label="ultimi", label_periodo="ultimi")
+            requested_qty, requested_unit = infer_rolling_window_request(start_dt, end_dt)
+            return TimeWindowResult(
+                start_dt=start_dt,
+                end_dt=now_local,
+                period_label="ultimi",
+                label_periodo="ultimi",
+                requested_quantity=requested_qty,
+                requested_unit=requested_unit,
+            )
         if schedule_type == "range":
             start_raw = str(row.get("start_ts") or "")
             end_raw = str(row.get("end_ts") or "")
@@ -362,7 +370,13 @@ class ChannelSummaryService:
             if str(row["content"] or "").strip()
         ]
 
-        window_header = format_window_header(period_label=window.period_label, start_dt=start_local, end_dt=end_local)
+        window_header = format_window_header(
+            period_label=window.period_label,
+            start_dt=start_local,
+            end_dt=end_local,
+            requested_quantity=window.requested_quantity,
+            requested_unit=window.requested_unit,
+        )
         data_is_sufficient, data_counts = self._channel_summary_data_is_sufficient(rows=rows, messages=messages)
         if not data_is_sufficient:
             logger.info(

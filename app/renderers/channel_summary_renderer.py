@@ -12,6 +12,7 @@ import discord
 from app.services.barcello import BarcelloResult
 from app.services.summary import SummaryItem, SummaryResult
 from app.utils.trend_render import render_trend_value
+from app.plugins.commands_modular.time_windows import format_rolling_window_label, infer_rolling_window_request
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MAX_FIELD_VALUE = 1024
@@ -82,26 +83,18 @@ def format_day_label(dt_local: datetime) -> str:
     return f"{WEEKDAY_IT[dt_local.weekday()]}, {dt_local.day} {MONTH_IT[dt_local.month]} {dt_local.year}"
 
 
-def format_window_header(*, period_label: str, start_dt: datetime, end_dt: datetime) -> str:
+def format_window_header(*, period_label: str, start_dt: datetime, end_dt: datetime, requested_quantity: int | None = None, requested_unit: str | None = None) -> str:
     if period_label == "oggi":
         return f"**🗓️ Oggi. {format_day_label(end_dt)}**"
     if period_label == "ieri":
         return f"**🗓️ Ieri. {format_day_label(start_dt)}**"
     if period_label == "ultimi":
-        delta = end_dt - start_dt
-        if delta.days >= 1:
-            qty = max(1, delta.days)
-            unit = "giorni" if qty > 1 else "giorno"
-            prefix = "Ultimi"
-        elif delta.total_seconds() >= 3600:
-            qty = max(1, int(delta.total_seconds() // 3600))
-            unit = "ore" if qty > 1 else "ora"
-            prefix = "Ultime"
-        else:
-            qty = max(1, int(delta.total_seconds() // 60))
-            unit = "minuti" if qty > 1 else "minuto"
-            prefix = "Ultimi"
-        return f"**🗓️ {prefix} {qty} {unit}\n{start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}**"
+        qty = requested_quantity
+        unit = requested_unit
+        if qty is None:
+            qty, unit = infer_rolling_window_request(start_dt, end_dt)
+        title = format_rolling_window_label(qty, str(unit or "minuti"))
+        return f"**🗓️ {title}\n{start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}**"
     return f"**🗓️ {start_dt.strftime('%d/%m/%Y %H:%M')} → {end_dt.strftime('%d/%m/%Y %H:%M')}**"
 
 
