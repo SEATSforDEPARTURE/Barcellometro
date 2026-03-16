@@ -39,3 +39,25 @@ def test_ask_general_with_web_calls_responses_with_tool() -> None:
     assert kwargs["model"] == "gpt-4o-mini"
     assert kwargs["tools"] == [{"type": "web_search"}]
     assert kwargs["input"][0]["role"] == "system"
+
+
+def test_load_settings_initializes_audio_summary_default() -> None:
+    db = Mock()
+
+    async def _get_setting(key: str):
+        values = {
+            "ai_enabled": "true",
+            "ai_model.summary": "gpt-4.1-mini",
+            "ai_model.transcription": "gpt-4o-transcribe",
+            "ai_model.translation": "gpt-4o-mini",
+        }
+        return values.get(key)
+
+    db.get_setting = AsyncMock(side_effect=_get_setting)
+    db.set_setting = AsyncMock()
+    service = AiService(db, api_key="")
+
+    asyncio.run(service.load_settings())
+
+    assert service.get_model("audio_summary") == "gpt-4o-mini"
+    db.set_setting.assert_any_await("ai_model.audio_summary", "gpt-4o-mini")

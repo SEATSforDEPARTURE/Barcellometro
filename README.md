@@ -91,7 +91,7 @@ finestra configurata in modo idempotente.
 ### AI centrale
 - `/bm ai on` → abilita il servizio AI.
 - `/bm ai off` → disabilita il servizio AI.
-- `/bm ai-model task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `transcription`, `translation`).
+- `/bm ai-model task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `server_summary`, `audio_summary`, `qa`, `analysis`, `transcription`, `translation`).
 - `/bm barcello calibrate` → calibra i pesi del motore barcello (mod).
 
 ### STT

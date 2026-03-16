@@ -9,6 +9,16 @@ from app.services.database import DatabaseService
 
 
 class AiService:
+    SUPPORTED_MODEL_TASKS: tuple[str, ...] = (
+        "summary",
+        "server_summary",
+        "audio_summary",
+        "qa",
+        "analysis",
+        "transcription",
+        "translation",
+    )
+
     def __init__(self, database: DatabaseService, api_key: str) -> None:
         self._database = database
         self._enabled = False
@@ -107,8 +117,22 @@ class AiService:
         return text or None
 
     async def _load_model_map(self) -> dict[str, str]:
-        return {
-            "summary": (await self._database.get_setting("ai_model.summary")) or "gpt-4o-mini",
-            "transcription": (await self._database.get_setting("ai_model.transcription")) or "gpt-4o-transcribe",
-            "translation": (await self._database.get_setting("ai_model.translation")) or "gpt-4o-mini",
+        defaults: dict[str, str] = {
+            "summary": "gpt-4o-mini",
+            "server_summary": "gpt-4o-mini",
+            "audio_summary": "gpt-4o-mini",
+            "qa": "gpt-4o-mini",
+            "analysis": "gpt-4o-mini",
+            "transcription": "gpt-4o-transcribe",
+            "translation": "gpt-4o-mini",
         }
+        model_map: dict[str, str] = {}
+        for task, default_model in defaults.items():
+            key = f"ai_model.{task}"
+            stored = await self._database.get_setting(key)
+            if stored is None:
+                await self._database.set_setting(key, default_model)
+                model_map[task] = default_model
+            else:
+                model_map[task] = stored
+        return model_map

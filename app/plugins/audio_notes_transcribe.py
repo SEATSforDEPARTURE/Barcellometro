@@ -107,9 +107,11 @@ async def _build_audio_note_summary(ai_service: Any, transcript_text: str) -> tu
     client = ai_service.client()
     if client is None:
         return None, None
-    model = ai_service.get_model("summary")
-    if not model:
-        return None, None
+    model = (
+        ai_service.get_model("audio_summary")
+        or ai_service.get_model("summary")
+        or "gpt-4o-mini"
+    )
 
     system_prompt = (
         "Riassumi fedelmente la seguente trascrizione di una nota audio in italiano. "
