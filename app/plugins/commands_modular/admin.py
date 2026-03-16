@@ -276,6 +276,10 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
     @app_commands.choices(
         task=[
             app_commands.Choice(name="summary", value="summary"),
+            app_commands.Choice(name="server_summary", value="server_summary"),
+            app_commands.Choice(name="audio_summary", value="audio_summary"),
+            app_commands.Choice(name="qa", value="qa"),
+            app_commands.Choice(name="analysis", value="analysis"),
             app_commands.Choice(name="transcription", value="transcription"),
             app_commands.Choice(name="translation", value="translation"),
         ]

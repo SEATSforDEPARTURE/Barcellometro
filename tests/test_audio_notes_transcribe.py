@@ -32,7 +32,7 @@ def test_build_audio_note_summary_and_output_when_threshold_exceeded() -> None:
         ai_service = SimpleNamespace(
             is_enabled=lambda: True,
             client=lambda: client,
-            get_model=lambda task: "gpt-4o-mini" if task == "summary" else None,
+            get_model=lambda task: "gpt-4o-mini" if task in {"summary", "audio_summary"} else None,
         )
 
         summary_text, summary_model = await mod._build_audio_note_summary(ai_service, "x" * 80)
@@ -59,7 +59,7 @@ def test_build_audio_note_summary_failure_does_not_break_flow() -> None:
         ai_service = SimpleNamespace(
             is_enabled=lambda: True,
             client=lambda: client,
-            get_model=lambda task: "gpt-4o-mini" if task == "summary" else None,
+            get_model=lambda task: "gpt-4o-mini" if task in {"summary", "audio_summary"} else None,
         )
 
         summary_text, summary_model = await mod._build_audio_note_summary(ai_service, "x" * 80)
@@ -109,3 +109,54 @@ def test_parse_chars_summary_limit_non_positive_disables_feature() -> None:
     assert mod._parse_chars_summary_limit("0") == 0
     assert mod._parse_chars_summary_limit("-10") == 0
     assert mod._parse_chars_summary_limit("1200") == 1200
+
+
+def test_build_audio_note_summary_prefers_audio_summary_model() -> None:
+    async def _run() -> None:
+        responses = SimpleNamespace(create=AsyncMock(return_value=SimpleNamespace(output_text="Riassunto audio.")))
+        client = SimpleNamespace(responses=responses)
+        ai_service = SimpleNamespace(
+            is_enabled=lambda: True,
+            client=lambda: client,
+            get_model=lambda task: {"audio_summary": "gpt-4.1-mini", "summary": "gpt-4o-mini"}.get(task),
+        )
+
+        summary_text, summary_model = await mod._build_audio_note_summary(ai_service, "x" * 120)
+
+        assert summary_text == "Riassunto audio."
+        assert summary_model == "gpt-4.1-mini"
+        responses.create.assert_awaited_once()
+        assert responses.create.await_args.kwargs["model"] == "gpt-4.1-mini"
+
+    asyncio.run(_run())
+
+
+def test_build_audio_note_summary_fallbacks_to_summary_then_default() -> None:
+    async def _run_summary_fallback() -> None:
+        responses = SimpleNamespace(create=AsyncMock(return_value=SimpleNamespace(output_text="Riassunto fallback.")))
+        client = SimpleNamespace(responses=responses)
+        ai_service = SimpleNamespace(
+            is_enabled=lambda: True,
+            client=lambda: client,
+            get_model=lambda task: "gpt-4o-mini" if task == "summary" else None,
+        )
+
+        _, summary_model = await mod._build_audio_note_summary(ai_service, "x" * 120)
+        assert summary_model == "gpt-4o-mini"
+        assert responses.create.await_args.kwargs["model"] == "gpt-4o-mini"
+
+    async def _run_default_fallback() -> None:
+        responses = SimpleNamespace(create=AsyncMock(return_value=SimpleNamespace(output_text="Riassunto fallback default.")))
+        client = SimpleNamespace(responses=responses)
+        ai_service = SimpleNamespace(
+            is_enabled=lambda: True,
+            client=lambda: client,
+            get_model=lambda task: None,
+        )
+
+        _, summary_model = await mod._build_audio_note_summary(ai_service, "x" * 120)
+        assert summary_model == "gpt-4o-mini"
+        assert responses.create.await_args.kwargs["model"] == "gpt-4o-mini"
+
+    asyncio.run(_run_summary_fallback())
+    asyncio.run(_run_default_fallback())
