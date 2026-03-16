@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -32,19 +32,37 @@ def setup(registry: ServiceRegistry) -> None:
     config = registry.get("config")
     aura_rolling = registry.get("aura_rolling") if registry.has("aura_rolling") else None
     warned_disabled_channels: set[str] = set()
+    channel_runtime_fingerprint: dict[str, tuple[str, str, str | None, int, int]] = {}
+    voice_event_dedupe: dict[tuple[str, str, str, str | None, str | None], datetime] = {}
 
     async def ensure_channel_record(channel: discord.abc.GuildChannel) -> bool:
-        enabled = await database.is_channel_enabled(str(channel.id))
-        await database.upsert_channel(
-            channel_id=str(channel.id),
-            guild_id=str(channel.guild.id),
-            name=channel.name,
-            enabled=_bool_int(enabled),
-            channel_type=str(channel.type),
-            category_id=str(channel.category_id) if channel.category_id else None,
-            is_nsfw=_bool_int(getattr(channel, "is_nsfw", lambda: False)()),
-            slowmode_delay=getattr(channel, "slowmode_delay", 0),
+        channel_id = str(channel.id)
+        enabled = await database.is_channel_enabled(channel_id)
+        fingerprint = (
+            channel.name,
+            str(channel.type),
+            str(channel.category_id) if channel.category_id else None,
+            _bool_int(getattr(channel, "is_nsfw", lambda: False)()),
+            int(getattr(channel, "slowmode_delay", 0) or 0),
         )
+        if channel_runtime_fingerprint.get(channel_id) != fingerprint:
+            try:
+                await database.upsert_channel(
+                    channel_id=channel_id,
+                    guild_id=str(channel.guild.id),
+                    name=channel.name,
+                    enabled=_bool_int(enabled),
+                    channel_type=str(channel.type),
+                    category_id=str(channel.category_id) if channel.category_id else None,
+                    is_nsfw=_bool_int(getattr(channel, "is_nsfw", lambda: False)()),
+                    slowmode_delay=getattr(channel, "slowmode_delay", 0),
+                )
+                channel_runtime_fingerprint[channel_id] = fingerprint
+            except Exception as exc:  # noqa: BLE001
+                if "database is locked" in str(exc).lower():
+                    logger.warning("Channel upsert skipped due to SQLite lock channel_id=%s", channel_id)
+                else:
+                    raise
         if not enabled:
             channel_id = str(channel.id)
             if channel_id not in warned_disabled_channels:
@@ -439,6 +457,34 @@ def setup(registry: ServiceRegistry) -> None:
             },
         )
 
+    async def _record_voice_event(
+        *,
+        event_type: str,
+        member: discord.Member,
+        voice_channel_id: str,
+        ts: str,
+        from_channel_id: str | None,
+        to_channel_id: str | None,
+    ) -> None:
+        now_dt = datetime.fromisoformat(ts)
+        dedupe_key = (str(member.guild.id), str(member.id), event_type, from_channel_id, to_channel_id)
+        last = voice_event_dedupe.get(dedupe_key)
+        if last is not None and (now_dt - last) < timedelta(seconds=2):
+            return
+        voice_event_dedupe[dedupe_key] = now_dt
+        await database.insert_voice_participant_event(
+            event_id=str(uuid4()),
+            guild_id=str(member.guild.id),
+            voice_channel_id=voice_channel_id,
+            user_id=str(member.id),
+            username=member.display_name,
+            event_type=event_type,
+            ts=ts,
+            from_channel_id=from_channel_id,
+            to_channel_id=to_channel_id,
+            meta={"source": "discord_adapter.voice_state"},
+        )
+
     @bot.event
     async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState) -> None:
         if member.bot and config.ignore_bots:
@@ -452,17 +498,14 @@ def setup(registry: ServiceRegistry) -> None:
             return
 
         if before_channel is not None:
-            await database.insert_voice_participant_event(
-                event_id=str(uuid4()),
-                guild_id=str(member.guild.id),
+            event_type = "switch" if after_channel is not None else "leave"
+            await _record_voice_event(
+                event_type=event_type,
+                member=member,
                 voice_channel_id=str(before_channel.id),
-                user_id=str(member.id),
-                username=member.display_name,
-                event_type="leave",
                 ts=ts,
                 from_channel_id=str(before_channel.id),
                 to_channel_id=str(after_channel.id) if after_channel else None,
-                meta={"source": "discord_adapter.voice_state"},
             )
             if aura_rolling is not None:
                 join_row = await database.fetch_latest_voice_participant_join(
@@ -493,18 +536,15 @@ def setup(registry: ServiceRegistry) -> None:
                         )
 
         if after_channel is not None:
-            await database.insert_voice_participant_event(
-                event_id=str(uuid4()),
-                guild_id=str(member.guild.id),
-                voice_channel_id=str(after_channel.id),
-                user_id=str(member.id),
-                username=member.display_name,
-                event_type="join",
-                ts=ts,
-                from_channel_id=str(before_channel.id) if before_channel else None,
-                to_channel_id=str(after_channel.id),
-                meta={"source": "discord_adapter.voice_state"},
-            )
+            if before_channel is None:
+                await _record_voice_event(
+                    event_type="join",
+                    member=member,
+                    voice_channel_id=str(after_channel.id),
+                    ts=ts,
+                    from_channel_id=None,
+                    to_channel_id=str(after_channel.id),
+                )
             if aura_rolling is not None:
                 await aura_rolling.on_voice_join(
                     guild_id=str(member.guild.id),

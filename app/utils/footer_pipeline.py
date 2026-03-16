@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import logging
 from typing import Any
 
 import discord
 
 from app.services.footer import FooterService
 
+logger = logging.getLogger(__name__)
+
 
 async def finalize_embed(embed: discord.Embed, footer_service: FooterService, *, default_service_name: str = "unknown") -> discord.Embed:
-    return await footer_service.apply(embed, default_service_name=default_service_name)
+    try:
+        return await footer_service.apply(embed, default_service_name=default_service_name)
+    except Exception as exc:  # noqa: BLE001
+        if "database is locked" in str(exc).lower():
+            logger.warning("Footer finalize skipped due to SQLite lock")
+        else:
+            logger.warning("Footer finalize failed: %s", exc)
+        return embed
 
 
 async def finalize_embeds(
