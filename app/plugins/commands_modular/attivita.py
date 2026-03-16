@@ -15,7 +15,6 @@ from app.services.footer import attach_footer_meta
 from discord import Forbidden, app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
-from app.plugins.commands_modular.inattivi import register_inattivi
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
 from app.renderers.activity_dm_renderer import build_activity_details_txt, build_activity_dm_embeds
@@ -370,10 +369,6 @@ def _format_interactions(interactions: dict[int, dict[str, object]]) -> str:
 
 
 def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -> None:
-    inattivi_group = app_commands.Group(name="inattivi", description="Gestione utenti inattivi")
-    attivita_group.add_command(inattivi_group)
-    register_inattivi(inattivi_group, ctx)
-
     async def _send_activity_report(interaction: discord.Interaction, window, utente: discord.Member | None = None) -> None:
         if not await check_permission(interaction, "attivita.dm", ctx):
             return
