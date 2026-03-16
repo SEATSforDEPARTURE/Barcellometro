@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.renderers.activity_daily_report_renderer import build_daily_activity_details_txt, build_daily_activity_embeds
+from app.plugins.commands_modular.time_windows import infer_rolling_window_request
 from app.services.activity_insights import ActivityInsightsService
 from app.services.database import DatabaseService
 from app.services.daily_activity_sorting import sort_channels_like_discord, sort_inactive_entries
@@ -29,6 +30,8 @@ class ReportWindow:
     start_dt: datetime
     end_dt: datetime
     period_label: str
+    requested_quantity: int | None = None
+    requested_unit: str | None = None
 
 
 def build_combined_activity_inactive_txt(
@@ -271,7 +274,18 @@ class DailyActivityReportService:
                     end_dt = datetime.fromisoformat(end_ts.replace("Z", "+00:00")).astimezone(ROME_TZ)
                 except Exception:
                     continue
-                window = ReportWindow(start_dt=start_dt, end_dt=end_dt, period_label=str(row["schedule_type"] or "oggi"))
+                schedule_type = str(row["schedule_type"] or "oggi")
+                requested_quantity = None
+                requested_unit = None
+                if schedule_type == "ultimi":
+                    requested_quantity, requested_unit = infer_rolling_window_request(start_dt, end_dt)
+                window = ReportWindow(
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    period_label=schedule_type,
+                    requested_quantity=requested_quantity,
+                    requested_unit=requested_unit,
+                )
                 await self._send_daily_report(guild_id=guild_id, mod_channel_id=target_channel_id, window=window)
                 await self._database.mark_server_summary_schedule_sent(int(row["id"]))
 
@@ -361,6 +375,11 @@ class DailyActivityReportService:
             start_local = window.start_dt.astimezone(ROME_TZ)
             end_local = window.end_dt.astimezone(ROME_TZ)
             period_label = window.period_label
+            requested_quantity = window.requested_quantity
+            requested_unit = window.requested_unit
+        if window is None:
+            requested_quantity = None
+            requested_unit = None
         start_ts = start_local.astimezone(timezone.utc).isoformat()
         end_ts = end_local.astimezone(timezone.utc).isoformat()
         lookback_start = (datetime.fromisoformat(end_ts) - timedelta(days=90)).isoformat()
@@ -638,6 +657,8 @@ class DailyActivityReportService:
             period_label=period_label,
             window_start_dt=start_local,
             window_end_dt=end_local,
+            requested_quantity=requested_quantity,
+            requested_unit=requested_unit,
         )
         activity_txt_payload = build_daily_activity_details_txt(
             guild,
@@ -647,6 +668,8 @@ class DailyActivityReportService:
             period_label=period_label,
             window_start_dt=start_local,
             window_end_dt=end_local,
+            requested_quantity=requested_quantity,
+            requested_unit=requested_unit,
         )
 
         report_embeds = list(embeds)

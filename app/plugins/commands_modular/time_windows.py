@@ -15,6 +15,75 @@ class TimeWindowResult:
     end_dt: datetime
     period_label: str
     label_periodo: str
+    requested_quantity: int | None = None
+    requested_unit: str | None = None
+
+
+def _normalize_requested_unit(unit: str | None) -> str:
+    normalized = str(unit or "").strip().lower()
+    aliases = {
+        "minuto": "minuti",
+        "minuti": "minuti",
+        "ora": "ore",
+        "ore": "ore",
+        "giorno": "giorni",
+        "giorni": "giorni",
+        "settimana": "settimane",
+        "settimane": "settimane",
+    }
+    return aliases.get(normalized, "minuti")
+
+
+def _format_qty_unit(qty: int, singular: str, plural: str) -> str:
+    safe_qty = max(1, int(qty))
+    return f"{safe_qty} {singular if safe_qty == 1 else plural}"
+
+
+def _minutes_equivalence_label(total_minutes: int) -> str | None:
+    if total_minutes < 1440:
+        return None
+    days = total_minutes // 1440
+    hours = (total_minutes % 1440) // 60
+    if days <= 0:
+        return None
+    day_label = _format_qty_unit(days, "giorno", "giorni")
+    if hours <= 0:
+        return day_label
+    hour_label = _format_qty_unit(hours, "ora", "ore")
+    return f"{day_label} e {hour_label}"
+
+
+def format_rolling_window_label(quantity: int, unit: str, *, include_equivalence: bool = True) -> str:
+    qty = max(1, int(quantity))
+    normalized_unit = _normalize_requested_unit(unit)
+    if normalized_unit == "ore":
+        base = "Ultima ora" if qty == 1 else f"Ultime {qty} ore"
+        if include_equivalence and qty >= 24:
+            base += f" ({_format_qty_unit(qty // 24, 'giorno', 'giorni')})"
+        return base
+    if normalized_unit == "giorni":
+        return "Ultimo giorno" if qty == 1 else f"Ultimi {qty} giorni"
+    if normalized_unit == "settimane":
+        return "Ultima settimana" if qty == 1 else f"Ultime {qty} settimane"
+
+    base = "Ultimo minuto" if qty == 1 else f"Ultimi {qty} minuti"
+    if include_equivalence:
+        eq = _minutes_equivalence_label(qty)
+        if eq:
+            base += f" ({eq})"
+    return base
+
+
+def infer_rolling_window_request(start_dt: datetime, end_dt: datetime) -> tuple[int, str]:
+    delta = max(timedelta(minutes=1), end_dt - start_dt)
+    total_seconds = int(delta.total_seconds())
+    if total_seconds % (7 * 24 * 3600) == 0:
+        return max(1, total_seconds // (7 * 24 * 3600)), "settimane"
+    if total_seconds % (24 * 3600) == 0:
+        return max(1, total_seconds // (24 * 3600)), "giorni"
+    if total_seconds % 3600 == 0:
+        return max(1, total_seconds // 3600), "ore"
+    return max(1, total_seconds // 60), "minuti"
 
 
 def parse_italian_datetime(value: str) -> datetime | None:
@@ -30,28 +99,26 @@ def parse_italian_datetime(value: str) -> datetime | None:
     return None
 
 
-def build_period_label(period_label: str, *, start_dt: datetime, end_dt: datetime, start_ts: str, end_ts: str) -> str:
+def build_period_label(
+    period_label: str,
+    *,
+    start_dt: datetime,
+    end_dt: datetime,
+    start_ts: str,
+    end_ts: str,
+    requested_quantity: int | None = None,
+    requested_unit: str | None = None,
+) -> str:
     if period_label == "oggi":
         return "Oggi"
     if period_label == "ieri":
         return "Ieri"
     if period_label == "ultimi":
-        delta = end_dt - start_dt
-        if delta.days >= 7:
-            weeks = max(1, int(round(delta.days / 7)))
-            unit = "settimane" if weeks > 1 else "settimana"
-            return f"Ultime {weeks} {unit}"
-        if delta.days >= 1:
-            days = max(1, delta.days)
-            unit = "giorni" if days > 1 else "giorno"
-            return f"Ultimi {days} {unit}"
-        hours = max(1, int(delta.total_seconds() // 3600))
-        if hours >= 1:
-            unit = "ore" if hours > 1 else "ora"
-            return f"Ultime {hours} {unit}"
-        minutes = max(1, int(delta.total_seconds() // 60))
-        unit = "minuti" if minutes > 1 else "minuto"
-        return f"Ultimi {minutes} {unit}"
+        qty = requested_quantity
+        unit = _normalize_requested_unit(requested_unit)
+        if qty is None:
+            qty, unit = infer_rolling_window_request(start_dt, end_dt)
+        return format_rolling_window_label(qty, unit)
     if period_label == "range":
         return f"Dal {format_italian_ts(start_ts)} al {format_italian_ts(end_ts)}"
     return "Periodo personalizzato"
@@ -86,7 +153,17 @@ def resolve_ultimi_window(quantita: int, unita: str, config: Any) -> tuple[TimeW
         start_dt=start_dt,
         end_dt=now,
         period_label="ultimi",
-        label_periodo=build_period_label("ultimi", start_dt=start_dt, end_dt=now, start_ts=start_dt.astimezone(timezone.utc).isoformat(), end_ts=now.astimezone(timezone.utc).isoformat()),
+        label_periodo=build_period_label(
+            "ultimi",
+            start_dt=start_dt,
+            end_dt=now,
+            start_ts=start_dt.astimezone(timezone.utc).isoformat(),
+            end_ts=now.astimezone(timezone.utc).isoformat(),
+            requested_quantity=quantita,
+            requested_unit=unita,
+        ),
+        requested_quantity=quantita,
+        requested_unit=unita,
     ), None
 
 

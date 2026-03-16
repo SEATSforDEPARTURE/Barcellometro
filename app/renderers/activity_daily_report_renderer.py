@@ -79,6 +79,8 @@ def build_daily_activity_embeds(
     period_label: str,
     window_start_dt: datetime,
     window_end_dt: datetime,
+    requested_quantity: int | None = None,
+    requested_unit: str | None = None,
 ) -> list[discord.Embed]:
     _ = guild
     total_messages = sum(item["details"].score.messages_count for item in channel_payloads)
@@ -103,7 +105,13 @@ def build_daily_activity_embeds(
         f"{item['details'].score.emoji} **({int(item['details'].score.score)}/100)** - {_fmt_channel_name(item['channel'])}"
         for item in channel_payloads
     ]
-    window_header = format_window_header(period_label=period_label, start_dt=window_start_dt, end_dt=window_end_dt)
+    window_header = format_window_header(
+        period_label=period_label,
+        start_dt=window_start_dt,
+        end_dt=window_end_dt,
+        requested_quantity=requested_quantity,
+        requested_unit=requested_unit,
+    )
 
     overview = discord.Embed(
         title=f"🗣️ RESOCONTO SERVER “{guild_name}”",
@@ -179,6 +187,8 @@ def build_daily_activity_details_txt(
     period_label: str,
     window_start_dt: datetime,
     window_end_dt: datetime,
+    requested_quantity: int | None = None,
+    requested_unit: str | None = None,
 ) -> str:
     total_messages = sum(item["details"].score.messages_count for item in channel_payloads)
     total_members = server_summary.get("total_non_bot_members")
@@ -187,7 +197,13 @@ def build_daily_activity_details_txt(
     inactive_total = server_summary.get("inactive_non_bot")
     inactive_total_label = str(inactive_total) if inactive_total is not None else "?"
 
-    window_header = format_window_header(period_label=period_label, start_dt=window_start_dt, end_dt=window_end_dt).replace("**", "")
+    window_header = format_window_header(
+        period_label=period_label,
+        start_dt=window_start_dt,
+        end_dt=window_end_dt,
+        requested_quantity=requested_quantity,
+        requested_unit=requested_unit,
+    ).replace("**", "")
 
     lines = [
         f"RESOCONTO SERVER — 🗝 {guild_name}",
