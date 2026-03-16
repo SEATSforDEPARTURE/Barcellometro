@@ -22,8 +22,6 @@ from app.services.daily_activity_sorting import sort_channels_like_discord, sort
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
-DUE_WINDOW_SECONDS = 600
-
 
 @dataclass
 class ReportWindow:
@@ -160,6 +158,7 @@ class DailyActivityReportService:
     def start(self) -> None:
         self._ensure_persistent_view_registered()
         if self._task is None:
+            logger.info("daily activity report scheduler running in server_summary_schedule-only mode")
             self._task = asyncio.create_task(self._loop())
 
     async def persist_pagination_record(
@@ -234,26 +233,7 @@ class DailyActivityReportService:
             await asyncio.sleep(30)
 
     async def run_once(self) -> None:
-        await self._run_legacy_activity_monitoring_once()
         await self._run_server_summary_schedules_once()
-
-    async def _run_legacy_activity_monitoring_once(self) -> None:
-        now_local = datetime.now(timezone.utc).astimezone(ROME_TZ)
-        rows = await self._database.list_enabled_activity_monitoring_configs()
-        for row in rows:
-            guild_id = str(row["guild_id"])
-            if row["last_sent_local_date"] == now_local.date().isoformat():
-                continue
-            try:
-                hh, mm = str(row["send_time_local"] or "09:00").split(":", 1)
-                send_local = now_local.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-            except Exception:
-                continue
-            delta = (now_local - send_local).total_seconds()
-            if delta < 0 or delta > DUE_WINDOW_SECONDS:
-                continue
-            await self._send_daily_report(guild_id=guild_id, mod_channel_id=str(row["mod_channel_id"] or ""), window=None)
-            await self._database.mark_activity_monitoring_sent(guild_id, now_local.date().isoformat())
 
     async def _run_server_summary_schedules_once(self) -> None:
         now_iso = datetime.now(timezone.utc).isoformat()
