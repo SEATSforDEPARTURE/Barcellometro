@@ -630,8 +630,24 @@ class DailyActivityReportService:
             "period_label": period_label,
         }
 
-        embeds = build_daily_activity_embeds(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)
-        activity_txt_payload = build_daily_activity_details_txt(guild, guild.name, payloads, server_summary=server_summary, reference_ts=end_ts)
+        embeds = build_daily_activity_embeds(
+            guild,
+            guild.name,
+            payloads,
+            server_summary=server_summary,
+            period_label=period_label,
+            window_start_dt=start_local,
+            window_end_dt=end_local,
+        )
+        activity_txt_payload = build_daily_activity_details_txt(
+            guild,
+            guild.name,
+            payloads,
+            server_summary=server_summary,
+            period_label=period_label,
+            window_start_dt=start_local,
+            window_end_dt=end_local,
+        )
 
         report_embeds = list(embeds)
         inactive_txt_file: discord.File | None = None
