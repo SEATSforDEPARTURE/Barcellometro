@@ -16,6 +16,7 @@ from app.plugins.commands_modular import (
     register_aura,
     register_barcello,
     register_attivita_settings,
+    register_inattivi,
     register_messaggi,
     register_privacy,
     register_riassunto,
@@ -61,6 +62,7 @@ def setup(registry: ServiceRegistry) -> None:
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunti")
     aura_group = app_commands.Group(name="aura", description="Resoconto aura")
     attivita_group = app_commands.Group(name="attivita", description="Comandi attività utenti")
+    moderazione_group = app_commands.Group(name="moderazione", description="Comandi moderazione")
     resocontocanale_group = app_commands.Group(name="resocontocanale", description="Resoconto canale")
     resocontoserver_group = app_commands.Group(name="resocontoserver", description="Resoconto server")
 
@@ -84,6 +86,10 @@ def setup(registry: ServiceRegistry) -> None:
     register_attivita(attivita_group, ctx)
     register_attivita_settings(attivita_group, ctx)
 
+    inattivi_group = app_commands.Group(name="inattivi", description="Gestione utenti inattivi")
+    add_group_once(moderazione_group, inattivi_group, logger)
+    register_inattivi(inattivi_group, ctx)
+
     register_resoconto(resocontocanale_group, resocontoserver_group, ctx)
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
 
@@ -103,6 +109,7 @@ def setup(registry: ServiceRegistry) -> None:
         riassunto_group,
         aura_group,
         attivita_group,
+        moderazione_group,
         status_group,
         resocontocanale_group,
         resocontoserver_group,
