@@ -193,7 +193,6 @@ def build_daily_activity_details_txt(
         f"RESOCONTO SERVER — 🗝 {guild_name}",
         "",
         f"Periodo: {window_header}",
-        f"Finestra temporale: {server_summary.get('window_start_local', '—')} → {server_summary.get('window_end_local', '—')}",
         "",
         f"• Attività generale: {server_summary.get('label', 'ASSENTE')}",
         f"• Punti attività generali: {server_summary.get('score', 0)}/100",

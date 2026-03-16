@@ -70,16 +70,9 @@ def format_italian_ts(ts: str | None) -> str:
 
 
 def resolve_ultimi_window(quantita: int, unita: str, config: Any) -> tuple[TimeWindowResult | None, str | None]:
+    _ = config
     if quantita <= 0:
         return None, "Specifica una quantità valida."
-    if unita == "minuti" and quantita > config.riassunto_max_minutes:
-        return None, "❌ Limite massimo: ultimi 60 minuti. Prova con le ore (es: /riassunto ultimi 2 ore)."
-    if unita == "ore" and quantita > config.riassunto_max_hours:
-        return None, "❌ Limite massimo: ultime 24 ore. Prova con i giorni (es: /riassunto ultimi 2 giorni)."
-    if unita == "giorni" and quantita > config.riassunto_max_days:
-        return None, "❌ Limite massimo: ultimi 30 giorni. Prova con le settimane (es: /riassunto ultimi 2 settimane)."
-    if unita == "settimane" and quantita > config.riassunto_max_weeks:
-        return None, "❌ Limite massimo: ultime 4 settimane. Riduci la finestra temporale."
 
     now = datetime.now(ROME_TZ)
     delta_map = {
@@ -111,6 +104,7 @@ def resolve_ieri_window() -> TimeWindowResult:
 
 
 def resolve_range_window(da: str, a: str, config: Any) -> tuple[TimeWindowResult | None, str | None]:
+    _ = config
     start_dt = parse_italian_datetime(da)
     end_dt = parse_italian_datetime(a)
     if not start_dt or not end_dt:
@@ -120,9 +114,6 @@ def resolve_range_window(da: str, a: str, config: Any) -> tuple[TimeWindowResult
     if end_utc < start_utc:
         start_utc, end_utc = end_utc, start_utc
         start_dt, end_dt = end_dt, start_dt
-    duration_days = (end_utc - start_utc).total_seconds() / 86400
-    if duration_days > config.riassunto_range_max_days:
-        return None, "❌ Range troppo elevato (max 30 giorni). Riduci la finestra temporale."
     return TimeWindowResult(
         start_dt=start_dt,
         end_dt=end_dt,
