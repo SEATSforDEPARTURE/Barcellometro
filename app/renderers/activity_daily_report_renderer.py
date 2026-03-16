@@ -5,6 +5,7 @@ from typing import Any
 
 import discord
 
+from app.renderers.channel_summary_renderer import format_window_header
 from app.services.footer import attach_footer_meta
 
 ITALIAN_WEEKDAYS = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
@@ -75,7 +76,9 @@ def build_daily_activity_embeds(
     channel_payloads: list[dict[str, Any]],
     *,
     server_summary: dict[str, Any],
-    reference_ts: str,
+    period_label: str,
+    window_start_dt: datetime,
+    window_end_dt: datetime,
 ) -> list[discord.Embed]:
     _ = guild
     total_messages = sum(item["details"].score.messages_count for item in channel_payloads)
@@ -100,12 +103,13 @@ def build_daily_activity_embeds(
         f"{item['details'].score.emoji} **({int(item['details'].score.score)}/100)** - {_fmt_channel_name(item['channel'])}"
         for item in channel_payloads
     ]
+    window_header = format_window_header(period_label=period_label, start_dt=window_start_dt, end_dt=window_end_dt)
 
     overview = discord.Embed(
         title=f"🗣️ RESOCONTO SERVER “{guild_name}”",
         color=_color_for_emoji(emoji),
         description=(
-            f"**🗓️ {_format_italian_date(reference_ts)}**\n\n"
+            f"{window_header}\n\n"
             f"{emoji} **ATTIVITÀ {label}**\n"
             "*Ritmo del server valutato su volume, persone attive e continuità.*\n\n"
             f"🫀 **PUNTI ATTIVITÀ SERVER**\n{_bar(score, emoji)} **({score}/100)**\n\n"
@@ -172,7 +176,9 @@ def build_daily_activity_details_txt(
     channel_payloads: list[dict[str, Any]],
     *,
     server_summary: dict[str, Any],
-    reference_ts: str,
+    period_label: str,
+    window_start_dt: datetime,
+    window_end_dt: datetime,
 ) -> str:
     total_messages = sum(item["details"].score.messages_count for item in channel_payloads)
     total_members = server_summary.get("total_non_bot_members")
@@ -181,10 +187,12 @@ def build_daily_activity_details_txt(
     inactive_total = server_summary.get("inactive_non_bot")
     inactive_total_label = str(inactive_total) if inactive_total is not None else "?"
 
+    window_header = format_window_header(period_label=period_label, start_dt=window_start_dt, end_dt=window_end_dt).replace("**", "")
+
     lines = [
-        f"RESOCONTO ATTIVITÀ SERVER — 🗝 {guild_name}",
+        f"RESOCONTO SERVER — 🗝 {guild_name}",
         "",
-        f"Data riferimento: {_format_italian_date(reference_ts)}",
+        f"Periodo: {window_header}",
         f"Finestra temporale: {server_summary.get('window_start_local', '—')} → {server_summary.get('window_end_local', '—')}",
         "",
         f"• Attività generale: {server_summary.get('label', 'ASSENTE')}",

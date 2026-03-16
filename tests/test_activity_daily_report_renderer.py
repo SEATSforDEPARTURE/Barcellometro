@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 import sys
 
@@ -87,10 +88,12 @@ def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fie
             "global_active_rows": ["1) ..."],
             "global_inactive_rows": ["1) ..."],
         },
-        reference_ts="2026-02-20T10:00:00+00:00",
+        period_label="oggi",
+        window_start_dt=datetime(2026, 2, 20, 0, 0),
+        window_end_dt=datetime(2026, 2, 20, 10, 0),
     )
 
-    assert "🗓️ Venerdì, 20 Febbraio 2026" in (embeds[0].description or "")
+    assert "🗓️ Oggi. Venerdì, 20 Febbraio 2026" in (embeds[0].description or "")
     assert "🫀 **PUNTI ATTIVITÀ SERVER**" in (embeds[0].description or "")
     assert "🫀 **PUNTI ATTIVITÀ CANALI**" in (embeds[0].description or "")
     assert "🟢 **(72/100)** - #general" in (embeds[0].description or "")
@@ -125,8 +128,68 @@ def test_daily_renderer_txt_contains_required_headers_and_silence() -> None:
             "global_active_rows": ["1) <@1> ..."],
             "global_inactive_rows": ["1) <@2> ..."],
         },
-        reference_ts="2026-02-20T10:00:00+00:00",
+        period_label="ieri",
+        window_start_dt=datetime(2026, 2, 19, 0, 0),
+        window_end_dt=datetime(2026, 2, 20, 0, 0),
     )
-    assert "RESOCONTO ATTIVITÀ SERVER —" in txt
+    assert "RESOCONTO SERVER —" in txt
+    assert "Periodo: 🗓️ Ieri. Giovedì, 19 Febbraio 2026" in txt
     assert "Ora di silenzio generale" in txt
     assert "• Ora di silenzio:" in txt
+
+
+def test_daily_renderer_embeds_use_ultimi_window_header() -> None:
+    guild = _Guild()
+    embeds = build_daily_activity_embeds(
+        guild,
+        "Test Server",
+        _payloads(),
+        server_summary={
+            "active_non_bot": 3,
+            "total_non_bot_members": 12,
+            "inactive_non_bot": 9,
+            "peak_hour": 22,
+            "silence_hour": 4,
+            "continuity_hours": 8,
+            "label": "INTENSA",
+            "score": 74,
+            "trend_text": "Messaggi in crescita (+40% vs finestra precedente).",
+            "window_end_local": "20:28",
+            "global_active_rows": ["1) ..."],
+            "global_inactive_rows": ["1) ..."],
+        },
+        period_label="ultimi",
+        window_start_dt=datetime(2026, 3, 15, 19, 19),
+        window_end_dt=datetime(2026, 3, 16, 15, 19),
+    )
+
+    assert "🗓️ Ultime 20 ore" in (embeds[0].description or "")
+    assert "15/03/2026 19:19 → 16/03/2026 15:19" in (embeds[0].description or "")
+
+
+def test_daily_renderer_embeds_use_range_window_header() -> None:
+    guild = _Guild()
+    embeds = build_daily_activity_embeds(
+        guild,
+        "Test Server",
+        _payloads(),
+        server_summary={
+            "active_non_bot": 3,
+            "total_non_bot_members": 12,
+            "inactive_non_bot": 9,
+            "peak_hour": 22,
+            "silence_hour": 4,
+            "continuity_hours": 8,
+            "label": "INTENSA",
+            "score": 74,
+            "trend_text": "Messaggi in crescita (+40% vs finestra precedente).",
+            "window_end_local": "20:28",
+            "global_active_rows": ["1) ..."],
+            "global_inactive_rows": ["1) ..."],
+        },
+        period_label="range",
+        window_start_dt=datetime(2026, 3, 10, 0, 0),
+        window_end_dt=datetime(2026, 3, 12, 1, 0),
+    )
+
+    assert "🗓️ 10/03/2026 00:00 → 12/03/2026 01:00" in (embeds[0].description or "")
