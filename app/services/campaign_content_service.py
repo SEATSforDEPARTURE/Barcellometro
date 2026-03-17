@@ -439,7 +439,7 @@ class CampaignContentService:
 
     def _resolve_ai_model_name(self, task: str) -> str:
         if self._ai is not None:
-            model = self._ai.get_model(task)
-            if isinstance(model, str) and model.strip():
-                return model.strip()
-        return "gpt-4o"
+            model_cfg = self._ai.get_model_config(task)
+            if isinstance(model_cfg, str) and model_cfg.strip():
+                return model_cfg.strip()
+        return "unknown"

@@ -63,13 +63,17 @@ class AiService:
         return self._enabled
 
     def get_model_config(self, task: str) -> Optional[str]:
+        """
+        Restituisce la stringa completa configurata nel DB:
+        es: 'openai:gpt-4o-mini' oppure 'ollama:qwen2.5:1.5b'
+        """
         return self._model_map.get(task)
 
     def get_runtime_model(self, task: str) -> Optional[str]:
         return self.get_model_config(task)
 
     def get_model(self, task: str) -> Optional[str]:
-        return self.get_openai_model(task)
+        return self.get_model_config(task)
 
     async def set_model(self, task: str, model: str) -> None:
         self._model_map[task] = model
@@ -124,15 +128,37 @@ class AiService:
         *,
         timeout_seconds: float = 25.0,
     ) -> str | None:
-        if not self._enabled or self._client is None:
+        if not self._enabled:
             return None
-        model = self.get_openai_model(task) or self.get_openai_model("summary") or "gpt-4o-mini"
+        model_cfg = self.get_model_config(task) or self.get_model_config("summary") or "openai:gpt-4o-mini"
         messages = self._build_general_messages(question, persona_system, history)
-        response = await asyncio.wait_for(self._client.responses.create(model=model, input=messages), timeout=timeout_seconds)
-        self._metrics["last_used_task"] = task
-        self._metrics["last_used_model"] = model
-        text = str(getattr(response, "output_text", "") or "").strip()
-        return text or None
+        prompt = messages[-1]["content"] if messages else question
+
+        async def _run(cfg: str) -> str:
+            provider, model = cfg.split(":", 1)
+            self.logger.info("[AI] task=%s provider=%s model=%s", task, provider, model)
+            if provider == "openai":
+                if self._client is None:
+                    raise RuntimeError("Client OpenAI non inizializzato")
+                response = await asyncio.wait_for(self._client.responses.create(model=model, input=messages), timeout=timeout_seconds)
+                return str(getattr(response, "output_text", "") or "").strip()
+            if provider == "ollama":
+                return (await self._ollama.generate_text(model, persona_system, prompt, timeout_seconds)).strip()
+            raise ValueError(f"Provider non supportato: {provider}")
+
+        try:
+            text = await _run(model_cfg)
+            self._metrics["last_used_task"] = task
+            self._metrics["last_used_model"] = model_cfg
+            return text or None
+        except Exception:
+            fallback_cfg = self.get_fallback_model(task)
+            if not fallback_cfg:
+                raise
+            text = await _run(fallback_cfg)
+            self._metrics["last_used_task"] = task
+            self._metrics["last_used_model"] = fallback_cfg
+            return text or None
 
     async def ask_general_with_web(
         self,
@@ -153,29 +179,47 @@ class AiService:
         *,
         timeout_seconds: float = 35.0,
     ) -> str | None:
-        if not self._enabled or self._client is None:
+        if not self._enabled:
             return None
-        model = self.get_openai_model(task) or self.get_openai_model("summary") or "gpt-4o-mini"
+        model_cfg = self.get_model_config(task) or self.get_model_config("summary") or "openai:gpt-4o-mini"
         system_with_sources = (
             f"{persona_system}\n"
             "Quando usi il web, cita esplicitamente le fonti consultate con link o nome testata/sito."
         )
         messages = self._build_general_messages(question, system_with_sources, history)
-        response = await asyncio.wait_for(
-            self._client.responses.create(
-                model=model,
-                input=messages,
-                tools=[{"type": "web_search"}],
-            ),
-            timeout=timeout_seconds,
-        )
-        self._metrics["last_used_task"] = task
-        self._metrics["last_used_model"] = model
-        text = str(getattr(response, "output_text", "") or "").strip()
-        return text or None
+        prompt = messages[-1]["content"] if messages else question
+
+        async def _run(cfg: str, *, use_web: bool) -> str:
+            provider, model = cfg.split(":", 1)
+            self.logger.info("[AI] task=%s provider=%s model=%s", task, provider, model)
+            if provider == "openai":
+                if self._client is None:
+                    raise RuntimeError("Client OpenAI non inizializzato")
+                kwargs: dict[str, Any] = {"model": model, "input": messages}
+                if use_web:
+                    kwargs["tools"] = [{"type": "web_search"}]
+                response = await asyncio.wait_for(self._client.responses.create(**kwargs), timeout=timeout_seconds)
+                return str(getattr(response, "output_text", "") or "").strip()
+            if provider == "ollama":
+                return (await self._ollama.generate_text(model, system_with_sources, prompt, timeout_seconds)).strip()
+            raise ValueError(f"Provider non supportato: {provider}")
+
+        try:
+            text = await _run(model_cfg, use_web=True)
+            self._metrics["last_used_task"] = task
+            self._metrics["last_used_model"] = model_cfg
+            return text or None
+        except Exception:
+            fallback_cfg = self.get_fallback_model(task)
+            if not fallback_cfg:
+                raise
+            text = await _run(fallback_cfg, use_web=False)
+            self._metrics["last_used_task"] = task
+            self._metrics["last_used_model"] = fallback_cfg
+            return text or None
 
     async def run_test(self, task: str, prompt: str, *, use_web: bool = False, timeout_seconds: float = 20.0) -> dict[str, Any]:
-        model = self.get_openai_model(task) or self.get_openai_model("summary") or "gpt-4o-mini"
+        model = self.get_model_config(task) or self.get_model_config("summary") or "openai:gpt-4o-mini"
         output: str | None = None
         error: str | None = None
         ok = False
