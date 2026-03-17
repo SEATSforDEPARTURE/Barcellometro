@@ -10,6 +10,22 @@ if "aiosqlite" not in sys.modules:
     aiosqlite_stub.connect = object
     sys.modules["aiosqlite"] = aiosqlite_stub
 
+if "httpx" not in sys.modules:
+    httpx_stub = types.ModuleType("httpx")
+
+    class _AsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    httpx_stub.AsyncClient = _AsyncClient
+    sys.modules["httpx"] = httpx_stub
+
 if "openai" not in sys.modules:
     openai_stub = types.ModuleType("openai")
     openai_stub.AsyncOpenAI = object
@@ -24,7 +40,7 @@ def test_ask_general_with_web_calls_responses_with_tool() -> None:
     client.responses.create = AsyncMock(return_value=SimpleNamespace(output_text="ok"))
     service._enabled = True
     service._client = client
-    service._model_map = {"summary": "gpt-4o-mini"}
+    service._model_map = {"summary": "openai:gpt-4o-mini"}
 
     out = asyncio.run(
         service.ask_general_with_web(
@@ -47,9 +63,9 @@ def test_load_settings_initializes_audio_summary_default() -> None:
     async def _get_setting(key: str):
         values = {
             "ai_enabled": "true",
-            "ai_model.summary": "gpt-4.1-mini",
-            "ai_model.transcription": "gpt-4o-transcribe",
-            "ai_model.translation": "gpt-4o-mini",
+            "ai_model.summary": "openai:gpt-4.1-mini",
+            "ai_model.transcription": "openai:gpt-4o-transcribe",
+            "ai_model.translation": "openai:gpt-4o-mini",
         }
         return values.get(key)
 
@@ -59,5 +75,5 @@ def test_load_settings_initializes_audio_summary_default() -> None:
 
     asyncio.run(service.load_settings())
 
-    assert service.get_model("audio_summary") == "gpt-4o-mini"
-    db.set_setting.assert_any_await("ai_model.audio_summary", "gpt-4o-mini")
+    assert service.get_model_config("audio_summary") == "openai:gpt-4o-mini"
+    db.set_setting.assert_any_await("ai_model.audio_summary", "openai:gpt-4o-mini")
