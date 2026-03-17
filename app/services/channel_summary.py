@@ -666,10 +666,26 @@ class ChannelSummaryService:
             aura_embed=aura_embed,
         )
 
-        attach_footer_meta(embeds[0], service_name="channel_summary", used_local_processing=True)
+        ai_reason = str(summary.ai_status.get("reason") or "")
+        ai_called = bool(summary.ai_status.get("called"))
+        ai_model = str(summary.ai_status.get("display_model") or "").strip()
+        footer_contributors = [ai_model] if ai_model and (ai_reason == "ok" or ai_called) else []
+        footer_local = ai_reason != "ok"
+
+        attach_footer_meta(
+            embeds[0],
+            service_name="channel_summary",
+            contributors=footer_contributors,
+            used_local_processing=footer_local,
+        )
         if len(embeds) >= 2:
             embeds[1].title = "🗒️ DETTAGLI CANALE (Pag 1/2)"
-            attach_footer_meta(embeds[1], service_name="channel_summary", contributors=["gpt-4o"], used_local_processing=False)
+            attach_footer_meta(
+                embeds[1],
+                service_name="channel_summary",
+                contributors=footer_contributors,
+                used_local_processing=footer_local,
+            )
         if len(embeds) >= 3:
             aura_chars_final = _estimate_embed_size(embeds[2])
             logger.debug("aura_embed_chars_final_with_footer=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
