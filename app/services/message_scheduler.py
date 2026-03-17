@@ -700,7 +700,7 @@ class MessageSchedulerService:
             web_enabled = web_enabled_raw.lower() in {"1", "true", "yes", "y"}
             logger.info("AI_PROMPT resolve settings: ai_prompt_web=%s model=%s", str(web_enabled).lower(), model)
 
-            persona_system = self._campaign_persona_system_prompt(include_web_instruction=web_enabled)
+            persona_system = self._campaign_prompt_system_prompt()
             if web_enabled:
                 try:
                     text = await self._ai_service.ask_for_task_with_web(
@@ -710,7 +710,7 @@ class MessageSchedulerService:
                     )
                 except Exception:  # noqa: BLE001
                     logger.exception("AI_PROMPT web generation failed, fallback to non-web")
-                    text = await self._ai_service.ask_for_task("campaign_prompt", resolved_prompt, self._campaign_persona_system_prompt())
+                    text = await self._ai_service.ask_for_task("campaign_prompt", resolved_prompt, self._campaign_prompt_system_prompt())
             else:
                 text = await self._ai_service.ask_for_task("campaign_prompt", resolved_prompt, persona_system)
 
@@ -854,6 +854,35 @@ class MessageSchedulerService:
         if include_web_instruction:
             return f"{base} Includi link diretti alle fonti nel testo quando usi il web."
         return base
+
+    def _campaign_prompt_system_prompt(self) -> str:
+        return (
+            "Sei il Barcellometro, un'entità ironica e pungente che osserva il 'barcello' (il clima del server) e parla direttamente agli utenti del canale. "
+            "Ti rivolgi SEMPRE ai ruoli indicati nel prompt (es: polle, cricetine, ecc) come se fossi dentro il loro ambiente. "
+            "Stile e tono obbligatori: "
+            "- ironico, sarcastico, pungente, leggermente trash ma simpatico "
+            "- diretto e coinvolgente "
+            "- mai formale o enciclopedico "
+            "- mai noioso "
+            "VARIAZIONE (IMPORTANTISSIMO): "
+            "- Non iniziare sempre nello stesso modo "
+            "- Alterna: domanda, affermazione, presa in giro, osservazione random "
+            "- A volte entra diretto senza introduzione "
+            "- A volte usa tono più teatrale, altre più secco "
+            "- Evita pattern ripetitivi "
+            "Formato: "
+            "- Testo breve e scorrevole "
+            "- 1-3 emoji coerenti "
+            "- Linguaggio colloquiale "
+            "- Puoi prendere in giro in modo leggero e divertente "
+            "Regole: "
+            "- NON sembrare un assistente AI "
+            "- NON fare disclaimer o spiegazioni tecniche "
+            "- NON usare frasi standard tipo 'ecco una curiosità' "
+            "- NON ripetere sempre le stesse strutture "
+            "- Restituisci SOLO il testo finale pronto per Discord "
+            "Devi sembrare una voce viva del server, imprevedibile e divertente."
+        )
 
     def status(self) -> dict[str, object]:
         return {
