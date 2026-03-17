@@ -161,6 +161,7 @@ def test_ai_prompt_slot_cache_avoids_duplicate_openai_calls_on_retry_and_updates
             insert_send_log=AsyncMock(),
             get_setting=AsyncMock(return_value="true"),
             set_setting=AsyncMock(),
+            count_sent_today=AsyncMock(return_value=0),
         )
         bot = _FakeBot()
         channel = _FakeMessageChannel(123)
@@ -170,8 +171,8 @@ def test_ai_prompt_slot_cache_avoids_duplicate_openai_calls_on_retry_and_updates
             is_enabled=lambda: True,
             client=lambda: object(),
             get_model=lambda _name: "gpt-4o-mini",
-            ask_general_with_web=AsyncMock(return_value="ciao"),
-            ask_general=AsyncMock(return_value="ciao"),
+            ask_for_task_with_web=AsyncMock(return_value="ciao"),
+            ask_for_task=AsyncMock(return_value="ciao"),
         )
         scheduler = MessageSchedulerService(db, bot, ai_service=ai_service)
 
@@ -192,7 +193,7 @@ def test_ai_prompt_slot_cache_avoids_duplicate_openai_calls_on_retry_and_updates
         await scheduler._process_campaign(campaign, now)
         await scheduler._process_campaign(campaign, now)
 
-        assert ai_service.ask_general_with_web.await_count == 1
+        assert ai_service.ask_for_task_with_web.await_count == 1
         assert db.update_campaign_next_run.await_count >= 2
         statuses = [call.kwargs["status"] for call in db.insert_send_log.await_args_list]
         assert "error" in statuses

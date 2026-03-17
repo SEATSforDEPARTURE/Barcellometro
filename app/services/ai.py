@@ -20,6 +20,8 @@ class AiService:
         "analysis",
         "transcription",
         "translation",
+        "campaign_editorial",
+        "campaign_prompt",
     )
 
     def __init__(self, database: DatabaseService, api_key: str) -> None:
@@ -33,6 +35,12 @@ class AiService:
         self.logger = logging.getLogger(__name__)
         self._metrics = {
             "last_updated_ts": None,
+            "last_test_task": None,
+            "last_test_model": None,
+            "last_test_ok": None,
+            "last_test_error": None,
+            "last_used_task": None,
+            "last_used_model": None,
         }
 
     async def load_settings(self) -> None:
@@ -62,10 +70,15 @@ class AiService:
 
     async def set_model(self, task: str, model: str) -> None:
         self._model_map[task] = model
+        self._metrics["last_updated_ts"] = asyncio.get_running_loop().time()
         await self._database.set_setting(f"ai_model.{task}", model)
+
+    def get_fallback_model(self, task: str) -> Optional[str]:
+        return self._fallback_model_map.get(task)
 
     async def set_fallback_model(self, task: str, model: str) -> None:
         self._fallback_model_map[task] = model
+        self._metrics["last_updated_ts"] = asyncio.get_running_loop().time()
         await self._database.set_setting(f"ai_fallback_model.{task}", model)
 
     def client(self) -> Optional[AsyncOpenAI]:
@@ -75,7 +88,9 @@ class AiService:
         return {
             "active": True,
             "state": "running" if self._enabled else "disabled",
-            "metrics": {"models": dict(self._model_map), **self._metrics},
+            "models": dict(self._model_map),
+            "fallback_models": dict(self._fallback_model_map),
+            "metrics": dict(self._metrics),
         }
 
 
@@ -95,11 +110,24 @@ class AiService:
         *,
         timeout_seconds: float = 25.0,
     ) -> str | None:
+        return await self.ask_for_task("summary", question, persona_system, history, timeout_seconds=timeout_seconds)
+
+    async def ask_for_task(
+        self,
+        task: str,
+        question: str,
+        persona_system: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        timeout_seconds: float = 25.0,
+    ) -> str | None:
         if not self._enabled or self._client is None:
             return None
-        model = self.get_openai_model("summary") or "gpt-4o-mini"
+        model = self.get_openai_model(task) or self.get_openai_model("summary") or "gpt-4o-mini"
         messages = self._build_general_messages(question, persona_system, history)
         response = await asyncio.wait_for(self._client.responses.create(model=model, input=messages), timeout=timeout_seconds)
+        self._metrics["last_used_task"] = task
+        self._metrics["last_used_model"] = model
         text = str(getattr(response, "output_text", "") or "").strip()
         return text or None
 
@@ -111,9 +139,20 @@ class AiService:
         *,
         timeout_seconds: float = 35.0,
     ) -> str | None:
+        return await self.ask_for_task_with_web("summary", question, persona_system, history, timeout_seconds=timeout_seconds)
+
+    async def ask_for_task_with_web(
+        self,
+        task: str,
+        question: str,
+        persona_system: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        timeout_seconds: float = 35.0,
+    ) -> str | None:
         if not self._enabled or self._client is None:
             return None
-        model = self.get_openai_model("summary") or "gpt-4o-mini"
+        model = self.get_openai_model(task) or self.get_openai_model("summary") or "gpt-4o-mini"
         system_with_sources = (
             f"{persona_system}\n"
             "Quando usi il web, cita esplicitamente le fonti consultate con link o nome testata/sito."
@@ -127,8 +166,40 @@ class AiService:
             ),
             timeout=timeout_seconds,
         )
+        self._metrics["last_used_task"] = task
+        self._metrics["last_used_model"] = model
         text = str(getattr(response, "output_text", "") or "").strip()
         return text or None
+
+    async def run_test(self, task: str, prompt: str, *, use_web: bool = False, timeout_seconds: float = 20.0) -> dict[str, Any]:
+        model = self.get_openai_model(task) or self.get_openai_model("summary") or "gpt-4o-mini"
+        output: str | None = None
+        error: str | None = None
+        ok = False
+        try:
+            if use_web:
+                output = await self.ask_for_task_with_web(
+                    task,
+                    prompt,
+                    "Sei un assistente di test del bot Discord.",
+                    timeout_seconds=timeout_seconds,
+                )
+            else:
+                output = await self.ask_for_task(
+                    task,
+                    prompt,
+                    "Sei un assistente di test del bot Discord.",
+                    timeout_seconds=timeout_seconds,
+                )
+            ok = bool(output)
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc)
+
+        self._metrics["last_test_task"] = task
+        self._metrics["last_test_model"] = model
+        self._metrics["last_test_ok"] = ok
+        self._metrics["last_test_error"] = error
+        return {"ok": ok, "task": task, "model": model, "output": output, "error": error}
 
     def _get_model_for_task(self, task: str) -> str:
         return self._model_map.get(task) or "openai:gpt-4o-mini"
@@ -201,6 +272,8 @@ class AiService:
             "analysis": "openai:gpt-4o-mini",
             "transcription": "openai:gpt-4o-transcribe",
             "translation": "openai:gpt-4o-mini",
+            "campaign_editorial": "openai:gpt-4o-mini",
+            "campaign_prompt": "openai:gpt-4o-mini",
         }
         model_map: dict[str, str] = {}
         for task, default_model in defaults.items():
@@ -222,6 +295,8 @@ class AiService:
             "analysis": "ollama:qwen2.5:1.5b",
             "transcription": "openai:gpt-4o-transcribe",
             "translation": "openai:gpt-4o-mini",
+            "campaign_editorial": "ollama:qwen2.5:1.5b",
+            "campaign_prompt": "ollama:qwen2.5:1.5b",
         }
         fallback_map: dict[str, str] = {}
         for task, default_model in defaults.items():

@@ -633,7 +633,7 @@ class MessageSchedulerService:
                 return cached[1], "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "hit"}
             logger.info("AI cache miss campaign=%s slot=%s", campaign.get("id"), slot)
 
-            model = self._ai_service.get_model("summary") or "gpt-4o-mini"
+            model = self._ai_service.get_model("campaign_prompt") or "gpt-4o-mini"
             web_enabled_raw = await self._get_setting_with_default("messages_ai_prompt_web_enabled", "true")
             web_enabled = web_enabled_raw.lower() in {"1", "true", "yes", "y"}
             logger.info("AI_PROMPT resolve settings: ai_prompt_web=%s model=%s", str(web_enabled).lower(), model)
@@ -641,15 +641,16 @@ class MessageSchedulerService:
             persona_system = self._campaign_persona_system_prompt(include_web_instruction=web_enabled)
             if web_enabled:
                 try:
-                    text = await self._ai_service.ask_general_with_web(
+                    text = await self._ai_service.ask_for_task_with_web(
+                        "campaign_prompt",
                         resolved_prompt,
                         persona_system,
                     )
                 except Exception:  # noqa: BLE001
                     logger.exception("AI_PROMPT web generation failed, fallback to non-web")
-                    text = await self._ai_service.ask_general(resolved_prompt, self._campaign_persona_system_prompt())
+                    text = await self._ai_service.ask_for_task("campaign_prompt", resolved_prompt, self._campaign_persona_system_prompt())
             else:
-                text = await self._ai_service.ask_general(resolved_prompt, persona_system)
+                text = await self._ai_service.ask_for_task("campaign_prompt", resolved_prompt, persona_system)
 
             text = (text or "").strip() or "AI non disponibile"
             self._ai_prompt_slot_cache[cache_key] = (now_utc + timedelta(seconds=AI_PROMPT_SLOT_CACHE_TTL_SECONDS), text)
