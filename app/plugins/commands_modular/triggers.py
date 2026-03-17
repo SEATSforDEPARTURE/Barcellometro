@@ -771,10 +771,10 @@ def register_triggers(
     )
     async def prompt_create(
         interaction: discord.Interaction,
-        name: str,
-        time_local: str,
-        interval_minutes: int,
         prompt_text: str,
+        name: str | None = None,
+        time_local: str | None = None,
+        interval_minutes: int | None = None,
         embed_title: str | None = None,
         embed_color: str | None = None,
     ) -> None:
@@ -786,20 +786,40 @@ def register_triggers(
         if ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
             await interaction.response.send_message("embed_color non valido. Usa #RRGGBB, RRGGBB oppure 0xRRGGBB.", ephemeral=True)
             return
-        next_run = calculate_initial_next_run(datetime.now(timezone.utc), time_local, interval_minutes, ctx.timezone)
+
+        now_utc = datetime.now(timezone.utc)
+        now_local = now_utc.astimezone(ctx.timezone)
+        resolved_name = (name or "").strip() or f"prompt-{now_local.strftime('%Y%m%d-%H%M')}"
+        resolved_time_local = (time_local or "").strip() or now_local.strftime("%H:%M")
+        resolved_interval = int(interval_minutes or 0)
+
+        if resolved_interval < 0:
+            await interaction.response.send_message("interval_minutes non può essere negativo.", ephemeral=True)
+            return
+
+        if resolved_interval > 0:
+            next_run = calculate_initial_next_run(now_utc, resolved_time_local, resolved_interval, ctx.timezone)
+            recurring = True
+        elif (time_local or "").strip():
+            next_run = calculate_initial_next_run(now_utc, resolved_time_local, 24 * 60, ctx.timezone)
+            recurring = False
+        else:
+            next_run = now_utc
+            recurring = False
+
         campaign_id = await ctx.database.create_message_campaign(
             guild_id=str(interaction.guild_id),
             channel_id=str(interaction.channel_id),
             campaign_type="AI_PROMPT",
-            name=name,
+            name=resolved_name,
             text=prompt_text,
             text_green=None,
             text_yellow=None,
             text_red=None,
             text_black=None,
             enabled=True,
-            start_time_local=time_local,
-            interval_minutes=interval_minutes,
+            start_time_local=resolved_time_local,
+            interval_minutes=resolved_interval,
             jitter_seconds=0,
             only_if_idle_minutes=0,
             mood_mode="IGNORE_BARCELLO",
@@ -808,7 +828,16 @@ def register_triggers(
             embed_title=embed_title,
             embed_color=embed_color,
         )
-        await interaction.response.send_message(f"Campagna AI_PROMPT creata: {campaign_id}", ephemeral=True)
+        if recurring:
+            await interaction.response.send_message(
+                f"Campagna AI_PROMPT creata: {campaign_id} • nome={resolved_name} • prossima esecuzione={next_run.isoformat()}",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                f"Campagna AI_PROMPT one-shot creata: {campaign_id} • nome={resolved_name} • esecuzione prevista={next_run.isoformat()}",
+                ephemeral=True,
+            )
 
     @prompt_group.command(name="list", description="Lista campagne AI_PROMPT")
     async def prompt_list(interaction: discord.Interaction) -> None:
@@ -826,6 +855,7 @@ def register_triggers(
             "\n".join(
                 [
                     f"ID {r['id']} {'on' if r['enabled'] else 'off'} {r['name'] or '-'} ch={r['channel_id'] or '-'} next={r['next_run_at'] or '-'}"
+                    f" frequenza={'one-shot' if int(r['interval_minutes']) <= 0 else 'ogni ' + str(r['interval_minutes']) + 'm'}"
                     f" embed_title={r['embed_title'] or '-'} embed_color={r['embed_color'] or '-'}"
                     for r in rows
                 ]

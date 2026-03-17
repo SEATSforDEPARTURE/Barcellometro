@@ -289,7 +289,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                     [
                         f"ID {row['id']}",
                         "on" if row["enabled"] else "off",
-                        f"ogni {row['interval_minutes']}m",
+                        ('one-shot' if int(row['interval_minutes']) <= 0 else f"ogni {row['interval_minutes']}m"),
                         f"start {row['start_time_local']}",
                         f"jitter {row['jitter_seconds']}s",
                         f"idle {row['only_if_idle_minutes']}m",

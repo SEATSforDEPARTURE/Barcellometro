@@ -22,6 +22,8 @@ from app.services.scheduler_utils import (
     is_in_quiet_hours,
 )
 
+ONE_SHOT_RETRY_MINUTES = 5
+
 if TYPE_CHECKING:
     from app.services.campaign_content_service import CampaignContentService
 
@@ -251,7 +253,14 @@ class MessageSchedulerService:
         guild_id = str(campaign["guild_id"])
         campaign_id = int(campaign["id"])
         campaign_type = str(campaign["type"])
-        next_run_at = calculate_next_run_after_send(now, int(campaign["interval_minutes"]), int(campaign["jitter_seconds"])).isoformat()
+        interval_minutes = int(campaign["interval_minutes"])
+        is_one_shot = interval_minutes <= 0
+        next_run_dt = (
+            now + timedelta(minutes=ONE_SHOT_RETRY_MINUTES)
+            if is_one_shot
+            else calculate_next_run_after_send(now, interval_minutes, int(campaign["jitter_seconds"]))
+        )
+        next_run_at = next_run_dt.isoformat()
         campaign_channel_id = campaign.get("channel_id")
         if not campaign_channel_id:
             logger.error("Campaign %s missing channel_id", campaign_id)
@@ -407,7 +416,13 @@ class MessageSchedulerService:
 
         logger.info("Sending campaign id=%s to channel_id=%s", campaign_id, channel_id)
         try:
-            await self.send_campaign_embed(channel, campaign, resolved_text)
+            await self.send_campaign_embed(
+                channel,
+                campaign,
+                resolved_text,
+                footer_contributors=debug_payload.get("footer_contributors"),
+                used_local_processing=debug_payload.get("used_local_processing"),
+            )
             await self._database.insert_send_log(
                 campaign_id=campaign_id,
                 guild_id=guild_id,
@@ -417,12 +432,21 @@ class MessageSchedulerService:
                 reason=send_reason,
                 error=None,
             )
-            await self._database.update_campaign_next_run(
-                guild_id=guild_id,
-                campaign_id=campaign_id,
-                next_run_at=next_run_at,
-                last_sent_at=now.isoformat(),
-            )
+            if is_one_shot:
+                await self._database.update_campaign_next_run(
+                    guild_id=guild_id,
+                    campaign_id=campaign_id,
+                    next_run_at=now.isoformat(),
+                    last_sent_at=now.isoformat(),
+                )
+                await self._database.set_message_campaign_enabled(guild_id, campaign_id, False)
+            else:
+                await self._database.update_campaign_next_run(
+                    guild_id=guild_id,
+                    campaign_id=campaign_id,
+                    next_run_at=next_run_at,
+                    last_sent_at=now.isoformat(),
+                )
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
             logger.warning("Failed to send campaign %s to channel %s: %s", campaign_id, channel_id, exc)
             await self._database.insert_send_log(
@@ -504,6 +528,9 @@ class MessageSchedulerService:
         channel: discord.abc.Messageable,
         campaign: dict[str, object],
         rendered_text: Optional[str],
+        *,
+        footer_contributors: list[str] | None = None,
+        used_local_processing: bool | None = None,
     ) -> None:
         base_title = str(campaign.get("embed_title") or campaign.get("name") or "📣 Campagna")
         raw_text = str(rendered_text or "")
@@ -520,7 +547,12 @@ class MessageSchedulerService:
             embed = discord.Embed(title=title, description=page, colour=color)
             campaign_type = str(campaign.get("type") or "").upper()
             footer_service = _campaign_footer_service_name(campaign_type)
-            attach_footer_meta(embed, service_name=footer_service, used_local_processing=True)
+            attach_footer_meta(
+                embed,
+                service_name=footer_service,
+                contributors=footer_contributors,
+                used_local_processing=(True if used_local_processing is None else used_local_processing),
+            )
             embeds.append(embed)
 
         logger.info(
@@ -606,7 +638,7 @@ class MessageSchedulerService:
         if campaign_type == "AI_PROMPT":
             prompt = str(campaign.get("text") or "")
             if not prompt:
-                return None, "no_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": None, "barcello_score": None, "selected_source": "base", "cache_status": "n/a"}
+                return None, "no_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": None, "barcello_score": None, "selected_source": "base", "cache_status": "n/a", "footer_contributors": None, "used_local_processing": True, "used_model_display": None, "used_model_config": None, "used_provider": None, "used_fallback": False}
             barcello_color, barcello_score, _, _ = await self._get_barcello_color(guild_id, channel_id)
             resolved_channel_id = int(channel_id) if channel_id.isdigit() else None
             channel = self._bot.get_channel(resolved_channel_id) if resolved_channel_id is not None else None
@@ -622,18 +654,33 @@ class MessageSchedulerService:
                 .replace("{today_date}", today)
             )
             if self._ai_service is None or not self._ai_service.is_enabled() or self._ai_service.client() is None:
-                return None, "ai_disabled", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "fallback", "cache_status": "n/a"}
+                return None, "ai_disabled", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "fallback", "cache_status": "n/a", "footer_contributors": None, "used_local_processing": True, "used_model_display": None, "used_model_config": None, "used_provider": None, "used_fallback": False}
 
             slot = due_slot or datetime.now(timezone.utc).isoformat()
             cache_key = (int(campaign["id"]), slot)
             cached = self._ai_prompt_slot_cache.get(cache_key)
             now_utc = datetime.now(timezone.utc)
+            runtime_model = self._ai_service.get_runtime_model("campaign_prompt")
+            model = self._ai_service.get_model_display_name("campaign_prompt") or "unknown"
+            provider = str(runtime_model).split(":", 1)[0] if runtime_model else None
+            used_fallback = bool(runtime_model and runtime_model != self._ai_service.get_model_config("campaign_prompt"))
+            contributors = [model] if model and model != "unknown" else None
             if cached and cached[0] > now_utc:
                 logger.info("AI cache hit campaign=%s slot=%s", campaign.get("id"), slot)
-                return cached[1], "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "hit"}
+                return cached[1], "ai_prompt", {
+                    "mood_mode": "AI_PROMPT",
+                    "barcello_color": barcello_color,
+                    "barcello_score": barcello_score,
+                    "selected_source": "ai",
+                    "cache_status": "hit",
+                    "footer_contributors": contributors,
+                    "used_local_processing": False if contributors else True,
+                    "used_model_display": model,
+                    "used_model_config": runtime_model,
+                    "used_provider": provider,
+                    "used_fallback": used_fallback,
+                }
             logger.info("AI cache miss campaign=%s slot=%s", campaign.get("id"), slot)
-
-            model = self._ai_service.get_model_display_name("campaign_prompt") or "unknown"
             web_enabled_raw = await self._get_setting_with_default("messages_ai_prompt_web_enabled", "true")
             web_enabled = web_enabled_raw.lower() in {"1", "true", "yes", "y"}
             logger.info("AI_PROMPT resolve settings: ai_prompt_web=%s model=%s", str(web_enabled).lower(), model)
@@ -653,8 +700,25 @@ class MessageSchedulerService:
                 text = await self._ai_service.ask_for_task("campaign_prompt", resolved_prompt, persona_system)
 
             text = (text or "").strip() or "AI non disponibile"
+            runtime_model = self._ai_service.get_runtime_model("campaign_prompt")
+            provider = str(runtime_model).split(":", 1)[0] if runtime_model else provider
+            model_display = self._ai_service.get_model_display_name("campaign_prompt") or model
+            used_fallback = bool(runtime_model and runtime_model != self._ai_service.get_model_config("campaign_prompt"))
+            contributors = [model_display] if model_display and model_display != "unknown" else None
             self._ai_prompt_slot_cache[cache_key] = (now_utc + timedelta(seconds=AI_PROMPT_SLOT_CACHE_TTL_SECONDS), text)
-            return text, "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "miss"}
+            return text, "ai_prompt", {
+                "mood_mode": "AI_PROMPT",
+                "barcello_color": barcello_color,
+                "barcello_score": barcello_score,
+                "selected_source": "ai",
+                "cache_status": "miss",
+                "footer_contributors": contributors,
+                "used_local_processing": False if contributors else True,
+                "used_model_display": model_display,
+                "used_model_config": runtime_model,
+                "used_provider": provider,
+                "used_fallback": used_fallback,
+            }
 
         mood_mode = str(campaign.get("mood_mode") or "AUTO")
         barcello_color, barcello_score, cache_status, barcello_reason = await self._get_barcello_color(guild_id, channel_id)
