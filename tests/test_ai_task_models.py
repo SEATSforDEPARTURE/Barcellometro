@@ -221,3 +221,20 @@ def test_ask_for_task_ollama_summary_fallback_uses_extended_timeout() -> None:
         assert fallback_timeout == 150.0
 
     asyncio.run(_run())
+
+
+def test_ask_for_task_extends_timeout_for_campaign_prompt_ollama() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "openai:gpt-4o-mini", "campaign_prompt": "ollama:llama3.2:3b"}
+        service._fallback_model_map = {}
+        service._ollama.generate_text = AsyncMock(return_value="ok")
+
+        await service.ask_for_task("campaign_prompt", "q", "sys", timeout_seconds=35.0)
+
+        timeout_used = service._ollama.generate_text.await_args.args[3]
+        assert timeout_used == 120.0
+
+    asyncio.run(_run())
