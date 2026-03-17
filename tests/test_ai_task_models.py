@@ -197,6 +197,27 @@ def test_ask_for_task_extends_timeout_for_summary_ollama() -> None:
         await service.ask_for_task("summary", "q", "sys", timeout_seconds=25.0)
 
         timeout_used = service._ollama.generate_text.await_args.args[3]
-        assert timeout_used > 25.0
+        assert timeout_used == 150.0
+
+    asyncio.run(_run())
+
+
+def test_ask_for_task_ollama_summary_fallback_uses_extended_timeout() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "ollama:qwen2.5:7b"}
+        service._fallback_model_map = {"summary": "ollama:qwen2.5:1.5b"}
+        service._ollama.generate_text = AsyncMock(side_effect=[TimeoutError("boom"), "ok-fallback"])
+
+        out = await service.ask_for_task("summary", "q", "sys", timeout_seconds=25.0)
+
+        assert out == "ok-fallback"
+        assert service._ollama.generate_text.await_count == 2
+        primary_timeout = service._ollama.generate_text.await_args_list[0].args[3]
+        fallback_timeout = service._ollama.generate_text.await_args_list[1].args[3]
+        assert primary_timeout == 150.0
+        assert fallback_timeout == 150.0
 
     asyncio.run(_run())

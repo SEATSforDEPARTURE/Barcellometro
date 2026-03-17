@@ -105,7 +105,96 @@ def test_build_period_description_works_without_openai_client() -> None:
             ai_allowed=True,
             config=DEFAULT_SUMMARY_CONFIG,
         )
-        assert out is not None
+        assert out is None
+        ai.ask_for_task.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+def test_call_ai_ollama_uses_lite_schema_and_smaller_payload() -> None:
+    async def _run() -> None:
+        ai = _Ai("ollama:qwen2.5:7b", '{"themes":[],"moments":[],"advice":[]}')
+        svc = SummaryService(database=_Db(), ai_service=ai)
+        messages = [
+            {
+                "ts": f"2026-01-01T10:{idx:02d}:00+00:00",
+                "author_id": "u1",
+                "content": f"msg {idx}",
+                "meta": {},
+                "message_id": f"m{idx}",
+            }
+            for idx in range(60)
+        ]
+
+        await svc._call_ai(
+            messages=messages,
+            include_names=False,
+            tier="role1",
+            barcello_metrics={},
+            config=DEFAULT_SUMMARY_CONFIG,
+        )
+
+        args = ai.ask_for_task.await_args.args
+        system_prompt = args[2]
+        payload = json.loads(args[1])
+        assert "Struttura JSON minima richiesta" in system_prompt
+        assert "quotes/dynamics/degrade_list/invigorate_list" in system_prompt
+        assert len(payload["messages"]) <= 40
+
+    asyncio.run(_run())
+
+
+def test_call_ai_openai_keeps_full_schema() -> None:
+    async def _run() -> None:
+        ai = _Ai("openai:gpt-4o-mini", '{"themes":[],"moments":[],"advice":[]}')
+        svc = SummaryService(database=_Db(), ai_service=ai)
+        await svc._call_ai(
+            messages=_minimal_messages(),
+            include_names=False,
+            tier="role1",
+            barcello_metrics={},
+            config=DEFAULT_SUMMARY_CONFIG,
+        )
+        system_prompt = ai.ask_for_task.await_args.args[2]
+        assert "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]" in system_prompt
+
+    asyncio.run(_run())
+
+
+def test_ollama_summary_path_triggers_single_ai_inference() -> None:
+    async def _run() -> None:
+        ai_payload = json.dumps({"themes": ["x"], "moments": [], "quotes": [], "dynamics": [], "degrade_list": [], "invigorate_list": [], "advice": []})
+        ai = _Ai("ollama:qwen2.5:7b", ai_payload)
+        svc = SummaryService(database=_Db(), ai_service=ai)
+
+        period = await svc.build_period_description(
+            tier="role1",
+            period_prefix="Oggi",
+            score=70,
+            color="verde",
+            metrics={},
+            trend=None,
+            ai_allowed=True,
+            config=DEFAULT_SUMMARY_CONFIG,
+        )
+        assert period is None
+
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=_minimal_messages(),
+        )
+        assert result.ai_status["used_ai_output"] is True
         ai.ask_for_task.assert_awaited_once()
 
     asyncio.run(_run())

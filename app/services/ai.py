@@ -14,6 +14,7 @@ from app.services.database import DatabaseService
 class AiService:
     OLLAMA_SLOW_TASKS: frozenset[str] = frozenset({"summary", "server_summary", "campaign_editorial"})
     OLLAMA_SLOW_TASK_TIMEOUT_SECONDS: float = 90.0
+    OLLAMA_SUMMARY_TIMEOUT_SECONDS: float = 150.0
     SUPPORTED_MODEL_TASKS: tuple[str, ...] = (
         "summary",
         "server_summary",
@@ -162,6 +163,7 @@ class AiService:
 
         provider, model = parse_model_string(model_cfg)
         effective_timeout = self._resolve_timeout(task, provider, timeout_seconds)
+        self.logger.info("[AI] task=%s provider=%s timeout=%.1fs", task, provider, effective_timeout)
         system = persona_system
         prompt = question if not history else history[-1].get("content", question)
 
@@ -189,14 +191,19 @@ class AiService:
                 )
                 raise
             fallback_timeout = self._resolve_timeout(task, provider_fb, timeout_seconds)
+            fallback_note = ""
+            if task == "summary" and provider == "ollama" and provider_fb == "ollama":
+                fallback_note = " same_backend_lower_capacity_reliability=low"
             self.logger.warning(
-                "[AI] task=%s primary=%s:%s failed=%s fallback=%s:%s",
+                "[AI] task=%s primary=%s:%s failed=%s fallback=%s:%s timeout=%.1fs%s",
                 task,
                 provider,
                 model,
                 exc.__class__.__name__,
                 provider_fb,
                 model_fb,
+                fallback_timeout,
+                fallback_note,
             )
             self.logger.info("[AI] task=%s provider=%s model=%s", task, provider_fb, model_fb)
             result = await self._run_model(provider_fb, model_fb, system, prompt, fallback_timeout)
@@ -206,6 +213,8 @@ class AiService:
             return text or None
 
     def _resolve_timeout(self, task: str, provider: str, requested_timeout: float) -> float:
+        if provider == "ollama" and task == "summary":
+            return max(requested_timeout, self.OLLAMA_SUMMARY_TIMEOUT_SECONDS)
         if provider == "ollama" and task in self.OLLAMA_SLOW_TASKS:
             return max(requested_timeout, self.OLLAMA_SLOW_TASK_TIMEOUT_SECONDS)
         return requested_timeout
