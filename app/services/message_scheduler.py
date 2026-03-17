@@ -633,7 +633,7 @@ class MessageSchedulerService:
                 return cached[1], "ai_prompt", {"mood_mode": "AI_PROMPT", "barcello_color": barcello_color, "barcello_score": barcello_score, "selected_source": "ai", "cache_status": "hit"}
             logger.info("AI cache miss campaign=%s slot=%s", campaign.get("id"), slot)
 
-            model = self._ai_service.get_model_config("campaign_prompt") or "unknown"
+            model = self._ai_service.get_model_display_name("campaign_prompt") or "unknown"
             web_enabled_raw = await self._get_setting_with_default("messages_ai_prompt_web_enabled", "true")
             web_enabled = web_enabled_raw.lower() in {"1", "true", "yes", "y"}
             logger.info("AI_PROMPT resolve settings: ai_prompt_web=%s model=%s", str(web_enabled).lower(), model)

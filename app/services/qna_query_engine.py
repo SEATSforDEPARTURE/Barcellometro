@@ -146,9 +146,8 @@ class QnaQueryEngine:
 
     async def _parse_intent(self, question: str) -> QnaIntent:
         fallback = self._heuristic_intent(question)
-        if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
+        if self._ai is None or not self._ai.is_enabled():
             return fallback
-        model = self._ai.get_model("summary") or "gpt-4o-mini"
         prompt = {
             "instruction": "Classifica la domanda di una community Discord italiana in JSON puro.",
             "schema": {
@@ -185,8 +184,7 @@ class QnaQueryEngine:
         }
         try:
             logger.info("qna_intent_parse model=%s", model)
-            response = await self._create_intent_response(model, prompt)
-            raw_text = self._extract_response_text(response)
+            raw_text = await self._create_intent_response(prompt)
             clean_text = self._strip_json_fences(raw_text)
             data = json.loads(clean_text)
             intent = str(data.get("intent") or "").strip()
@@ -235,22 +233,13 @@ class QnaQueryEngine:
                     return cleaned[start : idx + 1].strip()
         return cleaned
 
-    async def _create_intent_response(self, model: str, prompt: dict[str, Any]) -> Any:
-        if self._intent_response_format_supported is False:
-            return await self._ai.client().responses.create(model=model, input=json.dumps(prompt, ensure_ascii=False))
-        try:
-            response = await self._ai.client().responses.create(
-                model=model,
-                input=json.dumps(prompt, ensure_ascii=False),
-                response_format={"type": "json_object"},
-            )
-            self._intent_response_format_supported = True
-            return response
-        except Exception as exc:  # noqa: BLE001
-            if "response_format" not in str(exc):
-                raise
-            self._intent_response_format_supported = False
-            return await self._ai.client().responses.create(model=model, input=json.dumps(prompt, ensure_ascii=False))
+    async def _create_intent_response(self, prompt: dict[str, Any]) -> str:
+        response = await self._ai.ask_for_task(
+            "qa",
+            json.dumps(prompt, ensure_ascii=False),
+            "Rispondi SOLO con JSON valido.",
+        )
+        return response or ""
 
     def _heuristic_intent(self, question: str) -> QnaIntent:
         q = question.lower()
@@ -528,13 +517,12 @@ class QnaQueryEngine:
         return {"has_data": bool(rows), "messages": rows}
 
     async def _compose_answer(self, *, question: str, intent: str, target_user_name: str | None, range_label: str, payload: dict[str, Any]) -> str:
-        if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
+        if self._ai is None or not self._ai.is_enabled():
             if payload.get("barcello"):
                 return f"Barcello ora: {payload['barcello'].get('color')} (score {payload['barcello'].get('score')})."
             if payload.get("aura_total") is not None:
                 return f"Aura totale nel periodo: {payload.get('aura_total')} punti."
             return "Ho raccolto i dati richiesti, ma la generazione AI non è disponibile ora."
-        model = self._ai.get_model("summary") or "gpt-4o-mini"
         prompt = {
             "system": "Sei il motore /domanda del server Discord. Rispondi in italiano, in modo preciso, usando solo i dati forniti.",
             "question": question,
@@ -552,8 +540,7 @@ class QnaQueryEngine:
                 "Massimo 6 bullet o 1 breve paragrafo.",
             ],
         }
-        response = await self._ai.client().responses.create(model=model, input=json.dumps(prompt, ensure_ascii=False))
-        text = self._extract_response_text(response)
+        text = await self._ai.ask_for_task("summary", json.dumps(prompt, ensure_ascii=False), prompt["system"])
         if text:
             return text
         return self._compose_local_fallback(intent=intent, range_label=range_label, payload=payload)

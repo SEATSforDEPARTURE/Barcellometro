@@ -144,3 +144,22 @@ def test_ask_for_task_uses_fallback_model_when_primary_fails() -> None:
         assert service.status()["metrics"]["last_used_model"] == "ollama:qwen2.5:1.5b"
 
     asyncio.run(_run())
+
+
+def test_ask_for_task_uses_campaign_editorial_model() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "openai:gpt-4o-mini", "campaign_editorial": "ollama:qwen2.5:1.5b"}
+        service._fallback_model_map = {}
+        service._client = _FakeClient()
+        service._ollama.generate_text = AsyncMock(return_value="editorial-ok")
+
+        out = await service.ask_for_task("campaign_editorial", "q", "sys")
+
+        assert out == "editorial-ok"
+        service._ollama.generate_text.assert_awaited_once()
+        assert service.status()["metrics"]["last_used_model"] == "ollama:qwen2.5:1.5b"
+
+    asyncio.run(_run())

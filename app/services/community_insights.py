@@ -89,7 +89,7 @@ class CommunityInsightsService:
         return hobbies
 
     async def extract_hobbies_ai(self, messages: list[dict[str, Any]]) -> list[dict[str, str]]:
-        if self._ai_service is None or not self._ai_service.is_enabled() or self._ai_service.client() is None:
+        if self._ai_service is None or not self._ai_service.is_enabled():
             return []
         small_batch = [
             {
@@ -113,15 +113,16 @@ class CommunityInsightsService:
             ensure_ascii=False,
         )
         try:
-            response = await self._ai_service.client().responses.create(
-                model=self._ai_service.get_model("summary") or "gpt-4o-mini",
-                input=payload,
+            output = await self._ai_service.ask_for_task(
+                "summary",
+                payload,
+                "Rispondi solo con JSON valido.",
             )
         except Exception:
             logger.exception("Community insights AI extraction failed")
             return []
         try:
-            parsed = json.loads(getattr(response, "output_text", "") or "[]")
+            parsed = json.loads(output or "[]")
         except json.JSONDecodeError:
             return []
         if not isinstance(parsed, list):
@@ -180,7 +181,7 @@ class CommunityInsightsService:
         return result
 
     async def _extract_config_ai(self, text: str) -> Optional[dict[str, Any]]:
-        if self._ai_service is None or not self._ai_service.is_enabled() or self._ai_service.client() is None:
+        if self._ai_service is None or not self._ai_service.is_enabled():
             return None
         payload = json.dumps(
             {
@@ -196,15 +197,16 @@ class CommunityInsightsService:
             ensure_ascii=False,
         )
         try:
-            response = await self._ai_service.client().responses.create(
-                model=self._ai_service.get_model("summary") or "gpt-4o-mini",
-                input=payload,
+            output = await self._ai_service.ask_for_task(
+                "summary",
+                payload,
+                "Rispondi solo con JSON valido.",
             )
         except Exception:
             logger.exception("Community insights config parse failed")
             return None
         try:
-            parsed = json.loads(getattr(response, "output_text", "") or "{}")
+            parsed = json.loads(output or "{}")
         except json.JSONDecodeError:
             return None
         return parsed if isinstance(parsed, dict) else None
