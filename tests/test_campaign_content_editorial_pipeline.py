@@ -119,8 +119,8 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
         def is_enabled(self):
             return True
 
-        def get_model(self, _):
-            return "gpt-4o"
+        def get_model_config(self, _):
+            return "ollama:qwen2.5:1.5b"
 
     payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}}}
     for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
@@ -248,8 +248,8 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
         def is_enabled(self):
             return True
 
-        def get_model(self, _):
-            return "gpt-4o"
+        def get_model_config(self, _):
+            return "ollama:qwen2.5:1.5b"
 
     payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}}}
     for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
