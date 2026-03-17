@@ -608,39 +608,9 @@ class SummaryService:
             },
             ensure_ascii=False,
         )
-        if self._response_format_supported is False:
-            response = await client.responses.create(
-                model=model,
-                input=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_payload},
-                ],
-            )
-        else:
-            try:
-                response = await client.responses.create(
-                    model=model,
-                    response_format={"type": "json_object"},
-                    input=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_payload},
-                    ],
-                )
-                self._response_format_supported = True
-            except TypeError as exc:
-                if "response_format" not in str(exc):
-                    raise
-                if self._response_format_supported is not False:
-                    logger.info("Summary AI response_format unsupported; using JSON-in-text mode")
-                self._response_format_supported = False
-                response = await client.responses.create(
-                    model=model,
-                    input=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_payload},
-                    ],
-                )
-        text = _extract_ai_text(response)
+        if self._ai_service is None:
+            return None
+        text = await self._ai_service.ask_for_task("summary", user_payload, system_prompt)
         return _parse_json_safe(text)
 
     async def _call_ai_period_description(
@@ -682,14 +652,10 @@ class SummaryService:
             },
             ensure_ascii=False,
         )
-        response = await client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_payload},
-            ],
-        )
-        return _extract_ai_text(response)
+        if self._ai_service is None:
+            return ""
+        text = await self._ai_service.ask_for_task("summary", user_payload, system_prompt)
+        return text or ""
 
     def _merge_ai_summary(
         self,

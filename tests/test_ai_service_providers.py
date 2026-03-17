@@ -42,12 +42,12 @@ def test_parse_model_string() -> None:
 
 def test_generate_text_uses_fallback() -> None:
     service = AiService(Mock(), api_key="")
+    service._enabled = True
     service._model_map = {"summary": "openai:gpt-4o-mini"}
     service._fallback_model_map = {"summary": "ollama:qwen2.5:1.5b"}
-
-    service._generate_text_with_provider = AsyncMock(side_effect=[RuntimeError("boom"), "ok-fallback"])
+    service.ask_for_task = AsyncMock(return_value="ok-fallback")
 
     out = asyncio.run(service.generate_text("summary", "prompt", "sys"))
 
     assert out == "ok-fallback"
-    assert service._generate_text_with_provider.await_count == 2
+    service.ask_for_task.assert_awaited_once_with("summary", "prompt", "sys")

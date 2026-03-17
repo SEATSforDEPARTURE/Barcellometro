@@ -873,32 +873,12 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
         model: str,
         input_payload: list[dict[str, str]],
     ) -> tuple[dict[str, Any] | None, str]:
-        nonlocal response_format_supported
-        try:
-            if response_format_supported is False:
-                response = await client.responses.create(
-                    model=model,
-                    input=input_payload,
-                )
-            else:
-                response = await client.responses.create(
-                    model=model,
-                    response_format={"type": "json_object"},
-                    input=input_payload,
-                )
-                response_format_supported = True
-        except TypeError as exc:
-            if "response_format" not in str(exc):
-                raise
-            if response_format_supported is not False:
-                logger.info("OpenAI response_format unsupported; using JSON-in-text mode")
-            response_format_supported = False
-            response = await client.responses.create(
-                model=model,
-                input=input_payload,
-            )
-        logger.info("OpenAI response received")
-        ai_text = _extract_ai_text(response)
+        _ = client
+        _ = model
+        system_prompt = input_payload[0].get("content", "") if input_payload else ""
+        user_payload = input_payload[-1].get("content", "") if input_payload else ""
+        ai_text = await ctx.ai.ask_for_task("summary", user_payload, system_prompt) if ctx.ai is not None else ""
+        ai_text = ai_text or ""
         payload = _parse_json_safe(ai_text)
         return payload, ai_text
 

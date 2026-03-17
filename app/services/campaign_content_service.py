@@ -441,5 +441,5 @@ class CampaignContentService:
         if self._ai is not None:
             model_cfg = self._ai.get_model_config(task)
             if isinstance(model_cfg, str) and model_cfg.strip():
-                return model_cfg.strip()
+                return self._ai.get_model_display_name(task)
         return "unknown"

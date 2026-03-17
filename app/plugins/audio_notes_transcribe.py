@@ -104,15 +104,6 @@ async def _build_audio_note_summary(ai_service: Any, transcript_text: str) -> tu
         return None, None
     if not ai_service.is_enabled():
         return None, None
-    client = ai_service.client()
-    if client is None:
-        return None, None
-    model = (
-        ai_service.get_model("audio_summary")
-        or ai_service.get_model("summary")
-        or "gpt-4o-mini"
-    )
-
     system_prompt = (
         "Riassumi fedelmente la seguente trascrizione di una nota audio in italiano. "
         "Massimo 2 frasi brevi. Non aggiungere informazioni non presenti. "
@@ -120,23 +111,18 @@ async def _build_audio_note_summary(ai_service: Any, transcript_text: str) -> tu
         "Tono neutro e fedele al testo originale."
     )
     try:
-        response = await asyncio.wait_for(
-            client.responses.create(
-                model=model,
-                input=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": cleaned_transcript},
-                ],
-            ),
-            timeout=20,
+        summary_text = await ai_service.ask_for_task(
+            "audio_summary",
+            cleaned_transcript,
+            system_prompt,
+            timeout_seconds=20,
         )
     except Exception:
         logger.warning("Audio note summary generation failed", exc_info=True)
         return None, None
-    summary_text = str(getattr(response, "output_text", "") or "").strip()
     if not summary_text:
         return None, None
-    return summary_text, model
+    return summary_text, ai_service.get_model_display_name("audio_summary")
 
 
 def _build_audio_footer_contributors(
