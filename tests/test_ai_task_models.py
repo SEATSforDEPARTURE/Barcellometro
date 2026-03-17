@@ -163,3 +163,40 @@ def test_ask_for_task_uses_campaign_editorial_model() -> None:
         assert service.status()["metrics"]["last_used_model"] == "ollama:qwen2.5:1.5b"
 
     asyncio.run(_run())
+
+
+def test_ask_for_task_skips_identical_fallback_model() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "ollama:qwen2.5:1.5b", "campaign_prompt": "ollama:qwen2.5:1.5b"}
+        service._fallback_model_map = {"campaign_prompt": "ollama:qwen2.5:1.5b"}
+        service._ollama.generate_text = AsyncMock(side_effect=TimeoutError("timeout"))
+
+        try:
+            await service.ask_for_task("campaign_prompt", "q", "sys")
+            raise AssertionError("expected timeout")
+        except TimeoutError:
+            pass
+
+        service._ollama.generate_text.assert_awaited_once()
+
+    asyncio.run(_run())
+
+
+def test_ask_for_task_extends_timeout_for_summary_ollama() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "ollama:qwen2.5:1.5b"}
+        service._fallback_model_map = {}
+        service._ollama.generate_text = AsyncMock(return_value="ok")
+
+        await service.ask_for_task("summary", "q", "sys", timeout_seconds=25.0)
+
+        timeout_used = service._ollama.generate_text.await_args.args[3]
+        assert timeout_used > 25.0
+
+    asyncio.run(_run())
