@@ -337,18 +337,26 @@ class SummaryService:
             "provider": None,
             "model": None,
             "display_model": None,
+            "configured_model": None,
+            "configured_display_model": None,
             "called": False,
             "fallback": False,
             "reason": "disabled",
+            "used_ai_output": False,
+            "used_model": None,
+            "used_display_model": None,
         }
         if use_ai:
             model_cfg = str(model_name or "").strip()
             provider, _ = parse_model_string(model_cfg) if model_cfg else (None, None)
+            model_label = model_display_name(model_cfg) or None
             ai_status.update({
                 "enabled": True,
                 "provider": provider,
                 "model": model_cfg or None,
-                "display_model": model_display_name(model_cfg) or None,
+                "display_model": model_label,
+                "configured_model": model_cfg or None,
+                "configured_display_model": model_label,
             })
             if not model_cfg:
                 ai_status.update({"enabled": False, "fallback": True, "reason": "missing_model"})
@@ -378,20 +386,49 @@ class SummaryService:
                         )
                     if ai_payload:
                         summary = self._merge_ai_summary(local_summary, ai_payload, include_names, config=config, tier=tier)
-                        ai_status.update({"enabled": True, "fallback": False, "reason": "ok"})
+                        ai_status.update(
+                            {
+                                "enabled": True,
+                                "fallback": False,
+                                "reason": "ok",
+                                "used_ai_output": True,
+                                "used_model": model_cfg,
+                                "used_display_model": model_label,
+                            }
+                        )
                     else:
-                        ai_status.update({"enabled": False, "fallback": True, "reason": "invalid_json"})
+                        ai_status.update(
+                            {
+                                "enabled": False,
+                                "fallback": True,
+                                "reason": "invalid_json",
+                                "used_ai_output": False,
+                                "used_model": None,
+                                "used_display_model": None,
+                            }
+                        )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Summary AI failed")
-                    ai_status.update({"enabled": False, "fallback": True, "reason": f"exception:{exc.__class__.__name__}"})
+                    ai_status.update(
+                        {
+                            "enabled": False,
+                            "fallback": True,
+                            "reason": f"exception:{exc.__class__.__name__}",
+                            "used_ai_output": False,
+                            "used_model": None,
+                            "used_display_model": None,
+                        }
+                    )
 
         summary.ai_status = ai_status
         logger.info(
-            "summary: ai_called=%s fallback_reason=%s provider=%s model=%s",
+            "summary: ai_called=%s used_ai_output=%s fallback_reason=%s provider=%s configured_model=%s used_model=%s",
             ai_status.get("called"),
+            ai_status.get("used_ai_output"),
             ai_status.get("reason"),
             ai_status.get("provider"),
-            ai_status.get("model"),
+            ai_status.get("configured_model") or ai_status.get("model"),
+            ai_status.get("used_model"),
         )
         expires = now_epoch + self._cache_ttl
         self._cache[cache_key] = (expires, summary, max_message_ts)
@@ -471,7 +508,20 @@ class SummaryService:
             invigorate=invigorate,
             advice=advice,
             metrics=barcello_metrics,
-            ai_status={"enabled": False, "provider": None, "model": None, "display_model": None, "called": False, "fallback": False, "reason": "local"},
+            ai_status={
+                "enabled": False,
+                "provider": None,
+                "model": None,
+                "display_model": None,
+                "configured_model": None,
+                "configured_display_model": None,
+                "called": False,
+                "fallback": False,
+                "reason": "local",
+                "used_ai_output": False,
+                "used_model": None,
+                "used_display_model": None,
+            },
         )
 
     async def _call_ai(
