@@ -432,7 +432,13 @@ class MessageSchedulerService:
                 reason=send_reason,
                 error=None,
             )
-            if is_one_shot:
+            if is_one_shot and campaign_type == "AI_PROMPT":
+                await self._database.soft_delete_message_campaign(guild_id, campaign_id)
+                self._ai_prompt_slot_cache = {
+                    key: value for key, value in self._ai_prompt_slot_cache.items() if key[0] != campaign_id
+                }
+                logger.info("One-shot campaign %s executed and deleted", campaign_id)
+            elif is_one_shot:
                 await self._database.update_campaign_next_run(
                     guild_id=guild_id,
                     campaign_id=campaign_id,
@@ -532,7 +538,17 @@ class MessageSchedulerService:
         footer_contributors: list[str] | None = None,
         used_local_processing: bool | None = None,
     ) -> None:
-        base_title = str(campaign.get("embed_title") or campaign.get("name") or "📣 Campagna")
+        campaign_type = str(campaign.get("type") or "").upper()
+        embed_title = campaign.get("embed_title")
+        campaign_name = str(campaign.get("name") or "").strip()
+        if embed_title is not None and str(embed_title).strip():
+            base_title = str(embed_title).strip()
+        elif campaign_type == "AI_PROMPT" and not campaign_name:
+            base_title = "🤔 CURIOSITÀ"
+        elif campaign_name:
+            base_title = campaign_name
+        else:
+            base_title = "📣 Campagna"
         raw_text = str(rendered_text or "")
         color = self._parse_embed_color(campaign.get("embed_color"))
 
@@ -545,7 +561,6 @@ class MessageSchedulerService:
         for page_index, page in enumerate(pages, start=1):
             title = base_title if total == 1 else f"{base_title} • PAG {page_index}/{total}"
             embed = discord.Embed(title=title, description=page, colour=color)
-            campaign_type = str(campaign.get("type") or "").upper()
             footer_service = _campaign_footer_service_name(campaign_type)
             attach_footer_meta(
                 embed,

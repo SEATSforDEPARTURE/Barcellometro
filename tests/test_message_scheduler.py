@@ -370,3 +370,79 @@ def test_process_campaign_one_shot_disables_after_successful_send() -> None:
         await db.close()
 
     asyncio.run(_run())
+
+
+def test_send_campaign_embed_ai_prompt_defaults_title_when_name_missing() -> None:
+    class DummyChannel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, **kwargs):
+            self.sent.append(kwargs)
+
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        scheduler = MessageSchedulerService(db, bot=None)  # type: ignore[arg-type]
+        channel = DummyChannel()
+        campaign = {"id": 19, "name": "   ", "type": "AI_PROMPT", "embed_title": None}
+        await scheduler.send_campaign_embed(channel, campaign, "ciao")
+
+        embeds = channel.sent[0]["embeds"]
+        assert embeds[0].title == "🤔 CURIOSITÀ"
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_process_campaign_ai_prompt_one_shot_deletes_after_successful_send() -> None:
+    class DummyChannel:
+        async def send(self, **kwargs):
+            return None
+
+    class DummyBot:
+        def __init__(self) -> None:
+            self.channel = DummyChannel()
+
+        def get_channel(self, _channel_id: int):
+            return self.channel
+
+        async def fetch_channel(self, _channel_id: int):
+            return self.channel
+
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        now = datetime.now(timezone.utc)
+        campaign_id = await db.create_message_campaign(
+            guild_id="g1",
+            channel_id="123",
+            campaign_type="AI_PROMPT",
+            name="",
+            text="hello",
+            text_green=None,
+            text_yellow=None,
+            text_red=None,
+            text_black=None,
+            enabled=True,
+            start_time_local="10:00",
+            interval_minutes=0,
+            jitter_seconds=0,
+            only_if_idle_minutes=0,
+            mood_mode="IGNORE_BARCELLO",
+            next_run_at=now.isoformat(),
+            created_by="u1",
+        )
+        scheduler = MessageSchedulerService(db, bot=DummyBot())  # type: ignore[arg-type]
+        campaign = await db.get_message_campaign("g1", campaign_id)
+        assert campaign is not None
+
+        await scheduler._process_campaign(dict(campaign), now)
+
+        rows = await db.list_message_campaigns("g1", include_disabled=True)
+        assert all(int(row["id"]) != campaign_id for row in rows)
+        await db.close()
+
+    asyncio.run(_run())
