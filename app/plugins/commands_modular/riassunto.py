@@ -13,6 +13,7 @@ import discord
 
 from discord import app_commands
 
+from app.services.ai_utils import model_display_name
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all, copy_footer_meta
 from app.services.summary import SummaryImpact, SummaryItem, SummaryQuote
 from app.utils.discord_send import send_dm_or_followup
@@ -1741,13 +1742,22 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             embeds = build_embeds()
             if dm_mode and embeds:
-                ai_used = bool(summary.ai_status.get("reason") == "ok")
-                ai_model_name = str(summary.ai_status.get("model") or model_name or "unknown-model") if ai_used else ""
+                ai_reason = str(summary.ai_status.get("reason") or "")
+                ai_called = bool(summary.ai_status.get("called"))
+                ai_model_name = str(summary.ai_status.get("display_model") or model_display_name(str(summary.ai_status.get("model") or model_name or "")))
+                contributors = [ai_model_name] if ai_model_name and (ai_reason == "ok" or ai_called) else []
+                used_local_processing = ai_reason != "ok"
                 attach_footer_meta_to_all(
                     embeds,
                     service_name="riassunto",
-                    contributors=[ai_model_name] if ai_used else [],
-                    used_local_processing=not ai_used,
+                    contributors=contributors,
+                    used_local_processing=used_local_processing,
+                )
+                attach_footer_meta(
+                    status_embed,
+                    service_name="riassunto",
+                    contributors=contributors,
+                    used_local_processing=used_local_processing,
                 )
 
             logger.info(

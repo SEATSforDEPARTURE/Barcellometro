@@ -833,3 +833,8 @@ def test_channel_summary_validates_third_embed_without_mutating_after_validation
         assert second_embeds[0].footer and second_embeds[0].footer.text == "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati."
 
     asyncio.run(_run())
+
+
+def test_channel_summary_footer_does_not_hardcode_gpt4o() -> None:
+    source = Path("app/services/channel_summary.py").read_text()
+    assert 'contributors=["gpt-4o"]' not in source

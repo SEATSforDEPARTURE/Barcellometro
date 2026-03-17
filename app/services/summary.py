@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Iterable, Optional
 
-from app.services.ai_utils import parse_model_string
+from app.services.ai_utils import model_display_name, parse_model_string
 from app.services.barcello import NEGATIVE_KEYWORDS
 from app.services.database import DatabaseService
 
@@ -336,19 +336,25 @@ class SummaryService:
             "enabled": False,
             "provider": None,
             "model": None,
+            "display_model": None,
+            "called": False,
             "fallback": False,
             "reason": "disabled",
         }
-        ai_called = False
         if use_ai:
-            model_cfg = model_name or ""
+            model_cfg = str(model_name or "").strip()
             provider, _ = parse_model_string(model_cfg) if model_cfg else (None, None)
-            ai_status.update({"enabled": True, "provider": provider, "model": model_cfg})
+            ai_status.update({
+                "enabled": True,
+                "provider": provider,
+                "model": model_cfg or None,
+                "display_model": model_display_name(model_cfg) or None,
+            })
             if not model_cfg:
                 ai_status.update({"enabled": False, "fallback": True, "reason": "missing_model"})
             else:
                 try:
-                    ai_called = True
+                    ai_status["called"] = True
                     ai_payload = await self._call_ai(
                         messages=messages,
                         include_names=include_names,
@@ -372,7 +378,7 @@ class SummaryService:
                         )
                     if ai_payload:
                         summary = self._merge_ai_summary(local_summary, ai_payload, include_names, config=config, tier=tier)
-                        ai_status.update({"enabled": True, "reason": "ok"})
+                        ai_status.update({"enabled": True, "fallback": False, "reason": "ok"})
                     else:
                         ai_status.update({"enabled": False, "fallback": True, "reason": "invalid_json"})
                 except Exception as exc:  # noqa: BLE001
@@ -380,10 +386,13 @@ class SummaryService:
                     ai_status.update({"enabled": False, "fallback": True, "reason": f"exception:{exc.__class__.__name__}"})
 
         summary.ai_status = ai_status
-        if ai_called:
-            logger.info("summary: ai_called=true fallback_reason=%s", ai_status.get("reason"))
-        else:
-            logger.info("summary: ai_called=false fallback_reason=%s", ai_status.get("reason"))
+        logger.info(
+            "summary: ai_called=%s fallback_reason=%s provider=%s model=%s",
+            ai_status.get("called"),
+            ai_status.get("reason"),
+            ai_status.get("provider"),
+            ai_status.get("model"),
+        )
         expires = now_epoch + self._cache_ttl
         self._cache[cache_key] = (expires, summary, max_message_ts)
         return summary
@@ -462,7 +471,7 @@ class SummaryService:
             invigorate=invigorate,
             advice=advice,
             metrics=barcello_metrics,
-            ai_status={"enabled": False, "provider": None, "model": None, "fallback": False, "reason": "local"},
+            ai_status={"enabled": False, "provider": None, "model": None, "display_model": None, "called": False, "fallback": False, "reason": "local"},
         )
 
     async def _call_ai(
@@ -1806,39 +1815,66 @@ def _trim_period_description(text: str | None, period_prefix: str) -> str | None
     return line
 
 
+def _extract_json_object_candidate(raw: str) -> str | None:
+    start = raw.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(start, len(raw)):
+        ch = raw[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return raw[start : idx + 1]
+    return None
+
+
 def _parse_json_safe(text: str) -> dict[str, Any] | None:
     if not text:
         return None
     raw = text.strip()
     if not raw:
         return None
-    try:
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else None
-    except json.JSONDecodeError:
-        pass
+    candidates: list[str] = [raw]
     if "```" in raw:
-        start = raw.find("```")
-        if start != -1:
-            fence_lang_end = raw.find("\n", start + 3)
-            if fence_lang_end != -1:
-                end = raw.find("```", fence_lang_end + 1)
-                if end != -1:
-                    fenced = raw[fence_lang_end:end].strip()
-                    try:
-                        parsed = json.loads(fenced)
-                        return parsed if isinstance(parsed, dict) else None
-                    except json.JSONDecodeError:
-                        return None
-    start_obj = raw.find("{")
-    end_obj = raw.rfind("}")
-    if start_obj != -1 and end_obj != -1 and end_obj > start_obj:
-        candidate = raw[start_obj : end_obj + 1]
+        for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", raw, flags=re.IGNORECASE):
+            fenced = match.group(1).strip()
+            if fenced:
+                candidates.append(fenced)
+    extracted = _extract_json_object_candidate(raw)
+    if extracted:
+        candidates.append(extracted)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = candidate.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
         try:
-            parsed = json.loads(candidate)
-            return parsed if isinstance(parsed, dict) else None
+            parsed = json.loads(normalized)
+            if isinstance(parsed, dict):
+                return parsed
         except json.JSONDecodeError:
-            return None
+            continue
+
+    preview = raw.replace("\n", " ")[:240]
+    logger.debug("summary ai parse failed preview=%r", preview)
     return None
 
 

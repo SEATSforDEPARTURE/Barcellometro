@@ -520,10 +520,7 @@ class FooterService:
                 continue
             seen.add(clean)
             contributors_deduped.append(clean)
-        if used_local_processing and "in loco" not in seen:
-            contributors_deduped.append("in loco")
-
-        if not contributors_deduped or contributors_deduped == ["in loco"]:
+        if not contributors_deduped:
             processing = "Dati elaborati in loco"
         elif len(contributors_deduped) == 1:
             processing = f"Dati elaborati con {contributors_deduped[0]}"
@@ -531,6 +528,9 @@ class FooterService:
             processing = f"Dati elaborati con {contributors_deduped[0]} e {contributors_deduped[1]}"
         else:
             processing = f"Dati elaborati con {', '.join(contributors_deduped[:-1])} e {contributors_deduped[-1]}"
+
+        if used_local_processing and contributors_deduped:
+            processing = f"{processing} e fallback locale"
 
         parts = [brand, processing]
         if phrase:

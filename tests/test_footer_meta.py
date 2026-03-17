@@ -86,7 +86,7 @@ def test_footer_service_apply_sets_footer_text() -> None:
 
         await service.apply(embed, default_service_name="fallback")
 
-        assert embed.footer.text == "Barcellometro 1.0 · Dati elaborati con gpt-4o-mini e in loco"
+        assert embed.footer.text == "Barcellometro 1.0 · Dati elaborati con gpt-4o-mini e fallback locale"
 
     asyncio.run(_run())
 
@@ -221,5 +221,19 @@ def test_unknown_service_is_not_persisted_or_returned_as_known() -> None:
         assert await service.get_known_services() == []
         assert await service.get_service_footer_profile("unknown") is None
         assert await service.get_service_footer_variants("unknown") == {}
+
+    asyncio.run(_run())
+
+
+def test_footer_service_render_footer_mixed_ai_and_local_fallback() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        footer, _ = await service.render_footer(
+            service_name="riassunto",
+            contributors=["qwen2.5"],
+            used_local_processing=True,
+        )
+        assert footer == "Barcellometro dev6 · Dati elaborati con qwen2.5 e fallback locale"
 
     asyncio.run(_run())
