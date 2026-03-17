@@ -168,6 +168,17 @@ POSITIVE_KEYWORDS = {
 }
 
 
+def _row_get(row: Any, key: str, default: Any = None) -> Any:
+    if row is None:
+        return default
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
 
 THEME_EN_TO_IT = {
     "humor": "umore",
@@ -1070,8 +1081,9 @@ class SummaryService:
                         channel_id=channel_id,
                         message_id=primary_ref,
                     )
-                    if record and record.get("ts"):
-                        ts = _normalize_ts_value(record["ts"])
+                    record_ts = _row_get(record, "ts")
+                    if record_ts:
+                        ts = _normalize_ts_value(record_ts)
                 if key == "moments":
                     text = str(item.get("summary_text") or item.get("text") or "").strip()
                 elif key == "quotes":

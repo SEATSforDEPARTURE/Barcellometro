@@ -13,12 +13,32 @@ if "aiosqlite" not in sys.modules:
 from app.services.summary import DEFAULT_SUMMARY_CONFIG, SummaryService
 
 
+class _Row:
+    def __init__(self, data: dict[str, object]) -> None:
+        self._data = data
+
+    def __getitem__(self, key: str):
+        return self._data[key]
+
+
 class _Db:
+    def __init__(self) -> None:
+        self._rows: dict[str, _Row] = {}
+
     async def get_setting(self, _key: str):
         return None
 
     async def fetch_nearest_message_id_in_range(self, **_kwargs):
         return None
+
+    async def message_exists_in_channel(self, *, channel_id: str, message_id: str) -> bool:
+        _ = channel_id
+        _ = message_id
+        return True
+
+    async def fetch_message_by_id(self, *, channel_id: str, message_id: str):
+        _ = channel_id
+        return self._rows.get(message_id)
 
 
 class _Ai:
@@ -294,5 +314,80 @@ def test_build_summary_exception_marks_ai_as_not_used() -> None:
         assert result.ai_status["used_ai_output"] is False
         assert result.ai_status["used_model"] is None
         assert result.ai_status["used_display_model"] is None
+
+    asyncio.run(_run())
+
+
+def test_sanitize_ai_payload_accepts_row_without_get_for_ts_resolution() -> None:
+    async def _run() -> None:
+        db = _Db()
+        db._rows["12345678901234567"] = _Row({"ts": "2026-01-01T10:00:00+00:00", "author_id": "u1", "content": "ciao"})
+        svc = SummaryService(database=db, ai_service=None)
+        payload = {
+            "moments": [
+                {
+                    "summary_text": "momento valido",
+                    "primary_ref": "12345678901234567",
+                    "refs": [],
+                    "message_ids": [],
+                }
+            ]
+        }
+        messages: list[dict[str, object]] = []
+        await svc._sanitize_ai_payload(
+            payload,
+            messages,
+            include_names=False,
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+        )
+        assert payload["moments"][0]["text"] == "momento valido"
+
+    asyncio.run(_run())
+
+
+def test_build_summary_ai_payload_with_refs_survives_row_post_sanitize() -> None:
+    async def _run() -> None:
+        db = _Db()
+        db._rows["12345678901234567"] = _Row({"ts": "2026-01-01T10:00:00+00:00", "author_id": "u1", "content": "quote"})
+        ai_payload = json.dumps(
+            {
+                "themes": ["test"],
+                "moments": [{"summary_text": "momento", "primary_ref": "12345678901234567", "refs": [], "message_ids": []}],
+                "quotes": [{"quote_text": "frase", "primary_ref": "12345678901234567", "refs": [], "message_ids": []}],
+                "dynamics": [],
+                "degrade_list": [],
+                "invigorate_list": [],
+                "advice": [],
+            }
+        )
+        svc = SummaryService(database=db, ai_service=_Ai("ollama:qwen2.5:1.5b", ai_payload))
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=[
+                {
+                    "ts": "2026-01-01T10:00:00+00:00",
+                    "author_id": "u1",
+                    "content": "ciao team",
+                    "meta": {},
+                    "message_id": "12345678901234567",
+                }
+            ],
+        )
+        assert result.ai_status["reason"] == "ok"
+        assert result.ai_status["used_ai_output"] is True
+        assert result.moments and result.moments[0].ts == "2026-01-01T10:00:00+00:00"
 
     asyncio.run(_run())
