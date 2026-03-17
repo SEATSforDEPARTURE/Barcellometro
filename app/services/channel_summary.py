@@ -30,6 +30,14 @@ MIN_CHANNEL_SUMMARY_MESSAGES = 8
 MIN_CHANNEL_SUMMARY_DISTINCT_USERS = 2
 MIN_CHANNEL_SUMMARY_USABLE_CONTENT_MESSAGES = 5
 
+
+def _summary_footer_inputs(ai_status: dict[str, Any]) -> tuple[list[str], bool]:
+    used_ai_output = bool(ai_status.get("used_ai_output"))
+    used_display_model = str(ai_status.get("used_display_model") or "").strip()
+    contributors = [used_display_model] if used_ai_output and used_display_model else []
+    return contributors, (not used_ai_output)
+
+
 class ChannelSummaryService:
     def __init__(
         self,
@@ -666,11 +674,7 @@ class ChannelSummaryService:
             aura_embed=aura_embed,
         )
 
-        ai_reason = str(summary.ai_status.get("reason") or "")
-        ai_called = bool(summary.ai_status.get("called"))
-        ai_model = str(summary.ai_status.get("display_model") or "").strip()
-        footer_contributors = [ai_model] if ai_model and (ai_reason == "ok" or ai_called) else []
-        footer_local = ai_reason != "ok"
+        footer_contributors, footer_local = _summary_footer_inputs(summary.ai_status)
 
         attach_footer_meta(
             embeds[0],

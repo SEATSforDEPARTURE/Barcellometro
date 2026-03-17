@@ -13,7 +13,6 @@ import discord
 
 from discord import app_commands
 
-from app.services.ai_utils import model_display_name
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all, copy_footer_meta
 from app.services.summary import SummaryImpact, SummaryItem, SummaryQuote
 from app.utils.discord_send import send_dm_or_followup
@@ -41,6 +40,15 @@ logger = logging.getLogger(__name__)
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MOMENTS_FIELD_NAME = "📌 MOMENTI SALIENTI"
+
+
+
+
+def _summary_footer_inputs(ai_status: dict[str, Any]) -> tuple[list[str], bool]:
+    used_ai_output = bool(ai_status.get("used_ai_output"))
+    used_display_model = str(ai_status.get("used_display_model") or "").strip()
+    contributors = [used_display_model] if used_ai_output and used_display_model else []
+    return contributors, (not used_ai_output)
 
 
 def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -1743,10 +1751,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             embeds = build_embeds()
             if dm_mode and embeds:
                 ai_reason = str(summary.ai_status.get("reason") or "")
-                ai_called = bool(summary.ai_status.get("called"))
-                ai_model_name = str(summary.ai_status.get("display_model") or model_display_name(str(summary.ai_status.get("model") or model_name or "")))
-                contributors = [ai_model_name] if ai_model_name and (ai_reason == "ok" or ai_called) else []
-                used_local_processing = ai_reason != "ok"
+                contributors, used_local_processing = _summary_footer_inputs(summary.ai_status)
                 attach_footer_meta_to_all(
                     embeds,
                     service_name="riassunto",

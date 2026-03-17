@@ -35,6 +35,13 @@ class _Ai:
         raise AssertionError("legacy OpenAI client should not be used")
 
 
+
+
+class _AiRaises(_Ai):
+    def __init__(self, model_cfg: str, exc: Exception) -> None:
+        self._model_cfg = model_cfg
+        self.ask_for_task = AsyncMock(side_effect=exc)
+
 def _minimal_messages() -> list[dict[str, object]]:
     return [
         {
@@ -78,6 +85,8 @@ def test_build_summary_with_ollama_without_openai_client() -> None:
         )
         assert result.ai_status["provider"] == "ollama"
         assert result.ai_status["model"] == "ollama:qwen2.5:1.5b"
+        assert result.ai_status["configured_model"] == "ollama:qwen2.5:1.5b"
+        assert result.ai_status["configured_display_model"] == "qwen2.5"
 
     asyncio.run(_run())
 
@@ -136,6 +145,9 @@ Grazie!"""
         assert result.ai_status["reason"] == "ok"
         assert result.ai_status["called"] is True
         assert result.ai_status["display_model"] == "qwen2.5"
+        assert result.ai_status["used_ai_output"] is True
+        assert result.ai_status["used_model"] == "ollama:qwen2.5:1.5b"
+        assert result.ai_status["used_display_model"] == "qwen2.5"
 
     asyncio.run(_run())
 
@@ -163,5 +175,35 @@ def test_build_summary_invalid_json_keeps_model_and_marks_called() -> None:
         assert result.ai_status["provider"] == "ollama"
         assert result.ai_status["model"] == "ollama:qwen2.5:1.5b"
         assert result.ai_status["display_model"] == "qwen2.5"
+        assert result.ai_status["used_ai_output"] is False
+        assert result.ai_status["used_model"] is None
+        assert result.ai_status["used_display_model"] is None
+
+    asyncio.run(_run())
+
+
+def test_build_summary_exception_marks_ai_as_not_used() -> None:
+    async def _run() -> None:
+        svc = SummaryService(database=_Db(), ai_service=_AiRaises("ollama:qwen2.5:7b", RuntimeError("boom")))
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=_minimal_messages(),
+        )
+        assert result.ai_status["reason"] == "exception:RuntimeError"
+        assert result.ai_status["called"] is True
+        assert result.ai_status["used_ai_output"] is False
+        assert result.ai_status["used_model"] is None
+        assert result.ai_status["used_display_model"] is None
 
     asyncio.run(_run())
