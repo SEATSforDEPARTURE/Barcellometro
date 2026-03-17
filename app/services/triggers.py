@@ -1945,10 +1945,9 @@ class TriggerEngineService:
 
         if use_web:
             try:
-                if hasattr(self._ai, "ask_general_with_web"):
-                    text_web = await self._ai.ask_general_with_web(question, self._general_persona_system_prompt(), history or [])
-                    if text_web:
-                        return text_web
+                text_web = await self._ai.ask_for_task_with_web("summary", question, self._general_persona_system_prompt(), history or [])
+                if text_web:
+                    return text_web
             except Exception:  # noqa: BLE001
                 logger.exception("general_llm web_search failed", extra={"query_type": query_type})
 
@@ -1971,26 +1970,17 @@ class TriggerEngineService:
     async def _ask_general_llm(self, question: str, history: list[dict[str, str]] | None = None) -> str | None:
         if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
             return None
-        model = self._ai.get_model("summary") or "gpt-4o-mini"
-        provider = "openai"
+        model = self._ai.get_model_config("summary") or "unknown"
+        provider = (model.split(":", 1)[0] if ":" in model else "unknown")
         logger.info("qna_llm_called=%s model=%s", True, model)
         logger.info("qna_general_llm_called=true provider=%s model=%s", provider, model)
 
         persona = self._general_persona_system_prompt()
-        if hasattr(self._ai, "ask_general"):
-            try:
-                return await self._ai.ask_general(question, persona, history or [])
-            except Exception:  # noqa: BLE001
-                logger.exception("general_llm offline helper failed")
-
-        messages: list[dict[str, str]] = [{"role": "system", "content": persona}]
-        if history:
-            messages.extend(history)
-        else:
-            messages.append({"role": "user", "content": question})
-        response = await self._ai.client().responses.create(model=model, input=messages)
-        text = str(getattr(response, "output_text", "") or "").strip()
-        return text or None
+        try:
+            return await self._ai.ask_for_task("summary", question, persona, history or [])
+        except Exception:  # noqa: BLE001
+            logger.exception("general_llm offline helper failed")
+            return None
 
     def _normalize_question(self, question: str) -> str:
         return re.sub(r"\s+", " ", question.strip().lower())
@@ -2197,7 +2187,7 @@ class TriggerEngineService:
     def _get_qna_remote_model_name(self) -> str:
         if self._ai is None:
             return "modello AI"
-        return self._ai.get_model("summary") or "gpt-4o-mini"
+        return self._ai.get_model_config("summary") or "unknown"
 
     @staticmethod
     def _strip_leading_answer_label(text: str) -> str:
@@ -3159,9 +3149,8 @@ class TriggerEngineService:
     async def _ask_ai_json(self, payload: str) -> dict[str, object] | None:
         if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
             return None
-        model = self._ai.get_model("summary") or "gpt-4o-mini"
-        response = await self._ai.client().responses.create(model=model, input=payload)
-        text = getattr(response, "output_text", "") or ""
+        text = await self._ai.ask_for_task("summary", payload, "Rispondi SOLO con JSON valido, senza markdown e senza testo aggiuntivo.")
+        text = text or ""
         try:
             return json.loads(text)
         except json.JSONDecodeError:

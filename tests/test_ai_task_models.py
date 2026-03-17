@@ -105,3 +105,42 @@ def test_ask_for_task_uses_campaign_prompt_model() -> None:
         assert service.status()["metrics"]["last_used_task"] == "campaign_prompt"
 
     asyncio.run(_run())
+
+
+def test_ask_for_task_supports_ollama_primary_model() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "openai:gpt-4o-mini", "campaign_prompt": "ollama:qwen2.5:1.5b"}
+        service._fallback_model_map = {}
+        service._client = _FakeClient()
+        service._ollama.generate_text = AsyncMock(return_value="ollama-ok")
+
+        out = await service.ask_for_task("campaign_prompt", "q", "sys")
+
+        assert out == "ollama-ok"
+        service._ollama.generate_text.assert_awaited_once()
+        assert service.status()["metrics"]["last_used_model"] == "ollama:qwen2.5:1.5b"
+
+    asyncio.run(_run())
+
+
+def test_ask_for_task_uses_fallback_model_when_primary_fails() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "openai:gpt-4o-mini", "campaign_prompt": "openai:gpt-4.1-mini"}
+        service._fallback_model_map = {"campaign_prompt": "ollama:qwen2.5:1.5b"}
+        service._client = _FakeClient()
+        service._client.responses.create = AsyncMock(side_effect=RuntimeError("boom"))
+        service._ollama.generate_text = AsyncMock(return_value="fallback-ok")
+
+        out = await service.ask_for_task("campaign_prompt", "q", "sys")
+
+        assert out == "fallback-ok"
+        service._ollama.generate_text.assert_awaited_once()
+        assert service.status()["metrics"]["last_used_model"] == "ollama:qwen2.5:1.5b"
+
+    asyncio.run(_run())
