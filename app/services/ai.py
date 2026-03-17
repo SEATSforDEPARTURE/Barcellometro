@@ -65,6 +65,9 @@ class AiService:
     def get_model_config(self, task: str) -> Optional[str]:
         return self._model_map.get(task)
 
+    def get_runtime_model(self, task: str) -> Optional[str]:
+        return self.get_model_config(task)
+
     def get_model(self, task: str) -> Optional[str]:
         return self.get_openai_model(task)
 

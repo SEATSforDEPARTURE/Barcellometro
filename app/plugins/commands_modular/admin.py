@@ -5,6 +5,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.services.ai_model_catalog import build_model_autocomplete_choices
 from app.services.footer import ServiceFooterProfile, ServiceFooterVariant, _is_persistable_service_name
 
 
@@ -132,8 +133,8 @@ async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfil
     stt_backend = ((await ctx.database.get_setting("stt.backend")) or "local").strip().lower()
     translate_backend = ((await ctx.database.get_setting("translate.backend")) or "local").strip().lower()
     stt_local_model = ((await ctx.database.get_setting("stt.local.model")) or "small").strip()
-    stt_ai_model = ctx.ai.get_model("transcription") if ctx.ai is not None else "gpt-4o-transcribe"
-    translate_ai_model = ctx.ai.get_model("translation") if ctx.ai is not None else "gpt-4o-mini"
+    stt_ai_model = ctx.ai.get_runtime_model("transcription") if ctx.ai is not None else "openai:gpt-4o-transcribe"
+    translate_ai_model = ctx.ai.get_runtime_model("translation") if ctx.ai is not None else "openai:gpt-4o-mini"
 
     stt_model = stt_local_model if stt_backend != "ai" else (stt_ai_model or "gpt-4o-transcribe")
     translation_model = "argos" if translate_backend != "ai" else (translate_ai_model or "gpt-4o-mini")
@@ -278,22 +279,38 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
 
         await responder.send_message("Backfill disattivato.", ephemeral=True)
 
-    @bm_group.command(name="ai", description="Abilita o disabilita il servizio AI")
-    @app_commands.describe(state="on/off")
-    @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
-    async def ai_command(interaction: discord.Interaction, state: app_commands.Choice[str]) -> None:
+    ai_group = app_commands.Group(name="ai", description="Gestione servizio AI")
+    bm_group.add_command(ai_group)
+
+    async def _autocomplete_ai_model(
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        selected_task = getattr(interaction.namespace, "task", None)
+        task_value = selected_task.value if isinstance(selected_task, app_commands.Choice) else selected_task
+        return await build_model_autocomplete_choices(task_value, current)
+
+    def _is_valid_provider_model(value: str) -> bool:
+        return ":" in value and bool(value.split(":", 1)[0].strip()) and bool(value.split(":", 1)[1].strip())
+
+    @ai_group.command(name="on", description="Abilita il servizio AI")
+    async def ai_on_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.ai", ctx):
             return
-        enabled = state.value == "on"
-        await ctx.ai.set_enabled(enabled)
-        await interaction.response.send_message(
-            f"AI {'abilitata' if enabled else 'disabilitata'}.",
-            ephemeral=True,
-        )
+        await ctx.ai.set_enabled(True)
+        await interaction.response.send_message("AI abilitata.", ephemeral=True)
 
-    @bm_group.command(name="ai-model", description="Imposta il modello AI per un task")
-    @app_commands.describe(task="Task AI", model="Modello provider:model")
+    @ai_group.command(name="off", description="Disabilita il servizio AI")
+    async def ai_off_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "bm.ai", ctx):
+            return
+        await ctx.ai.set_enabled(False)
+        await interaction.response.send_message("AI disabilitata.", ephemeral=True)
+
+    @ai_group.command(name="model", description="Imposta il modello AI per un task")
+    @app_commands.describe(task="Task AI", model="Seleziona o cerca un modello (provider:model)")
     @app_commands.choices(task=ai_task_choices)
+    @app_commands.autocomplete(model=_autocomplete_ai_model)
     async def ai_model_command(
         interaction: discord.Interaction,
         task: app_commands.Choice[str],
@@ -301,23 +318,22 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
     ) -> None:
         if not await check_permission(interaction, "bm.ai-model", ctx):
             return
-        if ":" not in model:
+        if not _is_valid_provider_model(model):
             await interaction.response.send_message(
-                "Formato non valido. Usa provider:model",
+                "Formato non valido. Seleziona un modello dai suggerimenti oppure usa provider:model, ad esempio openai:gpt-4o-mini o ollama:qwen2.5:1.5b.",
                 ephemeral=True,
             )
             return
         await ctx.ai.set_model(task.value, model)
-        await interaction.response.send_message(
-            f"Modello per {task.value} aggiornato a {model}.",
-            ephemeral=True,
-        )
+        embed = discord.Embed(title="🧠 Modello AI aggiornato", color=discord.Color.green())
+        embed.add_field(name="Task", value=task.value, inline=True)
+        embed.add_field(name="Model", value=model, inline=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-
-    @bm_group.command(name="ai-fallback-model", description="Imposta il modello AI di fallback per un task")
-    @app_commands.describe(task="Task AI", model="Modello provider:model")
+    @ai_group.command(name="fallback-model", description="Imposta il modello AI di fallback per un task")
+    @app_commands.describe(task="Task AI", model="Seleziona o cerca un modello (provider:model)")
     @app_commands.choices(task=ai_task_choices)
+    @app_commands.autocomplete(model=_autocomplete_ai_model)
     async def ai_fallback_model_command(
         interaction: discord.Interaction,
         task: app_commands.Choice[str],
@@ -325,19 +341,19 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
     ) -> None:
         if not await check_permission(interaction, "bm.ai-model", ctx):
             return
-        if ":" not in model:
+        if not _is_valid_provider_model(model):
             await interaction.response.send_message(
-                "Formato non valido. Usa provider:model",
+                "Formato non valido. Seleziona un modello dai suggerimenti oppure usa provider:model, ad esempio openai:gpt-4o-mini o ollama:qwen2.5:1.5b.",
                 ephemeral=True,
             )
             return
         await ctx.ai.set_fallback_model(task.value, model)
-        await interaction.response.send_message(
-            f"Fallback model per {task.value} aggiornato a {model}.",
-            ephemeral=True,
-        )
+        embed = discord.Embed(title="🧠 Fallback AI aggiornato", color=discord.Color.green())
+        embed.add_field(name="Task", value=task.value, inline=True)
+        embed.add_field(name="Model", value=model, inline=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @bm_group.command(name="ai-status", description="Mostra stato e modelli AI")
+    @ai_group.command(name="status", description="Mostra stato e modelli AI")
     async def ai_status_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.ai", ctx):
             return
@@ -346,23 +362,40 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         models = status.get("models", {}) if isinstance(status, dict) else {}
         fallback_models = status.get("fallback_models", {}) if isinstance(status, dict) else {}
 
-        embed = discord.Embed(title="Stato AI", color=discord.Color.blurple())
-        embed.add_field(name="Stato", value=str(status.get("state") or "unknown"), inline=False)
+        embed = discord.Embed(
+            title="🧠 Stato AI",
+            description=f"Servizio: **{status.get('state') or 'unknown'}**",
+            color=discord.Color.blurple(),
+        )
         if isinstance(models, dict) and models:
-            primary_text = "\n".join(f"• {task}: {model}" for task, model in sorted(models.items()))
-            embed.add_field(name="Modelli primari", value=_truncate_embed_text(primary_text), inline=False)
+            primary_text = "\n".join(f"• {task} → {model}" for task, model in sorted(models.items()))
+            embed.add_field(name="Primari", value=_truncate_embed_text(primary_text), inline=False)
         if isinstance(fallback_models, dict) and fallback_models:
-            fallback_text = "\n".join(f"• {task}: {model}" for task, model in sorted(fallback_models.items()))
-            embed.add_field(name="Modelli fallback", value=_truncate_embed_text(fallback_text), inline=False)
+            fallback_text = "\n".join(f"• {task} → {model}" for task, model in sorted(fallback_models.items()))
+            embed.add_field(name="Fallback", value=_truncate_embed_text(fallback_text), inline=False)
 
-        embed.add_field(name="Ultimo task usato", value=str(metrics.get("last_used_task") or "(n/d)"), inline=True)
-        embed.add_field(name="Ultimo modello usato", value=str(metrics.get("last_used_model") or "(n/d)"), inline=True)
-        embed.add_field(name="Ultimo test", value="ok" if metrics.get("last_test_ok") else "ko", inline=True)
+        last_usage = (
+            f"• task: {metrics.get('last_used_task') or '(n/d)'}\n"
+            f"• modello: {metrics.get('last_used_model') or '(n/d)'}"
+        )
+        embed.add_field(name="Ultimo uso", value=_truncate_embed_text(last_usage), inline=False)
+
+        last_test_state = metrics.get("last_test_ok")
+        if last_test_state is None:
+            test_outcome = "(n/d)"
+        else:
+            test_outcome = "ok" if last_test_state else "ko"
+        last_test = (
+            f"• task: {metrics.get('last_test_task') or '(n/d)'}\n"
+            f"• modello: {metrics.get('last_test_model') or '(n/d)'}\n"
+            f"• esito: {test_outcome}"
+        )
         if metrics.get("last_test_error"):
-            embed.add_field(name="Ultimo errore test", value=_truncate_embed_text(str(metrics.get("last_test_error"))), inline=False)
+            last_test += f"\n• errore: {_truncate_embed_text(str(metrics.get('last_test_error')), limit=220)}"
+        embed.add_field(name="Ultimo test", value=_truncate_embed_text(last_test), inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @bm_group.command(name="ai-test", description="Esegue un test sul task AI configurato")
+    @ai_group.command(name="test", description="Esegue un test sul task AI configurato")
     @app_commands.describe(task="Task AI", prompt="Prompt di test", web="Abilita web search")
     @app_commands.choices(
         task=ai_task_choices,
