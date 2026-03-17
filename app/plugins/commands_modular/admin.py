@@ -272,7 +272,7 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         )
 
     @bm_group.command(name="ai-model", description="Imposta il modello AI per un task")
-    @app_commands.describe(task="Task AI", model="Nome modello")
+    @app_commands.describe(task="Task AI", model="Modello provider:model")
     @app_commands.choices(
         task=[
             app_commands.Choice(name="summary", value="summary"),
@@ -290,6 +290,12 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         model: str,
     ) -> None:
         if not await check_permission(interaction, "bm.ai-model", ctx):
+            return
+        if ":" not in model:
+            await interaction.response.send_message(
+                "Formato non valido. Usa provider:model",
+                ephemeral=True,
+            )
             return
         await ctx.ai.set_model(task.value, model)
         await interaction.response.send_message(
