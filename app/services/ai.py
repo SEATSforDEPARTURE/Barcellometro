@@ -7,10 +7,13 @@ from typing import Any, Optional
 from openai import AsyncOpenAI
 
 from app.services.ai_backends.ollama_backend import OllamaBackend
+from app.services.ai_utils import parse_model_string
 from app.services.database import DatabaseService
 
 
 class AiService:
+    OLLAMA_SLOW_TASKS: frozenset[str] = frozenset({"summary", "server_summary", "campaign_editorial"})
+    OLLAMA_SLOW_TASK_TIMEOUT_SECONDS: float = 90.0
     SUPPORTED_MODEL_TASKS: tuple[str, ...] = (
         "summary",
         "server_summary",
@@ -157,28 +160,55 @@ class AiService:
         if not model_cfg:
             model_cfg = self.get_model_config("summary") or "openai:gpt-4o-mini"
 
-        provider, model = model_cfg.split(":", 1)
+        provider, model = parse_model_string(model_cfg)
+        effective_timeout = self._resolve_timeout(task, provider, timeout_seconds)
         system = persona_system
         prompt = question if not history else history[-1].get("content", question)
 
         try:
             self.logger.info("[AI] task=%s provider=%s model=%s", task, provider, model)
-            result = await self._run_model(provider, model, system, prompt, timeout_seconds)
+            result = await self._run_model(provider, model, system, prompt, effective_timeout)
             self._metrics["last_used_task"] = task
             self._metrics["last_used_model"] = model_cfg
             text = self._extract_text(result)
             return text or None
-        except Exception:
+        except Exception as exc:
             fallback_cfg = self.get_fallback_model(task)
             if not fallback_cfg:
                 raise
-            provider_fb, model_fb = fallback_cfg.split(":", 1)
+            provider_fb, model_fb = parse_model_string(fallback_cfg)
+            if provider_fb == provider and model_fb == model:
+                self.logger.warning(
+                    "[AI] task=%s primary=%s:%s fallback=%s:%s fallback_skipped=same_provider_model error=%s",
+                    task,
+                    provider,
+                    model,
+                    provider_fb,
+                    model_fb,
+                    exc.__class__.__name__,
+                )
+                raise
+            fallback_timeout = self._resolve_timeout(task, provider_fb, timeout_seconds)
+            self.logger.warning(
+                "[AI] task=%s primary=%s:%s failed=%s fallback=%s:%s",
+                task,
+                provider,
+                model,
+                exc.__class__.__name__,
+                provider_fb,
+                model_fb,
+            )
             self.logger.info("[AI] task=%s provider=%s model=%s", task, provider_fb, model_fb)
-            result = await self._run_model(provider_fb, model_fb, system, prompt, timeout_seconds)
+            result = await self._run_model(provider_fb, model_fb, system, prompt, fallback_timeout)
             self._metrics["last_used_task"] = task
             self._metrics["last_used_model"] = fallback_cfg
             text = self._extract_text(result)
             return text or None
+
+    def _resolve_timeout(self, task: str, provider: str, requested_timeout: float) -> float:
+        if provider == "ollama" and task in self.OLLAMA_SLOW_TASKS:
+            return max(requested_timeout, self.OLLAMA_SLOW_TASK_TIMEOUT_SECONDS)
+        return requested_timeout
 
     async def ask_general_with_web(
         self,
@@ -245,9 +275,9 @@ class AiService:
         model_cfg = self._metrics.get("last_used_model") if self._metrics.get("last_used_task") == task else None
         if not model_cfg:
             model_cfg = self.get_model_config(task) or self.get_model_config("summary") or ""
-        if not model_cfg or ":" not in str(model_cfg):
+        if not model_cfg:
             return "unknown"
-        provider, model = str(model_cfg).split(":", 1)
+        provider, model = parse_model_string(str(model_cfg))
         if provider == "ollama":
             return model.split(":")[0]
         return model

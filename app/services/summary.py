@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Iterable, Optional
 
+from app.services.ai_utils import parse_model_string
 from app.services.barcello import NEGATIVE_KEYWORDS
 from app.services.database import DatabaseService
 
@@ -340,18 +341,15 @@ class SummaryService:
         }
         ai_called = False
         if use_ai:
-            ai_status.update({"enabled": True, "provider": "openai"})
-            model = model_name
-            client = self._ai_service.client() if self._ai_service else None
-            ai_status["model"] = model
-            if not model or not client:
-                ai_status.update({"enabled": False, "fallback": True, "reason": "missing_key"})
+            model_cfg = model_name or ""
+            provider, _ = parse_model_string(model_cfg) if model_cfg else (None, None)
+            ai_status.update({"enabled": True, "provider": provider, "model": model_cfg})
+            if not model_cfg:
+                ai_status.update({"enabled": False, "fallback": True, "reason": "missing_model"})
             else:
                 try:
                     ai_called = True
                     ai_payload = await self._call_ai(
-                        client=client,
-                        model=model,
                         messages=messages,
                         include_names=include_names,
                         tier=tier,
@@ -406,13 +404,10 @@ class SummaryService:
         if not use_ai:
             return None
         model = self._ai_service.get_model("summary") if self._ai_service else None
-        client = self._ai_service.client() if self._ai_service else None
-        if not model or not client:
+        if not model:
             return None
         try:
             text = await self._call_ai_period_description(
-                client=client,
-                model=model,
                 period_prefix=period_prefix,
                 score=score,
                 color=color,
@@ -473,8 +468,6 @@ class SummaryService:
     async def _call_ai(
         self,
         *,
-        client: Any,
-        model: str,
         messages: list[dict[str, Any]],
         include_names: bool,
         tier: str,
@@ -616,8 +609,6 @@ class SummaryService:
     async def _call_ai_period_description(
         self,
         *,
-        client: Any,
-        model: str,
         period_prefix: str,
         score: int,
         color: str,
