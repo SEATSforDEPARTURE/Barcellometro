@@ -50,8 +50,8 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
                 interaction,
                 prompt_text="scrivi un update",
                 name=None,
-                time_local=None,
-                interval_minutes=None,
+                publish_at=None,
+                every=None,
                 embed_title=None,
                 embed_color=None,
             )

@@ -176,7 +176,12 @@ class CampaignContentService:
             metadata_json=json.dumps(metadata, ensure_ascii=False),
             current_index=0,
         )
-        next_run = calculate_next_run_after_send(now, int(config["interval_minutes"]), 0)
+        interval_minutes = int(config.get("interval_minutes") or 0)
+        if interval_minutes <= 0:
+            await self._database.update_campaign_content_next_run(guild_id=guild_id, config_id=int(config["id"]), next_run_at=now.isoformat(), last_sent_at=now.isoformat())
+            await self._database.set_campaign_content_enabled(guild_id=guild_id, config_id=int(config["id"]), enabled=False)
+            return
+        next_run = calculate_next_run_after_send(now, interval_minutes, 0)
         await self._database.update_campaign_content_next_run(guild_id=guild_id, config_id=int(config["id"]), next_run_at=next_run.isoformat(), last_sent_at=now.isoformat())
 
     async def _rewrite_news_payload(self, payload: dict[str, Any]) -> str | None:

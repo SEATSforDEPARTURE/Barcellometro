@@ -11,6 +11,7 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.command_helpers import add_group_once, count_child_commands
+from app.plugins.commands_modular.time_windows import parse_italian_datetime
 from app.services.scheduler_utils import calculate_initial_next_run
 
 QUIET_DEFAULT_START = "01:00"
@@ -41,6 +42,19 @@ def _truncate(text: str, limit: int = 100) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+
+def _resolve_schedule(*, publish_at: Optional[str], every: Optional[int], now_utc: datetime, tz) -> tuple[datetime, str, int]:
+    resolved_every = int(every or 0)
+    if resolved_every < 0:
+        raise ValueError("every non può essere negativo")
+    raw_publish = str(publish_at or "").strip()
+    publish_dt = parse_italian_datetime(raw_publish) if raw_publish else None
+    if raw_publish and publish_dt is None:
+        raise ValueError("Formato publish_at non valido. Usa DD/MM/YYYY HH:MM")
+    if publish_dt is None:
+        publish_dt = now_utc.astimezone(tz)
+    return publish_dt.astimezone(timezone.utc), publish_dt.astimezone(tz).strftime("%H:%M"), resolved_every
 
 
 def validate_campaign_texts(
@@ -181,8 +195,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         testo_rosso="Testo per mood rosso",
         testo_nero="Testo per Barcello ⚫",
         mood_mode="Modalità barcello",
-        ogni_minuti="Intervallo in minuti",
-        ora_inizio="Ora di inizio (HH:MM, Europe/Rome)",
+        publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)",
+        every="Intervallo ripetizione: es 1440min",
         jitter_sec="Jitter opzionale in secondi",
         solo_se_inattivo_min="Invia solo se inattivo da X minuti",
         embed_title="Titolo embed opzionale",
@@ -191,14 +205,14 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     @app_commands.choices(mood_mode=MOOD_CHOICES)
     async def messaggi_aggiungi(
         interaction: discord.Interaction,
-        ogni_minuti: int,
-        ora_inizio: str,
         testo: Optional[str] = None,
         testo_verde: Optional[str] = None,
         testo_giallo: Optional[str] = None,
         testo_rosso: Optional[str] = None,
         testo_nero: Optional[str] = None,
         mood_mode: Optional[app_commands.Choice[str]] = None,
+        publish_at: Optional[str] = None,
+        every: Optional[int] = None,
         jitter_sec: Optional[int] = 0,
         solo_se_inattivo_min: Optional[int] = 0,
         embed_title: Optional[str] = None,
@@ -209,18 +223,15 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
             return
-        if ogni_minuti <= 0:
-            await interaction.response.send_message("ogni_minuti deve essere > 0.", ephemeral=True)
-            return
         if jitter_sec is None:
             jitter_sec = 0
         if solo_se_inattivo_min is None:
             solo_se_inattivo_min = 0
         now = datetime.now(timezone.utc)
         try:
-            next_run = calculate_initial_next_run(now, ora_inizio, ogni_minuti, ctx.timezone)
+            next_run, start_time_local, resolved_every = _resolve_schedule(publish_at=publish_at, every=every, now_utc=now, tz=ctx.timezone)
         except ValueError as exc:
-            await interaction.response.send_message(f"Errore ora_inizio: {exc}", ephemeral=True)
+            await interaction.response.send_message(str(exc), ephemeral=True)
             return
         resolved_mood_mode = mood_mode.value if mood_mode else "AUTO"
         validation_error = validate_campaign_texts(
@@ -249,8 +260,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             text_red=testo_rosso,
             text_black=testo_nero,
             enabled=True,
-            start_time_local=ora_inizio,
-            interval_minutes=ogni_minuti,
+            start_time_local=start_time_local,
+            interval_minutes=resolved_every,
             jitter_seconds=jitter_sec,
             only_if_idle_minutes=solo_se_inattivo_min,
             mood_mode=resolved_mood_mode,
@@ -259,10 +270,16 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_title=embed_title,
             embed_color=embed_color,
         )
-        await interaction.response.send_message(
-            f"Campagna creata con ID {campaign_id}. Prossima esecuzione: {next_run.isoformat()}",
-            ephemeral=True,
-        )
+        if resolved_every > 0:
+            await interaction.response.send_message(
+                f"Campagna creata: {campaign_id} • nome=custom-{campaign_id} • prima esecuzione={next_run.isoformat()} • ogni={resolved_every}min",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                f"Campagna one-shot creata: {campaign_id} • nome=custom-{campaign_id} • esecuzione prevista={next_run.isoformat()}",
+                ephemeral=True,
+            )
 
     @campagne_group.command(name="lista", description="Elenca le campagne attive")
     async def messaggi_lista(interaction: discord.Interaction) -> None:
@@ -348,7 +365,11 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             await interaction.response.send_message("Campagna non trovata.", ephemeral=True)
             return
         now = datetime.now(timezone.utc)
-        next_run = calculate_initial_next_run(now, campaign["start_time_local"], int(campaign["interval_minutes"]), ctx.timezone)
+        interval_minutes = int(campaign["interval_minutes"])
+        if interval_minutes > 0:
+            next_run = calculate_initial_next_run(now, campaign["start_time_local"], interval_minutes, ctx.timezone)
+        else:
+            next_run = now
         await ctx.database.set_message_campaign_enabled(str(interaction.guild_id), id, True)
         await ctx.database.update_campaign_next_run(str(interaction.guild_id), id, next_run.isoformat(), campaign["last_sent_at"])
         await interaction.response.send_message(
@@ -394,8 +415,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
 
     @servizi_group.command(name="notizie", description="Configura campagna editoriale notizie")
     @app_commands.describe(
-        time_local="Ora invio (HH:MM)",
-        interval_minutes="Intervallo in minuti",
+        publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)",
+        every="Intervallo ripetizione: es 1440min",
         embed_title="Titolo embed",
         embed_color="Colore embed (#RRGGBB)",
         sources="Fonti CSV o URL RSS separate da virgola",
@@ -403,8 +424,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     )
     async def campagne_notizie(
         interaction: discord.Interaction,
-        time_local: str,
-        interval_minutes: int,
+        publish_at: Optional[str] = None,
+        every: Optional[int] = None,
         embed_title: Optional[str] = None,
         embed_color: Optional[str] = None,
         sources: Optional[str] = None,
@@ -415,14 +436,11 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa il comando in una guild.", ephemeral=True)
             return
-        if interval_minutes <= 0:
-            await interaction.response.send_message("interval_minutes deve essere > 0.", ephemeral=True)
-            return
         now = datetime.now(timezone.utc)
         try:
-            next_run = calculate_initial_next_run(now, time_local, interval_minutes, ctx.timezone)
+            next_run, time_local, interval_minutes = _resolve_schedule(publish_at=publish_at, every=every, now_utc=now, tz=ctx.timezone)
         except ValueError as exc:
-            await interaction.response.send_message(f"Errore time_local: {exc}", ephemeral=True)
+            await interaction.response.send_message(str(exc), ephemeral=True)
             return
         cfg_id = await ctx.database.create_campaign_content_config(
             guild_id=str(interaction.guild_id),
@@ -437,20 +455,20 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             categories_json=categories,
             next_run_at=next_run.isoformat(),
         )
-        await interaction.response.send_message(f"Servizio notizie creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
+        await interaction.response.send_message((f"Servizio notizie creato: {cfg_id} • nome=NEWS-{cfg_id} • prima esecuzione={next_run.isoformat()} • ogni={interval_minutes}min" if interval_minutes > 0 else f"Servizio notizie one-shot creato: {cfg_id} • nome=NEWS-{cfg_id} • esecuzione prevista={next_run.isoformat()}"), ephemeral=True)
 
     @servizi_group.command(name="meteo", description="Configura campagna editoriale meteo")
     @app_commands.describe(
-        time_local="Ora invio (HH:MM)",
-        interval_minutes="Intervallo in minuti",
+        publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)",
+        every="Intervallo ripetizione: es 1440min",
         embed_title="Titolo embed",
         embed_color="Colore embed (#RRGGBB)",
         sources="Fonti CSV",
     )
     async def campagne_meteo(
         interaction: discord.Interaction,
-        time_local: str,
-        interval_minutes: int,
+        publish_at: Optional[str] = None,
+        every: Optional[int] = None,
         embed_title: Optional[str] = None,
         embed_color: Optional[str] = None,
         sources: Optional[str] = None,
@@ -462,9 +480,9 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return
         now = datetime.now(timezone.utc)
         try:
-            next_run = calculate_initial_next_run(now, time_local, interval_minutes, ctx.timezone)
+            next_run, time_local, interval_minutes = _resolve_schedule(publish_at=publish_at, every=every, now_utc=now, tz=ctx.timezone)
         except ValueError as exc:
-            await interaction.response.send_message(f"Errore time_local: {exc}", ephemeral=True)
+            await interaction.response.send_message(str(exc), ephemeral=True)
             return
         cfg_id = await ctx.database.create_campaign_content_config(
             guild_id=str(interaction.guild_id),
@@ -479,20 +497,20 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             categories_json=None,
             next_run_at=next_run.isoformat(),
         )
-        await interaction.response.send_message(f"Servizio meteo creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
+        await interaction.response.send_message((f"Servizio meteo creato: {cfg_id} • nome=WEATHER-{cfg_id} • prima esecuzione={next_run.isoformat()} • ogni={interval_minutes}min" if interval_minutes > 0 else f"Servizio meteo one-shot creato: {cfg_id} • nome=WEATHER-{cfg_id} • esecuzione prevista={next_run.isoformat()}"), ephemeral=True)
 
     @servizi_group.command(name="oroscopo", description="Configura campagna editoriale oroscopo")
     @app_commands.describe(
-        time_local="Ora invio (HH:MM)",
-        interval_minutes="Intervallo in minuti",
+        publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)",
+        every="Intervallo ripetizione: es 1440min",
         embed_title="Titolo embed",
         embed_color="Colore embed (#RRGGBB)",
         sources="Fonti CSV",
     )
     async def campagne_oroscopo(
         interaction: discord.Interaction,
-        time_local: str,
-        interval_minutes: int,
+        publish_at: Optional[str] = None,
+        every: Optional[int] = None,
         embed_title: Optional[str] = None,
         embed_color: Optional[str] = None,
         sources: Optional[str] = None,
@@ -504,9 +522,9 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return
         now = datetime.now(timezone.utc)
         try:
-            next_run = calculate_initial_next_run(now, time_local, interval_minutes, ctx.timezone)
+            next_run, time_local, interval_minutes = _resolve_schedule(publish_at=publish_at, every=every, now_utc=now, tz=ctx.timezone)
         except ValueError as exc:
-            await interaction.response.send_message(f"Errore time_local: {exc}", ephemeral=True)
+            await interaction.response.send_message(str(exc), ephemeral=True)
             return
         cfg_id = await ctx.database.create_campaign_content_config(
             guild_id=str(interaction.guild_id),
@@ -521,7 +539,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             categories_json=None,
             next_run_at=next_run.isoformat(),
         )
-        await interaction.response.send_message(f"Servizio oroscopo creato (ID {cfg_id}), next_run={next_run.isoformat()}", ephemeral=True)
+        await interaction.response.send_message((f"Servizio oroscopo creato: {cfg_id} • nome=HOROSCOPE-{cfg_id} • prima esecuzione={next_run.isoformat()} • ogni={interval_minutes}min" if interval_minutes > 0 else f"Servizio oroscopo one-shot creato: {cfg_id} • nome=HOROSCOPE-{cfg_id} • esecuzione prevista={next_run.isoformat()}"), ephemeral=True)
 
     @servizi_group.command(name="lista", description="Lista servizi editoriali")
     async def campagne_servizi_lista(interaction: discord.Interaction) -> None:
@@ -543,7 +561,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                         f"tipo {row['service_type']}",
                         f"stato {'on' if row['enabled'] else 'off'}",
                         f"canale {row['channel_id']}",
-                        f"start {row['time_local']}",
+                        ('one-shot' if int(row['interval_minutes']) <= 0 else f"ogni {row['interval_minutes']}m"),
                         f"next {row['next_run_at']}",
                     ]
                 )
