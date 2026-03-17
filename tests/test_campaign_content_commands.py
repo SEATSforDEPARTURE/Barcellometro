@@ -45,3 +45,21 @@ def test_hardening_for_group_registration_is_present() -> None:
     assert "Attempting to register subgroup" in source
     assert "Failed to register subgroup" in source
     assert "Failed to register command" in source
+
+
+def test_scheduling_parameters_are_unified_to_publish_at_every() -> None:
+    source = Path("app/plugins/commands_modular/messaggi.py").read_text()
+
+    assert 'publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)"' in source
+    assert 'every="Intervallo ripetizione: es 1440min"' in source
+    assert 'time_local="Ora invio (HH:MM)"' not in source
+    assert 'interval_minutes="Intervallo in minuti"' not in source
+
+
+def test_prompt_create_slash_exposes_publish_at_every() -> None:
+    source = Path("app/plugins/commands_modular/triggers.py").read_text()
+
+    assert 'publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)"' in source
+    assert 'every="Intervallo ripetizione: es 1440min"' in source
+    assert 'time_local: str | None = None' not in source
+    assert 'interval_minutes: int | None = None' not in source

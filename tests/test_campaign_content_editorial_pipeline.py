@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import json
 import sys
 import types
@@ -15,6 +16,7 @@ if "aiosqlite" not in sys.modules:
 from app.services.campaign_content_fetchers import dedupe_news_items
 from app.services.campaign_content_formatter import build_horoscope_embeds, build_news_embeds, build_weather_embeds
 from app.services.campaign_content_service import CampaignContentService
+from app.services.database import DatabaseService
 
 
 def test_build_weather_embeds_page_order() -> None:
@@ -273,3 +275,47 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
 
     asyncio.run(_run_valid())
     asyncio.run(_run_invalid())
+
+
+
+def test_campaign_content_one_shot_disables_after_send() -> None:
+    class DummyChannel:
+        async def send(self, **kwargs):
+            return type("M", (), {"id": 999})()
+
+    class DummyBot:
+        def get_channel(self, _channel_id: int):
+            return DummyChannel()
+
+        async def fetch_channel(self, _channel_id: int):
+            return DummyChannel()
+
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        service = CampaignContentService(db, DummyBot(), ai_service=None)
+        guild_id = "1"
+        channel_id = "2"
+        cfg_id = await db.create_campaign_content_config(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            service_type="NEWS",
+            enabled=True,
+            time_local="10:00",
+            interval_minutes=0,
+            embed_title="T",
+            embed_color="#112233",
+            sources_json="[]",
+            categories_json=None,
+            next_run_at=datetime.now(timezone.utc).isoformat(),
+        )
+        config = await db.get_campaign_content_config(guild_id, cfg_id)
+        assert config is not None
+        await service._send_and_store(config, [discord.Embed(title="x")], "NEWS", configured_sources=[], used_sources=[], used_model=None, fallback_used=False, payload={})
+        refreshed = await db.get_campaign_content_config(guild_id, cfg_id)
+        assert refreshed is not None
+        assert int(refreshed["enabled"]) == 0
+        await db.close()
+
+    asyncio.run(_run())

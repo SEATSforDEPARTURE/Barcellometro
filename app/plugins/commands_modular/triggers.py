@@ -13,8 +13,8 @@ from discord import app_commands
 from app.plugins.commands_modular.command_helpers import add_group_once
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.plugins.commands_modular.time_windows import parse_italian_datetime
 from app.services.config_file_loader import load_json_file
-from app.services.scheduler_utils import calculate_initial_next_run
 
 logger = logging.getLogger(__name__)
 
@@ -766,6 +766,10 @@ def register_triggers(
 
     @prompt_group.command(name="create", description="Crea campagna AI_PROMPT")
     @app_commands.describe(
+        prompt_text="Prompt da usare per la campagna",
+        name="Nome campagna (opzionale)",
+        publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)",
+        every="Intervallo ripetizione: es 1440min",
         embed_title="Titolo embed opzionale",
         embed_color="Colore embed opzionale",
     )
@@ -773,8 +777,8 @@ def register_triggers(
         interaction: discord.Interaction,
         prompt_text: str,
         name: str | None = None,
-        time_local: str | None = None,
-        interval_minutes: int | None = None,
+        publish_at: str | None = None,
+        every: int | None = None,
         embed_title: str | None = None,
         embed_color: str | None = None,
     ) -> None:
@@ -790,21 +794,28 @@ def register_triggers(
         now_utc = datetime.now(timezone.utc)
         now_local = now_utc.astimezone(ctx.timezone)
         resolved_name = (name or "").strip() or f"prompt-{now_local.strftime('%Y%m%d-%H%M')}"
-        resolved_time_local = (time_local or "").strip() or now_local.strftime("%H:%M")
-        resolved_interval = int(interval_minutes or 0)
+        resolved_interval = int(every or 0)
 
         if resolved_interval < 0:
-            await interaction.response.send_message("interval_minutes non può essere negativo.", ephemeral=True)
+            await interaction.response.send_message("every non può essere negativo.", ephemeral=True)
             return
 
-        if resolved_interval > 0:
-            next_run = calculate_initial_next_run(now_utc, resolved_time_local, resolved_interval, ctx.timezone)
-            recurring = True
-        elif (time_local or "").strip():
-            next_run = calculate_initial_next_run(now_utc, resolved_time_local, 24 * 60, ctx.timezone)
-            recurring = False
+        publish_at_raw = (publish_at or "").strip()
+        publish_at_dt = parse_italian_datetime(publish_at_raw) if publish_at_raw else None
+        if publish_at_raw and publish_at_dt is None:
+            await interaction.response.send_message("Formato `publish_at` non valido. Usa DD/MM/YYYY HH:MM.", ephemeral=True)
+            return
+
+        if publish_at_dt is not None:
+            next_run = publish_at_dt.astimezone(timezone.utc)
+            resolved_time_local = publish_at_dt.astimezone(ctx.timezone).strftime("%H:%M")
         else:
             next_run = now_utc
+            resolved_time_local = now_local.strftime("%H:%M")
+
+        if resolved_interval > 0:
+            recurring = True
+        else:
             recurring = False
 
         campaign_id = await ctx.database.create_message_campaign(
@@ -830,7 +841,7 @@ def register_triggers(
         )
         if recurring:
             await interaction.response.send_message(
-                f"Campagna AI_PROMPT creata: {campaign_id} • nome={resolved_name} • prossima esecuzione={next_run.isoformat()}",
+                f"Campagna AI_PROMPT creata: {campaign_id} • nome={resolved_name} • prima esecuzione={next_run.isoformat()} • ogni={resolved_interval}min",
                 ephemeral=True,
             )
         else:
