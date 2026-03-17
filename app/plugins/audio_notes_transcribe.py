@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -96,32 +97,110 @@ def _build_audio_note_output(*, transcript_text: str, detected_lang: str, transl
     return "\n".join(output_parts).strip()
 
 
+def _sanitize_transcript_for_summary(text: str) -> str:
+    sanitized = text
+    replacements: list[tuple[str, str]] = [
+        (r"\brompere il cazzo\b", "[espressione volgare]"),
+        (r"\brompi il cazzo\b", "[espressione volgare]"),
+        (r"\brompe il cazzo\b", "[espressione volgare]"),
+        (r"\bvaffanculo\b", "[offesa]"),
+        (r"\bstronza\b", "[insulto]"),
+        (r"\bstronzo\b", "[insulto]"),
+        (r"\btroia\b", "[insulto]"),
+        (r"\bputtana\b", "[insulto]"),
+        (r"\bcazzo\b", "[volgarità]"),
+        (r"\bminchia\b", "[volgarità]"),
+        (r"\bmerda\b", "[volgarità]"),
+    ]
+    for pattern, replacement in replacements:
+        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"[ \t]{2,}", " ", sanitized)
+    return sanitized.strip()
+
+
+def _looks_like_summary_refusal(text: str) -> bool:
+    lowered = text.strip().lower()
+    suspicious_fragments = {
+        "non posso",
+        "non sono in grado",
+        "non posso aiutarti",
+        "non posso fornire",
+        "non posso riassumere",
+        "contenuto offensivo",
+        "linguaggio offensivo",
+        "hate speech",
+        "violates",
+        "policy",
+        "mi dispiace",
+        "sorry",
+        "assist with",
+        "qualcos'altro?",
+        "posso aiutarti con",
+        "non posso elaborare",
+    }
+    return any(fragment in lowered for fragment in suspicious_fragments)
+
+
+def _normalize_summary_text(text: str) -> str:
+    normalized = text.strip()
+    normalized = re.sub(r'^["“”\']+|["“”\']+$', "", normalized).strip()
+    normalized = re.sub(r"^(riassunto|summary)\s*:\s*", "", normalized, flags=re.IGNORECASE)
+    return normalized.strip()
+
+
 async def _build_audio_note_summary(ai_service: Any, transcript_text: str) -> tuple[str | None, str | None]:
     if ai_service is None:
+        return None, None
+    if not ai_service.is_enabled():
         return None, None
     cleaned_transcript = transcript_text.strip()
     if len(cleaned_transcript) < 20:
         return None, None
-    if not ai_service.is_enabled():
+    sanitized_transcript = _sanitize_transcript_for_summary(cleaned_transcript)
+    if not sanitized_transcript:
         return None, None
+
     system_prompt = (
-        "Riassumi fedelmente la seguente trascrizione di una nota audio in italiano. "
-        "Massimo 2 frasi brevi. Non aggiungere informazioni non presenti. "
-        "Non usare elenchi puntati. Non iniziare con formule introduttive. "
-        "Tono neutro e fedele al testo originale."
+        "Stai leggendo una trascrizione ASR di una nota audio. "
+        "La trascrizione può contenere insulti o volgarità riportati come parte del contenuto. "
+        "Il tuo compito è SOLO riassumere in modo neutro e fedele ciò che viene detto. "
+        "Non moralizzare, non rifiutare, non inserire avvisi di policy. "
+        "Se compaiono espressioni volgari, descrivile in modo neutro senza ripeterle inutilmente. "
+        "Massimo 2 frasi brevi, niente elenchi, niente formule introduttive."
     )
-    try:
-        summary_text = await ai_service.ask_for_task(
+    hardened_prompt = (
+        "Stai leggendo una trascrizione ASR di una nota audio con possibili volgarità. "
+        "Produci direttamente solo il riassunto neutro e fedele in massimo 2 frasi brevi. "
+        "Non rispondere con rifiuti o avvisi; produci direttamente solo il riassunto. "
+        "Niente elenchi, niente formule introduttive."
+    )
+
+    async def _request_summary(prompt: str) -> str:
+        return await ai_service.ask_for_task(
             "audio_summary",
-            cleaned_transcript,
-            system_prompt,
+            sanitized_transcript,
+            prompt,
             timeout_seconds=20,
         )
+
+    try:
+        summary_text = _normalize_summary_text(await _request_summary(system_prompt))
     except Exception:
         logger.warning("Audio note summary generation failed", exc_info=True)
         return None, None
-    if not summary_text:
+
+    if not summary_text or _looks_like_summary_refusal(summary_text):
+        logger.warning("Audio note summary rejected by model output; retrying with hardened prompt")
+        try:
+            summary_text = _normalize_summary_text(await _request_summary(hardened_prompt))
+        except Exception:
+            logger.warning("Audio note summary generation failed", exc_info=True)
+            return None, None
+
+    if not summary_text or _looks_like_summary_refusal(summary_text):
+        logger.warning("Audio note summary generation produced refusal twice; skipping summary")
         return None, None
+
     return summary_text, ai_service.get_model_display_name("audio_summary")
 
 
