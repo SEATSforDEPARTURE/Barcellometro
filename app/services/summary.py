@@ -16,6 +16,10 @@ from app.services.database import DatabaseService
 logger = logging.getLogger(__name__)
 MOMENT_TEXT_LIMIT = 200
 ROME_TZ = ZoneInfo("Europe/Rome")
+OLLAMA_SUMMARY_SAMPLE_MAX_ITEMS = 40
+OLLAMA_SUMMARY_SAMPLE_BUCKETS = 4
+DEFAULT_SUMMARY_SAMPLE_MAX_ITEMS = 80
+DEFAULT_SUMMARY_SAMPLE_BUCKETS = 6
 
 DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
     "tiers": {
@@ -452,6 +456,10 @@ class SummaryService:
         model = self._ai_service.get_model("summary") if self._ai_service else None
         if not model:
             return None
+        provider, _ = parse_model_string(str(model))
+        if provider == "ollama":
+            logger.info("summary: period_description skipped for ollama provider; using local template")
+            return None
         try:
             text = await self._call_ai_period_description(
                 period_prefix=period_prefix,
@@ -538,7 +546,12 @@ class SummaryService:
         start_ts: str | None = None,
         end_ts: str | None = None,
     ) -> dict[str, Any] | None:
-        sampled_messages = sample_messages_time_distributed(messages, max_items=80, buckets=6)
+        model_cfg = self._ai_service.get_model("summary") if self._ai_service else None
+        provider, _ = parse_model_string(str(model_cfg or "")) if model_cfg else (None, None)
+        is_ollama = provider == "ollama"
+        sample_max_items = OLLAMA_SUMMARY_SAMPLE_MAX_ITEMS if is_ollama else DEFAULT_SUMMARY_SAMPLE_MAX_ITEMS
+        sample_buckets = OLLAMA_SUMMARY_SAMPLE_BUCKETS if is_ollama else DEFAULT_SUMMARY_SAMPLE_BUCKETS
+        sampled_messages = sample_messages_time_distributed(messages, max_items=sample_max_items, buckets=sample_buckets)
         snippet = [
             {
                 "ts": msg.get("ts"),
@@ -607,32 +620,47 @@ class SummaryService:
             moments_style_rule = (
                 "Momenti: stile neutro-fattuale, bullet autonomi orientati agli eventi; evita cronologia narrativa della giornata. "
             )
-        system_prompt = (
-            "Scrivi in italiano e restituisci SOLO JSON valido. "
-            + narrative_extra
-            + "Non inventare dettagli. "
-            + "Non inferire né ricostruire contenuti omessi per privacy. "
-            + names_rule
-            + "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
-            "TEMI devono essere solo keyword brevi (no nomi). TEMI devono essere in italiano, minuscoli, una parola o snake_case, senza # e senza inglese. Se un tema ti verrebbe in inglese, traducilo in italiano. "
-            "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
-            "Non inventare eventi di chiamata: usa solo quelli presenti nella timeline (kind: call/privacy/presence). "
-            "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
-            "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
-            + moments_style_rule
-            + "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
-            "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
-            "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
-            "Distribuisci moments/quotes/dynamics su tutto l'intervallo temporale (inizio, metà, fine). "
-            "Per i moments usa bullet descrittivi di 1-2 frasi quando possibile, evitando formule troppo brevi. "
-            "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
-            "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
-            "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
-            "quotes: oggetti con 'ts','primary_ref','refs' e 'quote_text' opzionale solo se certo al 100%. "
-            "dynamics: oggetti con 'ts','dynamic_text','optional_ref','refs'. "
-            "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
-            "advice: lista stringhe brevi."
-        )
+        if is_ollama:
+            schema_mode = "lite"
+            system_prompt = (
+                "Scrivi in italiano e restituisci SOLO JSON valido. "
+                + narrative_extra
+                + "Non inventare dettagli. "
+                + names_rule
+                + "Descrivi eventi reali senza copiare i messaggi. "
+                "Struttura JSON minima richiesta: themes[], moments[], advice[]. "
+                "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
+                "advice: lista stringhe brevi per la community. "
+                "quotes/dynamics/degrade_list/invigorate_list/who_interacted_today/proverbio sono opzionali."
+            )
+        else:
+            schema_mode = "full"
+            system_prompt = (
+                "Scrivi in italiano e restituisci SOLO JSON valido. "
+                + narrative_extra
+                + "Non inventare dettagli. "
+                + "Non inferire né ricostruire contenuti omessi per privacy. "
+                + names_rule
+                + "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
+                "TEMI devono essere solo keyword brevi (no nomi). TEMI devono essere in italiano, minuscoli, una parola o snake_case, senza # e senza inglese. Se un tema ti verrebbe in inglese, traducilo in italiano. "
+                "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
+                "Non inventare eventi di chiamata: usa solo quelli presenti nella timeline (kind: call/privacy/presence). "
+                "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
+                "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
+                + moments_style_rule
+                + "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
+                "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
+                "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
+                "Distribuisci moments/quotes/dynamics su tutto l'intervallo temporale (inizio, metà, fine). "
+                "Per i moments usa bullet descrittivi di 1-2 frasi quando possibile, evitando formule troppo brevi. "
+                "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
+                "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
+                "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
+                "quotes: oggetti con 'ts','primary_ref','refs' e 'quote_text' opzionale solo se certo al 100%. "
+                "dynamics: oggetti con 'ts','dynamic_text','optional_ref','refs'. "
+                "degrade_list/invigorate_list: oggetti con 'author_id','reason','ts','message_id'. "
+                "advice: lista stringhe brevi."
+            )
         if summary_mode in {"daily_resoconto", "channel_summary"}:
             system_prompt += (
                 " In modalità channel_summary aggiungi anche `vibe_line`: UNA sola frase (max 140 caratteri), "
@@ -662,6 +690,13 @@ class SummaryService:
         )
         if self._ai_service is None:
             return None
+        logger.info(
+            "summary: provider=%s schema=%s sampled_messages=%s buckets=%s",
+            provider or "unknown",
+            schema_mode,
+            len(sampled_messages),
+            sample_buckets,
+        )
         text = await self._ai_service.ask_for_task("summary", user_payload, system_prompt)
         return _parse_json_safe(text)
 
