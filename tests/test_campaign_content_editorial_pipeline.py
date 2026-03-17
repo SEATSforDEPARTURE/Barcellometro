@@ -114,7 +114,7 @@ def test_send_and_store_metadata_contains_page_map() -> None:
 def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
     class _Ai:
         def __init__(self, output: str):
-            self.ask_general = AsyncMock(return_value=output)
+            self.ask_for_task = AsyncMock(return_value=output)
 
         def is_enabled(self):
             return True
@@ -130,7 +130,8 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
         ai = _Ai(json.dumps({k: {"love": "x", "work": "y", "money": "z", "energy": "w", "friction": "q", "advice": "p"} for k in payload["signs"]}))
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(payload)
-        ai.ask_general.assert_awaited_once()
+        ai.ask_for_task.assert_awaited_once()
+        assert ai.ask_for_task.await_args.args[0] == "campaign_editorial"
 
     async def _run_invalid() -> None:
         ai = _Ai("not-json")
@@ -242,7 +243,7 @@ def test_open_personal_navigator_clamps_target_index() -> None:
 def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
     class _Ai:
         def __init__(self, output: str):
-            self.ask_general = AsyncMock(return_value=output)
+            self.ask_for_task = AsyncMock(return_value=output)
 
         def is_enabled(self):
             return True
@@ -258,7 +259,8 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
         ai = _Ai(json.dumps({k: {"love": "x", "work": "y", "money": "z", "energy": "w", "friction": "q", "advice": "p"} for k in payload["signs"]}))
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(payload)
-        ai.ask_general.assert_awaited_once()
+        ai.ask_for_task.assert_awaited_once()
+        assert ai.ask_for_task.await_args.args[0] == "campaign_editorial"
 
     async def _run_invalid() -> None:
         ai = _Ai("not-json")

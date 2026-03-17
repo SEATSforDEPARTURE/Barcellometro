@@ -126,3 +126,10 @@ def test_campaign_content_service_maps_editorial_footer_service_names() -> None:
     assert '"NEWS": "campagne_notizie"' in source
     assert '"WEATHER": "campagne_meteo"' in source
     assert '"HOROSCOPE": "campagne_oroscopo"' in source
+
+
+def test_campaign_service_resolve_model_uses_task_parameter_for_editorial() -> None:
+    source = Path("app/services/campaign_content_service.py").read_text()
+    assert 'def _resolve_ai_model_name(self, task: str)' in source
+    assert 'self._ai.get_model(task)' in source
+    assert 'self._ai.get_model("summary")' not in source

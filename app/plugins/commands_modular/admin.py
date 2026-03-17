@@ -118,6 +118,15 @@ def _chunk_status_blocks(blocks: list[str], max_len: int = 1900) -> list[str]:
         chunks.append(current)
     return [chunk for chunk in chunks if chunk]
 
+def _truncate_embed_text(value: str | None, limit: int = 1000) -> str:
+    text = (value or "").strip()
+    if not text:
+        return "(vuoto)"
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
+
+
 
 async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
     stt_backend = ((await ctx.database.get_setting("stt.backend")) or "local").strip().lower()
@@ -168,6 +177,17 @@ async def _infer_service_profile(service_name: str, ctx: CommandContext) -> Serv
 
 
 def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
+    ai_task_choices = [
+        app_commands.Choice(name="summary", value="summary"),
+        app_commands.Choice(name="server_summary", value="server_summary"),
+        app_commands.Choice(name="audio_summary", value="audio_summary"),
+        app_commands.Choice(name="qa", value="qa"),
+        app_commands.Choice(name="analysis", value="analysis"),
+        app_commands.Choice(name="transcription", value="transcription"),
+        app_commands.Choice(name="translation", value="translation"),
+        app_commands.Choice(name="campaign_editorial", value="campaign_editorial"),
+        app_commands.Choice(name="campaign_prompt", value="campaign_prompt"),
+    ]
     @bm_group.command(name="check", description="Attiva/disattiva raccolta eventi")
     @app_commands.describe(state="on/off")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
@@ -273,17 +293,7 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
 
     @bm_group.command(name="ai-model", description="Imposta il modello AI per un task")
     @app_commands.describe(task="Task AI", model="Modello provider:model")
-    @app_commands.choices(
-        task=[
-            app_commands.Choice(name="summary", value="summary"),
-            app_commands.Choice(name="server_summary", value="server_summary"),
-            app_commands.Choice(name="audio_summary", value="audio_summary"),
-            app_commands.Choice(name="qa", value="qa"),
-            app_commands.Choice(name="analysis", value="analysis"),
-            app_commands.Choice(name="transcription", value="transcription"),
-            app_commands.Choice(name="translation", value="translation"),
-        ]
-    )
+    @app_commands.choices(task=ai_task_choices)
     async def ai_model_command(
         interaction: discord.Interaction,
         task: app_commands.Choice[str],
@@ -302,6 +312,84 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             f"Modello per {task.value} aggiornato a {model}.",
             ephemeral=True,
         )
+
+
+
+    @bm_group.command(name="ai-fallback-model", description="Imposta il modello AI di fallback per un task")
+    @app_commands.describe(task="Task AI", model="Modello provider:model")
+    @app_commands.choices(task=ai_task_choices)
+    async def ai_fallback_model_command(
+        interaction: discord.Interaction,
+        task: app_commands.Choice[str],
+        model: str,
+    ) -> None:
+        if not await check_permission(interaction, "bm.ai-model", ctx):
+            return
+        if ":" not in model:
+            await interaction.response.send_message(
+                "Formato non valido. Usa provider:model",
+                ephemeral=True,
+            )
+            return
+        await ctx.ai.set_fallback_model(task.value, model)
+        await interaction.response.send_message(
+            f"Fallback model per {task.value} aggiornato a {model}.",
+            ephemeral=True,
+        )
+
+    @bm_group.command(name="ai-status", description="Mostra stato e modelli AI")
+    async def ai_status_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "bm.ai", ctx):
+            return
+        status = ctx.ai.status()
+        metrics = status.get("metrics", {}) if isinstance(status, dict) else {}
+        models = status.get("models", {}) if isinstance(status, dict) else {}
+        fallback_models = status.get("fallback_models", {}) if isinstance(status, dict) else {}
+
+        embed = discord.Embed(title="Stato AI", color=discord.Color.blurple())
+        embed.add_field(name="Stato", value=str(status.get("state") or "unknown"), inline=False)
+        if isinstance(models, dict) and models:
+            primary_text = "\n".join(f"• {task}: {model}" for task, model in sorted(models.items()))
+            embed.add_field(name="Modelli primari", value=_truncate_embed_text(primary_text), inline=False)
+        if isinstance(fallback_models, dict) and fallback_models:
+            fallback_text = "\n".join(f"• {task}: {model}" for task, model in sorted(fallback_models.items()))
+            embed.add_field(name="Modelli fallback", value=_truncate_embed_text(fallback_text), inline=False)
+
+        embed.add_field(name="Ultimo task usato", value=str(metrics.get("last_used_task") or "(n/d)"), inline=True)
+        embed.add_field(name="Ultimo modello usato", value=str(metrics.get("last_used_model") or "(n/d)"), inline=True)
+        embed.add_field(name="Ultimo test", value="ok" if metrics.get("last_test_ok") else "ko", inline=True)
+        if metrics.get("last_test_error"):
+            embed.add_field(name="Ultimo errore test", value=_truncate_embed_text(str(metrics.get("last_test_error"))), inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @bm_group.command(name="ai-test", description="Esegue un test sul task AI configurato")
+    @app_commands.describe(task="Task AI", prompt="Prompt di test", web="Abilita web search")
+    @app_commands.choices(
+        task=ai_task_choices,
+        web=[app_commands.Choice(name="off", value="off"), app_commands.Choice(name="on", value="on")],
+    )
+    async def ai_test_command(
+        interaction: discord.Interaction,
+        task: app_commands.Choice[str],
+        prompt: str,
+        web: app_commands.Choice[str] | None = None,
+    ) -> None:
+        if not await check_permission(interaction, "bm.ai", ctx):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        web_value = (web.value if web is not None else "off") == "on"
+        result = await ctx.ai.run_test(task.value, prompt, use_web=web_value)
+
+        embed = discord.Embed(title="AI test", color=discord.Color.green() if result.get("ok") else discord.Color.red())
+        embed.add_field(name="Task", value=str(result.get("task") or task.value), inline=True)
+        embed.add_field(name="Model", value=str(result.get("model") or "(n/d)"), inline=True)
+        embed.add_field(name="Web", value="on" if web_value else "off", inline=True)
+        embed.add_field(name="Esito", value="ok" if result.get("ok") else "ko", inline=True)
+        embed.add_field(name="Output", value=_truncate_embed_text(result.get("output"), limit=900), inline=False)
+        if result.get("error"):
+            embed.add_field(name="Errore", value=_truncate_embed_text(str(result.get("error")), limit=900), inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     footer_group = app_commands.Group(name="footer", description="Gestione footer")
     bm_group.add_command(footer_group)

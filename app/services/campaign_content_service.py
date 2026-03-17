@@ -190,7 +190,7 @@ class CampaignContentService:
                 )
                 item["summary"] = rewritten
                 used_ai = used_ai or ai_used
-        return self._resolve_ai_model_name() if used_ai else None
+        return self._resolve_ai_model_name("campaign_editorial") if used_ai else None
 
     async def _rewrite_weather_payload(self, payload: dict[str, Any]) -> str | None:
         used_ai = False
@@ -203,7 +203,7 @@ class CampaignContentService:
             )
             region["summary"] = rewritten
             used_ai = used_ai or ai_used
-        return self._resolve_ai_model_name() if used_ai else None
+        return self._resolve_ai_model_name("campaign_editorial") if used_ai else None
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
         if self._ai is None or not self._ai.is_enabled():
@@ -221,7 +221,7 @@ class CampaignContentService:
             "Ogni sezione deve avere massimo 2-3 frasi brevi e naturali.\n"
             f"JSON input:\n{json.dumps(compact, ensure_ascii=False)}"
         )
-        output = await self._ai.ask_general(prompt, "Assistente editoriale")
+        output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
         parsed: dict[str, Any] = {}
         try:
             parsed = json.loads(output or "{}")
@@ -239,7 +239,7 @@ class CampaignContentService:
                 else:
                     sign_payload[key] = sanitize_horoscope_text(sign, str(sign_payload.get(key) or ""))
         self._enforce_horoscope_diversity(payload)
-        return self._resolve_ai_model_name()
+        return self._resolve_ai_model_name("campaign_editorial")
 
     @staticmethod
     def _simple_similarity(a: str, b: str) -> float:
@@ -273,7 +273,7 @@ class CampaignContentService:
             "Non inventare dati/fatti/valori e non cambiare numeri. Evita frasi generiche fotocopia. "
             f"Contesto: {extra_info}.\nTesto:\n{text}"
         )
-        output = await self._ai.ask_general(prompt, "Assistente editoriale")
+        output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
         return (output or text).strip(), True
 
     async def load_message_record(self, message_id: str) -> dict[str, Any] | None:
@@ -437,9 +437,9 @@ class CampaignContentService:
             normalized.append(token)
         return normalized
 
-    def _resolve_ai_model_name(self) -> str:
+    def _resolve_ai_model_name(self, task: str) -> str:
         if self._ai is not None:
-            model = self._ai.get_model("summary")
+            model = self._ai.get_model(task)
             if isinstance(model, str) and model.strip():
                 return model.strip()
         return "gpt-4o"
