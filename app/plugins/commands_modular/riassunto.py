@@ -1611,6 +1611,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     return True
                 return barcello_color == "verde"
 
+            def _row_get(row: Any, key: str, default: Any = None) -> Any:
+                if row is None:
+                    return default
+                if isinstance(row, dict):
+                    return row.get(key, default)
+                try:
+                    return row[key]
+                except (KeyError, IndexError, TypeError):
+                    return default
+
             async def fetch_message_record(message_id: str) -> dict[str, Any] | None:
                 if message_id in message_cache:
                     return message_cache[message_id]
@@ -1639,9 +1649,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 record = await fetch_message_record(message_id)
                 if not record:
                     return None
-                if not _should_show_name(str(record.get("origin") or "chat")):
+                if not _should_show_name(str(_row_get(record, "origin") or "chat")):
                     return None
-                author_id = record.get("author_id")
+                author_id = _row_get(record, "author_id")
                 if not author_id:
                     return None
                 display_name = await ctx.database.fetch_user_display_name(
@@ -1683,8 +1693,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 quote_display[id(quote)] = await resolve_author_display_name(primary_id)
                 if primary_id:
                     record = await fetch_message_record(primary_id)
-                    if record and record.get("content"):
-                        quote_texts[id(quote)] = _select_quote_text(record["content"])
+                    content = _row_get(record, "content")
+                    if content:
+                        quote_texts[id(quote)] = _select_quote_text(str(content))
 
             dynamic_names: dict[int, list[str]] = {}
             for dynamic in summary.dynamics:

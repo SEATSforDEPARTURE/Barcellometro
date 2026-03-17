@@ -21,3 +21,11 @@ def test_channel_summary_footer_logic_uses_used_ai_output_fields() -> None:
 def test_footer_renderer_keeps_local_wording() -> None:
     source = Path("app/services/footer.py").read_text()
     assert "Dati elaborati in loco" in source
+
+
+def test_riassunto_row_access_uses_row_safe_helper_for_records() -> None:
+    source = Path("app/plugins/commands_modular/riassunto.py").read_text()
+    assert 'def _row_get(row: Any, key: str, default: Any = None) -> Any:' in source
+    assert 'record.get("content")' not in source
+    assert 'record.get("author_id")' not in source
+    assert 'record.get("origin")' not in source
