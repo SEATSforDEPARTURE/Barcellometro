@@ -529,9 +529,6 @@ class FooterService:
         else:
             processing = f"Dati elaborati con {', '.join(contributors_deduped[:-1])} e {contributors_deduped[-1]}"
 
-        if used_local_processing and contributors_deduped:
-            processing = f"{processing} e fallback locale"
-
         parts = [brand, processing]
         if phrase:
             parts.append(phrase)
