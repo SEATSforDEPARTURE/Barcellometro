@@ -19,6 +19,7 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
 from app.renderers.activity_dm_renderer import build_activity_details_txt, build_activity_dm_embeds
 from app.renderers.user_activity_renderer import build_user_activity_embeds
+from app.utils.command_embeds import CommandEmbedSection, send_standard_response
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -369,11 +370,41 @@ def _format_interactions(interactions: dict[int, dict[str, object]]) -> str:
 
 
 def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -> None:
+    async def _send_standard(
+        interaction: discord.Interaction,
+        *,
+        subcommand_path: str,
+        lines: list[tuple[str, object]] | None = None,
+        sections: list[CommandEmbedSection] | None = None,
+        kind: str = "info",
+        files: list[discord.File] | None = None,
+    ) -> None:
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path=subcommand_path,
+            lines=lines,
+            sections=sections,
+            kind=kind,
+            footer_service=ctx.footer,
+            files=files,
+        )
+
+    async def _send_dm_status(interaction: discord.Interaction, *, subcommand_path: str, status: str) -> None:
+        messages = {
+            "guild_only": ("error", [("error", "Comando disponibile solo nei server.")]),
+            "dm_sent": ("success", [("result", "Ti ho inviato il resoconto attività in DM ✅")]),
+            "dm_forbidden": ("error", [("error", "Non posso inviarti DM. Abilita i DM dal server e riprova.")]),
+            "dm_unavailable": ("error", [("error", "Non riesco a inviarti il report in DM al momento. Riprova tra poco.")]),
+        }
+        kind, lines = messages[status]
+        await _send_standard(interaction, subcommand_path=subcommand_path, lines=lines, kind=kind)
+
     async def _send_activity_report(interaction: discord.Interaction, window, utente: discord.Member | None = None) -> None:
         if not await check_permission(interaction, "attivita.dm", ctx):
             return
         if not interaction.guild_id or not interaction.channel_id or not interaction.guild or not interaction.channel:
-            await interaction.response.send_message("Comando disponibile solo nei server.", ephemeral=True)
+            await _send_dm_status(interaction, subcommand_path="attivita report", status="guild_only")
             return
 
         start_ts = window.start_dt.astimezone(timezone.utc).isoformat()
@@ -420,9 +451,9 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             txt_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=filename)
             try:
                 await interaction.user.send(embeds=embeds, file=txt_file)
-                await interaction.response.send_message("Ti ho inviato il resoconto attività in DM ✅", ephemeral=True)
+                await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_sent")
             except Forbidden:
-                await interaction.response.send_message("❌ Non posso inviarti DM. Abilita i DM dal server e riprova.", ephemeral=True)
+                await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_forbidden")
             return
 
         enabled_channels = await ctx.database.list_enabled_activity_channels(str(interaction.guild_id))
@@ -533,9 +564,9 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
 
         try:
             await interaction.user.send(embeds=embeds)
-            await interaction.response.send_message("Ti ho inviato il resoconto attività in DM ✅", ephemeral=True)
+            await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_sent")
         except Forbidden:
-            await interaction.response.send_message("❌ Non posso inviarti DM. Abilita i DM dal server e riprova.", ephemeral=True)
+            await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_forbidden")
         except discord.HTTPException as exc:
             logger.exception("Errore invio DM report utente attivita guild=%s user=%s", interaction.guild_id, utente.id)
             if exc.status == 400 and ("50035" in str(exc) or "Invalid Form Body" in str(exc)):
@@ -549,13 +580,13 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
                     period_slug = _safe_filename(window.label_periodo)
                     fallback_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=f"attivita_{utente.id}_{period_slug}.txt")
                     await interaction.user.send(embed=fallback, file=fallback_file)
-                    await interaction.response.send_message("Ti ho inviato il resoconto attività in DM ✅", ephemeral=True)
+                    await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_sent")
                 except Forbidden:
-                    await interaction.response.send_message("❌ Non posso inviarti DM. Abilita i DM dal server e riprova.", ephemeral=True)
+                    await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_forbidden")
                 except discord.HTTPException:
-                    await interaction.response.send_message("❌ Non riesco a inviarti il report in DM al momento. Riprova tra poco.", ephemeral=True)
+                    await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_unavailable")
             else:
-                await interaction.response.send_message("❌ Non riesco a inviarti il report in DM al momento. Riprova tra poco.", ephemeral=True)
+                await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_unavailable")
 
     @attivita_group.command(name="oggi", description="Report attività di oggi (DM staff)")
     @app_commands.describe(utente="Utente da analizzare (opzionale)")
@@ -582,7 +613,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
         if error:
-            await interaction.response.send_message(error, ephemeral=True)
+            await _send_standard(interaction, subcommand_path="attivita ultimi", lines=[("error", error)], kind="error")
             return
         assert window is not None
         await _send_activity_report(interaction, window, utente)
@@ -592,7 +623,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
     async def attivita_range(interaction: discord.Interaction, da: str, a: str, utente: discord.Member | None = None) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:
-            await interaction.response.send_message(error, ephemeral=True)
+            await _send_standard(interaction, subcommand_path="attivita range", lines=[("error", error)], kind="error")
             return
         assert window is not None
         await _send_activity_report(interaction, window, utente)

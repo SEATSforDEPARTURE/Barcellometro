@@ -145,8 +145,34 @@ def register_triggers(
         app_commands.Choice(name="regex", value="REGEX"),
     ]
 
+    def _command_permission_candidates(interaction: discord.Interaction) -> list[str]:
+        command = getattr(interaction, "command", None)
+        qualified_name = str(getattr(command, "qualified_name", "") or "").strip().lower()
+        if not qualified_name:
+            return ["bm.unknown"]
+
+        parts = [part for part in qualified_name.split() if part]
+        if parts and parts[0] == "bm":
+            parts = parts[1:]
+        if not parts:
+            return ["bm.unknown"]
+
+        canonical_parts = parts[:]
+        if canonical_parts[0] == "prompt":
+            canonical_parts.insert(0, "campagne")
+
+        candidates: list[str] = ["bm." + ".".join(canonical_parts), ".".join(canonical_parts)]
+        if canonical_parts[:2] == ["campagne", "prompt"]:
+            prompt_parts = canonical_parts[1:]
+            candidates.extend(("bm." + ".".join(prompt_parts), ".".join(prompt_parts)))
+
+        return list(dict.fromkeys(candidate for candidate in candidates if candidate and candidate != "bm."))
+
     async def _guard(interaction: discord.Interaction, *legacy_aliases: str) -> bool:
-        return await check_permission(interaction, _command_permission_key(interaction), ctx, legacy_aliases=legacy_aliases)
+        candidates = _command_permission_candidates(interaction)
+        permission_key = candidates[0]
+        resolved_aliases = [*candidates[1:], *legacy_aliases]
+        return await check_permission(interaction, permission_key, ctx, legacy_aliases=resolved_aliases)
 
     async def _send(
         interaction: discord.Interaction,
