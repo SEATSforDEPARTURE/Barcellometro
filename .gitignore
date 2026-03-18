@@ -33,7 +33,12 @@ logs/
 # === Secrets ===
 .env
 .env.*
+*.env
+main.env
+worker1.env
+worker2.env
 !*.example
+!example.*.env
 *.pem
 *.key
 *.crt
