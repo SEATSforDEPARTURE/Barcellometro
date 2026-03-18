@@ -10,7 +10,6 @@ from app.plugins.commands_modular.command_helpers import describe_placeholders
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.discord_embed_utils import FIELD_MAX, truncate
-from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 from app.utils.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 from app.services.member_flow_notifications import (
     build_template_context,
@@ -31,42 +30,29 @@ TEMPLATE_FIELDS = {
 }
 
 
-def _ensure_embed_lines(title: str, lines: list[str]) -> list[discord.Embed]:
-    if not lines:
-        embed = discord.Embed(title=title, description="No results.", colour=discord.Colour.blue())
-        attach_footer_meta(embed, service_name="moderazione_utenti", used_local_processing=True)
-        return [embed]
-    chunks: list[str] = []
-    current = ""
-    for line in lines:
-        add = line if not current else f"\n{line}"
-        if len(current) + len(add) > 3900:
-            chunks.append(current)
-            current = line
-        else:
-            current += add
-    if current:
-        chunks.append(current)
-    embeds = [
-        discord.Embed(
-            title=f"{title} ({idx}/{len(chunks)})" if len(chunks) > 1 else title,
-            description=chunk,
-            colour=discord.Colour.blue(),
-        )
-        for idx, chunk in enumerate(chunks, start=1)
-    ]
-    attach_footer_meta_to_all(embeds, service_name="moderazione_utenti", used_local_processing=True)
-    return embeds
-
-
-async def _send_lines(interaction: discord.Interaction, *, title: str, lines: list[str], prefix: str) -> None:
+async def _send_lines(
+    interaction: discord.Interaction,
+    ctx: CommandContext,
+    *,
+    subcommand_path: str,
+    title: str,
+    lines: list[str],
+    prefix: str,
+) -> None:
     payload = "\n".join(lines) if lines else "No results."
     txt = discord.File(
         io.BytesIO(payload.encode("utf-8")),
         filename=f"{prefix}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.txt",
     )
-    embeds = _ensure_embed_lines(title, lines)
-    await interaction.response.send_message(embeds=embeds, ephemeral=True, file=txt)
+    sections = [CommandEmbedSection(title=title, lines=lines or ["No results."])]
+    embeds = await build_command_embeds(
+        top_level="bm",
+        subcommand_path=subcommand_path,
+        lines=[("entries", len(lines))],
+        sections=sections,
+        footer_service=ctx.footer,
+    )
+    await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=[txt])
 
 
 def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -280,9 +266,14 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         resolved_reason = reason or await _default_reason(str(interaction.guild_id), "template_kick_reason", user=user, guild=interaction.guild, moderator=interaction.user)
         await user.kick(reason=resolved_reason)
         await _notify_action(guild=interaction.guild, user=user, action_type="kick", reason=resolved_reason, moderator=interaction.user)
-        embed = discord.Embed(title="✅ Kick completed", description=f"{user.mention} was removed successfully.", colour=discord.Colour.green())
-        attach_footer_meta(embed, service_name="moderazione_utenti", used_local_processing=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="moderazione users kick",
+            lines=[("user", user.mention), ("result", "kicked"), ("reason", resolved_reason)],
+            kind="success",
+            footer_service=ctx.footer,
+        )
 
     @users_group.command(name="kick_list", description="List recent kicks.")
     async def mod_users_kick_list(interaction: discord.Interaction) -> None:
@@ -290,7 +281,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         rows = await ctx.database.list_recent_kicked_users(str(interaction.guild_id))
         lines = [f"• <@{row['user_id']}> · {row['action_type']} · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
-        await _send_lines(interaction, title="Recent kicks", lines=lines, prefix="mod_users_kick_list")
+        await _send_lines(interaction, ctx, subcommand_path="moderazione users kick_list", title="Recent kicks", lines=lines, prefix="mod_users_kick_list")
 
     @users_group.command(name="ban", description="Ban a user permanently.")
     @app_commands.describe(user="Member to ban.", reason="Optional reason override.")
@@ -300,9 +291,14 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         resolved_reason = reason or await _default_reason(str(interaction.guild_id), "template_ban_reason", user=user, guild=interaction.guild, moderator=interaction.user)
         await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
         await _notify_action(guild=interaction.guild, user=user, action_type="ban", reason=resolved_reason, moderator=interaction.user)
-        embed = discord.Embed(title="✅ Ban completed", description=f"{user.mention} was permanently banned.", colour=discord.Colour.green())
-        attach_footer_meta(embed, service_name="moderazione_utenti", used_local_processing=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="moderazione users ban",
+            lines=[("user", user.mention), ("result", "banned"), ("reason", resolved_reason)],
+            kind="success",
+            footer_service=ctx.footer,
+        )
 
     @users_group.command(name="ban_list", description="List active permanent bans.")
     async def mod_users_ban_list(interaction: discord.Interaction) -> None:
@@ -310,7 +306,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         rows = await ctx.database.list_active_bans(str(interaction.guild_id))
         lines = [f"• <@{row['user_id']}> · ban · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
-        await _send_lines(interaction, title="Active permanent bans", lines=lines, prefix="mod_users_ban_list")
+        await _send_lines(interaction, ctx, subcommand_path="moderazione users ban_list", title="Active permanent bans", lines=lines, prefix="mod_users_ban_list")
 
     @users_group.command(name="tempban", description="Ban a user temporarily.")
     @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
@@ -331,9 +327,19 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
         await ctx.database.add_temp_ban(str(interaction.guild.id), str(user.id), expires_at.isoformat(), resolved_reason)
         await _notify_action(guild=interaction.guild, user=user, action_type="tempban", reason=resolved_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
-        embed = discord.Embed(title="✅ Tempban completed", description=f"{user.mention} was banned for {format_duration_human(duration_seconds)}.", colour=discord.Colour.green())
-        attach_footer_meta(embed, service_name="moderazione_utenti", used_local_processing=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="moderazione users tempban",
+            lines=[
+                ("user", user.mention),
+                ("duration", format_duration_human(duration_seconds)),
+                ("expires_at", expires_at.strftime("%d/%m/%Y %H:%M UTC")),
+                ("reason", resolved_reason),
+            ],
+            kind="success",
+            footer_service=ctx.footer,
+        )
 
     @users_group.command(name="tempban_list", description="List active temporary bans.")
     async def mod_users_tempban_list(interaction: discord.Interaction) -> None:
@@ -341,7 +347,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         rows = await ctx.database.list_active_tempbans(str(interaction.guild_id))
         lines = [f"• <@{row['user_id']}> · {row['action_type'] or 'tempban'} · expires {str(row['expires_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
-        await _send_lines(interaction, title="Active temporary bans", lines=lines, prefix="mod_users_tempban_list")
+        await _send_lines(interaction, ctx, subcommand_path="moderazione users tempban_list", title="Active temporary bans", lines=lines, prefix="mod_users_tempban_list")
 
     @users_group.command(name="grace", description="Assign a manual grace period to a user.")
     @app_commands.describe(user="Member that receives the grace period.", duration="Optional duration like 7d or 12h.", reason="Optional reason override.")
@@ -362,9 +368,18 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             expires_at=expires_at,
         )
         await _notify_action(guild=interaction.guild, user=user, action_type="grace", reason=resolved_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
-        embed = discord.Embed(title="✅ Grace updated", description=f"{user.mention} is protected until {expires_at.strftime('%d/%m/%Y %H:%M UTC')}", colour=discord.Colour.green())
-        attach_footer_meta(embed, service_name="moderazione_utenti", used_local_processing=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="moderazione users grace",
+            lines=[
+                ("user", user.mention),
+                ("protected_until", expires_at.strftime("%d/%m/%Y %H:%M UTC")),
+                ("reason", resolved_reason),
+            ],
+            kind="success",
+            footer_service=ctx.footer,
+        )
 
     @users_group.command(name="grace_list", description="List active grace periods.")
     async def mod_users_grace_list(interaction: discord.Interaction) -> None:
@@ -372,4 +387,4 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         rows = await ctx.database.list_active_grace_users(str(interaction.guild_id))
         lines = [f"• <@{row['user_id']}> · {row['action_type']} · expires {str(row['expires_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
-        await _send_lines(interaction, title="Active grace periods", lines=lines, prefix="mod_users_grace_list")
+        await _send_lines(interaction, ctx, subcommand_path="moderazione users grace_list", title="Active grace periods", lines=lines, prefix="mod_users_grace_list")

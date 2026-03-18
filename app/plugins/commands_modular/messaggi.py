@@ -13,6 +13,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime
 from app.services.scheduler_utils import calculate_initial_next_run
+from app.utils.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
 
 QUIET_DEFAULT_START = "01:00"
 QUIET_DEFAULT_END = "08:30"
@@ -152,15 +153,33 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     async def _check(interaction: discord.Interaction, command_name: str, *legacy_aliases: str) -> bool:
         return await check_permission(interaction, command_name, ctx, legacy_aliases=legacy_aliases)
 
-    async def _require_guild_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
+    async def _send(
+        interaction: discord.Interaction,
+        *,
+        subcommand_path: str,
+        lines: list[tuple[str, object]] | None = None,
+        sections: list[CommandEmbedSection] | None = None,
+        kind: CommandKind = "info",
+    ) -> None:
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path=subcommand_path,
+            lines=lines,
+            sections=sections,
+            kind=kind,
+            footer_service=ctx.footer,
+        )
+
+    async def _require_guild_channel(interaction: discord.Interaction, *, subcommand_path: str) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await interaction.response.send_message("Use this command in a guild channel.", ephemeral=True)
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("error", "Use this command in a guild channel.")], kind="error")
             return None
         return str(interaction.guild_id), str(interaction.channel_id)
 
-    async def _require_guild(interaction: discord.Interaction) -> str | None:
+    async def _require_guild(interaction: discord.Interaction, *, subcommand_path: str) -> str | None:
         if interaction.guild_id is None:
-            await interaction.response.send_message("Use this command in a guild.", ephemeral=True)
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("error", "Use this command in a guild.")], kind="error")
             return None
         return str(interaction.guild_id)
 
@@ -174,48 +193,41 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return None
         return dict(row)
 
-    async def _validate_embed_color(interaction: discord.Interaction, embed_color: Optional[str]) -> bool:
+    async def _validate_embed_color(interaction: discord.Interaction, embed_color: Optional[str], *, subcommand_path: str) -> bool:
         if ctx.message_scheduler is None:
             return True
         if ctx.message_scheduler.is_valid_embed_color(embed_color):
             return True
-        await interaction.response.send_message(
-            "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
         return False
 
     async def _custom_toggle(interaction: discord.Interaction, action: str) -> None:
+        subcommand_path = f"campagne custom {action}"
         if not await _check(interaction, f"campagne.custom.{action}"):
             return
-        scope = await _require_guild_channel(interaction)
+        scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
         if scope is None:
             return
         guild_id, channel_id = scope
         rows = [row for row in await _list_custom_campaigns(guild_id) if str(row.get("channel_id")) == channel_id]
         if action == "status":
             enabled_count = sum(1 for row in rows if bool(row.get("enabled")))
-            await interaction.response.send_message(
-                f"Custom campaigns in this channel: {enabled_count}/{len(rows)} enabled.",
-                ephemeral=True,
-            )
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("enabled", f"{enabled_count}/{len(rows)}"), ("channel", f"<#{channel_id}>")])
             return
         enabled = action == "on"
         for row in rows:
             await ctx.database.set_message_campaign_enabled(guild_id, int(row["id"]), enabled)
-        await interaction.response.send_message(
-            f"Custom campaigns in this channel are now {'enabled' if enabled else 'disabled'}. Updated {len(rows)} entries.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("entries", len(rows)), ("result", "enabled" if enabled else "disabled")], kind="success")
 
     async def _build_service_run_payload(guild_id: str, channel_id: str, service_type: str) -> dict[str, object] | None:
         row = await ctx.database.get_campaign_content_config_by_service(guild_id, channel_id, service_type)
         return dict(row) if row is not None else None
 
     async def _set_service_enabled(interaction: discord.Interaction, *, service_type: str, action: str, legacy_aliases: tuple[str, ...] = ()) -> None:
+        subcommand_path = f"campagne {service_type.lower()} {action}"
         if not await _check(interaction, f"campagne.{service_type.lower()}.{action}", *legacy_aliases):
             return
-        scope = await _require_guild_channel(interaction)
+        scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
         if scope is None:
             return
         guild_id, channel_id = scope
@@ -231,19 +243,15 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         if action == "status":
             enabled_count = sum(1 for row in rows if bool(row.get("enabled")))
             latest = rows[-1] if rows else None
-            base = f"{service_type.lower()} configs in this channel: {enabled_count}/{len(rows)} enabled."
             if latest is None:
-                await interaction.response.send_message(base + " No active configuration found.", ephemeral=True)
+                await _send(interaction, subcommand_path=subcommand_path, lines=[("enabled", f"{enabled_count}/{len(rows)}"), ("warning", "No active configuration found.")], kind="warning")
                 return
-            await interaction.response.send_message(base + f" Latest: {_format_service_config_row(latest)}", ephemeral=True)
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("enabled", f"{enabled_count}/{len(rows)}"), ("channel", f"<#{channel_id}>")], sections=[CommandEmbedSection(title="Latest", lines=[_format_service_config_row(latest)])])
             return
         enabled = action == "on"
         for row in rows:
             await ctx.database.set_campaign_content_enabled(guild_id, int(row["id"]), enabled)
-        await interaction.response.send_message(
-            f"{service_type.title()} campaigns in this channel are now {'enabled' if enabled else 'disabled'}. Updated {len(rows)} entries.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("entries", len(rows)), ("result", "enabled" if enabled else "disabled")], kind="success")
 
     async def _service_config_show(
         interaction: discord.Interaction,
@@ -253,15 +261,16 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         if not await _check(interaction, f"campagne.{service_type.lower()}.config_show", *legacy_aliases):
             return
-        scope = await _require_guild_channel(interaction)
+        subcommand_path = f"campagne {service_type.lower()} config_show"
+        scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
         if scope is None:
             return
         guild_id, channel_id = scope
         row = await ctx.database.get_campaign_content_config_by_service(guild_id, channel_id, service_type)
         if row is None:
-            await interaction.response.send_message(f"No {service_type.lower()} config found for this channel.", ephemeral=True)
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"No {service_type.lower()} config found for this channel.")], kind="warning")
             return
-        await interaction.response.send_message(_format_service_config_row(dict(row)), ephemeral=True)
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>")], sections=[CommandEmbedSection(title="Configuration", lines=[_format_service_config_row(dict(row))])])
 
     async def _service_config_reset(
         interaction: discord.Interaction,
@@ -271,7 +280,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         if not await _check(interaction, f"campagne.{service_type.lower()}.config_reset", *legacy_aliases):
             return
-        scope = await _require_guild_channel(interaction)
+        subcommand_path = f"campagne {service_type.lower()} config_reset"
+        scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
         if scope is None:
             return
         guild_id, channel_id = scope
@@ -283,10 +293,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         )
         for row in rows:
             await ctx.database.soft_delete_campaign_content_config(guild_id, int(row["id"]))
-        await interaction.response.send_message(
-            f"Reset {len(rows)} {service_type.lower()} config(s) for this channel.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("configs", len(rows)), ("result", "reset")], kind="success")
 
     async def _service_run(
         interaction: discord.Interaction,
@@ -296,19 +303,20 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         if not await _check(interaction, f"campagne.{service_type.lower()}.run", *legacy_aliases):
             return
-        scope = await _require_guild_channel(interaction)
+        subcommand_path = f"campagne {service_type.lower()} run"
+        scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
         if scope is None:
             return
         guild_id, channel_id = scope
         row = await _build_service_run_payload(guild_id, channel_id, service_type)
         if row is None:
-            await interaction.response.send_message(f"No {service_type.lower()} config found for this channel.", ephemeral=True)
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"No {service_type.lower()} config found for this channel.")], kind="warning")
             return
         service = getattr(ctx.message_scheduler, "_campaign_content_service", None) if ctx.message_scheduler is not None else None
         if service is None:
-            await interaction.response.send_message("Campaign content service unavailable.", ephemeral=True)
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("error", "Campaign content service unavailable.")], kind="error")
             return
-        await interaction.response.send_message(f"Running {service_type.lower()} campaign now.", ephemeral=True)
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("result", "running")], kind="success")
         if service_type == "NEWS":
             await service.execute_news_service(row)
         elif service_type == "WEATHER":
@@ -330,10 +338,11 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         if not await _check(interaction, f"campagne.{service_type.lower()}.config_set", *legacy_aliases):
             return
-        scope = await _require_guild_channel(interaction)
+        subcommand_path = f"campagne {service_type.lower()} config_set"
+        scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
         if scope is None:
             return
-        if not await _validate_embed_color(interaction, embed_color):
+        if not await _validate_embed_color(interaction, embed_color, subcommand_path=subcommand_path):
             return
         guild_id, channel_id = scope
         row = await ctx.database.get_campaign_content_config_by_service(guild_id, channel_id, service_type)
@@ -350,7 +359,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                 tz=ctx.timezone,
             )
         except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("error", str(exc))], kind="error")
             return
 
         if existing is not None and publish_at is None and every is None:
@@ -378,10 +387,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                 categories_json=categories_json,
                 next_run_at=next_run.isoformat(),
             )
-            await interaction.response.send_message(
-                f"Created {service_type.lower()} config {config_id}. Next run: {next_run.isoformat()}.",
-                ephemeral=True,
-            )
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("config_id", config_id), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
             return
 
         await ctx.database.update_campaign_content_config(
@@ -402,62 +408,56 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             set_categories_json=True,
             set_next_run_at=True,
         )
-        await interaction.response.send_message(
-            f"Updated {service_type.lower()} config {existing['id']}. Next run: {next_run.isoformat()}.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("config_id", existing["id"]), ("next_run", next_run.isoformat()), ("result", "updated")], kind="success")
 
     @campagne_group.command(name="on", description="Enable campaigns in the current channel")
     async def messaggi_on(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.on"):
             return
-        scope = await _require_guild_channel(interaction)
+        scope = await _require_guild_channel(interaction, subcommand_path="campagne on")
         if scope is None:
             return
         guild_id, channel_id = scope
         await ctx.database.set_message_channel_enabled(guild_id, channel_id, True)
-        await interaction.response.send_message("Campaigns enabled in this channel.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne on", lines=[("channel", f"<#{channel_id}>"), ("result", "enabled")], kind="success")
 
     @campagne_group.command(name="off", description="Disable campaigns in the current channel")
     async def messaggi_off(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.off"):
             return
-        scope = await _require_guild_channel(interaction)
+        scope = await _require_guild_channel(interaction, subcommand_path="campagne off")
         if scope is None:
             return
         guild_id, channel_id = scope
         await ctx.database.set_message_channel_enabled(guild_id, channel_id, False)
-        await interaction.response.send_message("Campaigns disabled in this channel.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne off", lines=[("channel", f"<#{channel_id}>"), ("result", "disabled")], kind="success")
 
     @campagne_group.command(name="status", description="Show campaign status for the current channel")
     async def messaggi_status(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.status"):
             return
-        scope = await _require_guild_channel(interaction)
+        scope = await _require_guild_channel(interaction, subcommand_path="campagne status")
         if scope is None:
             return
         guild_id, channel_id = scope
         enabled = await ctx.database.get_message_channel_status(guild_id, channel_id)
         active_campaigns = await ctx.database.list_message_campaigns(guild_id, include_disabled=False)
         active_for_channel = [row for row in active_campaigns if str(row["channel_id"]) == channel_id]
-        await interaction.response.send_message(
-            f"Channel campaigns are {'enabled' if enabled else 'disabled'}. Active entries in this channel: {len(active_for_channel)}.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path="campagne status", lines=[("channel", f"<#{channel_id}>"), ("campaigns", "enabled" if enabled else "disabled"), ("active_entries", len(active_for_channel))])
 
     @quiet_group.command(name="on", description="Enable quiet hours")
     async def quiet_on(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.quiet.on", "campagne.quiet_on"):
             return
         await ctx.database.set_setting("messages_quiet_enabled", "1")
-        await interaction.response.send_message("Quiet hours enabled.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne quiet on", lines=[("quiet_hours", "enabled")], kind="success")
 
     @quiet_group.command(name="off", description="Disable quiet hours")
     async def quiet_off(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.quiet.off", "campagne.quiet_off"):
             return
         await ctx.database.set_setting("messages_quiet_enabled", "0")
-        await interaction.response.send_message("Quiet hours disabled.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne quiet off", lines=[("quiet_hours", "disabled")], kind="success")
 
     @quiet_group.command(name="status", description="Show quiet hours status")
     async def quiet_status(interaction: discord.Interaction) -> None:
@@ -466,10 +466,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         enabled = await _ensure_setting(ctx, "messages_quiet_enabled", "1")
         start = await _ensure_setting(ctx, "messages_quiet_start", QUIET_DEFAULT_START)
         end = await _ensure_setting(ctx, "messages_quiet_end", QUIET_DEFAULT_END)
-        await interaction.response.send_message(
-            f"Quiet hours are {'enabled' if enabled == '1' else 'disabled'}: {start}-{end}.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path="campagne quiet status", lines=[("quiet_hours", "enabled" if enabled == "1" else "disabled"), ("start", start), ("end", end)])
 
     @quiet_group.command(name="config_set", description="Set quiet hours configuration")
     @app_commands.describe(start="Quiet hours start time (HH:MM)", end="Quiet hours end time (HH:MM)")
@@ -478,7 +475,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return
         await ctx.database.set_setting("messages_quiet_start", start)
         await ctx.database.set_setting("messages_quiet_end", end)
-        await interaction.response.send_message(f"Quiet hours updated to {start}-{end}.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne quiet config_set", lines=[("start", start), ("end", end), ("result", "updated")], kind="success")
 
     @quiet_group.command(name="config_show", description="Show quiet hours configuration")
     async def quiet_config_show(interaction: discord.Interaction) -> None:
@@ -486,7 +483,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return
         start = await _ensure_setting(ctx, "messages_quiet_start", QUIET_DEFAULT_START)
         end = await _ensure_setting(ctx, "messages_quiet_end", QUIET_DEFAULT_END)
-        await interaction.response.send_message(f"Quiet hours config: start={start}, end={end}.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne quiet config_show", lines=[("start", start), ("end", end)])
 
     @quiet_group.command(name="config_reset", description="Reset quiet hours configuration")
     async def quiet_config_reset(interaction: discord.Interaction) -> None:
@@ -494,21 +491,21 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return
         await ctx.database.set_setting("messages_quiet_start", QUIET_DEFAULT_START)
         await ctx.database.set_setting("messages_quiet_end", QUIET_DEFAULT_END)
-        await interaction.response.send_message("Quiet hours configuration reset to defaults.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne quiet config_reset", lines=[("start", QUIET_DEFAULT_START), ("end", QUIET_DEFAULT_END), ("result", "reset")], kind="success")
 
     @cap_group.command(name="on", description="Enable the daily cap")
     async def cap_on(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.cap.on", "campagne.cap_on"):
             return
         await ctx.database.set_setting("messages_daily_cap_enabled", "1")
-        await interaction.response.send_message("Daily cap enabled.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne cap on", lines=[("daily_cap", "enabled")], kind="success")
 
     @cap_group.command(name="off", description="Disable the daily cap")
     async def cap_off(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.cap.off", "campagne.cap_off"):
             return
         await ctx.database.set_setting("messages_daily_cap_enabled", "0")
-        await interaction.response.send_message("Daily cap disabled.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne cap off", lines=[("daily_cap", "disabled")], kind="success")
 
     @cap_group.command(name="status", description="Show the daily cap status")
     async def cap_status(interaction: discord.Interaction) -> None:
@@ -516,10 +513,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return
         enabled = await _ensure_setting(ctx, "messages_daily_cap_enabled", "1")
         cap = await _ensure_setting(ctx, "messages_daily_cap", str(CAP_DEFAULT))
-        await interaction.response.send_message(
-            f"Daily cap is {'enabled' if enabled == '1' else 'disabled'}: {cap} messages/day.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path="campagne cap status", lines=[("daily_cap", "enabled" if enabled == "1" else "disabled"), ("daily_limit", cap)])
 
     @cap_group.command(name="config_set", description="Set the daily cap configuration")
     @app_commands.describe(daily_limit="Maximum messages per day")
@@ -527,24 +521,24 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         if not await _check(interaction, "campagne.cap.config_set", "campagne.cap.set", "campagne.cap_set"):
             return
         if daily_limit <= 0:
-            await interaction.response.send_message("daily_limit must be greater than 0.", ephemeral=True)
+            await _send(interaction, subcommand_path="campagne cap config_set", lines=[("error", "daily_limit must be greater than 0.")], kind="error")
             return
         await ctx.database.set_setting("messages_daily_cap", str(daily_limit))
-        await interaction.response.send_message(f"Daily cap set to {daily_limit}.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne cap config_set", lines=[("daily_limit", daily_limit), ("result", "updated")], kind="success")
 
     @cap_group.command(name="config_show", description="Show the daily cap configuration")
     async def cap_config_show(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.cap.config_show", "campagne.cap_status"):
             return
         cap = await _ensure_setting(ctx, "messages_daily_cap", str(CAP_DEFAULT))
-        await interaction.response.send_message(f"Daily cap config: daily_limit={cap}.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne cap config_show", lines=[("daily_limit", cap)])
 
     @cap_group.command(name="config_reset", description="Reset the daily cap configuration")
     async def cap_config_reset(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.cap.config_reset", "campagne.cap.set", "campagne.cap_set"):
             return
         await ctx.database.set_setting("messages_daily_cap", str(CAP_DEFAULT))
-        await interaction.response.send_message("Daily cap configuration reset to defaults.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne cap config_reset", lines=[("daily_limit", CAP_DEFAULT), ("result", "reset")], kind="success")
 
     @custom_group.command(name="on", description="Enable custom campaigns in the current channel")
     async def custom_on(interaction: discord.Interaction) -> None:
@@ -591,10 +585,10 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         if not await _check(interaction, "campagne.custom.entry_add", "campagne.aggiungi"):
             return
-        scope = await _require_guild_channel(interaction)
+        scope = await _require_guild_channel(interaction, subcommand_path="campagne custom entry_add")
         if scope is None:
             return
-        if not await _validate_embed_color(interaction, embed_color):
+        if not await _validate_embed_color(interaction, embed_color, subcommand_path="campagne custom entry_add"):
             return
         guild_id, channel_id = scope
         now = datetime.now(timezone.utc)
@@ -606,7 +600,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                 tz=ctx.timezone,
             )
         except ValueError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_add", lines=[("error", str(exc))], kind="error")
             return
         resolved_mood_mode = mood_mode.value if mood_mode else "AUTO"
         validation_error = validate_campaign_texts(
@@ -618,7 +612,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             mood_mode=resolved_mood_mode,
         )
         if validation_error:
-            await interaction.response.send_message(validation_error, ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_add", lines=[("error", validation_error)], kind="error")
             return
         campaign_id = await ctx.database.create_message_campaign(
             guild_id=guild_id,
@@ -641,71 +635,68 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_title=embed_title,
             embed_color=embed_color,
         )
-        await interaction.response.send_message(
-            f"Created custom campaign {campaign_id}. Next run: {next_run.isoformat()}.",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path="campagne custom entry_add", lines=[("campaign_id", campaign_id), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
 
     @custom_group.command(name="entry_list", description="List custom campaign entries")
     async def custom_entry_list(interaction: discord.Interaction) -> None:
         if not await _check(interaction, "campagne.custom.entry_list", "campagne.lista"):
             return
-        guild_id = await _require_guild(interaction)
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_list")
         if guild_id is None:
             return
         campaigns = await _list_custom_campaigns(guild_id)
         if not campaigns:
-            await interaction.response.send_message("No custom campaigns configured.", ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_list", lines=[("warning", "No custom campaigns configured.")], kind="warning")
             return
-        await interaction.response.send_message("\n".join(_format_message_campaign_row(row) for row in campaigns), ephemeral=True)
+        await _send(interaction, subcommand_path="campagne custom entry_list", lines=[("campaigns", len(campaigns))], sections=[CommandEmbedSection(title="Entries", lines=[_format_message_campaign_row(row) for row in campaigns])])
 
     @custom_group.command(name="entry_show", description="Show a custom campaign entry")
     @app_commands.describe(id="Campaign entry ID")
     async def custom_entry_show(interaction: discord.Interaction, id: int) -> None:
         if not await _check(interaction, "campagne.custom.entry_show"):
             return
-        guild_id = await _require_guild(interaction)
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_show")
         if guild_id is None:
             return
         campaign = await _get_custom_campaign(guild_id, id)
         if campaign is None:
-            await interaction.response.send_message("Custom campaign not found.", ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_show", lines=[("warning", "Custom campaign not found.")], kind="warning")
             return
-        await interaction.response.send_message(_format_message_campaign_row(campaign), ephemeral=True)
+        await _send(interaction, subcommand_path="campagne custom entry_show", lines=[("campaign_id", id)], sections=[CommandEmbedSection(title="Details", lines=[_format_message_campaign_row(campaign)])])
 
     @custom_group.command(name="entry_remove", description="Remove a custom campaign entry")
     @app_commands.describe(id="Campaign entry ID")
     async def custom_entry_remove(interaction: discord.Interaction, id: int) -> None:
         if not await _check(interaction, "campagne.custom.entry_remove", "campagne.cancella"):
             return
-        guild_id = await _require_guild(interaction)
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_remove")
         if guild_id is None:
             return
         campaign = await _get_custom_campaign(guild_id, id)
         if campaign is None:
-            await interaction.response.send_message("Custom campaign not found.", ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_remove", lines=[("warning", "Custom campaign not found.")], kind="warning")
             return
         await ctx.database.soft_delete_message_campaign(guild_id, id)
-        await interaction.response.send_message(f"Removed custom campaign {id}.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne custom entry_remove", lines=[("campaign_id", id), ("result", "removed")], kind="success")
 
     @custom_group.command(name="entry_run", description="Run a custom campaign entry now")
     @app_commands.describe(id="Campaign entry ID")
     async def custom_entry_run(interaction: discord.Interaction, id: int) -> None:
         if not await _check(interaction, "campagne.custom.entry_run", "campagne.test"):
             return
-        guild_id = await _require_guild(interaction)
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_run")
         if guild_id is None or interaction.channel is None or interaction.channel_id is None:
             if not interaction.response.is_done():
-                await interaction.response.send_message("Use this command in a guild channel.", ephemeral=True)
+                await _send(interaction, subcommand_path="campagne custom entry_run", lines=[("error", "Use this command in a guild channel.")], kind="error")
             return
         campaign = await _get_custom_campaign(guild_id, id)
         if campaign is None:
-            await interaction.response.send_message("Custom campaign not found.", ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_run", lines=[("warning", "Custom campaign not found.")], kind="warning")
             return
         if ctx.message_scheduler is None:
-            await interaction.response.send_message("Scheduler service unavailable.", ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_run", lines=[("error", "Scheduler service unavailable.")], kind="error")
             return
-        await interaction.response.send_message("Running custom campaign test.", ephemeral=True)
+        await _send(interaction, subcommand_path="campagne custom entry_run", lines=[("campaign_id", id), ("result", "running")], kind="success")
         if isinstance(interaction.channel, discord.abc.Messageable):
             rendered_text, _, _ = await ctx.message_scheduler.preview_campaign_text(
                 campaign,
@@ -750,14 +741,14 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         if not await _check(interaction, "campagne.custom.entry_edit", "campagne.pausa", "campagne.riprendi"):
             return
-        guild_id = await _require_guild(interaction)
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_edit")
         if guild_id is None:
             return
         campaign = await _get_custom_campaign(guild_id, id)
         if campaign is None:
-            await interaction.response.send_message("Custom campaign not found.", ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("warning", "Custom campaign not found.")], kind="warning")
             return
-        if embed_color is not None and not await _validate_embed_color(interaction, embed_color):
+        if embed_color is not None and not await _validate_embed_color(interaction, embed_color, subcommand_path="campagne custom entry_edit"):
             return
 
         candidate_text = text if text is not None else campaign.get("text")
@@ -775,7 +766,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             mood_mode=resolved_mood_mode,
         )
         if validation_error:
-            await interaction.response.send_message(validation_error, ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("error", validation_error)], kind="error")
             return
 
         next_run_at: str | None = None
@@ -793,7 +784,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                         tz=ctx.timezone,
                     )
                 except ValueError as exc:
-                    await interaction.response.send_message(str(exc), ephemeral=True)
+                    await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("error", str(exc))], kind="error")
                     return
             else:
                 start_time_local = str(campaign.get("start_time_local") or now.astimezone(ctx.timezone).strftime("%H:%M"))
@@ -833,13 +824,10 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         if enabled is not None:
             await ctx.database.set_message_campaign_enabled(guild_id, id, enabled)
         if not updated and enabled is None:
-            await interaction.response.send_message("No changes requested.", ephemeral=True)
+            await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("warning", "No changes requested.")], kind="warning")
             return
         refreshed = await _get_custom_campaign(guild_id, id)
-        await interaction.response.send_message(
-            f"Updated custom campaign {id}.\n{_format_message_campaign_row(refreshed or campaign)}",
-            ephemeral=True,
-        )
+        await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("campaign_id", id), ("result", "updated")], sections=[CommandEmbedSection(title="Details", lines=[_format_message_campaign_row(refreshed or campaign)])], kind="success")
 
     @news_group.command(name="on", description="Enable news campaigns in the current channel")
     async def news_on(interaction: discord.Interaction) -> None:

@@ -16,6 +16,25 @@ def _is_embed_oversize_error(exc: discord.HTTPException) -> bool:
     return getattr(exc, "code", None) == 50035 and "Embed size exceeds maximum size of 6000" in str(exc)
 
 
+def _build_send_kwargs(
+    *,
+    content: str | None = None,
+    embeds: list[discord.Embed] | None = None,
+    files: list[discord.File] | None = None,
+    ephemeral: bool | None = None,
+) -> dict[str, object]:
+    kwargs: dict[str, object] = {}
+    if content is not None:
+        kwargs["content"] = content
+    if embeds:
+        kwargs["embeds"] = embeds
+    if files:
+        kwargs["files"] = files
+    if ephemeral is not None:
+        kwargs["ephemeral"] = ephemeral
+    return kwargs
+
+
 async def safe_followup_send(
     interaction: discord.Interaction,
     *,
@@ -31,10 +50,12 @@ async def safe_followup_send(
         embed_list = await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
     try:
         await interaction.followup.send(
-            content=content,
-            embeds=embed_list if embed_list else None,
-            files=files,
-            ephemeral=ephemeral,
+            **_build_send_kwargs(
+                content=content,
+                embeds=embed_list,
+                files=files,
+                ephemeral=ephemeral,
+            )
         )
     except discord.HTTPException as exc:
         if _is_embed_oversize_error(exc) and embed_list:
@@ -45,10 +66,12 @@ async def safe_followup_send(
                 max_chars=RETRY_MAX_EMBED_CHARS,
             )
             await interaction.followup.send(
-                content=content,
-                embeds=status_embeds if status_embeds else None,
-                files=files,
-                ephemeral=ephemeral,
+                **_build_send_kwargs(
+                    content=content,
+                    embeds=status_embeds,
+                    files=files,
+                    ephemeral=ephemeral,
+                )
             )
             if detail_embeds:
                 await interaction.followup.send(embeds=detail_embeds, ephemeral=ephemeral)
@@ -101,7 +124,7 @@ async def send_dm_or_followup(
                 await safe_followup_send(
                     interaction,
                     content=content,
-                    embeds=embed_list if embed_list else None,
+                    embeds=embed_list,
                     files=files,
                     ephemeral=ephemeral_fallback,
                 )
@@ -109,7 +132,7 @@ async def send_dm_or_followup(
         await safe_followup_send(
             interaction,
             content=content,
-            embeds=embed_list if embed_list else None,
+            embeds=embed_list,
             files=files,
             ephemeral=ephemeral_fallback,
         )
