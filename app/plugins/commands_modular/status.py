@@ -3,6 +3,7 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 
+from app.plugins.commands_modular.command_helpers import send_standard_command_embed
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.utils.command_embeds import send_standard_response
@@ -16,34 +17,35 @@ def register_status(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             return
         if service:
             status = ctx.status.component_status(service)
-            await send_standard_response(
+            await send_standard_command_embed(
                 interaction,
                 top_level="bm",
-                subcommand_path=f"bm status {service}",
-                lines=[
-                    ("active", status.get("active")),
-                    ("state", status.get("state")),
-                    ("metrics", status.get("metrics")),
+                path_parts=["status", service],
+                entries=[
+                    ("Service", service),
+                    ("Active", status["active"]),
+                    ("State", status["state"]),
+                    ("Metrics", status["metrics"]),
                 ],
-                footer_service=ctx.footer,
+                service_name="status",
                 ephemeral=True,
             )
             return
         general = await ctx.status.general_status()
-        await send_standard_response(
+        await send_standard_command_embed(
             interaction,
             top_level="bm",
-            subcommand_path="bm status",
-            lines=[
-                ("bot", "online"),
-                ("db_path", general.get("db_path")),
-                ("retention_days", general.get("retention_days")),
-                ("enabled_channels", general.get("enabled_channels")),
-                ("users", general.get("users_count")),
-                ("messages", general.get("messages_count")),
-                ("events", general.get("events_count")),
-                ("last_event", general.get("last_event_ts")),
+            path_parts=["status"],
+            entries=[
+                ("Bot", "online"),
+                ("Db Path", general["db_path"]),
+                ("Retention Days", general["retention_days"]),
+                ("Enabled Channels", general["enabled_channels"]),
+                ("Users", general["users_count"]),
+                ("Messages", general["messages_count"]),
+                ("Events", general["events_count"]),
+                ("Last Event", general["last_event_ts"]),
             ],
-            footer_service=ctx.footer,
+            service_name="status",
             ephemeral=True,
         )

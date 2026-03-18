@@ -89,6 +89,7 @@ class FooterMeta:
     contributors: list[str]
     used_local_processing: bool = False
     footer_icon_url: str | None = None
+    minimal: bool = False
 
 
 @dataclass(slots=True)
@@ -154,6 +155,7 @@ def attach_footer_meta(
     contributors: Iterable[str] | None = None,
     used_local_processing: bool = False,
     footer_icon_url: str | None = None,
+    minimal: bool = False,
 ) -> discord.Embed:
     if embed is None:
         raise ValueError("attach_footer_meta requires a discord.Embed instance, got None")
@@ -173,6 +175,7 @@ def attach_footer_meta(
             contributors=deduped,
             used_local_processing=used_local_processing,
             footer_icon_url=_clean(footer_icon_url) or None,
+            minimal=minimal,
         ),
     )
     return embed
@@ -185,6 +188,7 @@ def attach_footer_meta_to_all(
     contributors: Iterable[str] | None = None,
     used_local_processing: bool = False,
     footer_icon_url: str | None = None,
+    minimal: bool = False,
 ) -> list[discord.Embed]:
     embed_list = list(embeds or [])
     for embed in embed_list:
@@ -194,6 +198,7 @@ def attach_footer_meta_to_all(
             contributors=contributors,
             used_local_processing=used_local_processing,
             footer_icon_url=footer_icon_url,
+            minimal=minimal,
         )
     return embed_list
 
@@ -253,6 +258,7 @@ def copy_footer_meta(source: discord.Embed, target: discord.Embed) -> discord.Em
         contributors=meta.contributors,
         used_local_processing=meta.used_local_processing,
         footer_icon_url=meta.footer_icon_url,
+        minimal=meta.minimal,
     )
 
 
@@ -536,13 +542,22 @@ class FooterService:
                 profiles[service] = profile
         return profiles
 
-    async def render_footer(self, *, service_name: str, contributors: Iterable[str], used_local_processing: bool) -> tuple[str, str | None]:
+    async def render_footer(
+        self,
+        *,
+        service_name: str,
+        contributors: Iterable[str],
+        used_local_processing: bool,
+        minimal: bool = False,
+    ) -> tuple[str, str | None]:
         version = await self.get_version()
         global_phrase = await self.get_global_phrase()
         service_phrases = await self.get_service_phrases()
         phrase = service_phrases.get(service_name) or global_phrase
 
         brand = f"Barcellometro {version}" if version else "Barcellometro"
+        if minimal:
+            return brand, phrase
         contributors_deduped: list[str] = []
         seen: set[str] = set()
         for item in contributors:
@@ -581,6 +596,7 @@ class FooterService:
             service_name=meta.service_name,
             contributors=meta.contributors,
             used_local_processing=meta.used_local_processing,
+            minimal=meta.minimal,
         )
         if persistable:
             try:
