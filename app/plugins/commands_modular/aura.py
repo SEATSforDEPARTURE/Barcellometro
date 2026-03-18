@@ -25,6 +25,7 @@ from app.services.aura import build_discord_jump_link, resolve_aura_reason_label
 from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, build_aura_embeds
 from app.services.config_file_loader import load_json_file
 from app.services.barcello_window import resolve_default_window_minutes
+from app.utils.command_embeds import send_standard_response
 
 logger = logging.getLogger(__name__)
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
@@ -32,11 +33,23 @@ BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
-        ephemeral = interaction.guild_id is not None
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=ephemeral)
-        else:
-            await interaction.response.send_message(message, ephemeral=ephemeral)
+        text = str(message or "").strip()
+        kind = "info"
+        if text.startswith("✅"):
+            kind = "success"
+        elif text.startswith("⚠️"):
+            kind = "warning"
+        elif text.startswith("❌"):
+            kind = "error"
+        await send_standard_response(
+            interaction,
+            top_level="aura",
+            subcommand_path=str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "aura"),
+            lines=[("dettaglio", text.lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile.")],
+            kind=kind,
+            footer_service=ctx.footer,
+            ephemeral=interaction.guild_id is not None,
+        )
 
     async def _resolve_default_window_for_aura(interaction: discord.Interaction) -> TimeWindowResult:
         raw_default = await get_setting(ctx, "barcello.default_window_minutes", "30")
@@ -395,10 +408,10 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
                 files = [mod_file] if idx == 0 and mod_file is not None else None
                 await dm.send(embeds=embeds[idx : idx + 10], files=files)
             logger.info("aura dm sent: user=%s guild=%s pages=%s", str(interaction.user.id), guild_id, len(embeds))
-            await interaction.followup.send("📩 Resoconto Aura inviato in DM.", ephemeral=True)
+            await send_ephemeral(interaction, "✅ Resoconto Aura inviato in DM.")
         except discord.Forbidden:
             logger.warning("aura dm blocked: user=%s guild=%s", str(interaction.user.id), guild_id)
-            await interaction.followup.send("Non posso scriverti in DM. Abilita i DM dal server e riprova.", ephemeral=True)
+            await send_ephemeral(interaction, "⚠️ Non posso scriverti in DM. Abilita i DM dal server e riprova.")
 
     @aura_group.command(name="ultimi", description="Aura ultimi N periodi")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", utente="Utente target (solo mod)")

@@ -34,6 +34,7 @@ from app.plugins.commands_modular.time_windows import (
     resolve_range_window,
     resolve_ultimi_window,
 )
+from app.utils.command_embeds import send_standard_response
 from app.utils.summary_render import build_summary_detail_embeds
 
 logger = logging.getLogger(__name__)
@@ -52,12 +53,36 @@ def _summary_footer_inputs(ai_status: dict[str, Any]) -> tuple[list[str], bool]:
 
 
 def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext) -> None:
+    def _kind_from_message(message: str) -> str:
+        text = str(message or "").strip()
+        if text.startswith("✅"):
+            return "success"
+        if text.startswith("⚠️"):
+            return "warning"
+        if text.startswith("❌"):
+            return "error"
+        return "info"
+
+    def _normalize_message(message: str) -> str:
+        return str(message or "").lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile."
+
+    def _command_path(interaction: discord.Interaction) -> str:
+        qualified_name = str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "").strip()
+        if qualified_name:
+            return qualified_name
+        command_name = str((getattr(interaction, "data", None) or {}).get("name") or "").strip()
+        return f"riassunto {command_name}".strip() or "riassunto info"
+
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
-        ephemeral = interaction.guild_id is not None
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=ephemeral)
-        else:
-            await interaction.response.send_message(message, ephemeral=ephemeral)
+        await send_standard_response(
+            interaction,
+            top_level="riassunto",
+            subcommand_path=_command_path(interaction),
+            lines=[("dettaglio", _normalize_message(message))],
+            kind=_kind_from_message(message),
+            footer_service=ctx.footer,
+            ephemeral=interaction.guild_id is not None,
+        )
 
     def _render_health_bar(score: int, color_emoji: str) -> str:
         score = max(0, min(100, score))
@@ -1375,19 +1400,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     and timeline_before_privacy >= MIN_MSG_TOTAL_CHANNEL
                     and timeline_after_privacy < MIN_MSG_TOTAL_CHANNEL
                 ):
-                    await interaction.followup.send(
+                    await send_ephemeral(
+                        interaction,
                         (
-                            "❗ Molti contenuti nel periodo selezionato sono stati esclusi per Privacy Mode "
+                            "⚠️ Molti contenuti nel periodo selezionato sono stati esclusi per Privacy Mode "
                             f"(prima: {timeline_before_privacy} eventi, dopo filtro: {timeline_after_privacy}). "
                             "Prova ad allargare il periodo o verifica che la privacy venga disattivata correttamente."
                         ),
-                        ephemeral=True,
                     )
                 else:
-                    await interaction.followup.send(
-                        "❗ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.",
-                        ephemeral=True,
-                    )
+                    await send_ephemeral(interaction, "⚠️ Non ci sono dati sufficienti nel periodo selezionato per generare un riassunto.")
                 return
 
             extra_sections: list[tuple[str, str, int]] | None = None
@@ -1829,12 +1851,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             sent_dm = await send_dm_or_followup(
                 interaction,
                 embeds=payload_embeds,
-                content="⚠️ Non posso inviarti DM, quindi ti mostro il riassunto qui in modalità privata.",
+                content=None,
                 files=files,
                 ephemeral_fallback=True,
             )
             if sent_dm:
-                await interaction.followup.send("✅ Ti ho inviato il riassunto in DM.", ephemeral=True)
+                await send_ephemeral(interaction, "✅ Ti ho inviato il riassunto in DM.")
         except Exception:
             logger.exception("riassunto failed req_id=%s", req_id)
             await send_ephemeral(

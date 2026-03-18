@@ -10,6 +10,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.utils.command_embeds import CommandEmbedSection, send_standard_response
 from app.plugins.commands_modular.time_windows import (
     build_period_label,
     parse_italian_datetime,
@@ -42,11 +43,56 @@ def register_resoconto(
     resocontoserver_group: app_commands.Group,
     ctx: CommandContext,
 ) -> None:
-    async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
+    def _normalize_message(message: str) -> str:
+        return str(message or "").lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile."
+
+    def _kind_from_message(message: str) -> str:
+        text = str(message or "").strip()
+        if text.startswith("✅"):
+            return "success"
+        if text.startswith("⚠️"):
+            return "warning"
+        if text.startswith("❌"):
+            return "error"
+        return "info"
+
+    async def _send_resoconto_response(
+        interaction: discord.Interaction,
+        *,
+        scope: str,
+        path: str,
+        kind: str = "info",
+        lines: list[tuple[str, object]] | None = None,
+        sections: list[CommandEmbedSection] | None = None,
+        files: list[discord.File] | None = None,
+        ephemeral: bool = True,
+    ) -> None:
+        await send_standard_response(
+            interaction,
+            top_level="resoconto",
+            subcommand_path=f"{scope} {path}",
+            lines=lines,
+            sections=sections,
+            kind=kind,
+            footer_service=ctx.footer,
+            ephemeral=ephemeral,
+            files=files,
+        )
+
+    async def _send_message(
+        interaction: discord.Interaction,
+        *,
+        scope: str,
+        path: str,
+        message: str,
+    ) -> None:
+        await _send_resoconto_response(
+            interaction,
+            scope=scope,
+            path=path,
+            kind=_kind_from_message(message),
+            lines=[("dettaglio", _normalize_message(message))],
+        )
 
     def _parse_every(raw: str | None) -> tuple[int | None, str | None]:
         value = str(raw or "").strip().lower()
@@ -114,14 +160,19 @@ def register_resoconto(
             f"every={recurrence}"
         )
 
+    def _schedule_section(rows: list[dict[str, object]], *, key: str, empty_message: str) -> list[CommandEmbedSection]:
+        if not rows:
+            return [CommandEmbedSection(title="Schedules", lines=[empty_message])]
+        return [CommandEmbedSection(title="Schedules", lines=[_format_schedule_line(row, key=key) for row in rows])]
+
     async def _send_channel_aura(interaction: discord.Interaction, *, window) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="aura", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "aura", ctx):
             return
         if ctx.channel_summary is None:
-            await send_ephemeral(interaction, "❌ Summary service is not available.")
+            await _send_message(interaction, scope="canale", path="aura", message="❌ Summary service is not available.")
             return
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
@@ -133,19 +184,25 @@ def register_resoconto(
             title="🗒️ DETTAGLI PUNTI AURA",
         )
         if embed is None:
-            await interaction.followup.send("⚠️ No relevant aura data was found for this period.", ephemeral=True)
+            await _send_resoconto_response(
+                interaction,
+                scope="canale",
+                path="aura",
+                kind="warning",
+                lines=[("warning", "No relevant aura data was found for this period.")],
+            )
             return
         await interaction.followup.send(embed=embed)
 
     async def _run_server_aura_report(interaction: discord.Interaction, *, start_dt, end_dt, period_label: str) -> None:
         if interaction.guild_id is None:
-            await send_ephemeral(interaction, "This command is only available in a server.")
+            await _send_message(interaction, scope="server", path="aura", message="❌ This command is only available in a server.")
             return
         if not await check_permission(interaction, "aura", ctx):
             return
         profile, _ = await ctx.entitlements.resolve_profile_with_role_id(interaction.user)
         if profile != "mod":
-            await send_ephemeral(interaction, "This command is only available to moderators.")
+            await _send_message(interaction, scope="server", path="aura", message="❌ This command is only available to moderators.")
             return
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
@@ -204,12 +261,12 @@ def register_resoconto(
         end_at: str | None,
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="server", path="schedule_add", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         if ctx.daily_activity_report is None:
-            await send_ephemeral(interaction, "❌ Server summary service is not available.")
+            await _send_message(interaction, scope="server", path="schedule_add", message="❌ Server summary service is not available.")
             return
         window, error, internal_kind = _resolve_window_from_inputs(
             schedule_kind=schedule_kind,
@@ -219,18 +276,18 @@ def register_resoconto(
             end_at=end_at,
         )
         if error:
-            await send_ephemeral(interaction, error)
+            await _send_message(interaction, scope="server", path="schedule_add", message=error)
             return
         every_value, every_unit = _parse_every(every)
         if every and every_value is None:
-            await send_ephemeral(interaction, "❌ Invalid `every` format. Use values like 1440min, 24hours, or 1days.")
+            await _send_message(interaction, scope="server", path="schedule_add", message="❌ Invalid `every` format. Use values like 1440min, 24hours, or 1days.")
             return
         if internal_kind == "range" and every_value is not None:
-            await send_ephemeral(interaction, "❌ Range schedules only support one-shot publishing.")
+            await _send_message(interaction, scope="server", path="schedule_add", message="❌ Range schedules only support one-shot publishing.")
             return
         publish_at_dt = parse_italian_datetime(publish_at)
         if publish_at_dt is None:
-            await send_ephemeral(interaction, "❌ Invalid `publish_at` format. Use DD/MM/YYYY HH:MM.")
+            await _send_message(interaction, scope="server", path="schedule_add", message="❌ Invalid `publish_at` format. Use DD/MM/YYYY HH:MM.")
             return
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
@@ -249,7 +306,13 @@ def register_resoconto(
             created_by=str(interaction.user.id),
         )
         suffix = f" every {every_value}{every_unit}" if every_value and every_unit else ""
-        await interaction.followup.send(f"✅ Server summary schedule {schedule_id} created for {publish_at}{suffix}.", ephemeral=True)
+        await _send_resoconto_response(
+            interaction,
+            scope="server",
+            path="schedule_add",
+            kind="success",
+            lines=[("schedule_id", schedule_id), ("publish_at", publish_at), ("recurrence", suffix.strip() or "one-shot")],
+        )
 
     async def _create_channel_schedule(
         interaction: discord.Interaction,
@@ -263,12 +326,12 @@ def register_resoconto(
         end_at: str | None,
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="schedule_add", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         if ctx.channel_summary is None:
-            await send_ephemeral(interaction, "❌ Channel summary service is not available.")
+            await _send_message(interaction, scope="canale", path="schedule_add", message="❌ Channel summary service is not available.")
             return
         window, error, internal_kind = _resolve_window_from_inputs(
             schedule_kind=schedule_kind,
@@ -278,18 +341,18 @@ def register_resoconto(
             end_at=end_at,
         )
         if error:
-            await send_ephemeral(interaction, error)
+            await _send_message(interaction, scope="canale", path="schedule_add", message=error)
             return
         every_value, every_unit = _parse_every(every)
         if every and every_value is None:
-            await send_ephemeral(interaction, "❌ Invalid `every` format. Use values like 1440min, 24hours, or 1days.")
+            await _send_message(interaction, scope="canale", path="schedule_add", message="❌ Invalid `every` format. Use values like 1440min, 24hours, or 1days.")
             return
         if internal_kind == "range" and every_value is not None:
-            await send_ephemeral(interaction, "❌ Range schedules only support one-shot publishing.")
+            await _send_message(interaction, scope="canale", path="schedule_add", message="❌ Range schedules only support one-shot publishing.")
             return
         publish_at_dt = parse_italian_datetime(publish_at)
         if publish_at_dt is None:
-            await send_ephemeral(interaction, "❌ Invalid `publish_at` format. Use DD/MM/YYYY HH:MM.")
+            await _send_message(interaction, scope="canale", path="schedule_add", message="❌ Invalid `publish_at` format. Use DD/MM/YYYY HH:MM.")
             return
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
@@ -308,32 +371,50 @@ def register_resoconto(
             created_by=str(interaction.user.id),
         )
         suffix = f" every {every_value}{every_unit}" if every_value and every_unit else ""
-        await interaction.followup.send(f"✅ Channel summary schedule {schedule_id} created for {publish_at}{suffix}.", ephemeral=True)
+        await _send_resoconto_response(
+            interaction,
+            scope="canale",
+            path="schedule_add",
+            kind="success",
+            lines=[("schedule_id", schedule_id), ("publish_at", publish_at), ("recurrence", suffix.strip() or "one-shot")],
+        )
 
     @resocontocanale_group.command(name="on", description="Enable automatic channel summaries for the current channel.")
     async def canale_on(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="on", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         await ctx.database.set_channel_summary_auto_enabled(str(interaction.guild_id), str(interaction.channel_id), True)
-        await send_ephemeral(interaction, "✅ Automatic channel summaries enabled for this channel.")
+        await _send_resoconto_response(
+            interaction,
+            scope="canale",
+            path="on",
+            kind="success",
+            lines=[("channel", f"<#{interaction.channel_id}>"), ("automatic_summaries", "enabled")],
+        )
 
     @resocontocanale_group.command(name="off", description="Disable automatic channel summaries for the current channel.")
     async def canale_off(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="off", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         await ctx.database.set_channel_summary_auto_enabled(str(interaction.guild_id), str(interaction.channel_id), False)
-        await send_ephemeral(interaction, "✅ Automatic channel summaries disabled for this channel.")
+        await _send_resoconto_response(
+            interaction,
+            scope="canale",
+            path="off",
+            kind="success",
+            lines=[("channel", f"<#{interaction.channel_id}>"), ("automatic_summaries", "disabled")],
+        )
 
     @resocontocanale_group.command(name="status", description="Show the channel summary schedule status.")
     async def canale_status(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="status", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
@@ -341,9 +422,14 @@ def register_resoconto(
         cid = str(interaction.channel_id)
         enabled = await ctx.database.get_channel_summary_auto_enabled(gid, cid)
         rows = await ctx.database.list_channel_summary_schedules(gid, cid)
-        lines = [f"auto={'on' if enabled else 'off'}"]
-        lines.extend(_format_schedule_line(dict(row), key="type") for row in rows)
-        await send_ephemeral(interaction, "\n".join(lines if rows else [lines[0], "no schedules"]))
+        normalized_rows = [dict(row) for row in rows]
+        await _send_resoconto_response(
+            interaction,
+            scope="canale",
+            path="status",
+            lines=[("channel", f"<#{interaction.channel_id}>"), ("auto", "on" if enabled else "off"), ("schedules", len(normalized_rows))],
+            sections=_schedule_section(normalized_rows, key="type", empty_message="No channel summary schedules found."),
+        )
 
     @resocontocanale_group.command(name="schedule_add", description="Add a channel summary schedule.")
     @app_commands.describe(
@@ -405,7 +491,7 @@ def register_resoconto(
         enabled: bool | None = None,
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="schedule_edit", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
@@ -415,13 +501,13 @@ def register_resoconto(
             channel_id=str(interaction.channel_id),
         )
         if row is None:
-            await send_ephemeral(interaction, "❌ Schedule not found in this channel.")
+            await _send_message(interaction, scope="canale", path="schedule_edit", message="❌ Schedule not found in this channel.")
             return
         publish_dt = parse_italian_datetime(publish_at) if publish_at else None
         normalized_every = (every or "").strip().lower()
         every_value, every_unit = _parse_every(every)
         if every and every_value is None and normalized_every not in {"off", "none"}:
-            await send_ephemeral(interaction, "❌ Invalid `every` format.")
+            await _send_message(interaction, scope="canale", path="schedule_edit", message="❌ Invalid `every` format.")
             return
         if normalized_every in {"off", "none"}:
             every_value, every_unit = None, None
@@ -438,13 +524,22 @@ def register_resoconto(
             repeat_every_unit=every_unit,
             status=status_value,
         )
-        await send_ephemeral(interaction, f"✅ Channel summary schedule {schedule_id} updated." if ok else "❌ Schedule not found in this channel.")
+        if not ok:
+            await _send_message(interaction, scope="canale", path="schedule_edit", message="❌ Schedule not found in this channel.")
+            return
+        await _send_resoconto_response(
+            interaction,
+            scope="canale",
+            path="schedule_edit",
+            kind="success",
+            lines=[("schedule_id", schedule_id), ("result", "updated"), ("enabled", status_value or str(row.get("status") or "active"))],
+        )
 
     @resocontocanale_group.command(name="schedule_remove", description="Remove a channel summary schedule.")
     @app_commands.describe(schedule_id="Schedule ID to remove.")
     async def canale_schedule_remove(interaction: discord.Interaction, schedule_id: int) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="schedule_remove", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
@@ -453,13 +548,22 @@ def register_resoconto(
             guild_id=str(interaction.guild_id),
             channel_id=str(interaction.channel_id),
         )
-        await send_ephemeral(interaction, f"✅ Channel summary schedule {schedule_id} removed." if deleted else "❌ Schedule not found in this channel.")
+        if not deleted:
+            await _send_message(interaction, scope="canale", path="schedule_remove", message="❌ Schedule not found in this channel.")
+            return
+        await _send_resoconto_response(
+            interaction,
+            scope="canale",
+            path="schedule_remove",
+            kind="success",
+            lines=[("schedule_id", schedule_id), ("result", "removed")],
+        )
 
     @resocontocanale_group.command(name="schedule_show", description="Show one channel summary schedule.")
     @app_commands.describe(schedule_id="Schedule ID to inspect.")
     async def canale_schedule_show(interaction: discord.Interaction, schedule_id: int) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="schedule_show", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
@@ -469,22 +573,65 @@ def register_resoconto(
             channel_id=str(interaction.channel_id),
         )
         if row is None:
-            await send_ephemeral(interaction, "❌ Schedule not found in this channel.")
+            await _send_message(interaction, scope="canale", path="schedule_show", message="❌ Schedule not found in this channel.")
             return
-        await send_ephemeral(interaction, _format_schedule_line(dict(row), key="type"))
+        await _send_resoconto_response(
+            interaction,
+            scope="canale",
+            path="schedule_show",
+            lines=[("schedule_id", schedule_id)],
+            sections=[CommandEmbedSection(title="Details", lines=[_format_schedule_line(dict(row), key="type")])],
+        )
 
     @resocontocanale_group.command(name="schedule_list", description="List channel summary schedules for the current channel.")
     async def canale_schedule_list(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="canale", path="schedule_list", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         rows = await ctx.database.list_channel_summary_schedules(str(interaction.guild_id), str(interaction.channel_id))
-        if not rows:
-            await send_ephemeral(interaction, "No channel summary schedules found.")
+        normalized_rows = [dict(row) for row in rows]
+        await _send_resoconto_response(
+            interaction,
+            scope="canale",
+            path="schedule_list",
+            lines=[("channel", f"<#{interaction.channel_id}>"), ("schedules", len(normalized_rows))],
+            sections=_schedule_section(normalized_rows, key="type", empty_message="No channel summary schedules found."),
+            kind="warning" if not normalized_rows else "info",
+        )
+
+    @resocontocanale_group.command(name="oggi", description="Show manual channel aura details for today.")
+    async def canale_oggi(interaction: discord.Interaction) -> None:
+        await _send_channel_aura(interaction, window=resolve_oggi_window())
+
+    @resocontocanale_group.command(name="ieri", description="Show manual channel aura details for yesterday.")
+    async def canale_ieri(interaction: discord.Interaction) -> None:
+        await _send_channel_aura(interaction, window=resolve_ieri_window())
+
+    @resocontocanale_group.command(name="ultimi", description="Show manual channel aura details for the last window.")
+    @app_commands.choices(
+        unita=[
+            app_commands.Choice(name="minuti", value="minuti"),
+            app_commands.Choice(name="ore", value="ore"),
+            app_commands.Choice(name="giorni", value="giorni"),
+            app_commands.Choice(name="settimane", value="settimane"),
+        ]
+    )
+    async def canale_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
+        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+        if error:
+            await _send_message(interaction, scope="canale", path="ultimi", message=error)
             return
-        await send_ephemeral(interaction, "\n".join(_format_schedule_line(dict(row), key="type") for row in rows))
+        await _send_channel_aura(interaction, window=window)
+
+    @resocontocanale_group.command(name="range", description="Show manual channel aura details for a range.")
+    async def canale_range(interaction: discord.Interaction, da: str, a: str) -> None:
+        window, error = resolve_range_window(da, a, ctx.config)
+        if error:
+            await _send_message(interaction, scope="canale", path="range", message=error)
+            return
+        await _send_channel_aura(interaction, window=window)
 
     canale_aura_group = app_commands.Group(name="aura", description="Manual channel aura detail")
 
@@ -508,7 +655,7 @@ def register_resoconto(
     async def canale_aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
         window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
         if error:
-            await send_ephemeral(interaction, error)
+            await _send_message(interaction, scope="canale", path="aura ultimi", message=error)
             return
         await _send_channel_aura(interaction, window=window)
 
@@ -516,7 +663,7 @@ def register_resoconto(
     async def canale_aura_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:
-            await send_ephemeral(interaction, error)
+            await _send_message(interaction, scope="canale", path="aura range", message=error)
             return
         await _send_channel_aura(interaction, window=window)
 
@@ -525,28 +672,40 @@ def register_resoconto(
     @resocontoserver_group.command(name="on", description="Enable automatic server summaries.")
     async def server_on(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "This command is only available in a guild text channel.")
+            await _send_message(interaction, scope="server", path="on", message="❌ This command is only available in a guild text channel.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         await ctx.database.set_server_summary_auto_enabled(str(interaction.guild_id), True)
         await ctx.database.set_server_summary_target_channel(str(interaction.guild_id), str(interaction.channel_id))
-        await send_ephemeral(interaction, "✅ Automatic server summaries enabled for this server.")
+        await _send_resoconto_response(
+            interaction,
+            scope="server",
+            path="on",
+            kind="success",
+            lines=[("server", interaction.guild_id), ("target_channel", f"<#{interaction.channel_id}>"), ("automatic_summaries", "enabled")],
+        )
 
     @resocontoserver_group.command(name="off", description="Disable automatic server summaries.")
     async def server_off(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None:
-            await send_ephemeral(interaction, "This command is only available in a server.")
+            await _send_message(interaction, scope="server", path="off", message="❌ This command is only available in a server.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         await ctx.database.set_server_summary_auto_enabled(str(interaction.guild_id), False)
-        await send_ephemeral(interaction, "✅ Automatic server summaries disabled.")
+        await _send_resoconto_response(
+            interaction,
+            scope="server",
+            path="off",
+            kind="success",
+            lines=[("server", interaction.guild_id), ("automatic_summaries", "disabled")],
+        )
 
     @resocontoserver_group.command(name="status", description="Show the server summary schedule status.")
     async def server_status(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None:
-            await send_ephemeral(interaction, "This command is only available in a server.")
+            await _send_message(interaction, scope="server", path="status", message="❌ This command is only available in a server.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
@@ -554,9 +713,14 @@ def register_resoconto(
         enabled = await ctx.database.get_server_summary_auto_enabled(gid)
         target = await ctx.database.get_server_summary_target_channel(gid)
         rows = await ctx.database.list_server_summary_schedules(gid)
-        lines = [f"auto={'on' if enabled else 'off'}", f"target_channel={f'<#{target}>' if target else 'not set'}"]
-        lines.extend(_format_schedule_line(dict(row), key="schedule_type") for row in rows)
-        await send_ephemeral(interaction, "\n".join(lines if rows else lines + ["no schedules"]))
+        normalized_rows = [dict(row) for row in rows]
+        await _send_resoconto_response(
+            interaction,
+            scope="server",
+            path="status",
+            lines=[("auto", "on" if enabled else "off"), ("target_channel", f"<#{target}>" if target else "not set"), ("schedules", len(normalized_rows))],
+            sections=_schedule_section(normalized_rows, key="schedule_type", empty_message="No server summary schedules found."),
+        )
 
     @resocontoserver_group.command(name="schedule_add", description="Add a server summary schedule.")
     @app_commands.describe(
@@ -618,19 +782,19 @@ def register_resoconto(
         enabled: bool | None = None,
     ) -> None:
         if interaction.guild_id is None:
-            await send_ephemeral(interaction, "This command is only available in a server.")
+            await _send_message(interaction, scope="server", path="schedule_edit", message="❌ This command is only available in a server.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         row = await ctx.database.get_server_summary_schedule(schedule_id=schedule_id, guild_id=str(interaction.guild_id))
         if row is None:
-            await send_ephemeral(interaction, "❌ Server schedule not found.")
+            await _send_message(interaction, scope="server", path="schedule_edit", message="❌ Server schedule not found.")
             return
         publish_dt = parse_italian_datetime(publish_at) if publish_at else None
         normalized_every = (every or "").strip().lower()
         every_value, every_unit = _parse_every(every)
         if every and every_value is None and normalized_every not in {"off", "none"}:
-            await send_ephemeral(interaction, "❌ Invalid `every` format.")
+            await _send_message(interaction, scope="server", path="schedule_edit", message="❌ Invalid `every` format.")
             return
         if normalized_every in {"off", "none"}:
             every_value, every_unit = None, None
@@ -646,45 +810,108 @@ def register_resoconto(
             enabled=enabled,
             status=("active" if enabled else "disabled") if enabled is not None else None,
         )
-        await send_ephemeral(interaction, f"✅ Server summary schedule {schedule_id} updated." if ok else "❌ Server schedule not found.")
+        if not ok:
+            await _send_message(interaction, scope="server", path="schedule_edit", message="❌ Server schedule not found.")
+            return
+        await _send_resoconto_response(
+            interaction,
+            scope="server",
+            path="schedule_edit",
+            kind="success",
+            lines=[("schedule_id", schedule_id), ("result", "updated"), ("enabled", "active" if enabled or enabled is None else "disabled")],
+        )
 
     @resocontoserver_group.command(name="schedule_remove", description="Remove a server summary schedule.")
     @app_commands.describe(schedule_id="Schedule ID to remove.")
     async def server_schedule_remove(interaction: discord.Interaction, schedule_id: int) -> None:
         if interaction.guild_id is None:
-            await send_ephemeral(interaction, "This command is only available in a server.")
+            await _send_message(interaction, scope="server", path="schedule_remove", message="❌ This command is only available in a server.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         deleted = await ctx.database.delete_server_summary_schedule(schedule_id=schedule_id, guild_id=str(interaction.guild_id))
-        await send_ephemeral(interaction, f"✅ Server summary schedule {schedule_id} removed." if deleted else "❌ Server schedule not found.")
+        if not deleted:
+            await _send_message(interaction, scope="server", path="schedule_remove", message="❌ Server schedule not found.")
+            return
+        await _send_resoconto_response(
+            interaction,
+            scope="server",
+            path="schedule_remove",
+            kind="success",
+            lines=[("schedule_id", schedule_id), ("result", "removed")],
+        )
 
     @resocontoserver_group.command(name="schedule_show", description="Show one server summary schedule.")
     @app_commands.describe(schedule_id="Schedule ID to inspect.")
     async def server_schedule_show(interaction: discord.Interaction, schedule_id: int) -> None:
         if interaction.guild_id is None:
-            await send_ephemeral(interaction, "This command is only available in a server.")
+            await _send_message(interaction, scope="server", path="schedule_show", message="❌ This command is only available in a server.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         row = await ctx.database.get_server_summary_schedule(schedule_id=schedule_id, guild_id=str(interaction.guild_id))
         if row is None:
-            await send_ephemeral(interaction, "❌ Server schedule not found.")
+            await _send_message(interaction, scope="server", path="schedule_show", message="❌ Server schedule not found.")
             return
-        await send_ephemeral(interaction, _format_schedule_line(dict(row), key="schedule_type"))
+        await _send_resoconto_response(
+            interaction,
+            scope="server",
+            path="schedule_show",
+            lines=[("schedule_id", schedule_id)],
+            sections=[CommandEmbedSection(title="Details", lines=[_format_schedule_line(dict(row), key="schedule_type")])],
+        )
 
     @resocontoserver_group.command(name="schedule_list", description="List server summary schedules.")
     async def server_schedule_list(interaction: discord.Interaction) -> None:
         if interaction.guild_id is None:
-            await send_ephemeral(interaction, "This command is only available in a server.")
+            await _send_message(interaction, scope="server", path="schedule_list", message="❌ This command is only available in a server.")
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
         rows = await ctx.database.list_server_summary_schedules(str(interaction.guild_id))
-        if not rows:
-            await send_ephemeral(interaction, "No server summary schedules found.")
+        normalized_rows = [dict(row) for row in rows]
+        await _send_resoconto_response(
+            interaction,
+            scope="server",
+            path="schedule_list",
+            lines=[("server", interaction.guild_id), ("schedules", len(normalized_rows))],
+            sections=_schedule_section(normalized_rows, key="schedule_type", empty_message="No server summary schedules found."),
+            kind="warning" if not normalized_rows else "info",
+        )
+
+    @resocontoserver_group.command(name="oggi", description="Show manual server aura details for today.")
+    async def server_oggi(interaction: discord.Interaction) -> None:
+        window = resolve_oggi_window()
+        await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="oggi")
+
+    @resocontoserver_group.command(name="ieri", description="Show manual server aura details for yesterday.")
+    async def server_ieri(interaction: discord.Interaction) -> None:
+        window = resolve_ieri_window()
+        await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ieri")
+
+    @resocontoserver_group.command(name="ultimi", description="Show manual server aura details for the last window.")
+    @app_commands.choices(
+        unita=[
+            app_commands.Choice(name="minuti", value="minuti"),
+            app_commands.Choice(name="ore", value="ore"),
+            app_commands.Choice(name="giorni", value="giorni"),
+            app_commands.Choice(name="settimane", value="settimane"),
+        ]
+    )
+    async def server_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
+        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+        if error:
+            await _send_message(interaction, scope="server", path="ultimi", message=error)
             return
-        await send_ephemeral(interaction, "\n".join(_format_schedule_line(dict(row), key="schedule_type") for row in rows))
+        await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ultimi")
+
+    @resocontoserver_group.command(name="range", description="Show manual server aura details for a range.")
+    async def server_range(interaction: discord.Interaction, da: str, a: str) -> None:
+        window, error = resolve_range_window(da, a, ctx.config)
+        if error:
+            await _send_message(interaction, scope="server", path="range", message=error)
+            return
+        await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range")
 
     server_aura_group = app_commands.Group(name="aura", description="Manual server aura detail")
 
@@ -710,7 +937,7 @@ def register_resoconto(
     async def server_aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
         window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
         if error:
-            await send_ephemeral(interaction, error)
+            await _send_message(interaction, scope="server", path="aura ultimi", message=error)
             return
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ultimi")
 
@@ -718,7 +945,7 @@ def register_resoconto(
     async def server_aura_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:
-            await send_ephemeral(interaction, error)
+            await _send_message(interaction, scope="server", path="aura range", message=error)
             return
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range")
 
