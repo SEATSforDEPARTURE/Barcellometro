@@ -3879,6 +3879,83 @@ class DatabaseService:
             (guild_id, campaign_id),
         )
 
+    async def update_message_campaign(
+        self,
+        guild_id: str,
+        campaign_id: int,
+        *,
+        name: Optional[str] = None,
+        channel_id: Optional[str] = None,
+        text: Optional[str] = None,
+        text_green: Optional[str] = None,
+        text_yellow: Optional[str] = None,
+        text_red: Optional[str] = None,
+        text_black: Optional[str] = None,
+        start_time_local: Optional[str] = None,
+        interval_minutes: Optional[int] = None,
+        jitter_seconds: Optional[int] = None,
+        only_if_idle_minutes: Optional[int] = None,
+        mood_mode: Optional[str] = None,
+        next_run_at: Optional[str] = None,
+        embed_title: Optional[str] = None,
+        embed_color: Optional[str] = None,
+        set_name: bool = False,
+        set_channel_id: bool = False,
+        set_text: bool = False,
+        set_text_green: bool = False,
+        set_text_yellow: bool = False,
+        set_text_red: bool = False,
+        set_text_black: bool = False,
+        set_start_time_local: bool = False,
+        set_interval_minutes: bool = False,
+        set_jitter_seconds: bool = False,
+        set_only_if_idle_minutes: bool = False,
+        set_mood_mode: bool = False,
+        set_next_run_at: bool = False,
+        set_embed_title: bool = False,
+        set_embed_color: bool = False,
+    ) -> bool:
+        updates: list[str] = []
+        params: list[Any] = []
+
+        def _push(column: str, value: Any, enabled: bool) -> None:
+            if enabled:
+                updates.append(f"{column} = ?")
+                params.append(value)
+
+        _push("name", name, set_name)
+        _push("channel_id", channel_id, set_channel_id)
+        _push("text", text, set_text)
+        _push("text_green", text_green, set_text_green)
+        _push("text_yellow", text_yellow, set_text_yellow)
+        _push("text_red", text_red, set_text_red)
+        _push("text_black", text_black, set_text_black)
+        _push("start_time_local", start_time_local, set_start_time_local)
+        _push("interval_minutes", interval_minutes, set_interval_minutes)
+        _push("jitter_seconds", jitter_seconds, set_jitter_seconds)
+        _push("only_if_idle_minutes", only_if_idle_minutes, set_only_if_idle_minutes)
+        _push("mood_mode", mood_mode, set_mood_mode)
+        _push("next_run_at", next_run_at, set_next_run_at)
+        _push("embed_title", embed_title, set_embed_title)
+        _push("embed_color", embed_color, set_embed_color)
+
+        if not updates:
+            return False
+
+        now = datetime.now(timezone.utc).isoformat()
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.extend([guild_id, campaign_id])
+        await self.execute(
+            f"""
+            UPDATE message_campaigns
+            SET {", ".join(updates)}
+            WHERE guild_id = ? AND id = ? AND deleted_at IS NULL
+            """,
+            tuple(params),
+        )
+        return True
+
     async def set_message_campaign_enabled(self, guild_id: str, campaign_id: int, enabled: bool) -> None:
         now = datetime.now(timezone.utc).isoformat()
         await self.execute(
@@ -4079,6 +4156,97 @@ class DatabaseService:
             """,
             (guild_id, config_id),
         )
+
+    async def get_campaign_content_config_by_service(
+        self,
+        guild_id: str,
+        channel_id: str,
+        service_type: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT *
+            FROM campaign_content_configs
+            WHERE guild_id = ? AND channel_id = ? AND service_type = ? AND deleted_at IS NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (guild_id, channel_id, service_type),
+        )
+
+    async def list_campaign_content_configs_by_service(
+        self,
+        guild_id: str,
+        *,
+        service_type: str,
+        channel_id: Optional[str] = None,
+        include_disabled: bool = True,
+    ) -> list[aiosqlite.Row]:
+        conditions = ["guild_id = ?", "service_type = ?", "deleted_at IS NULL"]
+        params: list[Any] = [guild_id, service_type]
+        if channel_id is not None:
+            conditions.append("channel_id = ?")
+            params.append(channel_id)
+        if not include_disabled:
+            conditions.append("enabled = 1")
+        query = f"SELECT * FROM campaign_content_configs WHERE {' AND '.join(conditions)} ORDER BY id ASC"
+        return await self.fetchall(query, tuple(params))
+
+    async def update_campaign_content_config(
+        self,
+        guild_id: str,
+        config_id: int,
+        *,
+        channel_id: Optional[str] = None,
+        time_local: Optional[str] = None,
+        interval_minutes: Optional[int] = None,
+        embed_title: Optional[str] = None,
+        embed_color: Optional[str] = None,
+        sources_json: Optional[str] = None,
+        categories_json: Optional[str] = None,
+        next_run_at: Optional[str] = None,
+        set_channel_id: bool = False,
+        set_time_local: bool = False,
+        set_interval_minutes: bool = False,
+        set_embed_title: bool = False,
+        set_embed_color: bool = False,
+        set_sources_json: bool = False,
+        set_categories_json: bool = False,
+        set_next_run_at: bool = False,
+    ) -> bool:
+        updates: list[str] = []
+        params: list[Any] = []
+
+        def _push(column: str, value: Any, enabled: bool) -> None:
+            if enabled:
+                updates.append(f"{column} = ?")
+                params.append(value)
+
+        _push("channel_id", channel_id, set_channel_id)
+        _push("time_local", time_local, set_time_local)
+        _push("interval_minutes", interval_minutes, set_interval_minutes)
+        _push("embed_title", embed_title, set_embed_title)
+        _push("embed_color", embed_color, set_embed_color)
+        _push("sources_json", sources_json, set_sources_json)
+        _push("categories_json", categories_json, set_categories_json)
+        _push("next_run_at", next_run_at, set_next_run_at)
+
+        if not updates:
+            return False
+
+        now = datetime.now(timezone.utc).isoformat()
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.extend([guild_id, config_id])
+        await self.execute(
+            f"""
+            UPDATE campaign_content_configs
+            SET {", ".join(updates)}
+            WHERE guild_id = ? AND id = ? AND deleted_at IS NULL
+            """,
+            tuple(params),
+        )
+        return True
 
     async def set_campaign_content_enabled(self, guild_id: str, config_id: int, enabled: bool) -> None:
         now = datetime.now(timezone.utc).isoformat()

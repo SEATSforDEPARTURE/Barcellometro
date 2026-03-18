@@ -29,8 +29,8 @@ def register_triggers(
     insights_group: app_commands.Group,
     ctx: CommandContext,
 ) -> app_commands.Group:
-    frasi_group = app_commands.Group(name="frasi", description="Frasi")
-    prompt_group = app_commands.Group(name="prompt", description="Prompt campagne")
+    frasi_group = app_commands.Group(name="frasi", description="Phrase trigger controls")
+    prompt_group = app_commands.Group(name="prompt", description="Prompt campaign controls")
 
     add_group_once(campagne_group, prompt_group, logger)
 
@@ -177,60 +177,144 @@ def register_triggers(
         except ValueError:
             return str(raw_ts)
 
-    @frasi_group.command(name="on", description="Abilita trigger frasi")
-    async def frasi_on(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "frasi", "on")
+    TIER_CHOICES = [
+        app_commands.Choice(name="base", value="base"),
+        app_commands.Choice(name="role1", value="role1"),
+        app_commands.Choice(name="role2", value="role2"),
+        app_commands.Choice(name="role3", value="role3"),
+        app_commands.Choice(name="mod", value="mod"),
+    ]
 
-    @frasi_group.command(name="off", description="Disabilita trigger frasi")
-    async def frasi_off(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "frasi", "off")
+    MATCH_MODE_CHOICES = [
+        app_commands.Choice(name="contains", value="CONTAINS"),
+        app_commands.Choice(name="regex", value="REGEX"),
+    ]
 
-    @frasi_group.command(name="status", description="Stato trigger frasi")
-    async def frasi_status(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "frasi", "status")
+    async def _guard(interaction: discord.Interaction, *legacy_aliases: str) -> bool:
+        return await check_permission(interaction, _command_permission_key(interaction), ctx, legacy_aliases=legacy_aliases)
 
-    @frasi_group.command(name="add", description="Aggiungi frase trigger")
-    @app_commands.describe(
-        phrase="Frase",
-        match_mode="contains|regex",
-        colore="Colore embed opzionale (#RRGGBB)",
-        cooldown="Cooldown in secondi (opzionale)",
-        ruoli="Ruoli autorizzati (menzioni o ID separati da virgole/spazi)",
-    )
-    @app_commands.choices(
-        match_mode=[
-            app_commands.Choice(name="contains", value="CONTAINS"),
-            app_commands.Choice(name="regex", value="REGEX"),
-        ]
-    )
-    async def frasi_add(
-        interaction: discord.Interaction,
-        phrase: str,
-        match_mode: app_commands.Choice[str],
-        colore: str | None = None,
-        cooldown: int | None = None,
-        ruoli: str | None = None,
-    ) -> None:
-        scope = await _require_channel(interaction)
+    async def _require_channel(interaction: discord.Interaction, *legacy_aliases: str) -> tuple[str, str] | None:
+        if not await _guard(interaction, *legacy_aliases):
+            return None
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message("Use this command in a guild channel.", ephemeral=True)
+            return None
+        return str(interaction.guild_id), str(interaction.channel_id)
+
+    async def _set_toggle(interaction: discord.Interaction, key: str, action: str, *legacy_aliases: str) -> None:
+        scope = await _require_channel(interaction, *legacy_aliases)
         if scope is None:
             return
         guild_id, channel_id = scope
-        if cooldown is not None and cooldown <= 0:
-            await interaction.response.send_message("Cooldown non valido. Inserisci un numero intero positivo di secondi.", ephemeral=True)
+        if key == "frasi":
+            if action == "status":
+                enabled = await ctx.database.get_trigger_enabled_global(guild_id, key)
+                if not enabled:
+                    enabled = await ctx.database.get_trigger_enabled_any_channel(guild_id, key)
+                await interaction.response.send_message(f"Phrase triggers are {'on' if enabled else 'off'} at server scope.", ephemeral=True)
+                return
+            enabled = action == "on"
+            await ctx.database.set_trigger_enabled_global(guild_id, key, enabled)
+            await interaction.response.send_message(
+                f"Phrase triggers are now {'enabled' if enabled else 'disabled'} at server scope.",
+                ephemeral=True,
+            )
             return
-        color = _normalize_embed_color(colore)
-        if colore is not None and color is None:
-            await interaction.response.send_message("Colore non valido. Usa #RRGGBB, RRGGBB, 0xRRGGBB o valore decimale.", ephemeral=True)
+        if action == "status":
+            enabled = await ctx.database.get_trigger_enabled(guild_id, channel_id, key)
+            await interaction.response.send_message(f"{key} is {'on' if enabled else 'off'} in this channel.", ephemeral=True)
             return
-        role_ids = _parse_role_ids_input(ruoli)
-        if role_ids and interaction.guild is None:
-            await interaction.response.send_message("Impossibile validare i ruoli senza guild.", ephemeral=True)
+        enabled = action == "on"
+        await ctx.database.set_trigger_enabled(guild_id, channel_id, key, enabled)
+        await interaction.response.send_message(f"{key} is now {'enabled' if enabled else 'disabled'} in this channel.", ephemeral=True)
+
+    def _format_phrase_row(row: dict[str, object]) -> str:
+        role_ids = row.get("allowed_role_ids") if isinstance(row.get("allowed_role_ids"), list) else []
+        roles_text = "all" if not role_ids else ", ".join(f"<@&{role_id}>" for role_id in role_ids)
+        mode_raw = str(row.get("match_mode") or "CONTAINS").lower()
+        cooldown_raw = row.get("cooldown_seconds")
+        cooldown_text = f"{cooldown_raw}s" if cooldown_raw is not None else "none"
+        enabled = bool(row.get("enabled", 1))
+        return " · ".join(
+            [
+                f"#{row.get('id')}",
+                f'"{row.get("phrase")}"',
+                f"mode: {mode_raw}",
+                f"color: {row.get('embed_color') or '-'}",
+                f"cooldown: {cooldown_text}",
+                f"roles: {roles_text}",
+                f"status: {'enabled' if enabled else 'disabled'}",
+            ]
+        )
+
+    def _humanize_ts(raw_ts: object) -> str:
+        if not raw_ts:
+            return "-"
+        try:
+            dt = datetime.fromisoformat(str(raw_ts))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
+            minutes = max(0, int(delta.total_seconds() // 60))
+            if minutes < 120:
+                rel = f"{minutes}m ago"
+            elif minutes < 60 * 48:
+                rel = f"{minutes // 60}h ago"
+            else:
+                rel = f"{minutes // (60 * 24)}d ago"
+            return f"{dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} ({rel})"
+        except ValueError:
+            return str(raw_ts)
+
+    @frasi_group.command(name="on", description="Enable phrase triggers")
+    async def frasi_on(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "frasi", "on")
+
+    @frasi_group.command(name="off", description="Disable phrase triggers")
+    async def frasi_off(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "frasi", "off")
+
+    @frasi_group.command(name="status", description="Show phrase trigger status")
+    async def frasi_status(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "frasi", "status")
+
+    @frasi_group.command(name="entry_add", description="Add a phrase trigger entry")
+    @app_commands.describe(
+        phrase="Trigger phrase",
+        match_mode="Phrase match mode",
+        color="Optional embed color (#RRGGBB)",
+        cooldown_seconds="Optional cooldown in seconds",
+        role_ids="Allowed roles as mentions or IDs",
+    )
+    @app_commands.choices(match_mode=MATCH_MODE_CHOICES)
+    async def frasi_entry_add(
+        interaction: discord.Interaction,
+        phrase: str,
+        match_mode: app_commands.Choice[str],
+        color: str | None = None,
+        cooldown_seconds: int | None = None,
+        role_ids: str | None = None,
+    ) -> None:
+        scope = await _require_channel(interaction, "frasi.add")
+        if scope is None:
             return
-        if role_ids and interaction.guild is not None:
-            invalid_ids = [role_id for role_id in role_ids if interaction.guild.get_role(int(role_id)) is None]
+        guild_id, channel_id = scope
+        if cooldown_seconds is not None and cooldown_seconds <= 0:
+            await interaction.response.send_message("cooldown_seconds must be a positive integer.", ephemeral=True)
+            return
+        parsed_color = _normalize_embed_color(color)
+        if color is not None and parsed_color is None:
+            await interaction.response.send_message("Invalid color. Use #RRGGBB, RRGGBB, 0xRRGGBB, or a decimal value.", ephemeral=True)
+            return
+        parsed_role_ids = _parse_role_ids_input(role_ids)
+        if parsed_role_ids and interaction.guild is None:
+            await interaction.response.send_message("Cannot validate roles without guild context.", ephemeral=True)
+            return
+        if parsed_role_ids and interaction.guild is not None:
+            invalid_ids = [role_id for role_id in parsed_role_ids if interaction.guild.get_role(int(role_id)) is None]
             if invalid_ids:
                 await interaction.response.send_message(
-                    f"Ruoli non validi per questo server: {', '.join(invalid_ids)}",
+                    f"Invalid roles for this server: {', '.join(invalid_ids)}",
                     ephemeral=True,
                 )
                 return
@@ -240,398 +324,282 @@ def register_triggers(
             phrase,
             match_mode.value,
             False,
-            color,
-            cooldown,
-            role_ids,
+            parsed_color,
+            cooldown_seconds,
+            parsed_role_ids,
         )
-        role_text = "tutti"
-        if role_ids:
-            role_text = ", ".join(f"<@&{role_id}>" for role_id in role_ids)
-        cooldown_text = f"{cooldown}s" if cooldown is not None else "nessuno"
-        await interaction.response.send_message(
-            "\n".join(
-                [
-                    "Frase aggiunta a livello server.",
-                    f"Cooldown: {cooldown_text}",
-                    f"Ruoli autorizzati: {role_text}",
-                ]
-            ),
-            ephemeral=True,
-        )
+        await interaction.response.send_message("Phrase trigger entry added.", ephemeral=True)
 
-    @frasi_group.command(name="remove", description="Rimuovi frase trigger")
-    async def frasi_remove(interaction: discord.Interaction, id_or_phrase: str) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="entry_remove", description="Remove a phrase trigger entry")
+    @app_commands.describe(id="Phrase entry ID")
+    async def frasi_entry_remove(interaction: discord.Interaction, id: int) -> None:
+        scope = await _require_channel(interaction, "frasi.remove")
         if scope is None:
             return
         guild_id, _ = scope
-        if id_or_phrase.isdigit():
-            await ctx.database.remove_trigger_phrase_by_id(guild_id, int(id_or_phrase))
-        else:
-            await ctx.database.remove_trigger_phrase_guild(guild_id, id_or_phrase)
-        await interaction.response.send_message("Frase rimossa.", ephemeral=True)
+        row = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        if not row:
+            await interaction.response.send_message(f"Phrase entry #{id} not found.", ephemeral=True)
+            return
+        await ctx.database.remove_trigger_phrase_by_id(guild_id, id)
+        await interaction.response.send_message(f"Phrase entry #{id} removed.", ephemeral=True)
 
-    @frasi_group.command(name="list", description="Lista frasi")
-    async def frasi_list(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="entry_list", description="List phrase trigger entries")
+    async def frasi_entry_list(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction, "frasi.list")
         if scope is None:
             return
         guild_id, _ = scope
         rows = await ctx.database.list_trigger_phrases_guild(guild_id)
         if not rows:
-            await interaction.response.send_message("Nessuna frase configurata.", ephemeral=True)
+            await interaction.response.send_message("No phrase entries configured.", ephemeral=True)
             return
-        lines: list[str] = []
-        for row in rows:
-            lines.append(_format_phrase_row(row))
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        await interaction.response.send_message("\n".join(_format_phrase_row(row) for row in rows), ephemeral=True)
 
-    @frasi_group.command(name="edit", description="Modifica frase trigger esistente")
-    @app_commands.describe(
-        id="ID frase da modificare",
-        frase="Nuovo testo frase",
-        match_mode="contains|regex",
-        colore="Nuovo colore (#RRGGBB)",
-        cooldown="Nuovo cooldown in secondi",
-        ruoli="Nuovi ruoli autorizzati (menzioni/ID)",
-        reset_ruoli="Rimuovi allowlist ruoli",
-        reset_cooldown="Rimuovi cooldown",
-        reset_colore="Rimuovi colore personalizzato",
-        attiva="Abilita/disabilita la singola frase",
-    )
-    @app_commands.choices(
-        match_mode=[
-            app_commands.Choice(name="contains", value="CONTAINS"),
-            app_commands.Choice(name="regex", value="REGEX"),
-        ]
-    )
-    async def frasi_edit(
-        interaction: discord.Interaction,
-        id: int,
-        frase: str | None = None,
-        match_mode: app_commands.Choice[str] | None = None,
-        colore: str | None = None,
-        cooldown: int | None = None,
-        ruoli: str | None = None,
-        reset_ruoli: bool = False,
-        reset_cooldown: bool = False,
-        reset_colore: bool = False,
-        attiva: bool | None = None,
-    ) -> None:
+    @frasi_group.command(name="entry_show", description="Show a phrase trigger entry")
+    @app_commands.describe(id="Phrase entry ID")
+    async def frasi_entry_show(interaction: discord.Interaction, id: int) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
-
         row = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
         if not row:
-            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+            await interaction.response.send_message(f"Phrase entry #{id} not found.", ephemeral=True)
             return
-
-        if reset_ruoli and ruoli:
-            await interaction.response.send_message("Non puoi usare insieme `ruoli` e `reset_ruoli=true`.", ephemeral=True)
-            return
-        if reset_cooldown and cooldown is not None:
-            await interaction.response.send_message("Non puoi usare insieme `cooldown` e `reset_cooldown=true`.", ephemeral=True)
-            return
-        if reset_colore and colore is not None:
-            await interaction.response.send_message("Non puoi usare insieme `colore` e `reset_colore=true`.", ephemeral=True)
-            return
-
-        if cooldown is not None and cooldown <= 0:
-            await interaction.response.send_message("Cooldown non valido. Inserisci un numero intero positivo di secondi.", ephemeral=True)
-            return
-
-        parsed_color: str | None = None
-        if colore is not None:
-            parsed_color = _normalize_embed_color(colore)
-            if parsed_color is None:
-                await interaction.response.send_message("Colore non valido. Usa #RRGGBB, RRGGBB, 0xRRGGBB o valore decimale.", ephemeral=True)
-                return
-
-        role_ids: list[str] | None = None
-        if ruoli is not None:
-            role_ids = _parse_role_ids_input(ruoli)
-            if interaction.guild is None:
-                await interaction.response.send_message("Impossibile validare i ruoli senza guild.", ephemeral=True)
-                return
-            invalid_ids = [role_id for role_id in role_ids if interaction.guild.get_role(int(role_id)) is None]
-            if invalid_ids:
-                await interaction.response.send_message(f"Ruoli non validi per questo server: {', '.join(invalid_ids)}", ephemeral=True)
-                return
-
-        requested = any(
-            [
-                frase is not None,
-                match_mode is not None,
-                colore is not None,
-                cooldown is not None,
-                ruoli is not None,
-                reset_ruoli,
-                reset_cooldown,
-                reset_colore,
-                attiva is not None,
-            ]
-        )
-        if not requested:
-            await interaction.response.send_message("Nessuna modifica richiesta.", ephemeral=True)
-            return
-
-        updated = await ctx.database.update_trigger_phrase(
-            guild_id,
-            id,
-            phrase=frase,
-            match_mode=match_mode.value if match_mode is not None else None,
-            embed_color=parsed_color if colore is not None else None,
-            set_embed_color=colore is not None or reset_colore,
-            cooldown_seconds=cooldown,
-            set_cooldown_seconds=cooldown is not None or reset_cooldown,
-            allowed_role_ids=role_ids,
-            set_allowed_role_ids=ruoli is not None or reset_ruoli,
-            enabled=attiva,
-        )
-        if not updated:
-            await interaction.response.send_message("Nessuna modifica richiesta.", ephemeral=True)
-            return
-        row_after = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        summary = await ctx.database.get_trigger_phrase_stats_summary(guild_id, id)
         await interaction.response.send_message(
             "\n".join(
                 [
-                    f"Frase #{id} aggiornata a livello server.",
-                    _format_phrase_row(row_after),
+                    _format_phrase_row(dict(row)),
+                    f"Last activity: {_humanize_ts(summary.get('last_seen_ts_max') or row.get('last_seen_ts'))}",
+                    f"Total uses: {int(summary.get('total_uses') or 0)}",
+                    f"Unique users: {int(summary.get('unique_users') or 0)}",
                 ]
             ),
             ephemeral=True,
         )
 
-    @frasi_group.command(name="stats", description="Statistiche dettagliate di una frase")
-    @app_commands.describe(id="ID frase")
-    async def frasi_stats(interaction: discord.Interaction, id: int) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="entry_edit", description="Edit a phrase trigger entry")
+    @app_commands.describe(
+        id="Phrase entry ID",
+        phrase="Updated trigger phrase",
+        match_mode="Phrase match mode",
+        color="Updated embed color (#RRGGBB)",
+        cooldown_seconds="Updated cooldown in seconds",
+        role_ids="Updated allowed roles as mentions or IDs",
+        reset_role_ids="Remove the role allowlist",
+        reset_cooldown="Remove the cooldown",
+        reset_color="Remove the custom color",
+        enabled="Enable or disable this phrase entry",
+    )
+    @app_commands.choices(match_mode=MATCH_MODE_CHOICES)
+    async def frasi_entry_edit(
+        interaction: discord.Interaction,
+        id: int,
+        phrase: str | None = None,
+        match_mode: app_commands.Choice[str] | None = None,
+        color: str | None = None,
+        cooldown_seconds: int | None = None,
+        role_ids: str | None = None,
+        reset_role_ids: bool = False,
+        reset_cooldown: bool = False,
+        reset_color: bool = False,
+        enabled: bool | None = None,
+    ) -> None:
+        scope = await _require_channel(interaction, "frasi.edit")
         if scope is None:
             return
         guild_id, _ = scope
-        phrase = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
-        if not phrase:
-            await interaction.response.send_message(f"Frase #{id} non trovata in questa guild.", ephemeral=True)
+        row = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        if not row:
+            await interaction.response.send_message(f"Phrase entry #{id} not found.", ephemeral=True)
+            return
+        if reset_role_ids and role_ids:
+            await interaction.response.send_message("Use either role_ids or reset_role_ids, not both.", ephemeral=True)
+            return
+        if reset_cooldown and cooldown_seconds is not None:
+            await interaction.response.send_message("Use either cooldown_seconds or reset_cooldown, not both.", ephemeral=True)
+            return
+        if reset_color and color is not None:
+            await interaction.response.send_message("Use either color or reset_color, not both.", ephemeral=True)
+            return
+        if cooldown_seconds is not None and cooldown_seconds <= 0:
+            await interaction.response.send_message("cooldown_seconds must be a positive integer.", ephemeral=True)
             return
 
-        summary = await ctx.database.get_trigger_phrase_stats_summary(guild_id, id)
-        top_users = await ctx.database.list_trigger_phrase_user_stats(guild_id, id, limit=10)
-        global_milestones_enabled = await ctx.database.get_trigger_phrase_global_milestones_enabled(guild_id)
-        global_milestones = await ctx.database.list_trigger_phrase_global_milestones(guild_id)
+        parsed_color: str | None = None
+        if color is not None:
+            parsed_color = _normalize_embed_color(color)
+            if parsed_color is None:
+                await interaction.response.send_message("Invalid color. Use #RRGGBB, RRGGBB, 0xRRGGBB, or a decimal value.", ephemeral=True)
+                return
 
-        embed = discord.Embed(
-            title=f"📊 STATISTICHE FRASE #{id}",
-            description=str(phrase.get("phrase") or ""),
-            color=discord.Color.blurple(),
+        parsed_role_ids: list[str] | None = None
+        if role_ids is not None:
+            parsed_role_ids = _parse_role_ids_input(role_ids)
+            if interaction.guild is None:
+                await interaction.response.send_message("Cannot validate roles without guild context.", ephemeral=True)
+                return
+            invalid_ids = [role_id for role_id in parsed_role_ids if interaction.guild.get_role(int(role_id)) is None]
+            if invalid_ids:
+                await interaction.response.send_message(f"Invalid roles for this server: {', '.join(invalid_ids)}", ephemeral=True)
+                return
+
+        updated = await ctx.database.update_trigger_phrase(
+            guild_id,
+            id,
+            phrase=phrase,
+            match_mode=match_mode.value if match_mode is not None else None,
+            embed_color=parsed_color if color is not None else None,
+            set_embed_color=color is not None or reset_color,
+            cooldown_seconds=cooldown_seconds,
+            set_cooldown_seconds=cooldown_seconds is not None or reset_cooldown,
+            allowed_role_ids=parsed_role_ids,
+            set_allowed_role_ids=role_ids is not None or reset_role_ids,
+            enabled=enabled,
         )
-        unique_users = int(summary.get("unique_users") or 0)
-        total_uses = int(summary.get("total_uses") or 0)
-        avg = (total_uses / unique_users) if unique_users > 0 else 0
-        embed.add_field(name="Utenti unici", value=str(unique_users), inline=True)
-        embed.add_field(name="Utilizzi totali", value=str(total_uses), inline=True)
-        embed.add_field(name="Media per utente", value=f"{avg:.2f}" if unique_users > 0 else "-", inline=True)
-        embed.add_field(name="Ultima attività frase", value=_humanize_ts(summary.get("last_seen_ts_max") or phrase.get("last_seen_ts")), inline=False)
-        embed.add_field(name="Milestone globali", value="ON" if global_milestones_enabled else "OFF", inline=True)
-        embed.add_field(name="N. milestone globali", value=str(len(global_milestones)), inline=True)
+        if not updated:
+            await interaction.response.send_message("No changes requested.", ephemeral=True)
+            return
+        row_after = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
+        await interaction.response.send_message(f"Updated phrase entry #{id}.\n{_format_phrase_row(row_after)}", ephemeral=True)
 
-        if not top_users:
-            embed.add_field(name="Top utenti", value="Nessun utilizzo registrato.", inline=False)
-        else:
-            lines: list[str] = []
-            for idx, row in enumerate(top_users, start=1):
-                user_id = str(row.get("user_id") or "")
-                user_label = user_id
-                if interaction.guild is not None and user_id.isdigit():
-                    member = interaction.guild.get_member(int(user_id))
-                    if member is not None:
-                        user_label = member.mention
-                lines.append(
-                    f"{idx}. {user_label} — {int(row.get('count') or 0)} volte — ultima: {_humanize_ts(row.get('last_seen_ts'))}"
-                )
-            embed.add_field(name="Top utenti", value="\n".join(lines), inline=False)
-
-        attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @frasi_group.command(name="milestone_global_on", description="Abilita milestone globali")
-    async def frasi_milestone_global_on(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_milestone_set", description="Create or update a milestone template")
+    @app_commands.describe(threshold="Milestone threshold", text="Milestone template text")
+    async def frasi_template_milestone_set(interaction: discord.Interaction, threshold: int, text: str) -> None:
+        scope = await _require_channel(interaction, "frasi.milestone_global_set")
         if scope is None:
             return
         guild_id, _ = scope
+        if threshold < 2:
+            await interaction.response.send_message("threshold must be greater than or equal to 2.", ephemeral=True)
+            return
+        cleaned_text = text.strip()
+        if not cleaned_text:
+            await interaction.response.send_message("text cannot be empty.", ephemeral=True)
+            return
         await ctx.database.set_trigger_phrase_global_milestones_enabled(guild_id, True)
-        await interaction.response.send_message("Milestone globali abilitate.", ephemeral=True)
+        await ctx.database.set_trigger_phrase_global_milestone(guild_id, threshold, cleaned_text)
+        await interaction.response.send_message(f"Milestone template saved for threshold {threshold}.", ephemeral=True)
 
-    @frasi_group.command(name="milestone_global_off", description="Disabilita milestone globali")
-    async def frasi_milestone_global_off(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        guild_id, _ = scope
-        await ctx.database.set_trigger_phrase_global_milestones_enabled(guild_id, False)
-        await interaction.response.send_message("Milestone globali disabilitate.", ephemeral=True)
-
-    @frasi_group.command(name="milestone_global_status", description="Stato milestone globali")
-    async def frasi_milestone_global_status(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_milestone_show", description="Show milestone templates")
+    async def frasi_template_milestone_show(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction, "frasi.milestone_global_list", "frasi.milestone_global_status")
         if scope is None:
             return
         guild_id, _ = scope
         enabled = await ctx.database.get_trigger_phrase_global_milestones_enabled(guild_id)
-        rows = await ctx.database.list_trigger_phrase_global_milestones(guild_id)
-        await interaction.response.send_message(
-            f"Milestone globali: {'ON' if enabled else 'OFF'} · configurate: {len(rows)}",
-            ephemeral=True,
-        )
+        milestones = await ctx.database.list_trigger_phrase_global_milestones(guild_id)
+        if not milestones:
+            await interaction.response.send_message(f"Milestone templates are {'enabled' if enabled else 'disabled'}. No templates configured.", ephemeral=True)
+            return
+        lines = [f"Milestone templates are {'enabled' if enabled else 'disabled'}."]
+        lines.extend(f"{int(m['threshold_count'])} -> {str(m['template_text'])}" for m in milestones)
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-    @frasi_group.command(name="milestone_global_set", description="Imposta/aggiorna milestone globale")
-    @app_commands.describe(soglia="Soglia conteggio utente", testo="Template milestone globale")
-    async def frasi_milestone_global_set(interaction: discord.Interaction, soglia: int, testo: str) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        guild_id, _ = scope
-        if soglia < 2:
-            await interaction.response.send_message("La soglia deve essere >= 2.", ephemeral=True)
-            return
-        text_clean = testo.strip()
-        if not text_clean:
-            await interaction.response.send_message("Il testo milestone non può essere vuoto.", ephemeral=True)
-            return
-        await ctx.database.set_trigger_phrase_global_milestone(guild_id, soglia, text_clean)
-        await interaction.response.send_message(f"Milestone globale impostata alla soglia {soglia}.", ephemeral=True)
-
-    @frasi_group.command(name="milestone_global_remove", description="Rimuovi milestone globale")
-    @app_commands.describe(soglia="Soglia milestone")
-    async def frasi_milestone_global_remove(interaction: discord.Interaction, soglia: int) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        guild_id, _ = scope
-        deleted = await ctx.database.delete_trigger_phrase_global_milestone(guild_id, soglia)
-        if not deleted:
-            await interaction.response.send_message(f"Nessuna milestone globale alla soglia {soglia}.", ephemeral=True)
-            return
-        await interaction.response.send_message(f"Milestone globale rimossa alla soglia {soglia}.", ephemeral=True)
-
-    @frasi_group.command(name="milestone_global_list", description="Lista milestone globali")
-    async def frasi_milestone_global_list(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_milestone_reset", description="Reset all milestone templates")
+    async def frasi_template_milestone_reset(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction, "frasi.milestone_global_remove")
         if scope is None:
             return
         guild_id, _ = scope
         milestones = await ctx.database.list_trigger_phrase_global_milestones(guild_id)
-        if not milestones:
-            await interaction.response.send_message("Nessuna milestone globale configurata.", ephemeral=True)
-            return
-        lines = [f"{int(m['threshold_count'])} → \"{str(m['template_text'])}\"" for m in milestones]
-        await interaction.response.send_message("\n".join(["Milestone globali:", *lines]), ephemeral=True)
+        for milestone in milestones:
+            await ctx.database.delete_trigger_phrase_global_milestone(guild_id, int(milestone["threshold_count"]))
+        await ctx.database.set_trigger_phrase_global_milestones_enabled(guild_id, False)
+        await interaction.response.send_message(f"Reset {len(milestones)} milestone templates.", ephemeral=True)
 
-    @frasi_group.command(name="template_show", description="Mostra template trigger frasi")
-    async def frasi_template_show(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        guild_id, _ = scope
-        state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
-        normalized = _normalize_phrase_templates_state(state)
-        pretty = json.dumps(normalized, ensure_ascii=False, indent=2)
-        guide = (
-            "Placeholder disponibili:\n"
-            "{author}, {author_name}, {phrase}, {count_user_prev}, {count_user}, {last_seen_human}, {last_seen_dt}, {milestone}, {custom_user_phrase}\n"
-            "Nota: i template per-user legacy non sono più usati a runtime; usa /frasi userphrase_set."
-        )
-        await interaction.response.send_message(f"```json\n{pretty}\n```\n{guide}", ephemeral=True)
-
-    @frasi_group.command(name="template_set", description="Template frasi server")
-    @app_commands.choices(
-        kind=[
-            app_commands.Choice(name="DEFAULT", value="DEFAULT"),
-            app_commands.Choice(name="FIRST", value="FIRST"),
-        ]
-    )
-    async def frasi_template_set(interaction: discord.Interaction, kind: app_commands.Choice[str], text: str) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_global_set", description="Set the global phrase template")
+    @app_commands.describe(text="Template text")
+    async def frasi_template_global_set(interaction: discord.Interaction, text: str) -> None:
+        scope = await _require_channel(interaction, "frasi.template_set")
         if scope is None:
             return
         guild_id, _ = scope
         state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
         normalized = _normalize_phrase_templates_state(state)
         templates = dict(normalized.get("templates") or {})
-        templates[kind.value] = text
+        templates["DEFAULT"] = text
         normalized["templates"] = templates
         await ctx.database.set_trigger_state_global(guild_id, "frasi", normalized)
-        await interaction.response.send_message(f"Template {kind.value} aggiornato.", ephemeral=True)
+        await interaction.response.send_message("Global phrase template updated.", ephemeral=True)
 
-    @frasi_group.command(name="template_reset", description="Reset template trigger frasi")
-    async def frasi_template_reset(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_global_show", description="Show the global phrase template")
+    async def frasi_template_global_show(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction, "frasi.template_show")
         if scope is None:
             return
         guild_id, _ = scope
-        await ctx.database.set_trigger_state_global(guild_id, "frasi", {})
-        await interaction.response.send_message("Template trigger frasi globali resettati (DEFAULT/FIRST).", ephemeral=True)
+        state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
+        normalized = _normalize_phrase_templates_state(state)
+        templates = dict(normalized.get("templates") or {})
+        default_template = templates.get("DEFAULT") or "-"
+        first_template = templates.get("FIRST") or "-"
+        await interaction.response.send_message(
+            f"DEFAULT: {default_template}\nFIRST: {first_template}",
+            ephemeral=True,
+        )
 
-    @frasi_group.command(name="userphrase_set", description="Imposta frase custom globale utente")
-    async def frasi_userphrase_set(interaction: discord.Interaction, utente: discord.Member, testo: str) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_global_reset", description="Reset the global phrase template")
+    async def frasi_template_global_reset(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction, "frasi.template_reset")
         if scope is None:
             return
         guild_id, _ = scope
-        text_clean = testo.strip()
-        if not text_clean:
-            await interaction.response.send_message("Il testo non può essere vuoto.", ephemeral=True)
-            return
-        if len(text_clean) > 300:
-            await interaction.response.send_message("Testo troppo lungo (max 300 caratteri).", ephemeral=True)
-            return
-        await ctx.database.upsert_trigger_phrase_global_user_custom_text(guild_id, str(utente.id), text_clean)
-        await interaction.response.send_message(f"Frase custom globale aggiornata per {utente.mention}.", ephemeral=True)
+        state = await ctx.database.get_trigger_state_any_channel(guild_id, "frasi")
+        normalized = _normalize_phrase_templates_state(state)
+        templates = dict(normalized.get("templates") or {})
+        templates.pop("DEFAULT", None)
+        if templates:
+            normalized["templates"] = templates
+        else:
+            normalized.pop("templates", None)
+        await ctx.database.set_trigger_state_global(guild_id, "frasi", normalized)
+        await interaction.response.send_message("Global phrase template reset.", ephemeral=True)
 
-    @frasi_group.command(name="userphrase_remove", description="Rimuovi frase custom globale utente")
-    async def frasi_userphrase_remove(interaction: discord.Interaction, utente: discord.Member) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_user_set", description="Set a user-specific phrase template")
+    @app_commands.describe(user="Target user", text="Template text")
+    async def frasi_template_user_set(interaction: discord.Interaction, user: discord.Member, text: str) -> None:
+        scope = await _require_channel(interaction, "frasi.userphrase_set")
         if scope is None:
             return
         guild_id, _ = scope
-        removed = await ctx.database.delete_trigger_phrase_global_user_custom_text(guild_id, str(utente.id))
-        if not removed:
-            await interaction.response.send_message(f"Nessuna frase custom globale trovata per {utente.mention}.", ephemeral=True)
+        cleaned_text = text.strip()
+        if not cleaned_text:
+            await interaction.response.send_message("text cannot be empty.", ephemeral=True)
             return
-        await interaction.response.send_message(f"Frase custom globale rimossa per {utente.mention}.", ephemeral=True)
+        if len(cleaned_text) > 300:
+            await interaction.response.send_message("text is too long (max 300 characters).", ephemeral=True)
+            return
+        await ctx.database.upsert_trigger_phrase_global_user_custom_text(guild_id, str(user.id), cleaned_text)
+        await interaction.response.send_message(f"User phrase template updated for {user.mention}.", ephemeral=True)
 
-    @frasi_group.command(name="userphrase_show", description="Mostra frase custom globale utente")
-    async def frasi_userphrase_show(interaction: discord.Interaction, utente: discord.Member) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_user_show", description="Show a user-specific phrase template")
+    @app_commands.describe(user="Target user")
+    async def frasi_template_user_show(interaction: discord.Interaction, user: discord.Member) -> None:
+        scope = await _require_channel(interaction, "frasi.userphrase_show")
         if scope is None:
             return
         guild_id, _ = scope
-        text = await ctx.database.get_trigger_phrase_global_user_custom_text(guild_id, str(utente.id))
+        text = await ctx.database.get_trigger_phrase_global_user_custom_text(guild_id, str(user.id))
         if not text:
-            await interaction.response.send_message(f"{utente.mention} non ha una frase custom globale.", ephemeral=True)
+            await interaction.response.send_message(f"No user phrase template found for {user.mention}.", ephemeral=True)
             return
-        await interaction.response.send_message(f"{utente.mention} → {text}", ephemeral=True)
+        await interaction.response.send_message(f"{user.mention} -> {text}", ephemeral=True)
 
-    @frasi_group.command(name="userphrase_list", description="Lista frasi custom globali utenti")
-    async def frasi_userphrase_list(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
+    @frasi_group.command(name="template_user_reset", description="Reset a user-specific phrase template")
+    @app_commands.describe(user="Target user")
+    async def frasi_template_user_reset(interaction: discord.Interaction, user: discord.Member) -> None:
+        scope = await _require_channel(interaction, "frasi.userphrase_remove")
         if scope is None:
             return
         guild_id, _ = scope
-        rows = await ctx.database.list_trigger_phrase_global_user_custom_texts(guild_id)
-        if not rows:
-            await interaction.response.send_message("Nessuna frase custom globale configurata.", ephemeral=True)
+        removed = await ctx.database.delete_trigger_phrase_global_user_custom_text(guild_id, str(user.id))
+        if not removed:
+            await interaction.response.send_message(f"No user phrase template found for {user.mention}.", ephemeral=True)
             return
-        lines: list[str] = []
-        for row in rows[:30]:
-            user_id = str(row.get("user_id") or "")
-            mention = f"<@{user_id}>" if user_id.isdigit() else user_id
-            lines.append(f"{mention} → {row.get('custom_text')}")
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
-
-
+        await interaction.response.send_message(f"User phrase template reset for {user.mention}.", ephemeral=True)
     @barcello_group.command(name="calibrate", description="Calibra pesi barcello")
     async def barcello_calibrate(interaction: discord.Interaction) -> None:
         if not await _guard(interaction):
@@ -644,78 +612,91 @@ def register_triggers(
             message = f"Calibrazione non aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
         await interaction.followup.send(message, ephemeral=True)
 
-    @prompt_group.command(name="on", description="Abilita trigger prompt")
+    @prompt_group.command(name="on", description="Enable prompt campaigns in the current channel")
     async def prompt_on(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "prompt", "on")
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        rows = await ctx.database.list_message_campaigns(guild_id, include_disabled=True)
+        prompt_rows = [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT" and str(row["channel_id"]) == channel_id]
+        for row in prompt_rows:
+            await ctx.database.set_message_campaign_enabled(guild_id, int(row["id"]), True)
+        await interaction.response.send_message(f"Prompt campaigns enabled in this channel. Updated {len(prompt_rows)} entries.", ephemeral=True)
 
-    @prompt_group.command(name="off", description="Disabilita trigger prompt")
+    @prompt_group.command(name="off", description="Disable prompt campaigns in the current channel")
     async def prompt_off(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "prompt", "off")
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        rows = await ctx.database.list_message_campaigns(guild_id, include_disabled=True)
+        prompt_rows = [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT" and str(row["channel_id"]) == channel_id]
+        for row in prompt_rows:
+            await ctx.database.set_message_campaign_enabled(guild_id, int(row["id"]), False)
+        await interaction.response.send_message(f"Prompt campaigns disabled in this channel. Updated {len(prompt_rows)} entries.", ephemeral=True)
 
-    @prompt_group.command(name="status", description="Stato trigger prompt")
+    @prompt_group.command(name="status", description="Show prompt campaign status for the current channel")
     async def prompt_status(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "prompt", "status")
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        rows = await ctx.database.list_message_campaigns(guild_id, include_disabled=True)
+        prompt_rows = [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT" and str(row["channel_id"]) == channel_id]
+        enabled_count = sum(1 for row in prompt_rows if bool(row.get("enabled")))
+        await interaction.response.send_message(f"Prompt campaigns in this channel: {enabled_count}/{len(prompt_rows)} enabled.", ephemeral=True)
 
-    @prompt_group.command(name="create", description="Crea campagna AI_PROMPT")
+    @prompt_group.command(name="entry_add", description="Add a prompt campaign entry")
     @app_commands.describe(
-        prompt_text="Prompt da usare per la campagna",
-        name="Nome campagna (opzionale)",
-        publish_at="Prima pubblicazione (DD/MM/YYYY HH:MM)",
-        every="Intervallo ripetizione: es 1440min",
-        embed_title="Titolo embed opzionale",
-        embed_color="Colore embed opzionale",
+        text="Prompt text",
+        name="Optional campaign name",
+        publish_at="First publication time (DD/MM/YYYY HH:MM)",
+        every="Repeat interval in minutes",
+        embed_title="Optional embed title",
+        embed_color="Optional embed color",
     )
-    async def prompt_create(
+    async def prompt_entry_add(
         interaction: discord.Interaction,
-        prompt_text: str,
+        text: str,
         name: str | None = None,
         publish_at: str | None = None,
         every: int | None = None,
         embed_title: str | None = None,
         embed_color: str | None = None,
     ) -> None:
-        if not await _guard(interaction):
+        if not await _guard(interaction, "campagne.prompt.create"):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
-            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            await interaction.response.send_message("Use this command in a guild channel.", ephemeral=True)
             return
         if ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
-            await interaction.response.send_message("embed_color non valido. Usa #RRGGBB, RRGGBB oppure 0xRRGGBB.", ephemeral=True)
+            await interaction.response.send_message("Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.", ephemeral=True)
             return
-
         now_utc = datetime.now(timezone.utc)
         now_local = now_utc.astimezone(ctx.timezone)
         resolved_name = (name or "").strip() or f"prompt-{now_local.strftime('%Y%m%d-%H%M')}"
         resolved_interval = int(every or 0)
-
         if resolved_interval < 0:
-            await interaction.response.send_message("every non può essere negativo.", ephemeral=True)
+            await interaction.response.send_message("every must be greater than or equal to 0.", ephemeral=True)
             return
-
         publish_at_raw = (publish_at or "").strip()
         publish_at_dt = parse_italian_datetime(publish_at_raw) if publish_at_raw else None
         if publish_at_raw and publish_at_dt is None:
-            await interaction.response.send_message("Formato `publish_at` non valido. Usa DD/MM/YYYY HH:MM.", ephemeral=True)
+            await interaction.response.send_message("Invalid publish_at format. Use DD/MM/YYYY HH:MM.", ephemeral=True)
             return
-
         if publish_at_dt is not None:
             next_run = publish_at_dt.astimezone(timezone.utc)
             resolved_time_local = publish_at_dt.astimezone(ctx.timezone).strftime("%H:%M")
         else:
             next_run = now_utc
             resolved_time_local = now_local.strftime("%H:%M")
-
-        if resolved_interval > 0:
-            recurring = True
-        else:
-            recurring = False
-
         campaign_id = await ctx.database.create_message_campaign(
             guild_id=str(interaction.guild_id),
             channel_id=str(interaction.channel_id),
             campaign_type="AI_PROMPT",
             name=resolved_name,
-            text=prompt_text,
+            text=text,
             text_green=None,
             text_yellow=None,
             text_red=None,
@@ -731,97 +712,96 @@ def register_triggers(
             embed_title=embed_title,
             embed_color=embed_color,
         )
-        if recurring:
-            await interaction.response.send_message(
-                f"Campagna AI_PROMPT creata: {campaign_id} • nome={resolved_name} • prima esecuzione={next_run.isoformat()} • ogni={resolved_interval}min",
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.send_message(
-                f"Campagna AI_PROMPT one-shot creata: {campaign_id} • nome={resolved_name} • esecuzione prevista={next_run.isoformat()}",
-                ephemeral=True,
-            )
+        await interaction.response.send_message(f"Prompt campaign {campaign_id} created.", ephemeral=True)
 
-    @prompt_group.command(name="list", description="Lista campagne AI_PROMPT")
-    async def prompt_list(interaction: discord.Interaction) -> None:
-        if not await _guard(interaction):
+    @prompt_group.command(name="entry_list", description="List prompt campaign entries")
+    async def prompt_entry_list(interaction: discord.Interaction) -> None:
+        if not await _guard(interaction, "campagne.prompt.list"):
             return
         if interaction.guild_id is None:
-            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            await interaction.response.send_message("Use this command in a guild.", ephemeral=True)
             return
         rows = await ctx.database.list_message_campaigns(str(interaction.guild_id), include_disabled=True)
-        rows = [r for r in rows if str(r["type"]) == "AI_PROMPT"]
-        if not rows:
-            await interaction.response.send_message("Nessuna campagna AI_PROMPT.", ephemeral=True)
+        prompt_rows = [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT"]
+        if not prompt_rows:
+            await interaction.response.send_message("No prompt campaigns configured.", ephemeral=True)
             return
         await interaction.response.send_message(
             "\n".join(
+                f"ID {row['id']} {'on' if row['enabled'] else 'off'} {row['name'] or '-'} ch={row['channel_id'] or '-'} next={row['next_run_at'] or '-'} every={'one-shot' if int(row['interval_minutes']) <= 0 else str(row['interval_minutes']) + 'm'}"
+                for row in prompt_rows
+            ),
+            ephemeral=True,
+        )
+
+    @prompt_group.command(name="entry_show", description="Show a prompt campaign entry")
+    @app_commands.describe(id="Prompt campaign ID")
+    async def prompt_entry_show(interaction: discord.Interaction, id: int) -> None:
+        if not await _guard(interaction):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Use this command in a guild.", ephemeral=True)
+            return
+        row = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
+        if not row or str(row["type"]) != "AI_PROMPT":
+            await interaction.response.send_message("Prompt campaign not found.", ephemeral=True)
+            return
+        payload = dict(row)
+        await interaction.response.send_message(
+            "\n".join(
                 [
-                    f"ID {r['id']} {'on' if r['enabled'] else 'off'} {r['name'] or '-'} ch={r['channel_id'] or '-'} next={r['next_run_at'] or '-'}"
-                    f" frequenza={'one-shot' if int(r['interval_minutes']) <= 0 else 'ogni ' + str(r['interval_minutes']) + 'm'}"
-                    f" embed_title={r['embed_title'] or '-'} embed_color={r['embed_color'] or '-'}"
-                    for r in rows
+                    f"ID {payload['id']}",
+                    f"name={payload['name'] or '-'}",
+                    f"enabled={'on' if payload['enabled'] else 'off'}",
+                    f"channel={payload['channel_id']}",
+                    f"publish_at={payload['start_time_local']}",
+                    f"every={payload['interval_minutes']}",
+                    f"next={payload['next_run_at']}",
+                    f"embed_title={payload['embed_title'] or '-'}",
+                    f"embed_color={payload['embed_color'] or '-'}",
+                    f"text={payload['text'] or '-'}",
                 ]
             ),
             ephemeral=True,
         )
 
-    @prompt_group.command(name="delete", description="Elimina campagna AI_PROMPT")
-    async def prompt_delete(interaction: discord.Interaction, id_or_name: str) -> None:
-        if not await _guard(interaction):
+    @prompt_group.command(name="entry_remove", description="Remove a prompt campaign entry")
+    @app_commands.describe(id="Prompt campaign ID")
+    async def prompt_entry_remove(interaction: discord.Interaction, id: int) -> None:
+        if not await _guard(interaction, "campagne.prompt.delete"):
             return
         if interaction.guild_id is None:
-            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            await interaction.response.send_message("Use this command in a guild.", ephemeral=True)
             return
-        campaign_id: int | None = int(id_or_name) if id_or_name.isdigit() else None
-        if campaign_id is None:
-            rows = await ctx.database.list_message_campaigns(str(interaction.guild_id), include_disabled=True)
-            row = next((r for r in rows if str(r["type"]) == "AI_PROMPT" and str(r["name"] or "") == id_or_name), None)
-            if row is None:
-                await interaction.response.send_message("Campagna non trovata.", ephemeral=True)
-                return
-            campaign_id = int(row["id"])
-        await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), campaign_id)
-        await interaction.response.send_message("Campagna eliminata.", ephemeral=True)
+        row = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
+        if not row or str(row["type"]) != "AI_PROMPT":
+            await interaction.response.send_message("Prompt campaign not found.", ephemeral=True)
+            return
+        await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), id)
+        await interaction.response.send_message("Prompt campaign removed.", ephemeral=True)
 
-    @prompt_group.command(name="test", description="Genera e invia un test AI_PROMPT")
-    @app_commands.describe(id="ID campagna")
-    async def prompt_test(interaction: discord.Interaction, id: int) -> None:
-        if not await _guard(interaction):
+    @prompt_group.command(name="entry_run", description="Run a prompt campaign entry now")
+    @app_commands.describe(id="Prompt campaign ID")
+    async def prompt_entry_run(interaction: discord.Interaction, id: int) -> None:
+        if not await _guard(interaction, "campagne.prompt.test"):
             return
         if interaction.guild_id is None or interaction.channel is None or interaction.channel_id is None:
-            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            await interaction.response.send_message("Use this command in a guild channel.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         campaign = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
-        if not campaign:
-            await interaction.followup.send("Campagna non trovata.", ephemeral=True)
+        if not campaign or str(campaign["type"]) != "AI_PROMPT":
+            await interaction.followup.send("Prompt campaign not found.", ephemeral=True)
             return
-        if not isinstance(campaign, dict) and hasattr(campaign, "keys"):
-            campaign = dict(campaign)
-
-        logger.info(
-            "prompt_test campaign_id=%s type=%s user=%s channel=%s",
-            id,
-            campaign.get("type"),
-            interaction.user.id,
-            interaction.channel_id,
-        )
-        if str(campaign.get("type")) != "AI_PROMPT":
-            await interaction.followup.send("Questo test è solo per AI_PROMPT.", ephemeral=True)
-            return
-
         if ctx.message_scheduler is None:
-            await interaction.followup.send("Servizio scheduler non disponibile.", ephemeral=True)
+            await interaction.followup.send("Scheduler service unavailable.", ephemeral=True)
             return
-
-        logger.info("prompt_test campaign_id=%s used_service=%s", id, "message_scheduler")
         rendered_text, reason, debug_payload = await ctx.message_scheduler.preview_campaign_text(
-            campaign,
+            dict(campaign),
             channel_id_override=str(interaction.channel_id),
         )
         logger.info(
-            "prompt_test campaign_id=%s user=%s channel=%s ai_called=%s reason=%s",
+            "prompt_entry_run campaign_id=%s user=%s channel=%s ai_called=%s reason=%s",
             id,
             interaction.user.id,
             interaction.channel_id,
@@ -829,30 +809,106 @@ def register_triggers(
             reason,
         )
         if not rendered_text:
-            await interaction.followup.send(
-                f"Impossibile generare il test ({reason or 'no_text'}).",
-                ephemeral=True,
-            )
+            await interaction.followup.send(f"Unable to generate output ({reason or 'no_text'}).", ephemeral=True)
             return
-
-        await interaction.followup.send("Test inviato.", ephemeral=True)
+        await interaction.followup.send("Prompt campaign sent.", ephemeral=True)
         if isinstance(interaction.channel, discord.abc.Messageable):
-            await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
+            await ctx.message_scheduler.send_campaign_embed(interaction.channel, dict(campaign), rendered_text)
 
-    @qna_group.command(name="on", description="Abilita trigger qna")
+    @prompt_group.command(name="entry_edit", description="Edit a prompt campaign entry")
+    @app_commands.describe(
+        id="Prompt campaign ID",
+        text="Updated prompt text",
+        name="Updated campaign name",
+        publish_at="First publication time (DD/MM/YYYY HH:MM)",
+        every="Repeat interval in minutes",
+        embed_title="Updated embed title",
+        embed_color="Updated embed color",
+        enabled="Enable or disable this entry",
+    )
+    async def prompt_entry_edit(
+        interaction: discord.Interaction,
+        id: int,
+        text: str | None = None,
+        name: str | None = None,
+        publish_at: str | None = None,
+        every: int | None = None,
+        embed_title: str | None = None,
+        embed_color: str | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        if not await _guard(interaction, "campagne.prompt.create"):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Use this command in a guild.", ephemeral=True)
+            return
+        campaign = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
+        if not campaign or str(campaign["type"]) != "AI_PROMPT":
+            await interaction.response.send_message("Prompt campaign not found.", ephemeral=True)
+            return
+        if ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
+            await interaction.response.send_message("Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.", ephemeral=True)
+            return
+        start_time_local = None
+        interval_minutes = None
+        next_run_at = None
+        if publish_at is not None or every is not None:
+            current_interval = every if every is not None else int(campaign["interval_minutes"])
+            publish_at_raw = (publish_at or "").strip()
+            if publish_at_raw:
+                publish_at_dt = parse_italian_datetime(publish_at_raw)
+                if publish_at_dt is None:
+                    await interaction.response.send_message("Invalid publish_at format. Use DD/MM/YYYY HH:MM.", ephemeral=True)
+                    return
+                start_time_local = publish_at_dt.astimezone(ctx.timezone).strftime("%H:%M")
+                next_run_at = publish_at_dt.astimezone(timezone.utc).isoformat()
+            else:
+                now = datetime.now(timezone.utc)
+                start_time_local = str(campaign["start_time_local"])
+                next_run = now if current_interval <= 0 else now
+                next_run_at = next_run.isoformat()
+            interval_minutes = current_interval
+        updated = await ctx.database.update_message_campaign(
+            str(interaction.guild_id),
+            id,
+            name=name,
+            text=text,
+            start_time_local=start_time_local,
+            interval_minutes=interval_minutes,
+            next_run_at=next_run_at,
+            embed_title=embed_title,
+            embed_color=embed_color,
+            set_name=name is not None,
+            set_text=text is not None,
+            set_start_time_local=start_time_local is not None,
+            set_interval_minutes=interval_minutes is not None,
+            set_next_run_at=next_run_at is not None,
+            set_embed_title=embed_title is not None,
+            set_embed_color=embed_color is not None,
+        )
+        if enabled is not None:
+            await ctx.database.set_message_campaign_enabled(str(interaction.guild_id), id, enabled)
+        if not updated and enabled is None:
+            await interaction.response.send_message("No changes requested.", ephemeral=True)
+            return
+        await interaction.response.send_message(f"Prompt campaign {id} updated.", ephemeral=True)
+
+    @qna_group.command(name="on", description="Enable QnA in the current channel")
     async def qna_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "on")
 
-    @qna_group.command(name="off", description="Disabilita trigger qna")
+    @qna_group.command(name="off", description="Disable QnA in the current channel")
     async def qna_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "off")
 
-    @qna_group.command(name="status", description="Stato trigger qna")
+    @qna_group.command(name="status", description="Show QnA status for the current channel")
     async def qna_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "qna", "status")
 
-    @qna_group.command(name="limits_show", description="Mostra limiti giornalieri QnA")
-    async def qna_limits_show(interaction: discord.Interaction) -> None:
+    @qna_group.command(name="limits_show", description="Show QnA daily limits")
+    @app_commands.describe(tier="Optional QnA tier filter")
+    @app_commands.choices(tier=TIER_CHOICES)
+    async def qna_limits_show(interaction: discord.Interaction, tier: app_commands.Choice[str] | None = None) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
@@ -866,21 +922,22 @@ def register_triggers(
             except json.JSONDecodeError:
                 parsed = defaults
             data = parsed if isinstance(parsed, dict) else defaults
+        if tier is not None:
+            value = int(data.get(tier.value, defaults[tier.value]))
+            await interaction.response.send_message(f"{tier.value}={value}", ephemeral=True)
+            return
         pretty = json.dumps(data, ensure_ascii=False, indent=2)
         await interaction.response.send_message(f"```json\n{pretty}\n```", ephemeral=True)
 
-    @qna_group.command(name="limits_set", description="Imposta limite QnA tier")
-    async def qna_limits_set(interaction: discord.Interaction, tier_key: str, limit_int: int) -> None:
+    @qna_group.command(name="limits_set", description="Set a QnA daily limit")
+    @app_commands.describe(tier="QnA tier", limit="Daily question limit")
+    @app_commands.choices(tier=TIER_CHOICES)
+    async def qna_limits_set(interaction: discord.Interaction, tier: app_commands.Choice[str], limit: int) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        allowed_keys = {"base", "role1", "role2", "role3", "mod"}
-        key = tier_key.strip().lower()
-        if key not in allowed_keys:
-            await interaction.response.send_message("tier_key non valido. Usa: base, role1, role2, role3, mod.", ephemeral=True)
-            return
-        if limit_int < 0 or limit_int > 999:
-            await interaction.response.send_message("limit_int deve essere tra 0 e 999.", ephemeral=True)
+        if limit < 0 or limit > 999:
+            await interaction.response.send_message("limit must be between 0 and 999.", ephemeral=True)
             return
         raw = await ctx.database.get_setting("qna.daily_limits")
         data = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
@@ -891,95 +948,126 @@ def register_triggers(
                 parsed = None
             if isinstance(parsed, dict):
                 data.update(parsed)
-        data[key] = int(limit_int)
+        data[tier.value] = int(limit)
         await ctx.database.set_setting("qna.daily_limits", json.dumps(data, ensure_ascii=False))
-        await interaction.response.send_message(f"Limite aggiornato: {key}={limit_int}", ephemeral=True)
+        await interaction.response.send_message(f"QnA limit updated: {tier.value}={limit}.", ephemeral=True)
 
-    @qna_group.command(name="bonus_add", description="Aggiungi bonus QnA utente")
-    async def qna_bonus_add(interaction: discord.Interaction, user: discord.Member, amount_int: int, hours_valid: int | None = None) -> None:
-        if not await _guard(interaction):
+    @qna_group.command(name="limits_reset", description="Reset QnA daily limits to defaults")
+    async def qna_limits_reset(interaction: discord.Interaction) -> None:
+        scope = await _require_channel(interaction)
+        if scope is None:
+            return
+        defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
+        await ctx.database.set_setting("qna.daily_limits", json.dumps(defaults, ensure_ascii=False))
+        await interaction.response.send_message("QnA daily limits reset to defaults.", ephemeral=True)
+
+    @qna_group.command(name="bonus_set", description="Set a QnA bonus for a user")
+    @app_commands.describe(user="Target user", amount="Bonus amount", hours_valid="Optional validity in hours")
+    async def qna_bonus_set(interaction: discord.Interaction, user: discord.Member, amount: int, hours_valid: int | None = None) -> None:
+        if not await _guard(interaction, "qna.bonus_add"):
             return
         if interaction.guild_id is None:
-            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            await interaction.response.send_message("Use this command in a guild.", ephemeral=True)
             return
-        if amount_int < 0 or amount_int > 999:
-            await interaction.response.send_message("amount_int deve essere tra 0 e 999.", ephemeral=True)
+        if amount < 0 or amount > 999:
+            await interaction.response.send_message("amount must be between 0 and 999.", ephemeral=True)
             return
         expires_at = None
         if hours_valid is not None:
             if hours_valid <= 0 or hours_valid > 24 * 30:
-                await interaction.response.send_message("hours_valid non valido (1..720).", ephemeral=True)
+                await interaction.response.send_message("hours_valid must be between 1 and 720.", ephemeral=True)
                 return
             expires_at = (datetime.now(timezone.utc) + timedelta(hours=hours_valid)).isoformat()
-        current_bonus, _ = await ctx.database.get_qna_bonus(str(interaction.guild_id), str(user.id))
-        new_bonus = current_bonus + int(amount_int)
-        await ctx.database.set_qna_bonus(str(interaction.guild_id), str(user.id), new_bonus, expires_at)
+        await ctx.database.set_qna_bonus(str(interaction.guild_id), str(user.id), int(amount), expires_at)
         await interaction.response.send_message(
-            f"Bonus impostato per {user.mention}: {current_bonus} → {new_bonus}" + (f" fino a {expires_at}" if expires_at else ""),
+            f"QnA bonus set for {user.mention}: {amount}" + (f" until {expires_at}" if expires_at else ""),
             ephemeral=True,
         )
 
-    @qna_group.command(name="bonus_clear", description="Rimuove bonus domande QnA")
-    async def qna_bonus_clear(interaction: discord.Interaction, user: discord.Member) -> None:
-        if not await _guard(interaction):
-            return
-        if interaction.guild_id is None:
-            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
-            return
-        await ctx.database.clear_qna_bonus(str(interaction.guild_id), str(user.id))
-        await interaction.response.send_message(f"Bonus rimosso per {user.mention}.", ephemeral=True)
-
-    @qna_group.command(name="bonus_show", description="Mostra bonus domande QnA")
+    @qna_group.command(name="bonus_show", description="Show a user's QnA bonus")
+    @app_commands.describe(user="Target user")
     async def qna_bonus_show(interaction: discord.Interaction, user: discord.Member) -> None:
         if not await _guard(interaction):
             return
         if interaction.guild_id is None:
-            await interaction.response.send_message("Usa in una guild.", ephemeral=True)
+            await interaction.response.send_message("Use this command in a guild.", ephemeral=True)
             return
         bonus, expires_at = await ctx.database.get_qna_bonus(str(interaction.guild_id), str(user.id))
-        await interaction.response.send_message(
-            f"Bonus attivo per {user.mention}: {bonus}\nScadenza: {expires_at or '-'}",
-            ephemeral=True,
-        )
+        await interaction.response.send_message(f"QnA bonus for {user.mention}: {bonus}\nExpires: {expires_at or '-'}", ephemeral=True)
 
-    @insights_group.command(name="on", description="Abilita trigger curiosità utenti")
+    @qna_group.command(name="bonus_reset", description="Reset a user's QnA bonus")
+    @app_commands.describe(user="Target user")
+    async def qna_bonus_reset(interaction: discord.Interaction, user: discord.Member) -> None:
+        if not await _guard(interaction, "qna.bonus_clear"):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Use this command in a guild.", ephemeral=True)
+            return
+        await ctx.database.clear_qna_bonus(str(interaction.guild_id), str(user.id))
+        await interaction.response.send_message(f"QnA bonus reset for {user.mention}.", ephemeral=True)
+
+    @insights_group.command(name="on", description="Enable insights in the current channel")
     async def insights_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "insights", "on")
 
-    @insights_group.command(name="off", description="Disabilita trigger curiosità utenti")
+    @insights_group.command(name="off", description="Disable insights in the current channel")
     async def insights_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "insights", "off")
 
-    @insights_group.command(name="status", description="Stato curiosità utenti")
+    @insights_group.command(name="status", description="Show insights status for the current channel")
     async def insights_status(interaction: discord.Interaction) -> None:
         if not await _guard(interaction):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
-            await interaction.response.send_message("Usa in un canale.", ephemeral=True)
+            await interaction.response.send_message("Use this command in a guild channel.", ephemeral=True)
             return
         if ctx.trigger_engine is None:
-            await interaction.response.send_message("Trigger engine non disponibile.", ephemeral=True)
+            await interaction.response.send_message("Trigger engine unavailable.", ephemeral=True)
             return
         status = await ctx.trigger_engine.get_insights_status(str(interaction.guild_id), str(interaction.channel_id))
         await interaction.response.send_message(
-            f"Insights: {'on' if status['enabled'] else 'off'}\n"
-            f"Intervallo: {status['interval_minutes']} min\n"
-            f"Template: {str(status['template'])[:140]}\n"
-            f"Ultimo invio: {status['last_post_at'] or '-'}",
+            "\n".join(
+                [
+                    f"Insights: {'on' if status['enabled'] else 'off'}",
+                    f"Interval: {status['interval_minutes']} min",
+                    f"Template: {str(status['template'])[:140]}",
+                    f"Last post: {status['last_post_at'] or '-'}",
+                ]
+            ),
             ephemeral=True,
         )
 
-    @insights_group.command(name="config", description="Configura curiosità utenti")
-    async def insights_config(interaction: discord.Interaction, testo: str) -> None:
+    @insights_group.command(name="template_set", description="Set the insights template")
+    @app_commands.describe(text="Template text or natural-language config prompt")
+    async def insights_template_set(interaction: discord.Interaction, text: str) -> None:
+        if not await _guard(interaction, "insights.config"):
+            return
+        if ctx.trigger_engine is None:
+            await interaction.response.send_message("Trigger engine unavailable.", ephemeral=True)
+            return
+        config = await ctx.trigger_engine.configure_insights(text)
+        await interaction.response.send_message(
+            f"Insights template saved. Interval: {config['interval_minutes']} min. Template: {config['template'][:120]}",
+            ephemeral=True,
+        )
+
+    @insights_group.command(name="template_show", description="Show the insights template")
+    async def insights_template_show(interaction: discord.Interaction) -> None:
         if not await _guard(interaction):
             return
         if ctx.trigger_engine is None:
-            await interaction.response.send_message("Trigger engine non disponibile.", ephemeral=True)
+            await interaction.response.send_message("Trigger engine unavailable.", ephemeral=True)
             return
-        config = await ctx.trigger_engine.configure_insights(testo)
-        await interaction.response.send_message(
-            f"Configurazione salvata: ogni {config['interval_minutes']} min. Template: {config['template'][:120]}",
-            ephemeral=True,
-        )
+        raw = await ctx.database.get_setting("community_insights.config")
+        config = await ctx.trigger_engine._community_insights.get_config(raw)
+        pretty = json.dumps(config, ensure_ascii=False, indent=2)
+        await interaction.response.send_message(f"```json\n{pretty}\n```", ephemeral=True)
+
+    @insights_group.command(name="template_reset", description="Reset the insights template to defaults")
+    async def insights_template_reset(interaction: discord.Interaction) -> None:
+        if not await _guard(interaction, "insights.config"):
+            return
+        await ctx.database.set_setting("community_insights.config", "{}")
+        await interaction.response.send_message("Insights template reset to defaults.", ephemeral=True)
 
     return frasi_group
