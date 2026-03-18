@@ -114,6 +114,7 @@ class ServiceFooterVariant:
 
 
 _EMBED_META: dict[int, tuple[discord.Embed, FooterMeta]] = {}
+_MINIMAL_FOOTERS: dict[int, tuple[discord.Embed, str, str | None]] = {}
 
 
 def _clean(value: str | None) -> str:
@@ -226,6 +227,26 @@ def pop_footer_meta(embed: discord.Embed) -> FooterMeta | None:
         return None
     return meta
 
+
+
+
+def attach_minimal_footer(embed: discord.Embed, *, text: str, icon_url: str | None = None) -> discord.Embed:
+    if embed is None:
+        raise ValueError("attach_minimal_footer requires a discord.Embed instance, got None")
+    _MINIMAL_FOOTERS[id(embed)] = (embed, _clean(text) or "Barcellometro", _clean(icon_url) or None)
+    return embed
+
+
+def pop_minimal_footer(embed: discord.Embed) -> tuple[str, str | None] | None:
+    if embed is None:
+        return None
+    stored = _MINIMAL_FOOTERS.pop(id(embed), None)
+    if stored is None:
+        return None
+    stored_embed, text, icon_url = stored
+    if stored_embed is not embed:
+        return None
+    return text, icon_url
 
 def copy_footer_meta(source: discord.Embed, target: discord.Embed) -> discord.Embed:
     meta = get_footer_meta(source)
@@ -560,6 +581,11 @@ class FooterService:
         return _truncate(FOOTER_SEPARATOR.join(parts)), phrase
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
+        minimal_footer = pop_minimal_footer(embed)
+        if minimal_footer is not None:
+            text, icon_url = minimal_footer
+            embed.set_footer(text=text, icon_url=icon_url)
+            return embed
         meta = pop_footer_meta(embed)
         if meta is None:
             meta = FooterMeta(service_name=_clean(default_service_name) or "unknown", contributors=[], used_local_processing=False)

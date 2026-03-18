@@ -8,6 +8,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.ai_model_catalog import build_model_autocomplete_choices
 from app.services.footer import ServiceFooterProfile, ServiceFooterVariant, _is_persistable_service_name
+from app.utils.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 
 
 def _clean_opt(value: str | None) -> str | None:
@@ -119,6 +120,29 @@ def _chunk_status_blocks(blocks: list[str], max_len: int = 1900) -> list[str]:
     if current:
         chunks.append(current)
     return [chunk for chunk in chunks if chunk]
+
+
+
+
+async def _send_admin_response(
+    interaction: discord.Interaction,
+    ctx: CommandContext,
+    *,
+    subcommand_path: str,
+    lines: list[tuple[str, object]] | None = None,
+    sections: list[CommandEmbedSection] | None = None,
+    kind: str = "info",
+) -> None:
+    await send_standard_response(
+        interaction,
+        top_level="bm",
+        subcommand_path=subcommand_path,
+        lines=lines,
+        sections=sections,
+        kind=kind,
+        footer_service=ctx.footer,
+        ephemeral=True,
+    )
 
 
 def _truncate_embed_text(value: str | None, limit: int = 1000) -> str:
@@ -271,6 +295,7 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         values: dict[str, str],
         task: str | None,
     ) -> None:
+        header = "ai model_show" if "primary" in title.lower() else "ai fallback_show"
         if task is not None:
             await send_standard_command_embed(
                 interaction,
@@ -907,6 +932,5 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "status"], entries=[("Reason", "No footer data available")], tone="warning", service_name="status")
             return
 
-        await interaction.response.send_message(chunks[0], ephemeral=True)
-        for extra in chunks[1:]:
-            await interaction.followup.send(extra, ephemeral=True)
+        sections_payload = [CommandEmbedSection(title="Details", lines=[("status", chunk)]) for chunk in chunks]
+        await _send_admin_response(interaction, ctx, subcommand_path="footer status", lines=[("footer_rendering", "on" if enabled else "off")], sections=sections_payload)

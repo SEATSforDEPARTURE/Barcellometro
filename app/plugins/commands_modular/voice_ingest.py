@@ -7,6 +7,7 @@ from app.plugins.commands_modular.command_helpers import send_standard_command_e
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import set_setting
+from app.utils.command_embeds import send_standard_response
 
 
 def voice_ingest_key(bot_id: int, key: str) -> str:
@@ -16,10 +17,7 @@ def voice_ingest_key(bot_id: int, key: str) -> str:
 def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandContext) -> None:
     @voice_ingest_group.command(name="join", description="Join a voice channel manually.")
     @app_commands.describe(voice_channel="Voice channel.")
-    async def voice_ingest_join(
-        interaction: discord.Interaction,
-        voice_channel: discord.VoiceChannel,
-    ) -> None:
+    async def voice_ingest_join(interaction: discord.Interaction, voice_channel: discord.VoiceChannel) -> None:
         if not await check_permission(interaction, "bm.voice_ingest.join", ctx):
             return
         if not ctx.bot.user:
