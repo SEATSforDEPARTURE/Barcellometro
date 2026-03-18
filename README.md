@@ -202,3 +202,4 @@ sqlite3 bot.sqlite "SELECT * FROM events ORDER BY ts DESC LIMIT 5;"
 - `app/core`: config, logging, ServiceRegistry, PluginLoader, entrypoint.
 - `app/services`: DatabaseService, IngestService, RetentionService, BackfillService, CommandGuardService, AiService, STT/Translate services, StatusService.
 - `app/plugins`: adapter Discord (eventi), comandi slash, consumer di esempio.
+- `python -m scripts.validate_commands`: valida la slash tree, segnala naming/triadi/descrizioni fuori standard e può rigenerare `docs/command_tree_report.md`.

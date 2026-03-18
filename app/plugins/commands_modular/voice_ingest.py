@@ -13,8 +13,8 @@ def voice_ingest_key(bot_id: int, key: str) -> str:
 
 
 def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandContext) -> None:
-    @voice_ingest_group.command(name="join", description="Join manuale del canale vocale")
-    @app_commands.describe(voice_channel="Canale vocale")
+    @voice_ingest_group.command(name="join", description="Join a voice channel manually.")
+    @app_commands.describe(voice_channel="Voice channel.")
     async def voice_ingest_join(
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel,
@@ -32,7 +32,7 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
         if ctx.voice_ingest:
             await ctx.voice_ingest.join(voice_channel)
 
-    @voice_ingest_group.command(name="leave", description="Leave manuale del canale vocale")
+    @voice_ingest_group.command(name="leave", description="Leave the current voice channel manually.")
     async def voice_ingest_leave(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.voice_ingest.leave", ctx):
             return
