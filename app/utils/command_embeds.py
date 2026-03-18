@@ -252,10 +252,17 @@ async def send_command_embeds(
         return
     first = embed_list[0]
     extras = embed_list[1:]
+    kwargs: dict[str, Any] = {
+        "content": content,
+        "embed": first,
+        "ephemeral": ephemeral,
+    }
+    if files:
+        kwargs["files"] = files
     if interaction.response.is_done():
-        await interaction.followup.send(content=content, embed=first, ephemeral=ephemeral, files=files)
+        await interaction.followup.send(**kwargs)
     else:
-        await interaction.response.send_message(content=content, embed=first, ephemeral=ephemeral, files=files)
+        await interaction.response.send_message(**kwargs)
     for extra in extras:
         await interaction.followup.send(embed=extra, ephemeral=ephemeral)
 
