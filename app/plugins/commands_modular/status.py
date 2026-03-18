@@ -5,6 +5,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.utils.command_embeds import send_standard_response
 
 
 def register_status(bm_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -15,24 +16,34 @@ def register_status(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             return
         if service:
             status = ctx.status.component_status(service)
-            message = (
-                f"**{service}**\n"
-                f"Active: {status['active']}\n"
-                f"State: {status['state']}\n"
-                f"Metrics: {status['metrics']}"
+            await send_standard_response(
+                interaction,
+                top_level="bm",
+                subcommand_path=f"bm status {service}",
+                lines=[
+                    ("active", status.get("active")),
+                    ("state", status.get("state")),
+                    ("metrics", status.get("metrics")),
+                ],
+                footer_service=ctx.footer,
+                ephemeral=True,
             )
-            await interaction.response.send_message(message, ephemeral=True)
             return
         general = await ctx.status.general_status()
-        message = (
-            "**Barcellometro Status**\n"
-            "Bot: online\n"
-            f"DB Path: {general['db_path']}\n"
-            f"Retention Days: {general['retention_days']}\n"
-            f"Enabled Channels: {general['enabled_channels']}\n"
-            f"Users: {general['users_count']}\n"
-            f"Messages: {general['messages_count']}\n"
-            f"Events: {general['events_count']}\n"
-            f"Last Event: {general['last_event_ts']}"
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="bm status",
+            lines=[
+                ("bot", "online"),
+                ("db_path", general.get("db_path")),
+                ("retention_days", general.get("retention_days")),
+                ("enabled_channels", general.get("enabled_channels")),
+                ("users", general.get("users_count")),
+                ("messages", general.get("messages_count")),
+                ("events", general.get("events_count")),
+                ("last_event", general.get("last_event_ts")),
+            ],
+            footer_service=ctx.footer,
+            ephemeral=True,
         )
-        await interaction.response.send_message(message, ephemeral=True)
