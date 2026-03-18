@@ -12,6 +12,8 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting, set_setting
 from app.plugins.commands_modular.voice_ingest import voice_ingest_key
 
+PRIVACY_ALIASES = ("bm.privacy.on", "bm.privacy.off", "bm.privacy.status")
+
 
 def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> None:
     async def resolve_voice_channel(
@@ -77,21 +79,21 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
             )
         )
 
-    @privacy_group.command(name="on", description="Attiva privacy vocale")
-    @app_commands.describe(voice_channel="Canale vocale")
+    @privacy_group.command(name="on", description="Enable voice privacy.")
+    @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
     async def privacy_on(
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,
     ) -> None:
-        if not await check_permission(interaction, "bm.privacy.on", ctx):
+        if not await check_permission(interaction, "privacy.on", ctx, legacy_aliases=PRIVACY_ALIASES):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:
-            await interaction.response.send_message("Specifica un canale vocale.", ephemeral=True)
+            await interaction.response.send_message("Select a voice channel first.", ephemeral=True)
             return
         bot_ids = await resolve_affected_bots(resolved_voice)
         if not bot_ids:
-            await interaction.response.send_message("Nessun bot configurato per questo canale vocale.", ephemeral=True)
+            await interaction.response.send_message("No configured bot was found for this voice channel.", ephemeral=True)
             return
         for bot_id in bot_ids:
             await set_setting(ctx, voice_ingest_key(bot_id, "privacy_mode"), "true")
@@ -101,54 +103,54 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         if ctx.voice_ingest and ctx.bot.user and ctx.bot.user.id in bot_ids:
             await ctx.voice_ingest.leave()
         await interaction.response.send_message(
-            f"Privacy attivata per {resolved_voice.name}. Bot interessati: {len(bot_ids)}.",
+            f"Voice privacy enabled for {resolved_voice.name}. Affected bots: {len(bot_ids)}.",
             ephemeral=True,
         )
 
-    @privacy_group.command(name="off", description="Disattiva privacy vocale")
-    @app_commands.describe(voice_channel="Canale vocale")
+    @privacy_group.command(name="off", description="Disable voice privacy.")
+    @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
     async def privacy_off(
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,
     ) -> None:
-        if not await check_permission(interaction, "bm.privacy.off", ctx):
+        if not await check_permission(interaction, "privacy.off", ctx, legacy_aliases=PRIVACY_ALIASES):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:
-            await interaction.response.send_message("Specifica un canale vocale.", ephemeral=True)
+            await interaction.response.send_message("Select a voice channel first.", ephemeral=True)
             return
         bot_ids = await resolve_affected_bots(resolved_voice)
         if not bot_ids:
-            await interaction.response.send_message("Nessun bot configurato per questo canale vocale.", ephemeral=True)
+            await interaction.response.send_message("No configured bot was found for this voice channel.", ephemeral=True)
             return
         for bot_id in bot_ids:
             await set_setting(ctx, voice_ingest_key(bot_id, "privacy_mode"), "false")
             await set_setting(ctx, voice_ingest_key(bot_id, "auto_join"), "true")
             await set_setting(ctx, voice_ingest_key(bot_id, "enabled"), "true")
         await emit_privacy_event(interaction, "voice.privacy_off", resolved_voice, bot_ids)
-        non_bot_members = [m for m in resolved_voice.members if not m.bot]
+        non_bot_members = [member for member in resolved_voice.members if not member.bot]
         if ctx.voice_ingest and ctx.bot.user and ctx.bot.user.id in bot_ids and non_bot_members:
             await ctx.voice_ingest.join(resolved_voice)
         await interaction.response.send_message(
-            f"Privacy disattivata per {resolved_voice.name}. Bot interessati: {len(bot_ids)}.",
+            f"Voice privacy disabled for {resolved_voice.name}. Affected bots: {len(bot_ids)}.",
             ephemeral=True,
         )
 
-    @privacy_group.command(name="status", description="Mostra lo stato privacy")
-    @app_commands.describe(voice_channel="Canale vocale")
+    @privacy_group.command(name="status", description="Show the current voice privacy status.")
+    @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
     async def privacy_status(
         interaction: discord.Interaction,
         voice_channel: discord.VoiceChannel | None = None,
     ) -> None:
-        if not await check_permission(interaction, "bm.privacy.status", ctx):
+        if not await check_permission(interaction, "privacy.status", ctx, legacy_aliases=PRIVACY_ALIASES):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:
-            await interaction.response.send_message("Specifica un canale vocale.", ephemeral=True)
+            await interaction.response.send_message("Select a voice channel first.", ephemeral=True)
             return
         bot_ids = await resolve_affected_bots(resolved_voice)
         if not bot_ids:
-            await interaction.response.send_message("Nessun bot configurato per questo canale vocale.", ephemeral=True)
+            await interaction.response.send_message("No configured bot was found for this voice channel.", ephemeral=True)
             return
         states = []
         for bot_id in bot_ids:
@@ -166,13 +168,13 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         last_event = await ctx.database.get_last_privacy_event(str(resolved_voice.id))
         last_change = "N/A"
         if last_event:
-            actor = f"<@{last_event['actor_id']}>" if last_event.get("actor_id") else "sconosciuto"
-            last_change = f"{last_event['event_type']} alle {last_event['ts']} da {actor}"
+            actor = f"<@{last_event['actor_id']}>" if last_event.get("actor_id") else "unknown"
+            last_change = f"{last_event['event_type']} at {last_event['ts']} by {actor}"
         if len(privacy_values) == 1:
             status = "ON" if True in privacy_values else "OFF"
             message = (
-                f"Privacy {status} su {resolved_voice.name}. Bot: {len(bot_ids)}. "
-                f"Ultimo cambio: {last_change}"
+                f"Privacy {status} for {resolved_voice.name}. Bots: {len(bot_ids)}. "
+                f"Last change: {last_change}"
             )
         else:
             lines = [
@@ -180,8 +182,8 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
                 for bot_id, privacy, auto_join, enabled in states
             ]
             message = (
-                f"Privacy su {resolved_voice.name} (stati misti):\n"
+                f"Privacy status for {resolved_voice.name} (mixed state):\n"
                 + "\n".join(lines)
-                + f"\nUltimo cambio: {last_change}"
+                + f"\nLast change: {last_change}"
             )
         await interaction.response.send_message(message, ephemeral=True)

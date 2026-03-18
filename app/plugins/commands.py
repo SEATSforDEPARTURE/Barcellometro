@@ -58,13 +58,14 @@ def setup(registry: ServiceRegistry) -> None:
     qna_group = app_commands.Group(name="qna", description="QnA controls")
     insights_group = app_commands.Group(name="insights", description="Insights controls")
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Voice ingest")
-    privacy_group = app_commands.Group(name="privacy", description="Voice privacy")
-    riassunto_group = app_commands.Group(name="riassunto", description="Riassunti")
-    aura_group = app_commands.Group(name="aura", description="Resoconto aura")
-    attivita_group = app_commands.Group(name="attivita", description="Comandi attività utenti")
-    moderazione_group = app_commands.Group(name="moderazione", description="Comandi moderazione")
-    resocontocanale_group = app_commands.Group(name="resocontocanale", description="Resoconto canale")
-    resocontoserver_group = app_commands.Group(name="resocontoserver", description="Resoconto server")
+    privacy_group = app_commands.Group(name="privacy", description="Voice privacy controls")
+    riassunto_group = app_commands.Group(name="riassunto", description="Summaries")
+    aura_group = app_commands.Group(name="aura", description="Aura reports")
+    attivita_group = app_commands.Group(name="attivita", description="User activity commands")
+    mod_group = app_commands.Group(name="mod", description="Moderation controls")
+    inactivity_group = app_commands.Group(name="inactivity", description="Inactive member moderation")
+    resocontocanale_group = app_commands.Group(name="resocontocanale", description="Channel summary schedules")
+    resocontoserver_group = app_commands.Group(name="resocontoserver", description="Server summary schedules")
 
     add_group_once(bm_group, commandguard_group, logger)
     add_group_once(bm_group, stt_group, logger)
@@ -87,10 +88,8 @@ def setup(registry: ServiceRegistry) -> None:
     register_attivita(attivita_group, ctx)
     register_attivita_settings(attivita_group, ctx)
 
-    inattivi_group = app_commands.Group(name="inattivi", description="Gestione utenti inattivi")
-    add_group_once(moderazione_group, inattivi_group, logger)
-    register_inattivi(inattivi_group, ctx)
-    register_moderazione_utenti(moderazione_group, ctx)
+    register_inattivi(inactivity_group, ctx)
+    register_moderazione_utenti(mod_group, ctx)
 
     register_resoconto(resocontocanale_group, resocontoserver_group, ctx)
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
@@ -115,7 +114,8 @@ def setup(registry: ServiceRegistry) -> None:
         riassunto_group,
         aura_group,
         attivita_group,
-        moderazione_group,
+        mod_group,
+        inactivity_group,
         resocontocanale_group,
         resocontoserver_group,
         privacy_group,
