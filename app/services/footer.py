@@ -244,6 +244,16 @@ class FooterService:
         self._service_variants: dict[str, dict[str, ServiceFooterVariant]] = {}
         self._known_services_loaded = False
 
+    async def set_enabled(self, enabled: bool) -> None:
+        await self._database.set_setting("footer.enabled", "true" if enabled else "false")
+
+    async def is_enabled(self) -> bool:
+        stored = await self._database.get_setting("footer.enabled")
+        if stored is None:
+            await self._database.set_setting("footer.enabled", "true")
+            return True
+        return stored.lower() in {"1", "true", "yes", "y"}
+
     async def set_version(self, version: str | None) -> None:
         await self._set_or_clear(FOOTER_VERSION_KEY, version)
 

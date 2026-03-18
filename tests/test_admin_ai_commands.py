@@ -11,26 +11,27 @@ def test_ai_model_choices_include_campaign_and_audio_tasks() -> None:
 
 def test_ai_commands_are_registered_under_ai_group_namespace() -> None:
     source = Path("app/plugins/commands_modular/admin.py").read_text()
-    assert 'ai_group = app_commands.Group(name="ai", description="Gestione servizio AI")' in source
-    assert "bm_group.add_command(ai_group)" in source
+    assert 'ai_group = app_commands.Group(name="ai", description="AI service controls")' in source
+    assert 'bm_group.add_command(ai_group)' in source
     assert '@ai_group.command(name="on"' in source
     assert '@ai_group.command(name="off"' in source
-    assert '@ai_group.command(name="model"' in source
-    assert '@ai_group.command(name="fallback-model"' in source
+    assert '@ai_group.command(name="model_set"' in source
+    assert '@ai_group.command(name="model_show"' in source
+    assert '@ai_group.command(name="fallback_set"' in source
+    assert '@ai_group.command(name="fallback_show"' in source
     assert '@ai_group.command(name="status"' in source
-    assert '@ai_group.command(name="test"' in source
+    assert '@ai_group.command(name="run"' in source
 
 
-def test_legacy_ai_sibling_commands_are_removed() -> None:
+def test_legacy_ai_command_names_are_removed() -> None:
     source = Path("app/plugins/commands_modular/admin.py").read_text()
-    assert '@bm_group.command(name="ai-model"' not in source
-    assert '@bm_group.command(name="ai-fallback-model"' not in source
-    assert '@bm_group.command(name="ai-status"' not in source
-    assert '@bm_group.command(name="ai-test"' not in source
+    assert '@ai_group.command(name="model"' not in source
+    assert '@ai_group.command(name="fallback-model"' not in source
+    assert '@ai_group.command(name="test"' not in source
 
 
 def test_ai_model_autocomplete_is_configured_on_model_commands() -> None:
     source = Path("app/plugins/commands_modular/admin.py").read_text()
-    assert "async def _autocomplete_ai_model(" in source
-    assert "build_model_autocomplete_choices(task_value, current)" in source
-    assert source.count("@app_commands.autocomplete(model=_autocomplete_ai_model)") >= 2
+    assert 'async def _autocomplete_ai_model(' in source
+    assert 'build_model_autocomplete_choices(task_value, current)' in source
+    assert source.count('@app_commands.autocomplete(model=_autocomplete_ai_model)') >= 2

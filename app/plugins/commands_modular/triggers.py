@@ -30,10 +30,8 @@ def register_triggers(
     ctx: CommandContext,
 ) -> app_commands.Group:
     frasi_group = app_commands.Group(name="frasi", description="Frasi")
-    barcello_group = app_commands.Group(name="barcello", description="Trigger Barcello")
     prompt_group = app_commands.Group(name="prompt", description="Prompt campagne")
 
-    add_group_once(bm_group, barcello_group, logger)
     add_group_once(campagne_group, prompt_group, logger)
 
     def _command_permission_key(interaction: discord.Interaction) -> str:
@@ -178,112 +176,6 @@ def register_triggers(
             return f"{dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} ({rel})"
         except ValueError:
             return str(raw_ts)
-
-    @barcello_group.command(name="on", description="Abilita trigger barcello")
-    async def barcello_on(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "barcello", "on")
-
-    @barcello_group.command(name="off", description="Disabilita trigger barcello")
-    async def barcello_off(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "barcello", "off")
-
-    @barcello_group.command(name="status", description="Stato trigger barcello")
-    async def barcello_status(interaction: discord.Interaction) -> None:
-        await _set_toggle(interaction, "barcello", "status")
-
-    @barcello_group.command(name="mood", description="Mostra/imposta mood")
-    @app_commands.describe(value="Nuovo mood")
-    async def barcello_mood(interaction: discord.Interaction, value: str | None = None) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        guild_id, channel_id = scope
-        cfg = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
-
-        stored = await ctx.database.get_trigger_state(guild_id, channel_id, "barcello_mood")
-        stored_mood = str(stored.get("mood") or "")
-
-        channels_cfg = cfg.get("channels") if isinstance(cfg.get("channels"), dict) else {}
-        channel_cfg = channels_cfg.get(channel_id) if isinstance(channels_cfg.get(channel_id), dict) else {}
-        cfg_default = str(cfg.get("mood_default") or "chill")
-        channel_default = str(channel_cfg.get("mood_default") or "")
-        effective = stored_mood or channel_default or cfg_default
-
-        time_buckets = cfg.get("time_buckets") if isinstance(cfg.get("time_buckets"), dict) else {}
-        now_rome = datetime.now(ctx.timezone)
-        current_hour = now_rome.hour
-        time_bucket = "unknown"
-        for name, payload in time_buckets.items():
-            if not isinstance(payload, dict):
-                continue
-            start = payload.get("start")
-            end = payload.get("end")
-            if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= 24 and start <= current_hour < end:
-                time_bucket = str(name)
-                break
-
-        daily = await ctx.database.get_trigger_state(guild_id, channel_id, "barcello_daily")
-        day_key = now_rome.date().isoformat()
-        counts = daily.get("counts") if isinstance(daily.get("counts"), dict) and str(daily.get("date") or "") == day_key else {}
-        last_status = await ctx.database.get_barcello_trigger_state(guild_id, channel_id)
-        current_color = str((last_status or {}).get("last_color") or "")
-        state_count_today = int(counts.get(current_color) or 0) if current_color else 0
-
-        tiers = cfg.get("dramatic_tiers") if isinstance(cfg.get("dramatic_tiers"), list) else [{"min_count_today": 1, "label": "t1"}]
-        drama_label = "t1"
-        for tier in tiers:
-            if not isinstance(tier, dict):
-                continue
-            minimum = tier.get("min_count_today")
-            label = tier.get("label")
-            if isinstance(minimum, int) and isinstance(label, str) and state_count_today >= minimum:
-                drama_label = label
-
-        if value is None:
-            await interaction.response.send_message(
-                "\n".join(
-                    [
-                        f"Mood attuale: `{effective}`",
-                        f"Mood salvato: `{stored_mood or '-'}`",
-                        f"Mood default canale: `{channel_default or '-'}`",
-                        f"Mood default globale: `{cfg_default}`",
-                        f"Time bucket corrente: `{time_bucket}`",
-                        f"Drama label corrente: `{drama_label}` (count {state_count_today}, stato {current_color or '-'})",
-                    ]
-                ),
-                ephemeral=True,
-            )
-            return
-
-        normalized = value.strip()
-        if not normalized:
-            await interaction.response.send_message("Inserisci un mood valido.", ephemeral=True)
-            return
-        cfg = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
-        available_moods = cfg.get("moods") if isinstance(cfg.get("moods"), dict) else {}
-        if available_moods and normalized not in available_moods:
-            await interaction.response.send_message(
-                f"Mood `{normalized}` non definito in config. Disponibili: {', '.join(sorted(available_moods.keys()))}",
-                ephemeral=True,
-            )
-            return
-        today = datetime.now(ctx.timezone).date().isoformat()
-        await ctx.database.set_trigger_state(
-            guild_id,
-            channel_id,
-            "barcello_mood",
-            {"mood": normalized, "date": today, "mode": "manual"},
-        )
-        await interaction.response.send_message(f"Mood impostato a `{normalized}` per questo canale.", ephemeral=True)
-
-    @barcello_group.command(name="mood_reset", description="Reset mood del canale")
-    async def barcello_mood_reset(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        guild_id, channel_id = scope
-        await ctx.database.set_trigger_state(guild_id, channel_id, "barcello_mood", {})
-        await interaction.response.send_message("Mood resettato: torna al default config.", ephemeral=True)
 
     @frasi_group.command(name="on", description="Abilita trigger frasi")
     async def frasi_on(interaction: discord.Interaction) -> None:

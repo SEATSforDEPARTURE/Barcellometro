@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 async def finalize_embed(embed: discord.Embed, footer_service: FooterService, *, default_service_name: str = "unknown") -> discord.Embed:
     try:
+        if not await footer_service.is_enabled():
+            return embed
         return await footer_service.apply(embed, default_service_name=default_service_name)
     except Exception as exc:  # noqa: BLE001
         if "database is locked" in str(exc).lower():

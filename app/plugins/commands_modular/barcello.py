@@ -15,6 +15,7 @@ from discord import app_commands
 from app.services.entitlements import EntitlementsService
 from app.services.config_file_loader import load_json_file
 from app.services.barcello_window import resolve_default_window_minutes
+from app.plugins.commands_modular.command_helpers import add_group_once
 from app.utils.embed_limits import _split_field_chunks
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
@@ -26,8 +27,10 @@ logger = logging.getLogger(__name__)
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
-def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowflake | None, ctx: CommandContext) -> None:
+def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None:
     response_format_supported: bool | None = None
+    barcello_group = app_commands.Group(name="barcello", description="Barcello controls")
+    add_group_once(bm_group, barcello_group, logger)
 
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
         ephemeral = interaction.guild_id is not None
@@ -35,6 +38,145 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
             await interaction.followup.send(message, ephemeral=ephemeral)
         else:
             await interaction.response.send_message(message, ephemeral=ephemeral)
+
+    async def _require_channel_scope(interaction: discord.Interaction) -> tuple[str, str] | None:
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await send_ephemeral(interaction, "This command only works in guild channels.")
+            return None
+        return str(interaction.guild_id), str(interaction.channel_id)
+
+    async def _set_toggle(interaction: discord.Interaction, action: str) -> None:
+        if not await check_permission(interaction, f"bm.barcello.{action}", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        if action == "status":
+            enabled = await ctx.database.get_trigger_enabled(guild_id, channel_id, "barcello")
+            await send_ephemeral(interaction, f"Barcello trigger is {'on' if enabled else 'off'} for this channel.")
+            return
+        enabled = action == "on"
+        await ctx.database.set_trigger_enabled(guild_id, channel_id, "barcello", enabled)
+        await send_ephemeral(interaction, f"Barcello trigger {'enabled' if enabled else 'disabled'} for this channel.")
+
+    async def _show_mood(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "bm.barcello.mood_show", ctx, legacy_aliases=["bm.barcello.mood"]):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        cfg = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        stored = await ctx.database.get_trigger_state(guild_id, channel_id, "barcello_mood")
+        stored_mood = str(stored.get("mood") or "")
+
+        channels_cfg = cfg.get("channels") if isinstance(cfg.get("channels"), dict) else {}
+        channel_cfg = channels_cfg.get(channel_id) if isinstance(channels_cfg.get(channel_id), dict) else {}
+        cfg_default = str(cfg.get("mood_default") or "chill")
+        channel_default = str(channel_cfg.get("mood_default") or "")
+        effective = stored_mood or channel_default or cfg_default
+
+        time_buckets = cfg.get("time_buckets") if isinstance(cfg.get("time_buckets"), dict) else {}
+        now_local = datetime.now(ctx.timezone)
+        current_hour = now_local.hour
+        time_bucket = "unknown"
+        for name, payload in time_buckets.items():
+            if not isinstance(payload, dict):
+                continue
+            start = payload.get("start")
+            end = payload.get("end")
+            if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= 24 and start <= current_hour < end:
+                time_bucket = str(name)
+                break
+
+        daily = await ctx.database.get_trigger_state(guild_id, channel_id, "barcello_daily")
+        day_key = now_local.date().isoformat()
+        counts = daily.get("counts") if isinstance(daily.get("counts"), dict) and str(daily.get("date") or "") == day_key else {}
+        last_status = await ctx.database.get_barcello_trigger_state(guild_id, channel_id)
+        current_color = str((last_status or {}).get("last_color") or "")
+        state_count_today = int(counts.get(current_color) or 0) if current_color else 0
+
+        tiers = cfg.get("dramatic_tiers") if isinstance(cfg.get("dramatic_tiers"), list) else [{"min_count_today": 1, "label": "t1"}]
+        drama_label = "t1"
+        for tier in tiers:
+            if not isinstance(tier, dict):
+                continue
+            minimum = tier.get("min_count_today")
+            label = tier.get("label")
+            if isinstance(minimum, int) and isinstance(label, str) and state_count_today >= minimum:
+                drama_label = label
+
+        await send_ephemeral(
+            interaction,
+            "\n".join(
+                [
+                    f"Current mood: `{effective}`",
+                    f"Stored mood: `{stored_mood or '-'}`",
+                    f"Channel default mood: `{channel_default or '-'}`",
+                    f"Global default mood: `{cfg_default}`",
+                    f"Current time bucket: `{time_bucket}`",
+                    f"Current drama label: `{drama_label}` (count {state_count_today}, state {current_color or '-'})",
+                ]
+            ),
+        )
+
+    @barcello_group.command(name="on", description="Enable the Barcello trigger for this channel.")
+    async def barcello_on_command(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "on")
+
+    @barcello_group.command(name="off", description="Disable the Barcello trigger for this channel.")
+    async def barcello_off_command(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "off")
+
+    @barcello_group.command(name="status", description="Show Barcello trigger status for this channel.")
+    async def barcello_status_command(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "status")
+
+    @barcello_group.command(name="mood_set", description="Set the Barcello mood for this channel.")
+    @app_commands.describe(value="Mood value.")
+    async def barcello_mood_set_command(interaction: discord.Interaction, value: str) -> None:
+        if not await check_permission(interaction, "bm.barcello.mood_set", ctx, legacy_aliases=["bm.barcello.mood"]):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        normalized = value.strip()
+        if not normalized:
+            await send_ephemeral(interaction, "Please provide a valid mood.")
+            return
+        cfg = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        available_moods = cfg.get("moods") if isinstance(cfg.get("moods"), dict) else {}
+        if available_moods and normalized not in available_moods:
+            await send_ephemeral(
+                interaction,
+                f"Mood `{normalized}` is not defined in config. Available: {', '.join(sorted(available_moods.keys()))}",
+            )
+            return
+        today = datetime.now(ctx.timezone).date().isoformat()
+        await ctx.database.set_trigger_state(
+            guild_id,
+            channel_id,
+            "barcello_mood",
+            {"mood": normalized, "date": today, "mode": "manual"},
+        )
+        await send_ephemeral(interaction, f"Barcello mood set to `{normalized}` for this channel.")
+
+    @barcello_group.command(name="mood_show", description="Show the Barcello mood for this channel.")
+    async def barcello_mood_show_command(interaction: discord.Interaction) -> None:
+        await _show_mood(interaction)
+
+    @barcello_group.command(name="mood_reset", description="Reset the Barcello mood for this channel.")
+    async def barcello_mood_reset_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "bm.barcello.mood_reset", ctx, legacy_aliases=["bm.barcello.mood_reset"]):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        await ctx.database.set_trigger_state(guild_id, channel_id, "barcello_mood", {})
+        await send_ephemeral(interaction, "Barcello mood reset for this channel.")
 
     def _render_health_bar(score: int, color_emoji: str) -> str:
         score = max(0, min(100, score))
@@ -882,12 +1024,11 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
         payload = _parse_json_safe(ai_text)
         return payload, ai_text
 
-    @app_commands.command(name="barcello", description="Stato barcello (DM)")
-    @app_commands.rename(window_minutes="minuti")
+    @barcello_group.command(name="run", description="Run the Barcello analysis.")
     @app_commands.describe(
-        user1="Utente 1 (opzionale)",
-        user2="Utente 2 (opzionale)",
-        window_minutes="Finestra in minuti",
+        user1="Optional first user.",
+        user2="Optional second user.",
+        window_minutes="Analysis window in minutes.",
     )
     async def barcello_command(
         interaction: discord.Interaction,
@@ -936,7 +1077,7 @@ def register_barcello(tree: app_commands.CommandTree, guild: discord.abc.Snowfla
                     await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
                 return
 
-            if not await check_permission(interaction, "barcello", ctx):
+            if not await check_permission(interaction, "bm.barcello.run", ctx, legacy_aliases=["barcello"]):
                 return
 
             if window_minutes is None:

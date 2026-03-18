@@ -49,17 +49,16 @@ def setup(registry: ServiceRegistry) -> None:
     if not use_guild:
         logger.warning("GUILD_ID missing/invalid; registering GLOBAL commands")
 
-    bm_group = app_commands.Group(name="bm", description="Comandi bm")
-    role_group = app_commands.Group(name="role", description="Permessi e limiti")
-    stt_group = app_commands.Group(name="stt", description="Impostazioni STT")
-    translate_group = app_commands.Group(name="translate", description="Traduzione")
-    audio_notes_group = app_commands.Group(name="audio_notes", description="Note vocali")
+    bm_group = app_commands.Group(name="bm", description="Barcellometro control commands")
+    commandguard_group = app_commands.Group(name="commandguard", description="Command guard policies")
+    stt_group = app_commands.Group(name="stt", description="Speech-to-text configuration")
+    translate_group = app_commands.Group(name="translate", description="Translation configuration")
+    audionotes_group = app_commands.Group(name="audionotes", description="Audio notes controls")
     campagne_group = app_commands.Group(name="campagne", description="Campagne auto")
     qna_group = app_commands.Group(name="qna", description="QnA")
     insights_group = app_commands.Group(name="insights", description="Curiosità utenti")
-    voice_ingest_group = app_commands.Group(name="voice_ingest", description="Ingest vocale")
-    privacy_group = app_commands.Group(name="privacy", description="Privacy vocale")
-    status_group = app_commands.Group(name="status", description="Stato servizi")
+    voice_ingest_group = app_commands.Group(name="voice_ingest", description="Voice ingest")
+    privacy_group = app_commands.Group(name="privacy", description="Voice privacy")
     riassunto_group = app_commands.Group(name="riassunto", description="Riassunti")
     aura_group = app_commands.Group(name="aura", description="Resoconto aura")
     attivita_group = app_commands.Group(name="attivita", description="Comandi attività utenti")
@@ -67,21 +66,22 @@ def setup(registry: ServiceRegistry) -> None:
     resocontocanale_group = app_commands.Group(name="resocontocanale", description="Resoconto canale")
     resocontoserver_group = app_commands.Group(name="resocontoserver", description="Resoconto server")
 
-    add_group_once(bm_group, role_group, logger)
+    add_group_once(bm_group, commandguard_group, logger)
     add_group_once(bm_group, stt_group, logger)
     add_group_once(bm_group, translate_group, logger)
-    add_group_once(bm_group, audio_notes_group, logger)
+    add_group_once(bm_group, audionotes_group, logger)
     add_group_once(bm_group, voice_ingest_group, logger)
 
     register_admin(bm_group, ctx)
-    register_roles(role_group, ctx)
+    register_roles(commandguard_group, ctx)
     register_stt(stt_group, ctx)
     register_translate(translate_group, ctx)
-    register_audio_notes(audio_notes_group, ctx)
+    register_audio_notes(audionotes_group, ctx)
     register_messaggi(campagne_group, ctx)
     register_voice_ingest(voice_ingest_group, ctx)
     register_privacy(privacy_group, ctx)
-    register_status(status_group, ctx)
+    register_status(bm_group, ctx)
+    register_barcello(bm_group, ctx)
     register_riassunto(riassunto_group, ctx)
     register_aura(aura_group, ctx)
     register_attivita(attivita_group, ctx)
@@ -95,10 +95,14 @@ def setup(registry: ServiceRegistry) -> None:
     register_resoconto(resocontocanale_group, resocontoserver_group, ctx)
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
 
-    logger.info("Group children summary bm=%d campagne=%d qna=%d insights=%d", len(bm_group.commands), len(campagne_group.commands), len(qna_group.commands), len(insights_group.commands))
+    logger.info(
+        "Group children summary bm=%d campagne=%d qna=%d insights=%d",
+        len(bm_group.commands),
+        len(campagne_group.commands),
+        len(qna_group.commands),
+        len(insights_group.commands),
+    )
     register_ask(bot.tree, guild_obj, ctx)
-    logger.info("Registering /barcello with guild scope=%s", "guild" if use_guild else "global")
-    register_barcello(bot.tree, guild_obj, ctx)
     scope_label = "guild" if guild_obj else "global"
     top_level = bot.tree.get_commands(guild=guild_obj) if guild_obj else bot.tree.get_commands()
     logger.info("Registered commands scope=%s top_level=%s", scope_label, [c.qualified_name for c in top_level])
@@ -112,13 +116,11 @@ def setup(registry: ServiceRegistry) -> None:
         aura_group,
         attivita_group,
         moderazione_group,
-        status_group,
         resocontocanale_group,
         resocontoserver_group,
         privacy_group,
         frasi_group,
     ]
-
 
     def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
         if use_guild:
@@ -178,8 +180,6 @@ def setup(registry: ServiceRegistry) -> None:
             commands = bot.tree.get_commands(guild=guild_obj) if use_guild else bot.tree.get_commands()
             names = [command.qualified_name for command in commands]
             logger.info("Command tree pre-sync (%s) count=%d names=%s", command_scope, len(names), names)
-            logger.info("Pre-sync check /barcello presente=%s scope=%s", "barcello" in names, command_scope)
-            logger.info("Pre-sync check /domanda presente=%s scope=%s", "domanda" in names, command_scope)
             if use_guild:
                 synced = await bot.tree.sync(guild=guild_obj)
                 logger.info("Synced %d commands for %s", len(synced), "guild")

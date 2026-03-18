@@ -15,7 +15,7 @@ from .roles import register_roles
 from .messaggi import register_messaggi
 from .inattivi import register_inattivi
 from .moderazione_utenti import register_moderazione_utenti
-from .settings import get_setting, set_setting
+from .settings import get_setting, reset_setting, set_setting
 from .status import register_status
 from .stt import register_stt
 from .translate import register_translate
@@ -29,6 +29,7 @@ __all__ = [
     "describe_placeholders",
     "check_permission",
     "get_setting",
+    "reset_setting",
     "set_setting",
     "register_admin",
     "register_ask",

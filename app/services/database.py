@@ -967,6 +967,9 @@ class DatabaseService:
             (key, value),
         )
 
+    async def delete_setting(self, key: str) -> None:
+        await self.execute("DELETE FROM settings WHERE key = ?", (key,))
+
     async def upsert_channel(self, channel_id: str, guild_id: str, name: str, enabled: int, channel_type: str, category_id: Optional[str], is_nsfw: int, slowmode_delay: int) -> None:
         await self.execute(
             """
@@ -2735,6 +2738,18 @@ class DatabaseService:
             (guild_id, user_id, command),
         )
 
+    async def delete_role_policies(self, guild_id: str, role_id: str) -> None:
+        await self.execute(
+            "DELETE FROM role_policies WHERE guild_id = ? AND role_id = ?",
+            (guild_id, role_id),
+        )
+
+    async def delete_user_policies(self, guild_id: str, user_id: str) -> None:
+        await self.execute(
+            "DELETE FROM user_policies WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+
     async def fetch_role_policies(self, guild_id: str, role_id: str) -> list[aiosqlite.Row]:
         return await self.fetchall(
             "SELECT command, usage_limit, cooldown_seconds FROM role_policies WHERE guild_id = ? AND role_id = ?",
@@ -2745,6 +2760,18 @@ class DatabaseService:
         return await self.fetchall(
             "SELECT command, usage_limit, cooldown_seconds FROM user_policies WHERE guild_id = ? AND user_id = ?",
             (guild_id, user_id),
+        )
+
+    async def list_role_policies(self, guild_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT role_id, command, usage_limit, cooldown_seconds FROM role_policies WHERE guild_id = ? ORDER BY role_id, command",
+            (guild_id,),
+        )
+
+    async def list_user_policies(self, guild_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            "SELECT user_id, command, usage_limit, cooldown_seconds FROM user_policies WHERE guild_id = ? ORDER BY user_id, command",
+            (guild_id,),
         )
 
     async def fetch_role_policy(self, guild_id: str, role_id: str, command: str) -> Optional[aiosqlite.Row]:

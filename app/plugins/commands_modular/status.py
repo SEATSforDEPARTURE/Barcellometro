@@ -7,11 +7,11 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 
 
-def register_status(status_group: app_commands.Group, ctx: CommandContext) -> None:
-    @status_group.command(name="bm", description="Stato servizi")
-    @app_commands.describe(service="Servizio/plugin")
-    async def status_bm(interaction: discord.Interaction, service: str | None = None) -> None:
-        if not await check_permission(interaction, "status.bm", ctx):
+def register_status(bm_group: app_commands.Group, ctx: CommandContext) -> None:
+    @bm_group.command(name="status", description="Show the Barcellometro status.")
+    @app_commands.describe(service="Optional service or plugin name.")
+    async def bm_status_command(interaction: discord.Interaction, service: str | None = None) -> None:
+        if not await check_permission(interaction, "bm.status", ctx, legacy_aliases=["status.bm"]):
             return
         if service:
             status = ctx.status.component_status(service)
@@ -26,7 +26,7 @@ def register_status(status_group: app_commands.Group, ctx: CommandContext) -> No
         general = await ctx.status.general_status()
         message = (
             "**Barcellometro Status**\n"
-            f"Bot: online\n"
+            "Bot: online\n"
             f"DB Path: {general['db_path']}\n"
             f"Retention Days: {general['retention_days']}\n"
             f"Enabled Channels: {general['enabled_channels']}\n"
