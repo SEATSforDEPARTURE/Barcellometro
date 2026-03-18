@@ -146,7 +146,7 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         policies = await ctx.database.list_inactivity_role_policies(guild_id)
         await interaction.response.send_message(
             f"enabled={'on' if cfg['enabled'] else 'off'} | auto={'on' if cfg['auto_enabled'] else 'off'} | grace={cfg['grace_days_after_reminder']} | "
-            f"cooldown={cfg['reminder_cooldown_days']} | ban_days={cfg['ban_days']} | atrio={cfg['atrio_channel_id'] or 'n/d'} | "
+            f"cooldown={cfg['reminder_cooldown_days']} | ban_days={cfg['ban_days']} | notify={cfg['notify_channel_id'] or cfg['atrio_channel_id'] or 'n/d'} | "
             f"invite={cfg['invite_url'] or 'n/d'} | role_policies={len(policies)}",
             ephemeral=True,
         )
@@ -202,14 +202,6 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), invite_url=url)
         await interaction.response.send_message("✅ Invite impostato.", ephemeral=True)
 
-    @inattivi_group.command(name="set_atrio", description="Imposta canale atrio")
-    @app_commands.describe(canale="Canale notifiche")
-    async def inattivi_set_atrio(interaction: discord.Interaction, canale: discord.TextChannel) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await _ensure_cfg(ctx, str(interaction.guild_id))
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), atrio_channel_id=str(canale.id))
-        await interaction.response.send_message("✅ Canale atrio impostato.", ephemeral=True)
 
     @inattivi_group.command(name="exclude_role_add", description="Escludi ruolo da inattivi")
     @app_commands.describe(ruolo="Ruolo da ignorare")
@@ -311,156 +303,10 @@ def register_inattivi(inattivi_group: app_commands.Group, ctx: CommandContext) -
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_reminder_template=testo)
         await interaction.response.send_message("✅ Template reminder aggiornato.", ephemeral=True)
 
-    @inattivi_group.command(name="template_kick_set", description="Template kick DM")
-    @app_commands.describe(testo=TEMPLATE_HELP)
-    async def inattivi_template_kick_set(interaction: discord.Interaction, testo: str) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await _ensure_cfg(ctx, str(interaction.guild_id))
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_kick_template=testo)
-        await interaction.response.send_message("✅ Template kick aggiornato.", ephemeral=True)
 
-    @inattivi_group.command(name="template_atrio_set", description="Template atrio")
-    @app_commands.describe(testo=TEMPLATE_HELP)
-    async def inattivi_template_atrio_set(interaction: discord.Interaction, testo: str) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await _ensure_cfg(ctx, str(interaction.guild_id))
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), atrio_template=testo)
-        await interaction.response.send_message("✅ Template atrio aggiornato.", ephemeral=True)
 
-    @inattivi_group.command(name="template_show", description="Mostra template inattivi")
-    async def inattivi_template_show(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        cfg = await ctx.database.get_inactivity_config(str(interaction.guild_id))
-        if cfg is None:
-            await interaction.response.send_message("Nessuna configurazione inattivi presente.", ephemeral=True)
-            return
-        cfg = dict(cfg)
 
-        reminder_raw = str(cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!")
-        kick_raw = str(cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}")
-        atrio_raw = str(cfg.get("atrio_template") or "{display_name} ha lasciato il server per inattività ({inactivity_text}).")
 
-        reminder_preview = _render_preview(reminder_raw)
-        kick_preview = _render_preview(kick_raw)
-        atrio_preview = _render_preview(atrio_raw)
-
-        embed = discord.Embed(title="🧩 Template inattivi", colour=discord.Colour.blue())
-        attach_footer_meta(embed, service_name="inattivi", used_local_processing=True)
-        extra_sections: list[str] = []
-
-        def add_template_field(name: str, text: str) -> None:
-            if len(text) <= FIELD_MAX:
-                embed.add_field(name=name, value=text, inline=False)
-            else:
-                embed.add_field(name=name, value=truncate(text, FIELD_MAX), inline=False)
-                extra_sections.append(f"## {name}\n{text}")
-
-        add_template_field("📩 Template reminder", reminder_raw)
-        add_template_field("🚪 Template kick", kick_raw)
-        add_template_field("🏛 Template atrio", atrio_raw)
-        add_template_field("🧪 Esempio reminder", reminder_preview)
-        add_template_field("🧪 Esempio kick", kick_preview)
-        add_template_field("🧪 Esempio atrio", atrio_preview)
-
-        extra_file: discord.File | None = None
-        if extra_sections:
-            ts_name = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
-            filename = f"templates_{ts_name}.txt"
-            payload = "\n\n".join(extra_sections).encode("utf-8")
-            extra_file = discord.File(io.BytesIO(payload), filename=filename)
-
-        if extra_file is None:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-        else:
-            await interaction.response.send_message(embed=embed, ephemeral=True, file=extra_file)
-
-    @inattivi_group.command(name="grace_users", description="Utenti in grace period")
-    async def inattivi_grace_users(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        if ctx.inactive_members_moderation is None:
-            await interaction.response.send_message("❌ Servizio inattivi non disponibile.", ephemeral=True)
-            return
-        guild_id = str(interaction.guild_id)
-        inactive, _, cfg = await ctx.inactive_members_moderation.scan_inactive_members(guild_id)
-        states = await ctx.database.fetch_inactivity_user_states(guild_id, [str(c.member.id) for c in inactive])
-        grace_days = int((cfg or {}).get("grace_days_after_reminder", 7))
-        now = datetime.now(timezone.utc)
-        rows: list[tuple[datetime, str]] = []
-
-        for candidate in inactive:
-            state = states.get(str(candidate.member.id))
-            if not state or not state["last_reminder_at"]:
-                continue
-            try:
-                reminder_at = datetime.fromisoformat(str(state["last_reminder_at"]).replace("Z", "+00:00"))
-                if reminder_at.tzinfo is None:
-                    reminder_at = reminder_at.replace(tzinfo=timezone.utc)
-            except Exception:
-                continue
-            if candidate.last_message_ts and candidate.last_message_ts > str(state["last_reminder_at"]):
-                continue
-            deadline = reminder_at + timedelta(days=grace_days)
-            remaining = _format_remaining(deadline, now)
-            reminded_fmt = reminder_at.astimezone(ROME).strftime("%d/%m %H:%M")
-            remain_txt = remaining if remaining == "scaduto" else f"{remaining} alla scad."
-            rows.append((deadline, f"• {candidate.member.mention} -🔔 Avv. il {reminded_fmt} ({remain_txt})"))
-
-        rows.sort(key=lambda x: x[0])
-        await _send_lines_with_txt(
-            interaction,
-            title="⏳ Utenti grace inattivi",
-            lines=[line for _, line in rows],
-            txt_prefix="inattivi_grace_users",
-        )
-
-    @inattivi_group.command(name="banned_users", description="Utenti con ban temporaneo")
-    async def inattivi_banned_users(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        guild = interaction.guild
-        if guild is None:
-            await interaction.response.send_message("❌ Guild non disponibile.", ephemeral=True)
-            return
-
-        guild_id = str(interaction.guild_id)
-        cfg_row = await ctx.database.get_inactivity_config(guild_id)
-        cfg = dict(cfg_row) if cfg_row else {}
-        ban_days = int(cfg.get("ban_days", 7))
-        now = datetime.now(timezone.utc)
-        rows = await ctx.database.list_inactivity_banned_states(guild_id)
-        items: list[tuple[datetime, str]] = []
-
-        for row in rows:
-            raw = row["last_kick_at"]
-            if not raw:
-                continue
-            try:
-                kicked_at = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-                if kicked_at.tzinfo is None:
-                    kicked_at = kicked_at.replace(tzinfo=timezone.utc)
-            except Exception:
-                continue
-            deadline = kicked_at + timedelta(days=ban_days)
-            if deadline <= now:
-                continue
-            remaining = _format_remaining(deadline, now)
-            user_id = int(str(row["user_id"]))
-            member = guild.get_member(user_id)
-            mention = member.mention if member else f"<@{user_id}>"
-            kicked_fmt = kicked_at.astimezone(ROME).strftime("%d/%m %H:%M")
-            items.append((deadline, f"• {mention} -🚫 Ban. il {kicked_fmt} ({remaining} alla scad.)"))
-
-        items.sort(key=lambda x: x[0])
-        await _send_lines_with_txt(
-            interaction,
-            title="🚫 Ban temporanei attivi",
-            lines=[line for _, line in items],
-            txt_prefix="inattivi_banned_users",
-        )
 
     @inattivi_group.command(name="run", description="Esegui scansione inattivi")
     async def inattivi_run(interaction: discord.Interaction) -> None:

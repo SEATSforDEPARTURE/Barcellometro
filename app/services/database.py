@@ -542,12 +542,19 @@ class DatabaseService:
                 reminder_cooldown_days INTEGER NOT NULL DEFAULT 14,
                 ban_days INTEGER NOT NULL DEFAULT 7,
                 atrio_channel_id TEXT NULL,
+                notify_channel_id TEXT NULL,
+                notify_card_enabled INTEGER NOT NULL DEFAULT 0,
                 invite_url TEXT NULL,
                 excluded_role_ids_json TEXT NOT NULL DEFAULT '[]',
                 default_policy_json TEXT NOT NULL DEFAULT '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR","min_account_age_days":0}',
                 dm_reminder_template TEXT NULL,
                 dm_kick_template TEXT NULL,
                 atrio_template TEXT NULL,
+                template_inactivity_reason TEXT NULL,
+                template_kick_reason TEXT NULL,
+                template_ban_reason TEXT NULL,
+                template_tempban_reason TEXT NULL,
+                template_grace_reason TEXT NULL,
                 updated_at TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
@@ -589,6 +596,29 @@ class DatabaseService:
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (guild_id, user_id)
             );
+
+            CREATE TABLE IF NOT EXISTS moderation_actions (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                moderator_id TEXT NULL,
+                action_type TEXT NOT NULL,
+                reason TEXT NULL,
+                duration_seconds INTEGER NULL,
+                duration_days INTEGER NULL,
+                expires_at TEXT NULL,
+                created_at TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_moderation_actions_guild_created
+            ON moderation_actions (guild_id, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_moderation_actions_user
+            ON moderation_actions (guild_id, user_id, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_moderation_actions_type
+            ON moderation_actions (guild_id, action_type, created_at DESC);
 
             CREATE TABLE IF NOT EXISTS aura_user_profile (
                 guild_id TEXT NOT NULL,
@@ -676,8 +706,46 @@ class DatabaseService:
         await self._ensure_server_summary_schedule_columns()
         await self._ensure_trigger_barcello_state_columns()
         await self._ensure_daily_report_pagination_state_columns()
+        await self._ensure_inactivity_config_columns()
+        await self._ensure_moderation_actions_columns()
         await self._conn.commit()
         logger.info("Database schema initialized")
+
+
+    async def _ensure_inactivity_config_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(inactivity_config)")
+        if not columns:
+            return
+        existing = {row["name"] for row in columns}
+        missing = {
+            "notify_channel_id": "TEXT NULL",
+            "notify_card_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "template_inactivity_reason": "TEXT NULL",
+            "template_kick_reason": "TEXT NULL",
+            "template_ban_reason": "TEXT NULL",
+            "template_tempban_reason": "TEXT NULL",
+            "template_grace_reason": "TEXT NULL",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE inactivity_config ADD COLUMN {name} {col_def}")
+
+    async def _ensure_moderation_actions_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(moderation_actions)")
+        if not columns:
+            return
+        existing = {row["name"] for row in columns}
+        missing = {
+            "duration_seconds": "INTEGER NULL",
+            "duration_days": "INTEGER NULL",
+            "expires_at": "TEXT NULL",
+            "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE moderation_actions ADD COLUMN {name} {col_def}")
 
     async def _ensure_daily_report_pagination_state_columns(self) -> None:
         assert self._conn is not None
@@ -4082,7 +4150,13 @@ class DatabaseService:
         )
 
     async def get_inactivity_config(self, guild_id: str) -> Optional[aiosqlite.Row]:
-        return await self.fetchone("SELECT * FROM inactivity_config WHERE guild_id = ?", (guild_id,))
+        row = await self.fetchone("SELECT * FROM inactivity_config WHERE guild_id = ?", (guild_id,))
+        if row is None:
+            return None
+        data = dict(row)
+        data["notify_channel_id"] = data.get("notify_channel_id") or data.get("atrio_channel_id")
+        data["template_inactivity_reason"] = data.get("template_inactivity_reason") or data.get("atrio_template")
+        return data
 
     async def upsert_inactivity_config(self, guild_id: str, **fields: Any) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -4094,12 +4168,19 @@ class DatabaseService:
             "reminder_cooldown_days": 14,
             "ban_days": 7,
             "atrio_channel_id": None,
+            "notify_channel_id": None,
+            "notify_card_enabled": 0,
             "invite_url": None,
             "excluded_role_ids_json": "[]",
             "default_policy_json": '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR","min_account_age_days":0}',
             "dm_reminder_template": None,
             "dm_kick_template": None,
             "atrio_template": None,
+            "template_inactivity_reason": None,
+            "template_kick_reason": None,
+            "template_ban_reason": None,
+            "template_tempban_reason": None,
+            "template_grace_reason": None,
             "created_at": now,
             "updated_at": now,
         }
@@ -4117,12 +4198,19 @@ class DatabaseService:
             "reminder_cooldown_days",
             "ban_days",
             "atrio_channel_id",
+            "notify_channel_id",
+            "notify_card_enabled",
             "invite_url",
             "excluded_role_ids_json",
             "default_policy_json",
             "dm_reminder_template",
             "dm_kick_template",
             "atrio_template",
+            "template_inactivity_reason",
+            "template_kick_reason",
+            "template_ban_reason",
+            "template_tempban_reason",
+            "template_grace_reason",
             "updated_at",
             "created_at",
         ]
@@ -4133,6 +4221,27 @@ class DatabaseService:
             f"INSERT INTO inactivity_config ({', '.join(columns)}) VALUES ({placeholders}) ON CONFLICT(guild_id) DO UPDATE SET {update_cols}",
             tuple(values),
         )
+
+    async def get_moderation_templates(self, guild_id: str) -> dict[str, Any]:
+        cfg = await self.get_inactivity_config(guild_id)
+        data = dict(cfg) if cfg else {}
+        return {
+            "notify_channel_id": data.get("notify_channel_id") or data.get("atrio_channel_id"),
+            "notify_card_enabled": int(data.get("notify_card_enabled") or 0),
+            "template_inactivity_reason": data.get("template_inactivity_reason") or data.get("atrio_template") or "{display_name} ha lasciato il server per inattività ({inactivity_text}).",
+            "template_kick_reason": data.get("template_kick_reason") or "Rimozione manuale dal server.",
+            "template_ban_reason": data.get("template_ban_reason") or "Ban permanente manuale dal server.",
+            "template_tempban_reason": data.get("template_tempban_reason") or "Ban temporaneo dal server per {duration}.",
+            "template_grace_reason": data.get("template_grace_reason") or "Grace attiva per {duration}.",
+            "dm_reminder_template": data.get("dm_reminder_template") or "",
+            "dm_kick_template": data.get("dm_kick_template") or "",
+        }
+
+    async def set_notify_channel(self, guild_id: str, channel_id: str) -> None:
+        await self.upsert_inactivity_config(guild_id, notify_channel_id=channel_id)
+
+    async def set_notify_card_enabled(self, guild_id: str, enabled: bool) -> None:
+        await self.upsert_inactivity_config(guild_id, notify_card_enabled=1 if enabled else 0)
 
     async def set_inactivity_enabled(self, guild_id: str, enabled: bool) -> None:
         await self.upsert_inactivity_config(guild_id, enabled=1 if enabled else 0)
@@ -4232,6 +4341,99 @@ class DatabaseService:
 
     async def remove_temp_ban(self, guild_id: str, user_id: str) -> None:
         await self.execute("DELETE FROM temp_bans WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+
+    async def log_moderation_action(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        moderator_id: str | None,
+        action_type: str,
+        reason: str | None,
+        duration_seconds: int | None = None,
+        expires_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        action_id = str(uuid.uuid4())
+        created_at = datetime.now(timezone.utc).isoformat()
+        duration_days = None
+        if duration_seconds is not None:
+            duration_days = max(1, int(duration_seconds // 86400))
+        await self.execute(
+            """
+            INSERT INTO moderation_actions (
+                id, guild_id, user_id, moderator_id, action_type, reason, duration_seconds, duration_days, expires_at, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                action_id, guild_id, user_id, moderator_id, action_type, reason, duration_seconds, duration_days, expires_at, created_at, json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+        return action_id
+
+    async def list_recent_kicked_users(self, guild_id: str, *, limit: int = 25) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT * FROM moderation_actions
+            WHERE guild_id = ? AND action_type IN ('kick', 'inactive_kick')
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (guild_id, int(limit)),
+        )
+
+    async def list_active_tempbans(self, guild_id: str, *, now_iso: str | None = None) -> list[aiosqlite.Row]:
+        now_value = now_iso or datetime.now(timezone.utc).isoformat()
+        return await self.fetchall(
+            """
+            SELECT tb.guild_id, tb.user_id, tb.unban_at AS expires_at, tb.reason, tb.created_at, ma.action_type, ma.moderator_id
+            FROM temp_bans AS tb
+            LEFT JOIN moderation_actions AS ma
+              ON ma.guild_id = tb.guild_id
+             AND ma.user_id = tb.user_id
+             AND ma.created_at = (
+                 SELECT MAX(created_at) FROM moderation_actions
+                 WHERE guild_id = tb.guild_id AND user_id = tb.user_id AND action_type IN ('tempban', 'inactive_tempban')
+             )
+            WHERE tb.guild_id = ? AND tb.unban_at > ?
+            ORDER BY tb.unban_at ASC
+            """,
+            (guild_id, now_value),
+        )
+
+    async def list_active_grace_users(self, guild_id: str, *, now_iso: str | None = None) -> list[aiosqlite.Row]:
+        now_value = now_iso or datetime.now(timezone.utc).isoformat()
+        return await self.fetchall(
+            """
+            SELECT * FROM moderation_actions
+            WHERE guild_id = ?
+              AND action_type IN ('grace', 'inactive_grace')
+              AND expires_at IS NOT NULL
+              AND expires_at > ?
+            ORDER BY expires_at ASC
+            """,
+            (guild_id, now_value),
+        )
+
+    async def list_active_bans(self, guild_id: str, *, limit: int = 25) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT ma.*
+            FROM moderation_actions AS ma
+            WHERE ma.guild_id = ?
+              AND ma.action_type = 'ban'
+              AND NOT EXISTS (
+                  SELECT 1 FROM moderation_actions AS later
+                  WHERE later.guild_id = ma.guild_id
+                    AND later.user_id = ma.user_id
+                    AND later.action_type = 'unban'
+                    AND later.created_at > ma.created_at
+              )
+            ORDER BY ma.created_at DESC
+            LIMIT ?
+            """,
+            (guild_id, int(limit)),
+        )
 
     async def fetch_last_message_ts_by_user_guild(self, guild_id: str) -> dict[int, str]:
         rows = await self.fetchall(

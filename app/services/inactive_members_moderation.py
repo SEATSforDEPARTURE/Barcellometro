@@ -183,9 +183,10 @@ class GraceExpiredActionsView(discord.ui.View):
 
 
 class InactiveMembersModerationService:
-    def __init__(self, database: DatabaseService, bot: discord.Client) -> None:
+    def __init__(self, database: DatabaseService, bot: discord.Client, *, member_flow_notifications: Any | None = None) -> None:
         self._database = database
         self._bot = bot
+        self._member_flow_notifications = member_flow_notifications
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -212,6 +213,8 @@ class InactiveMembersModerationService:
             try:
                 await guild.unban(discord.Object(id=user_id), reason="Scadenza ban temporaneo inattività")
                 await self._database.remove_temp_ban(str(guild.id), str(user_id))
+                if self._member_flow_notifications is not None:
+                    await self._member_flow_notifications.log_action(guild_id=str(guild.id), user_id=str(user_id), moderator_id=None, action_type="unban", reason="Scadenza ban temporaneo inattività", metadata={"source": "inactive_members_moderation"})
                 logger.info("inactive moderation: unbanned user=%s guild=%s", user_id, guild.id)
             except Exception:
                 logger.warning("inactive moderation: failed unban user=%s guild=%s", user_id, guild.id, exc_info=True)
@@ -430,7 +433,7 @@ class InactiveMembersModerationService:
         mode = str(policy.get("mode", "OR")).upper()
         auto_enabled = "ON" if bool(cfg.get("auto_enabled")) else "OFF"
         invite_set = "si" if bool(cfg.get("invite_url")) else "no"
-        atrio_set = "si" if bool(cfg.get("atrio_channel_id") or cfg.get("atrio_template")) else "no"
+        atrio_set = "si" if bool(cfg.get("notify_channel_id") or cfg.get("atrio_channel_id") or cfg.get("template_inactivity_reason") or cfg.get("atrio_template")) else "no"
         min_account_age_days = int(policy.get("min_account_age_days", 0))
         return (
             f"- Inattivita: {policy.get('inactive_days', 30)} giorni\n"
@@ -445,7 +448,7 @@ class InactiveMembersModerationService:
             f"- Modalita auto kick: {auto_enabled}\n"
             f"- Reminder cooldown: {cfg.get('reminder_cooldown_days', 14)} giorni\n"
             f"- Invite link impostato: {invite_set}\n"
-            f"- Atrio/template uscita configurati: {atrio_set}"
+            f"- Notify/template uscita configurati: {atrio_set}"
         )
 
     def _format_excluded_roles(self, guild: discord.Guild, cfg: dict[str, Any]) -> str:
@@ -732,6 +735,9 @@ class InactiveMembersModerationService:
             try:
                 await candidate.member.send(body)
                 await self._database.mark_user_reminded(guild_id, str(candidate.member.id), now.isoformat())
+                if self._member_flow_notifications is not None:
+                    expires_at = now + timedelta(days=int(cfg.get("grace_days_after_reminder", 7)))
+                    await self._member_flow_notifications.log_action(guild_id=guild_id, user_id=str(candidate.member.id), moderator_id=None, action_type="inactive_grace", reason="Reminder inattività inviato", duration_seconds=int(cfg.get("grace_days_after_reminder", 7)) * 86400, expires_at=expires_at.isoformat(), metadata={"days_inactive": candidate.days_inactive})
                 ok += 1
             except Exception as exc:
                 fail += 1
@@ -743,14 +749,13 @@ class InactiveMembersModerationService:
         inactive, _, cfg = await self.scan_inactive_members(guild_id)
         guild = self._bot.get_guild(int(guild_id))
         if guild is None or not cfg:
-            return {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "atrio_ok": 0, "errors": []}
+            return {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "notify_ok": 0, "errors": []}
         now = datetime.now(timezone.utc)
         grace_days = int(cfg.get("grace_days_after_reminder", 7))
         ban_days = int(cfg.get("ban_days", 7))
         kick_template = cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}"
-        atrio_template = cfg.get("atrio_template") or "{display_name} ha lasciato il server per inattività ({inactivity_text})."
-        atrio_channel = guild.get_channel(int(cfg["atrio_channel_id"])) if cfg.get("atrio_channel_id") else None
-        stats = {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "atrio_ok": 0, "errors": []}
+        notify_template = cfg.get("template_inactivity_reason") or cfg.get("atrio_template") or "{display_name} ha lasciato il server per inattività ({inactivity_text})."
+        stats = {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "notify_ok": 0, "errors": []}
         by_id = {c.member.id: c for c in inactive}
         for user_id, candidate in by_id.items():
             state = await self._database.get_inactivity_user_state(guild_id, str(user_id))
@@ -793,22 +798,19 @@ class InactiveMembersModerationService:
             try:
                 await guild.ban(discord.Object(id=user_id), reason="Ban temporaneo post kick inattività", delete_message_seconds=0)
                 stats["ban_ok"] += 1
-                unban_at = (now + timedelta(days=ban_days)).isoformat()
+                expires_at = now + timedelta(days=ban_days)
+                unban_at = expires_at.isoformat()
                 await self._database.add_temp_ban(guild_id, str(user_id), unban_at, "Inattività")
                 await self._database.mark_user_kicked(guild_id, str(user_id), now.isoformat())
-            except Exception as exc:
-                stats["ban_fail"] += 1
-                stats["errors"].append(f"ban {user_id}: {exc.__class__.__name__}")
-            if isinstance(atrio_channel, discord.abc.Messageable):
-                try:
+                if self._member_flow_notifications is not None:
                     last_message_at = self._parse_last_message_dt(candidate.last_message_ts)
                     if not last_message_at:
                         inactivity_text = "non è mai stato attivo"
                     else:
                         days_inactive = (now - last_message_at).days
                         inactivity_text = f"è stato inattivo per {days_inactive} giorni"
-                    text = self._render_template(
-                        atrio_template,
+                    reason_text = self._render_template(
+                        notify_template,
                         member=candidate.member,
                         guild=guild,
                         days_inactive=candidate.days_inactive,
@@ -819,10 +821,13 @@ class InactiveMembersModerationService:
                         reason="Inattività prolungata",
                         inactivity_text=inactivity_text,
                     )
-                    await atrio_channel.send(text)
-                    stats["atrio_ok"] += 1
-                except Exception as exc:
-                    stats["errors"].append(f"atrio {user_id}: {exc.__class__.__name__}")
+                    await self._member_flow_notifications.log_action(guild_id=guild_id, user_id=str(user_id), moderator_id=None, action_type="inactive_kick", reason=reason_text, metadata={"days_inactive": candidate.days_inactive, "inactivity_text": inactivity_text})
+                    await self._member_flow_notifications.log_action(guild_id=guild_id, user_id=str(user_id), moderator_id=None, action_type="inactive_tempban", reason=reason_text, duration_seconds=ban_days * 86400, expires_at=unban_at, metadata={"days_inactive": candidate.days_inactive, "inactivity_text": inactivity_text})
+                    await self._member_flow_notifications.send_notification(guild=guild, user=candidate.member, action_type="inactive_tempban", reason=reason_text, duration_seconds=ban_days * 86400, expires_at=expires_at, metadata={"days_inactive": candidate.days_inactive, "inactivity_text": inactivity_text})
+                    stats["notify_ok"] += 1
+            except Exception as exc:
+                stats["ban_fail"] += 1
+                stats["errors"].append(f"ban {user_id}: {exc.__class__.__name__}")
         logger.info(
             "inactive kick pipeline guild=%s dm_ok=%s kick_ok=%s ban_ok=%s",
             guild_id,
@@ -847,7 +852,7 @@ class InactiveMembersModerationService:
             f"DM success/fail: **{merged.get('dm_ok', 0)}/{merged.get('dm_fail', 0)}**",
             f"Kick success/fail: **{merged.get('kick_ok', 0)}/{merged.get('kick_fail', 0)}**",
             f"Ban success/fail: **{merged.get('ban_ok', 0)}/{merged.get('ban_fail', 0)}**",
-            f"Atrio posted: **{merged.get('atrio_ok', 0)}**",
+            f"Notify posted: **{merged.get('notify_ok', 0)}**",
         ]
         errors = merged.get("errors") or []
         if errors:
