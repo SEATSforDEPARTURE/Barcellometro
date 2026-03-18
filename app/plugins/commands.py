@@ -18,6 +18,7 @@ from app.plugins.commands_modular import (
     register_attivita_settings,
     register_inattivi,
     register_messaggi,
+    register_moderazione_utenti,
     register_privacy,
     register_riassunto,
     register_resoconto,
@@ -89,6 +90,7 @@ def setup(registry: ServiceRegistry) -> None:
     inattivi_group = app_commands.Group(name="inattivi", description="Gestione utenti inattivi")
     add_group_once(moderazione_group, inattivi_group, logger)
     register_inattivi(inattivi_group, ctx)
+    register_moderazione_utenti(moderazione_group, ctx)
 
     register_resoconto(resocontocanale_group, resocontoserver_group, ctx)
     frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)

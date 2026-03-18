@@ -43,6 +43,7 @@ class CommandContext:
     aura_eligibility: Optional[Any] = None
     aura_rolling: Optional[Any] = None
     footer: Optional[FooterService] = None
+    member_flow_notifications: Optional[Any] = None
 
     @classmethod
     def from_registry(cls, registry: ServiceRegistry) -> "CommandContext":
@@ -77,6 +78,7 @@ class CommandContext:
         aura_rolling = registry.get("aura_rolling") if registry.has("aura_rolling") else None
         ingest: IngestService = registry.get("ingest")
         footer = registry.get("footer") if registry.has("footer") else None
+        member_flow_notifications = registry.get("member_flow_notifications") if registry.has("member_flow_notifications") else None
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
         return cls(
@@ -105,5 +107,6 @@ class CommandContext:
             aura_eligibility=aura_eligibility,
             aura_rolling=aura_rolling,
             footer=footer,
+            member_flow_notifications=member_flow_notifications,
             timezone=timezone,
         )

@@ -33,6 +33,7 @@ from app.services.translate.ai_translate import AiTranslateService
 from app.services.translate.argos import ArgosTranslateService
 from app.services.aura import AuraAggregationJob, AuraEligibilityService, AuraRollingStatsService, ArchetypeAnalyzerService
 from app.services.footer import FooterService
+from app.services.member_flow_notifications import MemberFlowNotificationsService
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     aura_rolling = None
     aura_aggregation = None
     archetype_analyzer = None
+    member_flow_notifications = None
 
     instance_mode = normalize_instance_mode(config.instance_mode)
     logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
@@ -146,7 +148,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         trigger_engine = TriggerEngineService(database_service, barcello_service, entitlements_service, ai_service, community_insights)
         inactivity_service = InactivityService(database_service)
         activity_insights = ActivityInsightsService(database_service)
-        inactive_members_moderation = InactiveMembersModerationService(database_service, bot)
+        member_flow_notifications = MemberFlowNotificationsService(database_service, bot)
+        inactive_members_moderation = InactiveMembersModerationService(database_service, bot, member_flow_notifications=member_flow_notifications)
         daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights, inactive_members_moderation=inactive_members_moderation)
     footer_service = FooterService(database_service)
 
@@ -172,6 +175,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("activity_insights", activity_insights)
         registry.register("daily_activity_report", daily_activity_report)
         registry.register("inactive_members_moderation", inactive_members_moderation)
+        registry.register("member_flow_notifications", member_flow_notifications)
         registry.register("aura_eligibility", aura_eligibility)
         registry.register("aura_rolling", aura_rolling)
         registry.register("aura_aggregation", aura_aggregation)
