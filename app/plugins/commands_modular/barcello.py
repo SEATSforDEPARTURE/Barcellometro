@@ -1624,9 +1624,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
             logger.exception("barcello: unexpected error")
             await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
 
-    if guild is not None:
-        tree.add_command(barcello_command, guild=guild)
-        logger.info("Registered /barcello scope=guild guild_id=%s", getattr(guild, "id", None))
-    else:
-        tree.add_command(barcello_command)
-        logger.info("Registered /barcello scope=global")
+    logger.info(
+        "Registered /bm barcello subcommands=%s",
+        [command.name for command in barcello_group.commands],
+    )
