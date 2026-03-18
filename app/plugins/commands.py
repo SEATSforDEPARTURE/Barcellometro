@@ -30,6 +30,7 @@ from app.plugins.commands_modular import (
     register_voice_ingest,
 )
 from app.plugins.commands_modular.command_helpers import add_group_once
+from app.utils.command_embeds import send_standard_response
 from app.utils.footer_pipeline import install_footer_auto_finalize
 
 logger = logging.getLogger(__name__)
@@ -158,17 +159,28 @@ def setup(registry: ServiceRegistry) -> None:
         detail = str(root_error).lower()
         looks_like_embed_error = any(token in detail for token in ["embed", "field", "6000", "1024", "invalid form body"])
         if looks_like_embed_error:
-            message = (
-                "⚠️ Ho avuto un problema a costruire l’embed (limite Discord). "
-                "Riprova o riduci la finestra."
-            )
+            message = "Ho avuto un problema a costruire l’embed (limite Discord). Riprova o riduci la finestra."
+            kind = "warning"
         else:
-            message = "⚠️ Si è verificato un errore interno durante l'esecuzione del comando. Riprova tra poco."
+            message = "Si è verificato un errore interno durante l'esecuzione del comando. Riprova tra poco."
+            kind = "error"
         try:
-            if interaction.response.is_done():
-                await interaction.followup.send(message, ephemeral=True)
-            else:
-                await interaction.response.send_message(message, ephemeral=True)
+            command_name = str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "").strip()
+            interaction_name = str((interaction.data or {}).get("name") or "").strip()
+            subcommand_path = "system app_command_error"
+            if command_name:
+                subcommand_path = f"{command_name} error"
+            elif interaction_name:
+                subcommand_path = f"{interaction_name} error"
+            await send_standard_response(
+                interaction,
+                top_level="status",
+                subcommand_path=subcommand_path,
+                lines=[("detail", message)],
+                kind=kind,
+                footer_service=ctx.footer,
+                ephemeral=True,
+            )
         except NotFound:
             logger.warning("Unable to deliver app command error response: interaction expired")
         except Exception:

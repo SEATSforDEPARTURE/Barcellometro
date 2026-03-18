@@ -6,6 +6,7 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting, reset_setting, set_setting
+from app.utils.command_embeds import send_standard_response
 
 BACKEND_CHOICES = [
     app_commands.Choice(name="local", value="local"),
@@ -74,9 +75,13 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         ):
             return
         if all(value is None for value in (backend, model, compute, beam, language)):
-            await interaction.response.send_message(
-                "No changes provided. Use /bm stt config_show to inspect the current configuration.",
-                ephemeral=True,
+            await send_standard_response(
+                interaction,
+                top_level="bm",
+                subcommand_path="stt config_set",
+                lines=[("error", "No changes provided. Use /bm stt config_show to inspect the current configuration.")],
+                kind="error",
+                footer_service=ctx.footer,
             )
             return
 
@@ -91,9 +96,14 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         if language is not None:
             await set_setting(ctx, "stt.local.language_hint", language.value)
 
-        await interaction.response.send_message(
-            "STT configuration updated.\n" + "\n".join(await _stt_config_lines(ctx)),
-            ephemeral=True,
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="stt config_set",
+            lines=[("result", "updated")],
+            sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
+            kind="success",
+            footer_service=ctx.footer,
         )
 
     @stt_group.command(name="config_show", description="Show the STT configuration.")
@@ -105,9 +115,12 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
             legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],
         ):
             return
-        await interaction.response.send_message(
-            "STT configuration\n" + "\n".join(await _stt_config_lines(ctx)),
-            ephemeral=True,
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="stt config_show",
+            sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
+            footer_service=ctx.footer,
         )
 
     @stt_group.command(name="config_reset", description="Reset the STT configuration to defaults.")
@@ -127,7 +140,12 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
             "stt.local.language_hint",
         ):
             await reset_setting(ctx, key)
-        await interaction.response.send_message(
-            "STT configuration reset.\n" + "\n".join(await _stt_config_lines(ctx)),
-            ephemeral=True,
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="stt config_reset",
+            lines=[("result", "reset")],
+            sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
+            kind="success",
+            footer_service=ctx.footer,
         )

@@ -6,6 +6,7 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting, reset_setting, set_setting
+from app.utils.command_embeds import send_standard_response
 
 BACKEND_CHOICES = [
     app_commands.Choice(name="local", value="local"),
@@ -41,18 +42,27 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
         ):
             return
         if backend is None and target is None:
-            await interaction.response.send_message(
-                "No changes provided. Use /bm translate config_show to inspect the current configuration.",
-                ephemeral=True,
+            await send_standard_response(
+                interaction,
+                top_level="bm",
+                subcommand_path="translate config_set",
+                lines=[("error", "No changes provided. Use /bm translate config_show to inspect the current configuration.")],
+                kind="error",
+                footer_service=ctx.footer,
             )
             return
         if backend is not None:
             await set_setting(ctx, "translate.backend", backend.value)
         if target is not None:
             await set_setting(ctx, "translate.target_lang", target.value)
-        await interaction.response.send_message(
-            "Translation configuration updated.\n" + "\n".join(await _translate_config_lines(ctx)),
-            ephemeral=True,
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="translate config_set",
+            lines=[("result", "updated")],
+            sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
+            kind="success",
+            footer_service=ctx.footer,
         )
 
     @translate_group.command(name="config_show", description="Show the translation configuration.")
@@ -64,9 +74,12 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             legacy_aliases=["bm.translate.backend", "bm.translate.target"],
         ):
             return
-        await interaction.response.send_message(
-            "Translation configuration\n" + "\n".join(await _translate_config_lines(ctx)),
-            ephemeral=True,
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="translate config_show",
+            sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
+            footer_service=ctx.footer,
         )
 
     @translate_group.command(name="config_reset", description="Reset the translation configuration to defaults.")
@@ -80,7 +93,12 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             return
         for key in ("translate.backend", "translate.target_lang"):
             await reset_setting(ctx, key)
-        await interaction.response.send_message(
-            "Translation configuration reset.\n" + "\n".join(await _translate_config_lines(ctx)),
-            ephemeral=True,
+        await send_standard_response(
+            interaction,
+            top_level="bm",
+            subcommand_path="translate config_reset",
+            lines=[("result", "reset")],
+            sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
+            kind="success",
+            footer_service=ctx.footer,
         )

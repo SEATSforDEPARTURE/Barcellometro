@@ -20,6 +20,7 @@ from app.utils.embed_limits import _split_field_chunks
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
+from app.utils.command_embeds import send_standard_response
 from app.utils.trend_render import normalize_trend, render_trend, render_trend_value
 
 logger = logging.getLogger(__name__)
@@ -33,11 +34,23 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
     add_group_once(bm_group, barcello_group, logger)
 
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
-        ephemeral = interaction.guild_id is not None
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=ephemeral)
-        else:
-            await interaction.response.send_message(message, ephemeral=ephemeral)
+        text = str(message or "").strip()
+        kind = "info"
+        if text.startswith("✅"):
+            kind = "success"
+        elif text.startswith("⚠️"):
+            kind = "warning"
+        elif text.startswith("❌"):
+            kind = "error"
+        await send_standard_response(
+            interaction,
+            top_level="barcello",
+            subcommand_path=str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "bm barcello"),
+            lines=[("dettaglio", text.lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile.")],
+            kind=kind,
+            footer_service=ctx.footer,
+            ephemeral=interaction.guild_id is not None,
+        )
 
     async def _require_channel_scope(interaction: discord.Interaction) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
