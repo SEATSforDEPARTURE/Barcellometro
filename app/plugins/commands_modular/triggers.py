@@ -34,52 +34,6 @@ def register_triggers(
 
     add_group_once(campagne_group, prompt_group, logger)
 
-    def _command_permission_key(interaction: discord.Interaction) -> str:
-        qualified_name = getattr(getattr(interaction, "command", None), "qualified_name", "")
-        if qualified_name:
-            return qualified_name.replace(" ", ".")
-        data_name = str((interaction.data or {}).get("name") or "").strip()
-        return data_name or "unknown"
-
-    async def _guard(interaction: discord.Interaction) -> bool:
-        return await check_permission(interaction, _command_permission_key(interaction), ctx)
-
-    async def _require_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
-        if not await _guard(interaction):
-            return None
-        if interaction.guild_id is None or interaction.channel_id is None:
-            await interaction.response.send_message("Usa il comando in un canale.", ephemeral=True)
-            return None
-        return str(interaction.guild_id), str(interaction.channel_id)
-
-    async def _set_toggle(interaction: discord.Interaction, key: str, action: str) -> None:
-        scope = await _require_channel(interaction)
-        if scope is None:
-            return
-        guild_id, channel_id = scope
-        if key == "frasi":
-            if action == "status":
-                enabled = await ctx.database.get_trigger_enabled_global(guild_id, key)
-                if not enabled:
-                    enabled = await ctx.database.get_trigger_enabled_any_channel(guild_id, key)
-                await interaction.response.send_message(f"Trigger {key} (globale server): {'on' if enabled else 'off'}", ephemeral=True)
-                return
-            enabled = action == "on"
-            await ctx.database.set_trigger_enabled_global(guild_id, key, enabled)
-            await interaction.response.send_message(
-                f"Trigger {key} globale nel server {'abilitato' if enabled else 'disabilitato'}.",
-                ephemeral=True,
-            )
-            return
-        if action == "status":
-            enabled = await ctx.database.get_trigger_enabled(guild_id, channel_id, key)
-            await interaction.response.send_message(f"Trigger {key}: {'on' if enabled else 'off'}", ephemeral=True)
-            return
-        enabled = action == "on"
-        await ctx.database.set_trigger_enabled(guild_id, channel_id, key, enabled)
-        await interaction.response.send_message(f"Trigger {key} {'abilitato' if enabled else 'disabilitato'}.", ephemeral=True)
-
-
     def _normalize_embed_color(raw: str | None) -> str | None:
         if raw is None:
             return None
@@ -600,18 +554,6 @@ def register_triggers(
             await interaction.response.send_message(f"No user phrase template found for {user.mention}.", ephemeral=True)
             return
         await interaction.response.send_message(f"User phrase template reset for {user.mention}.", ephemeral=True)
-    @barcello_group.command(name="calibrate", description="Calibra pesi barcello")
-    async def barcello_calibrate(interaction: discord.Interaction) -> None:
-        if not await _guard(interaction):
-            return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        result = await ctx.barcello_calibration_service.run_calibration(days=14, min_samples=20)
-        if result.get("updated"):
-            message = f"Calibrazione aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
-        else:
-            message = f"Calibrazione non aggiornata. Campioni: {result.get('samples')}. {result.get('summary')}"
-        await interaction.followup.send(message, ephemeral=True)
-
     @prompt_group.command(name="on", description="Enable prompt campaigns in the current channel")
     async def prompt_on(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)

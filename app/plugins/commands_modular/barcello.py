@@ -178,6 +178,18 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
         await ctx.database.set_trigger_state(guild_id, channel_id, "barcello_mood", {})
         await send_ephemeral(interaction, "Barcello mood reset for this channel.")
 
+    @barcello_group.command(name="calibrate", description="Recalculate Barcello calibration weights.")
+    async def barcello_calibrate_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "bm.barcello.calibrate", ctx):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await ctx.barcello_calibration_service.run_calibration(days=14, min_samples=20)
+        if result.get("updated"):
+            message = f"Calibration updated. Samples: {result.get('samples')}. {result.get('summary')}"
+        else:
+            message = f"Calibration not updated. Samples: {result.get('samples')}. {result.get('summary')}"
+        await interaction.followup.send(message, ephemeral=True)
+
     def _render_health_bar(score: int, color_emoji: str) -> str:
         score = max(0, min(100, score))
         filled = int(round(score / 10))

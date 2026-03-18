@@ -784,7 +784,7 @@ def test_phrase_global_milestone_not_triggered_when_cooldown_blocks() -> None:
     asyncio.run(_run())
 
 
-def test_frasi_stats_and_milestone_commands() -> None:
+def test_frasi_milestone_commands() -> None:
     async def _run() -> None:
         from discord import app_commands
 
@@ -808,36 +808,27 @@ def test_frasi_stats_and_milestone_commands() -> None:
             trigger_engine=Mock(),
         )
         frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
-        stats_cmd = next(c for c in frasi_group.commands if c.name == "stats")
-        set_cmd = next(c for c in frasi_group.commands if c.name == "milestone_global_set")
-        list_cmd = next(c for c in frasi_group.commands if c.name == "milestone_global_list")
-        remove_cmd = next(c for c in frasi_group.commands if c.name == "milestone_global_remove")
+        set_cmd = next(c for c in frasi_group.commands if c.name == "template_milestone_set")
+        list_cmd = next(c for c in frasi_group.commands if c.name == "template_milestone_show")
+        remove_cmd = next(c for c in frasi_group.commands if c.name == "template_milestone_reset")
 
         response = Mock()
         response.send_message = AsyncMock()
         guild = _FakeGuild(role_ids=[1], members={10: _FakeMember(10, []), 11: _FakeMember(11, [])})
         interaction = SimpleNamespace(guild_id=1, channel_id=2, guild=guild, response=response, user=SimpleNamespace(id=99))
 
-        await stats_cmd.callback(interaction, id=phrase_id)
-        kwargs = response.send_message.await_args_list[-1].kwargs
-        embed = kwargs["embed"]
-        assert embed.title == f"📊 STATISTICHE FRASE #{phrase_id}"
-        field_values = {f.name: f.value for f in embed.fields}
-        assert field_values["Utenti unici"] == "2"
-        assert field_values["Utilizzi totali"] == "3"
-
-        await set_cmd.callback(interaction, soglia=10, testo="dieci")
-        await set_cmd.callback(interaction, soglia=5, testo="cinque")
+        await set_cmd.callback(interaction, threshold=10, text="dieci")
+        await set_cmd.callback(interaction, threshold=5, text="cinque")
         milestones = await db.list_trigger_phrase_global_milestones("1")
         assert [int(m["threshold_count"]) for m in milestones] == [5, 10]
 
         await list_cmd.callback(interaction)
         text = response.send_message.await_args_list[-1].kwargs.get("content") or response.send_message.await_args_list[-1].args[0]
-        assert "5 →" in text and "10 →" in text
+        assert "5 -> cinque" in text and "10 -> dieci" in text
 
-        await remove_cmd.callback(interaction, soglia=5)
+        await remove_cmd.callback(interaction)
         milestones_after = await db.list_trigger_phrase_global_milestones("1")
-        assert [int(m["threshold_count"]) for m in milestones_after] == [10]
+        assert milestones_after == []
         await db.close()
 
     asyncio.run(_run())
