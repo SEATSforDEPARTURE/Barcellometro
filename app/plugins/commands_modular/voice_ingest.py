@@ -3,6 +3,7 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 
+from app.plugins.commands_modular.command_helpers import send_standard_command_embed
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import set_setting
@@ -22,12 +23,23 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
         if not await check_permission(interaction, "bm.voice_ingest.join", ctx):
             return
         if not ctx.bot.user:
-            await interaction.response.send_message("Bot non pronto.", ephemeral=True)
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["voice_ingest", "join"],
+                entries=[("Reason", "Bot non pronto")],
+                tone="error",
+                service_name="voice_ingest",
+            )
             return
         await set_setting(ctx, voice_ingest_key(ctx.bot.user.id, "target_voice_channel_id"), str(voice_channel.id))
-        await interaction.response.send_message(
-            f"Richiesto join su {voice_channel.name}.",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["voice_ingest", "join"],
+            entries=[("Voice Channel", voice_channel.name), ("Status", "join requested")],
+            tone="success",
+            service_name="voice_ingest",
         )
         if ctx.voice_ingest:
             await ctx.voice_ingest.join(voice_channel)
@@ -36,6 +48,13 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
     async def voice_ingest_leave(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.voice_ingest.leave", ctx):
             return
-        await interaction.response.send_message("Richiesto leave dal canale vocale.", ephemeral=True)
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["voice_ingest", "leave"],
+            entries=[("Status", "leave requested")],
+            tone="success",
+            service_name="voice_ingest",
+        )
         if ctx.voice_ingest:
             await ctx.voice_ingest.leave()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 
+from app.plugins.commands_modular.command_helpers import send_standard_command_embed
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.ai_model_catalog import build_model_autocomplete_choices
@@ -204,7 +205,14 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
 
     async def _require_guild_channel(interaction: discord.Interaction) -> discord.abc.GuildChannel | None:
         if not interaction.channel or not isinstance(interaction.channel, discord.abc.GuildChannel):
-            await interaction.response.send_message("This command only works in guild channels.", ephemeral=True)
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["events", "error"],
+                entries=[("Reason", "This command only works in guild channels")],
+                tone="error",
+                service_name="status",
+            )
             return None
         return interaction.channel
 
@@ -222,9 +230,13 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             is_nsfw=1 if channel.is_nsfw() else 0,
             slowmode_delay=channel.slowmode_delay,
         )
-        await interaction.response.send_message(
-            f"Event collection {'enabled' if enabled else 'disabled'} for this channel.",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["events", "on" if enabled else "off"],
+            entries=[("Channel", getattr(channel, "mention", channel.name)), ("Status", "enabled" if enabled else "disabled")],
+            tone="success",
+            service_name="status",
         )
 
     async def _show_events_status(interaction: discord.Interaction) -> None:
@@ -233,9 +245,12 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             return
         row = await ctx.database.fetchone("SELECT enabled FROM channels WHERE channel_id = ?", (str(channel.id),))
         enabled = bool(row and int(row["enabled"] or 0) == 1)
-        await interaction.response.send_message(
-            f"Event collection is {'on' if enabled else 'off'} for this channel.",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["events", "status"],
+            entries=[("Channel", getattr(channel, "mention", channel.name)), ("Status", enabled)],
+            service_name="status",
         )
 
     async def _autocomplete_ai_model(
@@ -257,12 +272,22 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         task: str | None,
     ) -> None:
         if task is not None:
-            model = values.get(task)
-            message = f"{title}\n{task}: {model or '(not set)'}"
-        else:
-            lines = [f"{item_task}: {item_model}" for item_task, item_model in sorted(values.items())]
-            message = title if not lines else title + "\n" + "\n".join(lines)
-        await interaction.response.send_message(message, ephemeral=True)
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["ai", "model_show" if "primary" in title.lower() else "fallback_show"],
+                entries=[("Task", task), ("Model", values.get(task) or "(not set)")],
+                service_name="status",
+            )
+            return
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["ai", "model_show" if "primary" in title.lower() else "fallback_show"],
+            entries=[("Configured Tasks", len(values))],
+            sections=[("Models", [(item_task, item_model) for item_task, item_model in sorted(values.items())])],
+            service_name="status",
+        )
 
     @events_group.command(name="on", description="Enable event collection for this channel.")
     async def events_on_command(interaction: discord.Interaction) -> None:
@@ -287,14 +312,14 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.retention.on", ctx, legacy_aliases=["bm.retention"]):
             return
         await ctx.retention.set_enabled(True)
-        await interaction.response.send_message("Retention enabled.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["retention", "on"], entries=[("Status", "enabled")], tone="success", service_name="status")
 
     @retention_group.command(name="off", description="Disable the retention task.")
     async def retention_off_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.retention.off", ctx, legacy_aliases=["bm.retention"]):
             return
         await ctx.retention.set_enabled(False)
-        await interaction.response.send_message("Retention disabled.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["retention", "off"], entries=[("Status", "disabled")], tone="success", service_name="status")
 
     @retention_group.command(name="status", description="Show retention status.")
     async def retention_status_command(interaction: discord.Interaction) -> None:
@@ -302,9 +327,12 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             return
         enabled = await ctx.retention.is_enabled()
         days = await ctx.retention.get_retention_days()
-        await interaction.response.send_message(
-            f"Retention is {'on' if enabled else 'off'} | days={days}",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["retention", "status"],
+            entries=[("Status", enabled), ("Days", days)],
+            service_name="status",
         )
 
     @retention_group.command(name="config_set", description="Update retention configuration.")
@@ -313,24 +341,46 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.retention.config_set", ctx, legacy_aliases=["bm.retention"]):
             return
         if days is None:
-            await interaction.response.send_message(
-                "No changes provided. Use /bm retention config_show to inspect the current configuration.",
-                ephemeral=True,
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["retention", "config_set"],
+                entries=[("Reason", "No changes provided")],
+                tone="warning",
+                sections=[("Next Step", [("Command", "/bm retention config_show")])],
+                service_name="status",
             )
             return
         if days <= 0:
-            await interaction.response.send_message("Please provide a valid positive day value.", ephemeral=True)
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["retention", "config_set"],
+                entries=[("Reason", "Provide a valid positive day value")],
+                tone="error",
+                service_name="status",
+            )
             return
         await ctx.retention.set_retention_days(days)
-        await interaction.response.send_message(f"Retention configuration updated: days={days}", ephemeral=True)
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["retention", "config_set"],
+            entries=[("Status", "updated"), ("Days", days)],
+            tone="success",
+            service_name="status",
+        )
 
     @retention_group.command(name="config_show", description="Show retention configuration.")
     async def retention_config_show_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.retention.config_show", ctx, legacy_aliases=["bm.retention"]):
             return
-        await interaction.response.send_message(
-            f"Retention days: {await ctx.retention.get_retention_days()}",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["retention", "config_show"],
+            entries=[("Days", await ctx.retention.get_retention_days())],
+            service_name="status",
         )
 
     @retention_group.command(name="config_reset", description="Reset retention configuration to defaults.")
@@ -339,9 +389,13 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             return
         default_days = int(getattr(ctx.retention, "_default_days", 30))
         await ctx.retention.set_retention_days(default_days)
-        await interaction.response.send_message(
-            f"Retention configuration reset: days={default_days}",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["retention", "config_reset"],
+            entries=[("Status", "reset"), ("Days", default_days)],
+            tone="success",
+            service_name="status",
         )
 
     @backfill_group.command(name="on", description="Enable backfill.")
@@ -349,14 +403,14 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.backfill.on", ctx, legacy_aliases=["bm.backfill"]):
             return
         await ctx.backfill.set_enabled(True)
-        await interaction.response.send_message("Backfill enabled.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["backfill", "on"], entries=[("Status", "enabled")], tone="success", service_name="status")
 
     @backfill_group.command(name="off", description="Disable backfill.")
     async def backfill_off_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.backfill.off", ctx, legacy_aliases=["bm.backfill"]):
             return
         await ctx.backfill.set_enabled(False)
-        await interaction.response.send_message("Backfill disabled.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["backfill", "off"], entries=[("Status", "disabled")], tone="success", service_name="status")
 
     @backfill_group.command(name="status", description="Show backfill status.")
     async def backfill_status_command(interaction: discord.Interaction) -> None:
@@ -364,9 +418,12 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             return
         enabled = await ctx.backfill.is_enabled()
         days = await ctx.backfill.get_backfill_days()
-        await interaction.response.send_message(
-            f"Backfill is {'on' if enabled else 'off'} | days={days}",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["backfill", "status"],
+            entries=[("Status", enabled), ("Days", days)],
+            service_name="status",
         )
 
     @backfill_group.command(name="config_set", description="Update backfill configuration.")
@@ -375,24 +432,46 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.backfill.config_set", ctx, legacy_aliases=["bm.backfill"]):
             return
         if days is None:
-            await interaction.response.send_message(
-                "No changes provided. Use /bm backfill config_show to inspect the current configuration.",
-                ephemeral=True,
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["backfill", "config_set"],
+                entries=[("Reason", "No changes provided")],
+                tone="warning",
+                sections=[("Next Step", [("Command", "/bm backfill config_show")])],
+                service_name="status",
             )
             return
         if days <= 0:
-            await interaction.response.send_message("Please provide a valid positive day value.", ephemeral=True)
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["backfill", "config_set"],
+                entries=[("Reason", "Provide a valid positive day value")],
+                tone="error",
+                service_name="status",
+            )
             return
         await ctx.backfill.set_backfill_days(days)
-        await interaction.response.send_message(f"Backfill configuration updated: days={days}", ephemeral=True)
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["backfill", "config_set"],
+            entries=[("Status", "updated"), ("Days", days)],
+            tone="success",
+            service_name="status",
+        )
 
     @backfill_group.command(name="config_show", description="Show backfill configuration.")
     async def backfill_config_show_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.backfill.config_show", ctx, legacy_aliases=["bm.backfill"]):
             return
-        await interaction.response.send_message(
-            f"Backfill days: {await ctx.backfill.get_backfill_days()}",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["backfill", "config_show"],
+            entries=[("Days", await ctx.backfill.get_backfill_days())],
+            service_name="status",
         )
 
     @backfill_group.command(name="config_reset", description="Reset backfill configuration to defaults.")
@@ -401,9 +480,13 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
             return
         default_days = int(getattr(ctx.backfill, "_default_days", 30))
         await ctx.backfill.set_backfill_days(default_days)
-        await interaction.response.send_message(
-            f"Backfill configuration reset: days={default_days}",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["backfill", "config_reset"],
+            entries=[("Status", "reset"), ("Days", default_days)],
+            tone="success",
+            service_name="status",
         )
 
     @backfill_group.command(name="run", description="Run backfill now.")
@@ -411,14 +494,25 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.backfill.run", ctx, legacy_aliases=["bm.backfill"]):
             return
         if not await ctx.backfill.is_enabled():
-            await interaction.response.send_message("Backfill is disabled. Enable it first.", ephemeral=True)
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["backfill", "run"],
+                entries=[("Reason", "Backfill is disabled"), ("Action", "Enable it first")],
+                tone="warning",
+                service_name="status",
+            )
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         result = await ctx.backfill.run_once(force_full_window=True)
-        await interaction.followup.send(
-            "Backfill completed. "
-            f"Messages: {result.messages}, Events: {result.events}, Channels: {result.channels}, Errors: {result.errors}.",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["backfill", "run"],
+            entries=[("Status", "completed")],
+            tone="success",
+            sections=[("Metrics", [("Messages", result.messages), ("Events", result.events), ("Channels", result.channels), ("Errors", result.errors)])],
+            service_name="status",
         )
 
     @ai_group.command(name="on", description="Enable the AI service.")
@@ -426,14 +520,14 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.ai.on", ctx, legacy_aliases=["bm.ai"]):
             return
         await ctx.ai.set_enabled(True)
-        await interaction.response.send_message("AI enabled.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["ai", "on"], entries=[("Status", "enabled")], tone="success", service_name="status")
 
     @ai_group.command(name="off", description="Disable the AI service.")
     async def ai_off_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.ai.off", ctx, legacy_aliases=["bm.ai"]):
             return
         await ctx.ai.set_enabled(False)
-        await interaction.response.send_message("AI disabled.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["ai", "off"], entries=[("Status", "disabled")], tone="success", service_name="status")
 
     @ai_group.command(name="model_set", description="Set the AI model for a task.")
     @app_commands.describe(task="AI task.", model="Select or search for a provider:model value.")
@@ -447,13 +541,25 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.ai.model_set", ctx, legacy_aliases=["bm.ai-model"]):
             return
         if not _is_valid_provider_model(model):
-            await interaction.response.send_message(
-                "Invalid format. Use a suggested model or provider:model, for example openai:gpt-4o-mini.",
-                ephemeral=True,
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["ai", "model_set"],
+                entries=[("Reason", "Invalid provider:model format")],
+                tone="error",
+                sections=[("Example", [("Model", "openai:gpt-4o-mini")])],
+                service_name="status",
             )
             return
         await ctx.ai.set_model(task.value, model)
-        await interaction.response.send_message(f"Primary AI model updated: {task.value} -> {model}", ephemeral=True)
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["ai", "model_set"],
+            entries=[("Task", task.value), ("Model", model), ("Scope", "primary")],
+            tone="success",
+            service_name="status",
+        )
 
     @ai_group.command(name="model_show", description="Show configured AI models.")
     @app_commands.describe(task="Optional AI task.")
@@ -480,13 +586,25 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.ai.fallback_set", ctx, legacy_aliases=["bm.ai-model"]):
             return
         if not _is_valid_provider_model(model):
-            await interaction.response.send_message(
-                "Invalid format. Use a suggested model or provider:model, for example openai:gpt-4o-mini.",
-                ephemeral=True,
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["ai", "fallback_set"],
+                entries=[("Reason", "Invalid provider:model format")],
+                tone="error",
+                sections=[("Example", [("Model", "openai:gpt-4o-mini")])],
+                service_name="status",
             )
             return
         await ctx.ai.set_fallback_model(task.value, model)
-        await interaction.response.send_message(f"Fallback AI model updated: {task.value} -> {model}", ephemeral=True)
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["ai", "fallback_set"],
+            entries=[("Task", task.value), ("Model", model), ("Scope", "fallback")],
+            tone="success",
+            service_name="status",
+        )
 
     @ai_group.command(name="fallback_show", description="Show configured AI fallback models.")
     @app_commands.describe(task="Optional AI task.")
@@ -510,38 +628,29 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         models = status.get("models", {}) if isinstance(status, dict) else {}
         fallback_models = status.get("fallback_models", {}) if isinstance(status, dict) else {}
 
-        embed = discord.Embed(
-            title="🧠 AI Status",
-            description=f"Service: **{status.get('state') or 'unknown'}**",
-            color=discord.Color.blurple(),
-        )
-        if isinstance(models, dict) and models:
-            primary_text = "\n".join(f"• {task} → {model}" for task, model in sorted(models.items()))
-            embed.add_field(name="Primary", value=_truncate_embed_text(primary_text), inline=False)
-        if isinstance(fallback_models, dict) and fallback_models:
-            fallback_text = "\n".join(f"• {task} → {model}" for task, model in sorted(fallback_models.items()))
-            embed.add_field(name="Fallback", value=_truncate_embed_text(fallback_text), inline=False)
-
-        last_usage = (
-            f"• task: {metrics.get('last_used_task') or '(n/a)'}\n"
-            f"• model: {metrics.get('last_used_model') or '(n/a)'}"
-        )
-        embed.add_field(name="Last usage", value=_truncate_embed_text(last_usage), inline=False)
-
         last_test_state = metrics.get("last_test_ok")
-        if last_test_state is None:
-            test_outcome = "(n/a)"
-        else:
-            test_outcome = "ok" if last_test_state else "failed"
-        last_test = (
-            f"• task: {metrics.get('last_test_task') or '(n/a)'}\n"
-            f"• model: {metrics.get('last_test_model') or '(n/a)'}\n"
-            f"• result: {test_outcome}"
+        test_outcome = "(n/a)" if last_test_state is None else ("ok" if last_test_state else "failed")
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["ai", "status"],
+            entries=[("Service", status.get("state") or "unknown")],
+            sections=[
+                ("Primary", [(task_name, model_name) for task_name, model_name in sorted(models.items())] if isinstance(models, dict) else []),
+                ("Fallback", [(task_name, model_name) for task_name, model_name in sorted(fallback_models.items())] if isinstance(fallback_models, dict) else []),
+                ("Last Usage", [("Task", metrics.get("last_used_task") or "(n/a)"), ("Model", metrics.get("last_used_model") or "(n/a)")]),
+                (
+                    "Last Run",
+                    [
+                        ("Task", metrics.get("last_test_task") or "(n/a)"),
+                        ("Model", metrics.get("last_test_model") or "(n/a)"),
+                        ("Result", test_outcome),
+                        ("Error", _truncate_embed_text(str(metrics.get("last_test_error"))) if metrics.get("last_test_error") else "(n/a)"),
+                    ],
+                ),
+            ],
+            service_name="status",
         )
-        if metrics.get("last_test_error"):
-            last_test += f"\n• error: {_truncate_embed_text(str(metrics.get('last_test_error')), limit=220)}"
-        embed.add_field(name="Last run", value=_truncate_embed_text(last_test), inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @ai_group.command(name="run", description="Run an AI test prompt.")
     @app_commands.describe(task="AI task.", prompt="Prompt text.", web="Enable or disable web search.")
@@ -558,36 +667,43 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         web_value = (web.value if web is not None else "off") == "on"
         result = await ctx.ai.run_test(task.value, prompt, use_web=web_value)
 
-        embed = discord.Embed(title="AI run", color=discord.Color.green() if result.get("ok") else discord.Color.red())
-        embed.add_field(name="Task", value=str(result.get("task") or task.value), inline=True)
-        embed.add_field(name="Model", value=str(result.get("model") or "(n/a)"), inline=True)
-        embed.add_field(name="Web", value="on" if web_value else "off", inline=True)
-        embed.add_field(name="Result", value="ok" if result.get("ok") else "failed", inline=True)
-        embed.add_field(name="Output", value=_truncate_embed_text(result.get("output"), limit=900), inline=False)
+        sections = [("Output", [("Result", _truncate_embed_text(result.get("output"), limit=900))])]
         if result.get("error"):
-            embed.add_field(name="Error", value=_truncate_embed_text(str(result.get("error")), limit=900), inline=False)
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
+            sections.append(("Error", [("Message", _truncate_embed_text(str(result.get("error")), limit=900))]))
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["ai", "run"],
+            entries=[
+                ("Task", result.get("task") or task.value),
+                ("Model", result.get("model") or "(n/a)"),
+                ("Web", web_value),
+                ("Result", "ok" if result.get("ok") else "failed"),
+            ],
+            tone="success" if result.get("ok") else "error",
+            sections=sections,
+            service_name="status",
+        )
 
     @footer_group.command(name="on", description="Enable footer rendering.")
     async def footer_on_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.footer.on", ctx, legacy_aliases=["bm.footer", "bm.footer_status"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "on"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
         await ctx.footer.set_enabled(True)
-        await interaction.response.send_message("Footer rendering enabled.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "on"], entries=[("Status", "enabled")], tone="success", service_name="status")
 
     @footer_group.command(name="off", description="Disable footer rendering.")
     async def footer_off_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.footer.off", ctx, legacy_aliases=["bm.footer", "bm.footer_status"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "off"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
         await ctx.footer.set_enabled(False)
-        await interaction.response.send_message("Footer rendering disabled.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "off"], entries=[("Status", "disabled")], tone="success", service_name="status")
 
     @footer_group.command(name="template_global_set", description="Set the global footer template.")
     @app_commands.describe(version="Optional footer brand version.", phrase="Optional global footer phrase.")
@@ -599,34 +715,47 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.footer.template_global_set", ctx, legacy_aliases=["bm.footer"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_global_set"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
         if version is None and phrase is None:
-            await interaction.response.send_message(
-                "No changes provided. Use /bm footer template_global_show to inspect the current template.",
-                ephemeral=True,
+            await send_standard_command_embed(
+                interaction,
+                top_level="bm",
+                path_parts=["footer", "template_global_set"],
+                entries=[("Reason", "No changes provided")],
+                tone="warning",
+                sections=[("Next Step", [("Command", "/bm footer template_global_show")])],
+                service_name="status",
             )
             return
         if version is not None:
             await ctx.footer.set_version(_clean_opt(version))
         if phrase is not None:
             await ctx.footer.set_global_phrase(_clean_opt(phrase))
-        await interaction.response.send_message("Global footer template updated.", ephemeral=True)
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["footer", "template_global_set"],
+            entries=[("Status", "updated"), ("Version", _format_value(await ctx.footer.get_version())), ("Phrase", _format_value(await ctx.footer.get_global_phrase()))],
+            tone="success",
+            service_name="status",
+        )
 
     @footer_group.command(name="template_global_show", description="Show the global footer template.")
     async def footer_template_global_show_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.footer.template_global_show", ctx, legacy_aliases=["bm.footer", "bm.footer_status"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_global_show"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
         current_version = await ctx.footer.get_version()
         current_global = await ctx.footer.get_global_phrase()
-        await interaction.response.send_message(
-            "Global footer template\n"
-            f"version: {_format_value(current_version)}\n"
-            f"phrase: {_format_value(current_global)}",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["footer", "template_global_show"],
+            entries=[("Version", _format_value(current_version)), ("Phrase", _format_value(current_global))],
+            service_name="status",
         )
 
     @footer_group.command(name="template_global_reset", description="Reset the global footer template.")
@@ -634,11 +763,11 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.footer.template_global_reset", ctx, legacy_aliases=["bm.footer"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_global_reset"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
         await ctx.footer.set_version(None)
         await ctx.footer.set_global_phrase(None)
-        await interaction.response.send_message("Global footer template reset.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_global_reset"], entries=[("Status", "reset")], tone="success", service_name="status")
 
     @footer_group.command(name="template_service_set", description="Set a service-specific footer template.")
     @app_commands.describe(service="Service name.", phrase="Service-specific footer phrase.")
@@ -650,14 +779,14 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.footer.template_service_set", ctx, legacy_aliases=["bm.footer"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_service_set"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
         service_name = _clean_opt(service)
         if service_name is None:
-            await interaction.response.send_message("Please provide a valid service name.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_service_set"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
             return
         await ctx.footer.set_service_phrase(service_name, _clean_opt(phrase))
-        await interaction.response.send_message(f"Service footer template updated for {service_name}.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_service_set"], entries=[("Service", service_name), ("Status", "updated")], tone="success", service_name="status")
 
     @footer_group.command(name="template_service_show", description="Show a service-specific footer template.")
     @app_commands.describe(service="Service name.")
@@ -665,16 +794,19 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.footer.template_service_show", ctx, legacy_aliases=["bm.footer", "bm.footer_status"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_service_show"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
         service_name = _clean_opt(service)
         if service_name is None:
-            await interaction.response.send_message("Please provide a valid service name.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_service_show"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
             return
         phrase = (await ctx.footer.get_service_phrases()).get(service_name)
-        await interaction.response.send_message(
-            f"Service footer template\nservice: {service_name}\nphrase: {_format_value(phrase)}",
-            ephemeral=True,
+        await send_standard_command_embed(
+            interaction,
+            top_level="bm",
+            path_parts=["footer", "template_service_show"],
+            entries=[("Service", service_name), ("Phrase", _format_value(phrase))],
+            service_name="status",
         )
 
     @footer_group.command(name="template_service_reset", description="Reset a service-specific footer template.")
@@ -683,21 +815,21 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         if not await check_permission(interaction, "bm.footer.template_service_reset", ctx, legacy_aliases=["bm.footer"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_service_reset"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
         service_name = _clean_opt(service)
         if service_name is None:
-            await interaction.response.send_message("Please provide a valid service name.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_service_reset"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
             return
         await ctx.footer.set_service_phrase(service_name, None)
-        await interaction.response.send_message(f"Service footer template reset for {service_name}.", ephemeral=True)
+        await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "template_service_reset"], entries=[("Service", service_name), ("Status", "reset")], tone="success", service_name="status")
 
     @footer_group.command(name="status", description="Show footer status and rendered variants.")
     async def footer_status_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "bm.footer.status", ctx, legacy_aliases=["bm.footer_status", "bm.footer"]):
             return
         if ctx.footer is None:
-            await interaction.response.send_message("Footer service is unavailable.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "status"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
 
         enabled = await ctx.footer.is_enabled()
@@ -709,7 +841,7 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         profile_map = await ctx.footer.get_service_footer_profiles()
 
         if not known_services:
-            await interaction.response.send_message("No known footer services.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "status"], entries=[("Reason", "No known footer services")], tone="warning", service_name="status")
             return
 
         services = sorted(set(known_services), key=lambda name: (_service_section(name), name))
@@ -772,7 +904,7 @@ def register_admin(bm_group: app_commands.Group, ctx: CommandContext) -> None:
 
         chunks = _chunk_status_blocks(lines, max_len=1900)
         if not chunks:
-            await interaction.response.send_message("No footer data available.", ephemeral=True)
+            await send_standard_command_embed(interaction, top_level="bm", path_parts=["footer", "status"], entries=[("Reason", "No footer data available")], tone="warning", service_name="status")
             return
 
         await interaction.response.send_message(chunks[0], ephemeral=True)
