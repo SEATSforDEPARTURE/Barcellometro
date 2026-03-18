@@ -5,6 +5,8 @@ import sys
 import types
 from pathlib import Path
 
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 import discord
 import asyncio
 
@@ -12,6 +14,8 @@ if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict, Connection=object)
 if "openai" not in sys.modules:
     sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
+if "httpx" not in sys.modules:
+    sys.modules["httpx"] = types.SimpleNamespace(AsyncClient=object, Client=object)
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "app/plugins/commands_modular/attivita.py"
@@ -192,8 +196,11 @@ class _Response:
     def __init__(self) -> None:
         self.payload = None
 
-    async def send_message(self, content: str, ephemeral: bool = False):
-        self.payload = (content, ephemeral)
+    def is_done(self) -> bool:
+        return self.payload is not None
+
+    async def send_message(self, content: str | None = None, embed: discord.Embed | None = None, ephemeral: bool = False, **kwargs):
+        self.payload = {"content": content, "embed": embed, "ephemeral": ephemeral, **kwargs}
 
 
 class _DummyResp:
@@ -227,9 +234,44 @@ def test_dm_forbidden_fallback(monkeypatch) -> None:
     ctx = types.SimpleNamespace(
         config=types.SimpleNamespace(MAX_ULTIMI_MINUTI=60, MAX_ULTIMI_ORE=24, MAX_ULTIMI_GIORNI=30, MAX_ULTIMI_SETTIMANE=8),
         activity_insights=_ActivityInsights(),
+        footer=None,
     )
     register_attivita(group, ctx)
     cmd = next(c for c in group.commands if c.name == "oggi")
     interaction = _Interaction()
     asyncio.run(cmd.callback(interaction))
-    assert interaction.response.payload == ("❌ Non posso inviarti DM. Abilita i DM dal server e riprova.", True)
+    payload = interaction.response.payload
+    assert payload is not None
+    assert payload["ephemeral"] is True
+    assert payload["content"] is None
+    assert payload["embed"] is not None
+    assert "Non posso inviarti DM. Abilita i DM dal server e riprova." in (payload["embed"].description or "")
+
+
+class _NoopUser:
+    async def send(self, *args, **kwargs):
+        return None
+
+
+def test_attivita_ultimi_validation_uses_standard_embed(monkeypatch) -> None:
+    async def _allowed(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(attivita_module, "check_permission", _allowed)
+    group = discord.app_commands.Group(name="attivita", description="x")
+    ctx = types.SimpleNamespace(
+        config=types.SimpleNamespace(MAX_ULTIMI_MINUTI=60, MAX_ULTIMI_ORE=24, MAX_ULTIMI_GIORNI=30, MAX_ULTIMI_SETTIMANE=8),
+        activity_insights=_ActivityInsights(),
+        footer=None,
+    )
+    register_attivita(group, ctx)
+    cmd = next(c for c in group.commands if c.name == "ultimi")
+    interaction = _Interaction()
+    interaction.user = _NoopUser()
+    interaction.command = cmd
+    asyncio.run(cmd.callback(interaction, 0, discord.app_commands.Choice(name="giorni", value="giorni")))
+    payload = interaction.response.payload
+    assert payload is not None
+    assert payload["embed"] is not None
+    assert "ATTIVITA ULTIMI" in (payload["embed"].description or "")
+    assert payload["content"] is None

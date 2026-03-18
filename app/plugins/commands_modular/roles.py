@@ -8,6 +8,24 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.utils.command_embeds import CommandEmbedSection, send_standard_response
 
 
+def _format_role_label(guild: discord.Guild | None, role_id: object) -> str:
+    raw_role_id = str(role_id)
+    if raw_role_id.isdigit() and guild is not None:
+        role = guild.get_role(int(raw_role_id))
+        if role is not None:
+            return f"{role.mention} ({role.name})"
+    return f"Deleted role (ID: {raw_role_id})"
+
+
+def _format_user_label(guild: discord.Guild | None, user_id: object) -> str:
+    raw_user_id = str(user_id)
+    if raw_user_id.isdigit() and guild is not None:
+        member = guild.get_member(int(raw_user_id))
+        if member is not None:
+            return f"{member.mention} ({member.display_name})"
+    return f"Unknown user (ID: {raw_user_id})"
+
+
 def _policy_line(command: str, usage_limit: int | None, cooldown_seconds: int | None) -> str:
     limit = usage_limit if usage_limit is not None else "∞"
     cooldown = cooldown_seconds if cooldown_seconds is not None else "∞"
@@ -74,7 +92,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
         if not rows:
             await send_standard_response(interaction, top_level="bm", subcommand_path="roles role_list", lines=[("warning", "No role policies configured.")], kind="warning", footer_service=ctx.footer)
             return
-        await send_standard_response(interaction, top_level="bm", subcommand_path="roles role_list", lines=[("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(f"role_{row['role_id']}", f"command={row['command']} · {_policy_line(row['command'], row['usage_limit'], row['cooldown_seconds'])}") for row in rows])], footer_service=ctx.footer)
+        await send_standard_response(interaction, top_level="bm", subcommand_path="roles role_list", lines=[("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(_format_role_label(interaction.guild, row['role_id']), f"command={row['command']} · {_policy_line(row['command'], row['usage_limit'], row['cooldown_seconds'])}") for row in rows])], footer_service=ctx.footer)
 
     @commandguard_group.command(name="role_reset", description="Reset all policies for a role.")
     @app_commands.describe(role="Target role.")
@@ -133,7 +151,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
         if not rows:
             await send_standard_response(interaction, top_level="bm", subcommand_path="roles user_list", lines=[("warning", "No user policies configured.")], kind="warning", footer_service=ctx.footer)
             return
-        await send_standard_response(interaction, top_level="bm", subcommand_path="roles user_list", lines=[("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(f"user_{row['user_id']}", f"command={row['command']} · {_policy_line(row['command'], row['usage_limit'], row['cooldown_seconds'])}") for row in rows])], footer_service=ctx.footer)
+        await send_standard_response(interaction, top_level="bm", subcommand_path="roles user_list", lines=[("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(_format_user_label(interaction.guild, row['user_id']), f"command={row['command']} · {_policy_line(row['command'], row['usage_limit'], row['cooldown_seconds'])}") for row in rows])], footer_service=ctx.footer)
 
     @commandguard_group.command(name="user_reset", description="Reset all policies for a user.")
     @app_commands.describe(user="Target user.")
