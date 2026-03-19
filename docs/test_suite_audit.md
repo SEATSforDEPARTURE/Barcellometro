@@ -6,7 +6,7 @@ Data audit: 2026-03-19.
 
 ### Metodo usato
 - Analisi statica dell'intera cartella `tests/` file per file.
-- Confronto puntuale con l'architettura attuale sotto `app/`, in particolare `app/plugins/commands_modular/`, `app/services/`, `app/renderers/`, `app/shared/discord/` e i compatibility shim in `app/utils/`.
+- Confronto puntuale con l'architettura attuale sotto `app/`, in particolare `app/plugins/commands_modular/`, `app/services/`, `app/renderers/`, `app/shared/discord/`, `app/config/` e il package minimale `app/utils/`.
 - Verifica di collection/esecuzione con:
   - `pytest --collect-only -q`
   - `pytest -q`
@@ -236,18 +236,19 @@ Copertura presente ma non abbastanza solida dove servirebbe davvero:
   - `resoconto`
   - `triggers`
 - **scoperti o quasi scoperti come command behavior reale**:
+  - `audio_notes`
   - `privacy`
   - `settings`
   - `status`
   - `stt`
   - `translate`
-  - `barcellometro_attivita`
+  - `voice_ingest`
   - `time_windows`
 
 ### 6.2 Footer / meta / footer pipeline
 Buona copertura su `FooterService` e metadata embed (`tests/test_footer_meta.py`), ma mancano o sono deboli:
 - test del patching reale di `install_footer_auto_finalize(...)` su oggetti Discord;
-- test dei compatibility shim sotto `app/utils/footer_pipeline.py`, `app/utils/command_embeds.py`, `app/utils/embed_limits.py`, `app/utils/report_embeds.py`, `app/utils/component_notices.py`, `app/utils/discord_send.py`.
+- test diretti dei moduli shared sotto `app/shared/discord/footer_pipeline.py`, `app/shared/discord/command_embeds.py`, `app/shared/discord/embed_limits.py`, `app/shared/discord/report_embeds.py`, `app/shared/discord/component_notices.py`, `app/shared/discord/delivery.py`.
 
 ### 6.3 Scheduling
 Ben coperti:
@@ -282,8 +283,8 @@ Mancano test puliti e affidabili su:
 
 ### 6.8 Compatibility shims legacy
 Gap evidente:
-- i compatibility shim `app/utils/*` sono quasi tutti privi di test dedicati;
-- `app/services/config_file_loader.py` e `app/services/config_overrides.py` (shim TODO remove after import migration) non hanno copertura diretta;
+- l'uso di alias legacy per path/config e command permission non è coperto in modo sistematico;
+- `app/config/file_loader.py` e `app/config/overrides.py` hanno copertura di base, ma non esiste una batteria dedicata alle sole compatibilità legacy documentate;
 - le compatibilità legacy di `voice_ingest` per setting namespaced/legacy non risultano coperte;
 - diversi alias legacy di permission/command nei moduli comando non sono testati in modo affidabile.
 
