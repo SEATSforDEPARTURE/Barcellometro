@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from app.services.campaign_content_formatter import (
-    apply_shared_footer_and_pagination,
     build_horoscope_embeds,
     build_news_embeds,
     build_weather_embeds,
@@ -19,7 +18,6 @@ def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
             }
         },
     )
-    apply_shared_footer_and_pagination(embeds, "Barcellometro dev6 · Dati elaborati con open-meteo, meteoam, 3bmeteo e gpt-4o")
 
     assert embeds[0].title == "🌞 METEO CRICETOSO • Overview Italia"
     assert embeds[1].title == "🌞 METEO CRICETOSO • Nord"
@@ -46,8 +44,6 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         {"signs": {"Ariete": {"text": "Focus"}}},
     )
     footer_text = "Barcellometro dev6 · Dati elaborati con open-meteo e gpt-4o"
-    apply_shared_footer_and_pagination(news, footer_text)
-    apply_shared_footer_and_pagination(horoscope, footer_text)
 
     assert news[0].title == "📰 NOTIZIARIO CRICETOSO • Inizio"
     assert news[1].title == "📰 NOTIZIARIO CRICETOSO • Trash"
@@ -110,6 +106,7 @@ def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
 def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fields() -> None:
     source = Path("app/services/campaign_content_service.py").read_text()
     assert "def _normalize_sources" in source
+    assert "def _build_campaign_footer" in source
     assert '"campagne_notizie"' in source
     assert '"campagne_meteo"' in source
     assert '"campagne_oroscopo"' in source
@@ -117,7 +114,6 @@ def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fiel
     assert '"used_sources": used_sources' in source
     assert '"used_model": used_model' in source
     assert "attach_footer_meta_to_all" in source
-    assert "apply_shared_footer_and_pagination" in source
 
 
 def test_campaign_content_service_maps_editorial_footer_service_names() -> None:
