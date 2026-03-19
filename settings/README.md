@@ -3,6 +3,12 @@
 Tutti i config file-based versionati e locali vivono **solo** in `settings/`.
 `app/settings/` non è più usato come source of truth.
 
+## Source of truth e migrazione
+
+- Il source of truth per i template versionati è questa directory: `settings/`.
+- I path canonici da documentare negli env example e nella documentazione sono solo `settings/...`.
+- Eventuali riferimenti legacy a `app/settings/...` esistono solo come compatibilità temporanea o come nota storica nel piano di refactor; non vanno usati per nuovi setup.
+
 ## File disponibili
 
 ### Template versionati (`*.example.json`)
@@ -36,3 +42,4 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - `ENTITLEMENTS_CONFIG_PATH` deve puntare a `settings/entitlements.json` se vuoi usare override locali.
 - I servizi Aura e Trigger leggono i runtime file in `settings/*.json` e, quando previsto, fanno fallback automatico al corrispondente `settings/*.example.json`.
 - Per evitare path duplicati nel codice Python, i riferimenti centralizzati stanno in `app/core/config_paths.py`.
+- In questa fase di preparazione al refactor strutturale non vanno spostati feature folders, moduli Python o comandi: si consolidano solo documentazione, template e path settings.
