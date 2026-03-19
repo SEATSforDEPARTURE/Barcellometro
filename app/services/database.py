@@ -2921,8 +2921,16 @@ class DatabaseService:
         where_clauses = ["ended_ts IS NULL"]
         params: list[str] = [ended_ts]
         if source:
-            where_clauses.append("(meta_json IS NOT NULL AND meta_json LIKE ?)")
-            params.append(f'%"source"%{source}%')
+            where_clauses.append(
+                """
+                (
+                    meta_json IS NOT NULL
+                    AND json_valid(meta_json)
+                    AND json_extract(meta_json, '$.source') = ?
+                )
+                """
+            )
+            params.append(source)
         if started_before_ts:
             where_clauses.append("started_ts < ?")
             params.append(started_before_ts)
