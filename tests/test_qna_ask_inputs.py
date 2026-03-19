@@ -1,58 +1,15 @@
-import sys
-import types
+from __future__ import annotations
+
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import asyncio
-
 import pytest
 
-discord_stub = sys.modules.get("discord")
-if discord_stub is None:
-    discord_stub = types.ModuleType("discord")
-    sys.modules["discord"] = discord_stub
-if not hasattr(discord_stub, "Interaction"):
-    discord_stub.Interaction = object
-if not hasattr(discord_stub, "abc"):
-    discord_stub.abc = types.SimpleNamespace(Snowflake=object)
-if not hasattr(discord_stub, "app_commands"):
-    app_commands_stub = types.ModuleType("app_commands")
-    app_commands_stub.CommandTree = object
-    app_commands_stub.describe = lambda **kwargs: (lambda func: func)
-    discord_stub.app_commands = app_commands_stub
 
-import importlib.util
-from pathlib import Path
-
-ctx_stub = types.ModuleType("app.plugins.commands_modular.ctx")
-ctx_stub.CommandContext = object
-sys.modules["app.plugins.commands_modular.ctx"] = ctx_stub
-
-permissions_stub = types.ModuleType("app.plugins.commands_modular.permissions")
-
-
-async def _allow(*args, **kwargs):
-    return True
-
-
-permissions_stub.check_permission = _allow
-sys.modules["app.plugins.commands_modular.permissions"] = permissions_stub
-
-ask_path = Path(__file__).resolve().parents[1] / "app" / "plugins" / "commands_modular" / "ask.py"
-spec = importlib.util.spec_from_file_location("ask_module_for_tests", ask_path)
-ask_module = importlib.util.module_from_spec(spec)
-assert spec and spec.loader
-spec.loader.exec_module(ask_module)
-_handle_ask_like = ask_module._handle_ask_like
-parse_qna_input = ask_module.parse_qna_input
-
-
-class DummyResponse:
-    def __init__(self) -> None:
-        self.sent: list[tuple[str, bool]] = []
-
-    async def send_message(self, text: str, ephemeral: bool = False) -> None:
-        self.sent.append((text, ephemeral))
+@pytest.fixture
+def ask_module(import_fresh):
+    return import_fresh("app.plugins.commands_modular.ask")
 
 
 @pytest.mark.parametrize(
@@ -62,15 +19,15 @@ class DummyResponse:
         (None, "mondo", "general_llm", "mondo"),
     ],
 )
-def test_parse_qna_input_valid(canale: str | None, generale: str | None, expected_scope: str, expected_text: str) -> None:
-    err, scope, text, _, _ = parse_qna_input(canale, generale)
+def test_parse_qna_input_valid(ask_module, canale: str | None, generale: str | None, expected_scope: str, expected_text: str) -> None:
+    err, scope, text, _, _ = ask_module.parse_qna_input(canale, generale)
     assert err is None
     assert scope == expected_scope
     assert text == expected_text
 
 
-def test_parse_qna_input_rejects_both_values() -> None:
-    err, scope, text, has_canale, has_generale = parse_qna_input("a", "b")
+def test_parse_qna_input_rejects_both_values(ask_module) -> None:
+    err, scope, text, has_canale, has_generale = ask_module.parse_qna_input("a", "b")
     assert "Compila un solo campo" in str(err)
     assert scope is None
     assert text is None
@@ -78,8 +35,8 @@ def test_parse_qna_input_rejects_both_values() -> None:
     assert has_generale is True
 
 
-def test_parse_qna_input_rejects_no_values() -> None:
-    err, scope, text, has_canale, has_generale = parse_qna_input(None, None)
+def test_parse_qna_input_rejects_no_values(ask_module) -> None:
+    err, scope, text, has_canale, has_generale = ask_module.parse_qna_input(None, None)
     assert "Compila uno dei due campi" in str(err)
     assert scope is None
     assert text is None
@@ -87,63 +44,72 @@ def test_parse_qna_input_rejects_no_values() -> None:
     assert has_generale is False
 
 
-def test_handle_ask_like_stato_canale() -> None:
-    trigger_engine = SimpleNamespace(
-        get_qna_quota_for_member=AsyncMock(
-            return_value={"tier": "role1", "limit": 1, "used": 0, "remaining": 1, "resets_at_iso": "2026-01-01T00:00:00+00:00"}
-        ),
-        route_qna=AsyncMock(),
-    )
-    ctx = SimpleNamespace(trigger_engine=trigger_engine)
-    interaction = SimpleNamespace(
-        guild_id=1,
-        channel_id=2,
-        user=SimpleNamespace(id=3),
-        response=DummyResponse(),
-    )
+def test_handle_ask_like_stato_canale(ask_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        trigger_engine = SimpleNamespace(
+            get_qna_quota_for_member=AsyncMock(
+                return_value={"tier": "role1", "limit": 1, "used": 0, "remaining": 1, "resets_at_iso": "2026-01-01T00:00:00+00:00"}
+            ),
+            route_qna=AsyncMock(),
+        )
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(ask_module, "send_standard_response", send_standard_response)
+        ctx = SimpleNamespace(trigger_engine=trigger_engine, footer=None)
+        interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3))
 
-    asyncio.run(_handle_ask_like(interaction, ctx, "stato", None))
+        await ask_module._handle_ask_like(interaction, ctx, "stato", None)
 
-    trigger_engine.route_qna.assert_not_called()
-    assert interaction.response.sent
-    assert interaction.response.sent[0][1] is True
+        trigger_engine.route_qna.assert_not_called()
+        kwargs = send_standard_response.await_args.kwargs
+        assert kwargs["subcommand_path"] == "ask domanda stato"
+        assert ("tier", "role1") in kwargs["lines"]
+        assert ("rimanenti_oggi", 1) in kwargs["lines"]
 
-
-def test_handle_ask_like_stato_generale() -> None:
-    trigger_engine = SimpleNamespace(
-        get_qna_quota_for_member=AsyncMock(
-            return_value={"tier": "role2", "limit": 2, "used": 1, "remaining": 1, "resets_at_iso": "2026-01-01T00:00:00+00:00"}
-        ),
-        route_qna=AsyncMock(),
-    )
-    ctx = SimpleNamespace(trigger_engine=trigger_engine)
-    interaction = SimpleNamespace(
-        guild_id=1,
-        channel_id=2,
-        user=SimpleNamespace(id=3),
-        response=DummyResponse(),
-    )
-
-    asyncio.run(_handle_ask_like(interaction, ctx, None, "StAtO"))
-
-    trigger_engine.route_qna.assert_not_called()
-    assert interaction.response.sent
-    assert interaction.response.sent[0][1] is True
+    asyncio.run(_run())
 
 
-def test_handle_ask_like_dispatches_scope_override() -> None:
-    trigger_engine = SimpleNamespace(get_qna_quota_for_member=AsyncMock(), route_qna=AsyncMock())
-    ctx = SimpleNamespace(trigger_engine=trigger_engine)
-    interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3), response=DummyResponse())
+def test_handle_ask_like_stato_generale(ask_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        trigger_engine = SimpleNamespace(
+            get_qna_quota_for_member=AsyncMock(
+                return_value={"tier": "role2", "limit": 2, "used": 1, "remaining": 1, "resets_at_iso": "2026-01-01T00:00:00+00:00"}
+            ),
+            route_qna=AsyncMock(),
+        )
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(ask_module, "send_standard_response", send_standard_response)
+        ctx = SimpleNamespace(trigger_engine=trigger_engine, footer=None)
+        interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3))
 
-    asyncio.run(_handle_ask_like(interaction, ctx, "Domanda canale", None))
-    trigger_engine.route_qna.assert_awaited_once_with(interaction, "Domanda canale", scope="channel_qna")
+        await ask_module._handle_ask_like(interaction, ctx, None, "StAtO")
+
+        trigger_engine.route_qna.assert_not_called()
+        kwargs = send_standard_response.await_args.kwargs
+        assert kwargs["subcommand_path"] == "ask domanda stato"
+        assert ("tier", "role2") in kwargs["lines"]
+
+    asyncio.run(_run())
 
 
-def test_handle_ask_like_dispatches_global_scope_override() -> None:
-    trigger_engine = SimpleNamespace(get_qna_quota_for_member=AsyncMock(), route_qna=AsyncMock())
-    ctx = SimpleNamespace(trigger_engine=trigger_engine)
-    interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3), response=DummyResponse())
+def test_handle_ask_like_dispatches_scope_override(ask_module) -> None:
+    async def _run() -> None:
+        trigger_engine = SimpleNamespace(get_qna_quota_for_member=AsyncMock(), route_qna=AsyncMock())
+        ctx = SimpleNamespace(trigger_engine=trigger_engine, footer=None)
+        interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3))
 
-    asyncio.run(_handle_ask_like(interaction, ctx, None, "Domanda generale"))
-    trigger_engine.route_qna.assert_awaited_once_with(interaction, "Domanda generale", scope="general_llm")
+        await ask_module._handle_ask_like(interaction, ctx, "Domanda canale", None)
+        trigger_engine.route_qna.assert_awaited_once_with(interaction, "Domanda canale", scope="channel_qna")
+
+    asyncio.run(_run())
+
+
+def test_handle_ask_like_dispatches_global_scope_override(ask_module) -> None:
+    async def _run() -> None:
+        trigger_engine = SimpleNamespace(get_qna_quota_for_member=AsyncMock(), route_qna=AsyncMock())
+        ctx = SimpleNamespace(trigger_engine=trigger_engine, footer=None)
+        interaction = SimpleNamespace(guild_id=1, channel_id=2, user=SimpleNamespace(id=3))
+
+        await ask_module._handle_ask_like(interaction, ctx, None, "Domanda generale")
+        trigger_engine.route_qna.assert_awaited_once_with(interaction, "Domanda generale", scope="general_llm")
+
+    asyncio.run(_run())
