@@ -1,5 +1,3 @@
 from app.domain.reporting.trend import normalize_trend, render_trend, render_trend_value
 
-# TODO: remove this compatibility shim after imports migrate to app.domain.reporting.trend.
-
 __all__ = ["normalize_trend", "render_trend", "render_trend_value"]

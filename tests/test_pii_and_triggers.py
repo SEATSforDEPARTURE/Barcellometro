@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.utils.pii import contains_pii, redact_pii
+from app.shared.safety.pii import contains_pii, redact_pii
 
 
 @pytest.fixture
