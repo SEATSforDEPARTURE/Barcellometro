@@ -17,8 +17,8 @@ from discord import Forbidden, app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
-from app.features.activity.renderers.activity_dm import build_activity_details_txt, build_activity_dm_embeds
-from app.features.activity.renderers.user_activity import build_user_activity_embeds
+from app.features.activity.renderers.activity_dm_report_renderer import build_activity_details_txt, build_activity_dm_embeds
+from app.features.activity.renderers.user_activity_report_renderer import build_user_activity_embeds
 from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
 from app.shared.discord.report_embeds import apply_standard_report_style
 

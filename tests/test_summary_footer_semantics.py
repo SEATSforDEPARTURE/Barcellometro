@@ -10,7 +10,7 @@ def test_riassunto_footer_logic_uses_used_ai_output_fields() -> None:
 
 
 def test_channel_summary_footer_logic_uses_used_ai_output_fields() -> None:
-    source = Path("app/features/summary/services/channel_summary.py").read_text()
+    source = Path("app/features/summary/services/channel_summary_service.py").read_text()
     assert 'used_ai_output = bool(ai_status.get("used_ai_output"))' in source
     assert 'used_display_model = str(ai_status.get("used_display_model") or "").strip()' in source
     assert 'contributors = [used_display_model] if used_ai_output and used_display_model else []' in source

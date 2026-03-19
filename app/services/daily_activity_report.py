@@ -1,4 +1,4 @@
 import sys
-from app.features.activity.services import daily_activity_report as _impl
+from app.features.activity.services import activity_report_service as _impl
 
 sys.modules[__name__] = _impl
