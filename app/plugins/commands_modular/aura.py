@@ -26,6 +26,7 @@ from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, build_aur
 from app.services.config_file_loader import load_json_file
 from app.services.barcello_window import resolve_default_window_minutes
 from app.utils.command_embeds import send_standard_response
+from app.utils.report_embeds import apply_standard_report_style, send_report_dm_chunks
 
 logger = logging.getLogger(__name__)
 BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
@@ -251,6 +252,15 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             row = await ctx.database.fetch_latest_aura_result(guild_id, user_id, start_ts, end_ts, channel_id=channel_id)
         return row
 
+    async def _send_aura_dm_payload(
+        interaction: discord.Interaction,
+        *,
+        embeds: list[discord.Embed],
+        mod_file: discord.File | None = None,
+    ) -> None:
+        dm = await interaction.user.create_dm()
+        await send_report_dm_chunks(dm, embeds=apply_standard_report_style(embeds, service_name="aura", cover_title=embeds[0].title or "✨ RESOCONTO AURA"), files=[mod_file] if mod_file is not None else None)
+
     async def _run(
         interaction: discord.Interaction,
         *,
@@ -286,10 +296,14 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
 
         eligibility = await ctx.aura_eligibility.evaluate_member(member, guild_id, start_ts, end_ts)
         if not eligibility.eligible:
-            embed = discord.Embed(title="✨ RESOCONTO AURA", description=f"{eligibility.reason}\nPer attivarla: aumenta i messaggi nel periodo.", color=0x5865F2)
-            embed.add_field(name="Periodo", value=f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}", inline=False)
-            attach_footer_meta(embed, service_name="aura", used_local_processing=True)
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await send_standard_response(
+                interaction,
+                top_level="aura",
+                subcommand_path="aura",
+                lines=[("eligibility", eligibility.reason), ("periodo", f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}"), ("nota", "Per attivarla: aumenta i messaggi nel periodo.")],
+                kind="warning",
+                footer_service=ctx.footer,
+            )
             return
 
         server_row = await _compute_or_fetch_result(guild_id=guild_id, user_id=user_id, start_ts=start_ts, end_ts=end_ts, channel_id=None)
@@ -403,10 +417,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             mod_file = discord.File(BytesIO(payload), filename=f"aura_metrics_{guild_id}_{user_id}.txt")
 
         try:
-            dm = await interaction.user.create_dm()
-            for idx in range(0, len(embeds), 10):
-                files = [mod_file] if idx == 0 and mod_file is not None else None
-                await dm.send(embeds=embeds[idx : idx + 10], files=files)
+            await _send_aura_dm_payload(interaction, embeds=embeds, mod_file=mod_file)
             logger.info("aura dm sent: user=%s guild=%s pages=%s", str(interaction.user.id), guild_id, len(embeds))
             await send_ephemeral(interaction, "✅ Resoconto Aura inviato in DM.")
         except discord.Forbidden:

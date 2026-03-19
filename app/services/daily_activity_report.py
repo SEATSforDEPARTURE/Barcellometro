@@ -19,6 +19,7 @@ from app.plugins.commands_modular.time_windows import infer_rolling_window_reque
 from app.services.activity_insights import ActivityInsightsService
 from app.services.database import DatabaseService
 from app.services.daily_activity_sorting import sort_channels_like_discord, sort_inactive_entries
+from app.utils.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -91,15 +92,15 @@ class DailyReportPaginationView(discord.ui.View):
     async def _navigate(self, interaction: discord.Interaction, *, action: str) -> None:
         message = interaction.message
         if message is None:
-            await interaction.response.send_message("⚠️ Messaggio non disponibile.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="daily report navigation", message="Messaggio non disponibile.", kind="warning")
             return
         record = await self._report_service.load_pagination_record(message_id=str(message.id))
         if record is None:
-            await interaction.response.send_message("⚠️ Report non più disponibile per la navigazione.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="daily report navigation", message="Report non più disponibile per la navigazione.", kind="warning")
             return
         embeds_payload = record.get("embeds")
         if not isinstance(embeds_payload, list) or not embeds_payload:
-            await interaction.response.send_message("⚠️ Pagine report non valide.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="daily report navigation", message="Pagine report non valide.", kind="warning")
             return
 
         current_index = int(record.get("current_index", 0))

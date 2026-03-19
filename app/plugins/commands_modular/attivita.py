@@ -20,6 +20,7 @@ from app.plugins.commands_modular.time_windows import resolve_ieri_window, resol
 from app.renderers.activity_dm_renderer import build_activity_details_txt, build_activity_dm_embeds
 from app.renderers.user_activity_renderer import build_user_activity_embeds
 from app.utils.command_embeds import CommandEmbedSection, send_standard_response
+from app.utils.report_embeds import apply_standard_report_style
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -426,7 +427,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
                 inactive_threshold=1,
             )
             channel_name = getattr(interaction.channel, "name", str(interaction.channel_id))
-            embeds = build_activity_dm_embeds(
+            embeds = apply_standard_report_style(build_activity_dm_embeds(
                 interaction.guild,
                 str(interaction.guild_id),
                 str(interaction.channel_id),
@@ -434,7 +435,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
                 window.label_periodo,
                 details,
                 reference_ts=end_ts,
-            )
+            ), service_name="attivita", cover_title="📈 REPORT ATTIVITÀ")
             txt_payload = build_activity_details_txt(
                 interaction.guild,
                 interaction.guild.name,
@@ -556,6 +557,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             topics_lines=topics_lines,
             advice_lines=advice,
         )
+        embeds = apply_standard_report_style(embeds, service_name="attivita", cover_title=f"📈 REPORT ATTIVITÀ — {utente.display_name}")
         txt_payload = _make_user_report_txt(utente.display_name, window.label_periodo, stats_lines, interaction_lines, topics_lines, advice)
         txt_file = None
         if should_attach_txt:

@@ -35,6 +35,7 @@ from app.plugins.commands_modular.time_windows import (
     resolve_ultimi_window,
 )
 from app.utils.command_embeds import send_standard_response
+from app.utils.report_embeds import apply_standard_report_style
 from app.utils.summary_render import build_summary_detail_embeds
 
 logger = logging.getLogger(__name__)
@@ -1822,6 +1823,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             payload_embeds = _sanitize_embeds_for_discord_limits([*normalized_status, *normalized_details], req_id=req_id)
             payload_embeds = _ensure_embed_limits(payload_embeds, max_chars=5600)
             payload_embeds = _sanitize_embeds_for_discord_limits(payload_embeds, req_id=req_id)
+            payload_embeds = apply_standard_report_style(payload_embeds, service_name="riassunto", cover_title=payload_embeds[0].title if payload_embeds else "🗒️ RIASSUNTO")
             metrics_file = build_metrics_attachment()
             files = [metrics_file] if metrics_file else None
             logger.info(
@@ -1854,6 +1856,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 content=None,
                 files=files,
                 ephemeral_fallback=True,
+                footer_service=ctx.footer,
+                default_service_name="riassunto",
             )
             if sent_dm:
                 await send_ephemeral(interaction, "✅ Ti ho inviato il riassunto in DM.")

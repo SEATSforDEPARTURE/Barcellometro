@@ -21,6 +21,7 @@ from app.plugins.commands_modular.time_windows import (
 )
 from app.services.aura import aura_reason_to_human
 from app.services.footer import attach_footer_meta
+from app.utils.report_embeds import apply_standard_report_style
 
 logger = logging.getLogger(__name__)
 EVERY_RE = re.compile(r"^(\d+)\s*(min|hours|days)$")
@@ -192,7 +193,7 @@ def register_resoconto(
                 lines=[("warning", "No relevant aura data was found for this period.")],
             )
             return
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embeds=apply_standard_report_style([embed], service_name="resoconto", cover_title=embed.title or "📓 RESOCONTO CANALE"))
 
     async def _run_server_aura_report(interaction: discord.Interaction, *, start_dt, end_dt, period_label: str) -> None:
         if interaction.guild_id is None:
@@ -247,7 +248,7 @@ def register_resoconto(
         txt_lines = ["=== RESOCONTO AURA MOD ===", f"guild_id: {guild_id}", f"period_start: {start_ts}", f"period_end: {end_ts}", "", "=== BY REASON ==="]
         txt_lines.extend([f"{item['reason_code']} => {item['total']:+d} ({item['count']})" for item in report["by_reason"]])
         file = discord.File(BytesIO("\n".join(txt_lines).encode("utf-8")), filename=f"resoconto_aura_{guild_id}.txt")
-        await interaction.followup.send(embed=embed, file=file)
+        await interaction.followup.send(embeds=apply_standard_report_style([embed], service_name="resoconto", cover_title=embed.title or "📓 RESOCONTO SERVER"), file=file)
 
     async def _create_server_schedule(
         interaction: discord.Interaction,
@@ -633,41 +634,7 @@ def register_resoconto(
             return
         await _send_channel_aura(interaction, window=window)
 
-    canale_aura_group = app_commands.Group(name="aura", description="Manual channel aura detail")
-
-    @canale_aura_group.command(name="oggi", description="Show manual channel aura details for today.")
-    async def canale_aura_oggi(interaction: discord.Interaction) -> None:
-        await _send_channel_aura(interaction, window=resolve_oggi_window())
-
-    @canale_aura_group.command(name="ieri", description="Show manual channel aura details for yesterday.")
-    async def canale_aura_ieri(interaction: discord.Interaction) -> None:
-        await _send_channel_aura(interaction, window=resolve_ieri_window())
-
-    @canale_aura_group.command(name="ultimi", description="Show manual channel aura details for the last window.")
-    @app_commands.choices(
-        unita=[
-            app_commands.Choice(name="minuti", value="minuti"),
-            app_commands.Choice(name="ore", value="ore"),
-            app_commands.Choice(name="giorni", value="giorni"),
-            app_commands.Choice(name="settimane", value="settimane"),
-        ]
-    )
-    async def canale_aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
-        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
-        if error:
-            await _send_message(interaction, scope="canale", path="aura ultimi", message=error)
-            return
-        await _send_channel_aura(interaction, window=window)
-
-    @canale_aura_group.command(name="range", description="Show manual channel aura details for a range.")
-    async def canale_aura_range(interaction: discord.Interaction, da: str, a: str) -> None:
-        window, error = resolve_range_window(da, a, ctx.config)
-        if error:
-            await _send_message(interaction, scope="canale", path="aura range", message=error)
-            return
-        await _send_channel_aura(interaction, window=window)
-
-    resocontocanale_group.add_command(canale_aura_group)
+    # Aura detail aliases remain exposed directly on /resocontocanale to avoid duplicate tree registrations.
 
     @resocontoserver_group.command(name="on", description="Enable automatic server summaries.")
     async def server_on(interaction: discord.Interaction) -> None:
@@ -913,40 +880,4 @@ def register_resoconto(
             return
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range")
 
-    server_aura_group = app_commands.Group(name="aura", description="Manual server aura detail")
-
-    @server_aura_group.command(name="oggi", description="Show manual server aura details for today.")
-    async def server_aura_oggi(interaction: discord.Interaction) -> None:
-        window = resolve_oggi_window()
-        await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="oggi")
-
-    @server_aura_group.command(name="ieri", description="Show manual server aura details for yesterday.")
-    async def server_aura_ieri(interaction: discord.Interaction) -> None:
-        window = resolve_ieri_window()
-        await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ieri")
-
-    @server_aura_group.command(name="ultimi", description="Show manual server aura details for the last window.")
-    @app_commands.choices(
-        unita=[
-            app_commands.Choice(name="minuti", value="minuti"),
-            app_commands.Choice(name="ore", value="ore"),
-            app_commands.Choice(name="giorni", value="giorni"),
-            app_commands.Choice(name="settimane", value="settimane"),
-        ]
-    )
-    async def server_aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
-        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
-        if error:
-            await _send_message(interaction, scope="server", path="aura ultimi", message=error)
-            return
-        await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ultimi")
-
-    @server_aura_group.command(name="range", description="Show manual server aura details for a range.")
-    async def server_aura_range(interaction: discord.Interaction, da: str, a: str) -> None:
-        window, error = resolve_range_window(da, a, ctx.config)
-        if error:
-            await _send_message(interaction, scope="server", path="aura range", message=error)
-            return
-        await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range")
-
-    resocontoserver_group.add_command(server_aura_group)
+    # Aura detail aliases remain exposed directly on /resocontoserver to avoid duplicate tree registrations.

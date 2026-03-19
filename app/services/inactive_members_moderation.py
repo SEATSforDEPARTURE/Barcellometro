@@ -14,6 +14,7 @@ import discord
 
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
+from app.utils.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
 ROME = ZoneInfo("Europe/Rome")
@@ -63,7 +64,7 @@ class InactivityActionsView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not self._is_admin(interaction):
-            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questi bottoni.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="inactive moderation", message="Solo gli amministratori possono usare questi bottoni.", kind="error")
             return False
         return True
 
@@ -81,7 +82,7 @@ class InactivityActionsView(discord.ui.View):
     async def reminder(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
         if not self._is_admin(interaction):
-            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="inactive moderation", message="Solo gli amministratori possono usare questo comando.", kind="error")
             return
         await interaction.response.defer(ephemeral=True)
         result = await self._service.execute_reminders(self._guild_id)
@@ -91,7 +92,7 @@ class InactivityActionsView(discord.ui.View):
     async def kick(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
         if not self._is_admin(interaction):
-            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="inactive moderation", message="Solo gli amministratori possono usare questo comando.", kind="error")
             return
         await interaction.response.defer(ephemeral=True)
         result = await self._service.execute_kick_pipeline(self._guild_id, require_grace=False)
@@ -101,7 +102,7 @@ class InactivityActionsView(discord.ui.View):
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
         if not self._is_admin(interaction):
-            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="inactive moderation", message="Solo gli amministratori possono usare questo comando.", kind="error")
             return
         for child in self.children:
             if isinstance(child, discord.ui.Button):
@@ -130,7 +131,7 @@ class GraceExpiredActionsView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not self._is_admin(interaction):
-            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questi bottoni.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="inactive moderation", message="Solo gli amministratori possono usare questi bottoni.", kind="error")
             return False
         return True
 
@@ -148,7 +149,7 @@ class GraceExpiredActionsView(discord.ui.View):
     async def kick_now(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
         if not self._is_admin(interaction):
-            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="inactive moderation", message="Solo gli amministratori possono usare questo comando.", kind="error")
             return
         await interaction.response.defer(ephemeral=True)
         result = await self._service.execute_kick_pipeline(self._guild_id, require_grace=True)
@@ -158,28 +159,30 @@ class GraceExpiredActionsView(discord.ui.View):
     async def extend_grace(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
         if not self._is_admin(interaction):
-            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="inactive moderation", message="Solo gli amministratori possono usare questo comando.", kind="error")
             return
         await interaction.response.defer(ephemeral=True)
         now_iso = datetime.now(timezone.utc).isoformat()
         for user_id in self._expired_user_ids:
             await self._service._database.extend_user_grace(self._guild_id, user_id, now_iso)
-        await interaction.followup.send(
-            f"✅ Grace esteso per **{len(self._expired_user_ids)}** utenti (senza invio DM).",
-            ephemeral=True,
+        await send_standard_component_notice(
+            interaction,
+            area="inactive moderation",
+            message=f"Grace esteso per {len(self._expired_user_ids)} utenti (senza invio DM).",
+            kind="success",
         )
 
     @discord.ui.button(label="❌ Annulla", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         _ = button
         if not self._is_admin(interaction):
-            await interaction.response.send_message("⛔ Solo gli amministratori possono usare questo comando.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="inactive moderation", message="Solo gli amministratori possono usare questo comando.", kind="error")
             return
         for child in self.children:
             if isinstance(child, discord.ui.Button):
                 child.disabled = True
         await interaction.response.edit_message(view=self)
-        await interaction.followup.send("❌ Azione grace scaduto annullata.", ephemeral=True)
+        await send_standard_component_notice(interaction, area="inactive moderation", message="Azione grace scaduto annullata.", kind="warning")
 
 
 class InactiveMembersModerationService:
