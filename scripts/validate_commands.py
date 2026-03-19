@@ -128,7 +128,7 @@ class ValidationResult:
 
     @property
     def warnings(self) -> list[Issue]:
-        return [issue for issue in self.issues if issue.severity == "warning"] + self.legacy_aliases
+        return [issue for issue in self.issues if issue.severity == "warning"]
 
 
 @dataclass(slots=True)
@@ -508,12 +508,12 @@ def render_markdown_report(result: ValidationResult) -> str:
             lines.append(f"- **{issue.severity.upper()} {issue.code}** — `{issue.path}`: {issue.message}{location}")
     else:
         lines.append("- No validator errors or warnings.")
-    lines.extend(["", "## Legacy alias review", ""])
+    lines.extend(["", "## Compatibility alias review", ""])
     if result.legacy_aliases:
         for issue in result.legacy_aliases:
-            lines.append(f"- **WARNING legacy_alias** — `{issue.path}`: `{issue.message}` (`{issue.source_file}:{issue.line}`)")
+            lines.append(f"- **INFO compatibility_alias** — `{issue.path}`: `{issue.message}` (`{issue.source_file}:{issue.line}`)")
     else:
-        lines.append("- No legacy alias residues detected.")
+        lines.append("- No compatibility aliases detected.")
     lines.extend(["", "## Localized exceptions", ""])
     if result.exceptions:
         lines.append("The following commands remain intentionally localized and are excluded from the English-only rule for now:")

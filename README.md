@@ -53,7 +53,7 @@ python -m app.main
 
 ## Note importanti
 
-- Il bot **non registra nulla di default**: abilita ogni canale con `/bm check on` prima di inviare messaggi da tracciare.
+- Il bot **non registra nulla di default**: abilita ogni canale con `/bm events on` prima di inviare messaggi da tracciare.
 - Assicurati di attivare **Message Content Intent** e **Server Members Intent** nelle impostazioni del bot su Discord Developer Portal, altrimenti gli eventi messaggio e membro non arrivano.
 - Per la traduzione locale serve installare i modelli Argos Translate (lingua sorgente → italiano).
 
@@ -66,12 +66,12 @@ python -m app.main
 - `messages_daily_cap`: limite invii/giorno per canale per messaggi community (default 6).
 
 ### Abilitazione canali
-- `/bm check on` → abilita raccolta eventi nel canale.
-- `/bm check off` → disabilita raccolta eventi nel canale.
+- `/bm events on` → abilita raccolta eventi nel canale.
+- `/bm events off` → disabilita raccolta eventi nel canale.
 
 ### Retention
-- `/bm retention get` → mostra i giorni correnti.
-- `/bm retention set days:<int>` → aggiorna la retention.
+- `/bm retention config_show` → mostra i giorni correnti.
+- `/bm retention config_set days:<int>` → aggiorna la retention.
 
 ### Backfill
 - `/bm backfill on` → abilita il backfill e lo esegue subito.
@@ -91,7 +91,7 @@ finestra configurata in modo idempotente.
 ### AI centrale
 - `/bm ai on` → abilita il servizio AI.
 - `/bm ai off` → disabilita il servizio AI.
-- `/bm ai-model task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `server_summary`, `audio_summary`, `qa`, `analysis`, `transcription`, `translation`).
+- `/bm ai model_set task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `server_summary`, `audio_summary`, `qa`, `analysis`, `transcription`, `translation`).
 - `/bm barcello calibrate` → calibra i pesi del motore barcello (mod).
 
 ### STT
@@ -106,10 +106,10 @@ finestra configurata in modo idempotente.
 - `/bm translate target it`
 
 ### Audio notes
-- `/bm audio_notes on`
-- `/bm audio_notes off`
-- `/bm audio_notes status`
-- `/bm audio_notes limits max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
+- `/bm audionotes on`
+- `/bm audionotes off`
+- `/bm audionotes status`
+- `/bm audionotes config_set max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
 
 Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa viene usato il binario fornito da `imageio-ffmpeg`).
 
@@ -124,15 +124,15 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/campagne on` → abilita invii automatici nel canale corrente.
 - `/campagne off` → disabilita nel canale corrente.
 - `/campagne status` → stato canale + conteggio campagne.
-- `/campagne aggiungi testo:"..." ogni_minuti:<int> ora_inizio:"HH:MM" [testo_verde:"..."] [testo_giallo:"..."] [testo_rosso:"..."] [testo_nero:"..."] [mood_mode:<AUTO|IGNORE_BARCELLO|GREEN_ONLY|YELLOW_ONLY|RED_ONLY|BLACK_ONLY>] [jitter_sec:<int>] [solo_se_inattivo_min:<int>]`
-- `/campagne quiet_status|quiet_on|quiet_off|quiet_set start:"HH:MM" end:"HH:MM"` → gestione quiet hours.
-- `/campagne cap_status|cap_on|cap_off|cap_set n:<int>` → gestione cap giornaliero.
-- `/campagne lista` → elenco campagne con ID reali.
-- `/campagne cancella id:<int>` → soft delete.
-- `/campagne pausa id:<int>` → disabilita.
-- `/campagne riprendi id:<int>` → abilita + ricalcolo next_run.
-- `/campagne test id:<int>` → invio immediato nel canale corrente.
-- `/campagne prompt on|off|status|create|list|delete|test` → gestione campagne AI prompt.
+- `/campagne custom entry_add text:"..." [text_green:"..."] [text_yellow:"..."] [text_red:"..."] [text_black:"..."] [mood_mode:<AUTO|IGNORE_BARCELLO|GREEN_ONLY|YELLOW_ONLY|RED_ONLY|BLACK_ONLY>] [publish_at:"DD/MM/YYYY HH:MM"] [every:<int>] [jitter_seconds:<int>] [only_if_idle_minutes:<int>] [embed_title:"..."] [embed_color:"#RRGGBB"]`
+- `/campagne quiet status|on|off|config_set start:"HH:MM" end:"HH:MM"` → gestione quiet hours.
+- `/campagne cap status|on|off|config_set n:<int>` → gestione cap giornaliero.
+- `/campagne custom entry_list` → elenco campagne con ID reali.
+- `/campagne custom entry_remove id:<int>` → soft delete.
+- `/campagne custom entry_edit id:<int> enabled:false` → disabilita.
+- `/campagne custom entry_edit id:<int> enabled:true` → abilita + ricalcolo next_run.
+- `/campagne custom entry_run id:<int>` → invio immediato nel canale corrente.
+- `/campagne prompt on|off|status|entry_add|entry_list|entry_remove|entry_run` → gestione campagne AI prompt.
 
 
 ### QnA
@@ -141,15 +141,15 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/qna status`
 - `/qna limits_show`
 - `/qna limits_set tier_key:<base|role1|role2|role3|mod> limit_int:<int>`
-- `/qna bonus_add user:<utente> amount_int:<int> [hours_valid:<int>]`
-- `/qna bonus_clear user:<utente>`
+- `/qna bonus_set user:<utente> amount:<int> [hours_valid:<int>]`
+- `/qna bonus_reset user:<utente>`
 - `/qna bonus_show user:<utente>`
 
 ### Insights
 - `/insights on`
 - `/insights off`
 - `/insights status`
-- `/insights config testo:"..."`
+- `/insights template_set text:"..."`
 
 ### Riassunto
 - `/riassunto ultimi <quantità> <minuti|ore|giorni|settimane>`
@@ -177,12 +177,12 @@ Il comando legge il JSON da `summary.config` (settings). Esempio di default:
 ```
 
 ### Policy ruoli/utenti
-- `/bm role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
-- `/bm role set-user user:<utente> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
-- `/bm role clear-role role:<ruolo> command:<cmd>`
-- `/bm role clear-user user:<utente> command:<cmd>`
-- `/bm role show-role role:<ruolo>`
-- `/bm role show-user user:<utente>`
+- `/bm commandguard role_add role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
+- `/bm commandguard user_add user:<utente> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
+- `/bm commandguard role_remove role:<ruolo> command:<cmd>`
+- `/bm commandguard user_remove user:<utente> command:<cmd>`
+- `/bm commandguard role_show role:<ruolo>`
+- `/bm commandguard user_show user:<utente>`
 
 Se non esiste alcuna policy, i comandi sono accessibili solo agli admin. Le policy utente hanno priorità
 su quelle di ruolo. I limiti e cooldown vengono conteggiati e sono disponibili ai plugin che li richiedono.

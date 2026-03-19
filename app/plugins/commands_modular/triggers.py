@@ -94,44 +94,6 @@ def register_triggers(
             values = re.findall(r"\d+", text)
         return list(dict.fromkeys(values))
 
-    def _format_phrase_row(row: dict[str, object]) -> str:
-        role_ids = row.get("allowed_role_ids") if isinstance(row.get("allowed_role_ids"), list) else []
-        roles_text = "tutti" if not role_ids else ", ".join(f"<@&{role_id}>" for role_id in role_ids)
-        mode_raw = str(row.get("match_mode") or "CONTAINS").lower()
-        cooldown_raw = row.get("cooldown_seconds")
-        cooldown_text = f"{cooldown_raw}s" if cooldown_raw is not None else "nessuno"
-        enabled = bool(row.get("enabled", 1))
-        return " · ".join(
-            [
-                f"#{row.get('id')}",
-                f'"{row.get("phrase")}"',
-                f"mode: {mode_raw}",
-                f"colore: {row.get('embed_color') or '-'}",
-                f"cooldown: {cooldown_text}",
-                f"ruoli: {roles_text}",
-                f"stato: {'attiva' if enabled else 'disattiva'}",
-            ]
-        )
-
-    def _humanize_ts(raw_ts: object) -> str:
-        if not raw_ts:
-            return "-"
-        try:
-            dt = datetime.fromisoformat(str(raw_ts))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            delta = datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
-            minutes = max(0, int(delta.total_seconds() // 60))
-            if minutes < 120:
-                rel = f"{minutes}m fa"
-            elif minutes < 60 * 48:
-                rel = f"{minutes // 60}h fa"
-            else:
-                rel = f"{minutes // (60 * 24)}g fa"
-            return f"{dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} ({rel})"
-        except ValueError:
-            return str(raw_ts)
-
     TIER_CHOICES = [
         app_commands.Choice(name="base", value="base"),
         app_commands.Choice(name="role1", value="role1"),

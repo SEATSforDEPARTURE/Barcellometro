@@ -25,7 +25,7 @@ ARCHITETTURA NON NEGOZIABILE
   - StatusService
 - app/plugins:
   - Discord adapter (event listeners)
-  - Comandi barcellometro (check, status, retention)
+  - Comandi barcellometro (events, status, retention)
   - Plugin consumer di esempio
 
 INGEST EVENT-DRIVEN
@@ -38,15 +38,15 @@ ABILITAZIONE CANALI (FONDAMENTALE)
 - Il bot NON registra nulla di default
 - Un canale va abilitato manualmente tramite comando:
 
-  /barcellometro check on
-  /barcellometro check off
+  /bm events on
+  /bm events off
 
 - Lo stato di ogni canale (enabled/disabled) va salvato su DB (o config persistente)
-- Solo i canali con check=ON inviano eventi a IngestService
+- Solo i canali con events=ON inviano eventi a IngestService
 
 COMANDI DI STATO (GUILD-BASED)
 1) Stato generale:
-   /status barcellometro
+   /bm status
    Deve mostrare:
    - stato bot (online)
    - db path
@@ -56,7 +56,7 @@ COMANDI DI STATO (GUILD-BASED)
    - ultimo evento registrato (timestamp)
 
 2) Stato mirato:
-   /status barcellometro service:<nome_plugin_o_servizio>
+   /bm status service:<nome_plugin_o_servizio>
    Deve mostrare:
    - plugin/servizio attivo o no
    - stato interno (es. running, idle, error)
@@ -65,8 +65,8 @@ COMANDI DI STATO (GUILD-BASED)
 COMANDI RETENTION
 - Comandi per modificare a runtime la retention:
 
-  /barcellometro retention get
-  /barcellometro retention set days:<int>
+  /bm retention config_show
+  /bm retention config_set days:<int>
 
 - Il valore va salvato persistentemente
 - RetentionService deve usarlo senza restart
