@@ -30,6 +30,8 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 
 Per i dettagli operativi sui config centralizzati vedi `settings/README.md`.
 
+> Nota migrazione strutturale: in questa fase il source of truth dei config example è `settings/`. Se trovi riferimenti legacy a `app/settings/...`, trattali come transitori e non usarli per nuovi setup.
+
 - `DISCORD_TOKEN`: token del bot.
 - `GUILD_ID`: ID della guild su cui sincronizzare i comandi.
 - `DB_PATH`: path del database SQLite (default `bot.sqlite`).
