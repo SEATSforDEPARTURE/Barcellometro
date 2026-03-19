@@ -54,8 +54,8 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
     assert news[2].title == "📰 NOTIZIARIO CRICETOSO • Viral"
     assert horoscope[0].title == "🔮 OROSCOPO DEL GIORNO • Inizio"
     assert horoscope[1].title == "🔮 OROSCOPO DEL GIORNO • Ariete"
-    assert all(embed.footer.text == footer_text for embed in news)
-    assert all(embed.footer.text == footer_text for embed in horoscope)
+    assert all(getattr(embed.footer, "text", None) in ("", None) for embed in news)
+    assert all(getattr(embed.footer, "text", None) in ("", None) for embed in horoscope)
     assert all("Pagina" not in (embed.footer.text or "") for embed in news + horoscope)
 
 

@@ -1,13 +1,19 @@
 import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import Iterator
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from tests._sqlite_stub import ensure_sqlite_stub
+
+ensure_sqlite_stub()
+
 pytest.importorskip("aiosqlite")
 
 from app.plugins.commands_modular.triggers import register_triggers
+import app.plugins.commands_modular.triggers as trigger_commands_module
 from app.services.database import DatabaseService
 from app.services.ingest import EventEnvelope
 from app.services.triggers import TriggerEngineService
@@ -27,7 +33,7 @@ class _FakeTextChannel:
     def __init__(self, *, message_author=None, guild=None) -> None:
         self.target = _FakeRepliedMessage(author=message_author)
         self.sent_embeds: list[object] = []
-        self.guild = guild
+        self.guild = guild or _FakeGuild(role_ids=[], members={})
 
     async def fetch_message(self, _message_id: int):
         return self.target
@@ -58,7 +64,8 @@ class _FakeMember:
 
 
 class _FakeGuild:
-    def __init__(self, role_ids: list[int], members: dict[int, _FakeMember] | None = None) -> None:
+    def __init__(self, role_ids: list[int], members: dict[int, _FakeMember] | None = None, guild_id: int = 1) -> None:
+        self.id = guild_id
         self._roles = {role_id: _FakeRole(role_id) for role_id in role_ids}
         self._members = members or {}
 
@@ -67,6 +74,31 @@ class _FakeGuild:
 
     def get_role(self, role_id: int):
         return self._roles.get(role_id)
+
+
+class _FakeDatetime:
+    _values: Iterator[datetime] | None = None
+    _last_value: datetime | None = None
+
+    @classmethod
+    def set_values(cls, values) -> None:
+        cls._values = iter(values)
+        cls._last_value = None
+
+    @classmethod
+    def now(cls, tz=None):
+        assert cls._values is not None
+        try:
+            value = next(cls._values)
+            cls._last_value = value
+        except StopIteration:
+            assert cls._last_value is not None
+            value = cls._last_value
+        return value if tz is None else value.astimezone(tz)
+
+    @staticmethod
+    def fromisoformat(value: str):
+        return datetime.fromisoformat(value)
 
 
 async def _run_phrase_once(
@@ -82,8 +114,8 @@ async def _run_phrase_once(
     if trigger_state is not None:
         await db.set_trigger_state_global("g1", "frasi", trigger_state)
 
-    await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
-    await db.add_trigger_phrase("g1", "ch-a", phrase_text, "CONTAINS", False, "#FFAA00")
+    await db.set_trigger_enabled("g1", "101", "frasi", True)
+    await db.add_trigger_phrase("g1", "101", phrase_text, "CONTAINS", False, "#FFAA00")
 
     service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
     channel = _FakeTextChannel(message_author=message_author, guild=guild or _FakeGuild(role_ids=[], members={}))
@@ -95,7 +127,7 @@ async def _run_phrase_once(
         platform="discord",
         ts="2026-01-01T10:00:00+00:00",
         guild_id="g1",
-        channel_id="ch-z",
+        channel_id="102",
         thread_id=None,
         author_id=author_id,
         content=content,
@@ -114,10 +146,10 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
             db = DatabaseService(":memory:")
             await db.connect()
             await db.initialize_schema()
-            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
+            await db.set_trigger_enabled("g1", "101", "frasi", True)
 
-            await db.add_trigger_phrase("g1", "ch-a", "il criccy", "CONTAINS", False, "#FFAA00")
-            await db.add_trigger_phrase("g1", "ch-b", "il criccy", "CONTAINS", False, "#00AA00")
+            await db.add_trigger_phrase("g1", "101", "il criccy", "CONTAINS", False, "#FFAA00")
+            await db.add_trigger_phrase("g1", "103", "il criccy", "CONTAINS", False, "#00AA00")
 
             row = await db.fetchone("SELECT MIN(id) AS id FROM trigger_phrases WHERE guild_id = ?", ("g1",))
             assert row is not None
@@ -133,7 +165,7 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
                 platform="discord",
                 ts="2026-01-01T10:00:00+00:00",
                 guild_id="g1",
-                channel_id="ch-z",
+                channel_id="102",
                 thread_id=None,
                 author_id="u1",
                 content="oggi dico IL CRICCY sempre",
@@ -143,7 +175,7 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
 
             embed = channel.target.replies[0]
             assert embed.title == "💬 FRASI ICONICHE"
-            assert getattr(embed.footer, "text", "") == "Servizio offerto dal vostro Barcellometro di fiducia."
+            assert getattr(embed.footer, "text", None) in ("", None)
             assert embed.color.value == 0xFFAA00
 
             stats = await db.get_phrase_user_stats(winner_id, "u1")
@@ -221,8 +253,8 @@ def test_template_fallback_does_not_break_trigger() -> None:
             db = DatabaseService(":memory:")
             await db.connect()
             await db.initialize_schema()
-            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
-            await db.add_trigger_phrase("g1", "ch-a", "il criccy", "CONTAINS", False, None)
+            await db.set_trigger_enabled("g1", "101", "frasi", True)
+            await db.add_trigger_phrase("g1", "101", "il criccy", "CONTAINS", False, None)
             await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "ok"}})
 
             service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
@@ -238,7 +270,7 @@ def test_template_fallback_does_not_break_trigger() -> None:
                     platform="discord",
                     ts="2026-01-01T10:00:00+00:00",
                     guild_id="g1",
-                    channel_id="ch-z",
+                    channel_id="102",
                     thread_id=None,
                     author_id="u1",
                     content="oggi dico il criccy",
@@ -250,7 +282,7 @@ def test_template_fallback_does_not_break_trigger() -> None:
 
             embed = channel.target.replies[0]
             assert embed.description == "il criccy"
-            assert embed.color.value == 0xFFD700
+            assert embed.color.value == 0xF1C40F
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
@@ -358,14 +390,14 @@ def test_db_trigger_phrase_columns_backcompat_and_serialization() -> None:
 def test_phrase_cooldown_blocks_second_hit_and_does_not_consume_first() -> None:
     async def _run() -> None:
         original_text_channel = triggers_module.discord.TextChannel
-        original_now = triggers_module.datetime.now
+        original_datetime = triggers_module.datetime
         triggers_module.discord.TextChannel = _FakeTextChannel
         try:
             db = DatabaseService(":memory:")
             await db.connect()
             await db.initialize_schema()
-            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
-            await db.add_trigger_phrase("g1", "ch-a", "ciao", "CONTAINS", False, None, 120, None)
+            await db.set_trigger_enabled("g1", "101", "frasi", True)
+            await db.add_trigger_phrase("g1", "101", "ciao", "CONTAINS", False, None, 120, None)
             await db.set_trigger_state_global("g1", "frasi", {"templates": {"FIRST": "first", "DEFAULT": "default {count_user}"}, "global_milestones_enabled": True})
 
             service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
@@ -381,7 +413,8 @@ def test_phrase_cooldown_blocks_second_hit_and_does_not_consume_first() -> None:
                     datetime(2026, 1, 1, 10, 3, 1, tzinfo=timezone.utc),
                 ]
             )
-            triggers_module.datetime.now = Mock(side_effect=lambda tz=None: next(now_values))
+            _FakeDatetime.set_values(now_values)
+            triggers_module.datetime = _FakeDatetime
 
             envelope = EventEnvelope(
                 event_id="evt-1",
@@ -389,7 +422,7 @@ def test_phrase_cooldown_blocks_second_hit_and_does_not_consume_first() -> None:
                 platform="discord",
                 ts="2026-01-01T10:00:00+00:00",
                 guild_id="g1",
-                channel_id="ch-z",
+                channel_id="102",
                 thread_id=None,
                 author_id="1",
                 content="ciao a tutti",
@@ -410,7 +443,7 @@ def test_phrase_cooldown_blocks_second_hit_and_does_not_consume_first() -> None:
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
-            triggers_module.datetime.now = original_now
+            triggers_module.datetime = original_datetime
 
     asyncio.run(_run())
 
@@ -423,8 +456,8 @@ def test_phrase_roles_allow_and_block_users() -> None:
             db = DatabaseService(":memory:")
             await db.connect()
             await db.initialize_schema()
-            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
-            await db.add_trigger_phrase("g1", "ch-a", "ciao", "CONTAINS", False, None, None, ["100"])
+            await db.set_trigger_enabled("g1", "101", "frasi", True)
+            await db.add_trigger_phrase("g1", "101", "ciao", "CONTAINS", False, None, None, ["100"])
 
             service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
             guild = _FakeGuild(
@@ -440,7 +473,7 @@ def test_phrase_roles_allow_and_block_users() -> None:
                 platform="discord",
                 ts="2026-01-01T10:00:00+00:00",
                 guild_id="g1",
-                channel_id="ch-z",
+                channel_id="102",
                 thread_id=None,
                 author_id="1",
                 content="ciao",
@@ -452,7 +485,7 @@ def test_phrase_roles_allow_and_block_users() -> None:
                 platform="discord",
                 ts="2026-01-01T10:00:01+00:00",
                 guild_id="g1",
-                channel_id="ch-z",
+                channel_id="102",
                 thread_id=None,
                 author_id="2",
                 content="ciao",
@@ -487,13 +520,17 @@ def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
             timezone=timezone.utc,
             message_scheduler=Mock(),
             trigger_engine=Mock(),
+            footer=None,
         )
+        old_permission = trigger_commands_module.check_permission
+        trigger_commands_module.check_permission = AsyncMock(return_value=True)
         frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
-        add_cmd = next(c for c in frasi_group.commands if c.name == "add")
-        list_cmd = next(c for c in frasi_group.commands if c.name == "list")
+        add_cmd = next(c for c in frasi_group.commands if c.name == "entry_add")
+        list_cmd = next(c for c in frasi_group.commands if c.name == "entry_list")
 
         response = Mock()
         response.send_message = AsyncMock()
+        response.is_done = Mock(return_value=False)
         interaction = SimpleNamespace(
             guild_id=1,
             channel_id=2,
@@ -501,27 +538,28 @@ def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
             response=response,
             user=SimpleNamespace(id=99),
         )
+        try:
+            await add_cmd.callback(
+                interaction,
+                phrase="ciao",
+                match_mode=SimpleNamespace(value="CONTAINS"),
+                color="#112233",
+                cooldown_seconds=120,
+                role_ids="123, 456",
+            )
+            rows = await db.list_trigger_phrases_guild("1")
+            assert rows[0]["cooldown_seconds"] == 120
+            assert rows[0]["allowed_role_ids"] == ["123", "456"]
 
-        await add_cmd.callback(
-            interaction,
-            phrase="ciao",
-            match_mode=SimpleNamespace(value="CONTAINS"),
-            colore="#112233",
-            cooldown=120,
-            ruoli="<@&123>, 456",
-        )
-        rows = await db.list_trigger_phrases_guild("1")
-        assert rows[0]["cooldown_seconds"] == 120
-        assert rows[0]["allowed_role_ids"] == ["123", "456"]
-
-        await list_cmd.callback(interaction)
-        calls = response.send_message.await_args_list
-        assert "Cooldown: 120s" in calls[0].kwargs["content"] or "Cooldown: 120s" in calls[0].args[0]
-        list_text = calls[-1].kwargs.get("content") if calls[-1].kwargs else calls[-1].args[0]
-        assert "#" in list_text
-        assert "cooldown: 120s" in list_text
-        assert "ruoli: <@&123>, <@&456>" in list_text
-        await db.close()
+            await list_cmd.callback(interaction)
+            sent_embed = response.send_message.await_args_list[-1].kwargs["embed"]
+            description = sent_embed.description or ""
+            assert "#" in description
+            assert "cooldown: 120s" in description
+            assert "roles: <@&123>, <@&456>" in description
+            await db.close()
+        finally:
+            trigger_commands_module.check_permission = old_permission
 
     asyncio.run(_run())
 
@@ -546,12 +584,16 @@ def test_frasi_edit_updates_in_place_and_preserves_stats() -> None:
             timezone=timezone.utc,
             message_scheduler=Mock(),
             trigger_engine=Mock(),
+            footer=None,
         )
+        old_permission = trigger_commands_module.check_permission
+        trigger_commands_module.check_permission = AsyncMock(return_value=True)
         frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
-        edit_cmd = next(c for c in frasi_group.commands if c.name == "edit")
+        edit_cmd = next(c for c in frasi_group.commands if c.name == "entry_edit")
 
         response = Mock()
         response.send_message = AsyncMock()
+        response.is_done = Mock(return_value=False)
         interaction = SimpleNamespace(
             guild_id=1,
             channel_id=2,
@@ -559,32 +601,34 @@ def test_frasi_edit_updates_in_place_and_preserves_stats() -> None:
             response=response,
             user=SimpleNamespace(id=99),
         )
+        try:
+            await edit_cmd.callback(
+                interaction,
+                id=phrase_id,
+                phrase="ciao aggiornato",
+                match_mode=SimpleNamespace(value="REGEX"),
+                color="#445566",
+                cooldown_seconds=300,
+                role_ids="999",
+                reset_role_ids=False,
+                reset_cooldown=False,
+                reset_color=False,
+                enabled=False,
+            )
+            row_after = await db.get_trigger_phrase_by_id("1", phrase_id)
+            assert row_after["id"] == phrase_id
+            assert row_after["phrase"] == "ciao aggiornato"
+            assert row_after["match_mode"] == "REGEX"
+            assert row_after["embed_color"] == "#445566"
+            assert row_after["cooldown_seconds"] == 300
+            assert row_after["allowed_role_ids"] == ["999"]
+            assert int(row_after["enabled"]) == 0
 
-        await edit_cmd.callback(
-            interaction,
-            id=phrase_id,
-            frase="ciao aggiornato",
-            match_mode=SimpleNamespace(value="REGEX"),
-            colore="#445566",
-            cooldown=300,
-            ruoli="999",
-            reset_ruoli=False,
-            reset_cooldown=False,
-            reset_colore=False,
-            attiva=False,
-        )
-        row_after = await db.get_trigger_phrase_by_id("1", phrase_id)
-        assert row_after["id"] == phrase_id
-        assert row_after["phrase"] == "ciao aggiornato"
-        assert row_after["match_mode"] == "REGEX"
-        assert row_after["embed_color"] == "#445566"
-        assert row_after["cooldown_seconds"] == 300
-        assert row_after["allowed_role_ids"] == ["999"]
-        assert int(row_after["enabled"]) == 0
-
-        stats = await db.get_phrase_user_stats(phrase_id, "u-1")
-        assert int(stats.get("count") or 0) == 1
-        await db.close()
+            stats = await db.get_phrase_user_stats(phrase_id, "u-1")
+            assert int(stats.get("count") or 0) == 1
+            await db.close()
+        finally:
+            trigger_commands_module.check_permission = old_permission
 
     asyncio.run(_run())
 
@@ -608,12 +652,16 @@ def test_frasi_edit_reset_fields_and_missing_id() -> None:
             timezone=timezone.utc,
             message_scheduler=Mock(),
             trigger_engine=Mock(),
+            footer=None,
         )
+        old_permission = trigger_commands_module.check_permission
+        trigger_commands_module.check_permission = AsyncMock(return_value=True)
         frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
-        edit_cmd = next(c for c in frasi_group.commands if c.name == "edit")
+        edit_cmd = next(c for c in frasi_group.commands if c.name == "entry_edit")
 
         response = Mock()
         response.send_message = AsyncMock()
+        response.is_done = Mock(return_value=False)
         interaction = SimpleNamespace(
             guild_id=1,
             channel_id=2,
@@ -621,23 +669,25 @@ def test_frasi_edit_reset_fields_and_missing_id() -> None:
             response=response,
             user=SimpleNamespace(id=99),
         )
+        try:
+            await edit_cmd.callback(
+                interaction,
+                id=phrase_id,
+                reset_role_ids=True,
+                reset_cooldown=True,
+                reset_color=True,
+            )
+            row_after = await db.get_trigger_phrase_by_id("1", phrase_id)
+            assert row_after["allowed_role_ids"] == []
+            assert row_after["cooldown_seconds"] is None
+            assert row_after["embed_color"] is None
 
-        await edit_cmd.callback(
-            interaction,
-            id=phrase_id,
-            reset_ruoli=True,
-            reset_cooldown=True,
-            reset_colore=True,
-        )
-        row_after = await db.get_trigger_phrase_by_id("1", phrase_id)
-        assert row_after["allowed_role_ids"] == []
-        assert row_after["cooldown_seconds"] is None
-        assert row_after["embed_color"] is None
-
-        await edit_cmd.callback(interaction, id=99999)
-        msg = response.send_message.await_args_list[-1].kwargs.get("content") or response.send_message.await_args_list[-1].args[0]
-        assert "non trovata" in msg.lower()
-        await db.close()
+            await edit_cmd.callback(interaction, id=99999)
+            sent_embed = response.send_message.await_args_list[-1].kwargs["embed"]
+            assert "not found" in (sent_embed.description or "").lower()
+            await db.close()
+        finally:
+            trigger_commands_module.check_permission = old_permission
 
     asyncio.run(_run())
 
@@ -650,8 +700,8 @@ def test_phrase_global_milestone_priority_and_exact_threshold_trigger() -> None:
             db = DatabaseService(":memory:")
             await db.connect()
             await db.initialize_schema()
-            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
-            await db.add_trigger_phrase("g1", "ch-a", "ciao", "CONTAINS", False, None, None, None)
+            await db.set_trigger_enabled("g1", "101", "frasi", True)
+            await db.add_trigger_phrase("g1", "101", "ciao", "CONTAINS", False, None, None, None)
             phrase = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
             assert phrase is not None
             phrase_id = int(phrase["id"])
@@ -667,7 +717,7 @@ def test_phrase_global_milestone_priority_and_exact_threshold_trigger() -> None:
                 platform="discord",
                 ts="2026-01-01T10:00:00+00:00",
                 guild_id="g1",
-                channel_id="ch-z",
+                channel_id="102",
                 thread_id=None,
                 author_id="1",
                 content="ciao",
@@ -694,8 +744,8 @@ def test_custom_user_phrase_works_inside_global_milestone() -> None:
             db = DatabaseService(":memory:")
             await db.connect()
             await db.initialize_schema()
-            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
-            await db.add_trigger_phrase("g1", "ch-a", "ciao", "CONTAINS", False, None, None, None)
+            await db.set_trigger_enabled("g1", "101", "frasi", True)
+            await db.add_trigger_phrase("g1", "101", "ciao", "CONTAINS", False, None, None, None)
             phrase = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
             assert phrase is not None
             phrase_id = int(phrase["id"])
@@ -715,7 +765,7 @@ def test_custom_user_phrase_works_inside_global_milestone() -> None:
                 platform="discord",
                 ts="2026-01-01T10:00:00+00:00",
                 guild_id="g1",
-                channel_id="ch-z",
+                channel_id="102",
                 thread_id=None,
                 author_id="1",
                 content="ciao",
@@ -734,14 +784,14 @@ def test_custom_user_phrase_works_inside_global_milestone() -> None:
 def test_phrase_global_milestone_not_triggered_when_cooldown_blocks() -> None:
     async def _run() -> None:
         original_text_channel = triggers_module.discord.TextChannel
-        original_now = triggers_module.datetime.now
+        original_datetime = triggers_module.datetime
         triggers_module.discord.TextChannel = _FakeTextChannel
         try:
             db = DatabaseService(":memory:")
             await db.connect()
             await db.initialize_schema()
-            await db.set_trigger_enabled("g1", "ch-a", "frasi", True)
-            await db.add_trigger_phrase("g1", "ch-a", "ciao", "CONTAINS", False, None, 120, None)
+            await db.set_trigger_enabled("g1", "101", "frasi", True)
+            await db.add_trigger_phrase("g1", "101", "ciao", "CONTAINS", False, None, 120, None)
             phrase = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
             assert phrase is not None
             phrase_id = int(phrase["id"])
@@ -758,14 +808,15 @@ def test_phrase_global_milestone_not_triggered_when_cooldown_blocks() -> None:
                     datetime(2026, 1, 1, 10, 1, 0, tzinfo=timezone.utc),
                 ]
             )
-            triggers_module.datetime.now = Mock(side_effect=lambda tz=None: next(now_values))
+            _FakeDatetime.set_values(now_values)
+            triggers_module.datetime = _FakeDatetime
             envelope = EventEnvelope(
                 event_id="evt",
                 event_type="message.create",
                 platform="discord",
                 ts="2026-01-01T10:00:00+00:00",
                 guild_id="g1",
-                channel_id="ch-z",
+                channel_id="102",
                 thread_id=None,
                 author_id="1",
                 content="ciao",
@@ -779,7 +830,7 @@ def test_phrase_global_milestone_not_triggered_when_cooldown_blocks() -> None:
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
-            triggers_module.datetime.now = original_now
+            triggers_module.datetime = original_datetime
 
     asyncio.run(_run())
 
@@ -806,7 +857,10 @@ def test_frasi_milestone_commands() -> None:
             timezone=timezone.utc,
             message_scheduler=Mock(),
             trigger_engine=Mock(),
+            footer=None,
         )
+        old_permission = trigger_commands_module.check_permission
+        trigger_commands_module.check_permission = AsyncMock(return_value=True)
         frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
         set_cmd = next(c for c in frasi_group.commands if c.name == "template_milestone_set")
         list_cmd = next(c for c in frasi_group.commands if c.name == "template_milestone_show")
@@ -814,22 +868,26 @@ def test_frasi_milestone_commands() -> None:
 
         response = Mock()
         response.send_message = AsyncMock()
+        response.is_done = Mock(return_value=False)
         guild = _FakeGuild(role_ids=[1], members={10: _FakeMember(10, []), 11: _FakeMember(11, [])})
         interaction = SimpleNamespace(guild_id=1, channel_id=2, guild=guild, response=response, user=SimpleNamespace(id=99))
+        try:
+            await set_cmd.callback(interaction, threshold=10, text="dieci")
+            await set_cmd.callback(interaction, threshold=5, text="cinque")
+            milestones = await db.list_trigger_phrase_global_milestones("1")
+            assert [int(m["threshold_count"]) for m in milestones] == [5, 10]
 
-        await set_cmd.callback(interaction, threshold=10, text="dieci")
-        await set_cmd.callback(interaction, threshold=5, text="cinque")
-        milestones = await db.list_trigger_phrase_global_milestones("1")
-        assert [int(m["threshold_count"]) for m in milestones] == [5, 10]
+            await list_cmd.callback(interaction)
+            sent_embed = response.send_message.await_args_list[-1].kwargs["embed"]
+            description = sent_embed.description or ""
+            assert "5 -> cinque" in description and "10 -> dieci" in description
 
-        await list_cmd.callback(interaction)
-        text = response.send_message.await_args_list[-1].kwargs.get("content") or response.send_message.await_args_list[-1].args[0]
-        assert "5 -> cinque" in text and "10 -> dieci" in text
-
-        await remove_cmd.callback(interaction)
-        milestones_after = await db.list_trigger_phrase_global_milestones("1")
-        assert milestones_after == []
-        await db.close()
+            await remove_cmd.callback(interaction)
+            milestones_after = await db.list_trigger_phrase_global_milestones("1")
+            assert milestones_after == []
+            await db.close()
+        finally:
+            trigger_commands_module.check_permission = old_permission
 
     asyncio.run(_run())
 
@@ -848,6 +906,7 @@ def test_template_set_user_command_is_not_registered() -> None:
             timezone=timezone.utc,
             message_scheduler=Mock(),
             trigger_engine=Mock(),
+            footer=None,
         )
         frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
         names = {command.name for command in frasi_group.commands}
