@@ -63,14 +63,14 @@ app/
 
 ## Compat layer rimossi
 
-I seguenti shim non devono più limitarsi a re-esportare moduli da `app.features`:
+I seguenti shim legacy sono stati assorbiti nel codice canonico o eliminati; non devono essere reintrodotti come semplici re-export da `app.features`:
 
 - `app/services/activity_insights.py`
 - `app/services/daily_activity_report.py`
 - `app/services/daily_activity_sorting.py`
 - `app/services/aura.py`
 - `app/services/aura_archetypes.py`
-- `app/services/aura_render.py` (bridge verso renderer canonico in `app/renderers/`)
+- `app/services/aura_render.py` (bridge storico ormai rimosso verso il renderer canonico in `app/renderers/`)
 - `app/plugins/commands_modular/attivita.py`
 
 ## Vincoli permanenti
