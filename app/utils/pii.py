@@ -1,5 +1,0 @@
-from app.shared.safety.pii import contains_pii, redact_pii
-
-# TODO: remove this compatibility shim after imports migrate to app.shared.safety.pii.
-
-__all__ = ["contains_pii", "redact_pii"]

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from app.services.barcello import BarcelloService
+from app.features.barcello.services.barcello_service import BarcelloService
 from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)

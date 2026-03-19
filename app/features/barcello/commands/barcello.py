@@ -14,7 +14,7 @@ from app.services.footer import attach_footer_meta
 from discord import app_commands
 
 from app.services.entitlements import EntitlementsService
-from app.services.config_file_loader import load_json_file
+from app.config.file_loader import load_json_file
 from app.features.barcello.services.barcello_window_defaults import resolve_default_window_minutes
 from app.plugins.commands_modular.command_helpers import add_group_once
 from app.shared.discord.embed_limits import _split_field_chunks

@@ -214,8 +214,8 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
 
 def test_critical_modules_no_longer_use_raw_slash_text_helpers() -> None:
     critical_files = [
-        Path("app/plugins/commands_modular/resoconto.py"),
-        Path("app/plugins/commands_modular/riassunto.py"),
+        Path("app/features/summary/commands/resoconto.py"),
+        Path("app/features/summary/commands/riassunto.py"),
         Path("app/plugins/commands.py"),
         Path("app/plugins/commands_modular/translate.py"),
         Path("app/plugins/commands_modular/stt.py"),

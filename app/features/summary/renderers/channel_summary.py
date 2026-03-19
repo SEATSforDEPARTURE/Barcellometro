@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from app.services.barcello import BarcelloResult
+from app.features.barcello.services.barcello_service import BarcelloResult
 from app.services.footer import attach_footer_meta_to_all
 from app.features.summary.services.content_summary_service import SummaryItem, SummaryResult
 from app.domain.reporting.trend import render_trend_value

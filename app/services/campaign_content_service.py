@@ -27,7 +27,7 @@ from app.services.campaign_content_views import BaseCampaignNavigatorView, Persi
 from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.footer import attach_footer_meta_to_all
-from app.utils.component_notices import send_standard_component_notice
+from app.shared.discord.component_notices import send_standard_component_notice
 from app.services.scheduler_utils import calculate_next_run_after_send
 
 logger = logging.getLogger(__name__)

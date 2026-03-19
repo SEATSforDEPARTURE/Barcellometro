@@ -11,7 +11,7 @@ import discord
 
 from app.core.config_paths import AURA_MISSIONS_JSON, AURA_RULES_JSON
 from app.services.database import DatabaseService
-from app.services.config_file_loader import load_json_file
+from app.config.file_loader import load_json_file
 from app.services.entitlements import EntitlementsService
 
 logger = logging.getLogger(__name__)

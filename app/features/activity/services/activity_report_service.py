@@ -19,7 +19,7 @@ from app.plugins.commands_modular.time_windows import infer_rolling_window_reque
 from app.features.activity.services.activity_insights_service import ActivityInsightsService
 from app.services.database import DatabaseService
 from app.features.activity.services.activity_sorting_service import sort_channels_like_discord, sort_inactive_entries
-from app.utils.component_notices import send_standard_component_notice
+from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")

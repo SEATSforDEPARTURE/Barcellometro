@@ -45,7 +45,7 @@ _MODULE_BY_ATTR = {
     "register_ask": "app.plugins.commands_modular.ask",
     "register_audio_notes": "app.plugins.commands_modular.audio_notes",
     "register_attivita": "app.plugins.commands_modular.attivita",
-    "register_aura": "app.plugins.commands_modular.aura",
+    "register_aura": "app.features.aura.commands.aura",
     "register_barcello": "app.features.barcello.commands.barcello",
     "register_attivita_settings": "app.plugins.commands_modular.barcellometro_attivita",
     "register_privacy": "app.plugins.commands_modular.privacy",

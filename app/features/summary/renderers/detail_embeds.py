@@ -8,7 +8,7 @@ import discord
 from app.services.footer import attach_footer_meta
 
 from app.features.summary.services.content_summary_service import SummaryImpact, SummaryItem, SummaryQuote, SummaryResult
-from app.utils.embed_limits import (
+from app.shared.discord.embed_limits import (
     MAX_EMBED_CHARS,
     _clone_embed_shell,
     _ensure_embed_limits,
