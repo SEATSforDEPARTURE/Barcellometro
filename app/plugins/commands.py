@@ -15,7 +15,6 @@ from app.plugins.commands_modular import (
     register_attivita,
     register_aura,
     register_barcello,
-    register_attivita_settings,
     register_inattivi,
     register_messaggi,
     register_moderazione_utenti,
@@ -87,7 +86,6 @@ def setup(registry: ServiceRegistry) -> None:
     register_riassunto(riassunto_group, ctx)
     register_aura(aura_group, ctx)
     register_attivita(attivita_group, ctx)
-    register_attivita_settings(attivita_group, ctx)
 
     register_inattivi(inactivity_group, ctx)
     register_moderazione_utenti(mod_group, ctx)

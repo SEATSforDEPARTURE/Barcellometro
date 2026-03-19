@@ -195,7 +195,6 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
     monkeypatch.setattr(commands_module, "register_riassunto", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_aura", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_attivita", lambda *args, **kwargs: None)
-    monkeypatch.setattr(commands_module, "register_attivita_settings", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_inattivi", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_moderazione_utenti", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_resoconto", lambda *args, **kwargs: None)

@@ -15,4 +15,9 @@ def test_readmes_describe_settings_as_source_of_truth() -> None:
     assert "source of truth" in settings_readme
     assert "`settings/`" in settings_readme
     assert "settings/README.md" in root_readme
-    assert "app/settings/" in root_readme
+    assert "`settings/`" in root_readme
+    assert "`app/services/`" in root_readme
+    assert "`app/renderers/`" in root_readme
+    assert "`app/utils/`" in root_readme
+    assert "`app/plugins/commands_modular/`" in root_readme
+    assert "`app/features/*`: command/service/renderer canonici per feature." not in root_readme

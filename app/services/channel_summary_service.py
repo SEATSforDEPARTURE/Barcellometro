@@ -17,7 +17,7 @@ from app.plugins.commands_modular.time_windows import TimeWindowResult, infer_ro
 from app.renderers.channel_summary import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, format_window_header
 from app.services.barcello_service import BarcelloResult, BarcelloService
 from app.services.aura import aura_reason_to_human
-from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_advice, build_channel_aura_embed
+from app.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_advice, build_channel_aura_embed
 from app.services.database import DatabaseService
 from app.services.content_summary_service import SummaryResult, SummaryService
 from app.shared.discord.embed_limits import _estimate_embed_size, estimate_embeds_total_size
