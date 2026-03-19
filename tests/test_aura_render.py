@@ -1,5 +1,5 @@
-from app.services.aura_archetypes import build_dynamic_archetype_reason
-from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_character_analysis_lines, _build_profile_traits_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
+from app.features.aura.services.archetypes import build_dynamic_archetype_reason
+from app.features.aura.renderers.aura import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_character_analysis_lines, _build_profile_traits_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
 
 
 def _payload() -> AuraRenderPayload:
@@ -95,7 +95,7 @@ def test_build_aura_embeds_uses_custom_archetypes_and_missions_config(monkeypatc
             }
         return {}
 
-    monkeypatch.setattr("app.services.aura_render.load_json_file", _fake_loader)
+    monkeypatch.setattr("app.features.aura.renderers.aura.load_json_file", _fake_loader)
 
     embeds = build_aura_embeds(
         profile_name="role3",
@@ -326,7 +326,7 @@ def _mission_trend_sample(**overrides):
 
 
 def test_channel_aura_embed_top10_format_and_sections() -> None:
-    from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+    from app.features.aura.renderers.aura import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
 
     embed = build_channel_aura_embed(
         max_chars=2000,
@@ -352,7 +352,7 @@ def test_channel_aura_embed_top10_format_and_sections() -> None:
 
 
 def test_channel_aura_advice_is_deterministic() -> None:
-    from app.services.aura_render import build_channel_aura_advice
+    from app.features.aura.renderers.aura import build_channel_aura_advice
 
     advice = build_channel_aura_advice(
         positive_points=0,
@@ -367,7 +367,7 @@ def test_channel_aura_advice_is_deterministic() -> None:
 
 
 def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
-    from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+    from app.features.aura.renderers.aura import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
     from app.utils.embed_limits import MAX_EMBED_CHARS, _estimate_embed_size
 
     very_long_reason = "per aver mantenuto una conversazione molto articolata e ripetuta con alto coinvolgimento nel periodo " * 8
@@ -423,7 +423,7 @@ def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
 
 
 def test_channel_aura_embed_preserves_all_10_rank_positions_with_compact_comments() -> None:
-    from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+    from app.features.aura.renderers.aura import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
 
     embed = build_channel_aura_embed(
         data=ChannelAuraEmbedData(
@@ -454,7 +454,7 @@ def test_channel_aura_embed_preserves_all_10_rank_positions_with_compact_comment
 
 
 def test_channel_aura_embed_uses_final_title_and_footer_in_size_budget() -> None:
-    from app.services.aura_render import (
+    from app.features.aura.renderers.aura import (
         AURA_DETAILS_INTERNAL_BUDGET,
         ChannelAuraEmbedData,
         ChannelAuraMissionTrend,
@@ -488,7 +488,7 @@ def test_channel_aura_embed_uses_final_title_and_footer_in_size_budget() -> None
 
 
 def test_channel_aura_embed_compacts_punteggi_before_reducing_top10_rows() -> None:
-    from app.services.aura_render import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+    from app.features.aura.renderers.aura import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
 
     embed = build_channel_aura_embed(
         max_chars=2000,
