@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.core.config_paths import BARCELLO_TRIGGER_JSON, ENTITLEMENTS_JSON
-from app.services.config_file_loader import load_json_file
+from app.config.file_loader import load_json_file
 
 
 def test_load_json_file_prefers_runtime_barcello_config(tmp_path: Path, monkeypatch) -> None:
