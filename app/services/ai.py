@@ -246,7 +246,89 @@ class AiService:
             f"{persona_system}\n"
             "Quando usi il web, cita esplicitamente le fonti consultate con link o nome testata/sito."
         )
-        return await self.ask_for_task(task, question, system_with_sources, history, timeout_seconds=timeout_seconds)
+        if not self._enabled:
+            return None
+        model_cfg = self.get_model_config(task)
+        if not model_cfg:
+            model_cfg = self.get_model_config("summary") or "openai:gpt-4o-mini"
+
+        provider, model = parse_model_string(model_cfg)
+        effective_timeout = self._resolve_timeout(task, provider, timeout_seconds)
+        self.logger.info("[AI] task=%s provider=%s timeout=%.1fs web=true", task, provider, effective_timeout)
+        system = system_with_sources
+        prompt = question if not history else history[-1].get("content", question)
+        messages = self._build_general_messages(question, system, history)
+
+        try:
+            self.logger.info("[AI] task=%s provider=%s model=%s web=true", task, provider, model)
+            if provider == "openai":
+                if self._client is None:
+                    raise RuntimeError("Client OpenAI non inizializzato")
+                result = await asyncio.wait_for(
+                    self._client.responses.create(
+                        model=model,
+                        input=messages,
+                        tools=[{"type": "web_search"}],
+                    ),
+                    timeout=effective_timeout,
+                )
+            elif provider == "ollama":
+                result = await self._ollama.generate_text(model, system, prompt, effective_timeout)
+            else:
+                raise RuntimeError(f"Provider non supportato: {provider}")
+
+            self._metrics["last_used_task"] = task
+            self._metrics["last_used_model"] = model_cfg
+            text = self._extract_text(result)
+            return text or None
+        except Exception as exc:
+            fallback_cfg = self.get_fallback_model(task)
+            if not fallback_cfg:
+                raise
+            provider_fb, model_fb = parse_model_string(fallback_cfg)
+            if provider_fb == provider and model_fb == model:
+                self.logger.warning(
+                    "[AI] task=%s primary=%s:%s fallback=%s:%s fallback_skipped=same_provider_model error=%s web=true",
+                    task,
+                    provider,
+                    model,
+                    provider_fb,
+                    model_fb,
+                    exc.__class__.__name__,
+                )
+                raise
+            fallback_timeout = self._resolve_timeout(task, provider_fb, timeout_seconds)
+            self.logger.warning(
+                "[AI] task=%s primary=%s:%s failed=%s fallback=%s:%s timeout=%.1fs web=true",
+                task,
+                provider,
+                model,
+                exc.__class__.__name__,
+                provider_fb,
+                model_fb,
+                fallback_timeout,
+            )
+            self.logger.info("[AI] task=%s provider=%s model=%s web=true", task, provider_fb, model_fb)
+            if provider_fb == "openai":
+                if self._client is None:
+                    raise RuntimeError("Client OpenAI non inizializzato")
+                result = await asyncio.wait_for(
+                    self._client.responses.create(
+                        model=model_fb,
+                        input=messages,
+                        tools=[{"type": "web_search"}],
+                    ),
+                    timeout=fallback_timeout,
+                )
+            elif provider_fb == "ollama":
+                result = await self._ollama.generate_text(model_fb, system, prompt, fallback_timeout)
+            else:
+                raise RuntimeError(f"Provider non supportato: {provider_fb}")
+
+            self._metrics["last_used_task"] = task
+            self._metrics["last_used_model"] = fallback_cfg
+            text = self._extract_text(result)
+            return text or None
 
     async def run_test(self, task: str, prompt: str, *, use_web: bool = False, timeout_seconds: float = 20.0) -> dict[str, Any]:
         model = self.get_model_config(task) or self.get_model_config("summary") or "openai:gpt-4o-mini"
