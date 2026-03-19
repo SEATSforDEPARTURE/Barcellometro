@@ -146,7 +146,7 @@ def test_schedule_channel_scope_for_status_edit_delete_clear() -> None:
 def test_trend_wording_oggi_ieri_is_natural_without_explicit_range() -> None:
     pytest.importorskip("aiosqlite")
     from app.features.summary.services.channel_summary import ChannelSummaryService
-    from app.services.barcello import BarcelloResult
+    from app.features.barcello.services.barcello import BarcelloResult
 
     svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
     current = BarcelloResult(score=72, color="verde", trend="up", reasons=[], metrics={"negativity_hits": 2, "positive_hits": 8})
@@ -176,7 +176,7 @@ def test_trend_wording_oggi_ieri_is_natural_without_explicit_range() -> None:
 def test_trend_wording_ultimi_keeps_explicit_previous_window() -> None:
     pytest.importorskip("aiosqlite")
     from app.features.summary.services.channel_summary import ChannelSummaryService
-    from app.services.barcello import BarcelloResult
+    from app.features.barcello.services.barcello import BarcelloResult
 
     svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
     current = BarcelloResult(score=45, color="giallo", trend="flat", reasons=[], metrics={"negativity_hits": 5, "positive_hits": 3})
