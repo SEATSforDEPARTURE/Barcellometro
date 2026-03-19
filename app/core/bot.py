@@ -15,7 +15,7 @@ from app.services.database import DatabaseService
 from app.services.ingest import IngestService
 from app.services.permissions import CommandGuardService
 from app.services.retention import RetentionService
-from app.services.barcello import BarcelloService
+from app.features.barcello.services.barcello_service import BarcelloService
 from app.services.message_scheduler import MessageSchedulerService
 from app.services.campaign_content_service import CampaignContentService
 from app.services.status import StatusService

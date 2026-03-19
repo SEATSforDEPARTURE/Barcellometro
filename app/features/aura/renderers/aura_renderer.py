@@ -11,8 +11,8 @@ from app.core.config_paths import AURA_ARCHETYPES_JSON, AURA_MISSIONS_JSON
 from app.services.footer import attach_footer_meta
 
 from app.features.aura.services.aura_archetype_reason_builder import build_dynamic_archetype_reason
-from app.services.config_file_loader import load_json_file
-from app.utils.embed_limits import MAX_EMBED_CHARS, _ensure_embed_limits, _estimate_embed_size, _split_field_chunks
+from app.config.file_loader import load_json_file
+from app.shared.discord.embed_limits import MAX_EMBED_CHARS, _ensure_embed_limits, _estimate_embed_size, _split_field_chunks
 
 logger = logging.getLogger(__name__)
 AURA_DETAILS_INTERNAL_BUDGET = 5700

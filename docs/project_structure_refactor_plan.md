@@ -579,3 +579,39 @@ Se l'obiettivo è massimizzare rapporto beneficio/rischio, l'ordine migliore è:
 7. **rimozione shim e duplicati**
 
 Così si ottiene prima la semplificazione più urgente (`settings/` unico) e solo dopo il refactor più ampio dei moduli.
+
+
+---
+
+## 7) Stato finale del cleanup + validator
+
+Stato target dopo questa PR finale:
+
+- `settings/` resta l'unica root canonica per i config file-based versionati e locali.
+- `app/renderers/` non deve più ospitare renderer feature-specific: i renderer canonici vivono sotto `app/features/*/renderers/`.
+- `app/utils/` non deve più ricevere helper di dominio/shared già migrati in `app/shared/` o `app/domain/`.
+- gli import interni devono puntare ai package canonici (`app/config`, `app/shared`, `app/domain`, `app/features/*`) invece che ai vecchi shim legacy.
+
+### 7.1 Regole del validatore `scripts/validate_project_layout.py`
+
+Il validatore applica queste regole:
+
+- **ERROR** se compare un nuovo file sotto `app/settings/`;
+- **ERROR** se compare il literal hardcoded `app/settings/` fuori dalle eccezioni documentate (`README`, `settings/README.md`, documenti storici di audit/refactor);
+- **ERROR** se ricompare un renderer applicativo sotto `app/renderers/`;
+- **ERROR** se ricompare un helper improprio sotto `app/utils/`;
+- **ERROR** se un file Python viola la naming scheme attuale basata su `snake_case`;
+- **ERROR** se in aree feature compaiono di nuovo filename legacy/alias invece del filename canonico introdotto dal refactor;
+- **ERROR** se viene aggiunto un nuovo template `settings/*.example.json` senza aggiornare il catalogo ammesso dal validatore;
+- **WARNING** per ogni compatibility shim legacy ancora presente nel codice.
+
+### 7.2 Eccezioni documentate
+
+Le uniche occorrenze ammesse del literal `app/settings/` sono quelle strettamente documentali/storiche, necessarie per spiegare la migrazione:
+
+- `README.md`;
+- `settings/README.md`;
+- `docs/project_structure_refactor_plan.md`;
+- `docs/test_suite_audit.md`.
+
+L'obiettivo è evitare nuovi riferimenti operativi al path legacy senza perdere il contesto storico della migrazione.

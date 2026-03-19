@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from app.features.aura.services.aura_service import ArchetypeAnalyzerService, AuraEligibilityService, AuraMissionService, AuraScoringService, build_discord_jump_link, compute_and_store_aura_result, load_aura_rule_definitions, load_aura_rules, normalize_text_for_matching, render_karma_bar, resolve_aura_reason_label
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
-from app.services.barcello_window import resolve_default_window_minutes
+from app.features.barcello.services.barcello_window_defaults import resolve_default_window_minutes
 
 
 class FakeDatabase:

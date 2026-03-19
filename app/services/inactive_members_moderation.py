@@ -15,7 +15,7 @@ import discord
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
-from app.utils.component_notices import send_standard_component_notice
+from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
 ROME = ZoneInfo("Europe/Rome")

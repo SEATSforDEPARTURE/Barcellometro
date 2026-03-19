@@ -368,7 +368,7 @@ def test_channel_aura_advice_is_deterministic() -> None:
 
 def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
     from app.features.aura.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
-    from app.utils.embed_limits import MAX_EMBED_CHARS, _estimate_embed_size
+    from app.shared.discord.embed_limits import MAX_EMBED_CHARS, _estimate_embed_size
 
     very_long_reason = "per aver mantenuto una conversazione molto articolata e ripetuta con alto coinvolgimento nel periodo " * 8
     top_users = [
@@ -461,7 +461,7 @@ def test_channel_aura_embed_uses_final_title_and_footer_in_size_budget() -> None
         ChannelAuraTopUserItem,
         build_channel_aura_embed,
     )
-    from app.utils.embed_limits import _estimate_embed_size
+    from app.shared.discord.embed_limits import _estimate_embed_size
 
     long_comment = "in crescita rispetto al periodo precedente e con dettaglio esteso " * 8
     embed = build_channel_aura_embed(

@@ -7,8 +7,8 @@ from typing import Any, Optional
 import discord
 
 from app.core.service_registry import ServiceRegistry
-from app.services.barcello import BarcelloService
-from app.services.barcello_calibration import BarcelloCalibrationService
+from app.features.barcello.services.barcello_service import BarcelloService
+from app.features.barcello.services.barcello_calibration_service import BarcelloCalibrationService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import IngestService
 from app.features.summary.services.content_summary_service import SummaryService

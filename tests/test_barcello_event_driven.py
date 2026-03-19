@@ -19,7 +19,7 @@ if "httpx" not in sys.modules:
     sys.modules["httpx"] = httpx_stub
 
 from app.services.ingest import EventEnvelope
-from app.services.triggers import TriggerEngineService
+from app.features.triggers.services.triggers_service import TriggerEngineService
 
 
 def _make_fake_messageable() -> AsyncMock:
