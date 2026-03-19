@@ -8,7 +8,7 @@ import pytest
 
 @pytest.fixture
 def renderer_module(import_fresh):
-    return import_fresh("app.renderers.activity_daily_report_renderer")
+    return import_fresh("app.features.activity.renderers.daily_report")
 
 
 class _Guild:

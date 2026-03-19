@@ -21,10 +21,10 @@ from app.services.campaign_content_service import CampaignContentService
 from app.services.status import StatusService
 from app.services.summary import SummaryService
 from app.services.daily_resoconto import DailyResocontoService
-from app.services.daily_activity_report import DailyActivityReportService
+from app.features.activity.services.daily_activity_report import DailyActivityReportService
 from app.services.entitlements import EntitlementsService
 from app.services.inactivity import InactivityService
-from app.services.activity_insights import ActivityInsightsService
+from app.features.activity.services.activity_insights import ActivityInsightsService
 from app.services.inactive_members_moderation import InactiveMembersModerationService
 from app.services.stt.ai_stt import AiSttService
 from app.services.stt.faster_whisper import FasterWhisperSttService
