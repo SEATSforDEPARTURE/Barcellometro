@@ -6,6 +6,10 @@ from zoneinfo import ZoneInfo
 import discord
 import pytest
 
+from tests._sqlite_stub import ensure_sqlite_stub
+
+ensure_sqlite_stub()
+
 pytest.importorskip("aiosqlite")
 
 from app.plugins.commands_modular import triggers as triggers_module
@@ -24,7 +28,7 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
     async def _run() -> None:
         db = SimpleNamespace(create_message_campaign=AsyncMock(return_value=42))
         scheduler = SimpleNamespace(is_valid_embed_color=lambda _c: True)
-        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"))
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
         group = discord.app_commands.Group(name="bm", description="x")
         campagne = discord.app_commands.Group(name="campagne", description="x")
@@ -36,19 +40,19 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
         try:
             register_triggers(group, campagne, qna, insights, ctx)
             prompt_group = _get_subgroup(campagne, "prompt")
-            callback = _get_command_callback(prompt_group, "create")
+            callback = _get_command_callback(prompt_group, "entry_add")
             interaction = SimpleNamespace(
                 guild_id=1,
                 channel_id=2,
                 user=SimpleNamespace(id=999),
-                command=SimpleNamespace(qualified_name="campagne prompt create"),
-                data={"name": "create"},
-                response=SimpleNamespace(send_message=AsyncMock()),
+                command=SimpleNamespace(qualified_name="campagne prompt entry_add"),
+                data={"name": "entry_add"},
+                response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
             )
 
             await callback(
                 interaction,
-                prompt_text="scrivi un update",
+                text="scrivi un update",
                 name=None,
                 publish_at=None,
                 every=None,
@@ -62,8 +66,9 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
         assert kwargs["interval_minutes"] == 0
         assert kwargs["name"].startswith("prompt-")
         assert len(kwargs["start_time_local"]) == 5 and ":" in kwargs["start_time_local"]
-        msg = interaction.response.send_message.await_args.args[0]
-        assert "one-shot" in msg
+        sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
+        assert "Campaign Id" in (sent_embed.description or "")
+        assert "created" in (sent_embed.description or "")
 
     asyncio.run(_run())
 
@@ -85,7 +90,7 @@ def test_prompt_list_shows_one_shot_label() -> None:
         ]
         db = SimpleNamespace(list_message_campaigns=AsyncMock(return_value=rows))
         scheduler = SimpleNamespace(is_valid_embed_color=lambda _c: True)
-        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"))
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
         group = discord.app_commands.Group(name="bm", description="x")
         campagne = discord.app_commands.Group(name="campagne", description="x")
@@ -97,19 +102,19 @@ def test_prompt_list_shows_one_shot_label() -> None:
         try:
             register_triggers(group, campagne, qna, insights, ctx)
             prompt_group = _get_subgroup(campagne, "prompt")
-            callback = _get_command_callback(prompt_group, "list")
+            callback = _get_command_callback(prompt_group, "entry_list")
             interaction = SimpleNamespace(
                 guild_id=1,
                 channel_id=2,
-                command=SimpleNamespace(qualified_name="campagne prompt list"),
-                data={"name": "list"},
-                response=SimpleNamespace(send_message=AsyncMock()),
+                command=SimpleNamespace(qualified_name="campagne prompt entry_list"),
+                data={"name": "entry_list"},
+                response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
             )
             await callback(interaction)
         finally:
             triggers_module.check_permission = old_permission
 
-        sent = interaction.response.send_message.await_args.args[0]
-        assert "frequenza=one-shot" in sent
+        sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
+        assert "every=one-shot" in (sent_embed.description or "")
 
     asyncio.run(_run())

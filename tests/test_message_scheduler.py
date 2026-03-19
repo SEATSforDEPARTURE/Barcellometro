@@ -1,6 +1,13 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
+
+import discord
+
+from tests._sqlite_stub import ensure_sqlite_stub
+
+ensure_sqlite_stub()
 
 from app.services.database import DatabaseService
 from app.services.footer import get_footer_meta
@@ -134,31 +141,31 @@ def test_barcello_text_selection() -> None:
 
 def test_validate_campaign_texts() -> None:
     error = validate_campaign_texts(
-        testo=None,
-        testo_verde=None,
-        testo_giallo=None,
-        testo_rosso=None,
-        testo_nero=None,
+        text=None,
+        text_green=None,
+        text_yellow=None,
+        text_red=None,
+        text_black=None,
         mood_mode="AUTO",
     )
     assert error is not None
 
     error = validate_campaign_texts(
-        testo=None,
-        testo_verde="ciao",
-        testo_giallo=None,
-        testo_rosso=None,
-        testo_nero=None,
+        text=None,
+        text_green="ciao",
+        text_yellow=None,
+        text_red=None,
+        text_black=None,
         mood_mode="AUTO",
     )
     assert error is None
 
     error = validate_campaign_texts(
-        testo=None,
-        testo_verde=None,
-        testo_giallo=None,
-        testo_rosso=None,
-        testo_nero="ciao",
+        text=None,
+        text_green=None,
+        text_yellow=None,
+        text_red=None,
+        text_black="ciao",
         mood_mode="IGNORE_BARCELLO",
     )
     assert error is not None
@@ -319,7 +326,10 @@ def test_send_campaign_embed_ai_prompt_supports_model_contributor_footer() -> No
 
 
 def test_process_campaign_one_shot_disables_after_successful_send() -> None:
-    class DummyChannel:
+    class DummyChannel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
         async def send(self, **kwargs):
             return None
 
@@ -339,7 +349,7 @@ def test_process_campaign_one_shot_disables_after_successful_send() -> None:
         await db.initialize_schema()
         now = datetime.now(timezone.utc)
         campaign_id = await db.create_message_campaign(
-            guild_id="g1",
+            guild_id="1",
             channel_id="123",
             campaign_type="CUSTOM",
             name="oneshot",
@@ -358,12 +368,12 @@ def test_process_campaign_one_shot_disables_after_successful_send() -> None:
             created_by="u1",
         )
         scheduler = MessageSchedulerService(db, bot=DummyBot())  # type: ignore[arg-type]
-        campaign = await db.get_message_campaign("g1", campaign_id)
+        campaign = await db.get_message_campaign("1", campaign_id)
         assert campaign is not None
 
         await scheduler._process_campaign(dict(campaign), now)
 
-        stored = await db.get_message_campaign("g1", campaign_id)
+        stored = await db.get_message_campaign("1", campaign_id)
         assert stored is not None
         assert int(stored["enabled"]) == 0
         assert stored["last_sent_at"] is not None
@@ -397,7 +407,10 @@ def test_send_campaign_embed_ai_prompt_defaults_title_when_name_missing() -> Non
 
 
 def test_process_campaign_ai_prompt_one_shot_deletes_after_successful_send() -> None:
-    class DummyChannel:
+    class DummyChannel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
         async def send(self, **kwargs):
             return None
 
@@ -410,6 +423,31 @@ def test_process_campaign_ai_prompt_one_shot_deletes_after_successful_send() -> 
 
         async def fetch_channel(self, _channel_id: int):
             return self.channel
+
+        def get_guild(self, _guild_id: int):
+            return SimpleNamespace(name="Guild test")
+
+    class DummyAiService:
+        def is_enabled(self) -> bool:
+            return True
+
+        def client(self):
+            return object()
+
+        def get_runtime_model(self, _task: str) -> str:
+            return "ollama:qwen2.5"
+
+        def get_model_display_name(self, _task: str) -> str:
+            return "qwen2.5"
+
+        def get_model_config(self, _task: str) -> str:
+            return "ollama:qwen2.5"
+
+        async def ask_for_task(self, _task: str, _prompt: str, _system: str) -> str:
+            return "generated text"
+
+        async def ask_for_task_with_web(self, _task: str, _prompt: str, _system: str) -> str:
+            return "generated text"
 
     async def _run() -> None:
         db = DatabaseService(":memory:")
@@ -435,13 +473,13 @@ def test_process_campaign_ai_prompt_one_shot_deletes_after_successful_send() -> 
             next_run_at=now.isoformat(),
             created_by="u1",
         )
-        scheduler = MessageSchedulerService(db, bot=DummyBot())  # type: ignore[arg-type]
+        scheduler = MessageSchedulerService(db, bot=DummyBot(), ai_service=DummyAiService())  # type: ignore[arg-type]
         campaign = await db.get_message_campaign("g1", campaign_id)
         assert campaign is not None
 
         await scheduler._process_campaign(dict(campaign), now)
 
-        rows = await db.list_message_campaigns("g1", include_disabled=True)
+        rows = await db.list_message_campaigns("1", include_disabled=True)
         assert all(int(row["id"]) != campaign_id for row in rows)
         await db.close()
 

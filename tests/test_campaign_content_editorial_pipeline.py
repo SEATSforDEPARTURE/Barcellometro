@@ -8,10 +8,12 @@ from unittest.mock import AsyncMock
 
 import discord
 
+from tests._sqlite_stub import ensure_sqlite_stub
+
+ensure_sqlite_stub()
+
 if "openai" not in sys.modules:
     sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
-if "aiosqlite" not in sys.modules:
-    sys.modules["aiosqlite"] = types.SimpleNamespace(Connection=object)
 
 from app.services.campaign_content_fetchers import dedupe_news_items
 from app.services.campaign_content_formatter import build_horoscope_embeds, build_news_embeds, build_weather_embeds
@@ -123,6 +125,9 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
 
         def get_model_config(self, _):
             return "ollama:qwen2.5:1.5b"
+
+        def get_model_display_name(self, _):
+            return "qwen2.5:1.5b"
 
     payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}}}
     for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
@@ -276,10 +281,11 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
     asyncio.run(_run_valid())
     asyncio.run(_run_invalid())
 
-
-
 def test_campaign_content_one_shot_disables_after_send() -> None:
-    class DummyChannel:
+    class DummyChannel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
         async def send(self, **kwargs):
             return type("M", (), {"id": 999})()
 

@@ -103,7 +103,7 @@ def test_personal_navigator_disables_current_section_only() -> None:
         {"type": "category", "key": "cronaca", "label": "📰 CRONACA", "page": 1},
         {"type": "category", "key": "sport", "label": "⚽ SPORT", "page": 2},
     ]
-    view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, current_index=2, timeout=60)
+    view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, service_type="NEWS", current_index=2, timeout=60)
     assert len(view.children) == 2
     assert view.children[0].disabled is False
     assert view.children[1].disabled is True
@@ -149,7 +149,7 @@ def test_weather_ephemeral_click_edits_same_message() -> None:
             {"type": "area", "key": "centro", "label": "🏛️ CENTRO", "page": 2},
             {"type": "area", "key": "sud_e_isole", "label": "🌋 SUD E ISOLE", "page": 3},
         ]
-        view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, current_index=1, timeout=60)
+        view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, service_type="WEATHER", current_index=1, timeout=60)
         interaction = _FakeInteraction()
         await view.children[1].callback(interaction)
         interaction.response.edit_message.assert_awaited_once()
@@ -166,7 +166,7 @@ def test_news_ephemeral_click_edits_same_message() -> None:
             {"type": "category", "key": "cronaca", "label": "📰 CRONACA", "page": 1},
             {"type": "category", "key": "sport", "label": "⚽ SPORT", "page": 2},
         ]
-        view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, current_index=1, timeout=60)
+        view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, service_type="NEWS", current_index=1, timeout=60)
         interaction = _FakeInteraction()
         await view.children[1].callback(interaction)
         interaction.response.edit_message.assert_awaited_once()
@@ -183,7 +183,7 @@ def test_horoscope_ephemeral_click_edits_same_message() -> None:
             {"type": "sign", "key": "ariete", "label": "♈ ARIETE", "page": 1},
             {"type": "sign", "key": "toro", "label": "♉ TORO", "page": 2},
         ]
-        view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, current_index=1, timeout=60)
+        view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, service_type="HOROSCOPE", current_index=1, timeout=60)
         interaction = _FakeInteraction()
         await view.children[1].callback(interaction)
         interaction.response.edit_message.assert_awaited_once()

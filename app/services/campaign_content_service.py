@@ -128,6 +128,7 @@ class CampaignContentService:
         fallback_used: bool,
         payload: dict[str, Any] | None = None,
     ) -> None:
+        config = dict(config)
         now = datetime.now(timezone.utc)
         guild_id = str(config["guild_id"])
         channel_id = str(config["channel_id"])
@@ -498,5 +499,8 @@ class CampaignContentService:
         if self._ai is not None:
             model_cfg = self._ai.get_model_config(task)
             if isinstance(model_cfg, str) and model_cfg.strip():
-                return self._ai.get_model_display_name(task)
+                get_display_name = getattr(self._ai, "get_model_display_name", None)
+                if callable(get_display_name):
+                    return str(get_display_name(task))
+                return model_cfg
         return "unknown"
