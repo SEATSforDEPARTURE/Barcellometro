@@ -27,7 +27,7 @@ def test_editorial_commands_are_not_direct_children_of_campagne() -> None:
 
 def test_existing_campagne_commands_and_prompt_group_are_kept() -> None:
     messaggi_source = Path("app/plugins/commands_modular/messaggi.py").read_text()
-    triggers_source = Path("app/plugins/commands_modular/triggers.py").read_text()
+    triggers_source = Path("app/features/triggers/commands/triggers.py").read_text()
 
     for cmd in ["on", "off", "status"]:
         assert f'@campagne_group.command(name="{cmd}"' in messaggi_source
@@ -56,7 +56,7 @@ def test_scheduling_parameters_are_unified_to_publish_at_every() -> None:
 
 
 def test_prompt_create_slash_exposes_publish_at_every() -> None:
-    source = Path("app/plugins/commands_modular/triggers.py").read_text()
+    source = Path("app/features/triggers/commands/triggers.py").read_text()
 
     assert 'publish_at="First publication time (DD/MM/YYYY HH:MM)"' in source
     assert 'every="Repeat interval in minutes"' in source
