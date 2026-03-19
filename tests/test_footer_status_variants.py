@@ -4,6 +4,25 @@ from pathlib import Path
 
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Connection=object)
+if "httpx" not in sys.modules:
+    httpx_stub = types.ModuleType("httpx")
+
+    class _AsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def get(self, *args, **kwargs):
+            raise RuntimeError("httpx stub: network call not configured in this test")
+
+    httpx_stub.AsyncClient = _AsyncClient
+    sys.modules["httpx"] = httpx_stub
 
 from app.plugins.commands_modular.admin import _chunk_status_blocks, _service_section, _split_long_text
 
@@ -20,9 +39,9 @@ def test_footer_status_groups_campaign_sections_separately() -> None:
 def test_footer_status_source_uses_variants_and_excludes_legacy_campagne() -> None:
     source = Path("app/plugins/commands_modular/admin.py").read_text()
     assert "get_all_service_footer_variants" in source
-    assert "Campagne editoriali" in source
-    assert "Campagne prompt" in source
-    assert "Campagne timer" in source
+    assert "Editorial campaigns" in source
+    assert "Prompt campaigns" in source
+    assert "Timer campaigns" in source
     assert 'service_name="campagne"' not in source
 
 
