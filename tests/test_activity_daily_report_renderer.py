@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-import sys
 
-if "aiosqlite" not in sys.modules:
-    sys.modules["aiosqlite"] = SimpleNamespace(Row=dict)
+import pytest
 
-from types import SimpleNamespace
 
-from app.renderers.activity_daily_report_renderer import _format_italian_date, build_daily_activity_details_txt, build_daily_activity_embeds
+@pytest.fixture
+def renderer_module(import_fresh):
+    return import_fresh("app.renderers.activity_daily_report_renderer")
 
 
 class _Guild:
@@ -35,12 +34,7 @@ def _details() -> SimpleNamespace:
         label="INTENSA",
         trend_text="Messaggi in crescita (+96% vs finestra precedente).",
     )
-    return SimpleNamespace(
-        score=score,
-        top_active_users=[],
-        inactive_users=[],
-        advice_bullets=["Coinvolgere utenti nuovi"],
-    )
+    return SimpleNamespace(score=score, top_active_users=[], inactive_users=[], advice_bullets=["Coinvolgere utenti nuovi"])
 
 
 def _payloads() -> list[dict]:
@@ -64,13 +58,13 @@ def _payloads() -> list[dict]:
     ]
 
 
-def test_format_italian_date() -> None:
-    assert _format_italian_date("2026-02-19T10:00:00+00:00") == "Giovedì, 19 Febbraio 2026"
+def test_format_italian_date(renderer_module) -> None:
+    assert renderer_module._format_italian_date("2026-02-19T10:00:00+00:00") == "Giovedì, 19 Febbraio 2026"
 
 
-def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fields() -> None:
+def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fields(renderer_module) -> None:
     guild = _Guild()
-    embeds = build_daily_activity_embeds(
+    embeds = renderer_module.build_daily_activity_embeds(
         guild,
         "Test Server",
         _payloads(),
@@ -108,9 +102,9 @@ def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fie
     assert [f.name for f in embeds[1].fields][:2] == ["📈 TREND", "📌 STATISTICHE CANALE"]
 
 
-def test_daily_renderer_txt_contains_required_headers_and_silence() -> None:
+def test_daily_renderer_txt_contains_required_headers_and_silence(renderer_module) -> None:
     guild = _Guild()
-    txt = build_daily_activity_details_txt(
+    txt = renderer_module.build_daily_activity_details_txt(
         guild,
         "Test Server",
         _payloads(),
@@ -138,10 +132,9 @@ def test_daily_renderer_txt_contains_required_headers_and_silence() -> None:
     assert "• Ora di silenzio:" in txt
 
 
-def test_daily_renderer_embeds_use_ultimi_window_header() -> None:
-    guild = _Guild()
-    embeds = build_daily_activity_embeds(
-        guild,
+def test_daily_renderer_embeds_use_ultimi_window_header(renderer_module) -> None:
+    embeds = renderer_module.build_daily_activity_embeds(
+        _Guild(),
         "Test Server",
         _payloads(),
         server_summary={
@@ -167,10 +160,9 @@ def test_daily_renderer_embeds_use_ultimi_window_header() -> None:
     assert "15/03/2026 19:19 → 16/03/2026 15:19" in (embeds[0].description or "")
 
 
-def test_daily_renderer_embeds_use_range_window_header() -> None:
-    guild = _Guild()
-    embeds = build_daily_activity_embeds(
-        guild,
+def test_daily_renderer_embeds_use_range_window_header(renderer_module) -> None:
+    embeds = renderer_module.build_daily_activity_embeds(
+        _Guild(),
         "Test Server",
         _payloads(),
         server_summary={

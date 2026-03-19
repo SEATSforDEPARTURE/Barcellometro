@@ -1,36 +1,21 @@
 from __future__ import annotations
 
-import sys
+import asyncio
 import types
-from pathlib import Path
 from types import SimpleNamespace
 
-if "aiosqlite" not in sys.modules:
-    sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict, Connection=object)
-if "openai" not in sys.modules:
-    sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
-if "httpx" not in sys.modules:
-    sys.modules["httpx"] = types.SimpleNamespace(AsyncClient=object, Client=object)
-
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
 import discord
+import pytest
 
-import importlib.util
 
-ROLES_PATH = Path(__file__).resolve().parents[1] / "app/plugins/commands_modular/roles.py"
-roles_spec = importlib.util.spec_from_file_location("roles_module", ROLES_PATH)
-roles_module = importlib.util.module_from_spec(roles_spec)
-assert roles_spec and roles_spec.loader
-roles_spec.loader.exec_module(roles_module)
-register_roles = roles_module.register_roles
+@pytest.fixture
+def roles_module(import_fresh):
+    return import_fresh("app.plugins.commands_modular.roles")
 
-TRIGGERS_PATH = Path(__file__).resolve().parents[1] / "app/plugins/commands_modular/triggers.py"
-triggers_spec = importlib.util.spec_from_file_location("triggers_module", TRIGGERS_PATH)
-triggers_module = importlib.util.module_from_spec(triggers_spec)
-assert triggers_spec and triggers_spec.loader
-triggers_spec.loader.exec_module(triggers_module)
-register_triggers = triggers_module.register_triggers
+
+@pytest.fixture
+def triggers_module(import_fresh):
+    return import_fresh("app.plugins.commands_modular.triggers")
 
 
 class _Response:
@@ -89,7 +74,7 @@ def _find_command(group: discord.app_commands.Group, *names: str):
     return next(cmd for cmd in current.commands if cmd.name == names[-1])
 
 
-def test_triggers_guard_uses_resolved_permission_keys(monkeypatch) -> None:
+def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[tuple[str, tuple[str, ...]]] = []
 
     async def _check_permission(interaction, command_name, ctx, *, legacy_aliases=()):
@@ -109,16 +94,13 @@ def test_triggers_guard_uses_resolved_permission_keys(monkeypatch) -> None:
     qna_group = discord.app_commands.Group(name="qna", description="qna")
     insights_group = discord.app_commands.Group(name="insights", description="insights")
     ctx = SimpleNamespace(database=_TriggerDb(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
-    frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
+    frasi_group = triggers_module.register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
 
     entry_list = _find_command(frasi_group, "entry_list")
-    interaction = _Interaction(entry_list)
-    import asyncio
-    asyncio.run(entry_list.callback(interaction))
+    asyncio.run(entry_list.callback(_Interaction(entry_list)))
 
     template_show = _find_command(frasi_group, "template_global_show")
-    interaction = _Interaction(template_show)
-    asyncio.run(template_show.callback(interaction))
+    asyncio.run(template_show.callback(_Interaction(template_show)))
 
     prompt_show = _find_command(campagne_group, "prompt", "entry_show")
 
@@ -126,8 +108,7 @@ def test_triggers_guard_uses_resolved_permission_keys(monkeypatch) -> None:
         return None
 
     ctx.database.get_message_campaign = types.MethodType(_get_message_campaign, ctx.database)
-    interaction = _Interaction(prompt_show)
-    asyncio.run(prompt_show.callback(interaction, 5))
+    asyncio.run(prompt_show.callback(_Interaction(prompt_show), 5))
 
     assert seen[0][0] == "bm.frasi.entry_list"
     assert "frasi.entry_list" in seen[0][1]
@@ -143,7 +124,7 @@ def test_triggers_guard_uses_resolved_permission_keys(monkeypatch) -> None:
     assert sent[2]["subcommand_path"] == "prompt entry_show"
 
 
-def test_role_list_and_user_list_render_labels(monkeypatch) -> None:
+def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest.MonkeyPatch) -> None:
     sent = []
 
     async def _check_permission(*args, **kwargs):
@@ -169,9 +150,8 @@ def test_role_list_and_user_list_render_labels(monkeypatch) -> None:
     monkeypatch.setattr(roles_module, "send_standard_response", _send_standard_response)
 
     group = discord.app_commands.Group(name="roles", description="roles")
-    register_roles(group, SimpleNamespace(database=_Db(), footer=None))
+    roles_module.register_roles(group, SimpleNamespace(database=_Db(), footer=None))
 
-    import asyncio
     role_list = _find_command(group, "role_list")
     asyncio.run(role_list.callback(_Interaction(role_list)))
     user_list = _find_command(group, "user_list")
