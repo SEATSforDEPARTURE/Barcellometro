@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import logging
 import re
 import unicodedata
@@ -183,6 +184,12 @@ class QnaQueryEngine:
             ],
         }
         try:
+            model = None
+            if hasattr(self._ai, "get_model"):
+                try:
+                    model = self._ai.get_model("qa")
+                except TypeError:
+                    model = self._ai.get_model()
             logger.info("qna_intent_parse model=%s", model)
             raw_text = await self._create_intent_response(prompt)
             clean_text = self._strip_json_fences(raw_text)
@@ -234,12 +241,11 @@ class QnaQueryEngine:
         return cleaned
 
     async def _create_intent_response(self, prompt: dict[str, Any]) -> str:
-        response = await self._ai.ask_for_task(
-            "qa",
-            json.dumps(prompt, ensure_ascii=False),
-            "Rispondi SOLO con JSON valido.",
+        return await self._request_ai_text(
+            task="qa",
+            prompt=json.dumps(prompt, ensure_ascii=False),
+            system_prompt="Rispondi SOLO con JSON valido.",
         )
-        return response or ""
 
     def _heuristic_intent(self, question: str) -> QnaIntent:
         q = question.lower()
@@ -315,7 +321,12 @@ class QnaQueryEngine:
             return None
         if re.fullmatch(r"\d{6,}", candidate):
             return None
+        meaningful = re.sub(r"<@!?\d+>", "", candidate)
+        meaningful = re.sub(r"\b\d{6,}\b", "", meaningful)
+        meaningful = re.sub(r"\b(ieri|oggi|adesso|settimana|ultima ora|ultimi 7 giorni)\b", "", meaningful, flags=re.IGNORECASE)
         if "<@" in candidate and re.sub(r"<@!?\d+>", "", candidate).strip() == "":
+            return None
+        if not meaningful.strip(" ?!.,"):
             return None
         return candidate
 
@@ -540,7 +551,11 @@ class QnaQueryEngine:
                 "Massimo 6 bullet o 1 breve paragrafo.",
             ],
         }
-        text = await self._ai.ask_for_task("summary", json.dumps(prompt, ensure_ascii=False), prompt["system"])
+        text = await self._request_ai_text(
+            task="summary",
+            prompt=json.dumps(prompt, ensure_ascii=False),
+            system_prompt=prompt["system"],
+        )
         if text:
             return text
         return self._compose_local_fallback(intent=intent, range_label=range_label, payload=payload)
@@ -571,6 +586,37 @@ class QnaQueryEngine:
                 if text:
                     chunks.append(str(text))
         return "\n".join(chunks).strip()
+
+    async def _request_ai_text(self, *, task: str, prompt: str, system_prompt: str) -> str:
+        ask_for_task = getattr(self._ai, "ask_for_task", None)
+        if callable(ask_for_task):
+            result = ask_for_task(task, prompt, system_prompt)
+            if inspect.isawaitable(result):
+                text = await result
+                if text:
+                    return str(text).strip()
+
+        client_factory = getattr(self._ai, "client", None)
+        client = client_factory() if callable(client_factory) else None
+        responses = getattr(client, "responses", None)
+        create = getattr(responses, "create", None)
+        if callable(create):
+            model = None
+            if hasattr(self._ai, "get_model"):
+                try:
+                    model = self._ai.get_model(task)
+                except TypeError:
+                    model = self._ai.get_model()
+            model_name = str(model or "gpt-4o-mini").split(":", 1)[-1]
+            response = await create(
+                model=model_name,
+                input=[
+                    {"role": "system", "content": system_prompt or ""},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return self._extract_response_text(response)
+        return ""
 
     @staticmethod
     def _clean_opt(value: Any) -> str | None:
