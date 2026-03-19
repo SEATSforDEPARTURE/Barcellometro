@@ -19,8 +19,8 @@ from app.services.barcello import BarcelloService
 from app.services.message_scheduler import MessageSchedulerService
 from app.services.campaign_content_service import CampaignContentService
 from app.services.status import StatusService
-from app.services.summary import SummaryService
-from app.services.daily_resoconto import DailyResocontoService
+from app.features.summary.services.summary import SummaryService
+from app.features.summary.services.daily_resoconto import DailyResocontoService
 from app.features.activity.services.daily_activity_report import DailyActivityReportService
 from app.services.entitlements import EntitlementsService
 from app.services.inactivity import InactivityService

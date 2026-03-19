@@ -12,10 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 pytest.importorskip("aiosqlite")
 
 from app.plugins import commands as commands_module
-from app.plugins.commands_modular import resoconto as resoconto_module
-from app.plugins.commands_modular import riassunto as riassunto_module
-from app.plugins.commands_modular.resoconto import register_resoconto
-from app.plugins.commands_modular.riassunto import register_riassunto
+from app.features.summary.commands import resoconto as resoconto_module
+from app.features.summary.commands import riassunto as riassunto_module
+from app.features.summary.commands.resoconto import register_resoconto
+from app.features.summary.commands.riassunto import register_riassunto
 
 
 class _FakeResponse:

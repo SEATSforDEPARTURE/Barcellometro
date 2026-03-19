@@ -1,4 +1,3 @@
-from app.services.channel_summary import ChannelSummaryService
+"""Compatibility shim for the daily_resoconto summary service."""
 
-
-DailyResocontoService = ChannelSummaryService
+from app.features.summary.services.daily_resoconto import *  # noqa: F401,F403
