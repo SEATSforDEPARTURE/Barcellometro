@@ -28,7 +28,7 @@ from app.features.activity.services.activity_insights import ActivityInsightsSer
 from app.services.inactive_members_moderation import InactiveMembersModerationService
 from app.services.stt.ai_stt import AiSttService
 from app.services.stt.faster_whisper import FasterWhisperSttService
-from app.services.triggers import TriggerEngineService
+from app.features.triggers.services.triggers import TriggerEngineService
 from app.services.translate.ai_translate import AiTranslateService
 from app.services.translate.argos import ArgosTranslateService
 from app.services.aura import AuraAggregationJob, AuraEligibilityService, AuraRollingStatsService, ArchetypeAnalyzerService
