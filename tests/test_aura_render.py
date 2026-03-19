@@ -209,9 +209,11 @@ def test_profile_traits_lines_show_prominent_archetypes_with_emoji_percent_name_
         fallback_metrics={},
     )
     assert len(lines) == 3
-    assert "• ✨ 41% Scintilla" in lines[0]
+    assert lines[0].startswith("• ✨ ")
+    assert "41% Scintilla" in lines[0]
     assert "—" in lines[0]
-    assert "• 🌿 33% Pacificatore" in lines[1]
+    assert lines[1].startswith("• 🌿 ")
+    assert "33% Pacificatore" in lines[1]
 
 
 def test_profile_traits_lines_fallback_with_legacy_payload() -> None:

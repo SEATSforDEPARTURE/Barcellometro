@@ -6,16 +6,107 @@ import re
 import sqlite3
 import uuid
 import asyncio
+import types
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 
-import aiosqlite
+try:
+    import aiosqlite  # type: ignore[import-not-found]
+except ModuleNotFoundError:  # pragma: no cover - exercised via test environment shims
+    aiosqlite = None  # type: ignore[assignment]
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
 _LOCKED_MAX_RETRIES = 3
 _LOCKED_BACKOFF_SECONDS = 0.15
+
+
+class _AsyncCursorWrapper:
+    def __init__(self, cursor: sqlite3.Cursor, row_factory: Any) -> None:
+        self._cursor = cursor
+        self._row_factory = row_factory
+
+    @property
+    def lastrowid(self) -> int | None:
+        return self._cursor.lastrowid
+
+    @property
+    def rowcount(self) -> int:
+        return self._cursor.rowcount
+
+    async def __aenter__(self) -> "_AsyncCursorWrapper":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        self._cursor.close()
+
+    def _convert(self, row: Any) -> Any:
+        if row is None or self._row_factory is None:
+            return row
+        return self._row_factory(self._cursor, row)
+
+    async def fetchone(self) -> Any:
+        return self._convert(self._cursor.fetchone())
+
+    async def fetchall(self) -> list[Any]:
+        return [self._convert(row) for row in self._cursor.fetchall()]
+
+
+class _AsyncExecuteResult:
+    def __init__(self, cursor_wrapper: _AsyncCursorWrapper) -> None:
+        self._cursor_wrapper = cursor_wrapper
+
+    def __await__(self):
+        async def _coro() -> _AsyncCursorWrapper:
+            return self._cursor_wrapper
+
+        return _coro().__await__()
+
+    async def __aenter__(self) -> _AsyncCursorWrapper:
+        return await self._cursor_wrapper.__aenter__()
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self._cursor_wrapper.__aexit__(exc_type, exc, tb)
+
+
+class _AsyncConnectionWrapper:
+    def __init__(self, path: str) -> None:
+        self._conn = sqlite3.connect(path)
+        self.row_factory = None
+
+    def execute(self, query: str, params: tuple[Any, ...] = ()) -> _AsyncExecuteResult:
+        return _AsyncExecuteResult(_AsyncCursorWrapper(self._conn.execute(query, params), self.row_factory))
+
+    async def executescript(self, script: str) -> None:
+        self._conn.executescript(script)
+
+    async def commit(self) -> None:
+        self._conn.commit()
+
+    async def close(self) -> None:
+        self._conn.close()
+
+
+async def _sqlite_fallback_connect(path: str) -> _AsyncConnectionWrapper:
+    return _AsyncConnectionWrapper(path)
+
+
+def _resolve_aiosqlite_module() -> Any:
+    candidate = aiosqlite
+    connect_fn = getattr(candidate, "connect", None)
+    row_type = getattr(candidate, "Row", None)
+    if candidate is not None and callable(connect_fn) and row_type is not None:
+        return candidate
+    return types.SimpleNamespace(
+        connect=_sqlite_fallback_connect,
+        Row=sqlite3.Row,
+        Connection=_AsyncConnectionWrapper,
+        IntegrityError=sqlite3.IntegrityError,
+    )
+
+
+aiosqlite = _resolve_aiosqlite_module()
 
 
 class DatabaseService:
