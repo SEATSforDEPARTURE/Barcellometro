@@ -30,8 +30,6 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 
 Per i dettagli operativi sui config centralizzati vedi `settings/README.md`.
 
-> Nota migrazione strutturale: in questa fase il source of truth dei config example è `settings/`. Se trovi riferimenti legacy a `app/settings/...`, trattali come transitori e non usarli per nuovi setup.
-
 - `DISCORD_TOKEN`: token del bot.
 - `GUILD_ID`: ID della guild su cui sincronizzare i comandi.
 - `DB_PATH`: path del database SQLite (default `bot.sqlite`).
@@ -213,11 +211,20 @@ sqlite3 bot.sqlite "SELECT * FROM events ORDER BY ts DESC LIMIT 5;"
 
 ## Architettura
 
-- `app/config`: loader e override dei config file-based centralizzati in `settings/`.
-- `app/shared`: infrastruttura condivisa cross-feature (Discord helpers, safety, delivery).
-- `app/domain`: logica di dominio riusabile non feature-specific.
-- `app/features/*`: command/service/renderer canonici per feature.
-- `app/services`: servizi runtime stabili non migrati a un namespace feature-specific.
-- `app/plugins`: adapter Discord (eventi), wiring e registration dei comandi slash.
+Struttura canonica del progetto:
+
+- `settings/`: template e override dei config file-based versionati/locali.
+- `app/services/`: servizi runtime applicativi.
+- `app/renderers/`: renderer e composizione output/embed.
+- `app/utils/`: utility e compatibility helpers mirati.
+- `app/plugins/commands_modular/`: moduli slash commands e relativo wiring.
+
+Note di compatibilità:
+
+- `app/settings/...` può ancora comparire solo come path legacy di compatibilità runtime; non è documentato come struttura canonica e non va usato per nuovi setup.
+- `app/features/` non fa parte del layout finale e non deve essere reintrodotto.
+
+Check utili:
+
 - `python -m scripts.validate_commands`: valida la slash tree, segnala naming/triadi/descrizioni fuori standard e può rigenerare `docs/command_tree_report.md`.
-- `python -m scripts.validate_project_layout`: valida il layout post-refactor; blocca nuove violazioni hard (`app/settings/`, `app/renderers/`, `app/utils/`, naming/file legacy) e segnala eventuali shim legacy ancora presenti come warning.
+- `python -m scripts.validate_project_layout`: valida il layout finale e blocca riferimenti strutturali legacy non consentiti.
