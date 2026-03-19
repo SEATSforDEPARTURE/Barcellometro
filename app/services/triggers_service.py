@@ -20,8 +20,8 @@ from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.command_embeds import send_standard_response
 from app.shared.discord.report_embeds import build_report_cover_embed
 
-from app.features.barcello.services.barcello_service import BarcelloService
-from app.features.barcello.services.barcello_window_defaults import resolve_window_minutes
+from app.services.barcello_service import BarcelloService
+from app.services.barcello_window_defaults import resolve_window_minutes
 from app.services.community_insights import CommunityInsightsService
 from app.config.file_loader import load_json_file
 from app.services.database import DatabaseService

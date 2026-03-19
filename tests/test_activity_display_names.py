@@ -6,8 +6,8 @@ import types
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict, Connection=object)
 
-from app.features.activity.renderers.activity_dm_report_renderer import build_activity_dm_embeds
-from app.features.activity.services.activity_insights_service import ActivityScore, ChannelActivityDetails, UserActivityEntry
+from app.renderers.activity_dm_report_renderer import build_activity_dm_embeds
+from app.services.activity_insights import ActivityScore, ChannelActivityDetails, UserActivityEntry
 
 
 class _Member:

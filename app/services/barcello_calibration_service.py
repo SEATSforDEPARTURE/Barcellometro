@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.features.barcello.services.barcello_service import DEFAULT_MITIGATION_FACTORS, DEFAULT_WEIGHT_MULTIPLIERS
+from app.services.barcello_service import DEFAULT_MITIGATION_FACTORS, DEFAULT_WEIGHT_MULTIPLIERS
 from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)

@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_resoconto_restores_top_level_manual_commands() -> None:
-    source = Path("app/features/summary/commands/resoconto.py").read_text()
+    source = Path("app/plugins/commands_modular/resoconto.py").read_text()
 
     for pattern in [
         '@resocontocanale_group.command(name="oggi"',
@@ -21,11 +21,11 @@ def test_resoconto_restores_top_level_manual_commands() -> None:
 
 def test_critical_modules_use_standard_response_renderer() -> None:
     targets = {
-        "app/features/summary/commands/resoconto.py": [
+        "app/plugins/commands_modular/resoconto.py": [
             "send_standard_response(",
             "_send_resoconto_response(",
         ],
-        "app/features/summary/commands/riassunto.py": [
+        "app/plugins/commands_modular/riassunto.py": [
             "send_standard_response(",
             "async def send_ephemeral",
         ],
@@ -43,8 +43,8 @@ def test_critical_modules_use_standard_response_renderer() -> None:
 
 def test_critical_modules_no_longer_send_raw_string_slash_responses() -> None:
     critical_files = [
-        Path("app/features/summary/commands/resoconto.py"),
-        Path("app/features/summary/commands/riassunto.py"),
+        Path("app/plugins/commands_modular/resoconto.py"),
+        Path("app/plugins/commands_modular/riassunto.py"),
         Path("app/plugins/commands.py"),
         Path("app/plugins/commands_modular/translate.py"),
         Path("app/plugins/commands_modular/stt.py"),

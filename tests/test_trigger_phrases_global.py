@@ -25,12 +25,12 @@ if "httpx" not in sys.modules:
 
 pytest.importorskip("aiosqlite")
 
-from app.features.triggers.commands.triggers import register_triggers
-import app.features.triggers.commands.triggers as trigger_commands_module
+from app.plugins.commands_modular.triggers import register_triggers
+import app.plugins.commands_modular.triggers as trigger_commands_module
 from app.services.database import DatabaseService
 from app.services.ingest import EventEnvelope
-from app.features.triggers.services.triggers_service import TriggerEngineService
-import app.features.triggers.services.triggers_service as triggers_module
+from app.services.triggers_service import TriggerEngineService
+import app.services.triggers_service as triggers_module
 
 
 class _FakeRepliedMessage:

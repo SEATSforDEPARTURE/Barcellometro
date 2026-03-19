@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 
 def test_resoconto_uses_schedule_standard_commands_only() -> None:
-    source = Path("app/features/summary/commands/resoconto.py").read_text()
+    source = Path("app/plugins/commands_modular/resoconto.py").read_text()
 
     for command_name in ["schedule_add", "schedule_edit", "schedule_remove", "schedule_show", "schedule_list"]:
         assert f'name="{command_name}"' in source
@@ -24,7 +24,7 @@ def test_resoconto_uses_schedule_standard_commands_only() -> None:
 
 
 def test_resoconto_schedule_commands_use_publish_at_every_and_enabled() -> None:
-    source = Path("app/features/summary/commands/resoconto.py").read_text()
+    source = Path("app/plugins/commands_modular/resoconto.py").read_text()
 
     assert "publish_at" in source
     assert "every" in source
@@ -38,7 +38,7 @@ def test_schedule_scoped_queries_stay_guild_channel_bound() -> None:
 
 
 def test_window_header_is_always_bold_across_period_types() -> None:
-    source = Path("app/features/summary/renderers/channel_summary.py").read_text()
+    source = Path("app/renderers/channel_summary.py").read_text()
     assert "**🗓️ Oggi." in source
     assert "**🗓️ Ieri." in source
     assert "**🗓️ {title}" in source
@@ -46,13 +46,13 @@ def test_window_header_is_always_bold_across_period_types() -> None:
 
 
 def test_renderer_supports_per_moment_barcello_map() -> None:
-    source = Path("app/features/summary/renderers/channel_summary.py").read_text()
+    source = Path("app/renderers/channel_summary.py").read_text()
     assert "moment_barcello: dict[int, BarcelloResult] | None = None" in source
     assert "(moment_barcello or {}).get(id(it), barcello_status)" in source
 
 
 def test_channel_summary_trend_uses_previous_equivalent_window() -> None:
-    source = Path("app/features/summary/services/channel_summary_service.py").read_text()
+    source = Path("app/services/channel_summary_service.py").read_text()
     assert "duration = max(timedelta(minutes=1), current_end_local - current_start_local)" in source
     assert "previous_start_local = current_start_local - duration" in source
     assert "previous_end_local = current_start_local" in source
@@ -60,7 +60,7 @@ def test_channel_summary_trend_uses_previous_equivalent_window() -> None:
 
 
 def test_multi_day_moment_cleanup_removes_time_of_day_hooks() -> None:
-    source = Path("app/features/summary/services/channel_summary_service.py").read_text()
+    source = Path("app/services/channel_summary_service.py").read_text()
     assert "if multi_day:" in source
     assert "di prima mattina" in source
     assert "verso mezzogiorno" in source
@@ -145,8 +145,8 @@ def test_schedule_channel_scope_for_status_edit_delete_clear() -> None:
 
 def test_trend_wording_oggi_ieri_is_natural_without_explicit_range() -> None:
     pytest.importorskip("aiosqlite")
-    from app.features.summary.services.channel_summary_service import ChannelSummaryService
-    from app.features.barcello.services.barcello_service import BarcelloResult
+    from app.services.channel_summary_service import ChannelSummaryService
+    from app.services.barcello_service import BarcelloResult
 
     svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
     current = BarcelloResult(score=72, color="verde", trend="up", reasons=[], metrics={"negativity_hits": 2, "positive_hits": 8})
@@ -175,8 +175,8 @@ def test_trend_wording_oggi_ieri_is_natural_without_explicit_range() -> None:
 
 def test_trend_wording_ultimi_keeps_explicit_previous_window() -> None:
     pytest.importorskip("aiosqlite")
-    from app.features.summary.services.channel_summary_service import ChannelSummaryService
-    from app.features.barcello.services.barcello_service import BarcelloResult
+    from app.services.channel_summary_service import ChannelSummaryService
+    from app.services.barcello_service import BarcelloResult
 
     svc = ChannelSummaryService(database=None, bot=None, summary_service=None, barcello_service=None)
     current = BarcelloResult(score=45, color="giallo", trend="flat", reasons=[], metrics={"negativity_hits": 5, "positive_hits": 3})

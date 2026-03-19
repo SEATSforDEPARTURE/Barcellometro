@@ -1,1 +1,0 @@
-"""Commands for triggers feature."""
