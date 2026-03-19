@@ -7,7 +7,7 @@ import os
 from app.core.bot import create_bot, normalize_instance_mode
 from app.core.config import load_config
 from app.core.logging_setup import setup_logging
-from app.services.config_overrides import ConfigOverridesService
+from app.config.overrides import ConfigOverridesService
 
 logger = logging.getLogger(__name__)
 

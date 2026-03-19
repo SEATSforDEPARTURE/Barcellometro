@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.config_overrides import ConfigOverridesService
+from app.config.overrides import ConfigOverridesService
 
 
 class FakeDatabase:
