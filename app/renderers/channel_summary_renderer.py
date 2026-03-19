@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.services.barcello import BarcelloResult
+from app.services.footer import attach_footer_meta_to_all
 from app.services.summary import SummaryItem, SummaryResult
 from app.utils.trend_render import render_trend_value
 from app.plugins.commands_modular.time_windows import format_rolling_window_label, infer_rolling_window_request
@@ -256,6 +257,7 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     total = len(pages) + (1 if aura_embed is not None else 0)
     for idx, embed in enumerate(pages, start=1):
         embed.title = f"🗒️ DETTAGLI (Pag {idx}/{total})"
+    attach_footer_meta_to_all(pages, service_name="channel_summary", used_local_processing=True)
 
     if aura_embed is not None:
         return [status_embed, *pages, aura_embed]

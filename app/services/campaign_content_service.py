@@ -25,7 +25,8 @@ from app.services.campaign_content_formatter import (
 )
 from app.services.campaign_content_views import BaseCampaignNavigatorView, PersistentCampaignLauncherView
 from app.services.database import DatabaseService
-from app.services.footer import FooterService, attach_footer_meta_to_all
+from app.services.footer import FooterService, attach_footer_meta
+from app.services.footer import attach_footer_meta_to_all
 from app.utils.component_notices import send_standard_component_notice
 from app.services.scheduler_utils import calculate_next_run_after_send
 
@@ -342,8 +343,21 @@ class CampaignContentService:
             page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=None)
 
         index = max(0, min(target_index, len(embeds) - 1))
-        view = BaseCampaignNavigatorView(self, embeds=embeds, page_map=page_map, current_index=index, timeout=600)
-        await interaction.response.send_message(embed=discord.Embed.from_dict(embeds[index]), view=view, ephemeral=True)
+        view = BaseCampaignNavigatorView(
+            self,
+            embeds=embeds,
+            page_map=page_map,
+            service_type=service_type,
+            metadata=metadata if isinstance(metadata, dict) else None,
+            current_index=index,
+            timeout=600,
+        )
+        embed = self._hydrate_stored_campaign_embed(
+            service_type=service_type,
+            embed_payload=embeds[index],
+            metadata=metadata if isinstance(metadata, dict) else None,
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         return True
 
     async def edit_public_message(self, interaction: discord.Interaction, *, target_index: int) -> bool:
@@ -360,7 +374,12 @@ class CampaignContentService:
         metadata = record.get("metadata", {})
         page_map = metadata.get("page_map") if isinstance(metadata, dict) else []
         view = PersistentCampaignLauncherView(self, service_type=record.get("service_type") or "NEWS", total_pages=len(embeds), page_map=page_map if isinstance(page_map, list) else [])
-        await interaction.response.edit_message(embed=discord.Embed.from_dict(embeds[index]), view=view)
+        embed = self._hydrate_stored_campaign_embed(
+            service_type=str(record.get("service_type") or "NEWS"),
+            embed_payload=embeds[index],
+            metadata=metadata if isinstance(metadata, dict) else None,
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
         return True
 
     def _build_page_map(self, service_type: str, *, payload_embeds: list[Any], payload: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -411,6 +430,38 @@ class CampaignContentService:
             "HOROSCOPE": "campagne_oroscopo",
         }
         return mapped.get(str(service_type or "").upper(), "campagne_notizie")
+
+    def _campaign_footer_contributors(self, metadata: dict[str, Any] | None) -> list[str]:
+        if not isinstance(metadata, dict):
+            return []
+        contributors: list[str] = []
+        seen: set[str] = set()
+        for source in metadata.get("used_sources") or metadata.get("configured_sources") or []:
+            token = str(source or "").strip()
+            if token and token not in seen:
+                contributors.append(token)
+                seen.add(token)
+        model = str(metadata.get("used_model") or metadata.get("ai_model_used") or "").strip()
+        if model and model not in {"unknown"} and model not in seen:
+            contributors.append(model)
+        return contributors
+
+    def _hydrate_stored_campaign_embed(
+        self,
+        *,
+        service_type: str,
+        embed_payload: Any,
+        metadata: dict[str, Any] | None,
+    ) -> discord.Embed:
+        embed = discord.Embed.from_dict(embed_payload if isinstance(embed_payload, dict) else {})
+        contributors = self._campaign_footer_contributors(metadata)
+        attach_footer_meta(
+            embed,
+            service_name=self._campaign_footer_service_name(service_type),
+            contributors=contributors,
+            used_local_processing=not contributors,
+        )
+        return embed
 
     async def _build_campaign_footer(self, *, service_name: str, used_sources: list[str], used_model: str | None) -> str:
         contributors = list(used_sources)
