@@ -196,6 +196,7 @@ class FakeLedgerDB:
     def __init__(self) -> None:
         self.events = []
         self.missions = []
+        self._daily_message_count = 6
 
     async def insert_aura_ledger_event(self, guild_id, user_id, channel_id, ts, reason_code, delta_points, meta, *, event_id=None):
         self.events.append({
@@ -231,9 +232,17 @@ class FakeLedgerDB:
 
     async def complete_aura_mission(self, **kwargs):
         self.completed = kwargs
+        mission_id = kwargs.get("mission_id")
+        for mission in self.missions:
+            if mission.get("mission_id") == mission_id:
+                mission["status"] = "completed"
 
     async def count_guild_good_morning_before(self, guild_id, day_iso, before_ts, keywords):
         return 0
+
+    async def count_user_messages_for_day(self, guild_id, user_id, day_iso):
+        self._daily_message_count += 1
+        return self._daily_message_count
 
 
 def test_aura_scoring_service_records_positive_and_negative_deltas() -> None:
