@@ -11,6 +11,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMANDS_ROOT = REPO_ROOT / "app" / "plugins"
 COMMANDS_FILE = COMMANDS_ROOT / "commands.py"
+COMMANDS_MODULAR_INIT = COMMANDS_ROOT / "commands_modular" / "__init__.py"
 MODULAR_DIR = COMMANDS_ROOT / "commands_modular"
 DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / "command_tree_report.md"
 
@@ -232,7 +233,27 @@ def _extract_params(node: ast.AsyncFunctionDef | ast.FunctionDef, descriptions: 
 
 def _parse_register_functions() -> dict[str, dict[str, Any]]:
     parsed: dict[str, dict[str, Any]] = {}
-    for path in sorted(MODULAR_DIR.glob("*.py")):
+
+    def iter_register_module_paths() -> list[Path]:
+        paths = {path for path in MODULAR_DIR.glob("*.py")}
+        init_tree = ast.parse(COMMANDS_MODULAR_INIT.read_text(), filename=str(COMMANDS_MODULAR_INIT))
+        for node in init_tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            if not any(isinstance(target, ast.Name) and target.id == "_MODULE_BY_ATTR" for target in node.targets):
+                continue
+            if not isinstance(node.value, ast.Dict):
+                continue
+            for key_node, value_node in zip(node.value.keys, node.value.values):
+                key = _literal_str(key_node)
+                module_name = _literal_str(value_node)
+                if not key or not module_name or not key.startswith("register_"):
+                    continue
+                paths.add(REPO_ROOT / f"{module_name.replace('.', '/')}.py")
+            break
+        return sorted(path for path in paths if path.exists())
+
+    for path in iter_register_module_paths():
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in tree.body:
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
