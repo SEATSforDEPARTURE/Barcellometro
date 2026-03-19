@@ -5,7 +5,7 @@ from typing import Any
 
 import discord
 
-from app.renderers.channel_summary_renderer import format_window_header
+from app.features.summary.renderers.channel_summary import format_window_header
 from app.services.footer import attach_footer_meta
 
 ITALIAN_WEEKDAYS = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]

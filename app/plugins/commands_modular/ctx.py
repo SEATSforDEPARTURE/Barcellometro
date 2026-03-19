@@ -11,7 +11,7 @@ from app.services.barcello import BarcelloService
 from app.services.barcello_calibration import BarcelloCalibrationService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import IngestService
-from app.services.summary import SummaryService
+from app.features.summary.services.summary import SummaryService
 from app.services.footer import FooterService
 
 
