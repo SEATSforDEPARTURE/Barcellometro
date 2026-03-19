@@ -58,7 +58,7 @@ _MODULE_BY_ATTR = {
     "register_status": "app.plugins.commands_modular.status",
     "register_stt": "app.plugins.commands_modular.stt",
     "register_translate": "app.plugins.commands_modular.translate",
-    "register_triggers": "app.plugins.commands_modular.triggers",
+    "register_triggers": "app.features.triggers.commands.triggers",
     "register_voice_ingest": "app.plugins.commands_modular.voice_ingest",
 }
 

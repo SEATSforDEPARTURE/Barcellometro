@@ -1,4 +1,6 @@
 import asyncio
+import sys
+import types
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Iterator
@@ -10,14 +12,25 @@ from tests._sqlite_stub import ensure_sqlite_stub
 
 ensure_sqlite_stub()
 
+if "openai" not in sys.modules:
+    openai_stub = types.ModuleType("openai")
+    openai_stub.AsyncOpenAI = object
+    sys.modules["openai"] = openai_stub
+
+if "httpx" not in sys.modules:
+    httpx_stub = types.ModuleType("httpx")
+    httpx_stub.AsyncClient = object
+    httpx_stub.Client = object
+    sys.modules["httpx"] = httpx_stub
+
 pytest.importorskip("aiosqlite")
 
-from app.plugins.commands_modular.triggers import register_triggers
-import app.plugins.commands_modular.triggers as trigger_commands_module
+from app.features.triggers.commands.triggers import register_triggers
+import app.features.triggers.commands.triggers as trigger_commands_module
 from app.services.database import DatabaseService
 from app.services.ingest import EventEnvelope
-from app.services.triggers import TriggerEngineService
-import app.services.triggers as triggers_module
+from app.features.triggers.services.triggers import TriggerEngineService
+import app.features.triggers.services.triggers as triggers_module
 
 
 class _FakeRepliedMessage:
