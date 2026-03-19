@@ -24,56 +24,12 @@ CANONICAL_SETTINGS_FILES = {
     "settings/aura_archetypes.example.json",
     "settings/aura_missions.example.json",
 }
-APP_RENDERERS_ALLOWED = {"__init__.py"}
-APP_UTILS_ALLOWED = set()
 LEGACY_SHIM_PATTERNS = (
     "Compatibility shim",
     "TODO remove after import migration",
     "remove this compatibility shim after imports migrate",
 )
-SNAKE_CASE_ALLOWED = {
-    "__init__.py",
-}
-LEGACY_FILE_STEMS = {
-    "activity_dm",
-    "daily_report",
-    "user_activity",
-    "activity_insights",
-    "daily_activity_report",
-    "daily_activity_sorting",
-    "aura",
-    "archetypes",
-    "barcello",
-    "calibration",
-    "window_defaults",
-    "daily_resoconto",
-    "channel_summary",
-    "message_names",
-    "summary",
-    "triggers",
-    "config_file_loader",
-    "config_overrides",
-    "command_embeds",
-    "component_notices",
-    "discord_send",
-    "embed_limits",
-    "footer_pipeline",
-    "report_embeds",
-    "summary_render",
-    "summary_names",
-    "trend_render",
-    "pii",
-}
-LEGACY_FILENAME_EXCEPTIONS = {
-    Path("app/features/aura/commands/aura.py"),
-    Path("app/features/barcello/commands/barcello.py"),
-    Path("app/features/summary/commands/riassunto.py"),
-    Path("app/features/summary/commands/resoconto.py"),
-    Path("app/features/triggers/commands/triggers.py"),
-    Path("app/features/summary/renderers/channel_summary.py"),
-    Path("app/features/summary/renderers/detail_embeds.py"),
-    Path("app/features/activity/commands/attivita.py"),
-}
+SNAKE_CASE_ALLOWED = {"__init__.py"}
 
 
 @dataclass(slots=True)
@@ -103,11 +59,7 @@ class ValidationReport:
 
 def _iter_files(root: Path) -> list[Path]:
     ignored_parts = {".git", ".venv", ".pytest_cache", "__pycache__"}
-    return sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file() and not any(part in ignored_parts for part in path.parts)
-    )
+    return sorted(path for path in root.rglob("*") if path.is_file() and not any(part in ignored_parts for part in path.parts))
 
 
 def _is_text_candidate(path: Path) -> bool:
@@ -122,6 +74,17 @@ def _is_snake_case_python(path: Path) -> bool:
         return True
     stem = path.stem
     return bool(stem) and stem == stem.lower() and all(ch.isalnum() or ch == "_" for ch in stem)
+
+
+def _check_features_dir_absent(report: ValidationReport) -> None:
+    features_dir = REPO_ROOT / "app" / "features"
+    if features_dir.exists():
+        report.add(
+            "error",
+            "legacy_features_dir",
+            features_dir.relative_to(REPO_ROOT),
+            "La directory app/features/ non è più ammessa: spostare il codice in app/services, app/renderers o app/plugins/commands_modular.",
+        )
 
 
 def _check_app_settings(report: ValidationReport) -> None:
@@ -158,34 +121,26 @@ def _check_legacy_settings_literals(report: ValidationReport) -> None:
         )
 
 
-def _check_app_renderers(report: ValidationReport) -> None:
-    renderers_dir = REPO_ROOT / "app" / "renderers"
-    if not renderers_dir.exists():
-        return
-    for path in _iter_files(renderers_dir):
-        rel = path.relative_to(REPO_ROOT)
-        if path.name not in APP_RENDERERS_ALLOWED:
-            report.add(
-                "error",
-                "legacy_renderer_bucket",
-                rel,
-                "I renderer feature-specific non devono più vivere sotto app/renderers/.",
-            )
-
-
-def _check_app_utils(report: ValidationReport) -> None:
-    utils_dir = REPO_ROOT / "app" / "utils"
-    if not utils_dir.exists():
-        return
-    for path in _iter_files(utils_dir):
-        rel = path.relative_to(REPO_ROOT)
-        if path.name not in APP_UTILS_ALLOWED:
-            report.add(
-                "error",
-                "legacy_utils_bucket",
-                rel,
-                "I helper di dominio/shared migrati non devono essere reintrodotti sotto app/utils/.",
-            )
+def _check_runtime_imports(report: ValidationReport) -> None:
+    needles = ("from app.features", "import app.features", "app.features.")
+    for root_name in PYTHON_ROOTS:
+        root = REPO_ROOT / root_name
+        if not root.exists():
+            continue
+        for path in _iter_files(root):
+            if path.suffix != ".py":
+                continue
+            rel = path.relative_to(REPO_ROOT)
+            if rel == Path("scripts/validate_project_layout.py"):
+                continue
+            text = path.read_text(encoding="utf-8")
+            if any(needle in text for needle in needles):
+                report.add(
+                    "error",
+                    "legacy_features_import",
+                    rel,
+                    "Sono vietati import o riferimenti runtime a app.features; usare i package canonici sotto app/services, app/renderers e app/plugins/commands_modular.",
+                )
 
 
 def _check_python_naming(report: ValidationReport) -> None:
@@ -203,16 +158,6 @@ def _check_python_naming(report: ValidationReport) -> None:
                     "python_naming",
                     rel,
                     "I file Python devono usare snake_case coerente con la naming scheme corrente.",
-                )
-                continue
-            if rel in LEGACY_FILENAME_EXCEPTIONS:
-                continue
-            if path.stem in LEGACY_FILE_STEMS and rel.as_posix().startswith("app/features/"):
-                report.add(
-                    "error",
-                    "legacy_filename_alias",
-                    rel,
-                    "Nome file legacy/alias rilevato in area feature: usare il nome canonico introdotto dal refactor.",
                 )
 
 
@@ -255,10 +200,10 @@ def _check_legacy_shims(report: ValidationReport) -> None:
 
 def validate_project_layout() -> ValidationReport:
     report = ValidationReport()
+    _check_features_dir_absent(report)
     _check_app_settings(report)
     _check_legacy_settings_literals(report)
-    _check_app_renderers(report)
-    _check_app_utils(report)
+    _check_runtime_imports(report)
     _check_python_naming(report)
     _check_settings_catalog(report)
     _check_legacy_shims(report)
@@ -267,11 +212,11 @@ def validate_project_layout() -> ValidationReport:
 
 def _print_report(report: ValidationReport) -> None:
     rules = [
+        "ERROR: app/features/ non deve esistere.",
         "ERROR: nessun nuovo file sotto app/settings/.",
         "ERROR: nessun literal hardcoded 'app/settings/' fuori dalle eccezioni documentate.",
-        "ERROR: nessun renderer feature-specific sotto app/renderers/.",
-        "ERROR: nessun helper improprio sotto app/utils/.",
-        "ERROR: naming Python in snake_case coerente; niente alias legacy nelle feature.",
+        "ERROR: nessun import runtime verso app.features.",
+        "ERROR: naming Python in snake_case coerente.",
         "ERROR: nessun nuovo template settings non documentato.",
         "WARNING: shim legacy ancora presenti nel codice.",
     ]

@@ -15,7 +15,7 @@ def roles_module(import_fresh):
 
 @pytest.fixture
 def triggers_module(import_fresh):
-    return import_fresh("app.features.triggers.commands.triggers")
+    return import_fresh("app.plugins.commands_modular.triggers")
 
 
 class _Response:

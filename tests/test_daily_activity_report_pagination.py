@@ -56,7 +56,7 @@ if "discord" not in sys.modules:
     discord_stub.ui = types.SimpleNamespace(View=_View, Button=_Button, button=_button)
     sys.modules["discord"] = discord_stub
 
-from app.features.activity.services.activity_report_service import build_combined_activity_inactive_txt
+from app.services.daily_activity_report import build_combined_activity_inactive_txt
 
 
 def test_combined_txt_single_attachment_payload_has_visible_sections() -> None:
@@ -85,7 +85,7 @@ def test_combined_txt_supports_single_section_without_extra_files() -> None:
 
 
 def test_daily_report_view_buttons_order_timeout_and_custom_ids_are_present() -> None:
-    report_source = Path("app/features/activity/services/activity_report_service.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text()
 
     start_idx = report_source.index('label="⏮️ INIZIO"')
     prev_idx = report_source.index('label="⬅️ INDIETRO"')
@@ -99,7 +99,7 @@ def test_daily_report_view_buttons_order_timeout_and_custom_ids_are_present() ->
 
 
 def test_daily_report_view_button_states_sync_logic_is_present() -> None:
-    report_source = Path("app/features/activity/services/activity_report_service.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text()
 
     assert "def _sync_button_states(self) -> None:" in report_source
     assert "is_first = self._current_index <= 0" in report_source
@@ -110,7 +110,7 @@ def test_daily_report_view_button_states_sync_logic_is_present() -> None:
 
 
 def test_daily_report_view_sync_is_called_at_init_and_after_navigation() -> None:
-    report_source = Path("app/features/activity/services/activity_report_service.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text()
 
     assert "self._sync_button_states()" in report_source
     assert "self._current_index = target_index" in report_source
@@ -118,7 +118,7 @@ def test_daily_report_view_sync_is_called_at_init_and_after_navigation() -> None
 
 
 def test_daily_report_uses_single_file_send_and_never_two_txt_attachments() -> None:
-    report_source = Path("app/features/activity/services/activity_report_service.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text()
 
     assert "build_combined_activity_inactive_txt(" in report_source
     assert "channel.send(embed=report_embeds[0], view=view, file=txt_file)" in report_source
@@ -136,7 +136,7 @@ def test_daily_report_pagination_persistence_db_methods_are_present() -> None:
 
 def test_inactive_embed_builder_and_single_send_flow_are_present() -> None:
     inactive_source = Path("app/services/inactive_members_moderation.py").read_text()
-    report_source = Path("app/features/activity/services/activity_report_service.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text()
 
     assert "async def build_serverwide_inactive_embeds(" in inactive_source
     assert "-> tuple[list[discord.Embed], discord.File | None, InactivityActionsView | None]" in inactive_source

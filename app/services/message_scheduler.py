@@ -11,7 +11,7 @@ import discord
 
 from app.services.footer import attach_footer_meta
 
-from app.features.barcello.services.barcello_service import BarcelloService
+from app.services.barcello_service import BarcelloService
 from app.services.community_insights import CommunityInsightsService
 from app.services.database import DatabaseService
 from app.services.ai import AiService

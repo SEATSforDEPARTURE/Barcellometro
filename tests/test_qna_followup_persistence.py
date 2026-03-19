@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 import discord
 
 from app.services.qna_sessions_repo import QnaSessionsRepo
-from app.features.triggers.services.triggers_service import TriggerEngineService
+from app.services.triggers_service import TriggerEngineService
 
 
 def run(coro):

@@ -12,8 +12,8 @@ ensure_sqlite_stub()
 
 pytest.importorskip("aiosqlite")
 
-import app.features.triggers.commands.triggers as triggers_module
-from app.features.triggers.commands.triggers import register_triggers
+import app.plugins.commands_modular.triggers as triggers_module
+from app.plugins.commands_modular.triggers import register_triggers
 
 
 def _get_subgroup(group: discord.app_commands.Group, name: str):

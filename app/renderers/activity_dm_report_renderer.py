@@ -7,7 +7,7 @@ import discord
 
 from app.services.footer import attach_footer_meta
 
-from app.features.activity.services.activity_insights_service import ChannelActivityDetails, UserActivityEntry
+from app.services.activity_insights import ChannelActivityDetails, UserActivityEntry
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MAX_LIST_ROWS = 10

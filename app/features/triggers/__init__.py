@@ -1,1 +1,0 @@
-"""Triggers feature namespace."""

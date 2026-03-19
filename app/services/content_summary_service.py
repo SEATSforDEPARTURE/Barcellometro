@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from typing import Any, Iterable, Optional
 
 from app.services.ai_utils import model_display_name, parse_model_string
-from app.features.barcello.services.barcello_service import NEGATIVE_KEYWORDS
+from app.services.barcello_service import NEGATIVE_KEYWORDS
 from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)
