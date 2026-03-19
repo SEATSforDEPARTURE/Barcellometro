@@ -20,7 +20,7 @@ from app.services.message_scheduler import MessageSchedulerService
 from app.services.campaign_content_service import CampaignContentService
 from app.services.status import StatusService
 from app.services.summary import SummaryService
-from app.services.daily_resoconto import DailyResocontoService
+from app.services.channel_summary import ChannelSummaryService
 from app.services.daily_activity_report import DailyActivityReportService
 from app.services.entitlements import EntitlementsService
 from app.services.inactivity import InactivityService
@@ -98,7 +98,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     campaign_content_service = None
     barcello_service = None
     community_insights = None
-    daily_resoconto = None
+    channel_summary = None
     trigger_engine = None
     inactivity_service = None
     activity_insights = None
@@ -139,7 +139,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
             campaign_content_service=campaign_content_service,
         )
         summary_service = SummaryService(database_service, ai_service=ai_service)
-        daily_resoconto = DailyResocontoService(database_service, bot, summary_service, barcello_service, ai_service=ai_service)
+        channel_summary = ChannelSummaryService(database_service, bot, summary_service, barcello_service, ai_service=ai_service)
         entitlements_service = EntitlementsService(database_service)
         aura_eligibility = AuraEligibilityService(database_service, entitlements_service)
         aura_rolling = AuraRollingStatsService(database_service)
@@ -169,7 +169,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("community_insights", community_insights)
         registry.register("message_scheduler", message_scheduler)
         registry.register("campaign_content_service", campaign_content_service)
-        registry.register("daily_resoconto", daily_resoconto)
+        registry.register("channel_summary", channel_summary)
+        registry.register("daily_resoconto", channel_summary)
         registry.register("trigger_engine", trigger_engine)
         registry.register("inactivity", inactivity_service)
         registry.register("activity_insights", activity_insights)
@@ -235,7 +236,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         status_service.register_component("barcello", barcello_service)
         status_service.register_component("community_insights", community_insights)
         status_service.register_component("message_scheduler", message_scheduler)
-        status_service.register_component("daily_resoconto", daily_resoconto)
+        status_service.register_component("daily_resoconto", channel_summary)
         status_service.register_component("trigger_engine", trigger_engine)
         status_service.register_component("daily_activity_report", daily_activity_report)
         status_service.register_component("stt.local", stt_local_service)
