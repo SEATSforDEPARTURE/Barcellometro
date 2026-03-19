@@ -1,20 +1,36 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+
+import discord
+
+if "openai" not in sys.modules:
+    openai_stub = types.ModuleType("openai")
+    openai_stub.AsyncOpenAI = object
+    sys.modules["openai"] = openai_stub
+if "httpx" not in sys.modules:
+    httpx_stub = types.ModuleType("httpx")
+    httpx_stub.AsyncClient = object
+    httpx_stub.Client = object
+    sys.modules["httpx"] = httpx_stub
 
 from app.services.ingest import EventEnvelope
 from app.services.triggers import TriggerEngineService
 
 
-class _FakeMessageable:
-    def __init__(self) -> None:
-        self.sent: list[object] = []
+def _make_fake_messageable() -> AsyncMock:
+    channel = AsyncMock(spec=discord.abc.Messageable)
+    channel.sent = []
 
-    async def send(self, *, embed=None):
-        self.sent.append(embed)
+    async def _send(*, embed=None, **_kwargs):
+        channel.sent.append(embed)
+
+    channel.send.side_effect = _send
+    return channel
 
 
 class _FakeBot:
@@ -59,7 +75,7 @@ def _base_service(prev_state: dict, status: dict, *, cfg: dict | None = None):
         "recovery": {"enabled": True, "poll_seconds": 300, "min_quiet_minutes": 12},
         "templates": {"VERDE->GIALLO": "x", "GIALLO->ROSSO": "x", "GIALLO->VERDE": "x"},
     })
-    channel = _FakeMessageable()
+    channel = _make_fake_messageable()
     service._bot = _FakeBot(channel)
     return service, database, channel
 
