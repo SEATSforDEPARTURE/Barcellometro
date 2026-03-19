@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+from os import PathLike
+from pathlib import Path
 from typing import Any
 
+from app.core.config_paths import resolve_config_path
+
 logger = logging.getLogger(__name__)
+PathInput = str | PathLike[str]
 
 
 def _strip_jsonc_comments(text: str) -> str:
@@ -26,7 +30,7 @@ def _strip_jsonc_comments(text: str) -> str:
                 in_string = False
             i += 1
             continue
-        if ch in {"\"", "'"}:
+        if ch in {'"', "'"}:
             in_string = True
             string_char = ch
             result.append(ch)
@@ -50,32 +54,31 @@ def _strip_jsonc_comments(text: str) -> str:
     return "".join(result)
 
 
-def load_json_file(path: str) -> dict[str, Any]:
+def load_json_file(path: PathInput | None, *, example_path: PathInput | None = None) -> dict[str, Any]:
     if not path:
         return {}
-    if not os.path.exists(path):
-        if path == "settings/barcello_trigger.json":
-            example_path = path.replace(".json", ".example.json")
-            if os.path.exists(example_path):
-                logger.warning("%s not found, using example config", path)
-                path = example_path
-            else:
-                return {}
-        else:
-            return {}
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            raw = handle.read()
-    except OSError:
-        logger.exception("Failed to read config file %s", path)
+
+    resolved_path, used_example = resolve_config_path(path, example_path=example_path)
+    if resolved_path is None:
         return {}
+
+    if used_example:
+        logger.warning("%s not found, using example config %s", Path(path), resolved_path)
+
     try:
-        if path.endswith(".jsonc"):
+        raw = resolved_path.read_text(encoding="utf-8")
+    except OSError:
+        logger.exception("Failed to read config file %s", resolved_path)
+        return {}
+
+    try:
+        if resolved_path.suffix == ".jsonc":
             raw = _strip_jsonc_comments(raw)
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        logger.error("Invalid JSON in config file %s", path)
+        logger.error("Invalid JSON in config file %s", resolved_path)
         return {}
+
     if isinstance(parsed, dict):
         return parsed
     return {}

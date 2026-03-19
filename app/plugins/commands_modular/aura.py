@@ -7,6 +7,7 @@ from datetime import timezone
 
 import discord
 
+from app.core.config_paths import BARCELLO_TRIGGER_JSON
 from app.services.footer import attach_footer_meta
 from discord import app_commands
 
@@ -29,7 +30,6 @@ from app.utils.command_embeds import send_standard_response
 from app.utils.report_embeds import apply_standard_report_style, send_report_dm_chunks
 
 logger = logging.getLogger(__name__)
-BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
 def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -54,7 +54,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
 
     async def _resolve_default_window_for_aura(interaction: discord.Interaction) -> TimeWindowResult:
         raw_default = await get_setting(ctx, "barcello.default_window_minutes", "30")
-        trigger_config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        trigger_config = load_json_file(BARCELLO_TRIGGER_JSON)
         resolved = resolve_default_window_minutes(interaction.channel_id or 0, raw_default, trigger_config)
         return resolve_ultimi_window(max(1, resolved), "minuti", ctx.config)[0] or resolve_oggi_window()
 

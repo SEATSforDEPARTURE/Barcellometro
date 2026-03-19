@@ -42,9 +42,8 @@ worker2.env
 *.pem
 *.key
 *.crt
-*.json
-!**/*.example.json
-app/settings/entitlements.json
+settings/*.json
+!settings/*.example.json
 
 # === Local DB / Artifacts ===
 *.sqlite
@@ -66,5 +65,3 @@ node_modules/
 # === Docker / Compose local overrides ===
 docker-compose.override.yml
 
-# Runtime local config (do not version)
-settings/barcello_trigger.json

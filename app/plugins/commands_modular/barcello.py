@@ -9,6 +9,7 @@ from typing import Any
 
 import discord
 
+from app.core.config_paths import BARCELLO_TRIGGER_JSON
 from app.services.footer import attach_footer_meta
 from discord import app_commands
 
@@ -27,7 +28,6 @@ from app.utils.trend_render import normalize_trend, render_trend, render_trend_v
 
 logger = logging.getLogger(__name__)
 
-BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
 def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -109,7 +109,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
         if scope is None:
             return
         guild_id, channel_id = scope
-        cfg = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        cfg = load_json_file(BARCELLO_TRIGGER_JSON)
         stored = await ctx.database.get_trigger_state(guild_id, channel_id, "barcello_mood")
         stored_mood = str(stored.get("mood") or "")
 
@@ -188,7 +188,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
         if not normalized:
             await send_ephemeral(interaction, "Please provide a valid mood.")
             return
-        cfg = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+        cfg = load_json_file(BARCELLO_TRIGGER_JSON)
         available_moods = cfg.get("moods") if isinstance(cfg.get("moods"), dict) else {}
         if available_moods and normalized not in available_moods:
             await send_ephemeral(
@@ -1144,7 +1144,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
 
             if window_minutes is None:
                 raw_default = await get_setting(ctx, "barcello.default_window_minutes", "30")
-                trigger_config = load_json_file(BARCELLO_TRIGGER_CONFIG_PATH)
+                trigger_config = load_json_file(BARCELLO_TRIGGER_JSON)
                 window_minutes = resolve_default_window_minutes(interaction.channel_id, raw_default, trigger_config)
                 default_window_minutes = int(raw_default) if str(raw_default).isdigit() else 30
                 if default_window_minutes <= 0:

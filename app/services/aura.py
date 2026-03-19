@@ -9,15 +9,12 @@ from typing import Any
 
 import discord
 
+from app.core.config_paths import AURA_MISSIONS_JSON, AURA_RULES_JSON
 from app.services.database import DatabaseService
 from app.services.config_file_loader import load_json_file
 from app.services.entitlements import EntitlementsService
 
 logger = logging.getLogger(__name__)
-AURA_RULES_CONFIG_PATH = "app/settings/aura_rules.json"
-AURA_RULES_EXAMPLE_PATH = "app/settings/aura_rules.example.json"
-AURA_MISSIONS_CONFIG_PATH = "app/settings/aura_missions.json"
-AURA_MISSIONS_EXAMPLE_PATH = "app/settings/aura_missions.example.json"
 
 
 @dataclass(frozen=True)
@@ -133,9 +130,7 @@ def _parse_rule_definition(reason_code: str, value: Any, defaults: AuraRuleDefin
 
 
 def load_aura_rule_definitions() -> dict[str, AuraRuleDefinition]:
-    data = load_json_file(AURA_RULES_CONFIG_PATH)
-    if not data:
-        data = load_json_file(AURA_RULES_EXAMPLE_PATH)
+    data = load_json_file(AURA_RULES_JSON)
     defaults = _build_default_rule_definitions()
     if not isinstance(data, dict):
         return defaults
@@ -190,9 +185,7 @@ def load_aura_rules() -> dict[str, int]:
 
 
 def load_aura_missions_config() -> dict[str, Any]:
-    data = load_json_file(AURA_MISSIONS_CONFIG_PATH)
-    if not data:
-        data = load_json_file(AURA_MISSIONS_EXAMPLE_PATH)
+    data = load_json_file(AURA_MISSIONS_JSON)
     if not isinstance(data, dict):
         return {"max_per_day": 3, "missions": []}
     return data

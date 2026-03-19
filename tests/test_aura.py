@@ -332,7 +332,8 @@ def test_archetype_analyzer_computes_multiscore_12_archetypes() -> None:
 
 
 def test_load_aura_rule_definitions_supports_number_and_object(monkeypatch) -> None:
-    def _fake_loader(path: str):
+    def _fake_loader(path):
+        path = str(path)
         if path.endswith("aura_rules.json"):
             return {
                 "first_message_of_day": 7,

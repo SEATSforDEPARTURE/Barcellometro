@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 
+from app.core.config_paths import BARCELLO_TRIGGER_JSON
 from app.services.footer import attach_footer_meta
 from discord import app_commands
 
@@ -19,8 +20,6 @@ from app.utils.command_embeds import CommandEmbedSection, CommandKind, send_stan
 
 logger = logging.getLogger(__name__)
 
-
-BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 
 
 def register_triggers(

@@ -18,6 +18,18 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
+3. Prepara i config file-based in `settings/` copiando i template che vuoi personalizzare:
+
+```bash
+cp settings/entitlements.example.json settings/entitlements.json
+cp settings/aura_rules.example.json settings/aura_rules.json
+cp settings/aura_archetypes.example.json settings/aura_archetypes.json
+cp settings/aura_missions.example.json settings/aura_missions.json
+cp settings/barcello_trigger.example.json settings/barcello_trigger.json
+```
+
+Per i dettagli operativi sui config centralizzati vedi `settings/README.md`.
+
 - `DISCORD_TOKEN`: token del bot.
 - `GUILD_ID`: ID della guild su cui sincronizzare i comandi.
 - `DB_PATH`: path del database SQLite (default `bot.sqlite`).

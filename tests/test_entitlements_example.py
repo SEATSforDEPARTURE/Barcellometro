@@ -40,7 +40,7 @@ def run(coro):
 
 
 def test_entitlements_example_runtime_read_paths_are_valid() -> None:
-    payload = json.loads(Path("app/settings/entitlements.example.json").read_text())
+    payload = json.loads(Path("settings/entitlements.example.json").read_text())
 
     assert payload["mod"]["role_ids"] == []
     assert payload["entitlements"]["profile_map"]["role_to_profile"] == {}
@@ -85,6 +85,6 @@ def test_entitlements_example_runtime_read_paths_are_valid() -> None:
 
 
 def test_entitlements_example_mod_has_aura_report_capability() -> None:
-    payload = json.loads(Path("app/settings/entitlements.example.json").read_text())
+    payload = json.loads(Path("settings/entitlements.example.json").read_text())
     mod_caps = payload["entitlements"]["policies"]["commands"]["resoconto"]["profiles"]["mod"]["capabilities"]
     assert "aura_report.view" in mod_caps

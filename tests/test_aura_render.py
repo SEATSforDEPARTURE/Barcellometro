@@ -75,7 +75,8 @@ def test_build_aura_embeds_missions_can_be_empty_for_today() -> None:
 def test_build_aura_embeds_uses_custom_archetypes_and_missions_config(monkeypatch) -> None:
     payload = _payload()
 
-    def _fake_loader(path: str):
+    def _fake_loader(path):
+        path = str(path)
         if path.endswith("aura_archetypes.json") or path.endswith("aura_archetypes.example.json"):
             return {
                 "archetypes": {

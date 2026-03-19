@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 import discord
 
+from app.core.config_paths import BARCELLO_TRIGGER_JSON
 from app.services.footer import FooterService, attach_footer_meta
 from app.utils.command_embeds import send_standard_response
 from app.utils.report_embeds import build_report_cover_embed
@@ -50,7 +51,6 @@ PHRASE_PLACEHOLDERS = {
     "{next_milestone}",
     "{remaining_to_next_milestone}",
 }
-BARCELLO_TRIGGER_CONFIG_PATH = "settings/barcello_trigger.json"
 IT_STOPWORDS = {
     "a", "ad", "ai", "al", "all", "alla", "alle", "anche", "avete", "che", "chi", "ci", "coi", "col", "come",
     "con", "cosa", "da", "dagli", "dai", "dal", "dalla", "dalle", "dei", "degli", "del", "della", "delle", "dello",
@@ -83,7 +83,7 @@ class TriggerEngineService:
         self._barcello_moods_missing_warned = False
         self._barcello_trigger_cfg: dict[str, Any] | None = None
         self._barcello_trigger_cfg_mtime: float | None = None
-        self._barcello_trigger_cfg_path = BARCELLO_TRIGGER_CONFIG_PATH
+        self._barcello_trigger_cfg_path = BARCELLO_TRIGGER_JSON
         self._barcello_trigger_cfg_missing_warned = False
         self._barcello_window_override_cache: dict[str, int] = {}
         self._barcello_window_override_cache_fingerprint: str | None = None

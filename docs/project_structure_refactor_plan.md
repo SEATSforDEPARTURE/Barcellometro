@@ -1,5 +1,7 @@
 # Project structure refactor plan
 
+> Nota: il refactor è stato implementato e il source of truth attuale è `settings/`. I riferimenti a `app/settings/` rimasti in questo documento descrivono lo stato legacy analizzato prima della migrazione.
+
 ## Scope and intent
 
 Questo documento è un audit concreto dell'attuale struttura del repository e propone un refactor **solo strutturale** per:

@@ -4,9 +4,11 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
+from app.core.config_paths import ENTITLEMENTS_JSON
 from app.services.config_file_loader import load_json_file
 from app.services.database import DatabaseService
 
@@ -110,7 +112,7 @@ DEFAULT_MOD_ROLE_IDS = json.dumps([])
 class ConfigOverridesService:
     """Apply entitlements/mod role overrides from a JSON file into DB settings.
 
-    Default path: app/settings/entitlements.json
+    Default path: settings/entitlements.json
     ENV override: ENTITLEMENTS_CONFIG_PATH=/path/to/entitlements.json
     Optional reload: ENTITLEMENTS_CONFIG_RELOAD=true (polling)
     JSON: standard .json (or .jsonc with comments stripped)
@@ -125,12 +127,10 @@ class ConfigOverridesService:
     }
     """
 
-    def __init__(self, database: DatabaseService, *, config_path: str | None = None) -> None:
+    def __init__(self, database: DatabaseService, *, config_path: str | Path | None = None) -> None:
         self._database = database
-        self._config_path = config_path or os.getenv(
-            "ENTITLEMENTS_CONFIG_PATH",
-            os.path.join("app", "settings", "entitlements.json"),
-        )
+        raw_config_path = config_path or os.getenv("ENTITLEMENTS_CONFIG_PATH", str(ENTITLEMENTS_JSON))
+        self._config_path = Path(raw_config_path)
         self._last_mtime: float | None = None
         self._missing_logged = False
 
@@ -139,7 +139,7 @@ class ConfigOverridesService:
         if seeded:
             logger.info("Seeded defaults for %s", ", ".join(seeded))
 
-        if not os.path.exists(self._config_path):
+        if not self._config_path.exists():
             if not self._missing_logged:
                 logger.info("Overrides file not found at %s, using defaults", self._config_path)
                 self._missing_logged = True

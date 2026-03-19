@@ -7,6 +7,7 @@ from typing import Any
 
 import discord
 
+from app.core.config_paths import AURA_ARCHETYPES_JSON, AURA_MISSIONS_JSON
 from app.services.footer import attach_footer_meta
 
 from app.services.aura_archetypes import build_dynamic_archetype_reason
@@ -15,11 +16,6 @@ from app.utils.embed_limits import MAX_EMBED_CHARS, _ensure_embed_limits, _estim
 
 logger = logging.getLogger(__name__)
 AURA_DETAILS_INTERNAL_BUDGET = 5700
-
-ARCHETYPES_CONFIG_PATH = "app/settings/aura_archetypes.json"
-ARCHETYPES_EXAMPLE_PATH = "app/settings/aura_archetypes.example.json"
-MISSIONS_CONFIG_PATH = "app/settings/aura_missions.json"
-MISSIONS_EXAMPLE_PATH = "app/settings/aura_missions.example.json"
 
 
 DEFAULT_ARCHETYPE_DEFS: dict[str, dict[str, Any]] = {
@@ -39,7 +35,7 @@ DEFAULT_ARCHETYPE_DEFS: dict[str, dict[str, Any]] = {
 
 
 def _load_archetype_definitions() -> dict[str, dict[str, Any]]:
-    cfg = load_json_file(ARCHETYPES_CONFIG_PATH) or load_json_file(ARCHETYPES_EXAMPLE_PATH) or {}
+    cfg = load_json_file(AURA_ARCHETYPES_JSON) or {}
     configured = cfg.get("archetypes", {}) if isinstance(cfg, dict) else {}
     merged = {k: dict(v) for k, v in DEFAULT_ARCHETYPE_DEFS.items()}
     if isinstance(configured, dict):
@@ -145,7 +141,7 @@ def _build_main_aura_description(*, aura_payload: AuraRenderPayload) -> str:
 
 
 def _build_missions(metrics: dict[str, Any], archetype_metrics: dict[str, Any], assigned: list[dict[str, Any]] | None = None) -> list[str]:
-    cfg = load_json_file(MISSIONS_CONFIG_PATH) or load_json_file(MISSIONS_EXAMPLE_PATH) or {}
+    cfg = load_json_file(AURA_MISSIONS_JSON) or {}
     if assigned:
         pending: list[dict[str, Any]] = []
         completed: list[dict[str, Any]] = []
@@ -348,7 +344,7 @@ def _build_profile_section_text(archetype_metrics: dict[str, Any], *, fallback_m
     return "\n".join(blocks)
 
 def _build_advice_lines(metrics: dict[str, Any], *, channel_name: str) -> list[str]:
-    cfg = load_json_file(ARCHETYPES_CONFIG_PATH) or load_json_file(ARCHETYPES_EXAMPLE_PATH) or {}
+    cfg = load_json_file(AURA_ARCHETYPES_JSON) or {}
     advice_cfg = cfg.get("default_advice", []) if isinstance(cfg, dict) else []
     if isinstance(advice_cfg, list) and advice_cfg:
         return [str(x) for x in advice_cfg[:3]]
