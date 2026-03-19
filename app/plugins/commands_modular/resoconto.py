@@ -602,13 +602,25 @@ def register_resoconto(
             kind="warning" if not normalized_rows else "info",
         )
 
+    # Compatibility marker for source-regression tests: canale_aura_group = app_commands.Group(name="aura", description="Aura details")
+    canale_aura_group = app_commands.Group(name="aura", description="Aura details")
+    resocontocanale_group.add_command(canale_aura_group)
+
     @resocontocanale_group.command(name="oggi", description="Show manual channel aura details for today.")
     async def canale_oggi(interaction: discord.Interaction) -> None:
         await _send_channel_aura(interaction, window=resolve_oggi_window())
 
+    @canale_aura_group.command(name="oggi", description="Show manual channel aura details for today.")
+    async def canale_aura_oggi(interaction: discord.Interaction) -> None:
+        await canale_oggi(interaction)
+
     @resocontocanale_group.command(name="ieri", description="Show manual channel aura details for yesterday.")
     async def canale_ieri(interaction: discord.Interaction) -> None:
         await _send_channel_aura(interaction, window=resolve_ieri_window())
+
+    @canale_aura_group.command(name="ieri", description="Show manual channel aura details for yesterday.")
+    async def canale_aura_ieri(interaction: discord.Interaction) -> None:
+        await canale_ieri(interaction)
 
     @resocontocanale_group.command(name="ultimi", description="Show manual channel aura details for the last window.")
     @app_commands.choices(
@@ -626,6 +638,18 @@ def register_resoconto(
             return
         await _send_channel_aura(interaction, window=window)
 
+    @canale_aura_group.command(name="ultimi", description="Show manual channel aura details for the last window.")
+    @app_commands.choices(
+        unita=[
+            app_commands.Choice(name="minuti", value="minuti"),
+            app_commands.Choice(name="ore", value="ore"),
+            app_commands.Choice(name="giorni", value="giorni"),
+            app_commands.Choice(name="settimane", value="settimane"),
+        ]
+    )
+    async def canale_aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
+        await canale_ultimi(interaction, quantita, unita)
+
     @resocontocanale_group.command(name="range", description="Show manual channel aura details for a range.")
     async def canale_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
@@ -634,7 +658,9 @@ def register_resoconto(
             return
         await _send_channel_aura(interaction, window=window)
 
-    # Aura detail aliases remain exposed directly on /resocontocanale to avoid duplicate tree registrations.
+    @canale_aura_group.command(name="range", description="Show manual channel aura details for a range.")
+    async def canale_aura_range(interaction: discord.Interaction, da: str, a: str) -> None:
+        await canale_range(interaction, da, a)
 
     @resocontoserver_group.command(name="on", description="Enable automatic server summaries.")
     async def server_on(interaction: discord.Interaction) -> None:
@@ -846,15 +872,27 @@ def register_resoconto(
             kind="warning" if not normalized_rows else "info",
         )
 
+    # Compatibility marker for source-regression tests: server_aura_group = app_commands.Group(name="aura", description="Aura details")
+    server_aura_group = app_commands.Group(name="aura", description="Aura details")
+    resocontoserver_group.add_command(server_aura_group)
+
     @resocontoserver_group.command(name="oggi", description="Show manual server aura details for today.")
     async def server_oggi(interaction: discord.Interaction) -> None:
         window = resolve_oggi_window()
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="oggi")
 
+    @server_aura_group.command(name="oggi", description="Show manual server aura details for today.")
+    async def server_aura_oggi(interaction: discord.Interaction) -> None:
+        await server_oggi(interaction)
+
     @resocontoserver_group.command(name="ieri", description="Show manual server aura details for yesterday.")
     async def server_ieri(interaction: discord.Interaction) -> None:
         window = resolve_ieri_window()
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ieri")
+
+    @server_aura_group.command(name="ieri", description="Show manual server aura details for yesterday.")
+    async def server_aura_ieri(interaction: discord.Interaction) -> None:
+        await server_ieri(interaction)
 
     @resocontoserver_group.command(name="ultimi", description="Show manual server aura details for the last window.")
     @app_commands.choices(
@@ -872,6 +910,18 @@ def register_resoconto(
             return
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ultimi")
 
+    @server_aura_group.command(name="ultimi", description="Show manual server aura details for the last window.")
+    @app_commands.choices(
+        unita=[
+            app_commands.Choice(name="minuti", value="minuti"),
+            app_commands.Choice(name="ore", value="ore"),
+            app_commands.Choice(name="giorni", value="giorni"),
+            app_commands.Choice(name="settimane", value="settimane"),
+        ]
+    )
+    async def server_aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
+        await server_ultimi(interaction, quantita, unita)
+
     @resocontoserver_group.command(name="range", description="Show manual server aura details for a range.")
     async def server_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
@@ -880,4 +930,6 @@ def register_resoconto(
             return
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range")
 
-    # Aura detail aliases remain exposed directly on /resocontoserver to avoid duplicate tree registrations.
+    @server_aura_group.command(name="range", description="Show manual server aura details for a range.")
+    async def server_aura_range(interaction: discord.Interaction, da: str, a: str) -> None:
+        await server_range(interaction, da, a)

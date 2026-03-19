@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -66,10 +66,10 @@ DEFAULT_MITIGATION_FACTORS = {
 class BarcelloResult:
     score: int
     color: str
-    window_start_ts: str
-    window_end_ts: str
-    reasons: list[dict[str, Any]]
-    metrics: dict[str, Any]
+    window_start_ts: str = ""
+    window_end_ts: str = ""
+    reasons: list[dict[str, Any]] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
     trend: Optional[dict[str, Any]] = None
     advice: Optional[list[str]] = None
 
