@@ -199,6 +199,16 @@ Il comando legge il JSON da `summary.config` (settings). Esempio di default:
 Se non esiste alcuna policy, i comandi sono accessibili solo agli admin. Le policy utente hanno priorità
 su quelle di ruolo. I limiti e cooldown vengono conteggiati e sono disponibili ai plugin che li richiedono.
 
+## Validator architetturali
+
+Per validare i residui legacy post-refactor e ottenere un report console con `OK`, `WARNING` ed `ERROR`:
+
+```bash
+python scripts/validate_architecture_residues.py
+```
+
+Lo script termina con exit code diverso da zero solo in presenza di violazioni reali; gli shim legacy temporanei documentati restano visibili come warning.
+
 ## Verifica DB
 
 Esempi di query:
