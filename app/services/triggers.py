@@ -2244,21 +2244,21 @@ class TriggerEngineService:
     ) -> discord.Embed:
         cleaned_answer = self._strip_leading_answer_label(answer_text)
         if is_followup:
-            description = self._truncate_embed_description(cleaned_answer)
-            lines: list[tuple[str, str]] = []
+            description = f"👇 **Risposta:**\n{cleaned_answer}"
         else:
-            description = self._truncate_embed_description(cleaned_answer)
-            lines = [
-                ("utente", asker_name),
-                ("domanda", (question or "").strip()),
-            ]
+            question_text = (question or "").strip()
+            description = (
+                f"👋 **{asker_name} chiede:**\n"
+                f"{question_text}\n\n"
+                f"👇 **Risposta:**\n{cleaned_answer}"
+            )
+        description = self._truncate_embed_description(description)
         title = "❓ DOMANDA" if response_origin == "error" else "❓ BOTTA & RISPOSTA"
         embed = build_report_cover_embed(
             title=title,
             description=description,
             color=0x9B59B6 if response_origin != "error" else 0xED4245,
             service_name="qna",
-            lines=lines,
         )
         attach_footer_meta(
             embed,

@@ -179,7 +179,7 @@ def test_handle_message_qna_expired_session_fallback_dm_only() -> None:
 
         dm_send = AsyncMock()
         author = SimpleNamespace(id=111, send=dm_send)
-        referenced = SimpleNamespace(author=SimpleNamespace(id=9999), embeds=[discord.Embed(title="❓BOTTA & RISPOSTA")])
+        referenced = SimpleNamespace(author=SimpleNamespace(id=9999), embeds=[discord.Embed(title="❓ BOTTA & RISPOSTA")])
         public_reply = AsyncMock()
 
         message = SimpleNamespace(

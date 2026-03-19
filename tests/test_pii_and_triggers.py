@@ -782,11 +782,15 @@ def test_build_qna_embed_layout_contains_question_and_answer() -> None:
         response_origin="remote_ai",
         model_name="gpt-4o-mini",
     )
-    assert embed.title == "❓BOTTA & RISPOSTA"
+    description = embed.description or ""
+
+    assert embed.title == "❓ BOTTA & RISPOSTA"
     assert embed.color == "#9B59B6"
-    assert "✋ **Luca chiede:**" in (embed.description or "")
-    assert "**👇 Risposta:**" in (embed.description or "")
-    assert "180" in (embed.description or "")
+    assert "👋 **Luca chiede:**" in description
+    assert "quanti minuti?" in description
+    assert "👇 **Risposta:**" in description
+    assert "180" in description
+    assert len(embed.fields) == 0
 
 
 def test_build_qna_embed_followup_layout_contains_only_answer() -> None:
@@ -801,9 +805,9 @@ def test_build_qna_embed_followup_layout_contains_only_answer() -> None:
     )
 
     description = embed.description or ""
-    assert description.startswith("**👇 Risposta:**")
+    assert description.startswith("👇 **Risposta:**")
     assert "chiede:" not in description
-    assert "Luca" not in description.split("\n", 1)[0]
+    assert len(embed.fields) == 0
 
 def test_format_qna_answer_text_evidence_mode_adds_proof_links() -> None:
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
@@ -1178,5 +1182,5 @@ def test_build_qna_embed_removes_answer_label_duplication() -> None:
         response_origin="local_backend",
     )
     description = embed.description or ""
-    assert description.count("**👇 Risposta:**") == 1
+    assert description.count("👇 **Risposta:**") == 1
     assert "\nRisposta" not in description
