@@ -6,7 +6,7 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting, reset_setting, set_setting
-from app.utils.command_embeds import send_standard_response
+from app.shared.discord.command_embeds import send_standard_response
 
 BACKEND_CHOICES = [
     app_commands.Choice(name="local", value="local"),

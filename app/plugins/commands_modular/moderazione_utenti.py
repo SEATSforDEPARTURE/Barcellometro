@@ -10,7 +10,7 @@ from app.plugins.commands_modular.command_helpers import describe_placeholders
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.discord_embed_utils import FIELD_MAX, truncate
-from app.utils.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 from app.services.member_flow_notifications import (
     build_template_context,
     format_duration_human,

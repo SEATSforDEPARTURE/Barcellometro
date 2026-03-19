@@ -30,8 +30,8 @@ from app.plugins.commands_modular import (
     register_voice_ingest,
 )
 from app.plugins.commands_modular.command_helpers import add_group_once
-from app.utils.command_embeds import send_standard_response
-from app.utils.footer_pipeline import install_footer_auto_finalize
+from app.shared.discord.command_embeds import send_standard_response
+from app.shared.discord.footer_pipeline import install_footer_auto_finalize
 
 logger = logging.getLogger(__name__)
 

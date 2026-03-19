@@ -10,7 +10,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.utils.command_embeds import CommandEmbedSection, send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
 from app.plugins.commands_modular.time_windows import (
     build_period_label,
     parse_italian_datetime,
@@ -21,7 +21,7 @@ from app.plugins.commands_modular.time_windows import (
 )
 from app.services.aura import aura_reason_to_human
 from app.services.footer import attach_footer_meta
-from app.utils.report_embeds import apply_standard_report_style
+from app.shared.discord.report_embeds import apply_standard_report_style
 
 logger = logging.getLogger(__name__)
 EVERY_RE = re.compile(r"^(\d+)\s*(min|hours|days)$")

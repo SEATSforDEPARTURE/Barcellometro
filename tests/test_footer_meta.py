@@ -14,8 +14,8 @@ from app.services.footer import (
     copy_footer_meta,
     get_footer_meta,
 )
-from app.utils.embed_limits import normalize_embeds_for_discord
-from app.utils.footer_pipeline import finalize_embeds
+from app.shared.discord.embed_limits import normalize_embeds_for_discord
+from app.shared.discord.footer_pipeline import finalize_embeds
 
 
 class _FakeDatabase:

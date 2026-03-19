@@ -15,8 +15,8 @@ from discord import app_commands
 
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all, copy_footer_meta
 from app.services.summary import SummaryImpact, SummaryItem, SummaryQuote
-from app.utils.discord_send import send_dm_or_followup
-from app.utils.embed_limits import (
+from app.shared.discord.delivery import send_dm_or_followup
+from app.shared.discord.embed_limits import (
     MAX_EMBED_CHARS,
     _clone_embed_shell,
     _ensure_embed_limits,
@@ -34,8 +34,8 @@ from app.plugins.commands_modular.time_windows import (
     resolve_range_window,
     resolve_ultimi_window,
 )
-from app.utils.command_embeds import send_standard_response
-from app.utils.report_embeds import apply_standard_report_style
+from app.shared.discord.command_embeds import send_standard_response
+from app.shared.discord.report_embeds import apply_standard_report_style
 from app.utils.summary_render import build_summary_detail_embeds
 
 logger = logging.getLogger(__name__)

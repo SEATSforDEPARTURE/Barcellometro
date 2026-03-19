@@ -17,13 +17,13 @@ from app.services.entitlements import EntitlementsService
 from app.services.config_file_loader import load_json_file
 from app.services.barcello_window import resolve_default_window_minutes
 from app.plugins.commands_modular.command_helpers import add_group_once
-from app.utils.embed_limits import _split_field_chunks
+from app.shared.discord.embed_limits import _split_field_chunks
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
-from app.utils.command_embeds import send_standard_response
-from app.utils.component_notices import send_standard_component_notice
-from app.utils.report_embeds import apply_standard_report_style
+from app.shared.discord.command_embeds import send_standard_response
+from app.shared.discord.component_notices import send_standard_component_notice
+from app.shared.discord.report_embeds import apply_standard_report_style
 from app.utils.trend_render import normalize_trend, render_trend, render_trend_value
 
 logger = logging.getLogger(__name__)

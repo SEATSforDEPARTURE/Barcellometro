@@ -8,7 +8,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.ai_model_catalog import build_model_autocomplete_choices
 from app.services.footer import ServiceFooterProfile, ServiceFooterVariant, _is_persistable_service_name
-from app.utils.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 
 
 def _clean_opt(value: str | None) -> str | None:
