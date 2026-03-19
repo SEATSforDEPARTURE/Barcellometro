@@ -1,9 +1,17 @@
 import asyncio
+import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
+
+from tests._sqlite_stub import ensure_sqlite_stub
+
+ensure_sqlite_stub()
+
+if "openai" not in sys.modules:
+    sys.modules["openai"] = SimpleNamespace(AsyncOpenAI=object)
 
 from app.core.service_registry import ServiceRegistry
 from app.plugins.discord_adapter import setup as setup_discord_adapter
@@ -139,6 +147,7 @@ def test_footer_persistence_lock_is_best_effort() -> None:
         db = SimpleNamespace(
             get_setting=AsyncMock(return_value=None),
             set_setting=AsyncMock(),
+            fetchall=AsyncMock(return_value=[]),
         )
         service = FooterService(db)
         service.record_service_footer_profile = AsyncMock(side_effect=RuntimeError("database is locked"))
@@ -155,11 +164,22 @@ def test_footer_persistence_lock_is_best_effort() -> None:
 
 def test_ai_prompt_slot_cache_avoids_duplicate_openai_calls_on_retry_and_updates_next_run() -> None:
     async def _run() -> None:
+        async def _get_setting(key: str) -> str | None:
+            values = {
+                "messages_quiet_hours_enabled": "false",
+                "messages_quiet_hours_start": "01:00",
+                "messages_quiet_hours_end": "08:30",
+                "messages_daily_cap_enabled": "false",
+                "messages_daily_cap": "6",
+                "messages_ai_prompt_web_enabled": "true",
+            }
+            return values.get(key)
+
         db = SimpleNamespace(
             update_campaign_next_run=AsyncMock(),
             get_trigger_enabled=AsyncMock(return_value=True),
             insert_send_log=AsyncMock(),
-            get_setting=AsyncMock(return_value="true"),
+            get_setting=AsyncMock(side_effect=_get_setting),
             set_setting=AsyncMock(),
             count_sent_today=AsyncMock(return_value=0),
         )
@@ -171,6 +191,9 @@ def test_ai_prompt_slot_cache_avoids_duplicate_openai_calls_on_retry_and_updates
             is_enabled=lambda: True,
             client=lambda: object(),
             get_model=lambda _name: "gpt-4o-mini",
+            get_model_config=lambda _name: "openai:gpt-4o-mini",
+            get_runtime_model=lambda _name: "openai:gpt-4o-mini",
+            get_model_display_name=lambda _name: "gpt-4o-mini",
             ask_for_task_with_web=AsyncMock(return_value="ciao"),
             ask_for_task=AsyncMock(return_value="ciao"),
         )
