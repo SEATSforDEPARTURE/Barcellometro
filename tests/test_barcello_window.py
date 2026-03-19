@@ -1,4 +1,4 @@
-from app.services.barcello_window import resolve_window_minutes
+from app.features.barcello.services.window_defaults import resolve_window_minutes
 
 
 def test_resolve_window_minutes_uses_default_without_overrides() -> None:
