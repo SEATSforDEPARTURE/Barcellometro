@@ -237,7 +237,10 @@ def pop_footer_meta(embed: discord.Embed) -> FooterMeta | None:
 def attach_minimal_footer(embed: discord.Embed, *, text: str, icon_url: str | None = None) -> discord.Embed:
     if embed is None:
         raise ValueError("attach_minimal_footer requires a discord.Embed instance, got None")
-    _MINIMAL_FOOTERS[id(embed)] = (embed, _clean(text) or "Barcellometro", _clean(icon_url) or None)
+    footer_text = _clean(text) or "Barcellometro"
+    clean_icon_url = _clean(icon_url) or None
+    embed.set_footer(text=footer_text, icon_url=clean_icon_url)
+    _MINIMAL_FOOTERS[id(embed)] = (embed, footer_text, clean_icon_url)
     return embed
 
 
