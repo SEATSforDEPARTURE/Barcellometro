@@ -7,30 +7,46 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
+import pytest
 
-ctx_stub = types.ModuleType("app.plugins.commands_modular.ctx")
-ctx_stub.CommandContext = object
-sys.modules["app.plugins.commands_modular.ctx"] = ctx_stub
 
-permissions_stub = types.ModuleType("app.plugins.commands_modular.permissions")
-permissions_stub.check_permission = AsyncMock(return_value=True)
-sys.modules["app.plugins.commands_modular.permissions"] = permissions_stub
+@pytest.fixture
+def messaggi_module(monkeypatch):
+    commands_modular_pkg = types.ModuleType("app.plugins.commands_modular")
+    commands_modular_pkg.__path__ = [str(Path(__file__).resolve().parents[1] / "app" / "plugins" / "commands_modular")]
+    monkeypatch.setitem(sys.modules, "app.plugins.commands_modular", commands_modular_pkg)
 
-helpers_stub = types.ModuleType("app.plugins.commands_modular.command_helpers")
-helpers_stub.add_group_once = lambda parent, subgroup, logger: parent.add_command(subgroup)
-helpers_stub.count_child_commands = lambda parent: len(getattr(parent, "commands", []))
-sys.modules["app.plugins.commands_modular.command_helpers"] = helpers_stub
+    ctx_stub = types.ModuleType("app.plugins.commands_modular.ctx")
+    ctx_stub.CommandContext = object
+    monkeypatch.setitem(sys.modules, "app.plugins.commands_modular.ctx", ctx_stub)
 
-scheduler_stub = types.ModuleType("app.services.scheduler_utils")
-scheduler_stub.calculate_initial_next_run = lambda now, ora_inizio, every, timezone: now
-scheduler_stub.calculate_next_run_after_send = lambda now, every, timezone: now
-sys.modules["app.services.scheduler_utils"] = scheduler_stub
+    permissions_stub = types.ModuleType("app.plugins.commands_modular.permissions")
+    permissions_stub.check_permission = AsyncMock(return_value=True)
+    monkeypatch.setitem(sys.modules, "app.plugins.commands_modular.permissions", permissions_stub)
 
-module_path = Path(__file__).resolve().parents[1] / "app" / "plugins" / "commands_modular" / "messaggi.py"
-spec = importlib.util.spec_from_file_location("messaggi_module_for_tests", module_path)
-messaggi_module = importlib.util.module_from_spec(spec)
-assert spec and spec.loader
-spec.loader.exec_module(messaggi_module)
+    helpers_stub = types.ModuleType("app.plugins.commands_modular.command_helpers")
+    helpers_stub.add_group_once = lambda parent, subgroup, logger: parent.add_command(subgroup)
+    helpers_stub.count_child_commands = lambda parent: len(getattr(parent, "commands", []))
+    monkeypatch.setitem(sys.modules, "app.plugins.commands_modular.command_helpers", helpers_stub)
+
+    scheduler_stub = types.ModuleType("app.services.scheduler_utils")
+    scheduler_stub.calculate_initial_next_run = lambda now, ora_inizio, every, timezone: now
+    scheduler_stub.calculate_next_run_after_send = lambda now, every, timezone: now
+    scheduler_stub.ROME_TZ = object()
+    monkeypatch.setitem(sys.modules, "app.services.scheduler_utils", scheduler_stub)
+
+    command_embeds_stub = types.ModuleType("app.shared.discord.command_embeds")
+    command_embeds_stub.CommandEmbedSection = lambda *args, **kwargs: {"args": args, "kwargs": kwargs}
+    command_embeds_stub.CommandKind = str
+    command_embeds_stub.send_standard_response = AsyncMock()
+    monkeypatch.setitem(sys.modules, "app.shared.discord.command_embeds", command_embeds_stub)
+
+    module_path = Path(__file__).resolve().parents[1] / "app" / "plugins" / "commands_modular" / "messaggi.py"
+    spec = importlib.util.spec_from_file_location("messaggi_module_for_tests", module_path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(mod)
+    return mod
 
 
 class _FakeDb:
@@ -45,6 +61,12 @@ class _FakeDb:
     async def get_campaign_content_config(self, guild_id: str, campaign_id: int):
         _ = guild_id, campaign_id
         return self.service_campaign
+
+    async def get_campaign_content_config_by_service(self, guild_id: str, channel_id: str, service_type: str):
+        _ = guild_id, channel_id
+        if self.service_campaign and self.service_campaign.get("service_type") == service_type:
+            return self.service_campaign
+        return None
 
     async def get_message_channel_status(self, guild_id: str, channel_id: str):
         _ = guild_id, channel_id
@@ -73,6 +95,7 @@ class _FakeChannel(discord.abc.Messageable):
 class _FakeResponse:
     def __init__(self) -> None:
         self.send_message = AsyncMock()
+        self.is_done = lambda: False
 
 
 class _FakeInteraction:
@@ -92,109 +115,111 @@ def _get_command_callback(group: discord.app_commands.Group, name: str):
     return next(cmd.callback for cmd in group.commands if cmd.name == name)
 
 
-def test_campagne_test_guides_user_to_editorial_subcommand_when_id_is_service() -> None:
+def test_custom_entry_run_reports_not_found_when_campaign_missing(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.message_campaign = None
-        db.service_campaign = {"id": 7, "service_type": "WEATHER"}
         scheduler = _FakeScheduler()
-        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome")
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
 
         group = discord.app_commands.Group(name="campagne", description="x")
-        permission_mock = AsyncMock(return_value=True)
-        old_permission = messaggi_module.check_permission
-        messaggi_module.check_permission = permission_mock
-        try:
-            messaggi_module.register_messaggi(group, ctx)
-            callback = _get_command_callback(group, "test")
-            interaction = _FakeInteraction()
-            await callback(interaction, id=7)
-        finally:
-            messaggi_module.check_permission = old_permission
+        messaggi_module.register_messaggi(group, ctx)
+        custom_group = _get_subgroup(group, "custom")
+        callback = _get_command_callback(custom_group, "entry_run")
+        interaction = _FakeInteraction()
+        await callback(interaction, id=99)
 
-        interaction.response.send_message.assert_awaited_once_with(
-            "Questo ID appartiene a un servizio editoriale. Usa /campagne servizi test.",
-            ephemeral=True,
+        messaggi_module.send_standard_response.assert_awaited_once_with(
+            interaction,
+            top_level="bm",
+            subcommand_path="campagne custom entry_run",
+            lines=[("warning", "Custom campaign not found.")],
+            sections=None,
+            kind="warning",
+            footer_service=ctx.footer,
         )
 
     asyncio.run(_run())
 
 
-def test_campagne_test_keeps_not_found_when_id_missing_everywhere() -> None:
+def test_weather_run_dispatches_editorial_service(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
+        db.service_campaign = {"id": 7, "service_type": "WEATHER"}
         scheduler = _FakeScheduler()
-        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome")
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
+
         group = discord.app_commands.Group(name="campagne", description="x")
+        messaggi_module.register_messaggi(group, ctx)
+        weather_group = _get_subgroup(group, "weather")
+        callback = _get_command_callback(weather_group, "run")
+        interaction = _FakeInteraction()
+        await callback(interaction)
 
-        permission_mock = AsyncMock(return_value=True)
-        old_permission = messaggi_module.check_permission
-        messaggi_module.check_permission = permission_mock
-        try:
-            messaggi_module.register_messaggi(group, ctx)
-            callback = _get_command_callback(group, "test")
-            interaction = _FakeInteraction()
-            await callback(interaction, id=99)
-        finally:
-            messaggi_module.check_permission = old_permission
-
-        interaction.response.send_message.assert_awaited_once_with("Campagna non trovata.", ephemeral=True)
+        messaggi_module.send_standard_response.assert_awaited_once_with(
+            interaction,
+            top_level="bm",
+            subcommand_path="campagne weather run",
+            lines=[("channel", "<#10>"), ("result", "running")],
+            sections=None,
+            kind="success",
+            footer_service=ctx.footer,
+        )
+        scheduler._campaign_content_service.execute_weather_service.assert_awaited_once_with(db.service_campaign)
+        scheduler._campaign_content_service.execute_news_service.assert_not_called()
+        scheduler._campaign_content_service.execute_horoscope_service.assert_not_called()
 
     asyncio.run(_run())
 
 
-def test_campagne_servizi_test_dispatches_by_service_type() -> None:
+def test_service_runs_dispatch_by_service_type(messaggi_module) -> None:
     async def _run() -> None:
-        for service_type in ["WEATHER", "NEWS", "HOROSCOPE"]:
+        for subgroup_name, service_type, attr_name in [
+            ("weather", "WEATHER", "execute_weather_service"),
+            ("news", "NEWS", "execute_news_service"),
+            ("horoscope", "HOROSCOPE", "execute_horoscope_service"),
+        ]:
             db = _FakeDb()
             db.service_campaign = {"id": 3, "service_type": service_type}
             scheduler = _FakeScheduler()
-            ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome")
+            ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
             group = discord.app_commands.Group(name="campagne", description="x")
 
-            permission_mock = AsyncMock(return_value=True)
-            old_permission = messaggi_module.check_permission
-            messaggi_module.check_permission = permission_mock
-            try:
-                messaggi_module.register_messaggi(group, ctx)
-                servizi_group = _get_subgroup(group, "servizi")
-                callback = _get_command_callback(servizi_group, "test")
-                interaction = _FakeInteraction()
-                await callback(interaction, id=3)
-            finally:
-                messaggi_module.check_permission = old_permission
+            messaggi_module.send_standard_response.reset_mock()
+            messaggi_module.register_messaggi(group, ctx)
+            subgroup = _get_subgroup(group, subgroup_name)
+            callback = _get_command_callback(subgroup, "run")
+            interaction = _FakeInteraction()
+            await callback(interaction)
 
-            interaction.response.send_message.assert_awaited_once_with(
-                "Invio test servizio editoriale in corso.",
-                ephemeral=True,
-            )
-            assert scheduler._campaign_content_service.execute_weather_service.await_count == (1 if service_type == "WEATHER" else 0)
-            assert scheduler._campaign_content_service.execute_news_service.await_count == (1 if service_type == "NEWS" else 0)
-            assert scheduler._campaign_content_service.execute_horoscope_service.await_count == (1 if service_type == "HOROSCOPE" else 0)
+            getattr(scheduler._campaign_content_service, attr_name).assert_awaited_once_with(db.service_campaign)
 
     asyncio.run(_run())
 
 
-def test_campagne_test_keeps_existing_behavior_for_message_campaign() -> None:
+def test_custom_entry_run_keeps_existing_behavior_for_message_campaign(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.message_campaign = {"id": 11, "text": "hello", "mood_mode": "AUTO"}
+        db.message_campaign = {"id": 11, "type": "CUSTOM", "text": "hello", "mood_mode": "AUTO"}
         scheduler = _FakeScheduler()
-        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome")
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
         group = discord.app_commands.Group(name="campagne", description="x")
 
-        permission_mock = AsyncMock(return_value=True)
-        old_permission = messaggi_module.check_permission
-        messaggi_module.check_permission = permission_mock
-        try:
-            messaggi_module.register_messaggi(group, ctx)
-            callback = _get_command_callback(group, "test")
-            interaction = _FakeInteraction()
-            await callback(interaction, id=11)
-        finally:
-            messaggi_module.check_permission = old_permission
+        messaggi_module.register_messaggi(group, ctx)
+        custom_group = _get_subgroup(group, "custom")
+        callback = _get_command_callback(custom_group, "entry_run")
+        interaction = _FakeInteraction()
+        await callback(interaction, id=11)
 
-        interaction.response.send_message.assert_awaited_once_with("Invio test in corso.", ephemeral=True)
+        messaggi_module.send_standard_response.assert_awaited_once_with(
+            interaction,
+            top_level="bm",
+            subcommand_path="campagne custom entry_run",
+            lines=[("campaign_id", 11), ("result", "running")],
+            sections=None,
+            kind="success",
+            footer_service=ctx.footer,
+        )
+        scheduler.preview_campaign_text.assert_awaited_once_with(db.message_campaign, channel_id_override="10")
         scheduler.send_campaign_embed.assert_awaited_once()
 
     asyncio.run(_run())
