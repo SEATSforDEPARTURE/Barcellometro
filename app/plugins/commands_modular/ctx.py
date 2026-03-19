@@ -66,8 +66,10 @@ class CommandContext:
         status_service = registry.get("status")
         ai_service = registry.get("ai")
         voice_ingest = registry.get("voice_ingest") if registry.has("voice_ingest") else None
-        daily_resoconto = registry.get("daily_resoconto") if registry.has("daily_resoconto") else None
-        channel_summary = daily_resoconto
+        channel_summary = registry.get("channel_summary") if registry.has("channel_summary") else None
+        daily_resoconto = channel_summary or (registry.get("daily_resoconto") if registry.has("daily_resoconto") else None)
+        if channel_summary is None:
+            channel_summary = daily_resoconto
         trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
         activity_insights = registry.get("activity_insights") if registry.has("activity_insights") else None
         inactivity = registry.get("inactivity") if registry.has("inactivity") else None

@@ -28,14 +28,16 @@ def main() -> None:
     retention = None
     backfill = None
     ai_service = None
-    daily_resoconto = None
+    channel_summary = None
     daily_activity_report = None
     trigger_engine = None
     if instance_mode == "main":
         retention = registry.get("retention")
         backfill = registry.get("backfill")
         ai_service = registry.get("ai")
-        daily_resoconto = registry.get("daily_resoconto") if registry.has("daily_resoconto") else None
+        channel_summary = registry.get("channel_summary") if registry.has("channel_summary") else None
+        if channel_summary is None and registry.has("daily_resoconto"):
+            channel_summary = registry.get("daily_resoconto")
         daily_activity_report = registry.get("daily_activity_report") if registry.has("daily_activity_report") else None
         trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
 
@@ -55,8 +57,8 @@ def main() -> None:
             await ai_service.load_settings()
             retention.start()
             backfill.start()
-            if daily_resoconto:
-                daily_resoconto.start()
+            if channel_summary:
+                channel_summary.start()
             if daily_activity_report:
                 daily_activity_report.start()
             if trigger_engine:
