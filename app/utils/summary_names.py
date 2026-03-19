@@ -1,3 +1,3 @@
-"""Compatibility shim for summary message-name resolution helpers."""
+"""Compatibility shim for summary message-name helpers."""
 
-from app.features.summary.services.message_names import *  # noqa: F401,F403
+from app.features.summary.services.message_name_service import *  # noqa: F401,F403

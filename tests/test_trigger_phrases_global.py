@@ -29,8 +29,8 @@ from app.features.triggers.commands.triggers import register_triggers
 import app.features.triggers.commands.triggers as trigger_commands_module
 from app.services.database import DatabaseService
 from app.services.ingest import EventEnvelope
-from app.features.triggers.services.triggers import TriggerEngineService
-import app.features.triggers.services.triggers as triggers_module
+from app.features.triggers.services.triggers_service import TriggerEngineService
+import app.features.triggers.services.triggers_service as triggers_module
 
 
 class _FakeRepliedMessage:

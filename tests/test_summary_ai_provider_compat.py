@@ -10,7 +10,7 @@ if "aiosqlite" not in sys.modules:
     aiosqlite_stub.connect = object
     sys.modules["aiosqlite"] = aiosqlite_stub
 
-from app.features.summary.services.summary import DEFAULT_SUMMARY_CONFIG, SummaryService
+from app.features.summary.services.content_summary_service import DEFAULT_SUMMARY_CONFIG, SummaryService
 
 
 class _Row:

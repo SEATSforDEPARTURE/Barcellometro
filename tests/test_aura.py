@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.features.aura.services.aura import ArchetypeAnalyzerService, AuraEligibilityService, AuraMissionService, AuraScoringService, build_discord_jump_link, compute_and_store_aura_result, load_aura_rule_definitions, load_aura_rules, normalize_text_for_matching, render_karma_bar, resolve_aura_reason_label
+from app.features.aura.services.aura_service import ArchetypeAnalyzerService, AuraEligibilityService, AuraMissionService, AuraScoringService, build_discord_jump_link, compute_and_store_aura_result, load_aura_rule_definitions, load_aura_rules, normalize_text_for_matching, render_karma_bar, resolve_aura_reason_label
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.barcello_window import resolve_default_window_minutes
@@ -290,7 +290,7 @@ def test_mission_good_morning_completes_without_single_mission_reward(monkeypatc
         def _fake_cfg():
             return {"good_morning": {"start_hour": 5, "end_hour": 11, "keywords": ["buongiorno"]}}
 
-        monkeypatch.setattr("app.features.aura.services.aura.load_aura_missions_config", _fake_cfg)
+        monkeypatch.setattr("app.features.aura.services.aura_service.load_aura_missions_config", _fake_cfg)
 
         done = await service.process_message_for_missions(
             guild_id="10",
@@ -357,7 +357,7 @@ def test_load_aura_rule_definitions_supports_number_and_object(monkeypatch) -> N
             }
         return {}
 
-    monkeypatch.setattr("app.features.aura.services.aura.load_json_file", _fake_loader)
+    monkeypatch.setattr("app.features.aura.services.aura_service.load_json_file", _fake_loader)
     defs = load_aura_rule_definitions()
     assert defs["first_message_of_day"].points == 7
     assert defs["good_morning_first"].points == 12
@@ -386,7 +386,7 @@ def test_single_mission_completion_does_not_assign_reward_points(monkeypatch) ->
         scoring = AuraScoringService(db)  # type: ignore[arg-type]
         service = AuraMissionService(db, scoring)  # type: ignore[arg-type]
 
-        monkeypatch.setattr("app.features.aura.services.aura.load_aura_missions_config", lambda: {"good_morning": {"start_hour": 5, "end_hour": 11, "keywords": ["buongiorno"]}})
+        monkeypatch.setattr("app.features.aura.services.aura_service.load_aura_missions_config", lambda: {"good_morning": {"start_hour": 5, "end_hour": 11, "keywords": ["buongiorno"]}})
 
         done = await service.process_message_for_missions(
             guild_id="10",
@@ -538,7 +538,7 @@ def test_mission_completed_only_after_all_assigned_done(monkeypatch) -> None:
         service = AuraMissionService(db, scoring)  # type: ignore[arg-type]
 
         monkeypatch.setattr(
-            "app.features.aura.services.aura.load_aura_missions_config",
+            "app.features.aura.services.aura_service.load_aura_missions_config",
             lambda: {"missions": [{"id": "talk_new_user"}, {"id": "balanced_participation"}]},
         )
 

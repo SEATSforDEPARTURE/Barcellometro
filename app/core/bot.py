@@ -19,16 +19,16 @@ from app.services.barcello import BarcelloService
 from app.services.message_scheduler import MessageSchedulerService
 from app.services.campaign_content_service import CampaignContentService
 from app.services.status import StatusService
-from app.features.summary.services.summary import SummaryService
-from app.features.summary.services.daily_resoconto import DailyResocontoService
-from app.features.activity.services.daily_activity_report import DailyActivityReportService
+from app.features.summary.services.content_summary_service import SummaryService
+from app.features.summary.services.server_activity_report_service import DailyResocontoService
+from app.features.activity.services.activity_report_service import DailyActivityReportService
 from app.services.entitlements import EntitlementsService
 from app.services.inactivity import InactivityService
-from app.features.activity.services.activity_insights import ActivityInsightsService
+from app.features.activity.services.activity_insights_service import ActivityInsightsService
 from app.services.inactive_members_moderation import InactiveMembersModerationService
 from app.services.stt.ai_stt import AiSttService
 from app.services.stt.faster_whisper import FasterWhisperSttService
-from app.features.triggers.services.triggers import TriggerEngineService
+from app.features.triggers.services.triggers_service import TriggerEngineService
 from app.services.translate.ai_translate import AiTranslateService
 from app.services.translate.argos import ArgosTranslateService
 from app.services.aura import AuraAggregationJob, AuraEligibilityService, AuraRollingStatsService, ArchetypeAnalyzerService

@@ -1,6 +1,6 @@
 import asyncio
 
-from app.features.barcello.services.barcello import BarcelloService
+from app.features.barcello.services.barcello_service import BarcelloService
 
 
 class FakeDatabase:

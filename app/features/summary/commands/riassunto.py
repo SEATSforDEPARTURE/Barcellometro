@@ -14,7 +14,7 @@ import discord
 from discord import app_commands
 
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all, copy_footer_meta
-from app.features.summary.services.summary import SummaryImpact, SummaryItem, SummaryQuote
+from app.features.summary.services.content_summary_service import SummaryImpact, SummaryItem, SummaryQuote
 from app.shared.discord.delivery import send_dm_or_followup
 from app.shared.discord.embed_limits import (
     MAX_EMBED_CHARS,

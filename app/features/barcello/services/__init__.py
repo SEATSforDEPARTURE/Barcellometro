@@ -1,6 +1,6 @@
 """Services for Barcello feature."""
 
-from app.features.barcello.services.barcello import (
+from app.features.barcello.services.barcello_service import (
     DEFAULT_COLOR_RANGES,
     DEFAULT_MITIGATION_FACTORS,
     DEFAULT_SCORE_WEIGHTS,
@@ -9,8 +9,8 @@ from app.features.barcello.services.barcello import (
     BarcelloResult,
     BarcelloService,
 )
-from app.features.barcello.services.calibration import BarcelloCalibrationService, CalibrationResult
-from app.features.barcello.services.window_defaults import resolve_default_window_minutes, resolve_window_minutes
+from app.features.barcello.services.barcello_calibration_service import BarcelloCalibrationService, CalibrationResult
+from app.features.barcello.services.barcello_window_defaults import resolve_default_window_minutes, resolve_window_minutes
 
 __all__ = [
     "DEFAULT_COLOR_RANGES",

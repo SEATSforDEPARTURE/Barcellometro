@@ -4,8 +4,8 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "app/features/activity/services/daily_activity_sorting.py"
-spec = importlib.util.spec_from_file_location("daily_activity_sorting", MODULE_PATH)
+MODULE_PATH = Path(__file__).resolve().parents[1] / "app/features/activity/services/activity_sorting_service.py"
+spec = importlib.util.spec_from_file_location("activity_sorting_service", MODULE_PATH)
 mod = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(mod)

@@ -22,8 +22,8 @@ from app.plugins.commands_modular.time_windows import (
     resolve_range_window,
     resolve_ultimi_window,
 )
-from app.features.aura.services.aura import build_discord_jump_link, resolve_aura_reason_label, compute_and_store_aura_result
-from app.features.aura.renderers.aura import AuraRenderPayload, AuraTrendInfo, build_aura_embeds
+from app.features.aura.services.aura_service import build_discord_jump_link, resolve_aura_reason_label, compute_and_store_aura_result
+from app.features.aura.renderers.aura_renderer import AuraRenderPayload, AuraTrendInfo, build_aura_embeds
 from app.services.config_file_loader import load_json_file
 from app.services.barcello_window import resolve_default_window_minutes
 from app.shared.discord.command_embeds import send_standard_response

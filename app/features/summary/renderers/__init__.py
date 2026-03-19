@@ -1,3 +1,3 @@
 """Summary renderer modules."""
 
-__all__ = ["channel_summary", "daily_resoconto", "detail_embeds"]
+__all__ = ["channel_summary", "detail_embeds", "server_activity_report_renderer"]

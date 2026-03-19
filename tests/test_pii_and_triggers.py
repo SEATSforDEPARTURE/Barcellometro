@@ -11,7 +11,7 @@ from app.shared.safety.pii import contains_pii, redact_pii
 
 @pytest.fixture
 def triggers_module(import_fresh):
-    return import_fresh("app.features.triggers.services.triggers")
+    return import_fresh("app.features.triggers.services.triggers_service")
 
 
 def _service(triggers_module):
