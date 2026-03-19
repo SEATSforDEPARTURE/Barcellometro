@@ -21,6 +21,8 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
 from app.utils.command_embeds import send_standard_response
+from app.utils.component_notices import send_standard_component_notice
+from app.utils.report_embeds import apply_standard_report_style
 from app.utils.trend_render import normalize_trend, render_trend, render_trend_value
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,33 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
             await send_ephemeral(interaction, "This command only works in guild channels.")
             return None
         return str(interaction.guild_id), str(interaction.channel_id)
+
+    async def _send_barcello_dm_notice(interaction: discord.Interaction, *, sent: bool, blocked_message: str | None = None) -> None:
+        if sent:
+            await send_standard_response(
+                interaction,
+                top_level="barcello",
+                subcommand_path="bm barcello run",
+                lines=[("result", "Ti ho inviato un DM")],
+                kind="success",
+                footer_service=ctx.footer,
+            )
+            return
+        await send_standard_response(
+            interaction,
+            top_level="barcello",
+            subcommand_path="bm barcello run",
+            lines=[("error", blocked_message or "Non riesco a inviarti DM. Abilita i messaggi privati dal server.")],
+            kind="error",
+            footer_service=ctx.footer,
+        )
+
+    def _build_barcello_dm_report(*, public_embed: discord.Embed, details_embed: discord.Embed) -> list[discord.Embed]:
+        return apply_standard_report_style(
+            [public_embed, details_embed],
+            service_name="barcello",
+            cover_title=public_embed.title or "❤️ REPORT BARCELLO",
+        )
 
     async def _set_toggle(interaction: discord.Interaction, action: str) -> None:
         if not await check_permission(interaction, f"bm.barcello.{action}", ctx):
@@ -201,7 +230,15 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
             message = f"Calibration updated. Samples: {result.get('samples')}. {result.get('summary')}"
         else:
             message = f"Calibration not updated. Samples: {result.get('samples')}. {result.get('summary')}"
-        await interaction.followup.send(message, ephemeral=True)
+        await send_standard_response(
+            interaction,
+            top_level="barcello",
+            subcommand_path="bm barcello calibrate",
+            lines=[("samples", result.get("samples")), ("summary", result.get("summary"))],
+            kind="success" if result.get("updated") else "warning",
+            footer_service=ctx.footer,
+            ephemeral=True,
+        )
 
     def _render_health_bar(score: int, color_emoji: str) -> str:
         score = max(0, min(100, score))
@@ -823,7 +860,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
 
         async def _ensure_owner(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id != self._owner_id:
-                await interaction.response.send_message("Feedback riservato ai mod.", ephemeral=True)
+                await send_standard_component_notice(interaction, area="barcello feedback", message="Feedback riservato ai mod.", kind="error")
                 return False
             return True
 
@@ -937,7 +974,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
 
         async def _ensure_owner(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id != self._owner_id:
-                await interaction.response.send_message("Feedback riservato ai mod.", ephemeral=True)
+                await send_standard_component_notice(interaction, area="barcello feedback", message="Feedback riservato ai mod.", kind="error")
                 return False
             return True
 
@@ -962,7 +999,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
             if not await self._ensure_owner(interaction):
                 return
             if not self._reason or self._delta_target is None:
-                await interaction.response.send_message("Seleziona motivo e correzione.", ephemeral=True)
+                await send_standard_component_notice(interaction, area="barcello feedback", message="Seleziona motivo e correzione.", kind="warning")
                 return
             try:
                 await self._database.insert_barcello_feedback(
@@ -1205,12 +1242,9 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
                 )
                 no_data_embed = _build_barcello_no_data_embed(title=title, window_minutes=window_minutes)
                 if await try_send_dm(embed=no_data_embed):
-                    await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
+                    await _send_barcello_dm_notice(interaction, sent=True)
                 else:
-                    await interaction.followup.send(
-                        "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
-                        ephemeral=True,
-                    )
+                    await _send_barcello_dm_notice(interaction, sent=False)
                 return
 
             insufficient_data = (
@@ -1626,16 +1660,21 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
                     profile=profile,
                 )
 
-            if await try_send_dm(embeds=[public_embed, details_embed], view=feedback_view):
-                await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
+            report_embeds = _build_barcello_dm_report(public_embed=public_embed, details_embed=details_embed)
+            if await try_send_dm(embeds=report_embeds, view=feedback_view):
+                await _send_barcello_dm_notice(interaction, sent=True)
             else:
-                await interaction.followup.send(
-                    "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
-                    ephemeral=True,
-                )
+                await _send_barcello_dm_notice(interaction, sent=False)
         except Exception:
             logger.exception("barcello: unexpected error")
-            await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
+            await send_standard_response(
+                interaction,
+                top_level="barcello",
+                subcommand_path="bm barcello run",
+                lines=[("error", "Errore temporaneo, riprova.")],
+                kind="error",
+                footer_service=ctx.footer,
+            )
 
     logger.info(
         "Registered /bm barcello subcommands=%s",

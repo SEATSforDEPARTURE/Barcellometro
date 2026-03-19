@@ -26,6 +26,7 @@ from app.services.campaign_content_formatter import (
 from app.services.campaign_content_views import BaseCampaignNavigatorView, PersistentCampaignLauncherView
 from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta_to_all
+from app.utils.component_notices import send_standard_component_notice
 from app.services.scheduler_utils import calculate_next_run_after_send
 
 logger = logging.getLogger(__name__)
@@ -323,16 +324,16 @@ class CampaignContentService:
     async def open_personal_navigator(self, interaction: discord.Interaction, *, target_index: int, service_type: str) -> bool:
         message = interaction.message
         if message is None:
-            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
             return False
         record = await self.load_message_record(str(message.id))
         if record is None:
-            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
             return False
 
         embeds = record.get("embeds", [])
         if not isinstance(embeds, list) or not embeds:
-            await interaction.response.send_message("Pagina non disponibile.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="campaign navigation", message="Pagina non disponibile.", kind="warning")
             return False
 
         metadata = record.get("metadata", {})

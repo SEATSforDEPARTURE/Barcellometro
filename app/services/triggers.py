@@ -15,7 +15,9 @@ from typing import Any, Literal
 
 import discord
 
-from app.services.footer import attach_footer_meta
+from app.services.footer import FooterService, attach_footer_meta
+from app.utils.command_embeds import send_standard_response
+from app.utils.report_embeds import build_report_cover_embed
 
 from app.services.barcello import BarcelloService
 from app.services.barcello_window import resolve_window_minutes
@@ -73,6 +75,7 @@ class TriggerEngineService:
         self._entitlements = entitlements
         self._ai = ai_service
         self._community_insights = community_insights or CommunityInsightsService(ai_service)
+        self._footer = FooterService(database)
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
         self._recovery_task: asyncio.Task[None] | None = None
@@ -116,11 +119,45 @@ class TriggerEngineService:
         await self._handle_phrases(envelope)
         await self._on_barcello_message(envelope)
 
-    async def _qna_reply(self, interaction: discord.Interaction, text: str, *, ephemeral: bool) -> None:
-        if interaction.response.is_done():
-            await interaction.followup.send(text, ephemeral=ephemeral)
-            return
-        await interaction.response.send_message(text, ephemeral=ephemeral)
+    async def _qna_reply(
+        self,
+        interaction: discord.Interaction,
+        text: str,
+        *,
+        ephemeral: bool,
+        kind: Literal["info", "success", "warning", "error"] = "warning",
+    ) -> None:
+        await send_standard_response(
+            interaction,
+            top_level="domanda",
+            subcommand_path="domanda",
+            lines=[("dettaglio", text)],
+            kind=kind,
+            footer_service=self._footer,
+            ephemeral=ephemeral,
+        )
+
+    async def _send_qna_error(
+        self,
+        interaction: discord.Interaction,
+        *,
+        question: str,
+        asker_name: str,
+        message: str = "Non riesco a rispondere qui in questo momento.",
+        ephemeral: bool = False,
+    ) -> None:
+        _ = question
+        _ = asker_name
+        await send_standard_response(
+            interaction,
+            top_level="domanda",
+            subcommand_path="domanda",
+            lines=[("errore", message)],
+            kind="error",
+            footer_service=self._footer,
+            ephemeral=ephemeral,
+        )
+
 
     def _trim_qna_history(self, history: list[dict[str, str]], *, max_messages: int = 16) -> list[dict[str, str]]:
         if max_messages <= 0:
@@ -153,10 +190,10 @@ class TriggerEngineService:
     ) -> None:
         question_text = (question or "").strip()
         if interaction.guild_id is None or interaction.channel_id is None:
-            await self._qna_reply(interaction, "Usa questo comando in un canale.", ephemeral=True)
+            await self._qna_reply(interaction, "Usa questo comando in un canale.", ephemeral=True, kind="error")
             return
         if not question_text:
-            await self._qna_reply(interaction, "Inserisci una domanda valida.", ephemeral=True)
+            await self._qna_reply(interaction, "Inserisci una domanda valida.", ephemeral=True, kind="error")
             return
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=False, thinking=True)
@@ -168,13 +205,13 @@ class TriggerEngineService:
         logger.info("qna_dispatch scope=%s guild=%s channel=%s user=%s", route_scope, guild_id, channel_id, user_id)
 
         if route_scope == "channel_qna" and not await self._database.get_trigger_enabled(guild_id, channel_id, "qna"):
-            await self._qna_reply(interaction, "Il trigger Q&A non è abilitato in questo canale.", ephemeral=True)
+            await self._qna_reply(interaction, "Il trigger Q&A non è abilitato in questo canale.", ephemeral=True, kind="warning")
             return
         if route_scope == "channel_qna" and is_out_of_scope_question(question_text):
-            await self._qna_reply(interaction, "Posso rispondere solo su questo canale.", ephemeral=True)
+            await self._qna_reply(interaction, "Posso rispondere solo su questo canale.", ephemeral=True, kind="warning")
             return
         if is_sensitive_question(question_text):
-            await self._qna_reply(interaction, "Non posso aiutare con dati personali o sensibili.", ephemeral=True)
+            await self._qna_reply(interaction, "Non posso aiutare con dati personali o sensibili.", ephemeral=True, kind="error")
             return
 
         profile = await self._entitlements.resolve_profile(interaction.user)
@@ -189,7 +226,7 @@ class TriggerEngineService:
                 f"• PRO: {limit_pro} domande/giorno\n"
                 f"• PRO MAX: {limit_promax} domande/giorno"
             )
-            await self._qna_reply(interaction, upgrade_text, ephemeral=True)
+            await self._qna_reply(interaction, upgrade_text, ephemeral=True, kind="info")
             return
 
         limit = await self._resolve_qna_limit(interaction, profile=profile, limits=limits)
@@ -206,7 +243,7 @@ class TriggerEngineService:
                 message = "Domande terminate, aspetta domani per averne altre."
             else:
                 message = "Hai esaurito le domande di oggi."
-            await self._qna_reply(interaction, message, ephemeral=True)
+            await self._qna_reply(interaction, message, ephemeral=True, kind="warning")
             return
 
         question_clean = question_text
@@ -218,13 +255,7 @@ class TriggerEngineService:
             history = [{"role": "user", "content": question_clean}]
             text = await self._ask_general_answer(question_clean, history=history)
             if not text:
-                error_embed = self._build_qna_embed(
-                    asker_name,
-                    question_clean,
-                    "Non riesco a rispondere qui in questo momento.",
-                    response_origin="error",
-                )
-                await interaction.followup.send(embed=error_embed, ephemeral=False)
+                await self._send_qna_error(interaction, question=question_clean, asker_name=asker_name)
                 return
             history.append({"role": "assistant", "content": text})
             history = self._trim_qna_history(history)
@@ -240,32 +271,14 @@ class TriggerEngineService:
                 source=interaction,
             )
             if answer is None:
-                error_embed = self._build_qna_embed(
-                    asker_name,
-                    question_clean,
-                    "Non riesco a rispondere qui in questo momento.",
-                    response_origin="error",
-                )
-                await interaction.followup.send(embed=error_embed, ephemeral=False)
+                await self._send_qna_error(interaction, question=question_clean, asker_name=asker_name)
                 return
             if not answer.get("can_answer"):
-                error_embed = self._build_qna_embed(
-                    asker_name,
-                    question_clean,
-                    "Non riesco a rispondere qui in questo momento.",
-                    response_origin="error",
-                )
-                await interaction.followup.send(embed=error_embed, ephemeral=False)
+                await self._send_qna_error(interaction, question=question_clean, asker_name=asker_name)
                 return
             text = str(answer.get("answer") or "").strip()
             if not text:
-                error_embed = self._build_qna_embed(
-                    asker_name,
-                    question_clean,
-                    "Non riesco a rispondere qui in questo momento.",
-                    response_origin="error",
-                )
-                await interaction.followup.send(embed=error_embed, ephemeral=False)
+                await self._send_qna_error(interaction, question=question_clean, asker_name=asker_name)
                 return
 
             evidence_pack = answer.get("evidence_pack") if isinstance(answer, dict) else []
@@ -276,7 +289,7 @@ class TriggerEngineService:
             model_name = None
 
         if contains_pii(text):
-            await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True)
+            await self._qna_reply(interaction, "Non posso condividere dati personali.", ephemeral=True, kind="error")
             return
 
         answer_mode = str(answer.get("answer_mode") or "") if route_scope != "general_llm" and isinstance(answer, dict) else ""
@@ -2231,19 +2244,21 @@ class TriggerEngineService:
     ) -> discord.Embed:
         cleaned_answer = self._strip_leading_answer_label(answer_text)
         if is_followup:
-            description_raw = f"**👇 Risposta:**\n{cleaned_answer}"
+            description = self._truncate_embed_description(cleaned_answer)
+            lines: list[tuple[str, str]] = []
         else:
-            description_raw = (
-                f"✋ **{asker_name} chiede:**\n"
-                f"{(question or '').strip()}\n\n"
-                "**👇 Risposta:**\n"
-                f"{cleaned_answer}"
-            )
-        description = self._truncate_embed_description(description_raw)
-        embed = discord.Embed(
-            title="❓BOTTA & RISPOSTA",
+            description = self._truncate_embed_description(cleaned_answer)
+            lines = [
+                ("utente", asker_name),
+                ("domanda", (question or "").strip()),
+            ]
+        title = "❓ DOMANDA" if response_origin == "error" else "❓ BOTTA & RISPOSTA"
+        embed = build_report_cover_embed(
+            title=title,
             description=description,
-            color=discord.Color.from_str("#9B59B6"),
+            color=0x9B59B6 if response_origin != "error" else 0xED4245,
+            service_name="qna",
+            lines=lines,
         )
         attach_footer_meta(
             embed,
