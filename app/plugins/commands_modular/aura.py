@@ -26,8 +26,8 @@ from app.services.aura import build_discord_jump_link, resolve_aura_reason_label
 from app.services.aura_render import AuraRenderPayload, AuraTrendInfo, build_aura_embeds
 from app.services.config_file_loader import load_json_file
 from app.services.barcello_window import resolve_default_window_minutes
-from app.utils.command_embeds import send_standard_response
-from app.utils.report_embeds import apply_standard_report_style, send_report_dm_chunks
+from app.shared.discord.command_embeds import send_standard_response
+from app.shared.discord.report_embeds import apply_standard_report_style, send_report_dm_chunks
 
 logger = logging.getLogger(__name__)
 

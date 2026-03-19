@@ -7,7 +7,7 @@ from app.plugins.commands_modular.command_helpers import send_standard_command_e
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import set_setting
-from app.utils.command_embeds import send_standard_response
+from app.shared.discord.command_embeds import send_standard_response
 
 
 def voice_ingest_key(bot_id: int, key: str) -> str:

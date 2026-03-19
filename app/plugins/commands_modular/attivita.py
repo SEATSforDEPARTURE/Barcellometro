@@ -19,8 +19,8 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
 from app.renderers.activity_dm_renderer import build_activity_details_txt, build_activity_dm_embeds
 from app.renderers.user_activity_renderer import build_user_activity_embeds
-from app.utils.command_embeds import CommandEmbedSection, send_standard_response
-from app.utils.report_embeds import apply_standard_report_style
+from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
+from app.shared.discord.report_embeds import apply_standard_report_style
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")

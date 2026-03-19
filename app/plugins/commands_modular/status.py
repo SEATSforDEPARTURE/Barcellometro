@@ -6,7 +6,7 @@ from discord import app_commands
 from app.plugins.commands_modular.command_helpers import send_standard_command_embed
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.utils.command_embeds import send_standard_response
+from app.shared.discord.command_embeds import send_standard_response
 
 
 def register_status(bm_group: app_commands.Group, ctx: CommandContext) -> None:

@@ -11,7 +11,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting, set_setting
 from app.plugins.commands_modular.voice_ingest import voice_ingest_key
-from app.utils.command_embeds import CommandEmbedSection, send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
 
 PRIVACY_ALIASES = ("bm.privacy.on", "bm.privacy.off", "bm.privacy.status")
 

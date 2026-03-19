@@ -16,7 +16,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime
 from app.services.config_file_loader import load_json_file
-from app.utils.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
 
 logger = logging.getLogger(__name__)
 

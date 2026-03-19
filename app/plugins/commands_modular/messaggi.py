@@ -13,7 +13,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime
 from app.services.scheduler_utils import calculate_initial_next_run
-from app.utils.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
 
 QUIET_DEFAULT_START = "01:00"
 QUIET_DEFAULT_END = "08:30"

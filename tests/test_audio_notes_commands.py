@@ -53,9 +53,9 @@ settings_stub.get_setting = _get_setting
 settings_stub.reset_setting = _reset_setting
 sys.modules["app.plugins.commands_modular.settings"] = settings_stub
 
-command_embeds_stub = types.ModuleType("app.utils.command_embeds")
+command_embeds_stub = types.ModuleType("app.shared.discord.command_embeds")
 command_embeds_stub.send_standard_response = AsyncMock()
-sys.modules["app.utils.command_embeds"] = command_embeds_stub
+sys.modules["app.shared.discord.command_embeds"] = command_embeds_stub
 
 module_path = Path(__file__).resolve().parents[1] / "app" / "plugins" / "commands_modular" / "audio_notes.py"
 spec = importlib.util.spec_from_file_location("audio_notes_module_for_tests", module_path)

@@ -5,7 +5,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.utils.command_embeds import CommandEmbedSection, send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
 
 
 def _format_role_label(guild: discord.Guild | None, role_id: object) -> str:
