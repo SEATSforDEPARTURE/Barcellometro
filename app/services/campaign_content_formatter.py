@@ -100,10 +100,13 @@ def _with_footer(embed: discord.Embed, page: int, total: int) -> discord.Embed:
 
 
 def apply_shared_footer_and_pagination(embeds: list[discord.Embed], footer_text: str) -> list[discord.Embed]:
+    # Footer rendering now happens through the centralized footer pipeline before
+    # payload persistence and dispatch. Keep this helper as a no-op shim because
+    # older call sites still invoke it for pagination compatibility.
+    _ = footer_text
     total = max(1, len(embeds))
     for idx, embed in enumerate(embeds, start=1):
         _with_footer(embed, idx, total)
-        embed.set_footer(text=footer_text)
     return embeds
 
 

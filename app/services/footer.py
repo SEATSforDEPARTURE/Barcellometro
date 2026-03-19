@@ -47,6 +47,8 @@ SUPPORTED_FOOTER_SERVICES: tuple[str, ...] = (
     "activity_dm",
     "user_activity",
     "channel_summary",
+    "inactivity_moderation",
+    "member_flow_notifications",
 )
 
 _STARTUP_SERVICE_SCAN_DIRS: tuple[Path, ...] = (
@@ -73,6 +75,8 @@ _SERVICE_NAME_OVERRIDES: dict[str, str | None] = {
     "attivita": "attivita",
     "barcello": "barcello",
     "message_scheduler": "message_scheduler",
+    "inactive_members_moderation": "inactivity_moderation",
+    "member_flow_notifications": "member_flow_notifications",
     "admin": None,
     "commands": None,
     "command_helpers": None,

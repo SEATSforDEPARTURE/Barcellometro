@@ -14,6 +14,7 @@ import discord
 
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
+from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 from app.utils.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ class InactivityActionsView(discord.ui.View):
                 child.disabled = True
         await interaction.response.edit_message(view=self)
         embed = discord.Embed(title="❌ Annullato", description="Azione manuale inattivi annullata.", color=0x808080)
+        attach_footer_meta(embed, service_name="inactivity_moderation", used_local_processing=True)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -551,6 +553,7 @@ class InactiveMembersModerationService:
         embed = discord.Embed(title="⚠️ GRACE SCADUTO (AUTO OFF)", colour=discord.Colour.orange())
         safe_add_field(embed, name="Utenti scaduti", value=str(len(expired)), inline=True)
         safe_add_field(embed, name="Dettaglio", value="\n".join(preview_lines) if preview_lines else "Nessun utente.", inline=False)
+        attach_footer_meta(embed, service_name="inactivity_moderation", used_local_processing=True)
 
         view = GraceExpiredActionsView(self, guild_id, [str(c.member.id) for c, _, _, _ in expired])
         message = await channel.send(embed=embed, view=view)
@@ -632,6 +635,7 @@ class InactiveMembersModerationService:
                 safe_add_field(embed, name="Stato reminder", value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
             embed.description = chunk
             embeds.append(embed)
+        attach_footer_meta_to_all(embeds, service_name="inactivity_moderation", used_local_processing=True)
 
         txt_file: discord.File | None = None
         if ordered:
@@ -872,6 +876,7 @@ class InactiveMembersModerationService:
         if errors:
             lines.append("Errori: " + "; ".join(errors[:10]))
         safe_set_description(embed, "\n".join(lines))
+        attach_footer_meta(embed, service_name="inactivity_moderation", used_local_processing=True)
         return embed
     @staticmethod
     def _to_rome(dt: datetime) -> datetime:

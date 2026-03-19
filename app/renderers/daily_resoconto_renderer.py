@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from app.services.footer import attach_footer_meta
+from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 
 from app.services.barcello import BarcelloResult
 from app.services.summary import SummaryItem, SummaryResult
@@ -235,5 +235,6 @@ def build_daily_resoconto_embeds(
     total = len(pages)
     for idx, embed in enumerate(pages, start=1):
         embed.title = f"🗒️ DETTAGLI (Pag {idx}/{total})"
+    attach_footer_meta_to_all(pages, service_name="daily_resoconto", used_local_processing=True)
 
     return [status_embed, *pages]

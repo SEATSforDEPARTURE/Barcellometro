@@ -18,11 +18,23 @@ class PageJumpButton(discord.ui.Button["BaseCampaignNavigatorView"]):
 
 
 class BaseCampaignNavigatorView(discord.ui.View):
-    def __init__(self, service: Any, *, embeds: list[dict[str, Any]], page_map: list[dict[str, Any]], current_index: int = 0, timeout: float | None = None) -> None:
+    def __init__(
+        self,
+        service: Any,
+        *,
+        embeds: list[dict[str, Any]],
+        page_map: list[dict[str, Any]],
+        service_type: str,
+        metadata: dict[str, Any] | None = None,
+        current_index: int = 0,
+        timeout: float | None = None,
+    ) -> None:
         super().__init__(timeout=timeout)
         self._service = service
         self._embeds = embeds
         self._page_map = page_map
+        self._service_type = service_type
+        self._metadata = metadata
         self._current_index = max(0, min(current_index, max(0, len(embeds) - 1)))
         self._build_dynamic_buttons()
         self._sync_controls()
@@ -50,7 +62,16 @@ class BaseCampaignNavigatorView(discord.ui.View):
     async def navigate(self, interaction: discord.Interaction, target_index: int) -> None:
         self._current_index = max(0, min(target_index, len(self._embeds) - 1))
         self._sync_controls()
-        await interaction.response.edit_message(embed=discord.Embed.from_dict(self._embeds[self._current_index]), view=self)
+        embed_payload = self._embeds[self._current_index]
+        if hasattr(self._service, "_hydrate_stored_campaign_embed"):
+            embed = self._service._hydrate_stored_campaign_embed(  # type: ignore[attr-defined]
+                service_type=self._service_type,
+                embed_payload=embed_payload,
+                metadata=self._metadata,
+            )
+        else:
+            embed = discord.Embed.from_dict(embed_payload)
+        await interaction.response.edit_message(embed=embed, view=self)
 
 
 class PersistentCampaignLauncherView(discord.ui.View):
