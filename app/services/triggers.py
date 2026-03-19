@@ -30,7 +30,7 @@ from app.services.ingest import EventEnvelope
 from app.services.qna_session_store import QnaSession, QnaSessionStore
 from app.services.qna_sessions_repo import QnaSessionsRepo
 from app.services.qna_query_engine import QnaAnswerResult, QnaQueryEngine
-from app.utils.pii import contains_pii
+from app.shared.safety.pii import contains_pii
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")

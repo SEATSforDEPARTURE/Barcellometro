@@ -12,7 +12,7 @@ import discord
 from app.services.barcello import BarcelloResult
 from app.services.footer import attach_footer_meta_to_all
 from app.services.summary import SummaryItem, SummaryResult
-from app.utils.trend_render import render_trend_value
+from app.domain.reporting.trend import render_trend_value
 from app.plugins.commands_modular.time_windows import format_rolling_window_label, infer_rolling_window_request
 
 ROME_TZ = ZoneInfo("Europe/Rome")

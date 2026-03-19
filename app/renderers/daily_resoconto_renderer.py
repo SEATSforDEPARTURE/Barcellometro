@@ -12,7 +12,7 @@ from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 
 from app.services.barcello import BarcelloResult
 from app.services.summary import SummaryItem, SummaryResult
-from app.utils.trend_render import render_trend_value
+from app.domain.reporting.trend import render_trend_value
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MAX_FIELD_VALUE = 1024

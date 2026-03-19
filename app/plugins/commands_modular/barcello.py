@@ -24,7 +24,7 @@ from app.plugins.commands_modular.settings import get_setting
 from app.shared.discord.command_embeds import send_standard_response
 from app.shared.discord.component_notices import send_standard_component_notice
 from app.shared.discord.report_embeds import apply_standard_report_style
-from app.utils.trend_render import normalize_trend, render_trend, render_trend_value
+from app.domain.reporting.trend import normalize_trend, render_trend, render_trend_value
 
 logger = logging.getLogger(__name__)
 

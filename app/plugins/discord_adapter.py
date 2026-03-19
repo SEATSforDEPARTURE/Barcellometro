@@ -10,7 +10,7 @@ import discord
 from app.core.service_registry import ServiceRegistry
 from app.services.backfill import BackfillResult
 from app.services.ingest import EventEnvelope, IngestService
-from app.utils.pii import redact_pii
+from app.shared.safety.pii import redact_pii
 
 logger = logging.getLogger(__name__)
 
