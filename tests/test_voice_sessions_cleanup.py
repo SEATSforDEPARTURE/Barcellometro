@@ -1,9 +1,11 @@
 import asyncio
 import json
 
-import pytest
+from tests._sqlite_stub import ensure_sqlite_stub
 
-aiosqlite = pytest.importorskip("aiosqlite")
+ensure_sqlite_stub()
+
+import aiosqlite
 
 from app.services.database import DatabaseService
 
@@ -35,7 +37,7 @@ def test_close_open_voice_sessions_filters_by_source() -> None:
             (
                 "session-b",
                 "guild-1",
-                "voice-1",
+                "voice-2",
                 "2026-01-01T11:00:00+00:00",
                 json.dumps({"source": "other"}),
             ),
@@ -48,7 +50,7 @@ def test_close_open_voice_sessions_filters_by_source() -> None:
             (
                 "session-c",
                 "guild-1",
-                "voice-1",
+                "voice-3",
                 "2026-01-01T11:30:00+00:00",
             ),
         )
@@ -88,14 +90,14 @@ def test_close_open_voice_sessions_without_source_closes_all() -> None:
             INSERT INTO voice_sessions (voice_session_id, guild_id, voice_channel_id, started_ts, ended_ts, meta_json)
             VALUES (?, ?, ?, ?, NULL, ?)
             """,
-            ("session-b", "guild-1", "voice-1", "2026-01-01T11:00:00+00:00", "{}"),
+            ("session-b", "guild-1", "voice-2", "2026-01-01T11:00:00+00:00", "{}"),
         )
         await db.execute(
             """
             INSERT INTO voice_sessions (voice_session_id, guild_id, voice_channel_id, started_ts, ended_ts, meta_json)
             VALUES (?, ?, ?, ?, NULL, NULL)
             """,
-            ("session-c", "guild-1", "voice-1", "2026-01-01T12:00:00+00:00"),
+            ("session-c", "guild-1", "voice-3", "2026-01-01T12:00:00+00:00"),
         )
 
         ended_ts = "2026-01-01T13:00:00+00:00"
