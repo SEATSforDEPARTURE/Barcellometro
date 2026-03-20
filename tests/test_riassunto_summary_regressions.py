@@ -16,7 +16,7 @@ from app.plugins.commands_modular.riassunto import (
     _summary_footer_inputs,
 )
 from app.renderers.channel_summary import _barcello_emoji_from_color, _bold_known_names
-from app.renderers.detail_embeds import build_summary_detail_embeds
+from app.renderers.detail_embeds import _truncate_line_preserve_md_link, build_summary_detail_embeds
 from app.services.barcello_service import BarcelloResult
 from app.services.content_summary_service import (
     SummaryImpact,
@@ -29,7 +29,12 @@ from app.services.content_summary_service import (
 )
 from app.services.footer import FooterService, attach_footer_meta_to_all
 from app.shared.discord.delivery import _prepare_embeds_for_send, send_dm_or_followup
-from app.shared.discord.embed_limits import _split_field_chunks, normalize_embeds_for_discord
+from app.shared.discord.embed_limits import (
+    _SUMMARY_LINK_PREFIX_RE,
+    _split_field_chunks,
+    normalize_embeds_for_discord,
+    split_markdown_lines_into_field_values,
+)
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.shared.discord.report_embeds import apply_standard_report_style
 
@@ -1165,3 +1170,212 @@ def test_riassunto_links_remain_valid_after_pagination() -> None:
     assert len(embeds) >= 2
     rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
     assert link in rendered
+
+
+def test_bold_masked_link_is_not_split_by_embed_limits() -> None:
+    link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    line = f"• {link} — Mario coordina il rilascio {'utile ' * 24}".strip()
+    chunks = split_markdown_lines_into_field_values([line], limit=90)
+
+    assert len(chunks) >= 2
+    assert chunks[0].startswith(f"• {link} —")
+    assert all("**[06:28](https://discord.com/channels/1/2/123456789012345678)" not in chunk or link in chunk for chunk in chunks)
+
+
+def test_truncate_line_preserve_md_link_keeps_closing_bold_markers() -> None:
+    line = "**[06:28](https://discord.com/channels/1/2/123456789012345678)** extra"
+    truncated = _truncate_line_preserve_md_link(line, len(line) - 2)
+
+    assert truncated.startswith("**[06:28](https://discord.com/channels/1/2/123456789012345678)**")
+    assert truncated.count("**") % 2 == 0
+    assert not truncated.endswith(")")
+
+
+def test_summary_link_prefix_regex_matches_moment_line_with_barcello_dot_and_score() -> None:
+    line = "**[06:28](https://discord.com/channels/1/2/123456789012345678)** 🟢 **64** — Testo momento"
+    match = _SUMMARY_LINK_PREFIX_RE.match(line)
+
+    assert match is not None
+    assert match.group('prefix') == "**[06:28](https://discord.com/channels/1/2/123456789012345678)** 🟢 **64** — "
+    assert match.group('tail') == 'Testo momento'
+
+
+def test_riassunto_moment_timestamp_survives_full_chunking_pipeline() -> None:
+    link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    summary = SummaryResult(
+        themes=[],
+        moments=[
+            SummaryItem(
+                ts="2026-03-19T05:28:00+00:00",
+                text=("Mario coordina il rilascio " + ("con molto contesto operativo " * 40)).strip(),
+                author_id="u1",
+            )
+            for _ in range(10)
+        ],
+        quotes=[],
+        dynamics=[],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    moment_primary = {id(item): "123456789012345678" for item in summary.moments}
+    embeds = build_summary_detail_embeds(
+        profile="role1",
+        summary=summary,
+        include_names=False,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary=moment_primary,
+        quote_primary={},
+        dynamic_primary={},
+        impact_primary={},
+        moment_display={},
+        quote_display={},
+        dynamic_names={},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="BASE",
+        tier_config={"sections": ["moments"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=lambda **kwargs: f"{link} 🟢 **64** — {kwargs['moment'].text}",
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=_format_runtime_dynamic_line,
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    normalized = normalize_embeds_for_discord(embeds, max_chars=4500)
+    rendered = "\n".join(field.value for embed in normalized for field in embed.fields)
+
+    assert link in rendered
+    assert rendered.count(link) == len(summary.moments)
+
+
+def test_riassunto_quote_timestamp_survives_truncation_when_bold_linked() -> None:
+    quote_link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    summary = SummaryResult(
+        themes=[],
+        moments=[],
+        quotes=[SummaryQuote(ts="2026-03-19T05:28:00+00:00", text="placeholder", author_id="u1")],
+        dynamics=[],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    embeds = build_summary_detail_embeds(
+        profile="role2",
+        summary=summary,
+        include_names=True,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary={},
+        quote_primary={id(summary.quotes[0]): "123456789012345678"},
+        dynamic_primary={},
+        impact_primary={},
+        moment_display={},
+        quote_display={id(summary.quotes[0]): "Mario"},
+        dynamic_names={},
+        quote_texts={id(summary.quotes[0]): "Messaggio molto lungo " * 100},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="PRO",
+        tier_config={"sections": ["quotes"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=lambda **kwargs: f"{quote_link} — “{kwargs['text_override']}” — **Mario**",
+        format_dynamic_line=_format_runtime_dynamic_line,
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
+
+    assert quote_link in rendered
+    assert rendered.count(quote_link) == 1
+
+
+def test_riassunto_dynamic_timestamp_survives_normalize_pipeline() -> None:
+    link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    summary = SummaryResult(
+        themes=[],
+        moments=[],
+        quotes=[],
+        dynamics=[
+            SummaryItem(
+                ts="2026-03-19T05:28:00+00:00",
+                text=("Mario coordina il rilascio " + ("con molto contesto " * 50)).strip(),
+                author_id="u1",
+            )
+            for _ in range(12)
+        ],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    dynamic_primary = {id(item): "123456789012345678" for item in summary.dynamics}
+    embeds = build_summary_detail_embeds(
+        profile="role3",
+        summary=summary,
+        include_names=False,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary={},
+        quote_primary={},
+        dynamic_primary=dynamic_primary,
+        impact_primary={},
+        moment_display={},
+        quote_display={},
+        dynamic_names={},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="PRO MAX",
+        tier_config={"sections": ["dynamics"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=lambda **kwargs: f"{link} — {kwargs['dynamic'].text}",
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    normalized = normalize_embeds_for_discord(embeds, max_chars=4500)
+    rendered = "\n".join(field.value for embed in normalized for field in embed.fields)
+
+    assert rendered.count(link) == len(summary.dynamics)
+
+
+def test_riassunto_impact_timestamp_survives_embed_limits_chunking() -> None:
+    link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    value = "\n".join(
+        f"• {link} — 🔥 **Mario** — {'supporta il gruppo ' * 22}"
+        for _ in range(3)
+    )
+
+    chunks = _split_field_chunks(value, 180)
+    rendered = "\n".join(chunks)
+
+    assert len(chunks) >= 2
+    assert rendered.count(link) == 3

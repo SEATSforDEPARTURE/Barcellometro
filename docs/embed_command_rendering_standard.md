@@ -128,8 +128,9 @@ Semantica dei contributor/provider:
 I dettagli di `/riassunto` devono seguire la stessa grammatica visuale del renderer di `/resocontocanale` quando i dati equivalenti sono disponibili:
 
 - `🏷️ TEMI` usa hashtag espliciti (`#settimana, #video_grafici, #progetto`);
-- `📌 MOMENTI SALIENTI` mostra timestamp/link, pallino colore Barcello del momento e score in grassetto prima del testo;
-- in tutte le sezioni a bullet con timestamp (`MOMENTI SALIENTI`, frasi iconiche, dinamiche, `CHI DEGRADA`, `CHI RINVIGORISCE`) il masked link markdown del timestamp deve restare cliccabile quando esiste un messaggio sorgente valido, anche dopo split, truncation o pagination degli embed;
+- `📌 MOMENTI SALIENTI` mostra un prefisso speciale composto da timestamp/link in forma di bolded masked link (`**[HH:MM](jump_url)**`), eventuale pallino colore Barcello del momento e score in grassetto prima del testo;
+- in tutte le sezioni a bullet con timestamp (`MOMENTI SALIENTI`, frasi iconiche, dinamiche, `CHI DEGRADA`, `CHI RINVIGORISCE`) il timestamp è trattato come masked link markdown e, quando è bolded, l'intero blocco `**[label](url)**` deve restare intatto e cliccabile quando esiste un messaggio sorgente valido, anche dopo render della linea, split, truncation, normalize e pagination degli embed;
+- per i `MOMENTI SALIENTI` la pipeline link-aware deve preservare senza spezzarlo il prefisso completo `**[HH:MM](jump_url)** 🟢 **64** — ` (con emoji/score opzionali ma atomici per il layout), così il link del timestamp non perde mai il closing markdown;
 - i nomi/nickname noti vengono resi in grassetto in momenti, frasi iconiche, dinamiche e sezioni analoghe con approccio conservativo;
 - nelle sezioni MOD `🔥 CHI DEGRADA` e `🌿 CHI RINVIGORISCE` i motivi devono essere chiari, leggibili e non tecnici: una frase breve che descrive il comportamento osservato e perché è utile ai MOD;
 - il dettaglio MOD di `/riassunto` può integrare i punti Aura nella finestra temporale richiesta, mostrando almeno il saldo Aura nel periodo e, quando utile, il totale Aura della finestra senza appesantire il layout;
