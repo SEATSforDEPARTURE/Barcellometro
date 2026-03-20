@@ -88,6 +88,15 @@ def _get_subgroup(group: discord.app_commands.Group, name: str):
     raise AssertionError(f"Subgroup {name} not found")
 
 
+def _assert_standard_footer(footer_text: str | None, *, contributors: str | None = None) -> None:
+    assert footer_text is not None
+    assert footer_text.startswith("Barcellometro ")
+    assert footer_text != "Barcellometro"
+    if contributors is not None:
+        assert contributors in footer_text
+
+
+
 def test_resoconto_manual_paths_are_restored_at_top_level_and_kept_under_aura() -> None:
     ctx = SimpleNamespace(timezone=ZoneInfo("Europe/Rome"), config=SimpleNamespace(), footer=None)
     channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
@@ -136,7 +145,7 @@ def test_resoconto_status_uses_standard_embed() -> None:
         kwargs = interaction.response.send_message.await_args.kwargs
         assert "embed" in kwargs
         assert kwargs["embed"].title
-        assert kwargs["embed"].footer.text
+        _assert_standard_footer(kwargs["embed"].footer.text)
         assert not interaction.response.send_message.await_args.args
 
     asyncio.run(_run())
@@ -207,7 +216,7 @@ def test_riassunto_no_data_guardrail_uses_standard_embed() -> None:
         kwargs = interaction.followup.send.await_args.kwargs
         assert "embed" in kwargs
         assert kwargs["embed"].title
-        assert kwargs["embed"].footer.text
+        _assert_standard_footer(kwargs["embed"].footer.text)
         assert kwargs["ephemeral"] is True
 
     asyncio.run(_run())
@@ -244,7 +253,7 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
 
     kwargs = interaction.response.send_message.await_args.kwargs
     assert "embed" in kwargs
-    assert kwargs["embed"].footer.text
+    _assert_standard_footer(kwargs["embed"].footer.text)
     assert kwargs["embed"].description and "DETAIL:" not in kwargs["embed"].description.upper()
     assert "• Ho avuto un problema a costruire l’embed" in (kwargs["embed"].description or "")
 

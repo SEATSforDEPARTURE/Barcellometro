@@ -234,6 +234,7 @@ def _check_legacy_footer_service_wiring(tree: ast.AST, path: Path, report: Valid
 
 _ALLOWED_MANUAL_SET_FOOTER_FILES = {
     REPO_ROOT / "app" / "services" / "footer.py",
+    REPO_ROOT / "app" / "shared" / "discord" / "footer_pipeline.py",
 }
 
 
@@ -613,6 +614,22 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
             )
             break
 
+
+    command_footer_fallback_snippets = (
+        "from app.shared.discord.footer_pipeline import finalize_embeds",
+        "if footer_service is None:",
+        "await finalize_embeds(embeds, footer_service, default_service_name=resolved_footer_service_name)",
+    )
+    for snippet in command_footer_fallback_snippets:
+        if snippet not in command_source:
+            report.add(
+                "canonical_footer_fallback_delivery",
+                command_embeds_path.relative_to(REPO_ROOT),
+                1,
+                f"Standard command embeds must finalize the shared footer contract even when footer_service is None; missing snippet: {snippet!r}.",
+            )
+            break
+
     required_section_snippets = (
         "def _resolve_section_emoji(",
         "subtitle_emoji: str | None = None",
@@ -632,6 +649,9 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
     footer_path = REPO_ROOT / "app" / "services" / "footer.py"
     footer_source = footer_path.read_text(encoding="utf-8")
     required_footer_snippets = (
+        "FOOTER_FALLBACK_VERSION =",
+        "def render_footer_text(",
+        "brand_version = _clean(version) or FOOTER_FALLBACK_VERSION",
         "async def _resolve_footer_phrase(",
         "return service_phrases.get(service_name) or global_phrase or None",
         "parts = [brand]",
