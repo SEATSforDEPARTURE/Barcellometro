@@ -18,9 +18,9 @@ def test_channel_summary_footer_logic_uses_used_ai_output_fields() -> None:
     assert '(ai_reason == "ok" or ai_called)' not in source
 
 
-def test_footer_renderer_keeps_local_wording() -> None:
+def test_footer_renderer_forbids_local_only_wording() -> None:
     source = Path("app/services/footer.py").read_text()
-    assert "Dati elaborati in loco" in source
+    assert "Dati elaborati" + " in loco" not in source
 
 
 def test_riassunto_row_access_uses_row_safe_helper_for_records() -> None:
@@ -29,3 +29,9 @@ def test_riassunto_row_access_uses_row_safe_helper_for_records() -> None:
     assert 'record.get("content")' not in source
     assert 'record.get("author_id")' not in source
     assert 'record.get("origin")' not in source
+
+
+def test_embed_docs_document_new_footer_and_section_rules() -> None:
+    source = Path("docs/embed_command_rendering_standard.md").read_text()
+    assert "Il body non deve mai riusare la stessa icona del sottotitolo nelle sezioni" in source
+    assert "locale-only è abolita" in source

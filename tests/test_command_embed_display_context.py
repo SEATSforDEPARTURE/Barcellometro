@@ -243,6 +243,48 @@ def test_build_command_embed_skips_long_unreadable_subtitle_input() -> None:
     assert "X" * 120 not in (embed.description or "")
 
 
+def test_build_command_embed_never_reuses_subtitle_icon_for_info_sections() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="admin",
+            visual_top_level="qna",
+            subcommand_path="qna limits_show",
+            sections=[{"title": "Limits", "lines": [("max", 5)], "emoji": "ℹ️"}],
+            footer_service=None,
+        )
+    )
+
+    description = embed.description or ""
+    assert description.startswith("**ℹ️ LIMITS_SHOW**")
+    assert "**ℹ️ LIMITS**" not in description
+    assert "**📊 LIMITS**" in description
+
+
+def test_build_command_embed_never_reuses_subtitle_icon_for_standard_kinds() -> None:
+    scenarios = {
+        "success": ("✅", "**📋 RESULT**"),
+        "warning": ("⚠️", "**📋 WARNINGS**"),
+        "error": ("❌", "**🧩 ERRORS**"),
+    }
+
+    for kind, (subtitle_emoji, expected_section_header) in scenarios.items():
+        embed = asyncio.run(
+            build_command_embed(
+                top_level="admin",
+                visual_top_level="qna",
+                subcommand_path="qna status",
+                kind=kind,
+                sections=[{"title": expected_section_header.split(' ', 1)[1].strip('*'), "lines": ["done"], "emoji": subtitle_emoji}],
+                footer_service=None,
+            )
+        )
+
+        description = embed.description or ""
+        assert description.startswith(f"**{subtitle_emoji} STATUS**")
+        assert expected_section_header in description
+        assert f"**{subtitle_emoji} {expected_section_header.split(' ', 1)[1].strip('*')}**" not in description
+
+
 def test_build_command_embed_uses_official_kind_mapping_for_all_standard_types() -> None:
     scenarios = {
         "success": ("✅", 0x57F287),

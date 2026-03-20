@@ -14,6 +14,7 @@ Tutti gli embed prodotti dai percorsi standardizzati (`send_standard_response`, 
 - Il builder standard deve mantenere sempre una separazione visiva stabile tra sottotitolo e body: `sottotitolo`, riga vuota, body.
 - Il sottotitolo usa sempre l’icona semantica ufficiale del tipo embed, non icone locali di sezione.
 - Il body non deve ripetere come primo marker la stessa icona già usata nel sottotitolo.
+- Il body non deve mai riusare la stessa icona del sottotitolo nelle sezioni: se una sezione la erediterebbe o la riceve esplicitamente, il builder centralizzato la sostituisce con un fallback semantico o neutro non ridondante.
 - Footer, colori e metadata devono passare dalla pipeline centralizzata.
 
 ## Standard ufficiale tipo embed → icona / colore
@@ -95,6 +96,7 @@ In pratica:
 - I renderer standardizzati deduplicano nel body i campi identitari già promossi nel sottotitolo (`user`, `tier`, `quantity`, `unit`, `scope`, `schedule_id`, ecc.) quando non aggiungono nuovo contesto.
 - I bullet narrativi di primo livello usano frasi pulite: il tono arriva da colore/icona/tipo embed, non da etichette testuali.
 - Se una riga body arriva con la stessa emoji del sottotitolo (per esempio `✅` in un embed `success`), il builder la ripulisce centralmente per evitare duplicazioni visive.
+- Le intestazioni di sezione passano tutte dalla stessa deduplica centrale: le emoji specializzate già sensate restano intatte se diverse dal sottotitolo, ma non è mai consentito un header sezione con la stessa faccina del sottotitolo.
 
 ## Footer centralizzato
 
@@ -102,7 +104,7 @@ Quando è disponibile `FooterService`, gli embed standardizzati non devono ferma
 
 1. versione bot;
 2. frase del footer service;
-3. parte tecnica finale (`Dati elaborati con ...`, `Dati elaborati in loco`, eventuale `fallback locale`).
+3. parte tecnica finale `Dati elaborati con ...` solo quando esistono davvero contributor/provider/model da dichiarare; se non ci sono contributor, il segmento tecnico non compare.
 
 Esempi:
 
@@ -110,6 +112,8 @@ Esempi:
 - dopo: `Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o`
 
 Se la frase del footer non esiste, il footer resta ben formato e concatena solo gli elementi disponibili, senza separatori doppi.
+
+La vecchia dicitura tecnica locale-only è abolita in tutto il progetto: non deve più comparire in codice, test, documentazione o footer renderizzati. Il flag `used_local_processing` continua a poter aggiungere `e fallback locale` solo ai footer che hanno già un segmento `Dati elaborati con ...` basato su contributor reali.
 
 ## Quali input entrano nel sottotitolo
 
