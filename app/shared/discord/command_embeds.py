@@ -87,14 +87,14 @@ SECTION_EMOJIS: dict[str, str] = {
 }
 
 KIND_EMOJIS: dict[CommandKind, str] = {
-    "info": "🛠️",
+    "info": "ℹ️",
     "success": "✅",
     "warning": "⚠️",
     "error": "❌",
 }
 
 KIND_COLORS: dict[CommandKind, int] = {
-    "info": 0x5865F2,
+    "info": 0x3498DB,
     "success": 0x57F287,
     "warning": 0xFEE75C,
     "error": 0xED4245,
@@ -158,6 +158,17 @@ _IDENTITY_LABELS = {
     "id",
     "id_or_name",
     "template_name",
+}
+_FOOTER_SERVICE_FALLBACKS: dict[str, str] = {
+    "ask": "qna",
+    "domanda": "qna",
+    "resocontocanale": "resoconto",
+    "resocontoserver": "resoconto",
+    "moderazione": "status",
+    "roles": "status",
+    "settings": "status",
+    "permissions": "status",
+    "commandguard": "status",
 }
 
 
@@ -225,6 +236,19 @@ def _clean_narrative_text(value: Any) -> str:
     return text
 
 
+def _strip_duplicate_kind_emoji(text: str, *, kind: CommandKind) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return cleaned
+    kind_emoji = KIND_EMOJIS[kind]
+    patterns = (
+        rf"^(?P<prefix>•\s*)?{re.escape(kind_emoji)}\s*[:\-–—]?\s*",
+    )
+    for pattern in patterns:
+        cleaned = re.sub(pattern, lambda match: match.group("prefix") or "", cleaned, count=1)
+    return cleaned.strip()
+
+
 def _has_entity_argument(raw_parameters: Sequence[object], *, labels: set[str]) -> bool:
     for parameter in raw_parameters:
         if parameter is None:
@@ -277,6 +301,7 @@ def _format_primary_bullet(
     *,
     display_context: DisplayCommandContext,
     raw_subtitle_parameters: Sequence[object],
+    kind: CommandKind,
     line_formatter: Callable[[str, Any], str],
 ) -> str | None:
     if _should_skip_primary_line(
@@ -288,8 +313,8 @@ def _format_primary_bullet(
         return None
     normalized_label = _normalize_command_token(label)
     if normalized_label in _NARRATIVE_LABELS:
-        return f"• {_clean_narrative_text(value)}"
-    return line_formatter(label, value)
+        return _strip_duplicate_kind_emoji(f"• {_clean_narrative_text(value)}", kind=kind)
+    return _strip_duplicate_kind_emoji(line_formatter(label, value), kind=kind)
 
 
 def humanize_key(key: str) -> str:
@@ -467,7 +492,7 @@ def normalize_display_command_context(
             subtitle_parameter_parts.insert(0, temporal_tail)
 
     visual_subtitle = normalize_command_path(*subtitle_parts)
-    resolved_subtitle_emoji = subcommand_emoji or get_section_emoji(subtitle_parts[-1] if subtitle_parts else None, kind=kind)
+    resolved_subtitle_emoji = subcommand_emoji or KIND_EMOJIS[kind]
     resolved_title_emoji = top_level_emoji or get_command_emoji(inferred_visual_top_level or raw_top_level)
 
     return DisplayCommandContext(
@@ -496,8 +521,11 @@ def stringify_value(value: Any) -> str:
     return str(value)
 
 
-def format_bullet(label: str, value: Any) -> str:
-    return f"• {humanize_key(label)}: **{stringify_value(value)}**"
+def format_bullet(label: str, value: Any, *, kind: CommandKind = "info") -> str:
+    rendered_value = stringify_value(value)
+    if isinstance(value, str):
+        rendered_value = _strip_duplicate_kind_emoji(rendered_value, kind=kind)
+    return _strip_duplicate_kind_emoji(f"• {humanize_key(label)}: **{rendered_value}**", kind=kind)
 
 
 def build_section(
@@ -512,9 +540,10 @@ def build_section(
     rendered = [f"**{header_emoji} {title.upper()}**"]
     for line in lines:
         if isinstance(line, str):
-            rendered.append(line)
+            rendered.append(_strip_duplicate_kind_emoji(line, kind=kind))
         else:
-            rendered.append((line_formatter or format_bullet)(line[0], line[1]))
+            formatter = line_formatter or (lambda label, value: format_bullet(label, value, kind=kind))
+            rendered.append(_strip_duplicate_kind_emoji(formatter(line[0], line[1]), kind=kind))
     return "\n".join(rendered)
 
 
@@ -523,6 +552,27 @@ async def _resolve_brand_text(footer_service: FooterService | None) -> str:
         return "Barcellometro"
     version = await footer_service.get_version()
     return f"Barcellometro {version}" if version else "Barcellometro"
+
+
+def _resolve_footer_service_name(
+    *,
+    footer_service_name: str | None,
+    visual_top_level: str | None,
+    top_level: str,
+) -> str:
+    explicit = _normalize_command_token(footer_service_name)
+    if explicit:
+        return explicit
+    for candidate in (
+        _normalize_command_token(visual_top_level),
+        _normalize_command_token(top_level),
+    ):
+        if not candidate:
+            continue
+        mapped = _FOOTER_SERVICE_FALLBACKS.get(candidate, candidate)
+        if mapped:
+            return mapped
+    return "status"
 
 
 async def build_command_embeds(
@@ -558,7 +608,7 @@ async def build_command_embeds(
     raw_subtitle_parameters = [*(subtitle_args or ()), *(relevant_parameters or ())]
     blocks: list[str] = []
     header = f"**{display_context.subtitle_emoji} {display_context.visual_subtitle}**" if display_context.visual_subtitle else ""
-    resolved_line_formatter = line_formatter or format_bullet
+    resolved_line_formatter = line_formatter or (lambda label, value: format_bullet(label, value, kind=kind))
     rendered_lines = [
         rendered
         for label, value in lines or []
@@ -567,14 +617,15 @@ async def build_command_embeds(
             value,
             display_context=display_context,
             raw_subtitle_parameters=raw_subtitle_parameters,
+            kind=kind,
             line_formatter=resolved_line_formatter,
         )) is not None
     ]
-    if header and compact_lines and rendered_lines:
-        blocks.append("\n".join([header, *rendered_lines]))
+    if header:
+        blocks.append(header)
+    if compact_lines and rendered_lines:
+        blocks.append("\n".join(rendered_lines))
     else:
-        if header:
-            blocks.append(header)
         blocks.extend(rendered_lines)
     for section in sections or []:
         if isinstance(section, dict):
@@ -615,19 +666,33 @@ async def build_command_embeds(
         chunks.append(current)
 
     brand_text = await _resolve_brand_text(footer_service)
+    resolved_footer_service_name = _resolve_footer_service_name(
+        footer_service_name=footer_service_name,
+        visual_top_level=visual_top_level or display_context.visual_top_level,
+        top_level=top_level,
+    )
     embeds: list[discord.Embed] = []
     color = get_semantic_color(kind)
     for chunk in chunks or [blocks[0]]:
         embed = discord.Embed(title=title, description=chunk, color=color)
         if footer_mode == "minimal":
-            attach_minimal_footer(embed, text=brand_text)
+            if footer_service is None:
+                attach_minimal_footer(embed, text=brand_text)
+            else:
+                attach_footer_meta(
+                    embed,
+                    service_name=resolved_footer_service_name,
+                    used_local_processing=True,
+                )
         elif footer_mode == "meta":
-            attach_footer_meta(
-                embed,
-                service_name=footer_service_name or "status",
-                used_local_processing=True,
-                minimal=True,
-            )
+            if footer_service is None:
+                attach_minimal_footer(embed, text=brand_text)
+            else:
+                attach_footer_meta(
+                    embed,
+                    service_name=resolved_footer_service_name,
+                    used_local_processing=True,
+                )
         embeds.append(embed)
     return embeds
 
@@ -804,5 +869,5 @@ async def send_legacy_standard_response(
         footer_mode="meta",
         footer_service_name=service_name,
         top_level_emoji=_LEGACY_TOP_LEVEL_EMOJIS.get(top_level.strip().lower(), "🧭"),
-        subcommand_emoji=context_emoji,
+        subcommand_emoji=KIND_EMOJIS[tone],
     )

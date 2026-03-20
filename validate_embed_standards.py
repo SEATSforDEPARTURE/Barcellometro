@@ -209,6 +209,12 @@ def _literal_str(node: ast.AST | None) -> str | None:
     return None
 
 
+def _literal_int(node: ast.AST | None) -> int | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return node.value
+    return None
+
+
 def _contains_name(node: ast.AST | None, target_names: set[str]) -> bool:
     if node is None:
         return False
@@ -216,6 +222,30 @@ def _contains_name(node: ast.AST | None, target_names: set[str]) -> bool:
         if isinstance(child, ast.Name) and child.id in target_names:
             return True
     return False
+
+
+def _dict_literal_values(tree: ast.AST, name: str) -> dict[str, str | int]:
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, (ast.AnnAssign, ast.Assign)):
+            continue
+        targets: list[ast.expr] = [node.target] if isinstance(node, ast.AnnAssign) else list(node.targets)
+        if not any(isinstance(target, ast.Name) and target.id == name for target in targets):
+            continue
+        if not isinstance(node.value, ast.Dict):
+            return {}
+        parsed: dict[str, str | int] = {}
+        for key_node, value_node in zip(node.value.keys, node.value.values, strict=False):
+            key = _literal_str(key_node)
+            if key is None:
+                continue
+            value = _literal_str(value_node)
+            if value is None:
+                value = _literal_int(value_node)
+            if value is None:
+                continue
+            parsed[key] = value
+        return parsed
+    return {}
 
 
 def _is_command_decorator(decorator: ast.AST) -> bool:
@@ -477,6 +507,72 @@ def _check_manual_subtitle_concatenation(tree: ast.AST, file_path: Path, report:
             )
 
 
+def _check_canonical_embed_configuration(report: ValidationReport) -> None:
+    command_embeds_path = REPO_ROOT / "app" / "shared" / "discord" / "command_embeds.py"
+    command_source = command_embeds_path.read_text(encoding="utf-8")
+    command_tree = ast.parse(command_source, filename=str(command_embeds_path))
+
+    expected_emojis = {
+        "success": "✅",
+        "warning": "⚠️",
+        "error": "❌",
+        "info": "ℹ️",
+    }
+    expected_colors = {
+        "success": 0x57F287,
+        "warning": 0xFEE75C,
+        "error": 0xED4245,
+        "info": 0x3498DB,
+    }
+    kind_emojis = _dict_literal_values(command_tree, "KIND_EMOJIS")
+    kind_colors = _dict_literal_values(command_tree, "KIND_COLORS")
+
+    for key, expected in expected_emojis.items():
+        actual = kind_emojis.get(key)
+        if actual != expected:
+            report.add(
+                "canonical_embed_kind_mapping",
+                command_embeds_path.relative_to(REPO_ROOT),
+                1,
+                f"KIND_EMOJIS['{key}'] must be {expected!r}, found {actual!r}.",
+            )
+    for key, expected in expected_colors.items():
+        actual = kind_colors.get(key)
+        if actual != expected:
+            report.add(
+                "canonical_embed_kind_mapping",
+                command_embeds_path.relative_to(REPO_ROOT),
+                1,
+                f"KIND_COLORS['{key}'] must be {hex(expected)}, found {actual!r}.",
+            )
+
+    if "resolved_subtitle_emoji = subcommand_emoji or KIND_EMOJIS[kind]" not in command_source:
+        report.add(
+            "canonical_embed_kind_mapping",
+            command_embeds_path.relative_to(REPO_ROOT),
+            1,
+            "Standard command embeds must derive the subtitle icon from KIND_EMOJIS[kind].",
+        )
+
+    footer_path = REPO_ROOT / "app" / "services" / "footer.py"
+    footer_source = footer_path.read_text(encoding="utf-8")
+    required_footer_snippets = (
+        "parts = [brand]",
+        "if phrase:",
+        "parts.append(phrase)",
+        "parts.append(processing)",
+    )
+    for snippet in required_footer_snippets:
+        if snippet not in footer_source:
+            report.add(
+                "canonical_footer_order",
+                footer_path.relative_to(REPO_ROOT),
+                1,
+                f"Footer renderer must keep ordered parts version → phrase → processing; missing snippet: {snippet!r}.",
+            )
+            break
+
+
 def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) -> ValidationReport:
     report = ValidationReport()
     command_roots = {
@@ -496,6 +592,7 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)
+    _check_canonical_embed_configuration(report)
     return report
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+from app.services.footer import get_footer_meta
 from app.shared.discord.command_embeds import build_command_embed, normalize_display_command_context
 
 
@@ -65,7 +66,9 @@ def test_build_command_embed_uses_visual_top_level_for_moderazione() -> None:
     )
 
     assert embed.title == "🛠️ MODERAZIONE"
-    assert embed.description.startswith("**🛠️ USERS TEMPBAN_LIST**")
+    assert embed.description.startswith("**ℹ️ USERS TEMPBAN_LIST**")
+    assert get_footer_meta(embed) is not None
+    assert get_footer_meta(embed).service_name == "status"
 
 
 def test_build_command_embed_omits_top_level_duplication_for_parameterized_command() -> None:
@@ -81,7 +84,7 @@ def test_build_command_embed_omits_top_level_duplication_for_parameterized_comma
     )
 
     assert embed.title == "❓ QNA"
-    assert embed.description.startswith("**🛠️ LIMITS_SHOW BASE**")
+    assert embed.description.startswith("**ℹ️ LIMITS_SHOW BASE**")
     assert "QNA LIMITS_SHOW BASE" not in (embed.description or "")
 
 
@@ -98,7 +101,7 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
     )
 
     assert embed.title == "❓ QNA"
-    assert embed.description.startswith("**🛠️ BONUS_SHOW MARIO ROSSI**")
+    assert embed.description.startswith("**ℹ️ BONUS_SHOW MARIO ROSSI**")
     assert "<@123>" not in (embed.description or "")
 
 
@@ -113,7 +116,7 @@ def test_build_command_embed_formats_period_subtitle_for_riassunto_ultimi() -> N
     )
 
     assert embed.title == "🗒️ RIASSUNTO"
-    assert embed.description.startswith("**🛠️ ULTIMA ORA**")
+    assert embed.description.startswith("**ℹ️ ULTIMA ORA**")
 
 
 def test_build_command_embed_formats_period_subtitle_for_attivita_ultimi() -> None:
@@ -128,7 +131,7 @@ def test_build_command_embed_formats_period_subtitle_for_attivita_ultimi() -> No
     )
 
     assert embed.title == "📈 ATTIVITA"
-    assert embed.description.startswith("**🛠️ ULTIMO MINUTO**")
+    assert embed.description.startswith("**ℹ️ ULTIMO MINUTO**")
 
 
 def test_build_command_embed_formats_range_subtitle_centrally() -> None:
@@ -142,7 +145,7 @@ def test_build_command_embed_formats_range_subtitle_centrally() -> None:
     )
 
     assert embed.title == "🗒️ RIASSUNTO"
-    assert embed.description.startswith("**🛠️ DAL 20/03 10:15 AL 21/03 11:45**")
+    assert embed.description.startswith("**ℹ️ DAL 20/03 10:15 AL 21/03 11:45**")
 
 
 def test_build_command_embed_uses_real_top_level_for_resocontocanale() -> None:
@@ -155,7 +158,7 @@ def test_build_command_embed_uses_real_top_level_for_resocontocanale() -> None:
     )
 
     assert embed.title == "📓 RESOCONTOCANALE"
-    assert embed.description.startswith("**🛠️ STATUS**")
+    assert embed.description.startswith("**ℹ️ STATUS**")
     assert "RESOCONTO STATUS" not in (embed.description or "")
 
 
@@ -199,7 +202,7 @@ def test_build_command_embed_deduplicates_identity_lines_already_in_subtitle() -
     )
 
     description = embed.description or ""
-    assert description.startswith("**🛠️ BONUS_SHOW MARIO**")
+    assert description.startswith("**ℹ️ BONUS_SHOW MARIO**")
     assert "• User:" not in description
     assert "<@123>" not in description
     assert "• Bonus: **3**" in description
@@ -218,7 +221,7 @@ def test_build_command_embed_deduplicates_tier_line_already_in_subtitle() -> Non
     )
 
     description = embed.description or ""
-    assert description.startswith("**🛠️ LIMITS_SHOW BASE**")
+    assert description.startswith("**ℹ️ LIMITS_SHOW BASE**")
     assert "Tier: **base**" not in description
     assert "• Limit: **5**" in description
 
@@ -236,5 +239,62 @@ def test_build_command_embed_skips_long_unreadable_subtitle_input() -> None:
     )
 
     assert embed.title == "💬 FRASI"
-    assert embed.description.startswith("**🛠️ TEMPLATE_USER_SET**")
+    assert embed.description.startswith("**ℹ️ TEMPLATE_USER_SET**")
     assert "X" * 120 not in (embed.description or "")
+
+
+def test_build_command_embed_uses_official_kind_mapping_for_all_standard_types() -> None:
+    scenarios = {
+        "success": ("✅", 0x57F287),
+        "warning": ("⚠️", 0xFEE75C),
+        "error": ("❌", 0xED4245),
+        "info": ("ℹ️", 0x3498DB),
+    }
+
+    for kind, (emoji, color) in scenarios.items():
+        embed = asyncio.run(
+            build_command_embed(
+                top_level="admin",
+                visual_top_level="qna",
+                subcommand_path="qna status",
+                kind=kind,
+                footer_service=None,
+            )
+        )
+
+        assert embed.description == f"**{emoji} STATUS**"
+        assert embed.colour.value == color
+
+
+def test_build_command_embed_keeps_blank_line_between_subtitle_and_body() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="admin",
+            visual_top_level="qna",
+            subcommand_path="qna status",
+            lines=[("detail", "Prima riga."), ("detail", "Seconda riga.")],
+            compact_lines=True,
+            footer_service=None,
+        )
+    )
+
+    assert embed.description == "**ℹ️ STATUS**\n\n• Prima riga.\n• Seconda riga."
+
+
+def test_build_command_embed_strips_duplicate_kind_emoji_from_body_lines() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="admin",
+            visual_top_level="qna",
+            subcommand_path="qna set",
+            kind="success",
+            lines=[("detail", "✅ Operazione completata."), ("status", "✅ enabled")],
+            footer_service=None,
+        )
+    )
+
+    description = embed.description or ""
+    assert description.startswith("**✅ SET**\n\n")
+    assert "• ✅ Operazione completata." not in description
+    assert "• Operazione completata." in description
+    assert "• Status: **enabled**" in description
