@@ -30,7 +30,7 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
         scheduler = SimpleNamespace(is_valid_embed_color=lambda _c: True)
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
-        group = discord.app_commands.Group(name="bm", description="x")
+        group = discord.app_commands.Group(name="admin", description="x")
         campagne = discord.app_commands.Group(name="campagne", description="x")
         qna = discord.app_commands.Group(name="qna", description="x")
         insights = discord.app_commands.Group(name="insights", description="x")
@@ -92,7 +92,7 @@ def test_prompt_list_shows_one_shot_label() -> None:
         scheduler = SimpleNamespace(is_valid_embed_color=lambda _c: True)
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
-        group = discord.app_commands.Group(name="bm", description="x")
+        group = discord.app_commands.Group(name="admin", description="x")
         campagne = discord.app_commands.Group(name="campagne", description="x")
         qna = discord.app_commands.Group(name="qna", description="x")
         insights = discord.app_commands.Group(name="insights", description="x")
@@ -144,7 +144,7 @@ def test_prompt_show_resolves_schedule_by_name() -> None:
         scheduler = SimpleNamespace(is_valid_embed_color=lambda _c: True)
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
-        group = discord.app_commands.Group(name="bm", description="x")
+        group = discord.app_commands.Group(name="admin", description="x")
         campagne = discord.app_commands.Group(name="campagne", description="x")
         qna = discord.app_commands.Group(name="qna", description="x")
         insights = discord.app_commands.Group(name="insights", description="x")
@@ -187,7 +187,7 @@ def test_prompt_show_rejects_ambiguous_schedule_name() -> None:
         scheduler = SimpleNamespace(is_valid_embed_color=lambda _c: True)
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
-        group = discord.app_commands.Group(name="bm", description="x")
+        group = discord.app_commands.Group(name="admin", description="x")
         campagne = discord.app_commands.Group(name="campagne", description="x")
         qna = discord.app_commands.Group(name="qna", description="x")
         insights = discord.app_commands.Group(name="insights", description="x")

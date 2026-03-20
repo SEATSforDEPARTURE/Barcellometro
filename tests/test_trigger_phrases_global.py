@@ -369,7 +369,7 @@ def test_db_global_phrase_state_and_color_column() -> None:
 def test_register_triggers_keeps_frasi_top_level() -> None:
     from discord import app_commands
 
-    group = app_commands.Group(name="bm", description="x")
+    group = app_commands.Group(name="admin", description="x")
     ctx = SimpleNamespace(
         database=Mock(),
         entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -526,7 +526,7 @@ def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
         db = DatabaseService(":memory:")
         await db.connect()
         await db.initialize_schema()
-        group = app_commands.Group(name="bm", description="x")
+        group = app_commands.Group(name="admin", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -590,7 +590,7 @@ def test_frasi_edit_updates_in_place_and_preserves_stats() -> None:
         phrase_id = int(row_before["id"])
         await db.increment_phrase_user_stats(phrase_id, "u-1", "2026-01-01T10:00:00+00:00", "m1")
 
-        group = app_commands.Group(name="bm", description="x")
+        group = app_commands.Group(name="admin", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -658,7 +658,7 @@ def test_frasi_edit_reset_fields_and_missing_id() -> None:
         assert row_before is not None
         phrase_id = int(row_before["id"])
 
-        group = app_commands.Group(name="bm", description="x")
+        group = app_commands.Group(name="admin", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -863,7 +863,7 @@ def test_frasi_milestone_commands() -> None:
         await db.increment_phrase_user_stats(phrase_id, "10", "2026-01-01T11:00:00+00:00", "m2")
         await db.increment_phrase_user_stats(phrase_id, "11", "2026-01-01T12:00:00+00:00", "m3")
 
-        group = app_commands.Group(name="bm", description="x")
+        group = app_commands.Group(name="admin", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -912,7 +912,7 @@ def test_template_set_user_command_is_not_registered() -> None:
         db = DatabaseService(":memory:")
         await db.connect()
         await db.initialize_schema()
-        group = app_commands.Group(name="bm", description="x")
+        group = app_commands.Group(name="admin", description="x")
         ctx = SimpleNamespace(
             database=db,
             entitlements=SimpleNamespace(resolve_profile=AsyncMock(return_value="mod")),
@@ -927,3 +927,52 @@ def test_template_set_user_command_is_not_registered() -> None:
         await db.close()
 
     asyncio.run(_run())
+
+
+def test_register_triggers_permission_candidates_prefer_admin_and_keep_bm_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    from discord import app_commands
+
+    seen: list[tuple[str, tuple[str, ...]]] = []
+
+    async def _check_permission(interaction, command_name, ctx, *, legacy_aliases=()):
+        seen.append((command_name, tuple(legacy_aliases)))
+        return True
+
+    monkeypatch.setattr(trigger_commands_module, "check_permission", _check_permission)
+
+    class _Db:
+        async def list_message_campaigns(self, guild_id: str, include_disabled: bool = True):
+            _ = guild_id, include_disabled
+            return []
+
+    admin_group = app_commands.Group(name="admin", description="x")
+    campagne_group = app_commands.Group(name="campagne", description="x")
+    qna_group = app_commands.Group(name="qna", description="x")
+    insights_group = app_commands.Group(name="insights", description="x")
+    ctx = SimpleNamespace(database=_Db(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
+
+    register_triggers(admin_group, campagne_group, qna_group, insights_group, ctx)
+    prompt_group = next(cmd for cmd in campagne_group.commands if isinstance(cmd, app_commands.Group) and cmd.name == "prompt")
+    prompt_show = next(cmd for cmd in prompt_group.commands if cmd.name == "schedule_show")
+
+    async def _get_message_campaign(self, guild_id, id):
+        return None
+
+    ctx.database.get_message_campaign = types.MethodType(_get_message_campaign, ctx.database)
+    interaction = SimpleNamespace(
+        guild_id=1,
+        channel_id=2,
+        command=SimpleNamespace(qualified_name="bm prompt schedule_show"),
+        data={"name": "schedule_show"},
+        response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
+    )
+    asyncio.run(prompt_show.callback(interaction, "5"))
+
+    assert len(seen) == 1
+    assert seen[0][0] == "admin.campagne.prompt.schedule_show"
+    assert "campagne.prompt.schedule_show" in seen[0][1]
+    assert "bm.campagne.prompt.schedule_show" in seen[0][1]
+    assert "prompt.schedule_show" in seen[0][1]
+    assert "admin.prompt.schedule_show" in seen[0][1]
+    assert "bm.prompt.schedule_show" in seen[0][1]
+    assert "campagne.prompt.entry_show" in seen[0][1]
