@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable
 
 import discord
@@ -29,6 +30,28 @@ def _truncate_text(s: str | None, limit: int) -> str:
     return s[: max(0, limit - 1)] + "…"
 
 
+def _truncate_line_preserve_md_link(line: str, line_limit: int) -> str:
+    if len(line) <= line_limit:
+        return line
+    if line_limit <= 1:
+        return _truncate_text(line, line_limit)
+    separator = " — "
+    if separator in line:
+        prefix, _, tail = line.partition(separator)
+        fixed_prefix = f"{prefix}{separator}"
+        if len(fixed_prefix) >= line_limit:
+            return _truncate_text(line, line_limit)
+        return fixed_prefix + _truncate_text(tail, line_limit - len(fixed_prefix))
+    link_match = re.search(r"\[[^\]]+\]\([^\)]+\)", line)
+    if link_match:
+        prefix = line[: link_match.end()]
+        suffix = line[link_match.end() :]
+        if len(prefix) >= line_limit:
+            return _truncate_text(line, line_limit)
+        return prefix + _truncate_text(suffix, line_limit - len(prefix))
+    return _truncate_text(line, line_limit)
+
+
 def _split_lines_into_field_values(lines: list[str], limit: int = 1024) -> list[str]:
     chunks: list[str] = []
     current: list[str] = []
@@ -37,6 +60,8 @@ def _split_lines_into_field_values(lines: list[str], limit: int = 1024) -> list[
         line = str(raw or "")
         if not line:
             continue
+        if len(line) > limit:
+            line = _truncate_line_preserve_md_link(line, limit)
         line_len = len(line) + (1 if current else 0)
         if current and current_len + line_len > limit:
             chunks.append("\n".join(current))
@@ -219,8 +244,16 @@ def build_summary_detail_embeds(
     def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
         out: list[discord.Embed] = []
         current = build_shell()
+        bullet_sections = {
+            MOMENTS_FIELD_NAME,
+            "💬 FRASI ICONICHE",
+            "🔁 DINAMICHE INTERESSANTI",
+            "🔥 CHI DEGRADA",
+            "🌿 CHI RINVIGORISCE",
+            "🧭 CONSIGLI PERSONALIZZATI",
+        }
         for name, value, _ in section_list:
-            pieces = _split_lines_into_field_values(value.split("\n"), 1024) if name == MOMENTS_FIELD_NAME else _split_field_chunks(value, 1024)
+            pieces = _split_lines_into_field_values(value.split("\n"), 1024) if name in bullet_sections else _split_field_chunks(value, 1024)
             for idx, piece in enumerate(pieces):
                 field_name = name if idx == 0 else f"{name} (cont.)"
                 candidate = _clone_embed_shell(current)

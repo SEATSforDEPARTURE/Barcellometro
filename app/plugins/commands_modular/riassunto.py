@@ -39,11 +39,203 @@ from app.shared.discord.report_embeds import apply_standard_report_style
 from app.renderers.channel_summary import MessageMeta, _barcello_emoji_from_color, _bold_known_names
 from app.renderers.detail_embeds import build_summary_detail_embeds
 from app.services.channel_summary_service import compute_moment_barcello_map
+from app.services.content_summary_service import _parse_ts
 
 logger = logging.getLogger(__name__)
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MOMENTS_FIELD_NAME = "📌 MOMENTI SALIENTI"
+
+
+def _is_valid_summary_snowflake(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(re.fullmatch(r"\d{17,20}", str(value).strip()))
+
+
+def _jump_link(guild_id: int, channel_id: int, message_id: str) -> str:
+    return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
+
+
+def _is_valid_discord_jump_url(url: str | None) -> bool:
+    if not url:
+        return False
+    raw = str(url).strip()
+    if not raw.startswith(("https://discord.com/channels/", "https://discordapp.com/channels/")):
+        return False
+    return bool(
+        re.fullmatch(
+            r"https://(?:discord\.com|discordapp\.com)/channels/\d{17,20}/\d{17,20}/\d{17,20}",
+            raw,
+        )
+    )
+
+
+def _resolve_jump_url(
+    *,
+    guild_id: int,
+    channel_id: int,
+    message_ref: str | None,
+) -> str | None:
+    if not message_ref:
+        return None
+    candidate = str(message_ref).strip()
+    if _is_valid_discord_jump_url(candidate):
+        return candidate
+    if _is_valid_summary_snowflake(candidate):
+        return _jump_link(guild_id, channel_id, candidate)
+    logger.debug("riassunto: discarded non-url message_ref for time link ref=%r", candidate[:80])
+    return None
+
+
+def _parse_summary_iso_ts(ts: str | None) -> datetime | None:
+    return _parse_ts(ts)
+
+
+def _format_italian_ts(ts: str | None) -> str:
+    parsed = _parse_summary_iso_ts(ts)
+    if parsed is None:
+        return ""
+    local = parsed.astimezone(ROME_TZ)
+    return local.strftime("%d/%m/%Y %H:%M")
+
+
+def _format_italian_time(ts: str | None, *, include_date: bool = False) -> str:
+    parsed = _parse_summary_iso_ts(ts)
+    if parsed is None:
+        return ""
+    local = parsed.astimezone(ROME_TZ)
+    return local.strftime("%d/%m %H:%M") if include_date else local.strftime("%H:%M")
+
+
+def _format_summary_time_link(
+    ts: str | None,
+    message_ref: str | None,
+    *,
+    guild_id: int,
+    channel_id: int,
+    placeholder: str = "--:--",
+    in_call: bool = False,
+    include_date: bool = False,
+) -> str:
+    time_label = _format_italian_time(ts, include_date=include_date) or placeholder
+    jump = _resolve_jump_url(guild_id=guild_id, channel_id=channel_id, message_ref=message_ref)
+    time_link = f"**[{time_label}]({jump})**" if jump else f"**{time_label}**"
+    return f"{time_link} 📞" if in_call else time_link
+
+
+def _format_signed_points(value: int | None) -> str | None:
+    if value is None:
+        return None
+    number = int(value)
+    return f"+{number}" if number > 0 else str(number)
+
+
+async def _resolve_summary_primary_ref(
+    database: Any,
+    *,
+    item_type: str,
+    channel_id: str,
+    start_ts: str,
+    end_ts: str,
+    ts: str | None,
+    explicit_refs: list[str] | None,
+) -> str | None:
+    normalized_candidates: list[str] = []
+    seen: set[str] = set()
+    for raw_ref in explicit_refs or []:
+        candidate = str(raw_ref or "").strip()
+        if not _is_valid_summary_snowflake(candidate) or candidate in seen:
+            continue
+        seen.add(candidate)
+        normalized_candidates.append(candidate)
+
+    had_explicit_ref = bool(normalized_candidates)
+    resolved: str | None = None
+    used_nearest_fallback = False
+
+    for candidate in normalized_candidates:
+        if await database.message_exists_in_channel(channel_id=channel_id, message_id=candidate):
+            resolved = candidate
+            break
+
+    if not resolved:
+        parsed = _parse_summary_iso_ts(ts)
+        target_ts = parsed.isoformat() if parsed is not None else None
+        if target_ts is None:
+            start_dt = _parse_summary_iso_ts(start_ts)
+            end_dt = _parse_summary_iso_ts(end_ts)
+            if start_dt and end_dt:
+                target_ts = (start_dt + (end_dt - start_dt) / 2).isoformat()
+            else:
+                target_ts = start_ts
+        nearest = await database.fetch_nearest_message_id_in_range(
+            channel_id=channel_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            ts=target_ts,
+        )
+        nearest_candidate = str(nearest or "").strip()
+        if _is_valid_summary_snowflake(nearest_candidate) and await database.message_exists_in_channel(
+            channel_id=channel_id,
+            message_id=nearest_candidate,
+        ):
+            resolved = nearest_candidate
+            used_nearest_fallback = True
+
+    logger.debug(
+        "riassunto: link_resolution item_type=%s had_explicit_ref=%s used_nearest_fallback=%s resolved=%s",
+        item_type,
+        str(had_explicit_ref).lower(),
+        str(used_nearest_fallback).lower(),
+        resolved or "none",
+    )
+    return resolved if _is_valid_summary_snowflake(resolved) else None
+
+
+async def _enrich_summary_impacts_with_aura(
+    database: Any,
+    *,
+    guild_id: str,
+    channel_id: str,
+    start_ts: str,
+    end_ts: str,
+    degrade: list[SummaryImpact],
+    invigorate: list[SummaryImpact],
+) -> None:
+    if not hasattr(database, "fetch_aura_ledger_events"):
+        return
+    user_ids = {str(item.author_id) for item in (degrade + invigorate) if str(item.author_id or "").strip()}
+    if not user_ids:
+        return
+    per_user: dict[str, dict[str, int]] = {}
+    for user_id in user_ids:
+        try:
+            events = await database.fetch_aura_ledger_events(guild_id, user_id, start_ts, end_ts)
+        except Exception:
+            logger.debug("riassunto: aura enrichment unavailable user_id=%s", user_id, exc_info=True)
+            continue
+        channel_events = [event for event in events if str(event.get("channel_id") or "") == channel_id]
+        period_total = sum(int(event.get("delta_points") or 0) for event in channel_events)
+        period_positive = sum(max(int(event.get("delta_points") or 0), 0) for event in channel_events)
+        period_negative = sum(min(int(event.get("delta_points") or 0), 0) for event in channel_events)
+        per_user[user_id] = {
+            "period_total": period_total,
+            "period_positive": period_positive,
+            "period_negative": period_negative,
+        }
+    for impact in degrade:
+        user_data = per_user.get(str(impact.author_id or ""))
+        if not user_data:
+            continue
+        impact.aura_points_period = user_data["period_negative"]
+        impact.aura_total_points = user_data["period_total"]
+    for impact in invigorate:
+        user_data = per_user.get(str(impact.author_id or ""))
+        if not user_data:
+            continue
+        impact.aura_points_period = user_data["period_positive"]
+        impact.aura_total_points = user_data["period_total"]
 
 
 def _italian_recent_period_phrase(value: int, unit: str) -> str:
@@ -413,34 +605,6 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         stored = await get_setting(ctx, "barcello.details_color_default", "")
         return _parse_hex_color(stored) or default_color
 
-    def _parse_iso_ts(ts: str | None) -> datetime | None:
-        if not ts or not str(ts).strip():
-            return None
-        raw = str(ts).strip()
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        try:
-            parsed = datetime.fromisoformat(raw)
-        except ValueError:
-            return None
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed
-
-    def _format_italian_ts(ts: str | None) -> str:
-        parsed = _parse_iso_ts(ts)
-        if parsed is None:
-            return ""
-        local = parsed.astimezone(ROME_TZ)
-        return local.strftime("%d/%m/%Y %H:%M")
-
-    def _format_italian_time(ts: str | None, *, include_date: bool = False) -> str:
-        parsed = _parse_iso_ts(ts)
-        if parsed is None:
-            return ""
-        local = parsed.astimezone(ROME_TZ)
-        return local.strftime("%d/%m %H:%M") if include_date else local.strftime("%H:%M")
-
     def _parse_italian_datetime(value: str) -> datetime | None:
         raw = value.strip()
         for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S"):
@@ -476,8 +640,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         if max_ts is None:
             await send_ephemeral(interaction, "❌ Dati insufficienti: non ci sono messaggi salvati per questo canale.")
             return None, None, None
-        min_dt = _parse_iso_ts(min_ts)
-        max_dt = _parse_iso_ts(max_ts)
+        min_dt = _parse_summary_iso_ts(min_ts)
+        max_dt = _parse_summary_iso_ts(max_ts)
 
         async def _send_no_data() -> tuple[None, None, None]:
             await send_ephemeral(
@@ -538,38 +702,6 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         )
         return start_dt_utc, end_dt_utc, warning_note
 
-    def _jump_link(guild_id: int, channel_id: int, message_id: str) -> str:
-        return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
-
-    def _is_valid_discord_jump_url(url: str | None) -> bool:
-        if not url:
-            return False
-        raw = str(url).strip()
-        if not raw.startswith(("https://discord.com/channels/", "https://discordapp.com/channels/")):
-            return False
-        return bool(
-            re.fullmatch(
-                r"https://(?:discord\.com|discordapp\.com)/channels/\d{17,20}/\d{17,20}/\d{17,20}",
-                raw,
-            )
-        )
-
-    def _resolve_jump_url(
-        *,
-        guild_id: int,
-        channel_id: int,
-        message_ref: str | None,
-    ) -> str | None:
-        if not message_ref:
-            return None
-        candidate = str(message_ref).strip()
-        if _is_valid_discord_jump_url(candidate):
-            return candidate
-        if re.fullmatch(r"\d{17,20}", candidate):
-            return _jump_link(guild_id, channel_id, candidate)
-        logger.debug("riassunto: discarded non-url message_ref for time link ref=%r", candidate[:80])
-        return None
-
     def _build_riassunto_status_embed(
         *,
         result: Any,
@@ -612,26 +744,6 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             value=_with_spacing(f"{bar} ({result.score}/100)\n{period_description}"),
         )
         return embed
-
-    def _format_summary_time_link(
-        ts: str | None,
-        message_ref: str | None,
-        *,
-        guild_id: int,
-        channel_id: int,
-        placeholder: str = "--:--",
-        in_call: bool = False,
-        include_date: bool = False,
-    ) -> str:
-        time_label = _format_italian_time(ts, include_date=include_date) or placeholder
-        jump = _resolve_jump_url(guild_id=guild_id, channel_id=channel_id, message_ref=message_ref)
-        if jump:
-            time_link = f"**[{time_label}]({jump})**"
-        else:
-            time_link = f"**{time_label}**"
-        if in_call:
-            return f"{time_link} 📞"
-        return time_link
 
     def _format_summary_moment_line(
         *,
@@ -765,8 +877,19 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             include_date=include_date,
         )
         if display_name:
-            return f"{time_link} — {prefix} **{display_name}** — {impact.reason}"
-        return f"{time_link} — {prefix} {impact.reason}"
+            base_line = f"{time_link} — {prefix} **{display_name}** — {impact.reason}"
+        else:
+            base_line = f"{time_link} — {prefix} {impact.reason}"
+        aura_lines: list[str] = []
+        period_points = _format_signed_points(impact.aura_points_period)
+        total_points = _format_signed_points(impact.aura_total_points)
+        if period_points is not None:
+            aura_lines.append(f"Aura nel periodo: **{period_points}**")
+        if total_points is not None and total_points != period_points:
+            aura_lines.append(f"Totale Aura finestra: **{total_points}**")
+        if aura_lines:
+            return f"{base_line}\n  {' · '.join(aura_lines)}"
+        return base_line
 
     def _build_metrics_report(metrics: dict[str, Any]) -> str:
         keys = [
@@ -994,7 +1117,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 if isinstance(ts_value, datetime):
                     ts_dt = ts_value
                 elif isinstance(ts_value, str):
-                    ts_dt = _parse_iso_ts(ts_value)
+                    ts_dt = _parse_summary_iso_ts(ts_value)
                 else:
                     ts_dt = None
                 if ts_dt is None:
@@ -1021,7 +1144,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 embeds = json.loads(embeds_raw) if embeds_raw else []
                 if any(isinstance(embed, dict) and embed.get("source") == "voice_ingest_stt" for embed in embeds):
                     voice_segments += 1
-                ts_parsed = _parse_iso_ts(row["ts"])
+                ts_parsed = _parse_summary_iso_ts(row["ts"])
                 _append_event(
                     ts_value=ts_parsed,
                     text=str(row["content"] or ""),
@@ -1059,7 +1182,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 return False
 
             def _is_in_privacy_gap(ts_value: str | None) -> bool:
-                ts_dt = _parse_iso_ts(ts_value)
+                ts_dt = _parse_summary_iso_ts(ts_value)
                 if ts_dt is None:
                     return False
                 return _is_in_privacy_gap_dt(ts_dt)
@@ -1120,10 +1243,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
                 session_lookup: dict[str, dict[str, Any]] = {}
                 for session in sessions:
-                    started = _parse_iso_ts(session["started_ts"])
+                    started = _parse_summary_iso_ts(session["started_ts"])
                     if not started:
                         continue
-                    ended = _parse_iso_ts(session["ended_ts"]) if session["ended_ts"] else None
+                    ended = _parse_summary_iso_ts(session["ended_ts"]) if session["ended_ts"] else None
                     session_id = str(session["voice_session_id"] or "")
                     session_lookup[session_id] = {"started": started, "ended": ended}
                     overlap_start = max(start_dt_utc, started)
@@ -1214,7 +1337,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     gap_actor = privacy_actor
                 for event in privacy_events:
                     event_type = event["event_type"]
-                    event_ts = _parse_iso_ts(event["ts"])
+                    event_ts = _parse_summary_iso_ts(event["ts"])
                     if not event_ts:
                         continue
                     event_ts = event_ts.astimezone(timezone.utc)
@@ -1277,7 +1400,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     if session and offset_ms is not None:
                         ts_real = session["started"] + timedelta(milliseconds=offset_ms)
                     else:
-                        ts_real = _parse_iso_ts(event["ts"])
+                        ts_real = _parse_summary_iso_ts(event["ts"])
                     if not ts_real:
                         continue
                     ts_real = ts_real.astimezone(timezone.utc)
@@ -1309,7 +1432,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 for moment in forced_moments:
                     if not moment.ts or not moment.text:
                         continue
-                    moment_ts = _parse_iso_ts(moment.ts)
+                    moment_ts = _parse_summary_iso_ts(moment.ts)
                     if moment_ts is None:
                         continue
                     moment_ts = moment_ts.astimezone(timezone.utc)
@@ -1362,7 +1485,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 if isinstance(ts_value, datetime):
                     ts_dt = ts_value
                 elif isinstance(ts_value, str):
-                    ts_dt = _parse_iso_ts(ts_value)
+                    ts_dt = _parse_summary_iso_ts(ts_value)
                 else:
                     ts_dt = None
                 if ts_dt is None:
@@ -1597,7 +1720,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             if channel_is_voice and voice_session_ranges:
                 def _is_ts_in_call(ts: str | None) -> bool:
-                    parsed = _parse_iso_ts(ts)
+                    parsed = _parse_summary_iso_ts(ts)
                     if not parsed:
                         return False
                     return any(start <= parsed <= end for start, end in voice_session_ranges)
@@ -1623,38 +1746,18 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 lower_names = {name.lower() for name in name_map.values()}
                 summary.themes = [theme for theme in summary.themes if theme.lower() not in lower_names]
 
-            details_color = await _get_details_embed_color(profile)
-
-            def is_valid_snowflake(value: str) -> bool:
-                return bool(re.fullmatch(r"\d{17,20}", value))
-
-            async def resolve_primary_ref(ts: str | None, message_ids: list[str]) -> str | None:
-                for mid in message_ids:
-                    mid_str = str(mid)
-                    if not is_valid_snowflake(mid_str):
-                        continue
-                    if await ctx.database.message_exists_in_channel(
-                        channel_id=str(interaction.channel_id),
-                        message_id=mid_str,
-                    ):
-                        return mid_str
-                parsed = _parse_iso_ts(ts)
-                start_ts = start_dt_utc.isoformat()
-                end_ts = end_dt_utc.isoformat()
-                if parsed is not None:
-                    return await ctx.database.fetch_nearest_message_id_in_range(
-                        channel_id=str(interaction.channel_id),
-                        start_ts=start_ts,
-                        end_ts=end_ts,
-                        ts=parsed.isoformat(),
-                    )
-                midpoint = start_dt_utc + (end_dt_utc - start_dt_utc) / 2
-                return await ctx.database.fetch_nearest_message_id_in_range(
+            if profile == "mod":
+                await _enrich_summary_impacts_with_aura(
+                    ctx.database,
+                    guild_id=str(interaction.guild_id),
                     channel_id=str(interaction.channel_id),
-                    start_ts=start_ts,
-                    end_ts=end_ts,
-                    ts=midpoint.isoformat(),
+                    start_ts=start_dt_utc.isoformat(),
+                    end_ts=end_dt_utc.isoformat(),
+                    degrade=summary.degrade,
+                    invigorate=summary.invigorate,
                 )
+
+            details_color = await _get_details_embed_color(profile)
 
             message_cache: dict[str, dict[str, Any]] = {}
 
@@ -1724,7 +1827,15 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             moment_primary: dict[int, str | None] = {}
             for moment in summary.moments:
-                moment_primary[id(moment)] = await resolve_primary_ref(moment.ts, moment.message_ids)
+                moment_primary[id(moment)] = await _resolve_summary_primary_ref(
+                    ctx.database,
+                    item_type="moment",
+                    channel_id=str(interaction.channel_id),
+                    start_ts=start_dt_utc.isoformat(),
+                    end_ts=end_dt_utc.isoformat(),
+                    ts=moment.ts,
+                    explicit_refs=moment.message_ids,
+                )
 
             moment_message_index: dict[str, MessageMeta] = {}
             for moment in summary.moments:
@@ -1739,16 +1850,40 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             quote_primary: dict[int, str | None] = {}
             for quote in summary.quotes:
-                quote_primary[id(quote)] = await resolve_primary_ref(quote.ts, quote.message_ids)
+                quote_primary[id(quote)] = await _resolve_summary_primary_ref(
+                    ctx.database,
+                    item_type="quote",
+                    channel_id=str(interaction.channel_id),
+                    start_ts=start_dt_utc.isoformat(),
+                    end_ts=end_dt_utc.isoformat(),
+                    ts=quote.ts,
+                    explicit_refs=quote.message_ids,
+                )
 
             dynamic_primary: dict[int, str | None] = {}
             for dynamic in summary.dynamics:
-                dynamic_primary[id(dynamic)] = await resolve_primary_ref(dynamic.ts, dynamic.message_ids)
+                dynamic_primary[id(dynamic)] = await _resolve_summary_primary_ref(
+                    ctx.database,
+                    item_type="dynamic",
+                    channel_id=str(interaction.channel_id),
+                    start_ts=start_dt_utc.isoformat(),
+                    end_ts=end_dt_utc.isoformat(),
+                    ts=dynamic.ts,
+                    explicit_refs=dynamic.message_ids,
+                )
 
             impact_primary: dict[int, str | None] = {}
             for impact in summary.degrade + summary.invigorate:
                 candidate_ids = [impact.message_id] if impact.message_id else []
-                impact_primary[id(impact)] = await resolve_primary_ref(impact.ts, candidate_ids)
+                impact_primary[id(impact)] = await _resolve_summary_primary_ref(
+                    ctx.database,
+                    item_type="impact",
+                    channel_id=str(interaction.channel_id),
+                    start_ts=start_dt_utc.isoformat(),
+                    end_ts=end_dt_utc.isoformat(),
+                    ts=impact.ts,
+                    explicit_refs=candidate_ids,
+                )
 
             moment_display: dict[int, str | None] = {}
             for moment in summary.moments:
@@ -1770,7 +1905,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 refs = [str(mid) for mid in (dynamic.message_ids or []) if str(mid)]
                 valid_refs: list[str] = []
                 for ref in refs:
-                    if not is_valid_snowflake(ref):
+                    if not _is_valid_summary_snowflake(ref):
                         continue
                     if await ctx.database.message_exists_in_channel(
                         channel_id=str(interaction.channel_id),
