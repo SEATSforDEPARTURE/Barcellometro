@@ -157,6 +157,30 @@ NOISE_KEYWORDS = {
     "bravo",
 }
 
+SUMMARY_MOMENT_NOISE_WORDS = NOISE_KEYWORDS | {
+    "bella",
+    "belle",
+    "belli",
+    "pollettine",
+    "raga",
+    "ragazzi",
+    "ragazze",
+    "mio",
+    "mia",
+    "miei",
+    "mie",
+    "sembro",
+    "aura",
+}
+
+SUMMARY_MOMENT_BANNED_PHRASES = (
+    "emergono spunti su",
+    "aggiornamenti e scambi regolari",
+    "tono collaborativo",
+    "scambi costruttivi",
+    "il confronto procede con",
+)
+
 POSITIVE_KEYWORDS = {
     "grazie",
     "ottimo",
@@ -724,11 +748,11 @@ class SummaryService:
             narrative_extra = ""
             names_rule = "NON includere mai nomi di persone. "
         moments_style_rule = (
-            "Momenti: stile narrativo e descrittivo, frasi complete; niente template tipo 'Si discute di'. "
+            "Momenti: stile narrativo e descrittivo, frasi complete e naturali; descrivi scene/eventi contestuali, non parole ricorrenti. "
         )
         if summary_mode in {"daily_resoconto", "channel_summary"} and multi_day_window:
             moments_style_rule = (
-                "Momenti: stile neutro-fattuale, bullet autonomi orientati agli eventi; evita cronologia narrativa della giornata. "
+                "Momenti: stile neutro-fattuale, bullet autonomi orientati agli eventi reali; evita cronologia narrativa della giornata. "
             )
         compact_system_prompt = (
             "Scrivi in italiano e restituisci SOLO JSON valido. "
@@ -741,6 +765,7 @@ class SummaryService:
             "Struttura JSON minima richiesta: themes[], moments[], advice[]. "
             "themes: lista corta di keyword in italiano, minuscole. "
             "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
+            "Nei moments descrivi eventi o scene contestuali in italiano naturale: niente parole isolate riciclate dai messaggi, niente formule come 'emergono spunti su'. "
             "advice: lista stringhe brevi per la community, anche vuota se non aggiunge valore. "
             "quotes/dynamics/degrade_list/invigorate_list/who_interacted_today/proverbio sono opzionali."
         )
@@ -763,6 +788,9 @@ class SummaryService:
                 "Genera ESATTAMENTE moments_target_count momenti salienti (non accorpare). "
                 "Ogni momento deve riassumere un evento/argomento e NON deve includere citazioni dirette. "
                 + moments_style_rule
+                + "Ogni moment deve dire cosa succede davvero, su quale tema concreto si parla se esiste, e con quale taglio (saluto, sfogo, spiegazione, confronto, battuta, coordinamento, supporto...). "
+                + "Vietate formule generiche o meccaniche come 'emergono spunti su...', 'aggiornamenti e scambi regolari', 'tono collaborativo...' o eco lessicale di parole isolate prese dai messaggi. "
+                + "Non trasformare token o vocativi in pseudo-temi: evita output come 'spunti su aura', 'spunti su belle pollettine', 'spunti su mio e sembro'. "
                 + "I momenti devono contenere un primary_ref valido (snowflake 17-20 cifre) e, se possibile, refs[] con altri id. "
                 "Ogni momento DEVE includere un primary_ref presente nei message ids forniti: non inventare id. "
                 "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
@@ -1638,6 +1666,29 @@ def _sanitize_bullet_text(text: str) -> str:
     return cleaned.strip()
 
 
+def _normalize_summary_moment_text(text: str) -> str:
+    cleaned = _sanitize_bullet_text(text)
+    lowered = cleaned.lower()
+    if not cleaned:
+        return cleaned
+    if any(phrase in lowered for phrase in SUMMARY_MOMENT_BANNED_PHRASES):
+        if re.search(r"\b(buongiorno|buonasera|ciao)\b", lowered):
+            return "La conversazione si apre con saluti e un clima leggero tra i partecipanti."
+        if _looks_like_distress(lowered):
+            return "Una partecipante racconta un momento di stanchezza o malessere, e il tono diventa più personale."
+        if _looks_like_music_share(lowered):
+            return "Si parla di musica e della possibilità di condividere o pubblicare brani."
+        if _looks_like_ramadan_context(lowered):
+            return "La conversazione si concentra su Ramadan, digiuno e chiarimenti pratici collegati."
+        return "Il momento riassume uno scambio concreto avvenuto nel canale."
+    if re.search(r"\bspunti su (belle|pollettine|mio|sembro|aura)\b", lowered):
+        if re.search(r"\b(buongiorno|buonasera|ciao)\b", lowered):
+            return "La conversazione si apre con saluti affettuosi e qualche scambio leggero."
+        if _looks_like_distress(lowered):
+            return "Emergono segnali di stanchezza o malessere personale che orientano il dialogo."
+    return cleaned
+
+
 def _is_template_bullet(text: str) -> bool:
     return "nel periodo spiccano" in text.lower()
 
@@ -1651,6 +1702,8 @@ def _sanitize_summary_items(
     sanitized: list[Any] = []
     for item in items:
         text = _sanitize_bullet_text(item.text)
+        if isinstance(item, SummaryItem):
+            text = _normalize_summary_moment_text(text)
         if not text:
             continue
         if drop_templates and _is_template_bullet(text):
@@ -1726,8 +1779,143 @@ def _extract_segment_keywords(text: str) -> list[str]:
     for word in _extract_keywords(text):
         if word in ITALIAN_STOPWORDS:
             continue
+        if word in SUMMARY_MOMENT_NOISE_WORDS:
+            continue
         keywords.append(word)
     return keywords
+
+
+def _summary_relevance_score(msg: dict[str, Any]) -> float:
+    raw_content = str(msg.get("content") or "").strip()
+    cleaned = _clean_text(raw_content)
+    if not cleaned:
+        return -100.0
+    token_count = len(list(_extract_keywords(cleaned)))
+    score = len(cleaned) / 28 + token_count * 1.2 + _count_mentions(raw_content) * 0.5
+    if "?" in raw_content:
+        score += 1.5
+    if len(cleaned) >= 40:
+        score += 2.0
+    if len(cleaned) >= 80:
+        score += 2.0
+    if _looks_like_greeting(cleaned):
+        score -= 6.0
+    if _looks_like_filler_message(cleaned):
+        score -= 8.0
+    if _looks_like_distress(cleaned):
+        score += 4.5
+    if _looks_like_music_share(cleaned):
+        score += 4.0
+    if _looks_like_ramadan_context(cleaned):
+        score += 4.0
+    if _looks_like_coordination(cleaned):
+        score += 2.5
+    return score
+
+
+def _looks_like_greeting(text: str) -> bool:
+    cleaned = str(text or "").strip().lower()
+    if not cleaned:
+        return False
+    return bool(re.search(r"\b(ciao|salve|buongiorno|buonasera|buonanotte|hola)\b", cleaned))
+
+
+def _looks_like_filler_message(text: str) -> bool:
+    cleaned = str(text or "").strip().lower()
+    if not cleaned:
+        return True
+    if len(cleaned) <= 8:
+        return True
+    tokens = list(_extract_keywords(cleaned))
+    if not tokens:
+        return True
+    if len(tokens) <= 2 and all(token in SUMMARY_MOMENT_NOISE_WORDS for token in tokens):
+        return True
+    return False
+
+
+def _looks_like_distress(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(sto male|malissimo|esaurit|stanc|sfin|non ce la faccio|croll|in crisi|ansia|piang|male)\b",
+            str(text or "").lower(),
+        )
+    )
+
+
+def _looks_like_music_share(text: str) -> bool:
+    return bool(re.search(r"\b(musica|brano|spotify|canzone|album|pubblic|traccia|beat)\b", str(text or "").lower()))
+
+
+def _looks_like_ramadan_context(text: str) -> bool:
+    return bool(re.search(r"\b(ramadan|digiun|iftar|suhoor|religion|sacrific|preghier)\b", str(text or "").lower()))
+
+
+def _looks_like_coordination(text: str) -> bool:
+    return bool(re.search(r"\b(orari|orario|call|meeting|organizz|coordini|facciamo|quando|domani|stasera)\b", str(text or "").lower()))
+
+
+def _bucket_scene_labels(bucket: dict[str, Any]) -> set[str]:
+    labels: set[str] = set()
+    texts = [str(message.get("cleaned") or "") for message in bucket.get("messages", [])]
+    combined = " \n ".join(texts)
+    if any(_looks_like_greeting(text) for text in texts):
+        labels.add("greeting")
+    if any(_looks_like_distress(text) for text in texts):
+        labels.add("distress")
+    if any(_looks_like_music_share(text) for text in texts):
+        labels.add("music")
+    if any(_looks_like_ramadan_context(text) for text in texts):
+        labels.add("ramadan")
+    if any(_looks_like_coordination(text) for text in texts):
+        labels.add("coordination")
+    if any("?" in str(message.get("content") or "") for message in bucket.get("messages", [])):
+        labels.add("question")
+    if bucket.get("negativity_hits", 0) > 0:
+        labels.add("tension")
+    if bucket.get("positive_hits", 0) > 0:
+        labels.add("support")
+    if re.search(r"\b(audio|video|link|foto|meme|guarda|ascolta|youtube|spotify)\b", combined):
+        labels.add("sharing")
+    if re.search(r"\b(ahah|ahahah|lol|scherz|battut)\b", combined):
+        labels.add("light")
+    return labels
+
+
+def _describe_bucket_scene(bucket: dict[str, Any], *, index: int, total: int, granularity_hint: str | None = None) -> str:
+    labels = _bucket_scene_labels(bucket)
+    keywords = _trim_theme_list(_rank_keywords(_expand_keywords(bucket.get("keyword_counts", {}))), limit=3)
+    if "distress" in labels:
+        return "Una partecipante racconta di sentirsi molto stanca o in difficoltà, aprendo uno scambio più personale."
+    if "music" in labels:
+        return "Si parla di musica e della possibilità di pubblicare o condividere brani su Spotify."
+    if "ramadan" in labels and "question" in labels:
+        return "Arrivano dubbi e chiarimenti pratici su Ramadan, sacrificio e digiuno."
+    if "ramadan" in labels:
+        return "La conversazione si sposta su religione, sacrificio e pratica del digiuno durante il Ramadan."
+    if "coordination" in labels and "question" in labels:
+        return "Emergono domande pratiche e indicazioni utili per coordinarsi meglio."
+    if "coordination" in labels:
+        return "Ci si organizza su tempi, call o passaggi pratici per andare avanti."
+    if "greeting" in labels and index == 0:
+        return "La giornata si apre con saluti affettuosi e un clima leggero tra i partecipanti."
+    if "support" in labels and "question" in labels:
+        return "Una domanda apre un confronto utile, con risposte pensate per chiarire i dubbi."
+    if "question" in labels:
+        return "Prende forma uno scambio di domande e chiarimenti su un tema concreto."
+    if "light" in labels:
+        return "Lo scambio resta leggero tra battute, commenti rapidi e chiacchiere."
+    if "sharing" in labels:
+        return "Nel gruppo circolano contenuti e spunti condivisi che orientano la conversazione."
+    if keywords:
+        topic = " e ".join(keywords[:2])
+        prefix = "Si parla in modo concreto di"
+        if granularity_hint == "days" and index == 0:
+            prefix = "Nel corso della giornata si parla di"
+        elif index >= total - 1:
+            prefix = "Verso la fine si torna su"
+        return f"{prefix} {topic}."
+    return "La conversazione resta contestuale e concreta, con interventi che fanno avanzare lo scambio."
 
 
 def _rank_keywords(words: list[str]) -> list[str]:
@@ -1982,9 +2170,11 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
                 "message_id": msg.get("message_id"),
                 "author_id": msg.get("author_id"),
                 "ts": ts,
+                "content": content,
                 "cleaned": cleaned,
                 "keywords": keywords,
                 "in_call": in_call,
+                "summary_relevance": _summary_relevance_score({"content": content}),
             }
         )
     if not enriched:
@@ -1993,7 +2183,7 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
     start_ts = enriched[0]["ts"]
     end_ts = enriched[-1]["ts"]
     total_seconds = max(1.0, (end_ts - start_ts).total_seconds())
-    bucket_count = min(limit, 10, max(1, len(enriched)))
+    bucket_count = min(limit, 10, max(1, math.ceil(len(enriched) / 3)))
     buckets: list[dict[str, Any]] = []
     for idx in range(bucket_count):
         buckets.append(
@@ -2010,6 +2200,10 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
                 "top_author_id": None,
                 "cluster_key": None,
                 "in_call_count": 0,
+                "messages": [],
+                "support_messages": [],
+                "representative_msg": None,
+                "representative_score": float("-inf"),
             }
         )
     for msg in enriched:
@@ -2029,6 +2223,17 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
         bucket["questions"] += msg["cleaned"].count("?")
         if msg.get("in_call"):
             bucket["in_call_count"] += 1
+        bucket["messages"].append(msg)
+        relevance = float(msg.get("summary_relevance") or 0.0)
+        if relevance > float(bucket.get("representative_score") or float("-inf")):
+            previous = bucket.get("representative_msg")
+            if previous is not None:
+                bucket.setdefault("support_messages", []).append(previous)
+            bucket["representative_msg"] = msg
+            bucket["representative_score"] = relevance
+            bucket["representative_ts"] = msg["ts"].isoformat()
+        elif len(bucket.setdefault("support_messages", [])) < 2 and relevance > -2:
+            bucket["support_messages"].append(msg)
         if bucket["representative_ts"] is None:
             bucket["representative_ts"] = msg["ts"].isoformat()
     output: list[dict[str, Any]] = []
@@ -2042,6 +2247,15 @@ def _bucket_messages_by_time(messages: list[dict[str, Any]], limit: int) -> list
         bucket["message_ids"] = [mid for mid in bucket["message_ids"] if mid]
         if bucket["representative_ts"] is None:
             bucket["representative_ts"] = start_ts.isoformat()
+        representative = bucket.get("representative_msg")
+        if representative is not None and representative.get("message_id"):
+            rep_id = str(representative.get("message_id"))
+            bucket["message_ids"] = [rep_id] + [mid for mid in bucket["message_ids"] if mid != rep_id]
+        support_messages = sorted(
+            [msg for msg in bucket.get("support_messages", []) if msg is not None],
+            key=lambda item: item["ts"],
+        )[:2]
+        bucket["support_messages"] = support_messages
         output.append(bucket)
     return output
 
@@ -2053,25 +2267,8 @@ def _build_bucket_summary(
     *,
     granularity_hint: str | None = None,
 ) -> str:
-    keywords = _rank_keywords(_expand_keywords(bucket.get("keyword_counts", {})))
-    keywords = _trim_theme_list(keywords, limit=2)
-    if index == 0:
-        prefix = "All'inizio"
-    elif index >= total - 1:
-        prefix = "Verso la fine"
-    elif index == 1:
-        prefix = "Poco dopo"
-    else:
-        prefix = "Più tardi"
-    if granularity_hint == "days" and index == 0:
-        prefix = "Nel corso della giornata"
-    elif granularity_hint == "weeks" and index == 0:
-        prefix = "Nel corso della settimana"
-    tone = _bucket_tone(bucket)
-    if keywords:
-        topic = " e ".join(keywords)
-        return f"{prefix} emergono spunti su {topic}, con {tone}."
-    return f"{prefix} il confronto procede con {tone}."
+    _ = _bucket_tone(bucket)
+    return _describe_bucket_scene(bucket, index=index, total=total, granularity_hint=granularity_hint)
 
 
 def _bucket_tone(bucket: dict[str, Any]) -> str:

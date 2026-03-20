@@ -199,6 +199,10 @@ def test_call_ai_openai_keeps_full_schema() -> None:
         )
         system_prompt = ai.ask_for_task.await_args.args[2]
         assert "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]" in system_prompt
+        assert "descrivi scene/eventi contestuali" in system_prompt
+        assert "Vietate formule generiche o meccaniche come 'emergono spunti su...'" in system_prompt
+        assert "Non trasformare token o vocativi in pseudo-temi" in system_prompt
+        assert "primary_ref valido" in system_prompt
 
     asyncio.run(_run())
 

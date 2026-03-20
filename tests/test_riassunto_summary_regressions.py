@@ -19,6 +19,8 @@ from app.renderers.channel_summary import _barcello_emoji_from_color, _bold_know
 from app.renderers.detail_embeds import _truncate_line_preserve_md_link, build_summary_detail_embeds
 from app.services.barcello_service import BarcelloResult
 from app.services.content_summary_service import (
+    DEFAULT_SUMMARY_CONFIG,
+    SummaryService,
     SummaryImpact,
     SummaryItem,
     SummaryQuote,
@@ -32,8 +34,11 @@ from app.shared.discord.delivery import _prepare_embeds_for_send, send_dm_or_fol
 from app.shared.discord.embed_limits import (
     _SUMMARY_LINK_PREFIX_RE,
     _split_field_chunks,
+    count_summary_clickable_timestamps_in_values,
+    extract_protected_summary_prefix,
     normalize_embeds_for_discord,
     split_markdown_lines_into_field_values,
+    truncate_line_preserve_links,
 )
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.shared.discord.report_embeds import apply_standard_report_style
@@ -1379,3 +1384,187 @@ def test_riassunto_impact_timestamp_survives_embed_limits_chunking() -> None:
 
     assert len(chunks) >= 2
     assert rendered.count(link) == 3
+
+
+def test_extract_protected_summary_prefix_supports_date_call_and_score() -> None:
+    line = "• **[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)** 📞 🟢 **64** — Testo momento"
+    protected = extract_protected_summary_prefix(line)
+
+    assert protected is not None
+    prefix, tail = protected
+    assert prefix == "• **[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)** 📞 🟢 **64** — "
+    assert tail == "Testo momento"
+
+
+def test_summary_chunks_keep_atomic_prefix_for_quote_dynamic_and_impact_lines() -> None:
+    lines = [
+        "• **[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)** 📞 — “Messaggio molto lungo " + ("utile " * 20) + "”",
+        "• **[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)** — Coordinamento operativo " + ("chiaro " * 20),
+        "• **[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)** — 🔥 **Mario** — " + ("richiama il gruppo " * 20),
+    ]
+
+    chunks = split_markdown_lines_into_field_values(lines, limit=180)
+    rendered = "\n".join(chunks)
+    link = "**[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)**"
+
+    assert chunks[0].startswith(f"• {link}")
+    assert rendered.count(link) == 3
+    assert "123456789012345678)** — 🔥" in rendered
+    assert "123456789012345678)** 📞 —" in rendered
+    assert rendered.count("123456789012345678)**") == 3
+
+
+def test_truncate_line_preserve_md_link_keeps_summary_prefix_when_limit_is_shorter_than_prefix() -> None:
+    line = "• **[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)** 📞 🟢 **64** — " + ("testo " * 20)
+    protected_prefix, _ = extract_protected_summary_prefix(line) or ("", "")
+
+    shared = truncate_line_preserve_links(line, 24)
+    renderer = _truncate_line_preserve_md_link(line, 24)
+
+    assert shared == renderer
+    assert shared.startswith(protected_prefix)
+    assert shared.endswith("…")
+    assert shared.count("**") % 2 == 0
+
+
+def test_full_summary_pipeline_preserves_all_clickable_timestamps_after_sanitize_and_normalize() -> None:
+    link = "**[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    summary = SummaryResult(
+        themes=[],
+        moments=[
+            SummaryItem(ts="2026-03-19T05:28:00+00:00", text=("Momento " + ("contestuale " * 40)).strip(), author_id="u1"),
+            SummaryItem(ts="2026-03-19T06:28:00+00:00", text=("Altro momento " + ("contestuale " * 40)).strip(), author_id="u2", in_call=True),
+        ],
+        quotes=[SummaryQuote(ts="2026-03-19T07:28:00+00:00", text=("Citazione " + ("memorabile " * 30)).strip(), author_id="u3")],
+        dynamics=[SummaryItem(ts="2026-03-19T08:28:00+00:00", text=("Dinamica " + ("operativa " * 35)).strip(), author_id="u4")],
+        degrade=[SummaryImpact(author_id="u5", reason=("Motivo " + ("concreto " * 20)).strip(), ts="2026-03-19T09:28:00+00:00", message_id="123456789012345678")],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    embeds = build_summary_detail_embeds(
+        profile="mod",
+        summary=summary,
+        include_names=True,
+        include_date_in_time=True,
+        guild_id=1,
+        channel_id=2,
+        name_map={"u5": "Mario"},
+        moment_primary={id(summary.moments[0]): "123456789012345678", id(summary.moments[1]): "123456789012345678"},
+        quote_primary={id(summary.quotes[0]): "123456789012345678"},
+        dynamic_primary={id(summary.dynamics[0]): "123456789012345678"},
+        impact_primary={id(summary.degrade[0]): "123456789012345678"},
+        moment_display={},
+        quote_display={},
+        dynamic_names={},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="MOD",
+        tier_config={"sections": ["moments", "quotes", "dynamics", "impact"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=lambda **kwargs: (
+            f"**[19/03 06:28](https://discord.com/channels/1/2/123456789012345678)**"
+            f"{' 📞' if kwargs['moment'].in_call else ''} 🟢 **64** — {kwargs['moment'].text}"
+        ),
+        format_quote_line=lambda **kwargs: f"{link} — “{kwargs['quote'].text}”",
+        format_dynamic_line=lambda **kwargs: f"{link} — {kwargs['dynamic'].text}",
+        format_impact_line=lambda **kwargs: f"{link} — 🔥 **Mario** — {kwargs['impact'].reason}",
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    normalized = normalize_embeds_for_discord(embeds, max_chars=4500)
+    final_values = [field.value for embed in normalized for field in embed.fields]
+
+    assert count_summary_clickable_timestamps_in_values(final_values) == 5
+
+
+def test_local_moments_describe_greeting_context_not_keyword_soup() -> None:
+    service = SummaryService(database=_FakeDatabase())
+    moments = service._extract_moments(
+        [
+            {"ts": "2026-03-19T07:00:00+00:00", "author_id": "u1", "content": "Buongiorno belle pollettine", "meta": {}, "message_id": "111111111111111111"},
+            {"ts": "2026-03-19T07:01:00+00:00", "author_id": "u2", "content": "Ciao, come state stamattina?", "meta": {}, "message_id": "111111111111111112"},
+        ],
+        DEFAULT_SUMMARY_CONFIG,
+        "role1",
+        granularity_hint="hours",
+    )
+
+    assert moments
+    assert "spunti su belle" not in moments[0].text.lower()
+    assert "pollettine" not in moments[0].text.lower()
+    assert "saluti" in moments[0].text.lower() or "si apre" in moments[0].text.lower()
+
+
+def test_local_moments_describe_distress_context_not_token_echo() -> None:
+    service = SummaryService(database=_FakeDatabase())
+    moments = service._extract_moments(
+        [
+            {"ts": "2026-03-19T10:00:00+00:00", "author_id": "u1", "content": "Sembro esaurita, sto male davvero oggi", "meta": {}, "message_id": "222222222222222221"},
+            {"ts": "2026-03-19T10:02:00+00:00", "author_id": "u2", "content": "Se vuoi racconta con calma cosa sta succedendo", "meta": {}, "message_id": "222222222222222222"},
+        ],
+        DEFAULT_SUMMARY_CONFIG,
+        "role1",
+        granularity_hint="hours",
+    )
+
+    assert moments
+    assert "spunti su mio e sembro" not in moments[0].text.lower()
+    assert "stanc" in moments[0].text.lower() or "difficoltà" in moments[0].text.lower() or "malessere" in moments[0].text.lower()
+
+
+def test_local_moments_capture_music_and_spotify_context() -> None:
+    service = SummaryService(database=_FakeDatabase())
+    moments = service._extract_moments(
+        [
+            {"ts": "2026-03-19T12:00:00+00:00", "author_id": "u1", "content": "Sto finendo un brano nuovo e vorrei pubblicarlo su Spotify", "meta": {}, "message_id": "333333333333333331"},
+            {"ts": "2026-03-19T12:03:00+00:00", "author_id": "u2", "content": "Secondo me ha senso distribuirlo come singolo prima dell'album", "meta": {}, "message_id": "333333333333333332"},
+        ],
+        DEFAULT_SUMMARY_CONFIG,
+        "role1",
+        granularity_hint="hours",
+    )
+
+    assert moments
+    assert "musica" in moments[0].text.lower()
+    assert "spotify" in moments[0].text.lower() or "brani" in moments[0].text.lower()
+
+
+def test_local_moments_capture_ramadan_and_fasting_context() -> None:
+    service = SummaryService(database=_FakeDatabase())
+    moments = service._extract_moments(
+        [
+            {"ts": "2026-03-19T18:00:00+00:00", "author_id": "u1", "content": "Durante il Ramadan il digiuno vale anche se lavori tutto il giorno?", "meta": {}, "message_id": "444444444444444441"},
+            {"ts": "2026-03-19T18:02:00+00:00", "author_id": "u2", "content": "Sì, ma ci sono eccezioni pratiche e il senso resta spirituale", "meta": {}, "message_id": "444444444444444442"},
+        ],
+        DEFAULT_SUMMARY_CONFIG,
+        "role1",
+        granularity_hint="hours",
+    )
+
+    assert moments
+    assert "ramadan" in moments[0].text.lower() or "digiuno" in moments[0].text.lower()
+    assert "spunti su" not in moments[0].text.lower()
+
+
+def test_local_moment_keeps_primary_ref_even_when_summary_uses_bucket_context() -> None:
+    service = SummaryService(database=_FakeDatabase())
+    moments = service._extract_moments(
+        [
+            {"ts": "2026-03-19T07:00:00+00:00", "author_id": "u1", "content": "Buongiorno belle pollettine", "meta": {}, "message_id": "555555555555555551"},
+            {"ts": "2026-03-19T07:02:00+00:00", "author_id": "u2", "content": "Raga oggi sono distrutta, non riesco a stare dietro a tutto", "meta": {}, "message_id": "555555555555555552"},
+            {"ts": "2026-03-19T07:04:00+00:00", "author_id": "u3", "content": "Se vuoi ti diamo una mano a riorganizzare i task", "meta": {}, "message_id": "555555555555555553"},
+        ],
+        DEFAULT_SUMMARY_CONFIG,
+        "role1",
+        granularity_hint="hours",
+    )
+
+    assert moments
+    assert moments[0].message_ids
+    assert moments[0].message_ids[0] == "555555555555555552"

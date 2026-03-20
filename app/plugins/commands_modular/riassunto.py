@@ -17,20 +17,18 @@ from app.services.footer import attach_footer_meta, attach_footer_meta_to_all, c
 from app.services.content_summary_service import SummaryImpact, SummaryItem, SummaryQuote
 from app.shared.discord.delivery import send_dm_or_followup
 from app.shared.discord.embed_limits import (
-    MAX_EMBED_CHARS,
     _clone_embed_shell,
-    extract_protected_masked_link_prefix,
     _ensure_embed_limits,
-    _estimate_embed_size,
     _split_field_chunks,
+    log_summary_clickable_timestamp_loss,
     normalize_embeds_for_discord,
     split_markdown_lines_into_field_values,
+    truncate_line_preserve_links,
 )
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
 from app.plugins.commands_modular.time_windows import (
-    parse_italian_datetime,
     resolve_ieri_window,
     resolve_oggi_window,
     resolve_range_window,
@@ -437,26 +435,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         return s[: max(0, limit - 1)] + "…"
 
     def _truncate_line_preserve_md_link(line: str, line_limit: int) -> str:
-        if len(line) <= line_limit:
-            return line
-        if line_limit <= 1:
-            return _truncate_text(line, line_limit)
-        separator = " — "
-        if separator in line:
-            prefix, _, tail = line.partition(separator)
-            fixed_prefix = f"{prefix}{separator}"
-            fixed_len = len(fixed_prefix)
-            if fixed_len >= line_limit:
-                return _truncate_text(line, line_limit)
-            return fixed_prefix + _truncate_text(tail, line_limit - fixed_len)
-
-        protected_link = extract_protected_masked_link_prefix(line)
-        if protected_link:
-            prefix, suffix = protected_link
-            if len(prefix) >= line_limit:
-                return _truncate_text(line, line_limit)
-            return prefix + _truncate_text(suffix, line_limit - len(prefix))
-        return _truncate_text(line, line_limit)
+        return truncate_line_preserve_links(line, line_limit)
 
     def _truncate_field_value_preserve_lines_preserve_md_links(value: str | None, limit: int = 1024) -> str:
         if value is None:
@@ -579,6 +558,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             if embed.image and embed.image.url:
                 clone.set_image(url=embed.image.url)
             for field in embed.fields:
+                original_values = [str(field.value or "")]
                 _safe_add_field(
                     clone,
                     name=field.name,
@@ -586,8 +566,38 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     req_id=req_id,
                     section=f"embed{embed_idx}:{field.name}",
                 )
+                sanitized_values = [str(clone.fields[-1].value or "")] if clone.fields else []
+                log_summary_clickable_timestamp_loss(
+                    expected_values=original_values,
+                    actual_values=sanitized_values,
+                    req_id=req_id,
+                    field_name=str(field.name or ""),
+                )
             sanitized.append(clone)
         return sanitized
+
+    def _log_summary_link_loss_between_embed_sets(
+        before: list[discord.Embed],
+        after: list[discord.Embed],
+        *,
+        req_id: str,
+        stage: str,
+    ) -> None:
+        grouped_before: dict[str, list[str]] = {}
+        grouped_after: dict[str, list[str]] = {}
+        for embed in before:
+            for field in embed.fields:
+                grouped_before.setdefault(str(field.name or ""), []).append(str(field.value or ""))
+        for embed in after:
+            for field in embed.fields:
+                grouped_after.setdefault(str(field.name or ""), []).append(str(field.value or ""))
+        for field_name, expected_values in grouped_before.items():
+            log_summary_clickable_timestamp_loss(
+                expected_values=expected_values,
+                actual_values=grouped_after.get(field_name, []),
+                req_id=req_id,
+                field_name=f"{stage}:{field_name}",
+            )
 
     def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
         chunks = _split_field_chunks(value, 1024)
@@ -2048,6 +2058,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 built_time_link_count,
                 normalized_time_link_count,
             )
+            _log_summary_link_loss_between_embed_sets(embeds, normalized_details, req_id=req_id, stage="normalize")
             payload_embeds = _sanitize_embeds_for_discord_limits([*normalized_status, *normalized_details], req_id=req_id)
             payload_embeds = _ensure_embed_limits(payload_embeds, max_chars=5600)
             payload_embeds = _sanitize_embeds_for_discord_limits(payload_embeds, req_id=req_id)
@@ -2058,6 +2069,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 normalized_time_link_count,
                 payload_time_link_count,
             )
+            _log_summary_link_loss_between_embed_sets(normalized_details, payload_embeds, req_id=req_id, stage="pagination")
             payload_embeds = apply_standard_report_style(payload_embeds, service_name="riassunto", cover_title=payload_embeds[0].title if payload_embeds else "🗒️ RIASSUNTO")
             attach_footer_meta_to_all(
                 payload_embeds,
