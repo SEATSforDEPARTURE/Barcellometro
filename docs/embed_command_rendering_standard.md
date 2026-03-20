@@ -108,6 +108,10 @@ Quando è disponibile `FooterService`, gli embed standardizzati non devono ferma
 
 Questa regola vale anche nel percorso `minimal=True`, negli embed admin standardizzati e in ogni helper/pipeline collegata: non esiste alcun fallback testuale automatico per la seconda sezione del footer. Se la frase non è configurata, il footer mostra soltanto la brand/versione e, se applicabile, il segmento tecnico finale.
 
+Vale esplicitamente per **tutti** i percorsi del repo: admin legacy, status/show/list/set/reset/config, embed campagne, report renderer, helper `minimal`, finalize helpers, delivery helpers e qualunque invio che passi da `send_legacy_standard_response(...)`, `send_standard_response(...)`, `finalize_embed(...)`, `finalize_embeds(...)` o metadata footer condivisi. Se la frase globale o di servizio esiste, non sono ammesse eccezioni silenziose che mostrano solo `Barcellometro <version>`.
+
+Di conseguenza, i renderer locali non devono usare `embed.set_footer(...)` con stringhe custom per bypassare il contratto centrale: devono invece allegare footer metadata e lasciare che la pipeline comune renderizzi sempre `versione → frase configurata → eventuale parte tecnica`.
+
 Esempi:
 
 - nessuna frase, nessun contributor: `Barcellometro dev6`

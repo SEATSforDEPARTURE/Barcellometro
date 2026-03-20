@@ -11,6 +11,10 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting, reset_setting, set_setting
 
 
+async def _send_legacy(interaction: discord.Interaction, ctx: CommandContext, **kwargs) -> None:
+    await send_legacy_standard_response(interaction, footer_service=ctx.footer, **kwargs)
+
+
 def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandContext) -> None:
     async def _config_lines() -> list[tuple[str, object]]:
         enabled = (await get_setting(ctx, "audio_notes.enabled", "false")).lower() in {"1", "true", "yes", "y"}
@@ -27,8 +31,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         if not await check_permission(interaction, "admin.audionotes.on", ctx):
             return
         await set_setting(ctx, "audio_notes.enabled", "true")
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["audionotes", "on"],
             entries=[("Status", "enabled")],
@@ -41,8 +44,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         if not await check_permission(interaction, "admin.audionotes.off", ctx):
             return
         await set_setting(ctx, "audio_notes.enabled", "false")
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["audionotes", "off"],
             entries=[("Status", "disabled")],
@@ -56,8 +58,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
             return
         max_mb, max_duration, max_chars, queue_max, chars_summary = await _config_lines()
         enabled = (await get_setting(ctx, "audio_notes.enabled", "false")).lower() in {"1", "true", "yes", "y"}
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["audionotes", "status"],
             entries=[
@@ -90,8 +91,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         if not await check_permission(interaction, "admin.audionotes.config_set", ctx):
             return
         if all(value is None for value in [max_mb, max_duration_s, discord_max_chars, queue_max, chars_summary]):
-            await send_legacy_standard_response(
-                interaction,
+            await _send_legacy(interaction, ctx,
                 top_level="admin",
                 path_parts=["audionotes", "config_set"],
                 entries=[("Reason", "No changes provided")],
@@ -102,8 +102,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
             return
         positive_limits = {"max_mb": max_mb, "max_duration_s": max_duration_s, "discord_max_chars": discord_max_chars, "queue_max": queue_max}
         if any(value is not None and value <= 0 for value in positive_limits.values()):
-            await send_legacy_standard_response(
-                interaction,
+            await _send_legacy(interaction, ctx,
                 top_level="admin",
                 path_parts=["audionotes", "config_set"],
                 entries=[("Reason", "Provide valid limits greater than 0")],
@@ -123,8 +122,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
             await set_setting(ctx, "audio_notes.chars_summary", "" if chars_summary <= 0 else str(chars_summary))
 
         max_mb_value, max_duration_value, max_chars_value, queue_max_value, chars_summary_value = await _config_lines()
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["audionotes", "config_set"],
             entries=[("Status", "updated")],
@@ -149,8 +147,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         if not await check_permission(interaction, "admin.audionotes.config_show", ctx):
             return
         max_mb, max_duration, max_chars, queue_max, chars_summary = await _config_lines()
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["audionotes", "config_show"],
             entries=[
@@ -170,8 +167,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         for key in ("audio_notes.max_mb", "audio_notes.max_duration_s", "audio_notes.discord_max_chars", "audio_notes.queue_max", "audio_notes.chars_summary"):
             await reset_setting(ctx, key)
         max_mb, max_duration, max_chars, queue_max, chars_summary = await _config_lines()
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["audionotes", "config_reset"],
             entries=[("Status", "reset")],

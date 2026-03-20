@@ -9,6 +9,10 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import set_setting
 
 
+async def _send_legacy(interaction: discord.Interaction, ctx: CommandContext, **kwargs) -> None:
+    await send_legacy_standard_response(interaction, footer_service=ctx.footer, **kwargs)
+
+
 def voice_ingest_key(bot_id: int, key: str) -> str:
     return f"voice_ingest.{bot_id}.{key}"
 
@@ -20,8 +24,7 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
         if not await check_permission(interaction, "admin.voice_ingest.join", ctx):
             return
         if not ctx.bot.user:
-            await send_legacy_standard_response(
-                interaction,
+            await _send_legacy(interaction, ctx,
                 top_level="admin",
                 path_parts=["voice_ingest", "join"],
                 entries=[("Reason", "Bot non pronto")],
@@ -30,8 +33,7 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
             )
             return
         await set_setting(ctx, voice_ingest_key(ctx.bot.user.id, "target_voice_channel_id"), str(voice_channel.id))
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["voice_ingest", "join"],
             entries=[("Voice Channel", voice_channel.name), ("Status", "join requested")],
@@ -45,8 +47,7 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
     async def voice_ingest_leave(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "admin.voice_ingest.leave", ctx):
             return
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["voice_ingest", "leave"],
             entries=[("Status", "leave requested")],

@@ -218,6 +218,42 @@ def _literal_str(node: ast.AST | None) -> str | None:
     return None
 
 
+def _check_legacy_footer_service_wiring(tree: ast.AST, path: Path, report: ValidationReport) -> None:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_name(node) != "send_legacy_standard_response":
+            continue
+        if any(keyword.arg == "footer_service" for keyword in node.keywords):
+            continue
+        report.add(
+            "legacy_footer_service_required",
+            path.relative_to(REPO_ROOT),
+            node.lineno,
+            "send_legacy_standard_response must receive footer_service so global footer phrases reach legacy/admin embeds.",
+        )
+
+
+_ALLOWED_MANUAL_SET_FOOTER_FILES = {
+    REPO_ROOT / "app" / "services" / "footer.py",
+}
+
+
+def _check_manual_set_footer_calls(tree: ast.AST, path: Path, report: ValidationReport) -> None:
+    if path in _ALLOWED_MANUAL_SET_FOOTER_FILES or path.parts[:1] == ("tests",):
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        chain = _attribute_chain(node.func)
+        if chain is None or chain[-1] != "set_footer":
+            continue
+        report.add(
+            "manual_footer_bypass",
+            path.relative_to(REPO_ROOT),
+            node.lineno,
+            "Manual embed.set_footer(...) bypasses the centralized footer contract; use footer metadata/helpers instead.",
+        )
+
+
 def _literal_int(node: ast.AST | None) -> int | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, int):
         return node.value
@@ -649,6 +685,8 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _check_duplicate_helper_systems(tree, path, report)
         _check_display_command_context(tree, path, report)
         _check_manual_subtitle_concatenation(tree, path, report)
+        _check_legacy_footer_service_wiring(tree, path, report)
+        _check_manual_set_footer_calls(tree, path, report)
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)

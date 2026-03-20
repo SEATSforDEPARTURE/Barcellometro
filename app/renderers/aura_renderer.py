@@ -568,7 +568,7 @@ def _compose_channel_aura_embed(
         value="\n".join(f"• {line}" for line in advice_lines) or "• Nessun consiglio disponibile.",
     )
     if footer_text:
-        embed.set_footer(text=footer_text)
+        logger.debug("aura_footer_note_delegated_to_central_pipeline=%s", footer_text)
     attach_footer_meta(embed, service_name="aura", used_local_processing=True)
     return embed
 

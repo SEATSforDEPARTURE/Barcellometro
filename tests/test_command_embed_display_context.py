@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import discord
 
-from app.services.footer import get_footer_meta
+from app.services.footer import FooterService, get_footer_meta
 from app.shared.discord.command_embeds import build_command_embed, normalize_display_command_context
 from app.shared.discord.footer_pipeline import finalize_embed
 
@@ -399,3 +399,84 @@ def test_build_command_embed_strips_duplicate_kind_emoji_from_body_lines() -> No
     assert "• ✅ Operazione completata." not in description
     assert "• Operazione completata." in description
     assert "• Status: **enabled**" in description
+
+
+class _FooterDb:
+    def __init__(self) -> None:
+        self.settings: dict[str, str] = {}
+
+    async def get_setting(self, key: str) -> str | None:
+        return self.settings.get(key)
+
+    async def set_setting(self, key: str, value: str) -> None:
+        self.settings[key] = value
+
+    async def fetchall(self, _query: str, _params: tuple[str, ...]):
+        return []
+
+
+def _build_footer_service() -> FooterService:
+    return FooterService(_FooterDb())
+
+
+def test_build_command_embed_admin_embed_includes_global_phrase() -> None:
+    async def _run() -> discord.Embed:
+        footer_service = _build_footer_service()
+        await footer_service.set_version('dev7.1')
+        await footer_service.set_global_phrase('In via di sviluppo')
+        embed = await build_command_embed(
+            top_level='admin',
+            subcommand_path='footer template_global_show',
+            footer_service=footer_service,
+            footer_service_name='status',
+            lines=[('Phrase', 'In via di sviluppo')],
+        )
+        await finalize_embed(embed, footer_service, default_service_name='status')
+        return embed
+
+    embed = asyncio.run(_run())
+
+    assert embed.footer is not None
+    assert embed.footer.text == 'Barcellometro dev7.1 · In via di sviluppo'
+
+
+def test_build_command_embed_minimal_mode_uses_global_phrase_when_footer_service_exists() -> None:
+    async def _run() -> discord.Embed:
+        footer_service = _build_footer_service()
+        await footer_service.set_version('dev7.1')
+        await footer_service.set_global_phrase('Sempre acceso')
+        embed = await build_command_embed(
+            top_level='admin',
+            subcommand_path='status',
+            footer_service=footer_service,
+            footer_mode='minimal',
+            footer_service_name='status',
+        )
+        await finalize_embed(embed, footer_service, default_service_name='status')
+        return embed
+
+    embed = asyncio.run(_run())
+
+    assert embed.footer is not None
+    assert embed.footer.text == 'Barcellometro dev7.1 · Sempre acceso'
+
+
+def test_build_command_embed_config_embed_includes_global_phrase() -> None:
+    async def _run() -> discord.Embed:
+        footer_service = _build_footer_service()
+        await footer_service.set_version('dev7.1')
+        await footer_service.set_global_phrase('Footer globale')
+        embed = await build_command_embed(
+            top_level='admin',
+            subcommand_path='audionotes config_show',
+            footer_service=footer_service,
+            footer_service_name='audio_notes',
+            lines=[('Queue Max', 50)],
+        )
+        await finalize_embed(embed, footer_service, default_service_name='audio_notes')
+        return embed
+
+    embed = asyncio.run(_run())
+
+    assert embed.footer is not None
+    assert embed.footer.text == 'Barcellometro dev7.1 · Footer globale'
