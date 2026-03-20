@@ -41,3 +41,5 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - `ENTITLEMENTS_CONFIG_PATH` deve puntare a `settings/entitlements.json` se vuoi usare override locali.
 - I servizi Aura e Trigger leggono i runtime file in `settings/*.json` e, quando previsto, fanno fallback automatico al corrispondente `settings/*.example.json`.
 - Per evitare path duplicati nel codice Python, i riferimenti centralizzati stanno in `app/core/config_paths.py`.
+- Gli override locali non devono reintrodurre wording legacy nei footer o nei template: `Dati elaborati` + ` in loco` ed `e fallback` + ` locale` sono aboliti in tutto il progetto.
+- Se un file runtime come `settings/barcello_trigger.json` contiene campi come `footer`, `fallback_footer` o simili, per output non-AI non va salvata alcuna frase tecnica finale equivalente; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare.
