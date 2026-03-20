@@ -238,6 +238,19 @@ class SummaryResult:
     cache_hit: bool = False
 
 
+@dataclass
+class SummaryJsonParseResult:
+    payload: dict[str, Any] | None
+    extraction_strategy: str
+    extracted_json_from_code_fence: bool = False
+    extracted_json_from_text_wrapper: bool = False
+    normalized_invalid_json: bool = False
+
+    @property
+    def parse_recovered(self) -> bool:
+        return self.extraction_strategy != "direct" or self.normalized_invalid_json
+
+
 class SummaryService:
     def __init__(self, database: DatabaseService, ai_service: Any | None = None, *, cache_ttl_seconds: int = 90) -> None:
         self._database = database
@@ -392,6 +405,18 @@ class SummaryService:
                         start_ts=start_ts,
                         end_ts=end_ts,
                     )
+                    runtime_model_cfg = self._ai_service.get_runtime_model("summary") if hasattr(self._ai_service, "get_runtime_model") else model_cfg
+                    runtime_provider, _ = parse_model_string(str(runtime_model_cfg or "")) if runtime_model_cfg else (provider, None)
+                    runtime_label = model_display_name(runtime_model_cfg) or model_label
+                    if runtime_model_cfg:
+                        ai_status.update(
+                            {
+                                "provider": runtime_provider,
+                                "model": runtime_model_cfg,
+                                "display_model": runtime_label,
+                                "fallback": bool(runtime_model_cfg and runtime_model_cfg != model_cfg),
+                            }
+                        )
                     if ai_payload:
                         await self._sanitize_ai_payload(
                             ai_payload,
@@ -406,11 +431,11 @@ class SummaryService:
                         ai_status.update(
                             {
                                 "enabled": True,
-                                "fallback": False,
+                                "fallback": bool(runtime_model_cfg and runtime_model_cfg != model_cfg),
                                 "reason": "ok",
                                 "used_ai_output": True,
-                                "used_model": model_cfg,
-                                "used_display_model": model_label,
+                                "used_model": runtime_model_cfg or model_cfg,
+                                "used_display_model": runtime_label,
                             }
                         )
                     else:
@@ -544,10 +569,13 @@ class SummaryService:
         end_ts: str | None = None,
     ) -> dict[str, Any] | None:
         model_cfg = self._ai_service.get_model("summary") if self._ai_service else None
+        fallback_model_cfg = self._ai_service.get_fallback_model("summary") if self._ai_service and hasattr(self._ai_service, "get_fallback_model") else None
         provider, _ = parse_model_string(str(model_cfg or "")) if model_cfg else (None, None)
+        fallback_provider, _ = parse_model_string(str(fallback_model_cfg or "")) if fallback_model_cfg else (None, None)
         is_ollama = provider == "ollama"
-        sample_max_items = OLLAMA_SUMMARY_SAMPLE_MAX_ITEMS if is_ollama else DEFAULT_SUMMARY_SAMPLE_MAX_ITEMS
-        sample_buckets = OLLAMA_SUMMARY_SAMPLE_BUCKETS if is_ollama else DEFAULT_SUMMARY_SAMPLE_BUCKETS
+        ollama_compatible_fallback = provider != "ollama" and fallback_provider == "ollama"
+        sample_max_items = OLLAMA_SUMMARY_SAMPLE_MAX_ITEMS if (is_ollama or ollama_compatible_fallback) else DEFAULT_SUMMARY_SAMPLE_MAX_ITEMS
+        sample_buckets = OLLAMA_SUMMARY_SAMPLE_BUCKETS if (is_ollama or ollama_compatible_fallback) else DEFAULT_SUMMARY_SAMPLE_BUCKETS
         sampled_messages = sample_messages_time_distributed(messages, max_items=sample_max_items, buckets=sample_buckets)
         compact_messages, compact_stats = _build_summary_prompt_messages(sampled_messages)
         moments_policy_tier = _moments_policy_tier(tier)
@@ -606,21 +634,23 @@ class SummaryService:
             moments_style_rule = (
                 "Momenti: stile neutro-fattuale, bullet autonomi orientati agli eventi; evita cronologia narrativa della giornata. "
             )
+        compact_system_prompt = (
+            "Scrivi in italiano e restituisci SOLO JSON valido. "
+            + narrative_extra
+            + "Non inventare dettagli. "
+            + names_rule
+            + "Descrivi eventi reali senza copiare i messaggi. "
+            "I messaggi in input usano chiavi compatte: i=message_id, t=timestamp ISO, a=author_id, x=testo, k=kind, vc=1 se evento vocale/in call. "
+            "Mantieni il testo dei campi JSON essenziale: niente boilerplate, niente intestazioni, niente frasi ornamentali. "
+            "Struttura JSON minima richiesta: themes[], moments[], advice[]. "
+            "themes: lista corta di keyword in italiano, minuscole. "
+            "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
+            "advice: lista stringhe brevi per la community, anche vuota se non aggiunge valore. "
+            "quotes/dynamics/degrade_list/invigorate_list/who_interacted_today/proverbio sono opzionali."
+        )
         if is_ollama:
-            schema_mode = "lite"
-            system_prompt = (
-                "Scrivi in italiano e restituisci SOLO JSON valido. "
-                + narrative_extra
-                + "Non inventare dettagli. "
-                + names_rule
-                + "Descrivi eventi reali senza copiare i messaggi. "
-                "I messaggi in input usano chiavi compatte: i=message_id, t=timestamp ISO, a=author_id, x=testo, k=kind, vc=1 se evento vocale/in call. "
-                "Mantieni il testo dei campi JSON essenziale: niente boilerplate, niente intestazioni, niente frasi ornamentali. "
-                "Struttura JSON minima richiesta: themes[], moments[], advice[]. "
-                "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
-                "advice: lista stringhe brevi per la community, anche vuota se non aggiunge valore. "
-                "quotes/dynamics/degrade_list/invigorate_list/who_interacted_today/proverbio sono opzionali."
-            )
+            schema_mode = "compact"
+            system_prompt = compact_system_prompt
         else:
             schema_mode = "full"
             system_prompt = (
@@ -697,8 +727,42 @@ class SummaryService:
             "true",
             "true" if summary_mode == "default" else "false",
         )
-        text = await self._ai_service.ask_for_task("summary", user_payload, system_prompt)
-        return _parse_json_safe(text)
+        fallback_schema_mode = "compact" if ollama_compatible_fallback else schema_mode
+        fallback_system_prompt = compact_system_prompt if ollama_compatible_fallback else system_prompt
+        fallback_user_payload = user_payload
+        text = await self._ai_service.ask_for_task(
+            "summary",
+            user_payload,
+            system_prompt,
+            fallback_question=fallback_user_payload if ollama_compatible_fallback else None,
+            fallback_persona_system=fallback_system_prompt if ollama_compatible_fallback else None,
+        )
+        runtime_model_cfg = self._ai_service.get_runtime_model("summary") if hasattr(self._ai_service, "get_runtime_model") else model_cfg
+        runtime_provider, _ = parse_model_string(str(runtime_model_cfg or "")) if runtime_model_cfg else (provider, None)
+        effective_schema_mode = fallback_schema_mode if runtime_provider == "ollama" and ollama_compatible_fallback else schema_mode
+        parse_result = _parse_json_safe(text)
+        logger.info(
+            "summary: provider=%s schema=%s json_extraction_strategy=%s extracted_json_from_code_fence=%s extracted_json_from_text_wrapper=%s normalized_invalid_json=%s parse_recovered=%s",
+            runtime_provider or provider or "unknown",
+            effective_schema_mode,
+            parse_result.extraction_strategy,
+            str(parse_result.extracted_json_from_code_fence).lower(),
+            str(parse_result.extracted_json_from_text_wrapper).lower(),
+            str(parse_result.normalized_invalid_json).lower(),
+            str(parse_result.parse_recovered).lower(),
+        )
+        payload = parse_result.payload
+        validation_failed_field = _validate_summary_payload(payload, effective_schema_mode)
+        if validation_failed_field:
+            logger.warning(
+                "summary: provider=%s schema=%s used_ai_output=false parse_recovered=%s validation_failed_field=%s",
+                runtime_provider or provider or "unknown",
+                effective_schema_mode,
+                str(parse_result.parse_recovered).lower(),
+                validation_failed_field,
+            )
+            return None
+        return payload
 
     def _merge_ai_summary(
         self,
@@ -1888,37 +1952,93 @@ def _extract_json_object_candidate(raw: str) -> str | None:
     return None
 
 
-def _parse_json_safe(text: str) -> dict[str, Any] | None:
+def _normalize_json_candidate(candidate: str) -> tuple[str, bool]:
+    normalized = candidate.strip().lstrip("\ufeff")
+    changed = False
+    trailing_commas_removed = re.sub(r",(\s*[}\]])", r"\1", normalized)
+    if trailing_commas_removed != normalized:
+        normalized = trailing_commas_removed
+        changed = True
+    return normalized, changed
+
+
+def _parse_json_candidate(candidate: str) -> tuple[dict[str, Any] | None, bool]:
+    normalized, changed = _normalize_json_candidate(candidate)
+    if not normalized:
+        return None, False
+    try:
+        parsed = json.loads(normalized)
+        if isinstance(parsed, dict):
+            return parsed, changed
+    except json.JSONDecodeError:
+        return None, changed
+    return None, changed
+
+
+def _parse_json_safe(text: str) -> SummaryJsonParseResult:
     if not text:
-        return None
+        return SummaryJsonParseResult(payload=None, extraction_strategy="none")
     raw = text.strip()
     if not raw:
-        return None
-    candidates: list[str] = [raw]
+        return SummaryJsonParseResult(payload=None, extraction_strategy="none")
+
+    direct_payload, direct_normalized = _parse_json_candidate(raw)
+    if direct_payload is not None:
+        return SummaryJsonParseResult(
+            payload=direct_payload,
+            extraction_strategy="direct",
+            normalized_invalid_json=direct_normalized,
+        )
+
     if "```" in raw:
         for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", raw, flags=re.IGNORECASE):
             fenced = match.group(1).strip()
-            if fenced:
-                candidates.append(fenced)
+            if not fenced:
+                continue
+            parsed, normalized = _parse_json_candidate(fenced)
+            if parsed is not None:
+                return SummaryJsonParseResult(
+                    payload=parsed,
+                    extraction_strategy="code_fence",
+                    extracted_json_from_code_fence=True,
+                    normalized_invalid_json=normalized,
+                )
+            extracted = _extract_json_object_candidate(fenced)
+            if extracted:
+                parsed, normalized = _parse_json_candidate(extracted)
+                if parsed is not None:
+                    return SummaryJsonParseResult(
+                        payload=parsed,
+                        extraction_strategy="code_fence",
+                        extracted_json_from_code_fence=True,
+                        extracted_json_from_text_wrapper=True,
+                        normalized_invalid_json=normalized,
+                    )
+
     extracted = _extract_json_object_candidate(raw)
     if extracted:
-        candidates.append(extracted)
-
-    seen: set[str] = set()
-    for candidate in candidates:
-        normalized = candidate.strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        try:
-            parsed = json.loads(normalized)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            continue
+        parsed, normalized = _parse_json_candidate(extracted)
+        if parsed is not None:
+            return SummaryJsonParseResult(
+                payload=parsed,
+                extraction_strategy="first_object",
+                extracted_json_from_text_wrapper=True,
+                normalized_invalid_json=normalized,
+            )
 
     preview = raw.replace("\n", " ")[:240]
     logger.debug("summary ai parse failed preview=%r", preview)
+    return SummaryJsonParseResult(payload=None, extraction_strategy="none")
+
+
+def _validate_summary_payload(payload: dict[str, Any] | None, schema_mode: str) -> str | None:
+    if payload is None:
+        return "payload"
+    required_fields = ("themes", "moments", "advice") if schema_mode == "compact" else ("themes", "moments", "advice")
+    for field_name in required_fields:
+        value = payload.get(field_name)
+        if not isinstance(value, list):
+            return field_name
     return None
 
 
