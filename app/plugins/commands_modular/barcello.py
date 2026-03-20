@@ -103,7 +103,7 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
         await send_ephemeral(interaction, f"Barcello trigger {'enabled' if enabled else 'disabled'} for this channel.")
 
     async def _show_mood(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "admin.barcello.mood_show", ctx, legacy_aliases=["bm.barcello.mood"]):
+        if not await check_permission(interaction, "admin.barcello.mood_show", ctx):
             return
         scope = await _require_channel_scope(interaction)
         if scope is None:
@@ -178,7 +178,7 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
     @barcello_group.command(name="mood_set", description="Set the Barcello mood for this channel.")
     @app_commands.describe(value="Mood value.")
     async def barcello_mood_set_command(interaction: discord.Interaction, value: str) -> None:
-        if not await check_permission(interaction, "admin.barcello.mood_set", ctx, legacy_aliases=["bm.barcello.mood"]):
+        if not await check_permission(interaction, "admin.barcello.mood_set", ctx):
             return
         scope = await _require_channel_scope(interaction)
         if scope is None:
@@ -211,7 +211,7 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
 
     @barcello_group.command(name="mood_reset", description="Reset the Barcello mood for this channel.")
     async def barcello_mood_reset_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "admin.barcello.mood_reset", ctx, legacy_aliases=["bm.barcello.mood_reset"]):
+        if not await check_permission(interaction, "admin.barcello.mood_reset", ctx):
             return
         scope = await _require_channel_scope(interaction)
         if scope is None:
@@ -1139,7 +1139,7 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
                     await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
                 return
 
-            if not await check_permission(interaction, "admin.barcello.run", ctx, legacy_aliases=["barcello"]):
+            if not await check_permission(interaction, "admin.barcello.run", ctx):
                 return
 
             if window_minutes is None:

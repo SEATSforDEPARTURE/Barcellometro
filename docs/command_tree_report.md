@@ -2,7 +2,7 @@
 
 - Commands discovered: **266**
 - Errors: **0**
-- Warnings: **123**
+- Warnings: **51**
 
 ## Inventory
 
@@ -64,172 +64,172 @@
 | `aura` | `—` | `oggi` | Aura di oggi | `app/plugins/commands_modular/aura.py:452` |
 | `aura` | `—` | `range` | Aura per intervallo | `app/plugins/commands_modular/aura.py:463` |
 | `aura` | `—` | `ultimi` | Aura ultimi N periodi | `app/plugins/commands_modular/aura.py:435` |
-| `campagne` | `cap` | `config_reset` | Reset the daily cap configuration | `app/plugins/commands_modular/messaggi.py:604` |
-| `campagne` | `cap` | `config_set` | Set the daily cap configuration | `app/plugins/commands_modular/messaggi.py:587` |
-| `campagne` | `cap` | `config_show` | Show the daily cap configuration | `app/plugins/commands_modular/messaggi.py:597` |
-| `campagne` | `cap` | `off` | Disable the daily cap | `app/plugins/commands_modular/messaggi.py:571` |
-| `campagne` | `cap` | `on` | Enable the daily cap | `app/plugins/commands_modular/messaggi.py:564` |
-| `campagne` | `cap` | `status` | Show the daily cap status | `app/plugins/commands_modular/messaggi.py:578` |
-| `campagne` | `custom` | `off` | Disable custom campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:615` |
-| `campagne` | `custom` | `on` | Enable custom campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:611` |
-| `campagne` | `custom` | `run` | Run a custom campaign schedule now | `app/plugins/commands_modular/messaggi.py:751` |
-| `campagne` | `custom` | `schedule_add` | Add a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:638` |
-| `campagne` | `custom` | `schedule_edit` | Edit a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:792` |
-| `campagne` | `custom` | `schedule_list` | List custom campaign schedules | `app/plugins/commands_modular/messaggi.py:708` |
-| `campagne` | `custom` | `schedule_remove` | Remove a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:736` |
-| `campagne` | `custom` | `schedule_show` | Show a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:722` |
-| `campagne` | `custom` | `status` | Show custom campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:619` |
-| `campagne` | `horoscope` | `off` | Disable horoscope campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:1085` |
-| `campagne` | `horoscope` | `on` | Enable horoscope campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:1081` |
-| `campagne` | `horoscope` | `run` | Run the horoscope campaign immediately | `app/plugins/commands_modular/messaggi.py:1168` |
-| `campagne` | `horoscope` | `schedule_add` | Add a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1100` |
-| `campagne` | `horoscope` | `schedule_edit` | Edit a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1130` |
-| `campagne` | `horoscope` | `schedule_list` | List horoscope campaign schedules | `app/plugins/commands_modular/messaggi.py:1164` |
-| `campagne` | `horoscope` | `schedule_remove` | Remove a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1160` |
-| `campagne` | `horoscope` | `schedule_show` | Show a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1155` |
-| `campagne` | `horoscope` | `status` | Show horoscope campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:1089` |
-| `campagne` | `news` | `off` | Disable news campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:904` |
-| `campagne` | `news` | `on` | Enable news campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:900` |
-| `campagne` | `news` | `run` | Run the news campaign immediately | `app/plugins/commands_modular/messaggi.py:986` |
-| `campagne` | `news` | `schedule_add` | Add a news campaign schedule | `app/plugins/commands_modular/messaggi.py:920` |
-| `campagne` | `news` | `schedule_edit` | Edit a news campaign schedule | `app/plugins/commands_modular/messaggi.py:950` |
-| `campagne` | `news` | `schedule_list` | List news campaign schedules | `app/plugins/commands_modular/messaggi.py:982` |
-| `campagne` | `news` | `schedule_remove` | Remove a news campaign schedule | `app/plugins/commands_modular/messaggi.py:978` |
-| `campagne` | `news` | `schedule_show` | Show a news campaign schedule | `app/plugins/commands_modular/messaggi.py:973` |
-| `campagne` | `news` | `status` | Show news campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:908` |
-| `campagne` | `—` | `off` | Disable campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:492` |
-| `campagne` | `—` | `on` | Enable campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:481` |
-| `campagne` | `prompt` | `off` | Disable prompt campaigns in the current channel | `app/plugins/commands_modular/triggers.py:632` |
-| `campagne` | `prompt` | `on` | Enable prompt campaigns in the current channel | `app/plugins/commands_modular/triggers.py:620` |
-| `campagne` | `prompt` | `run` | Run a prompt campaign schedule now | `app/plugins/commands_modular/triggers.py:765` |
-| `campagne` | `prompt` | `schedule_add` | Add a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:663` |
-| `campagne` | `prompt` | `schedule_edit` | Edit a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:809` |
-| `campagne` | `prompt` | `schedule_list` | List prompt campaign schedules | `app/plugins/commands_modular/triggers.py:722` |
-| `campagne` | `prompt` | `schedule_remove` | Remove a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:750` |
-| `campagne` | `prompt` | `schedule_show` | Show a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:736` |
-| `campagne` | `prompt` | `status` | Show prompt campaign status for the current channel | `app/plugins/commands_modular/triggers.py:644` |
-| `campagne` | `quiet` | `config_reset` | Reset quiet hours configuration | `app/plugins/commands_modular/messaggi.py:556` |
-| `campagne` | `quiet` | `config_set` | Set quiet hours configuration | `app/plugins/commands_modular/messaggi.py:540` |
-| `campagne` | `quiet` | `config_show` | Show quiet hours configuration | `app/plugins/commands_modular/messaggi.py:548` |
-| `campagne` | `quiet` | `off` | Disable quiet hours | `app/plugins/commands_modular/messaggi.py:523` |
-| `campagne` | `quiet` | `on` | Enable quiet hours | `app/plugins/commands_modular/messaggi.py:516` |
-| `campagne` | `quiet` | `status` | Show quiet hours status | `app/plugins/commands_modular/messaggi.py:530` |
-| `campagne` | `—` | `status` | Show campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:503` |
-| `campagne` | `weather` | `off` | Disable weather campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:994` |
-| `campagne` | `weather` | `on` | Enable weather campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:990` |
-| `campagne` | `weather` | `run` | Run the weather campaign immediately | `app/plugins/commands_modular/messaggi.py:1077` |
-| `campagne` | `weather` | `schedule_add` | Add a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1009` |
-| `campagne` | `weather` | `schedule_edit` | Edit a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1039` |
-| `campagne` | `weather` | `schedule_list` | List weather campaign schedules | `app/plugins/commands_modular/messaggi.py:1073` |
-| `campagne` | `weather` | `schedule_remove` | Remove a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1069` |
-| `campagne` | `weather` | `schedule_show` | Show a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1064` |
-| `campagne` | `weather` | `status` | Show weather campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:998` |
-| `commandguard` | `—` | `role_add` | Add a role command policy. | `app/plugins/commands_modular/roles.py:57` |
-| `commandguard` | `—` | `role_edit` | Edit a role command policy. | `app/plugins/commands_modular/roles.py:68` |
-| `commandguard` | `—` | `role_list` | List all role policies. | `app/plugins/commands_modular/roles.py:100` |
-| `commandguard` | `—` | `role_remove` | Remove a role command policy. | `app/plugins/commands_modular/roles.py:79` |
-| `commandguard` | `—` | `role_reset` | Reset all policies for a role. | `app/plugins/commands_modular/roles.py:111` |
-| `commandguard` | `—` | `role_show` | Show role policies. | `app/plugins/commands_modular/roles.py:88` |
-| `commandguard` | `—` | `user_add` | Add a user command policy. | `app/plugins/commands_modular/roles.py:119` |
-| `commandguard` | `—` | `user_edit` | Edit a user command policy. | `app/plugins/commands_modular/roles.py:130` |
-| `commandguard` | `—` | `user_list` | List all user policies. | `app/plugins/commands_modular/roles.py:162` |
-| `commandguard` | `—` | `user_remove` | Remove a user command policy. | `app/plugins/commands_modular/roles.py:141` |
-| `commandguard` | `—` | `user_reset` | Reset all policies for a user. | `app/plugins/commands_modular/roles.py:173` |
-| `commandguard` | `—` | `user_show` | Show user policies. | `app/plugins/commands_modular/roles.py:150` |
+| `campagne` | `cap` | `config_reset` | Reset the daily cap configuration | `app/plugins/commands_modular/messaggi.py:598` |
+| `campagne` | `cap` | `config_set` | Set the daily cap configuration | `app/plugins/commands_modular/messaggi.py:581` |
+| `campagne` | `cap` | `config_show` | Show the daily cap configuration | `app/plugins/commands_modular/messaggi.py:591` |
+| `campagne` | `cap` | `off` | Disable the daily cap | `app/plugins/commands_modular/messaggi.py:565` |
+| `campagne` | `cap` | `on` | Enable the daily cap | `app/plugins/commands_modular/messaggi.py:558` |
+| `campagne` | `cap` | `status` | Show the daily cap status | `app/plugins/commands_modular/messaggi.py:572` |
+| `campagne` | `custom` | `off` | Disable custom campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:609` |
+| `campagne` | `custom` | `on` | Enable custom campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:605` |
+| `campagne` | `custom` | `run` | Run a custom campaign schedule now | `app/plugins/commands_modular/messaggi.py:745` |
+| `campagne` | `custom` | `schedule_add` | Add a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:632` |
+| `campagne` | `custom` | `schedule_edit` | Edit a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:786` |
+| `campagne` | `custom` | `schedule_list` | List custom campaign schedules | `app/plugins/commands_modular/messaggi.py:702` |
+| `campagne` | `custom` | `schedule_remove` | Remove a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:730` |
+| `campagne` | `custom` | `schedule_show` | Show a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:716` |
+| `campagne` | `custom` | `status` | Show custom campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:613` |
+| `campagne` | `horoscope` | `off` | Disable horoscope campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:1075` |
+| `campagne` | `horoscope` | `on` | Enable horoscope campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:1071` |
+| `campagne` | `horoscope` | `run` | Run the horoscope campaign immediately | `app/plugins/commands_modular/messaggi.py:1156` |
+| `campagne` | `horoscope` | `schedule_add` | Add a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1090` |
+| `campagne` | `horoscope` | `schedule_edit` | Edit a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1119` |
+| `campagne` | `horoscope` | `schedule_list` | List horoscope campaign schedules | `app/plugins/commands_modular/messaggi.py:1152` |
+| `campagne` | `horoscope` | `schedule_remove` | Remove a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1148` |
+| `campagne` | `horoscope` | `schedule_show` | Show a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1143` |
+| `campagne` | `horoscope` | `status` | Show horoscope campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:1079` |
+| `campagne` | `news` | `off` | Disable news campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:898` |
+| `campagne` | `news` | `on` | Enable news campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:894` |
+| `campagne` | `news` | `run` | Run the news campaign immediately | `app/plugins/commands_modular/messaggi.py:978` |
+| `campagne` | `news` | `schedule_add` | Add a news campaign schedule | `app/plugins/commands_modular/messaggi.py:914` |
+| `campagne` | `news` | `schedule_edit` | Edit a news campaign schedule | `app/plugins/commands_modular/messaggi.py:943` |
+| `campagne` | `news` | `schedule_list` | List news campaign schedules | `app/plugins/commands_modular/messaggi.py:974` |
+| `campagne` | `news` | `schedule_remove` | Remove a news campaign schedule | `app/plugins/commands_modular/messaggi.py:970` |
+| `campagne` | `news` | `schedule_show` | Show a news campaign schedule | `app/plugins/commands_modular/messaggi.py:965` |
+| `campagne` | `news` | `status` | Show news campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:902` |
+| `campagne` | `—` | `off` | Disable campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:486` |
+| `campagne` | `—` | `on` | Enable campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:475` |
+| `campagne` | `prompt` | `off` | Disable prompt campaigns in the current channel | `app/plugins/commands_modular/triggers.py:622` |
+| `campagne` | `prompt` | `on` | Enable prompt campaigns in the current channel | `app/plugins/commands_modular/triggers.py:610` |
+| `campagne` | `prompt` | `run` | Run a prompt campaign schedule now | `app/plugins/commands_modular/triggers.py:755` |
+| `campagne` | `prompt` | `schedule_add` | Add a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:653` |
+| `campagne` | `prompt` | `schedule_edit` | Edit a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:799` |
+| `campagne` | `prompt` | `schedule_list` | List prompt campaign schedules | `app/plugins/commands_modular/triggers.py:712` |
+| `campagne` | `prompt` | `schedule_remove` | Remove a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:740` |
+| `campagne` | `prompt` | `schedule_show` | Show a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:726` |
+| `campagne` | `prompt` | `status` | Show prompt campaign status for the current channel | `app/plugins/commands_modular/triggers.py:634` |
+| `campagne` | `quiet` | `config_reset` | Reset quiet hours configuration | `app/plugins/commands_modular/messaggi.py:550` |
+| `campagne` | `quiet` | `config_set` | Set quiet hours configuration | `app/plugins/commands_modular/messaggi.py:534` |
+| `campagne` | `quiet` | `config_show` | Show quiet hours configuration | `app/plugins/commands_modular/messaggi.py:542` |
+| `campagne` | `quiet` | `off` | Disable quiet hours | `app/plugins/commands_modular/messaggi.py:517` |
+| `campagne` | `quiet` | `on` | Enable quiet hours | `app/plugins/commands_modular/messaggi.py:510` |
+| `campagne` | `quiet` | `status` | Show quiet hours status | `app/plugins/commands_modular/messaggi.py:524` |
+| `campagne` | `—` | `status` | Show campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:497` |
+| `campagne` | `weather` | `off` | Disable weather campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:986` |
+| `campagne` | `weather` | `on` | Enable weather campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:982` |
+| `campagne` | `weather` | `run` | Run the weather campaign immediately | `app/plugins/commands_modular/messaggi.py:1067` |
+| `campagne` | `weather` | `schedule_add` | Add a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1001` |
+| `campagne` | `weather` | `schedule_edit` | Edit a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1030` |
+| `campagne` | `weather` | `schedule_list` | List weather campaign schedules | `app/plugins/commands_modular/messaggi.py:1063` |
+| `campagne` | `weather` | `schedule_remove` | Remove a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1059` |
+| `campagne` | `weather` | `schedule_show` | Show a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1054` |
+| `campagne` | `weather` | `status` | Show weather campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:990` |
+| `commandguard` | `—` | `role_add` | Add a role command policy. | `app/plugins/commands_modular/roles.py:56` |
+| `commandguard` | `—` | `role_edit` | Edit a role command policy. | `app/plugins/commands_modular/roles.py:67` |
+| `commandguard` | `—` | `role_list` | List all role policies. | `app/plugins/commands_modular/roles.py:98` |
+| `commandguard` | `—` | `role_remove` | Remove a role command policy. | `app/plugins/commands_modular/roles.py:78` |
+| `commandguard` | `—` | `role_reset` | Reset all policies for a role. | `app/plugins/commands_modular/roles.py:109` |
+| `commandguard` | `—` | `role_show` | Show role policies. | `app/plugins/commands_modular/roles.py:86` |
+| `commandguard` | `—` | `user_add` | Add a user command policy. | `app/plugins/commands_modular/roles.py:117` |
+| `commandguard` | `—` | `user_edit` | Edit a user command policy. | `app/plugins/commands_modular/roles.py:128` |
+| `commandguard` | `—` | `user_list` | List all user policies. | `app/plugins/commands_modular/roles.py:159` |
+| `commandguard` | `—` | `user_remove` | Remove a user command policy. | `app/plugins/commands_modular/roles.py:139` |
+| `commandguard` | `—` | `user_reset` | Reset all policies for a user. | `app/plugins/commands_modular/roles.py:170` |
+| `commandguard` | `—` | `user_show` | Show user policies. | `app/plugins/commands_modular/roles.py:147` |
 | `domanda` | `—` | `domanda` | Fai una domanda al Q&A | `app/plugins/commands_modular/ask.py:60` |
-| `frasi` | `—` | `entry_add` | Add a phrase trigger entry | `app/plugins/commands_modular/triggers.py:309` |
-| `frasi` | `—` | `entry_edit` | Edit a phrase trigger entry | `app/plugins/commands_modular/triggers.py:418` |
-| `frasi` | `—` | `entry_list` | List phrase trigger entries | `app/plugins/commands_modular/triggers.py:364` |
-| `frasi` | `—` | `entry_remove` | Remove a phrase trigger entry | `app/plugins/commands_modular/triggers.py:351` |
-| `frasi` | `—` | `entry_show` | Show a phrase trigger entry | `app/plugins/commands_modular/triggers.py:377` |
-| `frasi` | `—` | `off` | Disable phrase triggers | `app/plugins/commands_modular/triggers.py:293` |
-| `frasi` | `—` | `on` | Enable phrase triggers | `app/plugins/commands_modular/triggers.py:289` |
-| `frasi` | `—` | `status` | Show phrase trigger status | `app/plugins/commands_modular/triggers.py:297` |
-| `frasi` | `—` | `template_global_reset` | Reset the global phrase template | `app/plugins/commands_modular/triggers.py:561` |
-| `frasi` | `—` | `template_global_set` | Set the global phrase template | `app/plugins/commands_modular/triggers.py:534` |
-| `frasi` | `—` | `template_global_show` | Show the global phrase template | `app/plugins/commands_modular/triggers.py:548` |
-| `frasi` | `—` | `template_milestone_reset` | Reset all milestone templates | `app/plugins/commands_modular/triggers.py:521` |
-| `frasi` | `—` | `template_milestone_set` | Create or update a milestone template | `app/plugins/commands_modular/triggers.py:491` |
-| `frasi` | `—` | `template_milestone_show` | Show milestone templates | `app/plugins/commands_modular/triggers.py:508` |
-| `frasi` | `—` | `template_user_reset` | Reset a user-specific phrase template | `app/plugins/commands_modular/triggers.py:609` |
-| `frasi` | `—` | `template_user_set` | Set a user-specific phrase template | `app/plugins/commands_modular/triggers.py:579` |
-| `frasi` | `—` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:596` |
-| `inactivity` | `autokick` | `off` | Disable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:225` |
-| `inactivity` | `autokick` | `on` | Enable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:218` |
-| `inactivity` | `autokick` | `status` | Show the automatic inactivity action status. | `app/plugins/commands_modular/inattivi.py:232` |
-| `inactivity` | `dms` | `cooldown_reset` | Reset the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:377` |
-| `inactivity` | `dms` | `cooldown_set` | Set the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:363` |
-| `inactivity` | `dms` | `cooldown_show` | Show the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:370` |
-| `inactivity` | `dms` | `invite_reset` | Reset the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:402` |
-| `inactivity` | `dms` | `invite_set` | Set the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:388` |
-| `inactivity` | `dms` | `invite_show` | Show the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:395` |
-| `inactivity` | `dms` | `template_reminder_reset` | Reset the reminder DM template. | `app/plugins/commands_modular/inattivi.py:355` |
-| `inactivity` | `dms` | `template_reminder_set` | Set the reminder DM template. | `app/plugins/commands_modular/inattivi.py:334` |
-| `inactivity` | `dms` | `template_reminder_show` | Show the reminder DM template. | `app/plugins/commands_modular/inattivi.py:341` |
-| `inactivity` | `grace` | `config_reset` | Reset the inactivity grace period configuration. | `app/plugins/commands_modular/inattivi.py:279` |
-| `inactivity` | `grace` | `config_set` | Set the inactivity grace period configuration. | `app/plugins/commands_modular/inattivi.py:264` |
-| `inactivity` | `grace` | `config_show` | Show the inactivity grace period configuration. | `app/plugins/commands_modular/inattivi.py:271` |
-| `inactivity` | `grace` | `off` | Disable the inactivity grace period. | `app/plugins/commands_modular/inattivi.py:248` |
-| `inactivity` | `grace` | `on` | Enable the inactivity grace period. | `app/plugins/commands_modular/inattivi.py:239` |
-| `inactivity` | `grace` | `status` | Show the inactivity grace period status. | `app/plugins/commands_modular/inattivi.py:255` |
-| `inactivity` | `—` | `off` | Disable inactivity moderation. | `app/plugins/commands_modular/inattivi.py:179` |
-| `inactivity` | `—` | `on` | Enable inactivity moderation. | `app/plugins/commands_modular/inattivi.py:172` |
-| `inactivity` | `policy` | `default_reset` | Reset the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:443` |
-| `inactivity` | `policy` | `default_set` | Set the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:416` |
-| `inactivity` | `policy` | `default_show` | Show the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:435` |
-| `inactivity` | `policy` | `exceptions_add` | Add a role to the inactivity exception list. | `app/plugins/commands_modular/inattivi.py:502` |
-| `inactivity` | `policy` | `exceptions_list` | List all inactivity exception roles. | `app/plugins/commands_modular/inattivi.py:539` |
-| `inactivity` | `policy` | `exceptions_remove` | Remove a role from the inactivity exception list. | `app/plugins/commands_modular/inattivi.py:516` |
-| `inactivity` | `policy` | `exceptions_show` | Show whether a role is excluded from inactivity moderation. | `app/plugins/commands_modular/inattivi.py:530` |
-| `inactivity` | `policy` | `role_reset` | Reset an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:494` |
-| `inactivity` | `policy` | `role_set` | Set an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:459` |
-| `inactivity` | `policy` | `role_show` | Show an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:481` |
-| `inactivity` | `—` | `run` | Run the inactivity moderation scan now. | `app/plugins/commands_modular/inattivi.py:554` |
-| `inactivity` | `—` | `status` | Show the inactivity moderation status. | `app/plugins/commands_modular/inattivi.py:186` |
-| `inactivity` | `tempban` | `config_reset` | Reset the inactivity tempban configuration. | `app/plugins/commands_modular/inattivi.py:326` |
-| `inactivity` | `tempban` | `config_set` | Set the inactivity tempban configuration. | `app/plugins/commands_modular/inattivi.py:311` |
-| `inactivity` | `tempban` | `config_show` | Show the inactivity tempban configuration. | `app/plugins/commands_modular/inattivi.py:318` |
-| `inactivity` | `tempban` | `off` | Disable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:295` |
-| `inactivity` | `tempban` | `on` | Enable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:286` |
-| `inactivity` | `tempban` | `status` | Show the inactivity tempban status. | `app/plugins/commands_modular/inattivi.py:302` |
-| `insights` | `—` | `off` | Disable insights in the current channel | `app/plugins/commands_modular/triggers.py:991` |
-| `insights` | `—` | `on` | Enable insights in the current channel | `app/plugins/commands_modular/triggers.py:987` |
-| `insights` | `—` | `status` | Show insights status for the current channel | `app/plugins/commands_modular/triggers.py:995` |
-| `insights` | `—` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1031` |
-| `insights` | `—` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:1009` |
-| `insights` | `—` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1019` |
-| `mod` | `channel` | `notify_reset` | Reset the moderation notification channel. | `app/plugins/commands_modular/moderazione_utenti.py:152` |
-| `mod` | `channel` | `notify_set` | Set the moderation notification channel. | `app/plugins/commands_modular/moderazione_utenti.py:137` |
-| `mod` | `channel` | `notify_show` | Show the moderation notification channel. | `app/plugins/commands_modular/moderazione_utenti.py:144` |
-| `mod` | `channel` | `off` | Disable moderation notifications for the channel setting. | `app/plugins/commands_modular/moderazione_utenti.py:123` |
-| `mod` | `channel` | `on` | Enable moderation notifications for a channel. | `app/plugins/commands_modular/moderazione_utenti.py:110` |
-| `mod` | `channel` | `status` | Show the moderation channel configuration status. | `app/plugins/commands_modular/moderazione_utenti.py:130` |
-| `mod` | `channel` | `template_reset` | Reset a moderation notification template. | `app/plugins/commands_modular/moderazione_utenti.py:194` |
-| `mod` | `channel` | `template_set` | Set a moderation notification template. | `app/plugins/commands_modular/moderazione_utenti.py:160` |
-| `mod` | `channel` | `template_show` | Show moderation notification templates. | `app/plugins/commands_modular/moderazione_utenti.py:172` |
-| `mod` | `channel` | `user_card_reset` | Reset the moderation notification user card setting. | `app/plugins/commands_modular/moderazione_utenti.py:221` |
-| `mod` | `channel` | `user_card_set` | Set whether moderation notifications include the user card. | `app/plugins/commands_modular/moderazione_utenti.py:206` |
-| `mod` | `channel` | `user_card_show` | Show whether the moderation notification user card is enabled. | `app/plugins/commands_modular/moderazione_utenti.py:213` |
-| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:288` |
-| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:304` |
-| `mod` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:354` |
-| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:385` |
-| `mod` | `users` | `kick` | Kick a user. | `app/plugins/commands_modular/moderazione_utenti.py:263` |
-| `mod` | `users` | `kick_list` | List recent kicks. | `app/plugins/commands_modular/moderazione_utenti.py:279` |
-| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:313` |
-| `mod` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:345` |
-| `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:92` |
-| `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:70` |
-| `privacy` | `—` | `status` | Show the current voice privacy status. | `app/plugins/commands_modular/privacy.py:115` |
-| `qna` | `—` | `bonus_reset` | Reset a user's QnA bonus | `app/plugins/commands_modular/triggers.py:977` |
-| `qna` | `—` | `bonus_set` | Set a QnA bonus for a user | `app/plugins/commands_modular/triggers.py:946` |
-| `qna` | `—` | `bonus_show` | Show a user's QnA bonus | `app/plugins/commands_modular/triggers.py:966` |
-| `qna` | `—` | `limits_reset` | Reset QnA daily limits to defaults | `app/plugins/commands_modular/triggers.py:936` |
-| `qna` | `—` | `limits_set` | Set a QnA daily limit | `app/plugins/commands_modular/triggers.py:915` |
-| `qna` | `—` | `limits_show` | Show QnA daily limits | `app/plugins/commands_modular/triggers.py:891` |
-| `qna` | `—` | `off` | Disable QnA in the current channel | `app/plugins/commands_modular/triggers.py:881` |
-| `qna` | `—` | `on` | Enable QnA in the current channel | `app/plugins/commands_modular/triggers.py:877` |
-| `qna` | `—` | `status` | Show QnA status for the current channel | `app/plugins/commands_modular/triggers.py:885` |
+| `frasi` | `—` | `entry_add` | Add a phrase trigger entry | `app/plugins/commands_modular/triggers.py:299` |
+| `frasi` | `—` | `entry_edit` | Edit a phrase trigger entry | `app/plugins/commands_modular/triggers.py:408` |
+| `frasi` | `—` | `entry_list` | List phrase trigger entries | `app/plugins/commands_modular/triggers.py:354` |
+| `frasi` | `—` | `entry_remove` | Remove a phrase trigger entry | `app/plugins/commands_modular/triggers.py:341` |
+| `frasi` | `—` | `entry_show` | Show a phrase trigger entry | `app/plugins/commands_modular/triggers.py:367` |
+| `frasi` | `—` | `off` | Disable phrase triggers | `app/plugins/commands_modular/triggers.py:283` |
+| `frasi` | `—` | `on` | Enable phrase triggers | `app/plugins/commands_modular/triggers.py:279` |
+| `frasi` | `—` | `status` | Show phrase trigger status | `app/plugins/commands_modular/triggers.py:287` |
+| `frasi` | `—` | `template_global_reset` | Reset the global phrase template | `app/plugins/commands_modular/triggers.py:551` |
+| `frasi` | `—` | `template_global_set` | Set the global phrase template | `app/plugins/commands_modular/triggers.py:524` |
+| `frasi` | `—` | `template_global_show` | Show the global phrase template | `app/plugins/commands_modular/triggers.py:538` |
+| `frasi` | `—` | `template_milestone_reset` | Reset all milestone templates | `app/plugins/commands_modular/triggers.py:511` |
+| `frasi` | `—` | `template_milestone_set` | Create or update a milestone template | `app/plugins/commands_modular/triggers.py:481` |
+| `frasi` | `—` | `template_milestone_show` | Show milestone templates | `app/plugins/commands_modular/triggers.py:498` |
+| `frasi` | `—` | `template_user_reset` | Reset a user-specific phrase template | `app/plugins/commands_modular/triggers.py:599` |
+| `frasi` | `—` | `template_user_set` | Set a user-specific phrase template | `app/plugins/commands_modular/triggers.py:569` |
+| `frasi` | `—` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:586` |
+| `inactivity` | `autokick` | `off` | Disable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:224` |
+| `inactivity` | `autokick` | `on` | Enable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:217` |
+| `inactivity` | `autokick` | `status` | Show the automatic inactivity action status. | `app/plugins/commands_modular/inattivi.py:231` |
+| `inactivity` | `dms` | `cooldown_reset` | Reset the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:376` |
+| `inactivity` | `dms` | `cooldown_set` | Set the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:362` |
+| `inactivity` | `dms` | `cooldown_show` | Show the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:369` |
+| `inactivity` | `dms` | `invite_reset` | Reset the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:401` |
+| `inactivity` | `dms` | `invite_set` | Set the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:387` |
+| `inactivity` | `dms` | `invite_show` | Show the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:394` |
+| `inactivity` | `dms` | `template_reminder_reset` | Reset the reminder DM template. | `app/plugins/commands_modular/inattivi.py:354` |
+| `inactivity` | `dms` | `template_reminder_set` | Set the reminder DM template. | `app/plugins/commands_modular/inattivi.py:333` |
+| `inactivity` | `dms` | `template_reminder_show` | Show the reminder DM template. | `app/plugins/commands_modular/inattivi.py:340` |
+| `inactivity` | `grace` | `config_reset` | Reset the inactivity grace period configuration. | `app/plugins/commands_modular/inattivi.py:278` |
+| `inactivity` | `grace` | `config_set` | Set the inactivity grace period configuration. | `app/plugins/commands_modular/inattivi.py:263` |
+| `inactivity` | `grace` | `config_show` | Show the inactivity grace period configuration. | `app/plugins/commands_modular/inattivi.py:270` |
+| `inactivity` | `grace` | `off` | Disable the inactivity grace period. | `app/plugins/commands_modular/inattivi.py:247` |
+| `inactivity` | `grace` | `on` | Enable the inactivity grace period. | `app/plugins/commands_modular/inattivi.py:238` |
+| `inactivity` | `grace` | `status` | Show the inactivity grace period status. | `app/plugins/commands_modular/inattivi.py:254` |
+| `inactivity` | `—` | `off` | Disable inactivity moderation. | `app/plugins/commands_modular/inattivi.py:178` |
+| `inactivity` | `—` | `on` | Enable inactivity moderation. | `app/plugins/commands_modular/inattivi.py:171` |
+| `inactivity` | `policy` | `default_reset` | Reset the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:442` |
+| `inactivity` | `policy` | `default_set` | Set the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:415` |
+| `inactivity` | `policy` | `default_show` | Show the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:434` |
+| `inactivity` | `policy` | `exceptions_add` | Add a role to the inactivity exception list. | `app/plugins/commands_modular/inattivi.py:501` |
+| `inactivity` | `policy` | `exceptions_list` | List all inactivity exception roles. | `app/plugins/commands_modular/inattivi.py:538` |
+| `inactivity` | `policy` | `exceptions_remove` | Remove a role from the inactivity exception list. | `app/plugins/commands_modular/inattivi.py:515` |
+| `inactivity` | `policy` | `exceptions_show` | Show whether a role is excluded from inactivity moderation. | `app/plugins/commands_modular/inattivi.py:529` |
+| `inactivity` | `policy` | `role_reset` | Reset an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:493` |
+| `inactivity` | `policy` | `role_set` | Set an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:458` |
+| `inactivity` | `policy` | `role_show` | Show an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:480` |
+| `inactivity` | `—` | `run` | Run the inactivity moderation scan now. | `app/plugins/commands_modular/inattivi.py:553` |
+| `inactivity` | `—` | `status` | Show the inactivity moderation status. | `app/plugins/commands_modular/inattivi.py:185` |
+| `inactivity` | `tempban` | `config_reset` | Reset the inactivity tempban configuration. | `app/plugins/commands_modular/inattivi.py:325` |
+| `inactivity` | `tempban` | `config_set` | Set the inactivity tempban configuration. | `app/plugins/commands_modular/inattivi.py:310` |
+| `inactivity` | `tempban` | `config_show` | Show the inactivity tempban configuration. | `app/plugins/commands_modular/inattivi.py:317` |
+| `inactivity` | `tempban` | `off` | Disable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:294` |
+| `inactivity` | `tempban` | `on` | Enable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:285` |
+| `inactivity` | `tempban` | `status` | Show the inactivity tempban status. | `app/plugins/commands_modular/inattivi.py:301` |
+| `insights` | `—` | `off` | Disable insights in the current channel | `app/plugins/commands_modular/triggers.py:981` |
+| `insights` | `—` | `on` | Enable insights in the current channel | `app/plugins/commands_modular/triggers.py:977` |
+| `insights` | `—` | `status` | Show insights status for the current channel | `app/plugins/commands_modular/triggers.py:985` |
+| `insights` | `—` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1021` |
+| `insights` | `—` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:999` |
+| `insights` | `—` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1009` |
+| `mod` | `channel` | `notify_reset` | Reset the moderation notification channel. | `app/plugins/commands_modular/moderazione_utenti.py:151` |
+| `mod` | `channel` | `notify_set` | Set the moderation notification channel. | `app/plugins/commands_modular/moderazione_utenti.py:136` |
+| `mod` | `channel` | `notify_show` | Show the moderation notification channel. | `app/plugins/commands_modular/moderazione_utenti.py:143` |
+| `mod` | `channel` | `off` | Disable moderation notifications for the channel setting. | `app/plugins/commands_modular/moderazione_utenti.py:122` |
+| `mod` | `channel` | `on` | Enable moderation notifications for a channel. | `app/plugins/commands_modular/moderazione_utenti.py:109` |
+| `mod` | `channel` | `status` | Show the moderation channel configuration status. | `app/plugins/commands_modular/moderazione_utenti.py:129` |
+| `mod` | `channel` | `template_reset` | Reset a moderation notification template. | `app/plugins/commands_modular/moderazione_utenti.py:193` |
+| `mod` | `channel` | `template_set` | Set a moderation notification template. | `app/plugins/commands_modular/moderazione_utenti.py:159` |
+| `mod` | `channel` | `template_show` | Show moderation notification templates. | `app/plugins/commands_modular/moderazione_utenti.py:171` |
+| `mod` | `channel` | `user_card_reset` | Reset the moderation notification user card setting. | `app/plugins/commands_modular/moderazione_utenti.py:220` |
+| `mod` | `channel` | `user_card_set` | Set whether moderation notifications include the user card. | `app/plugins/commands_modular/moderazione_utenti.py:205` |
+| `mod` | `channel` | `user_card_show` | Show whether the moderation notification user card is enabled. | `app/plugins/commands_modular/moderazione_utenti.py:212` |
+| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:287` |
+| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:303` |
+| `mod` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:353` |
+| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:384` |
+| `mod` | `users` | `kick` | Kick a user. | `app/plugins/commands_modular/moderazione_utenti.py:262` |
+| `mod` | `users` | `kick_list` | List recent kicks. | `app/plugins/commands_modular/moderazione_utenti.py:278` |
+| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:312` |
+| `mod` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:344` |
+| `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:90` |
+| `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:68` |
+| `privacy` | `—` | `status` | Show the current voice privacy status. | `app/plugins/commands_modular/privacy.py:113` |
+| `qna` | `—` | `bonus_reset` | Reset a user's QnA bonus | `app/plugins/commands_modular/triggers.py:967` |
+| `qna` | `—` | `bonus_set` | Set a QnA bonus for a user | `app/plugins/commands_modular/triggers.py:936` |
+| `qna` | `—` | `bonus_show` | Show a user's QnA bonus | `app/plugins/commands_modular/triggers.py:956` |
+| `qna` | `—` | `limits_reset` | Reset QnA daily limits to defaults | `app/plugins/commands_modular/triggers.py:926` |
+| `qna` | `—` | `limits_set` | Set a QnA daily limit | `app/plugins/commands_modular/triggers.py:905` |
+| `qna` | `—` | `limits_show` | Show QnA daily limits | `app/plugins/commands_modular/triggers.py:881` |
+| `qna` | `—` | `off` | Disable QnA in the current channel | `app/plugins/commands_modular/triggers.py:871` |
+| `qna` | `—` | `on` | Enable QnA in the current channel | `app/plugins/commands_modular/triggers.py:867` |
+| `qna` | `—` | `status` | Show QnA status for the current channel | `app/plugins/commands_modular/triggers.py:875` |
 | `resocontocanale` | `aura` | `ieri` | Show manual channel aura details for yesterday. | `app/plugins/commands_modular/resoconto.py:622` |
 | `resocontocanale` | `aura` | `oggi` | Show manual channel aura details for today. | `app/plugins/commands_modular/resoconto.py:614` |
 | `resocontocanale` | `aura` | `range` | Show manual channel aura details for a range. | `app/plugins/commands_modular/resoconto.py:662` |
@@ -266,12 +266,12 @@
 | `riassunto` | `—` | `oggi` | Riassunto della giornata di oggi | `app/plugins/commands_modular/riassunto.py:1901` |
 | `riassunto` | `—` | `range` | Riassunto per intervallo | `app/plugins/commands_modular/riassunto.py:1912` |
 | `riassunto` | `—` | `ultimi` | Riassunto ultimi N periodi | `app/plugins/commands_modular/riassunto.py:1882` |
-| `stt` | `—` | `config_reset` | Reset the STT configuration to defaults. | `app/plugins/commands_modular/stt.py:127` |
+| `stt` | `—` | `config_reset` | Reset the STT configuration to defaults. | `app/plugins/commands_modular/stt.py:125` |
 | `stt` | `—` | `config_set` | Update the STT configuration. | `app/plugins/commands_modular/stt.py:62` |
-| `stt` | `—` | `config_show` | Show the STT configuration. | `app/plugins/commands_modular/stt.py:110` |
-| `translate` | `—` | `config_reset` | Reset the translation configuration to defaults. | `app/plugins/commands_modular/translate.py:86` |
+| `stt` | `—` | `config_show` | Show the STT configuration. | `app/plugins/commands_modular/stt.py:109` |
+| `translate` | `—` | `config_reset` | Reset the translation configuration to defaults. | `app/plugins/commands_modular/translate.py:84` |
 | `translate` | `—` | `config_set` | Update the translation configuration. | `app/plugins/commands_modular/translate.py:32` |
-| `translate` | `—` | `config_show` | Show the translation configuration. | `app/plugins/commands_modular/translate.py:69` |
+| `translate` | `—` | `config_show` | Show the translation configuration. | `app/plugins/commands_modular/translate.py:68` |
 | `voice_ingest` | `—` | `join` | Join a voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:19` |
 | `voice_ingest` | `—` | `leave` | Leave the current voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:45` |
 
@@ -279,8 +279,8 @@
 
 - **WARNING missing_param_description** — `aura.ieri`: Parameter 'utente' is missing a description. (`app/plugins/commands_modular/aura.py:457`)
 - **WARNING missing_param_description** — `aura.oggi`: Parameter 'utente' is missing a description. (`app/plugins/commands_modular/aura.py:452`)
-- **WARNING missing_param_description** — `inactivity.dms.template_reminder_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/inattivi.py:334`)
-- **WARNING missing_param_description** — `mod.channel.template_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/moderazione_utenti.py:160`)
+- **WARNING missing_param_description** — `inactivity.dms.template_reminder_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/inattivi.py:333`)
+- **WARNING missing_param_description** — `mod.channel.template_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/moderazione_utenti.py:159`)
 - **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:662`)
 - **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:662`)
 - **WARNING missing_param_description** — `resocontocanale.aura.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:650`)
@@ -301,110 +301,33 @@
 - **WARNING required_param** — `admin.ai.model_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:569`)
 - **WARNING required_param** — `admin.barcello.mood_set`: Parameter 'value' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/barcello.py:180`)
 - **WARNING required_param** — `admin.footer.template_service_set`: Parameter 'phrase' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:807`)
-- **WARNING required_param** — `campagne.cap.config_set`: Parameter 'daily_limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:587`)
-- **WARNING required_param** — `campagne.prompt.schedule_show`: Parameter 'id_or_name' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:736`)
-- **WARNING required_param** — `campagne.quiet.config_set`: Parameter 'start' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:540`)
-- **WARNING required_param** — `campagne.quiet.config_set`: Parameter 'end' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:540`)
-- **WARNING required_param** — `frasi.template_global_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:534`)
-- **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'threshold' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:491`)
-- **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:491`)
-- **WARNING required_param** — `frasi.template_user_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:579`)
-- **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:363`)
-- **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:388`)
-- **WARNING required_param** — `inactivity.dms.template_reminder_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:334`)
-- **WARNING required_param** — `inactivity.grace.config_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:264`)
-- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:418`)
-- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:419`)
-- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:420`)
-- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:421`)
-- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:462`)
-- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:463`)
-- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:464`)
-- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:465`)
-- **WARNING required_param** — `inactivity.tempban.config_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:311`)
-- **WARNING required_param** — `insights.template_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:1009`)
-- **WARNING required_param** — `mod.channel.template_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:160`)
-- **WARNING required_param** — `mod.channel.user_card_set`: Parameter 'enabled' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:206`)
-- **WARNING required_param** — `qna.bonus_set`: Parameter 'amount' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:946`)
-- **WARNING required_param** — `qna.limits_set`: Parameter 'tier' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:915`)
-- **WARNING required_param** — `qna.limits_set`: Parameter 'limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:915`)
-
-## Legacy alias review
-
-Legacy aliases remain compatibility-only. In particular, `bm.*` paths are allowed for backward compatibility, while `admin.*` is the canonical namespace.
-
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.events.on", ctx, legacy_aliases=["bm.check"]):` (`app/plugins/commands_modular/admin.py:324`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.events.off", ctx, legacy_aliases=["bm.check"]):` (`app/plugins/commands_modular/admin.py:330`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.events.status", ctx, legacy_aliases=["bm.check"]):` (`app/plugins/commands_modular/admin.py:336`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.retention.on", ctx, legacy_aliases=["bm.retention"]):` (`app/plugins/commands_modular/admin.py:342`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.retention.off", ctx, legacy_aliases=["bm.retention"]):` (`app/plugins/commands_modular/admin.py:349`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.retention.status", ctx, legacy_aliases=["bm.retention"]):` (`app/plugins/commands_modular/admin.py:356`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.retention.config_set", ctx, legacy_aliases=["bm.retention"]):` (`app/plugins/commands_modular/admin.py:371`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.retention.config_show", ctx, legacy_aliases=["bm.retention"]):` (`app/plugins/commands_modular/admin.py:406`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.retention.config_reset", ctx, legacy_aliases=["bm.retention"]):` (`app/plugins/commands_modular/admin.py:418`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.backfill.on", ctx, legacy_aliases=["bm.backfill"]):` (`app/plugins/commands_modular/admin.py:433`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.backfill.off", ctx, legacy_aliases=["bm.backfill"]):` (`app/plugins/commands_modular/admin.py:440`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.backfill.status", ctx, legacy_aliases=["bm.backfill"]):` (`app/plugins/commands_modular/admin.py:447`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.backfill.config_set", ctx, legacy_aliases=["bm.backfill"]):` (`app/plugins/commands_modular/admin.py:462`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.backfill.config_show", ctx, legacy_aliases=["bm.backfill"]):` (`app/plugins/commands_modular/admin.py:497`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.backfill.config_reset", ctx, legacy_aliases=["bm.backfill"]):` (`app/plugins/commands_modular/admin.py:509`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.backfill.run", ctx, legacy_aliases=["bm.backfill"]):` (`app/plugins/commands_modular/admin.py:524`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.ai.on", ctx, legacy_aliases=["bm.ai"]):` (`app/plugins/commands_modular/admin.py:550`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.ai.off", ctx, legacy_aliases=["bm.ai"]):` (`app/plugins/commands_modular/admin.py:557`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.ai.model_set", ctx, legacy_aliases=["bm.ai-model"]):` (`app/plugins/commands_modular/admin.py:571`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.ai.model_show", ctx, legacy_aliases=["bm.ai-model", "bm.ai"]):` (`app/plugins/commands_modular/admin.py:601`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.ai.fallback_set", ctx, legacy_aliases=["bm.ai-model"]):` (`app/plugins/commands_modular/admin.py:616`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.ai.fallback_show", ctx, legacy_aliases=["bm.ai-model", "bm.ai"]):` (`app/plugins/commands_modular/admin.py:646`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.ai.status", ctx, legacy_aliases=["bm.ai"]):` (`app/plugins/commands_modular/admin.py:654`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.ai.run", ctx, legacy_aliases=["bm.ai"]):` (`app/plugins/commands_modular/admin.py:694`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.on", ctx, legacy_aliases=["bm.footer", "bm.footer_status"]):` (`app/plugins/commands_modular/admin.py:720`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.off", ctx, legacy_aliases=["bm.footer", "bm.footer_status"]):` (`app/plugins/commands_modular/admin.py:730`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.template_global_set", ctx, legacy_aliases=["bm.footer"]):` (`app/plugins/commands_modular/admin.py:745`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.template_global_show", ctx, legacy_aliases=["bm.footer", "bm.footer_status"]):` (`app/plugins/commands_modular/admin.py:776`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.template_global_reset", ctx, legacy_aliases=["bm.footer"]):` (`app/plugins/commands_modular/admin.py:793`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.template_service_set", ctx, legacy_aliases=["bm.footer"]):` (`app/plugins/commands_modular/admin.py:809`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.template_service_show", ctx, legacy_aliases=["bm.footer", "bm.footer_status"]):` (`app/plugins/commands_modular/admin.py:824`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.template_service_reset", ctx, legacy_aliases=["bm.footer"]):` (`app/plugins/commands_modular/admin.py:845`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/admin.py`: `if not await check_permission(interaction, "admin.footer.status", ctx, legacy_aliases=["bm.footer_status", "bm.footer"]):` (`app/plugins/commands_modular/admin.py:859`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/audio_notes.py`: `if not await check_permission(interaction, "admin.audionotes.on", ctx, legacy_aliases=["bm.audio_notes.on"]):` (`app/plugins/commands_modular/audio_notes.py:27`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/audio_notes.py`: `if not await check_permission(interaction, "admin.audionotes.off", ctx, legacy_aliases=["bm.audio_notes.off"]):` (`app/plugins/commands_modular/audio_notes.py:41`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/audio_notes.py`: `if not await check_permission(interaction, "admin.audionotes.status", ctx, legacy_aliases=["bm.audio_notes.status"]):` (`app/plugins/commands_modular/audio_notes.py:55`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/audio_notes.py`: `if not await check_permission(interaction, "admin.audionotes.config_set", ctx, legacy_aliases=["bm.audio_notes.limits"]):` (`app/plugins/commands_modular/audio_notes.py:90`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/audio_notes.py`: `if not await check_permission(interaction, "admin.audionotes.config_show", ctx, legacy_aliases=["bm.audio_notes.limits"]):` (`app/plugins/commands_modular/audio_notes.py:149`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/audio_notes.py`: `if not await check_permission(interaction, "admin.audionotes.config_reset", ctx, legacy_aliases=["bm.audio_notes.limits"]):` (`app/plugins/commands_modular/audio_notes.py:168`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/barcello.py`: `if not await check_permission(interaction, "admin.barcello.mood_show", ctx, legacy_aliases=["bm.barcello.mood"]):` (`app/plugins/commands_modular/barcello.py:106`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/barcello.py`: `if not await check_permission(interaction, "admin.barcello.mood_set", ctx, legacy_aliases=["bm.barcello.mood"]):` (`app/plugins/commands_modular/barcello.py:181`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/barcello.py`: `if not await check_permission(interaction, "admin.barcello.mood_reset", ctx, legacy_aliases=["bm.barcello.mood_reset"]):` (`app/plugins/commands_modular/barcello.py:214`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.role_add", ctx, legacy_aliases=["bm.role.set_role"]):` (`app/plugins/commands_modular/roles.py:58`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.role_edit", ctx, legacy_aliases=["bm.role.set_role"]):` (`app/plugins/commands_modular/roles.py:69`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.role_remove", ctx, legacy_aliases=["bm.role.clear_role"]):` (`app/plugins/commands_modular/roles.py:80`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.role_show", ctx, legacy_aliases=["bm.role.show_role"]):` (`app/plugins/commands_modular/roles.py:89`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.role_list", ctx, legacy_aliases=["bm.role.show_role"]):` (`app/plugins/commands_modular/roles.py:101`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.role_reset", ctx, legacy_aliases=["bm.role.clear_role"]):` (`app/plugins/commands_modular/roles.py:112`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.user_add", ctx, legacy_aliases=["bm.role.set_user"]):` (`app/plugins/commands_modular/roles.py:120`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.user_edit", ctx, legacy_aliases=["bm.role.set_user"]):` (`app/plugins/commands_modular/roles.py:131`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.user_remove", ctx, legacy_aliases=["bm.role.clear_user"]):` (`app/plugins/commands_modular/roles.py:142`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.user_show", ctx, legacy_aliases=["bm.role.show_user"]):` (`app/plugins/commands_modular/roles.py:151`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.user_list", ctx, legacy_aliases=["bm.role.show_user"]):` (`app/plugins/commands_modular/roles.py:163`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/roles.py`: `if not await check_permission(interaction, "admin.commandguard.user_reset", ctx, legacy_aliases=["bm.role.clear_user"]):` (`app/plugins/commands_modular/roles.py:174`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/stt.py`: `legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],` (`app/plugins/commands_modular/stt.py:74`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/stt.py`: `legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],` (`app/plugins/commands_modular/stt.py:115`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/stt.py`: `legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],` (`app/plugins/commands_modular/stt.py:132`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/translate.py`: `legacy_aliases=["bm.translate.backend", "bm.translate.target"],` (`app/plugins/commands_modular/translate.py:41`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/translate.py`: `legacy_aliases=["bm.translate.backend", "bm.translate.target"],` (`app/plugins/commands_modular/translate.py:74`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/translate.py`: `legacy_aliases=["bm.translate.backend", "bm.translate.target"],` (`app/plugins/commands_modular/translate.py:91`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.add")` (`app/plugins/commands_modular/triggers.py:317`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.remove")` (`app/plugins/commands_modular/triggers.py:352`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.list")` (`app/plugins/commands_modular/triggers.py:365`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.milestone_global_set")` (`app/plugins/commands_modular/triggers.py:492`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.milestone_global_list", "frasi.milestone_global_status")` (`app/plugins/commands_modular/triggers.py:509`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.milestone_global_remove")` (`app/plugins/commands_modular/triggers.py:522`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.template_set")` (`app/plugins/commands_modular/triggers.py:535`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.template_show")` (`app/plugins/commands_modular/triggers.py:549`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.template_reset")` (`app/plugins/commands_modular/triggers.py:562`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.userphrase_set")` (`app/plugins/commands_modular/triggers.py:580`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.userphrase_show")` (`app/plugins/commands_modular/triggers.py:597`)
-- **WARNING legacy_alias** — `app/plugins/commands_modular/triggers.py`: `scope = await _require_channel(interaction, "frasi.userphrase_remove")` (`app/plugins/commands_modular/triggers.py:610`)
+- **WARNING required_param** — `campagne.cap.config_set`: Parameter 'daily_limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:581`)
+- **WARNING required_param** — `campagne.prompt.schedule_show`: Parameter 'id_or_name' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:726`)
+- **WARNING required_param** — `campagne.quiet.config_set`: Parameter 'start' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:534`)
+- **WARNING required_param** — `campagne.quiet.config_set`: Parameter 'end' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:534`)
+- **WARNING required_param** — `frasi.template_global_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:524`)
+- **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'threshold' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:481`)
+- **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:481`)
+- **WARNING required_param** — `frasi.template_user_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:569`)
+- **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:362`)
+- **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:387`)
+- **WARNING required_param** — `inactivity.dms.template_reminder_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:333`)
+- **WARNING required_param** — `inactivity.grace.config_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:263`)
+- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:417`)
+- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:418`)
+- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:419`)
+- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:420`)
+- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:461`)
+- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:462`)
+- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:463`)
+- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:464`)
+- **WARNING required_param** — `inactivity.tempban.config_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:310`)
+- **WARNING required_param** — `insights.template_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:999`)
+- **WARNING required_param** — `mod.channel.template_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:159`)
+- **WARNING required_param** — `mod.channel.user_card_set`: Parameter 'enabled' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:205`)
+- **WARNING required_param** — `qna.bonus_set`: Parameter 'amount' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:936`)
+- **WARNING required_param** — `qna.limits_set`: Parameter 'tier' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:905`)
+- **WARNING required_param** — `qna.limits_set`: Parameter 'limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:905`)
 
 ## Localized exceptions
 

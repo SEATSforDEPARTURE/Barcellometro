@@ -74,11 +74,11 @@ def _find_command(group: discord.app_commands.Group, *names: str):
     return next(cmd for cmd in current.commands if cmd.name == names[-1])
 
 
-def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[tuple[str, tuple[str, ...]]] = []
+def test_triggers_guard_uses_canonical_admin_permission_keys(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
 
-    async def _check_permission(interaction, command_name, ctx, *, legacy_aliases=()):
-        seen.append((command_name, tuple(legacy_aliases)))
+    async def _check_permission(interaction, command_name, ctx):
+        seen.append(command_name)
         return True
 
     sent = []
@@ -110,33 +110,22 @@ def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypat
     ctx.database.get_message_campaign = types.MethodType(_get_message_campaign, ctx.database)
     asyncio.run(prompt_show.callback(_Interaction(prompt_show), "5"))
 
-    assert seen[0][0] == "admin.frasi.entry_list"
-    assert "frasi.entry_list" in seen[0][1]
-    assert "bm.frasi.entry_list" in seen[0][1]
-    assert "frasi.list" in seen[0][1]
-    assert seen[1][0] == "admin.frasi.template_global_show"
-    assert "frasi.template_global_show" in seen[1][1]
-    assert "bm.frasi.template_global_show" in seen[1][1]
-    assert "frasi.template_show" in seen[1][1]
-    assert seen[2][0] == "admin.campagne.prompt.schedule_show"
-    assert "campagne.prompt.schedule_show" in seen[2][1]
-    assert "bm.campagne.prompt.schedule_show" in seen[2][1]
-    assert "bm.prompt.schedule_show" in seen[2][1]
-    assert "campagne.prompt.entry_show" in seen[2][1]
+    assert seen == [
+        "admin.frasi.entry_list",
+        "admin.frasi.template_global_show",
+        "admin.campagne.prompt.schedule_show",
+    ]
     assert sent[0]["subcommand_path"] == "frasi entry_list"
     assert sent[1]["subcommand_path"] == "frasi template_global_show"
     assert sent[2]["subcommand_path"] == "campagne prompt schedule_show"
     assert all(payload["top_level"] == "admin" for payload in sent)
 
 
-def test_permission_helpers_prefer_admin_and_keep_bm_legacy_aliases(import_fresh) -> None:
-    # `bm.*` remains supported only as a legacy alias layer.
+def test_permission_helpers_keep_only_canonical_keys(import_fresh) -> None:
     permissions_module = import_fresh("app.plugins.commands_modular.permissions")
 
-    assert permissions_module.canonical_permission_key("bm.frasi.entry_list") == "admin.frasi.entry_list"
-    assert permissions_module.canonical_permission_key("admin.commandguard.role_add") == "admin.commandguard.role_add"
-    assert permissions_module.legacy_permission_candidates("admin.frasi.entry_list") == ["bm.frasi.entry_list"]
-    assert permissions_module.legacy_permission_candidates("admin") == ["bm"]
+    assert permissions_module.canonical_permission_key("admin.frasi.entry_list") == "admin.frasi.entry_list"
+    assert permissions_module.canonical_permission_key(" Admin.Frasi.Entry_List ") == "admin.frasi.entry_list"
 
 
 def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,15 +140,13 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     class _Db:
         async def list_role_policies(self, guild_id: str):
             return [
-                # Legacy stored policy should still be rendered through the canonical `admin.*` label.
-                {"role_id": "123", "command": "bm.test", "usage_limit": 5, "cooldown_seconds": 10},
+                {"role_id": "123", "command": "admin.test", "usage_limit": 5, "cooldown_seconds": 10},
                 {"role_id": "999", "command": "admin.test2", "usage_limit": None, "cooldown_seconds": None},
             ]
 
         async def list_user_policies(self, guild_id: str):
             return [
-                # Legacy stored policy should still be rendered through the canonical `admin.*` label.
-                {"user_id": "456", "command": "bm.test", "usage_limit": 1, "cooldown_seconds": 0},
+                {"user_id": "456", "command": "admin.test", "usage_limit": 1, "cooldown_seconds": 0},
                 {"user_id": "777", "command": "admin.other", "usage_limit": None, "cooldown_seconds": None},
             ]
 

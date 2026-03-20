@@ -24,7 +24,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
 
     @audio_notes_group.command(name="on", description="Enable audio notes.")
     async def audio_notes_on_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "admin.audionotes.on", ctx, legacy_aliases=["bm.audio_notes.on"]):
+        if not await check_permission(interaction, "admin.audionotes.on", ctx):
             return
         await set_setting(ctx, "audio_notes.enabled", "true")
         await send_legacy_standard_response(
@@ -38,7 +38,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
 
     @audio_notes_group.command(name="off", description="Disable audio notes.")
     async def audio_notes_off_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "admin.audionotes.off", ctx, legacy_aliases=["bm.audio_notes.off"]):
+        if not await check_permission(interaction, "admin.audionotes.off", ctx):
             return
         await set_setting(ctx, "audio_notes.enabled", "false")
         await send_legacy_standard_response(
@@ -52,7 +52,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
 
     @audio_notes_group.command(name="status", description="Show the audio notes status.")
     async def audio_notes_status_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "admin.audionotes.status", ctx, legacy_aliases=["bm.audio_notes.status"]):
+        if not await check_permission(interaction, "admin.audionotes.status", ctx):
             return
         max_mb, max_duration, max_chars, queue_max, chars_summary = await _config_lines()
         enabled = (await get_setting(ctx, "audio_notes.enabled", "false")).lower() in {"1", "true", "yes", "y"}
@@ -87,7 +87,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         queue_max: int | None = None,
         chars_summary: int | None = None,
     ) -> None:
-        if not await check_permission(interaction, "admin.audionotes.config_set", ctx, legacy_aliases=["bm.audio_notes.limits"]):
+        if not await check_permission(interaction, "admin.audionotes.config_set", ctx):
             return
         if all(value is None for value in [max_mb, max_duration_s, discord_max_chars, queue_max, chars_summary]):
             await send_legacy_standard_response(
@@ -146,7 +146,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
 
     @audio_notes_group.command(name="config_show", description="Show the audio notes configuration.")
     async def audio_notes_config_show_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "admin.audionotes.config_show", ctx, legacy_aliases=["bm.audio_notes.limits"]):
+        if not await check_permission(interaction, "admin.audionotes.config_show", ctx):
             return
         max_mb, max_duration, max_chars, queue_max, chars_summary = await _config_lines()
         await send_legacy_standard_response(
@@ -165,7 +165,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
 
     @audio_notes_group.command(name="config_reset", description="Reset the audio notes configuration to defaults.")
     async def audio_notes_config_reset_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "admin.audionotes.config_reset", ctx, legacy_aliases=["bm.audio_notes.limits"]):
+        if not await check_permission(interaction, "admin.audionotes.config_reset", ctx):
             return
         for key in ("audio_notes.max_mb", "audio_notes.max_duration_s", "audio_notes.discord_max_chars", "audio_notes.queue_max", "audio_notes.chars_summary"):
             await reset_setting(ctx, key)

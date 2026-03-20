@@ -16,7 +16,6 @@ MODULAR_DIR = COMMANDS_ROOT / "commands_modular"
 DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / "command_tree_report.md"
 
 CANONICAL_ADMIN_ROOT = "admin"
-LEGACY_ADMIN_ROOT_ALIASES = {"bm"}
 BANNED_SEGMENTS = {"delete", "clear", "create", "update", "stats", "get", "toggle"}
 ENGLISH_ALLOWED_SHORT = {"admin", "ai", "dm", "dms", "qna", "stt"}
 ITALIAN_MARKERS = {
@@ -75,18 +74,6 @@ CONFIG_TARGET_NAMES = {
     "utente",
     "voice_channel",
 }
-LEGACY_ALIAS_HINTS = (
-    "milestone_global_",
-    "template_set",
-    "template_show",
-    "template_reset",
-    "userphrase_",
-    ".set",
-    ".add",
-    ".remove",
-    ".list",
-)
-
 
 @dataclass(slots=True)
 class ParameterRecord:
@@ -122,7 +109,6 @@ class Issue:
 class ValidationResult:
     commands: list[CommandRecord] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
-    legacy_aliases: list[Issue] = field(default_factory=list)
     exceptions: list[str] = field(default_factory=list)
 
     @property
@@ -131,7 +117,7 @@ class ValidationResult:
 
     @property
     def warnings(self) -> list[Issue]:
-        return [issue for issue in self.issues if issue.severity == "warning"] + self.legacy_aliases
+        return [issue for issue in self.issues if issue.severity == "warning"]
 
 
 @dataclass(slots=True)
@@ -421,16 +407,6 @@ def _validate_commands(result: ValidationResult) -> ValidationResult:
             _add_issue(result, "error", "snake_case", f"Action '{action}' must be snake_case with at most two underscores.", command.path, command.source_file, command.line)
         if action.count("_") > 2:
             _add_issue(result, "error", "underscore_limit", f"Action '{action}' exceeds the max underscore limit.", command.path, command.source_file, command.line)
-        if command.root in LEGACY_ADMIN_ROOT_ALIASES:
-            _add_issue(
-                result,
-                "warning",
-                "legacy_root",
-                f"Legacy root '{command.root}' is still compatible, but '{CANONICAL_ADMIN_ROOT}' is the canonical namespace.",
-                command.path,
-                command.source_file,
-                command.line,
-            )
         if (not _should_skip_localized_checks(command)) and _looks_localized(command.description):
             _add_issue(result, "warning", "localized_description", "Command description looks non-English.", command.path, command.source_file, command.line)
         if not command.description:
@@ -476,32 +452,12 @@ def _validate_commands(result: ValidationResult) -> ValidationResult:
         if plain_show and plain_list:
             _add_issue(result, "warning", "show_list_overlap", "Parent exposes both plain 'show' and plain 'list'; verify there is no semantic duplication.", path_label)
 
-    _scan_legacy_aliases(result)
     result.commands.sort(key=lambda item: item.path)
     result.issues.sort(key=lambda issue: (issue.severity, issue.code, issue.path, issue.line or 0))
-    result.legacy_aliases.sort(key=lambda issue: (issue.path, issue.line or 0))
     result.exceptions = sorted(set(result.exceptions))
     return result
 
 
-def _scan_legacy_aliases(result: ValidationResult) -> None:
-    for path in sorted(MODULAR_DIR.glob("*.py")):
-        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
-            if "legacy_aliases" not in line and "_require_channel(interaction," not in line and '"frasi.' not in line:
-                continue
-            lowered = line.lower()
-            if not any(hint in lowered for hint in LEGACY_ALIAS_HINTS) and "bm." not in lowered and '"bm"' not in lowered and "'bm'" not in lowered:
-                continue
-            result.legacy_aliases.append(
-                Issue(
-                    severity="warning",
-                    code="legacy_alias",
-                    message=line.strip(),
-                    path=str(path.relative_to(REPO_ROOT)),
-                    source_file=str(path.relative_to(REPO_ROOT)),
-                    line=lineno,
-                )
-            )
 
 
 def validate_command_tree() -> ValidationResult:
@@ -541,16 +497,6 @@ def render_markdown_report(result: ValidationResult) -> str:
             lines.append(f"- **{issue.severity.upper()} {issue.code}** — `{issue.path}`: {issue.message}{location}")
     else:
         lines.append("- No validator errors or warnings.")
-    lines.extend(["", "## Legacy alias review", ""])
-    if result.legacy_aliases:
-        lines.append(
-            f"Legacy aliases remain compatibility-only. In particular, `{next(iter(sorted(LEGACY_ADMIN_ROOT_ALIASES)))}.*` paths are allowed for backward compatibility, while `{CANONICAL_ADMIN_ROOT}.*` is the canonical namespace."
-        )
-        lines.append("")
-        for issue in result.legacy_aliases:
-            lines.append(f"- **WARNING legacy_alias** — `{issue.path}`: `{issue.message}` (`{issue.source_file}:{issue.line}`)")
-    else:
-        lines.append("- No legacy alias residues detected.")
     lines.extend(["", "## Localized exceptions", ""])
     if result.exceptions:
         lines.append("The following commands remain intentionally localized and are excluded from the English-only rule for now:")

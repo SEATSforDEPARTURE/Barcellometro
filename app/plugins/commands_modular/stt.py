@@ -71,7 +71,6 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
             interaction,
             "admin.stt.config_set",
             ctx,
-            legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],
         ):
             return
         if all(value is None for value in (backend, model, compute, beam, language)):
@@ -112,7 +111,6 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
             interaction,
             "admin.stt.config_show",
             ctx,
-            legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],
         ):
             return
         await send_standard_response(
@@ -129,7 +127,6 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
             interaction,
             "admin.stt.config_reset",
             ctx,
-            legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],
         ):
             return
         for key in (

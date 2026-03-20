@@ -13,9 +13,6 @@ from app.plugins.commands_modular.settings import get_setting, set_setting
 from app.plugins.commands_modular.voice_ingest import voice_ingest_key
 from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
 
-# Legacy `bm.*` aliases stay supported for existing guild policies and muscle memory.
-PRIVACY_ALIASES = ("bm.privacy.on", "bm.privacy.off", "bm.privacy.status")
-
 
 def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> None:
     async def resolve_voice_channel(interaction: discord.Interaction, voice_channel: discord.VoiceChannel | None) -> discord.VoiceChannel | None:
@@ -69,7 +66,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
     @privacy_group.command(name="on", description="Enable voice privacy.")
     @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
     async def privacy_on(interaction: discord.Interaction, voice_channel: discord.VoiceChannel | None = None) -> None:
-        if not await check_permission(interaction, "privacy.on", ctx, legacy_aliases=PRIVACY_ALIASES):
+        if not await check_permission(interaction, "privacy.on", ctx):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:
@@ -91,7 +88,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
     @privacy_group.command(name="off", description="Disable voice privacy.")
     @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
     async def privacy_off(interaction: discord.Interaction, voice_channel: discord.VoiceChannel | None = None) -> None:
-        if not await check_permission(interaction, "privacy.off", ctx, legacy_aliases=PRIVACY_ALIASES):
+        if not await check_permission(interaction, "privacy.off", ctx):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:
@@ -114,7 +111,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
     @privacy_group.command(name="status", description="Show the current voice privacy status.")
     @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
     async def privacy_status(interaction: discord.Interaction, voice_channel: discord.VoiceChannel | None = None) -> None:
-        if not await check_permission(interaction, "privacy.status", ctx, legacy_aliases=PRIVACY_ALIASES):
+        if not await check_permission(interaction, "privacy.status", ctx):
             return
         resolved_voice = await resolve_voice_channel(interaction, voice_channel)
         if resolved_voice is None:

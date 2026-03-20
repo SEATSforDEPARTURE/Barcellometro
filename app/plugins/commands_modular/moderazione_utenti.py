@@ -19,7 +19,6 @@ from app.services.member_flow_notifications import (
 )
 
 PERM = "mod"
-LEGACY_PERMISSION_ALIASES = ("moderazione.utenti",)
 TEMPLATE_HELP = f"Supported placeholders: {describe_placeholders()}"
 TEMPLATE_FIELDS = {
     "inactivity": "template_inactivity_reason",
@@ -62,7 +61,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
     mod_group.add_command(users_group)
 
     async def _ensure(interaction: discord.Interaction) -> bool:
-        return await check_permission(interaction, PERM, ctx, legacy_aliases=LEGACY_PERMISSION_ALIASES)
+        return await check_permission(interaction, PERM, ctx)
 
     async def _ensure_cfg(guild_id: str) -> dict:
         if await ctx.database.get_inactivity_config(guild_id) is None:

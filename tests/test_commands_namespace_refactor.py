@@ -32,5 +32,5 @@ def test_campaign_and_trigger_outputs_use_admin_namespace() -> None:
 
     assert 'top_level="admin"' in triggers_source
     assert 'top_level="admin"' in messaggi_source
-    assert 'top_level="bm"' not in triggers_source
-    assert 'top_level="bm"' not in messaggi_source
+    assert triggers_source.count('top_level="admin"') >= 1
+    assert messaggi_source.count('top_level="admin"') >= 1

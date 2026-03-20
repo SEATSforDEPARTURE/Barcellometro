@@ -38,7 +38,6 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             interaction,
             "admin.translate.config_set",
             ctx,
-            legacy_aliases=["bm.translate.backend", "bm.translate.target"],
         ):
             return
         if backend is None and target is None:
@@ -71,7 +70,6 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             interaction,
             "admin.translate.config_show",
             ctx,
-            legacy_aliases=["bm.translate.backend", "bm.translate.target"],
         ):
             return
         await send_standard_response(
@@ -88,7 +86,6 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             interaction,
             "admin.translate.config_reset",
             ctx,
-            legacy_aliases=["bm.translate.backend", "bm.translate.target"],
         ):
             return
         for key in ("translate.backend", "translate.target_lang"):

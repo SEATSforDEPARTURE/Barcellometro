@@ -14,8 +14,6 @@ FooterMode = Literal["minimal", "meta", "none"]
 
 TOP_LEVEL_EMOJIS: dict[str, str] = {
     "admin": "🫛",
-    # Legacy embed payloads may still resolve `bm`; keep the emoji mapping for compatibility only.
-    "bm": "🫛",
     "status": "📊",
     "ai": "🧠",
     "retention": "🗂️",
@@ -335,8 +333,6 @@ async def send_standard_response(
 
 _LEGACY_TOP_LEVEL_EMOJIS: dict[str, str] = {
     "admin": "🧭",
-    # Legacy compatibility for historical `bm` payloads.
-    "bm": "🧭",
 }
 
 _LEGACY_CONTEXT_EMOJIS: dict[str, str] = {
