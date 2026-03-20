@@ -11,7 +11,21 @@ Tutti gli embed prodotti dai percorsi standardizzati (`send_standard_response`, 
 - Wrapper tecnici o namespace interni (per esempio `admin`) **non devono comparire nel titolo** se il comando visuale appartiene a un altro namespace.
 - Il body deve evitare duplicazioni inutili dei parametri già presenti nel sottotitolo.
 - Le prime righe del body non devono introdurre prefissi narrativi come `Dettaglio:`, `Warning:`, `Result:`, `Results:`, `Error:`.
-- Footer, colori e metadata restano quelli centralizzati esistenti.
+- Il builder standard deve mantenere sempre una separazione visiva stabile tra sottotitolo e body: `sottotitolo`, riga vuota, body.
+- Il sottotitolo usa sempre l’icona semantica ufficiale del tipo embed, non icone locali di sezione.
+- Il body non deve ripetere come primo marker la stessa icona già usata nel sottotitolo.
+- Footer, colori e metadata devono passare dalla pipeline centralizzata.
+
+## Standard ufficiale tipo embed → icona / colore
+
+Per tutti gli embed standardizzati:
+
+- `success` → sottotitolo `✅`, colore verde (`0x57F287`);
+- `warning` → sottotitolo `⚠️`, colore giallo (`0xFEE75C`);
+- `error` → sottotitolo `❌`, colore rosso (`0xED4245`);
+- `info` → sottotitolo `ℹ️`, colore azzurro (`0x3498DB`).
+
+Questo mapping è centralizzato in `app/shared/discord/command_embeds.py` e vale anche per percorsi `status/show/list/set/reset/test/config` quando transitano dal builder standard.
 
 ## Esempi
 
@@ -25,46 +39,46 @@ Tutti gli embed prodotti dai percorsi standardizzati (`send_standard_response`, 
 
 - `/frasi template_global_show`
   - titolo: `💬 FRASI`
-  - sottotitolo: `🛠️ TEMPLATE_GLOBAL_SHOW`
+  - sottotitolo: `ℹ️ TEMPLATE_GLOBAL_SHOW`
 - `/qna limits_show parameter:base`
   - titolo: `❓ QNA`
-  - sottotitolo: `🛠️ LIMITS_SHOW BASE`
+  - sottotitolo: `ℹ️ LIMITS_SHOW BASE`
 - `/qna bonus_show user:@Mario`
   - titolo: `❓ QNA`
-  - sottotitolo: `🛠️ BONUS_SHOW MARIO`
+  - sottotitolo: `ℹ️ BONUS_SHOW MARIO`
 - `/resocontocanale status`
   - titolo: `📓 RESOCONTOCANALE`
-  - sottotitolo: `🛠️ STATUS`
+  - sottotitolo: `ℹ️ STATUS`
 - `/resocontoserver status`
   - titolo: `📓 RESOCONTOSERVER`
-  - sottotitolo: `🛠️ STATUS`
+  - sottotitolo: `ℹ️ STATUS`
 - `/riassunto ultimi quantita:30 unita:minuti`
   - titolo: `🗒️ RIASSUNTO`
   - sottotitolo: `✅ ULTIMI 30 MINUTI`
 - `/riassunto ultimi quantita:1 unita:ore`
   - titolo: `🗒️ RIASSUNTO`
-  - sottotitolo: `🛠️ ULTIMA ORA`
+  - sottotitolo: `ℹ️ ULTIMA ORA`
 - `/attivita ultimi quantita:7 unita:giorni`
   - titolo: `📈 ATTIVITA`
   - sottotitolo: `✅ ULTIMI 7 GIORNI`
 - `/attivita ultimi quantita:1 unita:minuti`
   - titolo: `📈 ATTIVITA`
-  - sottotitolo: `🛠️ ULTIMO MINUTO`
+  - sottotitolo: `ℹ️ ULTIMO MINUTO`
 - `/resocontocanale ultimi quantita:1 unita:giorni`
   - titolo: `📓 RESOCONTOCANALE`
-  - sottotitolo: `🛠️ ULTIMO GIORNO`
+  - sottotitolo: `ℹ️ ULTIMO GIORNO`
 - `/riassunto range da:20/03/2026 10:15 a:21/03/2026 11:45`
   - titolo: `🗒️ RIASSUNTO`
-  - sottotitolo: `🛠️ DAL 20/03 10:15 AL 21/03 11:45`
+  - sottotitolo: `ℹ️ DAL 20/03 10:15 AL 21/03 11:45`
 - `/campagne prompt status`
   - titolo: `📣 CAMPAGNE`
-  - sottotitolo: `🛠️ PROMPT STATUS`
+  - sottotitolo: `ℹ️ PROMPT STATUS`
 - `/moderazione users tempban_list`
   - titolo: `🛠️ MODERAZIONE`
-  - sottotitolo: `🛠️ USERS TEMPBAN_LIST`
+  - sottotitolo: `ℹ️ USERS TEMPBAN_LIST`
 - `/admin retention on`
   - titolo: `🫛 ADMIN`
-  - sottotitolo: `🛠️ RETENTION ON`
+  - sottotitolo: `ℹ️ RETENTION ON`
 
 ## Implementazione
 
@@ -80,6 +94,22 @@ In pratica:
 - La grammatica italiana delle finestre temporali usa la logica comune di `time_windows` per produrre forme corrette come `ULTIMO MINUTO`, `ULTIMA ORA`, `ULTIMO GIORNO`, `ULTIMA SETTIMANA`, oltre ai plurali corretti per quantità > 1.
 - I renderer standardizzati deduplicano nel body i campi identitari già promossi nel sottotitolo (`user`, `tier`, `quantity`, `unit`, `scope`, `schedule_id`, ecc.) quando non aggiungono nuovo contesto.
 - I bullet narrativi di primo livello usano frasi pulite: il tono arriva da colore/icona/tipo embed, non da etichette testuali.
+- Se una riga body arriva con la stessa emoji del sottotitolo (per esempio `✅` in un embed `success`), il builder la ripulisce centralmente per evitare duplicazioni visive.
+
+## Footer centralizzato
+
+Quando è disponibile `FooterService`, gli embed standardizzati non devono fermarsi a versione/minimal footer: devono usare la pipeline footer comune e quindi includere, quando disponibili, tutti i segmenti nell’ordine:
+
+1. versione bot;
+2. frase del footer service;
+3. parte tecnica finale (`Dati elaborati con ...`, `Dati elaborati in loco`, eventuale `fallback locale`).
+
+Esempi:
+
+- prima: `Barcellometro dev6 · Dati elaborati con gpt-4o · In via di sviluppo.`
+- dopo: `Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o`
+
+Se la frase del footer non esiste, il footer resta ben formato e concatena solo gli elementi disponibili, senza separatori doppi.
 
 ## Quali input entrano nel sottotitolo
 

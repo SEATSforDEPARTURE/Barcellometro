@@ -83,10 +83,11 @@ def test_footer_service_apply_sets_footer_text() -> None:
         attach_footer_meta(embed, service_name="barcello", contributors=["gpt-4o-mini"], used_local_processing=True)
         service = _build_footer_service()
         await service.set_version("1.0")
+        await service.set_global_phrase("In via di sviluppo.")
 
         await service.apply(embed, default_service_name="fallback")
 
-        assert embed.footer.text == "Barcellometro 1.0 · Dati elaborati con gpt-4o-mini e fallback locale"
+        assert embed.footer.text == "Barcellometro 1.0 · In via di sviluppo. · Dati elaborati con gpt-4o-mini e fallback locale"
 
     asyncio.run(_run())
 
@@ -117,11 +118,12 @@ def test_normalize_embeds_for_discord_preserves_footer_meta_on_split_pages() -> 
 
         service = _build_footer_service()
         await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
         await finalize_embeds(normalized, service, default_service_name="riassunto")
 
         footer_texts = [item.footer.text for item in normalized]
         assert len(set(footer_texts)) == 1
-        assert footer_texts[0] == "Barcellometro dev6 · Dati elaborati con gpt-4o"
+        assert footer_texts[0] == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o"
 
     asyncio.run(_run())
 
@@ -156,12 +158,13 @@ def test_finalize_embeds_multipage_riassunto_keeps_same_ai_footer_on_all_pages()
         )
         service = _build_footer_service()
         await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
 
         await finalize_embeds(embeds, service, default_service_name="riassunto")
 
         footers = [embed.footer.text for embed in embeds]
         assert len(set(footers)) == 1
-        assert footers[0] == "Barcellometro dev6 · Dati elaborati con gpt-4o"
+        assert footers[0] == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o"
         assert all("in loco" not in (text or "") for text in footers)
 
     asyncio.run(_run())
@@ -229,11 +232,48 @@ def test_footer_service_render_footer_mixed_ai_and_local_fallback() -> None:
     async def _run() -> None:
         service = _build_footer_service()
         await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
         footer, _ = await service.render_footer(
             service_name="riassunto",
             contributors=["qwen2.5"],
             used_local_processing=True,
         )
-        assert footer == "Barcellometro dev6 · Dati elaborati con qwen2.5 e fallback locale"
+        assert footer == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con qwen2.5 e fallback locale"
+
+    asyncio.run(_run())
+
+
+def test_footer_service_render_footer_orders_version_phrase_then_processing() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.set_version("dev7.1")
+        await service.set_global_phrase("Sempre acceso.")
+
+        footer, phrase = await service.render_footer(
+            service_name="status",
+            contributors=["llama3.2"],
+            used_local_processing=False,
+        )
+
+        assert phrase == "Sempre acceso."
+        assert footer == "Barcellometro dev7.1 · Sempre acceso. · Dati elaborati con llama3.2"
+
+    asyncio.run(_run())
+
+
+def test_footer_service_render_footer_skips_missing_phrase_without_double_separator() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.set_version("dev7.1")
+
+        footer, phrase = await service.render_footer(
+            service_name="status",
+            contributors=[],
+            used_local_processing=True,
+        )
+
+        assert phrase is None
+        assert footer == "Barcellometro dev7.1 · Dati elaborati in loco"
+        assert " ·  · " not in footer
 
     asyncio.run(_run())
