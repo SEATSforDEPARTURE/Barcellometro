@@ -79,7 +79,6 @@ _SERVICE_NAME_OVERRIDES: dict[str, str | None] = {
     "member_flow_notifications": "member_flow_notifications",
     "admin": None,
     "commands": None,
-    "command_helpers": None,
     "ctx": None,
     "settings": None,
     "permissions": None,

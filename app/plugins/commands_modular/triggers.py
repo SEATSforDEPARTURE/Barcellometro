@@ -11,7 +11,7 @@ from app.core.config_paths import BARCELLO_TRIGGER_JSON
 from app.services.footer import attach_footer_meta
 from discord import app_commands
 
-from app.plugins.commands_modular.command_helpers import add_group_once
+from app.plugins.commands_modular.registration import add_group_once
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime

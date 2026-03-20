@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 import json
 from typing import Any, Literal
 
 import discord
 
-from app.services.footer import attach_minimal_footer, FooterService
+from app.services.footer import attach_footer_meta, attach_minimal_footer, FooterService
 
 CommandKind = Literal["info", "success", "warning", "error"]
+FooterMode = Literal["minimal", "meta", "none"]
 
 TOP_LEVEL_EMOJIS: dict[str, str] = {
     "bm": "🫛",
@@ -140,14 +141,21 @@ def format_bullet(label: str, value: Any) -> str:
     return f"• {humanize_key(label)}: **{stringify_value(value)}**"
 
 
-def build_section(title: str, lines: Sequence[tuple[str, Any]] | Sequence[str], emoji: str | None = None, *, kind: CommandKind = "info") -> str:
+def build_section(
+    title: str,
+    lines: Sequence[tuple[str, Any]] | Sequence[str],
+    emoji: str | None = None,
+    *,
+    kind: CommandKind = "info",
+    line_formatter: Callable[[str, Any], str] | None = None,
+) -> str:
     header_emoji = emoji or get_section_emoji(title, kind=kind)
     rendered = [f"**{header_emoji} {title.upper()}**"]
     for line in lines:
         if isinstance(line, str):
             rendered.append(line)
         else:
-            rendered.append(format_bullet(line[0], line[1]))
+            rendered.append((line_formatter or format_bullet)(line[0], line[1]))
     return "\n".join(rendered)
 
 
@@ -168,12 +176,22 @@ async def build_command_embeds(
     top_level_emoji: str | None = None,
     subcommand_emoji: str | None = None,
     footer_service: FooterService | None = None,
+    footer_mode: FooterMode = "minimal",
+    footer_service_name: str | None = None,
+    compact_lines: bool = False,
+    line_formatter: Callable[[str, Any], str] | None = None,
+    section_title_formatter: Callable[[str], str] | None = None,
 ) -> list[discord.Embed]:
     title = f"{top_level_emoji or get_command_emoji(top_level)} {str(top_level).upper()}"
     sub_emoji = subcommand_emoji or get_section_emoji(subcommand_path.split()[-1] if subcommand_path else None, kind=kind)
-    blocks: list[str] = [f"**{sub_emoji} {normalize_command_path(subcommand_path)}**"]
-    for label, value in lines or []:
-        blocks.append(format_bullet(label, value))
+    blocks: list[str] = []
+    header = f"**{sub_emoji} {normalize_command_path(subcommand_path)}**"
+    rendered_lines = [(line_formatter or format_bullet)(label, value) for label, value in lines or []]
+    if compact_lines and rendered_lines:
+        blocks.append("\n".join([header, *rendered_lines]))
+    else:
+        blocks.append(header)
+        blocks.extend(rendered_lines)
     for section in sections or []:
         if isinstance(section, dict):
             item = CommandEmbedSection(
@@ -183,7 +201,8 @@ async def build_command_embeds(
             )
         else:
             item = section
-        blocks.append(build_section(item.title, item.lines, item.emoji, kind=kind))
+        section_title = (section_title_formatter or str)(item.title)
+        blocks.append(build_section(section_title, item.lines, item.emoji, kind=kind, line_formatter=line_formatter))
 
     chunks: list[str] = []
     current = ""
@@ -216,7 +235,15 @@ async def build_command_embeds(
     color = get_semantic_color(kind)
     for chunk in chunks or [blocks[0]]:
         embed = discord.Embed(title=title, description=chunk, color=color)
-        attach_minimal_footer(embed, text=brand_text)
+        if footer_mode == "minimal":
+            attach_minimal_footer(embed, text=brand_text)
+        elif footer_mode == "meta":
+            attach_footer_meta(
+                embed,
+                service_name=footer_service_name or "status",
+                used_local_processing=True,
+                minimal=True,
+            )
         embeds.append(embed)
     return embeds
 
@@ -278,6 +305,13 @@ async def send_standard_response(
     footer_service: FooterService | None = None,
     ephemeral: bool = True,
     files: list[discord.File] | None = None,
+    footer_mode: FooterMode = "minimal",
+    footer_service_name: str | None = None,
+    compact_lines: bool = False,
+    line_formatter: Callable[[str, Any], str] | None = None,
+    section_title_formatter: Callable[[str], str] | None = None,
+    top_level_emoji: str | None = None,
+    subcommand_emoji: str | None = None,
 ) -> None:
     embeds = await build_command_embeds(
         top_level=top_level,
@@ -286,5 +320,99 @@ async def send_standard_response(
         sections=sections,
         kind=kind,
         footer_service=footer_service,
+        footer_mode=footer_mode,
+        footer_service_name=footer_service_name,
+        compact_lines=compact_lines,
+        line_formatter=line_formatter,
+        section_title_formatter=section_title_formatter,
+        top_level_emoji=top_level_emoji,
+        subcommand_emoji=subcommand_emoji,
     )
     await send_command_embeds(interaction, embeds=embeds, ephemeral=ephemeral, files=files)
+
+
+_LEGACY_TOP_LEVEL_EMOJIS: dict[str, str] = {
+    "bm": "🧭",
+}
+
+_LEGACY_CONTEXT_EMOJIS: dict[str, str] = {
+    "status": "📊",
+    "events": "📡",
+    "retention": "🗃️",
+    "backfill": "♻️",
+    "ai": "🧠",
+    "audionotes": "🎙️",
+    "voice_ingest": "🎤",
+    "footer": "🧩",
+    "config": "⚙️",
+    "run": "▶️",
+    "error": "❌",
+    "warning": "⚠️",
+    "success": "✅",
+    "info": "ℹ️",
+}
+
+
+def _legacy_display_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "On" if value else "Off"
+    if value is None:
+        return "(n/a)"
+    text = str(value).strip()
+    return text or "(empty)"
+
+
+def _legacy_format_bullet(label: str, value: Any) -> str:
+    normalized = str(label).replace("_", " ").replace("-", " ").strip().title()
+    return f"• {normalized}: **{_legacy_display_value(value)}**"
+
+
+def _legacy_section_title(section_key: str) -> str:
+    return str(section_key).replace("_", " ").replace("-", " ").upper()
+
+
+def _legacy_context_emoji(path_parts: Sequence[str], tone: CommandKind) -> str:
+    for key in reversed(path_parts):
+        if key in _LEGACY_CONTEXT_EMOJIS:
+            return _LEGACY_CONTEXT_EMOJIS[key]
+    return _LEGACY_CONTEXT_EMOJIS.get(tone, "ℹ️")
+
+
+async def send_legacy_standard_response(
+    interaction: discord.Interaction,
+    *,
+    top_level: str,
+    path_parts: Sequence[str],
+    entries: Iterable[tuple[str, object]],
+    tone: CommandKind = "info",
+    sections: Sequence[tuple[str, Sequence[tuple[str, object]]]] | None = None,
+    service_name: str = "status",
+    ephemeral: bool = True,
+) -> None:
+    normalized_path = [part.strip().lower() for part in path_parts if part and part.strip()]
+    subcommand_path = " ".join(part.replace("-", " ").upper() for part in normalized_path) or top_level.strip().upper()
+    context_emoji = _legacy_context_emoji(normalized_path, tone)
+    legacy_sections = [
+        CommandEmbedSection(
+            title=_legacy_section_title(section_name),
+            lines=list(section_entries),
+            emoji=context_emoji,
+        )
+        for section_name, section_entries in sections or ()
+        if section_entries
+    ]
+    await send_standard_response(
+        interaction,
+        top_level=top_level,
+        subcommand_path=subcommand_path,
+        lines=list(entries),
+        sections=legacy_sections,
+        kind=tone,
+        ephemeral=ephemeral,
+        compact_lines=True,
+        line_formatter=_legacy_format_bullet,
+        footer_mode="meta",
+        footer_service_name=service_name,
+        top_level_emoji=_LEGACY_TOP_LEVEL_EMOJIS.get(top_level.strip().lower(), "🧭"),
+        subcommand_emoji=context_emoji,
+    )

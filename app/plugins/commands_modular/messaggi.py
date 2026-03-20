@@ -8,7 +8,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from app.plugins.commands_modular.command_helpers import add_group_once, count_child_commands
+from app.plugins.commands_modular.registration import add_group_once, count_child_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime

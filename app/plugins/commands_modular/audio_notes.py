@@ -5,11 +5,10 @@ import os
 import discord
 from discord import app_commands
 
-from app.plugins.commands_modular.command_helpers import send_standard_command_embed
+from app.shared.discord.command_embeds import send_legacy_standard_response
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting, reset_setting, set_setting
-from app.shared.discord.command_embeds import send_standard_response
 
 
 def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -28,7 +27,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         if not await check_permission(interaction, "bm.audionotes.on", ctx, legacy_aliases=["bm.audio_notes.on"]):
             return
         await set_setting(ctx, "audio_notes.enabled", "true")
-        await send_standard_command_embed(
+        await send_legacy_standard_response(
             interaction,
             top_level="bm",
             path_parts=["audionotes", "on"],
@@ -42,7 +41,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         if not await check_permission(interaction, "bm.audionotes.off", ctx, legacy_aliases=["bm.audio_notes.off"]):
             return
         await set_setting(ctx, "audio_notes.enabled", "false")
-        await send_standard_command_embed(
+        await send_legacy_standard_response(
             interaction,
             top_level="bm",
             path_parts=["audionotes", "off"],
@@ -57,7 +56,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
             return
         max_mb, max_duration, max_chars, queue_max, chars_summary = await _config_lines()
         enabled = (await get_setting(ctx, "audio_notes.enabled", "false")).lower() in {"1", "true", "yes", "y"}
-        await send_standard_command_embed(
+        await send_legacy_standard_response(
             interaction,
             top_level="bm",
             path_parts=["audionotes", "status"],
@@ -91,7 +90,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         if not await check_permission(interaction, "bm.audionotes.config_set", ctx, legacy_aliases=["bm.audio_notes.limits"]):
             return
         if all(value is None for value in [max_mb, max_duration_s, discord_max_chars, queue_max, chars_summary]):
-            await send_standard_command_embed(
+            await send_legacy_standard_response(
                 interaction,
                 top_level="bm",
                 path_parts=["audionotes", "config_set"],
@@ -103,7 +102,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
             return
         positive_limits = {"max_mb": max_mb, "max_duration_s": max_duration_s, "discord_max_chars": discord_max_chars, "queue_max": queue_max}
         if any(value is not None and value <= 0 for value in positive_limits.values()):
-            await send_standard_command_embed(
+            await send_legacy_standard_response(
                 interaction,
                 top_level="bm",
                 path_parts=["audionotes", "config_set"],
@@ -124,7 +123,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
             await set_setting(ctx, "audio_notes.chars_summary", "" if chars_summary <= 0 else str(chars_summary))
 
         max_mb_value, max_duration_value, max_chars_value, queue_max_value, chars_summary_value = await _config_lines()
-        await send_standard_command_embed(
+        await send_legacy_standard_response(
             interaction,
             top_level="bm",
             path_parts=["audionotes", "config_set"],
@@ -150,7 +149,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         if not await check_permission(interaction, "bm.audionotes.config_show", ctx, legacy_aliases=["bm.audio_notes.limits"]):
             return
         max_mb, max_duration, max_chars, queue_max, chars_summary = await _config_lines()
-        await send_standard_command_embed(
+        await send_legacy_standard_response(
             interaction,
             top_level="bm",
             path_parts=["audionotes", "config_show"],
@@ -171,7 +170,7 @@ def register_audio_notes(audio_notes_group: app_commands.Group, ctx: CommandCont
         for key in ("audio_notes.max_mb", "audio_notes.max_duration_s", "audio_notes.discord_max_chars", "audio_notes.queue_max", "audio_notes.chars_summary"):
             await reset_setting(ctx, key)
         max_mb, max_duration, max_chars, queue_max, chars_summary = await _config_lines()
-        await send_standard_command_embed(
+        await send_legacy_standard_response(
             interaction,
             top_level="bm",
             path_parts=["audionotes", "config_reset"],
