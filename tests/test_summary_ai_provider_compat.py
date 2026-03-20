@@ -62,6 +62,10 @@ class _AiRaises(_Ai):
         self._model_cfg = model_cfg
         self.ask_for_task = AsyncMock(side_effect=exc)
 
+
+class _FakeRateLimitError(RuntimeError):
+    pass
+
 def _minimal_messages() -> list[dict[str, object]]:
     return [
         {
@@ -125,7 +129,7 @@ def test_build_period_description_works_without_openai_client() -> None:
             ai_allowed=True,
             config=DEFAULT_SUMMARY_CONFIG,
         )
-        assert out is None
+        assert out == "Oggi il barcello è stato sano 🙂."
         ai.ask_for_task.assert_not_awaited()
 
     asyncio.run(_run())
@@ -159,7 +163,11 @@ def test_call_ai_ollama_uses_lite_schema_and_smaller_payload() -> None:
         payload = json.loads(args[1])
         assert "Struttura JSON minima richiesta" in system_prompt
         assert "quotes/dynamics/degrade_list/invigorate_list" in system_prompt
+        assert "i=message_id" in system_prompt
         assert len(payload["messages"]) <= 40
+        assert payload["messages"][0]["x"] == "msg 0"
+        assert "content" not in payload["messages"][0]
+        assert "meta" not in payload["messages"][0]
 
     asyncio.run(_run())
 
@@ -197,7 +205,7 @@ def test_ollama_summary_path_triggers_single_ai_inference() -> None:
             ai_allowed=True,
             config=DEFAULT_SUMMARY_CONFIG,
         )
-        assert period is None
+        assert period == "Oggi il barcello è stato sano 🙂."
 
         result = await svc.build_summary(
             guild_id="g",
@@ -314,6 +322,94 @@ def test_build_summary_exception_marks_ai_as_not_used() -> None:
         assert result.ai_status["used_ai_output"] is False
         assert result.ai_status["used_model"] is None
         assert result.ai_status["used_display_model"] is None
+
+    asyncio.run(_run())
+
+
+def test_build_summary_rate_limit_keeps_local_fallback_and_single_call() -> None:
+    async def _run() -> None:
+        ai = _AiRaises("openai:gpt-4o-mini", _FakeRateLimitError("429 Too Many Requests"))
+        svc = SummaryService(database=_Db(), ai_service=ai)
+        period = await svc.build_period_description(
+            tier="role1",
+            period_prefix="Oggi",
+            score=75,
+            color="verde",
+            metrics={},
+            trend=None,
+            ai_allowed=True,
+            config=DEFAULT_SUMMARY_CONFIG,
+        )
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=_minimal_messages(),
+        )
+        assert period == "Oggi il barcello è stato sano 🙂."
+        assert result.ai_status["reason"] == "exception:_FakeRateLimitError"
+        assert result.ai_status["used_ai_output"] is False
+        assert result.moments
+        ai.ask_for_task.assert_awaited_once()
+
+    asyncio.run(_run())
+
+
+def test_call_ai_compacts_payload_but_keeps_relevant_rendering_inputs() -> None:
+    async def _run() -> None:
+        ai = _Ai(
+            "openai:gpt-4o-mini",
+            '{"themes":[],"moments":[],"quotes":[],"dynamics":[],"degrade_list":[],"invigorate_list":[],"advice":[]}',
+        )
+        svc = SummaryService(database=_Db(), ai_service=ai)
+        very_long_text = " ".join(["contenuto"] * 120)
+        messages = [
+            {
+                "ts": "2026-01-01T10:00:00+00:00",
+                "author_id": "u1",
+                "content": very_long_text,
+                "meta": {"kind": "message", "in_call": False, "unused": "noise"},
+                "message_id": "12345678901234567",
+            },
+            {
+                "ts": "2026-01-01T10:01:00+00:00",
+                "author_id": "u1",
+                "content": very_long_text,
+                "meta": {"kind": "message", "in_call": False},
+                "message_id": "12345678901234568",
+            },
+        ]
+
+        await svc._call_ai(
+            messages=messages,
+            include_names=False,
+            tier="role1",
+            barcello_metrics={
+                "message_count": 2,
+                "window_minutes": 60,
+                "msg_per_min": 0.03,
+                "burst_ratio": 0.7,
+                "unused_metric": "x" * 200,
+            },
+            config=DEFAULT_SUMMARY_CONFIG,
+            summary_context={"period_label": "oggi", "nonce": "abc", "unused": "x" * 200},
+        )
+
+        payload = json.loads(ai.ask_for_task.await_args.args[1])
+        assert list(payload["metrics"].keys()) == ["message_count", "window_minutes", "msg_per_min", "burst_ratio"]
+        assert payload["summary_context"] == {"period_label": "oggi", "nonce": "abc"}
+        assert len(payload["messages"]) == 1
+        assert payload["messages"][0]["i"] == "12345678901234567"
+        assert len(payload["messages"][0]["x"]) < len(very_long_text)
 
     asyncio.run(_run())
 

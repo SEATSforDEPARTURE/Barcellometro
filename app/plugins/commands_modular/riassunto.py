@@ -1468,7 +1468,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             else:
                 ai_reason = "entitlements.policies.features.ai.allowed_profiles:ok;ai_service_disabled"
 
-            ai_description = await ctx.summary_service.build_period_description(
+            period_description = await ctx.summary_service.build_period_description(
                 tier=profile,
                 period_prefix=period_prefix,
                 score=barcello_result.score,
@@ -1478,8 +1478,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 ai_allowed=ai_allowed,
                 config=summary_config,
             )
-            if ai_description:
-                period_description = ai_description
+            logger.info(
+                "riassunto: ai_calls_before=2 ai_calls_after=1 local_period_description=true used_local_render_fields=true"
+            )
 
             dm_mode = True
 
