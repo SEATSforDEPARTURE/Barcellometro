@@ -142,6 +142,43 @@ def test_resoconto_status_uses_standard_embed() -> None:
     asyncio.run(_run())
 
 
+def test_resocontoserver_status_uses_real_command_title() -> None:
+    async def _run() -> None:
+        db = SimpleNamespace(
+            get_server_summary_auto_enabled=AsyncMock(return_value=True),
+            get_server_summary_target_channel=AsyncMock(return_value="99"),
+            list_server_summary_schedules=AsyncMock(return_value=[]),
+        )
+        ctx = SimpleNamespace(
+            database=db,
+            timezone=ZoneInfo("Europe/Rome"),
+            config=SimpleNamespace(),
+            footer=None,
+            channel_summary=object(),
+            daily_activity_report=object(),
+            entitlements=SimpleNamespace(),
+        )
+        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
+        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        old_permission = resoconto_module.check_permission
+        resoconto_module.check_permission = AsyncMock(return_value=True)
+        try:
+            register_resoconto(channel_group, server_group, ctx)
+            callback = _get_command_callback(server_group, "status")
+            interaction = _FakeInteraction(qualified_name="resocontoserver status")
+            await callback(interaction)
+        finally:
+            resoconto_module.check_permission = old_permission
+
+        kwargs = interaction.response.send_message.await_args.kwargs
+        embed = kwargs["embed"]
+        assert embed.title == "📓 RESOCONTOSERVER"
+        assert embed.description.startswith("**🛠️ STATUS**")
+        assert "RESOCONTO" not in (embed.title or "").replace("RESOCONTOSERVER", "")
+
+    asyncio.run(_run())
+
+
 def test_riassunto_no_data_guardrail_uses_standard_embed() -> None:
     async def _run() -> None:
         db = SimpleNamespace(get_channel_coverage=AsyncMock(return_value=("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00")))
@@ -208,7 +245,8 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
     kwargs = interaction.response.send_message.await_args.kwargs
     assert "embed" in kwargs
     assert kwargs["embed"].footer.text
-    assert kwargs["embed"].description and "DETAIL" in kwargs["embed"].description.upper()
+    assert kwargs["embed"].description and "DETAIL:" not in kwargs["embed"].description.upper()
+    assert "• Ho avuto un problema a costruire l’embed" in (kwargs["embed"].description or "")
 
 
 def test_critical_modules_no_longer_use_raw_slash_text_helpers() -> None:

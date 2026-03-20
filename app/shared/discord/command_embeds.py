@@ -9,7 +9,8 @@ from typing import Any, Literal
 
 import discord
 
-from app.services.footer import attach_footer_meta, attach_minimal_footer, FooterService
+from app.plugins.commands_modular.time_windows import format_italian_ts, format_rolling_window_label, parse_italian_datetime
+from app.services.footer import FooterService, attach_footer_meta, attach_minimal_footer
 
 CommandKind = Literal["info", "success", "warning", "error"]
 FooterMode = Literal["minimal", "meta", "none"]
@@ -54,6 +55,8 @@ TOP_LEVEL_EMOJIS: dict[str, str] = {
     "aura": "✨",
     "barcello": "❤️",
     "resoconto": "📓",
+    "resocontocanale": "📓",
+    "resocontoserver": "📓",
     "riassunto": "🗒️",
     "moderazione": "🛠️",
     "moderazione_utenti": "🛠️",
@@ -112,6 +115,8 @@ class DisplayCommandContext:
     title_emoji: str
     visual_subtitle: str
     subtitle_emoji: str
+    visual_subtitle_parts: tuple[str, ...]
+    subtitle_parameter_parts: tuple[str, ...]
 
 
 _MAX_DESCRIPTION = 3800
@@ -120,6 +125,171 @@ _RAW_OBJECT_HINTS = ("{", "}", "[", "]", "\n")
 _MENTION_RE = re.compile(r"^<@!?(?P<user_id>\d+)>$")
 _ROLE_MENTION_RE = re.compile(r"^<@&(?P<role_id>\d+)>$")
 _CHANNEL_MENTION_RE = re.compile(r"^<#(?P<channel_id>\d+)>$")
+_NARRATIVE_LABELS = {"detail", "dettaglio", "warning", "result", "results", "error", "info"}
+_GENERIC_STATUS_TEXT = {
+    "updated": "Updated.",
+    "removed": "Removed.",
+    "reset": "Reset.",
+    "created": "Created.",
+    "saved": "Saved.",
+    "enabled": "Enabled.",
+    "disabled": "Disabled.",
+    "sent": "Sent.",
+    "running": "Running.",
+    "added": "Added.",
+    "on": "Enabled.",
+    "off": "Disabled.",
+}
+_USER_LABELS = {"user", "utente"}
+_ROLE_LABELS = {"role"}
+_CHANNEL_LABELS = {"channel"}
+_IDENTITY_LABELS = {
+    *_USER_LABELS,
+    *_ROLE_LABELS,
+    *_CHANNEL_LABELS,
+    "tier",
+    "quantita",
+    "quantity",
+    "unita",
+    "unit",
+    "periodo",
+    "scope",
+    "schedule_id",
+    "id",
+    "id_or_name",
+    "template_name",
+}
+
+
+def _choice_or_value(value: object) -> object:
+    choice_value = getattr(value, "value", None)
+    return choice_value if choice_value is not None else value
+
+
+def _coerce_temporal_quantity(value: object) -> int | None:
+    raw = _choice_or_value(value)
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw if raw > 0 else None
+    if isinstance(raw, float):
+        coerced = int(raw)
+        return coerced if coerced > 0 else None
+    text = str(raw or "").strip()
+    return int(text) if text.isdigit() and int(text) > 0 else None
+
+
+def _coerce_temporal_unit(value: object) -> str | None:
+    raw = _choice_or_value(value)
+    normalized = str(raw or "").strip().lower()
+    return normalized or None
+
+
+def _format_range_subtitle(start_value: object, end_value: object) -> str | None:
+    start_dt = parse_italian_datetime(str(_choice_or_value(start_value) or ""))
+    end_dt = parse_italian_datetime(str(_choice_or_value(end_value) or ""))
+    if start_dt is None or end_dt is None:
+        return None
+    start_label = format_italian_ts(start_dt.isoformat())
+    end_label = format_italian_ts(end_dt.isoformat())
+    return f"Dal {start_label} al {end_label}"
+
+
+def _apply_temporal_subtitle_rules(
+    subtitle_parts: list[str],
+    raw_parameters: Sequence[object],
+) -> tuple[list[str], set[int]]:
+    if not subtitle_parts:
+        return subtitle_parts, set()
+    last_part = _normalize_command_token(subtitle_parts[-1])
+    if last_part == "ultimi" and len(raw_parameters) >= 2:
+        quantity = _coerce_temporal_quantity(raw_parameters[0])
+        unit = _coerce_temporal_unit(raw_parameters[1])
+        if quantity is not None and unit:
+            rendered = format_rolling_window_label(quantity, unit, include_equivalence=False)
+            return [*subtitle_parts[:-1], rendered], {0, 1}
+    if last_part == "range" and len(raw_parameters) >= 2:
+        rendered = _format_range_subtitle(raw_parameters[0], raw_parameters[1])
+        if rendered:
+            return [*subtitle_parts[:-1], rendered], {0, 1}
+    return subtitle_parts, set()
+
+
+def _clean_narrative_text(value: Any) -> str:
+    text = stringify_value(value).strip()
+    if not text:
+        return "Nessun dettaglio disponibile."
+    lowered = text.lower()
+    if lowered in _GENERIC_STATUS_TEXT:
+        return _GENERIC_STATUS_TEXT[lowered]
+    return text
+
+
+def _has_entity_argument(raw_parameters: Sequence[object], *, labels: set[str]) -> bool:
+    for parameter in raw_parameters:
+        if parameter is None:
+            continue
+        if labels is _USER_LABELS and (
+            isinstance(parameter, (discord.Member, discord.User))
+            or _discord_entity_display_name(parameter) is not None
+        ):
+            return True
+        if labels is _ROLE_LABELS and isinstance(parameter, discord.Role):
+            return True
+        if labels is _CHANNEL_LABELS and isinstance(parameter, (discord.abc.GuildChannel, discord.Thread)):
+            return True
+    return False
+
+
+def _should_skip_primary_line(
+    label: str,
+    value: Any,
+    *,
+    display_context: DisplayCommandContext,
+    raw_subtitle_parameters: Sequence[object],
+) -> bool:
+    normalized_label = _normalize_command_token(label)
+    if normalized_label not in _IDENTITY_LABELS:
+        return False
+
+    normalized_value = _normalize_relevant_parameter(value)
+    if normalized_value and any(
+        _normalize_command_token(part) == _normalize_command_token(normalized_value)
+        for part in display_context.subtitle_parameter_parts
+    ):
+        return True
+
+    if normalized_label in _USER_LABELS and _has_entity_argument(raw_subtitle_parameters, labels=_USER_LABELS):
+        return True
+    if normalized_label in _ROLE_LABELS and _has_entity_argument(raw_subtitle_parameters, labels=_ROLE_LABELS):
+        return True
+    if normalized_label in _CHANNEL_LABELS and _has_entity_argument(raw_subtitle_parameters, labels=_CHANNEL_LABELS):
+        return True
+
+    if normalized_label in {"tier", "quantita", "quantity", "unita", "unit", "periodo", "scope"} and display_context.subtitle_parameter_parts:
+        return True
+    return False
+
+
+def _format_primary_bullet(
+    label: str,
+    value: Any,
+    *,
+    display_context: DisplayCommandContext,
+    raw_subtitle_parameters: Sequence[object],
+    line_formatter: Callable[[str, Any], str],
+) -> str | None:
+    if _should_skip_primary_line(
+        label,
+        value,
+        display_context=display_context,
+        raw_subtitle_parameters=raw_subtitle_parameters,
+    ):
+        return None
+    normalized_label = _normalize_command_token(label)
+    if normalized_label in _NARRATIVE_LABELS:
+        return f"• {_clean_narrative_text(value)}"
+    return line_formatter(label, value)
 
 
 def humanize_key(key: str) -> str:
@@ -264,6 +434,7 @@ def normalize_display_command_context(
     path_parts = _split_command_path(subcommand_path)
     raw_top_level = _normalize_command_token(top_level)
     inferred_visual_top_level = _normalize_command_token(visual_top_level)
+    raw_parameters = [*(subtitle_args or ()), *(relevant_parameters or ())]
 
     if not inferred_visual_top_level and path_parts:
         candidate = _normalize_command_token(path_parts[0])
@@ -276,14 +447,24 @@ def normalize_display_command_context(
     subtitle_parts = list(path_parts)
     if subtitle_parts and _normalize_command_token(subtitle_parts[0]) == inferred_visual_top_level:
         subtitle_parts = subtitle_parts[1:]
+    subtitle_parts, consumed_parameter_indexes = _apply_temporal_subtitle_rules(subtitle_parts, raw_parameters)
+    subtitle_parameter_parts: list[str] = []
 
-    for raw_parameter in [*(subtitle_args or ()), *(relevant_parameters or ())]:
+    for index, raw_parameter in enumerate(raw_parameters):
+        if index in consumed_parameter_indexes:
+            continue
         normalized_parameter = _normalize_relevant_parameter(raw_parameter)
         if normalized_parameter is None:
             continue
         if any(_normalize_command_token(part) == _normalize_command_token(normalized_parameter) for part in subtitle_parts):
             continue
         subtitle_parts.append(normalized_parameter)
+        subtitle_parameter_parts.append(normalized_parameter)
+
+    if consumed_parameter_indexes and subtitle_parts:
+        temporal_tail = subtitle_parts[-1]
+        if temporal_tail not in subtitle_parameter_parts:
+            subtitle_parameter_parts.insert(0, temporal_tail)
 
     visual_subtitle = normalize_command_path(*subtitle_parts)
     resolved_subtitle_emoji = subcommand_emoji or get_section_emoji(subtitle_parts[-1] if subtitle_parts else None, kind=kind)
@@ -295,6 +476,8 @@ def normalize_display_command_context(
         title_emoji=resolved_title_emoji,
         visual_subtitle=visual_subtitle,
         subtitle_emoji=resolved_subtitle_emoji,
+        visual_subtitle_parts=tuple(normalize_command_path(part) for part in subtitle_parts),
+        subtitle_parameter_parts=tuple(normalize_command_path(part) for part in subtitle_parameter_parts),
     )
 
 
@@ -372,9 +555,21 @@ async def build_command_embeds(
         subcommand_emoji=subcommand_emoji,
     )
     title = f"{display_context.title_emoji} {display_context.visual_title}"
+    raw_subtitle_parameters = [*(subtitle_args or ()), *(relevant_parameters or ())]
     blocks: list[str] = []
     header = f"**{display_context.subtitle_emoji} {display_context.visual_subtitle}**" if display_context.visual_subtitle else ""
-    rendered_lines = [(line_formatter or format_bullet)(label, value) for label, value in lines or []]
+    resolved_line_formatter = line_formatter or format_bullet
+    rendered_lines = [
+        rendered
+        for label, value in lines or []
+        if (rendered := _format_primary_bullet(
+            label,
+            value,
+            display_context=display_context,
+            raw_subtitle_parameters=raw_subtitle_parameters,
+            line_formatter=resolved_line_formatter,
+        )) is not None
+    ]
     if header and compact_lines and rendered_lines:
         blocks.append("\n".join([header, *rendered_lines]))
     else:

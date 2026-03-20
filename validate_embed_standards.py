@@ -420,6 +420,14 @@ def _check_display_command_context(tree: ast.AST, file_path: Path, report: Valid
         visual_top_level = _literal_str(_keyword_value(node, "visual_top_level"))
         if not top_level or not subcommand_path:
             continue
+        if top_level.lower() == "resoconto":
+            report.add(
+                "display_command_context",
+                file_rel,
+                node.lineno,
+                "Do not use generic top_level='resoconto' for standardized embeds; use the real visible root such as 'resocontocanale' or 'resocontoserver'.",
+            )
+            continue
 
         path_parts = [part.strip().lower() for part in subcommand_path.split() if part.strip()]
         if not path_parts:
