@@ -156,6 +156,8 @@ class AiService:
         history: list[dict[str, str]] | None = None,
         *,
         timeout_seconds: float = 25.0,
+        fallback_question: str | None = None,
+        fallback_persona_system: str | None = None,
     ) -> str | None:
         if not self._enabled:
             return None
@@ -208,7 +210,9 @@ class AiService:
                 fallback_note,
             )
             self.logger.info("[AI] task=%s provider=%s model=%s", task, provider_fb, model_fb)
-            result = await self._run_model(provider_fb, model_fb, system, prompt, fallback_timeout)
+            fallback_system = fallback_persona_system if fallback_persona_system is not None else system
+            fallback_prompt = fallback_question if fallback_question is not None else prompt
+            result = await self._run_model(provider_fb, model_fb, fallback_system, fallback_prompt, fallback_timeout)
             self._metrics["last_used_task"] = task
             self._metrics["last_used_model"] = fallback_cfg
             text = self._extract_text(result)
