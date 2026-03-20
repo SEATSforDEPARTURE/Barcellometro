@@ -196,9 +196,48 @@ class _CapturingUser:
         return None
 
 
+class _OversizeThenCapturingUser(_CapturingUser):
+    def __init__(self) -> None:
+        super().__init__(forbidden=False)
+        self._raised_oversize = False
+
+    async def send(self, **kwargs):
+        embeds = kwargs.get("embeds") or []
+        if not self._raised_oversize and len(embeds) >= 2:
+            self._raised_oversize = True
+            raise discord.HTTPException(
+                response=SimpleNamespace(status=400, reason="Bad Request", text="closed"),
+                message={
+                    "code": 50035,
+                    "message": "Invalid Form Body",
+                    "errors": {
+                        "embeds": {
+                            "0": {
+                                "_errors": [
+                                    {
+                                        "message": "Embed size exceeds maximum size of 6000",
+                                        "code": "BASE_TYPE_MAX_LENGTH",
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                },
+            )
+        self.calls.append(kwargs)
+        return None
+
+
 def _build_interaction(*, forbidden_dm: bool = False):
     return SimpleNamespace(
         user=_CapturingUser(forbidden=forbidden_dm),
+        followup=_CapturingFollowup(),
+    )
+
+
+def _build_interaction_with_oversize_dm():
+    return SimpleNamespace(
+        user=_OversizeThenCapturingUser(),
         followup=_CapturingFollowup(),
     )
 
@@ -475,6 +514,31 @@ def test_riassunto_multipage_footer_remains_consistent_after_send_pipeline() -> 
         assert len(sent_embeds) >= 4
         assert len(set(footers)) == 1
         assert footers[0] == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o-mini"
+
+    asyncio.run(_run())
+
+
+def test_riassunto_ai_footer_survives_dm_oversize_retry_path() -> None:
+    async def _run() -> None:
+        contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": True, "used_display_model": "gpt-4o-mini"})
+        interaction = _build_interaction_with_oversize_dm()
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        sent_dm = await send_dm_or_followup(
+            interaction,
+            embeds=_build_runtime_payload_embeds(contributors=contributors, used_local_processing=used_local_processing, groups=4),
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+
+        assert sent_dm is True
+        assert len(interaction.user.calls) == 2
+        retried_embeds = [embed for call in interaction.user.calls for embed in call.get("embeds", [])]
+        assert retried_embeds
+        assert all(embed.footer.text == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o-mini" for embed in retried_embeds)
+        assert not interaction.followup.calls
 
     asyncio.run(_run())
 

@@ -16,6 +16,7 @@ from app.services.footer import (
     get_footer_meta,
 )
 from app.shared.discord.embed_limits import normalize_embeds_for_discord
+from app.shared.discord.embed_limits import _clone_embed_shell
 from app.shared.discord.footer_pipeline import finalize_embeds
 
 
@@ -84,6 +85,19 @@ def test_copy_footer_meta_copies_values_to_target() -> None:
     assert meta.service_name == "riassunto"
     assert meta.contributors == ["gpt-4o-mini"]
     assert meta.used_local_processing is False
+
+
+def test_clone_embed_shell_keeps_footer_meta_without_copying_rendered_footer_text() -> None:
+    source = discord.Embed(title="source")
+    attach_footer_meta(source, service_name="riassunto", contributors=["gpt-4o-mini"], used_local_processing=False)
+
+    cloned = _clone_embed_shell(source)
+
+    meta = get_footer_meta(cloned)
+    assert meta is not None
+    assert meta.service_name == "riassunto"
+    assert meta.contributors == ["gpt-4o-mini"]
+    assert getattr(cloned.footer, "text", None) in (None, "")
 
 
 def test_footer_service_apply_sets_footer_text() -> None:

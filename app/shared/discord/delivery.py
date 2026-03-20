@@ -6,7 +6,7 @@ from typing import Iterable
 import discord
 
 from app.shared.discord.embed_limits import RETRY_MAX_EMBED_CHARS, normalize_embeds_for_discord
-from app.services.footer import FooterService, get_footer_meta
+from app.services.footer import FooterService, copy_footer_meta, get_footer_meta
 from app.shared.discord.footer_pipeline import finalize_embeds
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,15 @@ def _build_send_kwargs(
     return kwargs
 
 
+def _clone_embeds_for_retry(embeds: Iterable[discord.Embed] | None) -> list[discord.Embed]:
+    clones: list[discord.Embed] = []
+    for embed in embeds or []:
+        clone = discord.Embed.from_dict(embed.to_dict())
+        copy_footer_meta(embed, clone)
+        clones.append(clone)
+    return clones
+
+
 async def _prepare_embeds_for_send(
     embeds: list[discord.Embed],
     *,
@@ -60,6 +69,7 @@ async def safe_followup_send(
     default_service_name: str = "unknown",
 ) -> None:
     embed_list = list(embeds) if embeds is not None else []
+    retry_embeds = _clone_embeds_for_retry(embed_list)
     embed_list = await _prepare_embeds_for_send(
         embed_list,
         footer_service=footer_service,
@@ -77,9 +87,9 @@ async def safe_followup_send(
     except discord.HTTPException as exc:
         if _is_embed_oversize_error(exc) and embed_list:
             logger.warning("embed oversize in followup, retrying with smaller chunks")
-            status_embeds = normalize_embeds_for_discord([embed_list[0]]) if embed_list else []
+            status_embeds = normalize_embeds_for_discord([retry_embeds[0]]) if retry_embeds else []
             detail_embeds = normalize_embeds_for_discord(
-                embed_list[1:],
+                retry_embeds[1:],
                 max_chars=RETRY_MAX_EMBED_CHARS,
             )
             status_embeds = await _prepare_embeds_for_send(
@@ -117,6 +127,7 @@ async def send_dm_or_followup(
     default_service_name: str = "unknown",
 ) -> bool:
     embed_list = list(embeds) if embeds is not None else []
+    retry_embeds = _clone_embeds_for_retry(embed_list)
     embed_list = await _prepare_embeds_for_send(
         embed_list,
         footer_service=footer_service,
@@ -132,7 +143,7 @@ async def send_dm_or_followup(
         await safe_followup_send(
             interaction,
             content=content,
-            embeds=embed_list if embed_list else None,
+            embeds=retry_embeds if retry_embeds else None,
             files=files,
             ephemeral=ephemeral_fallback,
             footer_service=footer_service,
@@ -142,9 +153,9 @@ async def send_dm_or_followup(
     except discord.HTTPException as exc:
         if _is_embed_oversize_error(exc) and embed_list:
             logger.warning("embed oversize in DM, retrying with smaller chunks")
-            status_embeds = normalize_embeds_for_discord([embed_list[0]])
+            status_embeds = normalize_embeds_for_discord([retry_embeds[0]])
             detail_embeds = normalize_embeds_for_discord(
-                embed_list[1:],
+                retry_embeds[1:],
                 max_chars=RETRY_MAX_EMBED_CHARS,
             )
             status_embeds = await _prepare_embeds_for_send(
@@ -166,7 +177,7 @@ async def send_dm_or_followup(
                 await safe_followup_send(
                     interaction,
                     content=content,
-                    embeds=embed_list,
+                    embeds=retry_embeds,
                     files=files,
                     ephemeral=ephemeral_fallback,
                     footer_service=footer_service,
@@ -176,7 +187,7 @@ async def send_dm_or_followup(
         await safe_followup_send(
             interaction,
             content=content,
-            embeds=embed_list,
+            embeds=retry_embeds,
             files=files,
             ephemeral=ephemeral_fallback,
             footer_service=footer_service,
