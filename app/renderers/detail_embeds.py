@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Callable
 
 import discord
@@ -9,15 +8,16 @@ import discord
 from app.services.footer import attach_footer_meta
 
 from app.renderers.channel_summary import _as_hashtag
-from app.services.content_summary_service import SummaryImpact, SummaryItem, SummaryQuote, SummaryResult
+from app.services.content_summary_service import SummaryResult
 from app.shared.discord.embed_limits import (
     MAX_EMBED_CHARS,
     _clone_embed_shell,
-    extract_protected_masked_link_prefix,
     _ensure_embed_limits,
     _estimate_embed_size,
     _split_field_chunks,
+    log_summary_clickable_timestamp_loss,
     split_markdown_lines_into_field_values,
+    truncate_line_preserve_links,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,24 +33,7 @@ def _truncate_text(s: str | None, limit: int) -> str:
 
 
 def _truncate_line_preserve_md_link(line: str, line_limit: int) -> str:
-    if len(line) <= line_limit:
-        return line
-    if line_limit <= 1:
-        return _truncate_text(line, line_limit)
-    separator = " — "
-    if separator in line:
-        prefix, _, tail = line.partition(separator)
-        fixed_prefix = f"{prefix}{separator}"
-        if len(fixed_prefix) >= line_limit:
-            return _truncate_text(line, line_limit)
-        return fixed_prefix + _truncate_text(tail, line_limit - len(fixed_prefix))
-    protected_link = extract_protected_masked_link_prefix(line)
-    if protected_link:
-        prefix, suffix = protected_link
-        if len(prefix) >= line_limit:
-            return _truncate_text(line, line_limit)
-        return prefix + _truncate_text(suffix, line_limit - len(prefix))
-    return _truncate_text(line, line_limit)
+    return truncate_line_preserve_links(line, line_limit)
 
 
 def build_summary_detail_embeds(
@@ -231,10 +214,17 @@ def build_summary_detail_embeds(
             "🧭 CONSIGLI PERSONALIZZATI",
         }
         for name, value, _ in section_list:
+            original_values = [str(value or "")]
             pieces = (
                 split_markdown_lines_into_field_values(value.split("\n"), 1024)
                 if name in bullet_sections
                 else _split_field_chunks(value, 1024)
+            )
+            log_summary_clickable_timestamp_loss(
+                expected_values=original_values,
+                actual_values=pieces,
+                req_id=req_id,
+                field_name=name,
             )
             for idx, piece in enumerate(pieces):
                 field_name = name if idx == 0 else f"{name} (cont.)"

@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import logging
 import re
 
 import discord
 
 from app.services.footer import copy_footer_meta
 
+logger = logging.getLogger(__name__)
+
 MAX_EMBED_CHARS: int = 5800
 RETRY_MAX_EMBED_CHARS: int = 5200
 _MASKED_LINK_TOKEN_PATTERN = r"\*\*\[[^\]]+\]\([^)]+\)\*\*|\[[^\]]+\]\([^)]+\)"
 _MASKED_LINK_RE = re.compile(rf"(?:{_MASKED_LINK_TOKEN_PATTERN})")
+_SUMMARY_TIME_LABEL_PATTERN = r"(?:\d{2}/\d{2}\s+)?(?:\d{2}:\d{2}|--:--)"
+_SUMMARY_TIME_TOKEN_PATTERN = rf"(?:{_MASKED_LINK_TOKEN_PATTERN}|\*\*{_SUMMARY_TIME_LABEL_PATTERN}\*\*|{_SUMMARY_TIME_LABEL_PATTERN})"
 _SUMMARY_LINK_PREFIX_RE = re.compile(
-    rf"^(?P<prefix>(?:•\s+)?(?:{_MASKED_LINK_TOKEN_PATTERN})(?:\s+📞)?(?:\s+\S+\s+\*\*[^*\n]+\*\*)?\s+—\s+)(?P<tail>.*)$"
+    rf"^(?P<prefix>(?:•\s+)?(?:{_SUMMARY_TIME_TOKEN_PATTERN})(?:\s+📞)?(?:\s+\S+\s+\*\*[^*\n]+\*\*)?\s+—\s+)(?P<tail>.*)$"
 )
 
 
@@ -22,6 +27,81 @@ def extract_protected_masked_link_prefix(line: str) -> tuple[str, str] | None:
     prefix = line[: match.end()]
     tail = line[match.end() :]
     return prefix, tail
+
+
+def extract_protected_summary_prefix(line: str) -> tuple[str, str] | None:
+    match = _SUMMARY_LINK_PREFIX_RE.match(str(line or ""))
+    if not match:
+        return None
+    return match.group("prefix"), match.group("tail")
+
+
+def _truncate_text(text: str | None, limit: int) -> str:
+    if text is None or limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    if limit == 1:
+        return "…"
+    return f"{text[: max(0, limit - 1)]}…"
+
+
+def truncate_line_preserve_links(line: str, line_limit: int) -> str:
+    if len(line) <= line_limit:
+        return line
+    if line_limit <= 0:
+        return ""
+    protected_summary = extract_protected_summary_prefix(line)
+    if protected_summary:
+        prefix, tail = protected_summary
+        if not tail:
+            return prefix
+        tail_budget = line_limit - len(prefix)
+        if tail_budget <= 0:
+            return f"{prefix}…"
+        return prefix + _truncate_text(tail, tail_budget)
+    protected_link = extract_protected_masked_link_prefix(line)
+    if protected_link:
+        prefix, suffix = protected_link
+        if len(prefix) >= line_limit:
+            return prefix
+        return prefix + _truncate_text(suffix, line_limit - len(prefix))
+    return _truncate_text(line, line_limit)
+
+
+def count_summary_clickable_timestamps_in_values(values: list[str]) -> int:
+    total = 0
+    for value in values:
+        for line in str(value or "").splitlines():
+            protected = extract_protected_summary_prefix(line)
+            if not protected:
+                continue
+            prefix, _ = protected
+            if _MASKED_LINK_RE.search(prefix):
+                total += 1
+    return total
+
+
+def log_summary_clickable_timestamp_loss(
+    *,
+    expected_values: list[str],
+    actual_values: list[str],
+    req_id: str,
+    field_name: str,
+) -> None:
+    expected = count_summary_clickable_timestamps_in_values(expected_values)
+    if expected <= 0:
+        return
+    actual = count_summary_clickable_timestamps_in_values(actual_values)
+    if actual >= expected:
+        return
+    logger.warning(
+        "summary_clickable_timestamp_loss req_id=%s field_name=%s expected=%s actual=%s",
+        req_id,
+        field_name,
+        expected,
+        actual,
+    )
 
 
 def _split_long_token(token: str, limit: int) -> list[str]:
@@ -78,12 +158,15 @@ def _split_markdown_text_chunks(
 def _split_markdown_aware_line(line: str, limit: int, *, continuation_prefix: str = "↳ ") -> list[str]:
     if len(line) <= limit:
         return [line]
-    summary_match = _SUMMARY_LINK_PREFIX_RE.match(line)
-    if summary_match:
+    protected_summary = extract_protected_summary_prefix(line)
+    if protected_summary:
+        prefix, tail = protected_summary
+        if len(prefix) >= limit:
+            return [f"{prefix}…" if tail else prefix]
         return _split_markdown_text_chunks(
-            summary_match.group("tail"),
+            tail,
             limit=limit,
-            first_prefix=summary_match.group("prefix"),
+            first_prefix=prefix,
             continuation_prefix=continuation_prefix,
         )
     return _split_markdown_text_chunks(line, limit=limit, continuation_prefix=continuation_prefix)
