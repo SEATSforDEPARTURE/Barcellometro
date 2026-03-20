@@ -244,5 +244,7 @@ def test_attivita_ultimi_validation_uses_standard_embed(attivita_module, monkeyp
     payload = interaction.response.payload
     assert payload is not None
     assert payload["embed"] is not None
-    assert "ATTIVITA ULTIMI" in (payload["embed"].description or "")
+    assert "ATTIVITA" in (payload["embed"].title or "")
+    assert "ULTIMI" in (payload["embed"].description or "")
+    assert "ATTIVITA ULTIMI" not in (payload["embed"].description or "")
     assert payload["content"] is None
