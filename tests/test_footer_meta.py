@@ -210,6 +210,31 @@ def test_finalize_embeds_multipage_riassunto_keeps_same_ai_footer_on_all_pages()
     asyncio.run(_run())
 
 
+def test_finalize_embeds_double_finalize_keeps_existing_ai_footer() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="Dettagli")
+        attach_footer_meta(
+            embed,
+            service_name="riassunto",
+            contributors=["gpt-4o"],
+            used_local_processing=False,
+        )
+        service, _ = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        await finalize_embeds([embed], service, default_service_name="riassunto")
+        first_footer = embed.footer.text
+
+        await finalize_embeds([embed], service, default_service_name="riassunto")
+
+        assert first_footer == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o"
+        assert embed.footer.text == first_footer
+        assert get_footer_meta(embed) is None
+
+    asyncio.run(_run())
+
+
 def test_footer_meta_is_cleaned_up_after_apply() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="cleanup")

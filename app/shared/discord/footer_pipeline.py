@@ -11,6 +11,19 @@ from app.services.footer import FooterService, get_footer_meta, render_footer_te
 logger = logging.getLogger(__name__)
 
 
+def _needs_footer_finalize(embed: discord.Embed) -> bool:
+    has_meta_before = get_footer_meta(embed) is not None
+    footer_text_before = getattr(embed.footer, "text", None)
+    needs_finalize = has_meta_before or not footer_text_before
+    logger.debug(
+        "footer finalize: has_meta_before=%s footer_text_before=%r needs_finalize=%s",
+        has_meta_before,
+        footer_text_before,
+        needs_finalize,
+    )
+    return needs_finalize
+
+
 async def finalize_embed(
     embed: discord.Embed,
     footer_service: FooterService | None,
@@ -18,6 +31,16 @@ async def finalize_embed(
     default_service_name: str = "unknown",
 ) -> discord.Embed:
     meta = get_footer_meta(embed)
+    footer_text_before = getattr(embed.footer, "text", None)
+    has_meta_before = meta is not None
+    logger.debug(
+        "footer finalize: has_meta_before=%s footer_text_before=%r",
+        has_meta_before,
+        footer_text_before,
+    )
+    if not has_meta_before and footer_text_before:
+        logger.debug("footer finalize: skipped_rewrite_for_already_finalized_embed=true")
+        return embed
     if footer_service is None:
         contributors = getattr(meta, "contributors", ())
         text, _ = render_footer_text(version=None, phrase=None, contributors=contributors)
@@ -63,9 +86,12 @@ def install_footer_auto_finalize(footer_service: FooterService) -> None:
         embed = kwargs.get("embed")
         embeds = kwargs.get("embeds")
         if embed is not None:
-            await finalize_embed(embed, footer_service)
+            if _needs_footer_finalize(embed):
+                await finalize_embed(embed, footer_service)
         if embeds is not None:
-            await finalize_embeds(embeds, footer_service)
+            embeds_to_finalize = [candidate for candidate in embeds if _needs_footer_finalize(candidate)]
+            if embeds_to_finalize:
+                await finalize_embeds(embeds_to_finalize, footer_service)
 
     orig_interaction_send = discord.InteractionResponse.send_message
     async def patched_interaction_send(self: discord.InteractionResponse, *args: Any, **kwargs: Any):
