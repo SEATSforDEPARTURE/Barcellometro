@@ -42,7 +42,7 @@ def test_existing_campagne_commands_and_prompt_group_are_kept() -> None:
 
 
 def test_hardening_for_group_registration_is_present() -> None:
-    source = Path("app/plugins/commands_modular/command_helpers.py").read_text()
+    source = Path("app/plugins/commands_modular/registration.py").read_text()
 
     assert "def count_child_commands(parent: app_commands.Group) -> int:" in source
     assert "Attempting to register subgroup" in source
