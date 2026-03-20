@@ -30,7 +30,7 @@ def register_triggers(
     ctx: CommandContext,
 ) -> app_commands.Group:
     frasi_group = app_commands.Group(name="frasi", description="Phrase trigger controls")
-    prompt_group = app_commands.Group(name="prompt", description="Prompt campaign controls")
+    prompt_group = app_commands.Group(name="prompt", description="Prompt campaign schedules")
 
     add_group_once(campagne_group, prompt_group, logger)
 
@@ -199,6 +199,27 @@ def register_triggers(
             await _send(interaction, subcommand_path=command_path, lines=[("error", "Use this command in a guild channel.")], kind="error")
             return None
         return str(interaction.guild_id), str(interaction.channel_id)
+
+    async def _list_prompt_campaigns(guild_id: str) -> list[dict[str, object]]:
+        rows = await ctx.database.list_message_campaigns(guild_id, include_disabled=True)
+        return [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT"]
+
+    async def _resolve_prompt_campaign(guild_id: str, id_or_name: str) -> tuple[dict[str, object] | None, str | None]:
+        token = str(id_or_name or "").strip()
+        if not token:
+            return None, "Provide a schedule id or exact name."
+        if token.isdigit():
+            row = await ctx.database.get_message_campaign(guild_id, int(token))
+            if not row or str(row["type"]) != "AI_PROMPT":
+                return None, "Prompt schedule not found."
+            return dict(row), None
+
+        matches = [row for row in await _list_prompt_campaigns(guild_id) if str(row.get("name") or "") == token]
+        if not matches:
+            return None, f"Prompt schedule `{token}` not found."
+        if len(matches) > 1:
+            return None, f"Prompt schedule name `{token}` is ambiguous. Use the numeric id."
+        return matches[0], None
 
     async def _set_toggle(interaction: discord.Interaction, key: str, action: str, *legacy_aliases: str) -> None:
         scope = await _require_channel(interaction, *legacy_aliases)
@@ -603,7 +624,7 @@ def register_triggers(
         prompt_rows = [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT" and str(row["channel_id"]) == channel_id]
         for row in prompt_rows:
             await ctx.database.set_message_campaign_enabled(guild_id, int(row["id"]), True)
-        await _send(interaction, subcommand_path="prompt on", lines=[("entries", len(prompt_rows)), ("result", "enabled"), ("channel", f"<#{channel_id}>")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt on", lines=[("schedules", len(prompt_rows)), ("result", "enabled"), ("channel", f"<#{channel_id}>")], kind="success")
 
     @prompt_group.command(name="off", description="Disable prompt campaigns in the current channel")
     async def prompt_off(interaction: discord.Interaction) -> None:
@@ -615,7 +636,7 @@ def register_triggers(
         prompt_rows = [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT" and str(row["channel_id"]) == channel_id]
         for row in prompt_rows:
             await ctx.database.set_message_campaign_enabled(guild_id, int(row["id"]), False)
-        await _send(interaction, subcommand_path="prompt off", lines=[("entries", len(prompt_rows)), ("result", "disabled"), ("channel", f"<#{channel_id}>")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt off", lines=[("schedules", len(prompt_rows)), ("result", "disabled"), ("channel", f"<#{channel_id}>")], kind="success")
 
     @prompt_group.command(name="status", description="Show prompt campaign status for the current channel")
     async def prompt_status(interaction: discord.Interaction) -> None:
@@ -626,45 +647,45 @@ def register_triggers(
         rows = await ctx.database.list_message_campaigns(guild_id, include_disabled=True)
         prompt_rows = [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT" and str(row["channel_id"]) == channel_id]
         enabled_count = sum(1 for row in prompt_rows if bool(row.get("enabled")))
-        await _send(interaction, subcommand_path="prompt status", lines=[("enabled", f"{enabled_count}/{len(prompt_rows)}"), ("channel", f"<#{channel_id}>")])
+        await _send(interaction, subcommand_path="campagne prompt status", lines=[("enabled", f"{enabled_count}/{len(prompt_rows)}"), ("channel", f"<#{channel_id}>")])
 
-    @prompt_group.command(name="entry_add", description="Add a prompt campaign entry")
+    @prompt_group.command(name="schedule_add", description="Add a prompt campaign schedule")
     @app_commands.describe(
-        text="Prompt text",
-        name="Optional campaign name",
+        prompt_text="Prompt text",
+        name="Optional schedule name",
         publish_at="First publication time (DD/MM/YYYY HH:MM)",
         every="Repeat interval in minutes",
         embed_title="Optional embed title",
         embed_color="Optional embed color",
     )
-    async def prompt_entry_add(
+    async def prompt_schedule_add(
         interaction: discord.Interaction,
-        text: str,
+        prompt_text: str,
         name: str | None = None,
         publish_at: str | None = None,
         every: int | None = None,
         embed_title: str | None = None,
         embed_color: str | None = None,
     ) -> None:
-        if not await _guard(interaction, "campagne.prompt.create"):
+        if not await _guard(interaction, "campagne.prompt.schedule_add", "campagne.prompt.create", "campagne.prompt.entry_add"):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
-            await _send(interaction, subcommand_path="prompt entry_add", lines=[("error", "Use this command in a guild channel.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt schedule_add", lines=[("error", "Use this command in a guild channel.")], kind="error")
             return
         if ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
-            await _send(interaction, subcommand_path="prompt entry_add", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt schedule_add", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
             return
         now_utc = datetime.now(timezone.utc)
         now_local = now_utc.astimezone(ctx.timezone)
         resolved_name = (name or "").strip() or f"prompt-{now_local.strftime('%Y%m%d-%H%M')}"
         resolved_interval = int(every or 0)
         if resolved_interval < 0:
-            await _send(interaction, subcommand_path="prompt entry_add", lines=[("error", "every must be greater than or equal to 0.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt schedule_add", lines=[("error", "every must be greater than or equal to 0.")], kind="error")
             return
         publish_at_raw = (publish_at or "").strip()
         publish_at_dt = parse_italian_datetime(publish_at_raw) if publish_at_raw else None
         if publish_at_raw and publish_at_dt is None:
-            await _send(interaction, subcommand_path="prompt entry_add", lines=[("error", "Invalid publish_at format. Use DD/MM/YYYY HH:MM.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt schedule_add", lines=[("error", "Invalid publish_at format. Use DD/MM/YYYY HH:MM.")], kind="error")
             return
         if publish_at_dt is not None:
             next_run = publish_at_dt.astimezone(timezone.utc)
@@ -677,7 +698,7 @@ def register_triggers(
             channel_id=str(interaction.channel_id),
             campaign_type="AI_PROMPT",
             name=resolved_name,
-            text=text,
+            text=prompt_text,
             text_green=None,
             text_yellow=None,
             text_red=None,
@@ -693,102 +714,100 @@ def register_triggers(
             embed_title=embed_title,
             embed_color=embed_color,
         )
-        await _send(interaction, subcommand_path="prompt entry_add", lines=[("campaign_id", campaign_id), ("name", resolved_name), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt schedule_add", lines=[("schedule_id", campaign_id), ("name", resolved_name), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
 
-    @prompt_group.command(name="entry_list", description="List prompt campaign entries")
-    async def prompt_entry_list(interaction: discord.Interaction) -> None:
-        if not await _guard(interaction, "campagne.prompt.list"):
+    @prompt_group.command(name="schedule_list", description="List prompt campaign schedules")
+    async def prompt_schedule_list(interaction: discord.Interaction) -> None:
+        if not await _guard(interaction, "campagne.prompt.schedule_list", "campagne.prompt.list", "campagne.prompt.entry_list"):
             return
         if interaction.guild_id is None:
-            await _send(interaction, subcommand_path="prompt entry_list", lines=[("error", "Use this command in a guild.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt schedule_list", lines=[("error", "Use this command in a guild.")], kind="error")
             return
-        rows = await ctx.database.list_message_campaigns(str(interaction.guild_id), include_disabled=True)
-        prompt_rows = [dict(row) for row in rows if str(row["type"]) == "AI_PROMPT"]
+        prompt_rows = await _list_prompt_campaigns(str(interaction.guild_id))
         if not prompt_rows:
-            await _send(interaction, subcommand_path="prompt entry_list", lines=[("warning", "No prompt campaigns configured.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne prompt schedule_list", lines=[("warning", "No prompt schedules configured.")], kind="warning")
             return
-        await _send(interaction, subcommand_path="prompt entry_list", lines=[("campaigns", len(prompt_rows))], sections=[CommandEmbedSection(title="Entries", lines=[f"ID {row['id']} {'on' if row['enabled'] else 'off'} {row['name'] or '-'} ch={row['channel_id'] or '-'} next={row['next_run_at'] or '-'} every={'one-shot' if int(row['interval_minutes']) <= 0 else str(row['interval_minutes']) + 'm'}" for row in prompt_rows])])
+        await _send(interaction, subcommand_path="campagne prompt schedule_list", lines=[("schedules", len(prompt_rows))], sections=[CommandEmbedSection(title="Schedules", lines=[f"ID {row['id']} {'on' if row['enabled'] else 'off'} {row['name'] or '-'} ch={row['channel_id'] or '-'} next={row['next_run_at'] or '-'} every={'one-shot' if int(row['interval_minutes']) <= 0 else str(row['interval_minutes']) + 'm'}" for row in prompt_rows])])
 
-    @prompt_group.command(name="entry_show", description="Show a prompt campaign entry")
-    @app_commands.describe(id="Prompt campaign ID")
-    async def prompt_entry_show(interaction: discord.Interaction, id: int) -> None:
-        if not await _guard(interaction):
+    @prompt_group.command(name="schedule_show", description="Show a prompt campaign schedule")
+    @app_commands.describe(id_or_name="Prompt schedule ID or exact name")
+    async def prompt_schedule_show(interaction: discord.Interaction, id_or_name: str) -> None:
+        if not await _guard(interaction, "campagne.prompt.schedule_show", "campagne.prompt.entry_show"):
             return
         if interaction.guild_id is None:
-            await _send(interaction, subcommand_path="prompt entry_show", lines=[("error", "Use this command in a guild.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt schedule_show", lines=[("error", "Use this command in a guild.")], kind="error")
             return
-        row = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
-        if not row or str(row["type"]) != "AI_PROMPT":
-            await _send(interaction, subcommand_path="prompt entry_show", lines=[("warning", "Prompt campaign not found.")], kind="warning")
+        payload, error = await _resolve_prompt_campaign(str(interaction.guild_id), id_or_name)
+        if payload is None:
+            await _send(interaction, subcommand_path="campagne prompt schedule_show", lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
             return
-        payload = dict(row)
-        await _send(interaction, subcommand_path="prompt entry_show", lines=[("campaign_id", id)], sections=[CommandEmbedSection(title="Details", lines=[("name", payload["name"] or "-"), ("enabled", "on" if payload["enabled"] else "off"), ("channel", payload["channel_id"]), ("publish_at", payload["start_time_local"]), ("every", payload["interval_minutes"]), ("next", payload["next_run_at"]), ("embed_title", payload["embed_title"] or "-"), ("embed_color", payload["embed_color"] or "-"), ("text", payload["text"] or "-")])])
+        await _send(interaction, subcommand_path="campagne prompt schedule_show", lines=[("schedule_id", payload["id"])], sections=[CommandEmbedSection(title="Schedule", lines=[("name", payload["name"] or "-"), ("enabled", "on" if payload["enabled"] else "off"), ("channel", payload["channel_id"]), ("publish_at", payload["start_time_local"]), ("every", payload["interval_minutes"]), ("next", payload["next_run_at"]), ("embed_title", payload["embed_title"] or "-"), ("embed_color", payload["embed_color"] or "-"), ("prompt_text", payload["text"] or "-")])])
 
-    @prompt_group.command(name="entry_remove", description="Remove a prompt campaign entry")
-    @app_commands.describe(id="Prompt campaign ID")
-    async def prompt_entry_remove(interaction: discord.Interaction, id: int) -> None:
-        if not await _guard(interaction, "campagne.prompt.delete"):
+    @prompt_group.command(name="schedule_remove", description="Remove a prompt campaign schedule")
+    @app_commands.describe(id_or_name="Prompt schedule ID or exact name")
+    async def prompt_schedule_remove(interaction: discord.Interaction, id_or_name: str) -> None:
+        if not await _guard(interaction, "campagne.prompt.schedule_remove", "campagne.prompt.delete", "campagne.prompt.entry_remove"):
             return
         if interaction.guild_id is None:
-            await _send(interaction, subcommand_path="prompt entry_remove", lines=[("error", "Use this command in a guild.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt schedule_remove", lines=[("error", "Use this command in a guild.")], kind="error")
             return
-        row = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
-        if not row or str(row["type"]) != "AI_PROMPT":
-            await _send(interaction, subcommand_path="prompt entry_remove", lines=[("warning", "Prompt campaign not found.")], kind="warning")
+        campaign, error = await _resolve_prompt_campaign(str(interaction.guild_id), id_or_name)
+        if campaign is None:
+            await _send(interaction, subcommand_path="campagne prompt schedule_remove", lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
             return
-        await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), id)
-        await _send(interaction, subcommand_path="prompt entry_remove", lines=[("campaign_id", id), ("result", "removed")], kind="success")
+        await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), int(campaign["id"]))
+        await _send(interaction, subcommand_path="campagne prompt schedule_remove", lines=[("schedule_id", campaign["id"]), ("result", "removed")], kind="success")
 
-    @prompt_group.command(name="entry_run", description="Run a prompt campaign entry now")
-    @app_commands.describe(id="Prompt campaign ID")
-    async def prompt_entry_run(interaction: discord.Interaction, id: int) -> None:
-        if not await _guard(interaction, "campagne.prompt.test"):
+    @prompt_group.command(name="run", description="Run a prompt campaign schedule now")
+    @app_commands.describe(id_or_name="Prompt schedule ID or exact name")
+    async def prompt_run(interaction: discord.Interaction, id_or_name: str) -> None:
+        if not await _guard(interaction, "campagne.prompt.run", "campagne.prompt.test", "campagne.prompt.entry_run"):
             return
         if interaction.guild_id is None or interaction.channel is None or interaction.channel_id is None:
-            await _send(interaction, subcommand_path="prompt entry_run", lines=[("error", "Use this command in a guild channel.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt run", lines=[("error", "Use this command in a guild channel.")], kind="error")
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        campaign = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
-        if not campaign or str(campaign["type"]) != "AI_PROMPT":
-            await _send(interaction, subcommand_path="prompt entry_run", lines=[("warning", "Prompt campaign not found.")], kind="warning")
+        campaign, error = await _resolve_prompt_campaign(str(interaction.guild_id), id_or_name)
+        if campaign is None:
+            await _send(interaction, subcommand_path="campagne prompt run", lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
             return
         if ctx.message_scheduler is None:
-            await _send(interaction, subcommand_path="prompt entry_run", lines=[("error", "Scheduler service unavailable.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt run", lines=[("error", "Scheduler service unavailable.")], kind="error")
             return
         rendered_text, reason, debug_payload = await ctx.message_scheduler.preview_campaign_text(
-            dict(campaign),
+            campaign,
             channel_id_override=str(interaction.channel_id),
         )
         logger.info(
-            "prompt_entry_run campaign_id=%s user=%s channel=%s ai_called=%s reason=%s",
-            id,
+            "prompt_run campaign_id=%s user=%s channel=%s ai_called=%s reason=%s",
+            campaign["id"],
             interaction.user.id,
             interaction.channel_id,
             "yes" if debug_payload.get("selected_source") == "ai" else "no",
             reason,
         )
         if not rendered_text:
-            await _send(interaction, subcommand_path="prompt entry_run", lines=[("error", f"Unable to generate output ({reason or 'no_text'}).")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt run", lines=[("error", f"Unable to generate output ({reason or 'no_text'}).")], kind="error")
             return
-        await _send(interaction, subcommand_path="prompt entry_run", lines=[("campaign_id", id), ("result", "sent")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt run", lines=[("schedule_id", campaign["id"]), ("result", "sent")], kind="success")
         if isinstance(interaction.channel, discord.abc.Messageable):
-            await ctx.message_scheduler.send_campaign_embed(interaction.channel, dict(campaign), rendered_text)
+            await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
 
-    @prompt_group.command(name="entry_edit", description="Edit a prompt campaign entry")
+    @prompt_group.command(name="schedule_edit", description="Edit a prompt campaign schedule")
     @app_commands.describe(
-        id="Prompt campaign ID",
-        text="Updated prompt text",
-        name="Updated campaign name",
+        id_or_name="Prompt schedule ID or exact name",
+        prompt_text="Updated prompt text",
+        name="Updated schedule name",
         publish_at="First publication time (DD/MM/YYYY HH:MM)",
         every="Repeat interval in minutes",
         embed_title="Updated embed title",
         embed_color="Updated embed color",
-        enabled="Enable or disable this entry",
+        enabled="Enable or disable this schedule",
     )
-    async def prompt_entry_edit(
+    async def prompt_schedule_edit(
         interaction: discord.Interaction,
-        id: int,
-        text: str | None = None,
+        id_or_name: str,
+        prompt_text: str | None = None,
         name: str | None = None,
         publish_at: str | None = None,
         every: int | None = None,
@@ -796,17 +815,17 @@ def register_triggers(
         embed_color: str | None = None,
         enabled: bool | None = None,
     ) -> None:
-        if not await _guard(interaction, "campagne.prompt.create"):
+        if not await _guard(interaction, "campagne.prompt.schedule_edit", "campagne.prompt.create", "campagne.prompt.entry_edit"):
             return
         if interaction.guild_id is None:
-            await _send(interaction, subcommand_path="prompt entry_edit", lines=[("error", "Use this command in a guild.")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("error", "Use this command in a guild.")], kind="error")
             return
-        campaign = await ctx.database.get_message_campaign(str(interaction.guild_id), id)
-        if not campaign or str(campaign["type"]) != "AI_PROMPT":
-            await _send(interaction, subcommand_path="prompt entry_edit", lines=[("warning", "Prompt campaign not found.")], kind="warning")
+        campaign, error = await _resolve_prompt_campaign(str(interaction.guild_id), id_or_name)
+        if campaign is None:
+            await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
             return
-        if ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
-            await _send(interaction, subcommand_path="prompt entry_edit", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+        if embed_color is not None and ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
+            await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
             return
         start_time_local = None
         interval_minutes = None
@@ -817,28 +836,28 @@ def register_triggers(
             if publish_at_raw:
                 publish_at_dt = parse_italian_datetime(publish_at_raw)
                 if publish_at_dt is None:
-                    await _send(interaction, subcommand_path="prompt entry_edit", lines=[("error", "Invalid publish_at format. Use DD/MM/YYYY HH:MM.")], kind="error")
+                    await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("error", "Invalid publish_at format. Use DD/MM/YYYY HH:MM.")], kind="error")
                     return
                 start_time_local = publish_at_dt.astimezone(ctx.timezone).strftime("%H:%M")
                 next_run_at = publish_at_dt.astimezone(timezone.utc).isoformat()
             else:
                 now = datetime.now(timezone.utc)
                 start_time_local = str(campaign["start_time_local"])
-                next_run = now if current_interval <= 0 else now
+                next_run = now
                 next_run_at = next_run.isoformat()
             interval_minutes = current_interval
         updated = await ctx.database.update_message_campaign(
             str(interaction.guild_id),
-            id,
+            int(campaign["id"]),
             name=name,
-            text=text,
+            text=prompt_text,
             start_time_local=start_time_local,
             interval_minutes=interval_minutes,
             next_run_at=next_run_at,
             embed_title=embed_title,
             embed_color=embed_color,
             set_name=name is not None,
-            set_text=text is not None,
+            set_text=prompt_text is not None,
             set_start_time_local=start_time_local is not None,
             set_interval_minutes=interval_minutes is not None,
             set_next_run_at=next_run_at is not None,
@@ -846,11 +865,11 @@ def register_triggers(
             set_embed_color=embed_color is not None,
         )
         if enabled is not None:
-            await ctx.database.set_message_campaign_enabled(str(interaction.guild_id), id, enabled)
+            await ctx.database.set_message_campaign_enabled(str(interaction.guild_id), int(campaign["id"]), enabled)
         if not updated and enabled is None:
-            await _send(interaction, subcommand_path="prompt entry_edit", lines=[("warning", "No changes requested.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("warning", "No changes requested.")], kind="warning")
             return
-        await _send(interaction, subcommand_path="prompt entry_edit", lines=[("campaign_id", id), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("schedule_id", campaign["id"]), ("result", "updated")], kind="success")
 
     @qna_group.command(name="on", description="Enable QnA in the current channel")
     async def qna_on(interaction: discord.Interaction) -> None:

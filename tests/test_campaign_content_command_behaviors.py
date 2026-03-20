@@ -115,7 +115,7 @@ def _get_command_callback(group: discord.app_commands.Group, name: str):
     return next(cmd.callback for cmd in group.commands if cmd.name == name)
 
 
-def test_custom_entry_run_reports_not_found_when_campaign_missing(messaggi_module) -> None:
+def test_custom_run_reports_not_found_when_campaign_missing(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
         scheduler = _FakeScheduler()
@@ -124,15 +124,15 @@ def test_custom_entry_run_reports_not_found_when_campaign_missing(messaggi_modul
         group = discord.app_commands.Group(name="campagne", description="x")
         messaggi_module.register_messaggi(group, ctx)
         custom_group = _get_subgroup(group, "custom")
-        callback = _get_command_callback(custom_group, "entry_run")
+        callback = _get_command_callback(custom_group, "run")
         interaction = _FakeInteraction()
         await callback(interaction, id=99)
 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
             top_level="bm",
-            subcommand_path="campagne custom entry_run",
-            lines=[("warning", "Custom campaign not found.")],
+            subcommand_path="campagne custom run",
+            lines=[("warning", "Custom schedule not found.")],
             sections=None,
             kind="warning",
             footer_service=ctx.footer,
@@ -196,7 +196,7 @@ def test_service_runs_dispatch_by_service_type(messaggi_module) -> None:
     asyncio.run(_run())
 
 
-def test_custom_entry_run_keeps_existing_behavior_for_message_campaign(messaggi_module) -> None:
+def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
         db.message_campaign = {"id": 11, "type": "CUSTOM", "text": "hello", "mood_mode": "AUTO"}
@@ -206,15 +206,15 @@ def test_custom_entry_run_keeps_existing_behavior_for_message_campaign(messaggi_
 
         messaggi_module.register_messaggi(group, ctx)
         custom_group = _get_subgroup(group, "custom")
-        callback = _get_command_callback(custom_group, "entry_run")
+        callback = _get_command_callback(custom_group, "run")
         interaction = _FakeInteraction()
         await callback(interaction, id=11)
 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
             top_level="bm",
-            subcommand_path="campagne custom entry_run",
-            lines=[("campaign_id", 11), ("result", "running")],
+            subcommand_path="campagne custom run",
+            lines=[("schedule_id", 11), ("result", "running")],
             sections=None,
             kind="success",
             footer_service=ctx.footer,

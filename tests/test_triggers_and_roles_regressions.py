@@ -102,13 +102,13 @@ def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypat
     template_show = _find_command(frasi_group, "template_global_show")
     asyncio.run(template_show.callback(_Interaction(template_show)))
 
-    prompt_show = _find_command(campagne_group, "prompt", "entry_show")
+    prompt_show = _find_command(campagne_group, "prompt", "schedule_show")
 
     async def _get_message_campaign(self, guild_id, id):
         return None
 
     ctx.database.get_message_campaign = types.MethodType(_get_message_campaign, ctx.database)
-    asyncio.run(prompt_show.callback(_Interaction(prompt_show), 5))
+    asyncio.run(prompt_show.callback(_Interaction(prompt_show), "5"))
 
     assert seen[0][0] == "bm.frasi.entry_list"
     assert "frasi.entry_list" in seen[0][1]
@@ -116,12 +116,13 @@ def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypat
     assert seen[1][0] == "bm.frasi.template_global_show"
     assert "frasi.template_global_show" in seen[1][1]
     assert "frasi.template_show" in seen[1][1]
-    assert seen[2][0] == "bm.campagne.prompt.entry_show"
+    assert seen[2][0] == "bm.campagne.prompt.schedule_show"
+    assert "campagne.prompt.schedule_show" in seen[2][1]
+    assert "bm.prompt.schedule_show" in seen[2][1]
     assert "campagne.prompt.entry_show" in seen[2][1]
-    assert "bm.prompt.entry_show" in seen[2][1]
     assert sent[0]["subcommand_path"] == "frasi entry_list"
     assert sent[1]["subcommand_path"] == "frasi template_global_show"
-    assert sent[2]["subcommand_path"] == "prompt entry_show"
+    assert sent[2]["subcommand_path"] == "campagne prompt schedule_show"
 
 
 def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest.MonkeyPatch) -> None:

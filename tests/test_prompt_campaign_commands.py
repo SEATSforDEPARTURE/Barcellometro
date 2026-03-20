@@ -40,19 +40,19 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
         try:
             register_triggers(group, campagne, qna, insights, ctx)
             prompt_group = _get_subgroup(campagne, "prompt")
-            callback = _get_command_callback(prompt_group, "entry_add")
+            callback = _get_command_callback(prompt_group, "schedule_add")
             interaction = SimpleNamespace(
                 guild_id=1,
                 channel_id=2,
                 user=SimpleNamespace(id=999),
-                command=SimpleNamespace(qualified_name="campagne prompt entry_add"),
-                data={"name": "entry_add"},
+                command=SimpleNamespace(qualified_name="campagne prompt schedule_add"),
+                data={"name": "schedule_add"},
                 response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
             )
 
             await callback(
                 interaction,
-                text="scrivi un update",
+                prompt_text="scrivi un update",
                 name=None,
                 publish_at=None,
                 every=None,
@@ -67,7 +67,7 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
         assert kwargs["name"].startswith("prompt-")
         assert len(kwargs["start_time_local"]) == 5 and ":" in kwargs["start_time_local"]
         sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
-        assert "Campaign Id" in (sent_embed.description or "")
+        assert "Schedule Id" in (sent_embed.description or "")
         assert "created" in (sent_embed.description or "")
 
     asyncio.run(_run())
@@ -102,12 +102,12 @@ def test_prompt_list_shows_one_shot_label() -> None:
         try:
             register_triggers(group, campagne, qna, insights, ctx)
             prompt_group = _get_subgroup(campagne, "prompt")
-            callback = _get_command_callback(prompt_group, "entry_list")
+            callback = _get_command_callback(prompt_group, "schedule_list")
             interaction = SimpleNamespace(
                 guild_id=1,
                 channel_id=2,
-                command=SimpleNamespace(qualified_name="campagne prompt entry_list"),
-                data={"name": "entry_list"},
+                command=SimpleNamespace(qualified_name="campagne prompt schedule_list"),
+                data={"name": "schedule_list"},
                 response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
             )
             await callback(interaction)
@@ -116,5 +116,99 @@ def test_prompt_list_shows_one_shot_label() -> None:
 
         sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
         assert "every=one-shot" in (sent_embed.description or "")
+
+    asyncio.run(_run())
+
+
+def test_prompt_show_resolves_schedule_by_name() -> None:
+    async def _run() -> None:
+        rows = [
+            {
+                "id": 9,
+                "type": "AI_PROMPT",
+                "enabled": 1,
+                "name": "morning-news",
+                "channel_id": "2",
+                "next_run_at": "2026-01-01T10:00:00+00:00",
+                "interval_minutes": 0,
+                "start_time_local": "10:00",
+                "embed_title": None,
+                "embed_color": None,
+                "text": "Scrivi un update",
+            }
+        ]
+        db = SimpleNamespace(
+            list_message_campaigns=AsyncMock(return_value=rows),
+            get_message_campaign=AsyncMock(return_value=None),
+        )
+        scheduler = SimpleNamespace(is_valid_embed_color=lambda _c: True)
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
+
+        group = discord.app_commands.Group(name="bm", description="x")
+        campagne = discord.app_commands.Group(name="campagne", description="x")
+        qna = discord.app_commands.Group(name="qna", description="x")
+        insights = discord.app_commands.Group(name="insights", description="x")
+
+        old_permission = triggers_module.check_permission
+        triggers_module.check_permission = AsyncMock(return_value=True)
+        try:
+            register_triggers(group, campagne, qna, insights, ctx)
+            prompt_group = _get_subgroup(campagne, "prompt")
+            callback = _get_command_callback(prompt_group, "schedule_show")
+            interaction = SimpleNamespace(
+                guild_id=1,
+                channel_id=2,
+                command=SimpleNamespace(qualified_name="campagne prompt schedule_show"),
+                data={"name": "schedule_show"},
+                response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
+            )
+            await callback(interaction, id_or_name="morning-news")
+        finally:
+            triggers_module.check_permission = old_permission
+
+        sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
+        assert "morning-news" in (sent_embed.description or "")
+        assert "prompt_text" in (sent_embed.description or "")
+
+    asyncio.run(_run())
+
+
+def test_prompt_show_rejects_ambiguous_schedule_name() -> None:
+    async def _run() -> None:
+        rows = [
+            {"id": 9, "type": "AI_PROMPT", "enabled": 1, "name": "dup", "channel_id": "2", "next_run_at": "2026-01-01T10:00:00+00:00", "interval_minutes": 0},
+            {"id": 10, "type": "AI_PROMPT", "enabled": 1, "name": "dup", "channel_id": "2", "next_run_at": "2026-01-01T10:00:00+00:00", "interval_minutes": 0},
+        ]
+        db = SimpleNamespace(
+            list_message_campaigns=AsyncMock(return_value=rows),
+            get_message_campaign=AsyncMock(return_value=None),
+        )
+        scheduler = SimpleNamespace(is_valid_embed_color=lambda _c: True)
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
+
+        group = discord.app_commands.Group(name="bm", description="x")
+        campagne = discord.app_commands.Group(name="campagne", description="x")
+        qna = discord.app_commands.Group(name="qna", description="x")
+        insights = discord.app_commands.Group(name="insights", description="x")
+
+        old_permission = triggers_module.check_permission
+        triggers_module.check_permission = AsyncMock(return_value=True)
+        try:
+            register_triggers(group, campagne, qna, insights, ctx)
+            prompt_group = _get_subgroup(campagne, "prompt")
+            callback = _get_command_callback(prompt_group, "schedule_show")
+            interaction = SimpleNamespace(
+                guild_id=1,
+                channel_id=2,
+                command=SimpleNamespace(qualified_name="campagne prompt schedule_show"),
+                data={"name": "schedule_show"},
+                response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
+            )
+            await callback(interaction, id_or_name="dup")
+        finally:
+            triggers_module.check_permission = old_permission
+
+        sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
+        assert "ambiguous" in (sent_embed.description or "")
 
     asyncio.run(_run())

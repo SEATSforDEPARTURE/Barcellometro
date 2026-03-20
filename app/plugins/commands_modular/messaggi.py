@@ -136,7 +136,7 @@ def _format_service_config_row(row: dict[str, object]) -> str:
 def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -> None:
     quiet_group = app_commands.Group(name="quiet", description="Quiet hours controls")
     cap_group = app_commands.Group(name="cap", description="Daily cap controls")
-    custom_group = app_commands.Group(name="custom", description="Custom campaign entries")
+    custom_group = app_commands.Group(name="custom", description="Custom campaign schedules")
     news_group = app_commands.Group(name="news", description="News campaign controls")
     weather_group = app_commands.Group(name="weather", description="Weather campaign controls")
     horoscope_group = app_commands.Group(name="horoscope", description="Horoscope campaign controls")
@@ -217,11 +217,17 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         enabled = action == "on"
         for row in rows:
             await ctx.database.set_message_campaign_enabled(guild_id, int(row["id"]), enabled)
-        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("entries", len(rows)), ("result", "enabled" if enabled else "disabled")], kind="success")
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("schedules", len(rows)), ("result", "enabled" if enabled else "disabled")], kind="success")
 
     async def _build_service_run_payload(guild_id: str, channel_id: str, service_type: str) -> dict[str, object] | None:
         row = await ctx.database.get_campaign_content_config_by_service(guild_id, channel_id, service_type)
         return dict(row) if row is not None else None
+
+    async def _get_service_schedule(guild_id: str, service_type: str, schedule_id: int) -> dict[str, object] | None:
+        row = await ctx.database.get_campaign_content_config(guild_id, schedule_id)
+        if row is None or str(row["service_type"]).upper() != service_type:
+            return None
+        return dict(row)
 
     async def _set_service_enabled(interaction: discord.Interaction, *, service_type: str, action: str, legacy_aliases: tuple[str, ...] = ()) -> None:
         subcommand_path = f"campagne {service_type.lower()} {action}"
@@ -244,56 +250,78 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             enabled_count = sum(1 for row in rows if bool(row.get("enabled")))
             latest = rows[-1] if rows else None
             if latest is None:
-                await _send(interaction, subcommand_path=subcommand_path, lines=[("enabled", f"{enabled_count}/{len(rows)}"), ("warning", "No active configuration found.")], kind="warning")
+                await _send(interaction, subcommand_path=subcommand_path, lines=[("enabled", f"{enabled_count}/{len(rows)}"), ("warning", "No schedules found for this channel.")], kind="warning")
                 return
             await _send(interaction, subcommand_path=subcommand_path, lines=[("enabled", f"{enabled_count}/{len(rows)}"), ("channel", f"<#{channel_id}>")], sections=[CommandEmbedSection(title="Latest", lines=[_format_service_config_row(latest)])])
             return
         enabled = action == "on"
         for row in rows:
             await ctx.database.set_campaign_content_enabled(guild_id, int(row["id"]), enabled)
-        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("entries", len(rows)), ("result", "enabled" if enabled else "disabled")], kind="success")
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("schedules", len(rows)), ("result", "enabled" if enabled else "disabled")], kind="success")
 
-    async def _service_config_show(
+    async def _service_schedule_show(
         interaction: discord.Interaction,
         *,
         service_type: str,
+        schedule_id: int,
         legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.config_show", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_show", *legacy_aliases):
             return
-        subcommand_path = f"campagne {service_type.lower()} config_show"
-        scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
-        if scope is None:
+        subcommand_path = f"campagne {service_type.lower()} schedule_show"
+        guild_id = await _require_guild(interaction, subcommand_path=subcommand_path)
+        if guild_id is None:
             return
-        guild_id, channel_id = scope
-        row = await ctx.database.get_campaign_content_config_by_service(guild_id, channel_id, service_type)
+        row = await _get_service_schedule(guild_id, service_type, schedule_id)
         if row is None:
-            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"No {service_type.lower()} config found for this channel.")], kind="warning")
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"{service_type.title()} schedule not found.")], kind="warning")
             return
-        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>")], sections=[CommandEmbedSection(title="Configuration", lines=[_format_service_config_row(dict(row))])])
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("schedule_id", schedule_id), ("channel", f"<#{row['channel_id']}>")], sections=[CommandEmbedSection(title="Schedule", lines=[_format_service_config_row(row)])])
 
-    async def _service_config_reset(
+    async def _service_schedule_remove(
+        interaction: discord.Interaction,
+        *,
+        service_type: str,
+        schedule_id: int,
+        legacy_aliases: tuple[str, ...] = (),
+    ) -> None:
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_remove", *legacy_aliases):
+            return
+        subcommand_path = f"campagne {service_type.lower()} schedule_remove"
+        guild_id = await _require_guild(interaction, subcommand_path=subcommand_path)
+        if guild_id is None:
+            return
+        row = await _get_service_schedule(guild_id, service_type, schedule_id)
+        if row is None:
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"{service_type.title()} schedule not found.")], kind="warning")
+            return
+        await ctx.database.soft_delete_campaign_content_config(guild_id, schedule_id)
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("schedule_id", schedule_id), ("result", "removed")], kind="success")
+
+    async def _service_schedule_list(
         interaction: discord.Interaction,
         *,
         service_type: str,
         legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.config_reset", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_list", *legacy_aliases):
             return
-        subcommand_path = f"campagne {service_type.lower()} config_reset"
-        scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
-        if scope is None:
+        subcommand_path = f"campagne {service_type.lower()} schedule_list"
+        guild_id = await _require_guild(interaction, subcommand_path=subcommand_path)
+        if guild_id is None:
             return
-        guild_id, channel_id = scope
-        rows = await ctx.database.list_campaign_content_configs_by_service(
-            guild_id,
-            service_type=service_type,
-            channel_id=channel_id,
-            include_disabled=True,
-        )
-        for row in rows:
-            await ctx.database.soft_delete_campaign_content_config(guild_id, int(row["id"]))
-        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("configs", len(rows)), ("result", "reset")], kind="success")
+        rows = [
+            dict(row)
+            for row in await ctx.database.list_campaign_content_configs_by_service(
+                guild_id,
+                service_type=service_type,
+                include_disabled=True,
+            )
+        ]
+        if not rows:
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"No {service_type.lower()} schedules configured.")], kind="warning")
+            return
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("schedules", len(rows))], sections=[CommandEmbedSection(title="Schedules", lines=[_format_service_config_row(row) for row in rows])])
 
     async def _service_run(
         interaction: discord.Interaction,
@@ -310,7 +338,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         guild_id, channel_id = scope
         row = await _build_service_run_payload(guild_id, channel_id, service_type)
         if row is None:
-            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"No {service_type.lower()} config found for this channel.")], kind="warning")
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"No {service_type.lower()} schedule found for this channel.")], kind="warning")
             return
         service = getattr(ctx.message_scheduler, "_campaign_content_service", None) if ctx.message_scheduler is not None else None
         if service is None:
@@ -324,7 +352,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         elif service_type == "HOROSCOPE":
             await service.execute_horoscope_service(row)
 
-    async def _service_config_set(
+    async def _service_schedule_add(
         interaction: discord.Interaction,
         *,
         service_type: str,
@@ -336,79 +364,118 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         categories: str | None,
         legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.config_set", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_add", *legacy_aliases):
             return
-        subcommand_path = f"campagne {service_type.lower()} config_set"
+        subcommand_path = f"campagne {service_type.lower()} schedule_add"
         scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
         if scope is None:
             return
         if not await _validate_embed_color(interaction, embed_color, subcommand_path=subcommand_path):
             return
         guild_id, channel_id = scope
-        row = await ctx.database.get_campaign_content_config_by_service(guild_id, channel_id, service_type)
-        existing = dict(row) if row is not None else None
 
         now = datetime.now(timezone.utc)
-        resolved_publish = publish_at
-        resolved_every = every if every is not None else int(existing["interval_minutes"]) if existing is not None else 0
         try:
             next_run, time_local, interval_minutes = _resolve_schedule(
-                publish_at=resolved_publish,
-                every=resolved_every,
+                publish_at=publish_at,
+                every=every,
                 now_utc=now,
                 tz=ctx.timezone,
             )
         except ValueError as exc:
             await _send(interaction, subcommand_path=subcommand_path, lines=[("error", str(exc))], kind="error")
             return
-
-        if existing is not None and publish_at is None and every is None:
-            time_local = str(existing["time_local"])
-            next_run = datetime.fromisoformat(str(existing["next_run_at"])) if existing.get("next_run_at") else now
-        sources_json = json.dumps(
-            _parse_csv(sources) if sources is not None else json.loads(str(existing["sources_json"])) if existing and existing.get("sources_json") else [],
-            ensure_ascii=False,
-        )
-        categories_json = categories if categories is not None else str(existing["categories_json"]) if existing and existing.get("categories_json") is not None else None
-        resolved_embed_title = embed_title if embed_title is not None else str(existing["embed_title"]) if existing and existing.get("embed_title") is not None else None
-        resolved_embed_color = embed_color if embed_color is not None else str(existing["embed_color"]) if existing and existing.get("embed_color") is not None else None
-
-        if existing is None:
-            config_id = await ctx.database.create_campaign_content_config(
-                guild_id=guild_id,
-                channel_id=channel_id,
-                service_type=service_type,
-                enabled=True,
-                time_local=time_local,
-                interval_minutes=interval_minutes,
-                embed_title=resolved_embed_title,
-                embed_color=resolved_embed_color,
-                sources_json=sources_json,
-                categories_json=categories_json,
-                next_run_at=next_run.isoformat(),
-            )
-            await _send(interaction, subcommand_path=subcommand_path, lines=[("config_id", config_id), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
-            return
-
-        await ctx.database.update_campaign_content_config(
-            guild_id,
-            int(existing["id"]),
+        sources_json = json.dumps(_parse_csv(sources), ensure_ascii=False)
+        config_id = await ctx.database.create_campaign_content_config(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            service_type=service_type,
+            enabled=True,
             time_local=time_local,
             interval_minutes=interval_minutes,
-            embed_title=resolved_embed_title,
-            embed_color=resolved_embed_color,
+            embed_title=embed_title,
+            embed_color=embed_color,
             sources_json=sources_json,
-            categories_json=categories_json,
+            categories_json=categories,
             next_run_at=next_run.isoformat(),
-            set_time_local=True,
-            set_interval_minutes=True,
-            set_embed_title=True,
-            set_embed_color=True,
-            set_sources_json=True,
-            set_categories_json=True,
-            set_next_run_at=True,
         )
-        await _send(interaction, subcommand_path=subcommand_path, lines=[("config_id", existing["id"]), ("next_run", next_run.isoformat()), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("schedule_id", config_id), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
+
+    async def _service_schedule_edit(
+        interaction: discord.Interaction,
+        *,
+        service_type: str,
+        schedule_id: int,
+        publish_at: str | None,
+        every: int | None,
+        embed_title: str | None,
+        embed_color: str | None,
+        enabled: bool | None,
+        sources: str | None = None,
+        categories: str | None = None,
+        legacy_aliases: tuple[str, ...] = (),
+    ) -> None:
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_edit", *legacy_aliases):
+            return
+        subcommand_path = f"campagne {service_type.lower()} schedule_edit"
+        guild_id = await _require_guild(interaction, subcommand_path=subcommand_path)
+        if guild_id is None:
+            return
+        schedule = await _get_service_schedule(guild_id, service_type, schedule_id)
+        if schedule is None:
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"{service_type.title()} schedule not found.")], kind="warning")
+            return
+        if embed_color is not None and not await _validate_embed_color(interaction, embed_color, subcommand_path=subcommand_path):
+            return
+
+        next_run_at: str | None = None
+        time_local: str | None = None
+        interval_minutes: int | None = None
+        if publish_at is not None or every is not None:
+            now = datetime.now(timezone.utc)
+            current_every = every if every is not None else int(schedule.get("interval_minutes") or 0)
+            try:
+                if publish_at is not None:
+                    next_run, time_local, interval_minutes = _resolve_schedule(
+                        publish_at=publish_at,
+                        every=current_every,
+                        now_utc=now,
+                        tz=ctx.timezone,
+                    )
+                else:
+                    interval_minutes = current_every
+                    time_local = str(schedule.get("time_local") or now.astimezone(ctx.timezone).strftime("%H:%M"))
+                    next_run = calculate_initial_next_run(now, time_local, int(interval_minutes or 0), ctx.timezone) if int(interval_minutes or 0) > 0 else now
+            except ValueError as exc:
+                await _send(interaction, subcommand_path=subcommand_path, lines=[("error", str(exc))], kind="error")
+                return
+            next_run_at = next_run.isoformat()
+
+        updated = await ctx.database.update_campaign_content_config(
+            guild_id,
+            schedule_id,
+            time_local=time_local,
+            interval_minutes=interval_minutes,
+            embed_title=embed_title,
+            embed_color=embed_color,
+            sources_json=json.dumps(_parse_csv(sources), ensure_ascii=False) if sources is not None else None,
+            categories_json=categories,
+            next_run_at=next_run_at,
+            set_time_local=time_local is not None,
+            set_interval_minutes=interval_minutes is not None,
+            set_embed_title=embed_title is not None,
+            set_embed_color=embed_color is not None,
+            set_sources_json=sources is not None,
+            set_categories_json=categories is not None,
+            set_next_run_at=next_run_at is not None,
+        )
+        if enabled is not None:
+            await ctx.database.set_campaign_content_enabled(guild_id, schedule_id, enabled)
+        if not updated and enabled is None:
+            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", "No changes requested.")], kind="warning")
+            return
+        refreshed = await _get_service_schedule(guild_id, service_type, schedule_id)
+        await _send(interaction, subcommand_path=subcommand_path, lines=[("schedule_id", schedule_id), ("result", "updated")], sections=[CommandEmbedSection(title="Schedule", lines=[_format_service_config_row(refreshed or schedule)])], kind="success")
 
     @campagne_group.command(name="on", description="Enable campaigns in the current channel")
     async def messaggi_on(interaction: discord.Interaction) -> None:
@@ -552,7 +619,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     async def custom_status(interaction: discord.Interaction) -> None:
         await _custom_toggle(interaction, "status")
 
-    @custom_group.command(name="entry_add", description="Add a custom campaign entry")
+    @custom_group.command(name="schedule_add", description="Add a custom campaign schedule")
     @app_commands.describe(
         text="Fallback text",
         text_green="Text for green mood",
@@ -568,7 +635,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         embed_color="Optional embed color",
     )
     @app_commands.choices(mood_mode=MOOD_CHOICES)
-    async def custom_entry_add(
+    async def custom_schedule_add(
         interaction: discord.Interaction,
         text: Optional[str] = None,
         text_green: Optional[str] = None,
@@ -583,12 +650,12 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         embed_title: Optional[str] = None,
         embed_color: Optional[str] = None,
     ) -> None:
-        if not await _check(interaction, "campagne.custom.entry_add", "campagne.aggiungi"):
+        if not await _check(interaction, "campagne.custom.schedule_add", "campagne.custom.entry_add", "campagne.aggiungi"):
             return
-        scope = await _require_guild_channel(interaction, subcommand_path="campagne custom entry_add")
+        scope = await _require_guild_channel(interaction, subcommand_path="campagne custom schedule_add")
         if scope is None:
             return
-        if not await _validate_embed_color(interaction, embed_color, subcommand_path="campagne custom entry_add"):
+        if not await _validate_embed_color(interaction, embed_color, subcommand_path="campagne custom schedule_add"):
             return
         guild_id, channel_id = scope
         now = datetime.now(timezone.utc)
@@ -600,7 +667,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                 tz=ctx.timezone,
             )
         except ValueError as exc:
-            await _send(interaction, subcommand_path="campagne custom entry_add", lines=[("error", str(exc))], kind="error")
+            await _send(interaction, subcommand_path="campagne custom schedule_add", lines=[("error", str(exc))], kind="error")
             return
         resolved_mood_mode = mood_mode.value if mood_mode else "AUTO"
         validation_error = validate_campaign_texts(
@@ -612,7 +679,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             mood_mode=resolved_mood_mode,
         )
         if validation_error:
-            await _send(interaction, subcommand_path="campagne custom entry_add", lines=[("error", validation_error)], kind="error")
+            await _send(interaction, subcommand_path="campagne custom schedule_add", lines=[("error", validation_error)], kind="error")
             return
         campaign_id = await ctx.database.create_message_campaign(
             guild_id=guild_id,
@@ -635,68 +702,68 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_title=embed_title,
             embed_color=embed_color,
         )
-        await _send(interaction, subcommand_path="campagne custom entry_add", lines=[("campaign_id", campaign_id), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
+        await _send(interaction, subcommand_path="campagne custom schedule_add", lines=[("schedule_id", campaign_id), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
 
-    @custom_group.command(name="entry_list", description="List custom campaign entries")
-    async def custom_entry_list(interaction: discord.Interaction) -> None:
-        if not await _check(interaction, "campagne.custom.entry_list", "campagne.lista"):
+    @custom_group.command(name="schedule_list", description="List custom campaign schedules")
+    async def custom_schedule_list(interaction: discord.Interaction) -> None:
+        if not await _check(interaction, "campagne.custom.schedule_list", "campagne.custom.entry_list", "campagne.lista"):
             return
-        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_list")
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom schedule_list")
         if guild_id is None:
             return
         campaigns = await _list_custom_campaigns(guild_id)
         if not campaigns:
-            await _send(interaction, subcommand_path="campagne custom entry_list", lines=[("warning", "No custom campaigns configured.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne custom schedule_list", lines=[("warning", "No custom schedules configured.")], kind="warning")
             return
-        await _send(interaction, subcommand_path="campagne custom entry_list", lines=[("campaigns", len(campaigns))], sections=[CommandEmbedSection(title="Entries", lines=[_format_message_campaign_row(row) for row in campaigns])])
+        await _send(interaction, subcommand_path="campagne custom schedule_list", lines=[("schedules", len(campaigns))], sections=[CommandEmbedSection(title="Schedules", lines=[_format_message_campaign_row(row) for row in campaigns])])
 
-    @custom_group.command(name="entry_show", description="Show a custom campaign entry")
-    @app_commands.describe(id="Campaign entry ID")
-    async def custom_entry_show(interaction: discord.Interaction, id: int) -> None:
-        if not await _check(interaction, "campagne.custom.entry_show"):
+    @custom_group.command(name="schedule_show", description="Show a custom campaign schedule")
+    @app_commands.describe(id="Campaign schedule ID")
+    async def custom_schedule_show(interaction: discord.Interaction, id: int) -> None:
+        if not await _check(interaction, "campagne.custom.schedule_show", "campagne.custom.entry_show"):
             return
-        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_show")
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom schedule_show")
         if guild_id is None:
             return
         campaign = await _get_custom_campaign(guild_id, id)
         if campaign is None:
-            await _send(interaction, subcommand_path="campagne custom entry_show", lines=[("warning", "Custom campaign not found.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne custom schedule_show", lines=[("warning", "Custom schedule not found.")], kind="warning")
             return
-        await _send(interaction, subcommand_path="campagne custom entry_show", lines=[("campaign_id", id)], sections=[CommandEmbedSection(title="Details", lines=[_format_message_campaign_row(campaign)])])
+        await _send(interaction, subcommand_path="campagne custom schedule_show", lines=[("schedule_id", id)], sections=[CommandEmbedSection(title="Schedule", lines=[_format_message_campaign_row(campaign)])])
 
-    @custom_group.command(name="entry_remove", description="Remove a custom campaign entry")
-    @app_commands.describe(id="Campaign entry ID")
-    async def custom_entry_remove(interaction: discord.Interaction, id: int) -> None:
-        if not await _check(interaction, "campagne.custom.entry_remove", "campagne.cancella"):
+    @custom_group.command(name="schedule_remove", description="Remove a custom campaign schedule")
+    @app_commands.describe(id="Campaign schedule ID")
+    async def custom_schedule_remove(interaction: discord.Interaction, id: int) -> None:
+        if not await _check(interaction, "campagne.custom.schedule_remove", "campagne.custom.entry_remove", "campagne.cancella"):
             return
-        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_remove")
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom schedule_remove")
         if guild_id is None:
             return
         campaign = await _get_custom_campaign(guild_id, id)
         if campaign is None:
-            await _send(interaction, subcommand_path="campagne custom entry_remove", lines=[("warning", "Custom campaign not found.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne custom schedule_remove", lines=[("warning", "Custom schedule not found.")], kind="warning")
             return
         await ctx.database.soft_delete_message_campaign(guild_id, id)
-        await _send(interaction, subcommand_path="campagne custom entry_remove", lines=[("campaign_id", id), ("result", "removed")], kind="success")
+        await _send(interaction, subcommand_path="campagne custom schedule_remove", lines=[("schedule_id", id), ("result", "removed")], kind="success")
 
-    @custom_group.command(name="entry_run", description="Run a custom campaign entry now")
-    @app_commands.describe(id="Campaign entry ID")
-    async def custom_entry_run(interaction: discord.Interaction, id: int) -> None:
-        if not await _check(interaction, "campagne.custom.entry_run", "campagne.test"):
+    @custom_group.command(name="run", description="Run a custom campaign schedule now")
+    @app_commands.describe(id="Campaign schedule ID")
+    async def custom_run(interaction: discord.Interaction, id: int) -> None:
+        if not await _check(interaction, "campagne.custom.run", "campagne.custom.entry_run", "campagne.test"):
             return
-        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_run")
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom run")
         if guild_id is None or interaction.channel is None or interaction.channel_id is None:
             if not interaction.response.is_done():
-                await _send(interaction, subcommand_path="campagne custom entry_run", lines=[("error", "Use this command in a guild channel.")], kind="error")
+                await _send(interaction, subcommand_path="campagne custom run", lines=[("error", "Use this command in a guild channel.")], kind="error")
             return
         campaign = await _get_custom_campaign(guild_id, id)
         if campaign is None:
-            await _send(interaction, subcommand_path="campagne custom entry_run", lines=[("warning", "Custom campaign not found.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne custom run", lines=[("warning", "Custom schedule not found.")], kind="warning")
             return
         if ctx.message_scheduler is None:
-            await _send(interaction, subcommand_path="campagne custom entry_run", lines=[("error", "Scheduler service unavailable.")], kind="error")
+            await _send(interaction, subcommand_path="campagne custom run", lines=[("error", "Scheduler service unavailable.")], kind="error")
             return
-        await _send(interaction, subcommand_path="campagne custom entry_run", lines=[("campaign_id", id), ("result", "running")], kind="success")
+        await _send(interaction, subcommand_path="campagne custom run", lines=[("schedule_id", id), ("result", "running")], kind="success")
         if isinstance(interaction.channel, discord.abc.Messageable):
             rendered_text, _, _ = await ctx.message_scheduler.preview_campaign_text(
                 campaign,
@@ -704,7 +771,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             )
             await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
 
-    @custom_group.command(name="entry_edit", description="Edit a custom campaign entry")
+    @custom_group.command(name="schedule_edit", description="Edit a custom campaign schedule")
     @app_commands.describe(
         id="Campaign entry ID",
         text="Fallback text",
@@ -719,10 +786,10 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         only_if_idle_minutes="Only send if the channel has been idle for X minutes",
         embed_title="Optional embed title",
         embed_color="Optional embed color",
-        enabled="Enable or disable this entry",
+        enabled="Enable or disable this schedule",
     )
     @app_commands.choices(mood_mode=MOOD_CHOICES)
-    async def custom_entry_edit(
+    async def custom_schedule_edit(
         interaction: discord.Interaction,
         id: int,
         text: str | None = None,
@@ -739,16 +806,16 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         embed_color: str | None = None,
         enabled: bool | None = None,
     ) -> None:
-        if not await _check(interaction, "campagne.custom.entry_edit", "campagne.pausa", "campagne.riprendi"):
+        if not await _check(interaction, "campagne.custom.schedule_edit", "campagne.custom.entry_edit", "campagne.pausa", "campagne.riprendi"):
             return
-        guild_id = await _require_guild(interaction, subcommand_path="campagne custom entry_edit")
+        guild_id = await _require_guild(interaction, subcommand_path="campagne custom schedule_edit")
         if guild_id is None:
             return
         campaign = await _get_custom_campaign(guild_id, id)
         if campaign is None:
-            await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("warning", "Custom campaign not found.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne custom schedule_edit", lines=[("warning", "Custom schedule not found.")], kind="warning")
             return
-        if embed_color is not None and not await _validate_embed_color(interaction, embed_color, subcommand_path="campagne custom entry_edit"):
+        if embed_color is not None and not await _validate_embed_color(interaction, embed_color, subcommand_path="campagne custom schedule_edit"):
             return
 
         candidate_text = text if text is not None else campaign.get("text")
@@ -766,7 +833,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             mood_mode=resolved_mood_mode,
         )
         if validation_error:
-            await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("error", validation_error)], kind="error")
+            await _send(interaction, subcommand_path="campagne custom schedule_edit", lines=[("error", validation_error)], kind="error")
             return
 
         next_run_at: str | None = None
@@ -784,7 +851,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
                         tz=ctx.timezone,
                     )
                 except ValueError as exc:
-                    await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("error", str(exc))], kind="error")
+                    await _send(interaction, subcommand_path="campagne custom schedule_edit", lines=[("error", str(exc))], kind="error")
                     return
             else:
                 start_time_local = str(campaign.get("start_time_local") or now.astimezone(ctx.timezone).strftime("%H:%M"))
@@ -824,10 +891,10 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         if enabled is not None:
             await ctx.database.set_message_campaign_enabled(guild_id, id, enabled)
         if not updated and enabled is None:
-            await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("warning", "No changes requested.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne custom schedule_edit", lines=[("warning", "No changes requested.")], kind="warning")
             return
         refreshed = await _get_custom_campaign(guild_id, id)
-        await _send(interaction, subcommand_path="campagne custom entry_edit", lines=[("campaign_id", id), ("result", "updated")], sections=[CommandEmbedSection(title="Details", lines=[_format_message_campaign_row(refreshed or campaign)])], kind="success")
+        await _send(interaction, subcommand_path="campagne custom schedule_edit", lines=[("schedule_id", id), ("result", "updated")], sections=[CommandEmbedSection(title="Schedule", lines=[_format_message_campaign_row(refreshed or campaign)])], kind="success")
 
     @news_group.command(name="on", description="Enable news campaigns in the current channel")
     async def news_on(interaction: discord.Interaction) -> None:
@@ -841,7 +908,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     async def news_status(interaction: discord.Interaction) -> None:
         await _set_service_enabled(interaction, service_type="NEWS", action="status", legacy_aliases=("campagne.notizie",))
 
-    @news_group.command(name="config_set", description="Create or update the news campaign configuration")
+    @news_group.command(name="schedule_add", description="Add a news campaign schedule")
     @app_commands.describe(
         publish_at="First publication time (DD/MM/YYYY HH:MM)",
         every="Repeat interval in minutes",
@@ -850,7 +917,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         sources="Comma-separated source list or RSS URLs",
         categories="Comma-separated category list",
     )
-    async def news_config_set(
+    async def news_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
         every: int | None = None,
@@ -859,7 +926,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         sources: str | None = None,
         categories: str | None = None,
     ) -> None:
-        await _service_config_set(
+        await _service_schedule_add(
             interaction,
             service_type="NEWS",
             publish_at=publish_at,
@@ -868,16 +935,52 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_color=embed_color,
             sources=sources,
             categories=categories,
-            legacy_aliases=("campagne.notizie",),
+            legacy_aliases=("campagne.news.config_set", "campagne.notizie"),
         )
 
-    @news_group.command(name="config_show", description="Show the news campaign configuration")
-    async def news_config_show(interaction: discord.Interaction) -> None:
-        await _service_config_show(interaction, service_type="NEWS", legacy_aliases=("campagne.notizie", "campagne.servizi_lista"))
+    @news_group.command(name="schedule_edit", description="Edit a news campaign schedule")
+    @app_commands.describe(
+        id="News schedule ID",
+        publish_at="First publication time (DD/MM/YYYY HH:MM)",
+        every="Repeat interval in minutes",
+        embed_title="Optional embed title",
+        embed_color="Optional embed color",
+        enabled="Enable or disable this schedule",
+    )
+    async def news_schedule_edit(
+        interaction: discord.Interaction,
+        id: int,
+        publish_at: str | None = None,
+        every: int | None = None,
+        embed_title: str | None = None,
+        embed_color: str | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        await _service_schedule_edit(
+            interaction,
+            service_type="NEWS",
+            schedule_id=id,
+            publish_at=publish_at,
+            every=every,
+            embed_title=embed_title,
+            embed_color=embed_color,
+            enabled=enabled,
+            legacy_aliases=("campagne.news.config_set", "campagne.notizie"),
+        )
 
-    @news_group.command(name="config_reset", description="Reset the news campaign configuration")
-    async def news_config_reset(interaction: discord.Interaction) -> None:
-        await _service_config_reset(interaction, service_type="NEWS", legacy_aliases=("campagne.servizi_delete",))
+    @news_group.command(name="schedule_show", description="Show a news campaign schedule")
+    @app_commands.describe(id="News schedule ID")
+    async def news_schedule_show(interaction: discord.Interaction, id: int) -> None:
+        await _service_schedule_show(interaction, service_type="NEWS", schedule_id=id, legacy_aliases=("campagne.news.config_show", "campagne.notizie", "campagne.servizi_lista"))
+
+    @news_group.command(name="schedule_remove", description="Remove a news campaign schedule")
+    @app_commands.describe(id="News schedule ID")
+    async def news_schedule_remove(interaction: discord.Interaction, id: int) -> None:
+        await _service_schedule_remove(interaction, service_type="NEWS", schedule_id=id, legacy_aliases=("campagne.news.config_reset", "campagne.servizi_delete"))
+
+    @news_group.command(name="schedule_list", description="List news campaign schedules")
+    async def news_schedule_list(interaction: discord.Interaction) -> None:
+        await _service_schedule_list(interaction, service_type="NEWS", legacy_aliases=("campagne.news.config_show", "campagne.notizie", "campagne.servizi_lista"))
 
     @news_group.command(name="run", description="Run the news campaign immediately")
     async def news_run(interaction: discord.Interaction) -> None:
@@ -895,7 +998,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     async def weather_status(interaction: discord.Interaction) -> None:
         await _set_service_enabled(interaction, service_type="WEATHER", action="status", legacy_aliases=("campagne.meteo",))
 
-    @weather_group.command(name="config_set", description="Create or update the weather campaign configuration")
+    @weather_group.command(name="schedule_add", description="Add a weather campaign schedule")
     @app_commands.describe(
         publish_at="First publication time (DD/MM/YYYY HH:MM)",
         every="Repeat interval in minutes",
@@ -903,7 +1006,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         embed_color="Optional embed color",
         sources="Comma-separated provider list",
     )
-    async def weather_config_set(
+    async def weather_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
         every: int | None = None,
@@ -911,7 +1014,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         embed_color: str | None = None,
         sources: str | None = None,
     ) -> None:
-        await _service_config_set(
+        await _service_schedule_add(
             interaction,
             service_type="WEATHER",
             publish_at=publish_at,
@@ -920,16 +1023,55 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_color=embed_color,
             sources=sources,
             categories=None,
-            legacy_aliases=("campagne.meteo",),
+            legacy_aliases=("campagne.weather.config_set", "campagne.meteo"),
         )
 
-    @weather_group.command(name="config_show", description="Show the weather campaign configuration")
-    async def weather_config_show(interaction: discord.Interaction) -> None:
-        await _service_config_show(interaction, service_type="WEATHER", legacy_aliases=("campagne.meteo", "campagne.servizi_lista"))
+    @weather_group.command(name="schedule_edit", description="Edit a weather campaign schedule")
+    @app_commands.describe(
+        id="Weather schedule ID",
+        publish_at="First publication time (DD/MM/YYYY HH:MM)",
+        every="Repeat interval in minutes",
+        embed_title="Optional embed title",
+        embed_color="Optional embed color",
+        sources="Comma-separated provider list",
+        enabled="Enable or disable this schedule",
+    )
+    async def weather_schedule_edit(
+        interaction: discord.Interaction,
+        id: int,
+        publish_at: str | None = None,
+        every: int | None = None,
+        embed_title: str | None = None,
+        embed_color: str | None = None,
+        sources: str | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        await _service_schedule_edit(
+            interaction,
+            service_type="WEATHER",
+            schedule_id=id,
+            publish_at=publish_at,
+            every=every,
+            embed_title=embed_title,
+            embed_color=embed_color,
+            sources=sources,
+            enabled=enabled,
+            legacy_aliases=("campagne.weather.config_set", "campagne.meteo"),
+        )
 
-    @weather_group.command(name="config_reset", description="Reset the weather campaign configuration")
-    async def weather_config_reset(interaction: discord.Interaction) -> None:
-        await _service_config_reset(interaction, service_type="WEATHER", legacy_aliases=("campagne.servizi_delete",))
+    @weather_group.command(name="schedule_show", description="Show a weather campaign schedule")
+    @app_commands.describe(id="Weather schedule ID")
+    async def weather_schedule_show(interaction: discord.Interaction, id: int) -> None:
+        await _service_schedule_show(interaction, service_type="WEATHER", schedule_id=id, legacy_aliases=("campagne.weather.config_show", "campagne.meteo", "campagne.servizi_lista"))
+
+    @weather_group.command(name="schedule_remove", description="Remove a weather campaign schedule")
+    @app_commands.describe(id="Weather schedule ID")
+    async def weather_schedule_remove(interaction: discord.Interaction, id: int) -> None:
+        await _service_schedule_remove(interaction, service_type="WEATHER", schedule_id=id, legacy_aliases=("campagne.weather.config_reset", "campagne.servizi_delete"))
+
+    @weather_group.command(name="schedule_list", description="List weather campaign schedules")
+    async def weather_schedule_list(interaction: discord.Interaction) -> None:
+        await _service_schedule_list(interaction, service_type="WEATHER", legacy_aliases=("campagne.weather.config_show", "campagne.meteo", "campagne.servizi_lista"))
 
     @weather_group.command(name="run", description="Run the weather campaign immediately")
     async def weather_run(interaction: discord.Interaction) -> None:
@@ -947,7 +1089,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     async def horoscope_status(interaction: discord.Interaction) -> None:
         await _set_service_enabled(interaction, service_type="HOROSCOPE", action="status", legacy_aliases=("campagne.oroscopo",))
 
-    @horoscope_group.command(name="config_set", description="Create or update the horoscope campaign configuration")
+    @horoscope_group.command(name="schedule_add", description="Add a horoscope campaign schedule")
     @app_commands.describe(
         publish_at="First publication time (DD/MM/YYYY HH:MM)",
         every="Repeat interval in minutes",
@@ -955,7 +1097,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         embed_color="Optional embed color",
         sources="Comma-separated provider list",
     )
-    async def horoscope_config_set(
+    async def horoscope_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
         every: int | None = None,
@@ -963,7 +1105,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         embed_color: str | None = None,
         sources: str | None = None,
     ) -> None:
-        await _service_config_set(
+        await _service_schedule_add(
             interaction,
             service_type="HOROSCOPE",
             publish_at=publish_at,
@@ -972,16 +1114,55 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_color=embed_color,
             sources=sources,
             categories=None,
-            legacy_aliases=("campagne.oroscopo",),
+            legacy_aliases=("campagne.horoscope.config_set", "campagne.oroscopo"),
         )
 
-    @horoscope_group.command(name="config_show", description="Show the horoscope campaign configuration")
-    async def horoscope_config_show(interaction: discord.Interaction) -> None:
-        await _service_config_show(interaction, service_type="HOROSCOPE", legacy_aliases=("campagne.oroscopo", "campagne.servizi_lista"))
+    @horoscope_group.command(name="schedule_edit", description="Edit a horoscope campaign schedule")
+    @app_commands.describe(
+        id="Horoscope schedule ID",
+        publish_at="First publication time (DD/MM/YYYY HH:MM)",
+        every="Repeat interval in minutes",
+        embed_title="Optional embed title",
+        embed_color="Optional embed color",
+        sources="Comma-separated provider list",
+        enabled="Enable or disable this schedule",
+    )
+    async def horoscope_schedule_edit(
+        interaction: discord.Interaction,
+        id: int,
+        publish_at: str | None = None,
+        every: int | None = None,
+        embed_title: str | None = None,
+        embed_color: str | None = None,
+        sources: str | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        await _service_schedule_edit(
+            interaction,
+            service_type="HOROSCOPE",
+            schedule_id=id,
+            publish_at=publish_at,
+            every=every,
+            embed_title=embed_title,
+            embed_color=embed_color,
+            sources=sources,
+            enabled=enabled,
+            legacy_aliases=("campagne.horoscope.config_set", "campagne.oroscopo"),
+        )
 
-    @horoscope_group.command(name="config_reset", description="Reset the horoscope campaign configuration")
-    async def horoscope_config_reset(interaction: discord.Interaction) -> None:
-        await _service_config_reset(interaction, service_type="HOROSCOPE", legacy_aliases=("campagne.servizi_delete",))
+    @horoscope_group.command(name="schedule_show", description="Show a horoscope campaign schedule")
+    @app_commands.describe(id="Horoscope schedule ID")
+    async def horoscope_schedule_show(interaction: discord.Interaction, id: int) -> None:
+        await _service_schedule_show(interaction, service_type="HOROSCOPE", schedule_id=id, legacy_aliases=("campagne.horoscope.config_show", "campagne.oroscopo", "campagne.servizi_lista"))
+
+    @horoscope_group.command(name="schedule_remove", description="Remove a horoscope campaign schedule")
+    @app_commands.describe(id="Horoscope schedule ID")
+    async def horoscope_schedule_remove(interaction: discord.Interaction, id: int) -> None:
+        await _service_schedule_remove(interaction, service_type="HOROSCOPE", schedule_id=id, legacy_aliases=("campagne.horoscope.config_reset", "campagne.servizi_delete"))
+
+    @horoscope_group.command(name="schedule_list", description="List horoscope campaign schedules")
+    async def horoscope_schedule_list(interaction: discord.Interaction) -> None:
+        await _service_schedule_list(interaction, service_type="HOROSCOPE", legacy_aliases=("campagne.horoscope.config_show", "campagne.oroscopo", "campagne.servizi_lista"))
 
     @horoscope_group.command(name="run", description="Run the horoscope campaign immediately")
     async def horoscope_run(interaction: discord.Interaction) -> None:
