@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 import discord
 
-from app.plugins.commands_modular.command_helpers import send_standard_command_embed
+from app.shared.discord.command_embeds import send_legacy_standard_response
 from app.plugins.commands_modular.ctx import CommandContext
 
 
@@ -40,7 +40,7 @@ async def check_permission(
     if result.cooldown_remaining is not None:
         message += f" Cooldown: {result.cooldown_remaining}s."
     ephemeral = interaction.guild_id is not None
-    await send_standard_command_embed(
+    await send_legacy_standard_response(
         interaction,
         top_level="bm",
         path_parts=["warning"],

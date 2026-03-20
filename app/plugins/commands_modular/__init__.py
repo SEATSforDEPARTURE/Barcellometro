@@ -33,9 +33,9 @@ __all__ = [
 
 _MODULE_BY_ATTR = {
     "CommandContext": "app.plugins.commands_modular.ctx",
-    "add_group_once": "app.plugins.commands_modular.command_helpers",
-    "add_command_once": "app.plugins.commands_modular.command_helpers",
-    "describe_placeholders": "app.plugins.commands_modular.command_helpers",
+    "add_group_once": "app.plugins.commands_modular.registration",
+    "add_command_once": "app.plugins.commands_modular.registration",
+    "describe_placeholders": "app.plugins.commands_modular.placeholders",
     "check_permission": "app.plugins.commands_modular.permissions",
     "get_setting": "app.plugins.commands_modular.settings",
     "reset_setting": "app.plugins.commands_modular.settings",
