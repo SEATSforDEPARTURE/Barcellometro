@@ -209,6 +209,14 @@ python scripts/validate_architecture_residues.py
 
 Lo script termina con exit code diverso da zero solo in presenza di violazioni reali; gli shim legacy temporanei documentati restano visibili come warning.
 
+Per verificare gli standard embed e bloccare messaggi raw / helper duplicati / embed senza footer meta:
+
+```bash
+python validate_embed_standards.py
+```
+
+Il validator stampa un report per file e termina con exit code diverso da zero se trova violazioni. È anche eseguito nella suite Pytest tramite `tests/test_embed_standards_validator.py`.
+
 ## Verifica DB
 
 Esempi di query:
