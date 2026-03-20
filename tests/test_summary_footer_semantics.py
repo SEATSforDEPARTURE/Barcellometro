@@ -34,5 +34,8 @@ def test_riassunto_row_access_uses_row_safe_helper_for_records() -> None:
 def test_embed_docs_document_new_footer_and_section_rules() -> None:
     source = Path("docs/embed_command_rendering_standard.md").read_text()
     assert "Il body non deve mai riusare la stessa icona del sottotitolo nelle sezioni" in source
+    assert "Non esiste più un output finale `minimal`" in source
+    assert "attach_minimal_footer(...)` sopravvive solo come shim di compatibilità interna" in source
+    assert "i servizi AI o pipeline ibride **devono** dichiarare i contributor reali" in source
     assert "`Dati elaborati` + ` in loco`" in source
     assert "`e fallback` + ` locale`" in source

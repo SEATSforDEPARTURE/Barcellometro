@@ -171,7 +171,7 @@ def test_footer_includes_summary_model_only_when_present(audio_notes_module) -> 
         has_translation_text=True,
         summary_model="sum-model",
     )
-    assert contributors == ["sum-model"]
+    assert contributors == ["stt-model", "tr-model", "sum-model"]
     assert not used_local
 
     contributors_no_summary, used_local_no_summary = audio_notes_module._build_audio_footer_contributors(

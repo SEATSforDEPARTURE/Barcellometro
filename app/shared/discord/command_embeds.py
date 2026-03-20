@@ -10,7 +10,7 @@ from typing import Any, Literal
 import discord
 
 from app.plugins.commands_modular.time_windows import format_italian_ts, format_rolling_window_label, parse_italian_datetime
-from app.services.footer import FooterService, attach_footer_meta, attach_minimal_footer
+from app.services.footer import FooterService, attach_footer_meta
 
 CommandKind = Literal["info", "success", "warning", "error"]
 FooterMode = Literal["minimal", "meta", "none"]
@@ -619,13 +619,6 @@ def build_section(
 
 
 
-async def _resolve_brand_text(footer_service: FooterService | None) -> str:
-    if footer_service is None:
-        return "Barcellometro"
-    version = await footer_service.get_version()
-    return f"Barcellometro {version}" if version else "Barcellometro"
-
-
 def _resolve_footer_service_name(
     *,
     footer_service_name: str | None,
@@ -660,7 +653,7 @@ async def build_command_embeds(
     top_level_emoji: str | None = None,
     subcommand_emoji: str | None = None,
     footer_service: FooterService | None = None,
-    footer_mode: FooterMode = "minimal",
+    footer_mode: FooterMode = "meta",
     footer_service_name: str | None = None,
     compact_lines: bool = False,
     line_formatter: Callable[[str, Any], str] | None = None,
@@ -746,7 +739,6 @@ async def build_command_embeds(
     if current:
         chunks.append(current)
 
-    brand_text = await _resolve_brand_text(footer_service)
     resolved_footer_service_name = _resolve_footer_service_name(
         footer_service_name=footer_service_name,
         visual_top_level=visual_top_level or display_context.visual_top_level,
@@ -756,24 +748,12 @@ async def build_command_embeds(
     color = get_semantic_color(kind)
     for chunk in chunks or [blocks[0]]:
         embed = discord.Embed(title=title, description=chunk, color=color)
-        if footer_mode == "minimal":
-            if footer_service is None:
-                attach_minimal_footer(embed, text=brand_text)
-            else:
-                attach_footer_meta(
-                    embed,
-                    service_name=resolved_footer_service_name,
-                    used_local_processing=True,
-                )
-        elif footer_mode == "meta":
-            if footer_service is None:
-                attach_minimal_footer(embed, text=brand_text)
-            else:
-                attach_footer_meta(
-                    embed,
-                    service_name=resolved_footer_service_name,
-                    used_local_processing=True,
-                )
+        if footer_mode in {"minimal", "meta"}:
+            attach_footer_meta(
+                embed,
+                service_name=resolved_footer_service_name,
+                used_local_processing=True,
+            )
         embeds.append(embed)
     return embeds
 
@@ -838,7 +818,7 @@ async def send_standard_response(
     footer_service: FooterService | None = None,
     ephemeral: bool = True,
     files: list[discord.File] | None = None,
-    footer_mode: FooterMode = "minimal",
+    footer_mode: FooterMode = "meta",
     footer_service_name: str | None = None,
     compact_lines: bool = False,
     line_formatter: Callable[[str, Any], str] | None = None,

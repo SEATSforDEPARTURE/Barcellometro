@@ -139,7 +139,6 @@ class CampaignContentService:
         channel_id = str(config["channel_id"])
         footer_sources = used_sources or configured_sources
         footer_service_name = self._campaign_footer_service_name(service_type)
-        footer_text = await self._build_campaign_footer(service_name=footer_service_name, used_sources=footer_sources, used_model=used_model)
         contributors = [*footer_sources, *([used_model] if used_model else [])]
         attach_footer_meta_to_all(
             embeds,
@@ -148,6 +147,11 @@ class CampaignContentService:
             used_local_processing=not contributors,
         )
         await finalize_embeds(embeds, self._footer, default_service_name=footer_service_name)
+        footer_text = getattr(embeds[0].footer, "text", None) or await self._build_campaign_footer(
+            service_name=footer_service_name,
+            used_sources=footer_sources,
+            used_model=used_model,
+        )
         apply_shared_footer_and_pagination(embeds, footer_text)
         channel = self._bot.get_channel(int(channel_id))
         if channel is None:
