@@ -58,8 +58,6 @@ def _clone_embed_shell(source: discord.Embed, *, title: str | None = None) -> di
     if source.author:
         new_embed.set_author(name=source.author.name or "")
     copy_footer_meta(source, new_embed)
-    if source.footer and getattr(source.footer, "text", None):
-        new_embed.set_footer(text=source.footer.text, icon_url=source.footer.icon_url)
     return new_embed
 
 
