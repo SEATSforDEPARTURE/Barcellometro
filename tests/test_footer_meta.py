@@ -29,18 +29,26 @@ class _FakeDatabase:
     async def set_setting(self, key: str, value: str) -> None:
         self.settings[key] = value
 
+    async def delete_setting(self, key: str) -> None:
+        self.settings.pop(key, None)
+
     async def execute(self, _query: str, _params: tuple[str, ...]) -> None:
         return None
 
-    async def commit(self) -> None:
-        return None
+    async def fetchall(self, query: str, params: tuple[str, ...]):
+        prefix = str(params[0]).replace('%', '') if params else ''
+        if 'FROM settings' not in query:
+            return []
+        return [
+            {'key': key, 'value': value}
+            for key, value in sorted(self.settings.items())
+            if not prefix or key.startswith(prefix)
+        ]
 
-    async def fetchall(self, _query: str, _params: tuple[str, ...]):
-        return []
 
-
-def _build_footer_service() -> FooterService:
-    return FooterService(_FakeDatabase())
+def _build_footer_service() -> tuple[FooterService, _FakeDatabase]:
+    database = _FakeDatabase()
+    return FooterService(database), database
 
 
 def test_attach_footer_meta_non_crashing_with_discord_embed() -> None:
@@ -82,7 +90,7 @@ def test_footer_service_apply_sets_footer_text() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="x")
         attach_footer_meta(embed, service_name="barcello", contributors=["gpt-4o-mini"], used_local_processing=True)
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("1.0")
         await service.set_global_phrase("In via di sviluppo.")
 
@@ -98,7 +106,7 @@ def test_footer_service_apply_ignores_legacy_minimal_text_and_uses_centralized_m
         embed = discord.Embed(title="x")
         attach_minimal_footer(embed, text="Legacy footer da non usare")
         attach_footer_meta(embed, service_name="riassunto", contributors=["gpt-4o-mini"], used_local_processing=False)
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("1.0")
         await service.set_global_phrase("Sempre acceso.")
 
@@ -115,7 +123,7 @@ def test_finalize_embeds_multi_embed_does_not_crash() -> None:
         embeds = [discord.Embed(title="one"), discord.Embed(title="two")]
         attach_footer_meta(embeds[0], service_name="riassunto", contributors=["gpt-4o-mini"])
 
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await finalize_embeds(embeds, service, default_service_name="unknown")
 
         assert embeds[0].footer and "Barcellometro" in (embeds[0].footer.text or "")
@@ -134,7 +142,7 @@ def test_normalize_embeds_for_discord_preserves_footer_meta_on_split_pages() -> 
         normalized = normalize_embeds_for_discord([embed], max_chars=4500)
         assert len(normalized) >= 2
 
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev6")
         await service.set_global_phrase("In via di sviluppo.")
         await finalize_embeds(normalized, service, default_service_name="riassunto")
@@ -174,7 +182,7 @@ def test_finalize_embeds_multipage_riassunto_keeps_same_ai_footer_on_all_pages()
             contributors=["gpt-4o"],
             used_local_processing=False,
         )
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev6")
         await service.set_global_phrase("In via di sviluppo.")
 
@@ -192,7 +200,7 @@ def test_footer_meta_is_cleaned_up_after_apply() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="cleanup")
         attach_footer_meta(embed, service_name="barcello", contributors=["gpt-4o-mini"])
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
 
         assert get_footer_meta(embed) is not None
         await service.apply(embed)
@@ -203,7 +211,7 @@ def test_footer_meta_is_cleaned_up_after_apply() -> None:
 
 def test_footer_service_tracks_multiple_variants_for_same_service() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.record_service_footer_profile(
             service_name="audio_notes",
             contributors=["small", "argos"],
@@ -229,7 +237,7 @@ def test_footer_service_tracks_multiple_variants_for_same_service() -> None:
 
 def test_unknown_service_is_not_persisted_or_returned_as_known() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.record_service_footer_profile(
             service_name="unknown",
             contributors=[],
@@ -248,7 +256,7 @@ def test_unknown_service_is_not_persisted_or_returned_as_known() -> None:
 
 def test_footer_service_render_footer_mixed_ai_and_local_processing_keeps_clean_ai_wording() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev6")
         await service.set_global_phrase("In via di sviluppo.")
         footer, _ = await service.render_footer(
@@ -264,7 +272,7 @@ def test_footer_service_render_footer_mixed_ai_and_local_processing_keeps_clean_
 
 def test_footer_service_render_footer_orders_version_phrase_then_processing() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev7.1")
         await service.set_global_phrase("Sempre acceso.")
 
@@ -282,7 +290,7 @@ def test_footer_service_render_footer_orders_version_phrase_then_processing() ->
 
 def test_footer_service_render_footer_with_configured_phrase_and_no_contributors_keeps_brand_then_phrase() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev8")
         await service.set_global_phrase("Sempre acceso.")
 
@@ -301,7 +309,7 @@ def test_footer_service_render_footer_with_configured_phrase_and_no_contributors
 
 def test_footer_service_render_footer_without_phrase_or_contributors_keeps_only_brand() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev7.1")
 
         footer, phrase = await service.render_footer(
@@ -322,7 +330,7 @@ def test_footer_service_render_footer_without_phrase_or_contributors_keeps_only_
 
 def test_footer_service_render_footer_with_phrase_and_no_contributors_skips_processing_segment() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev8")
         await service.set_global_phrase("In via di sviluppo.")
 
@@ -343,7 +351,7 @@ def test_footer_service_render_footer_with_phrase_and_no_contributors_skips_proc
 
 def test_footer_service_render_footer_shows_processing_only_when_contributors_exist() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev8")
 
         with_contributors, _ = await service.render_footer(
@@ -370,7 +378,7 @@ def test_footer_service_render_footer_shows_processing_only_when_contributors_ex
 
 def test_footer_service_render_footer_minimal_without_phrase_keeps_only_brand() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev9")
 
         footer, phrase = await service.render_footer(
@@ -390,7 +398,7 @@ def test_footer_service_render_footer_minimal_without_phrase_keeps_only_brand() 
 
 def test_footer_service_render_footer_minimal_with_contributors_matches_standard_rules() -> None:
     async def _run() -> None:
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev9")
 
         footer, phrase = await service.render_footer(
@@ -407,11 +415,102 @@ def test_footer_service_render_footer_minimal_with_contributors_matches_standard
     asyncio.run(_run())
 
 
+def test_global_template_reset_removes_custom_value() -> None:
+    async def _run() -> None:
+        service, database = _build_footer_service()
+        await service.set_version("1.2.3")
+        await service.set_global_phrase("Frase custom")
+
+        await service.set_version(None)
+        await service.set_global_phrase(None)
+
+        assert await service.get_version() is None
+        assert await service.get_global_phrase() is None
+        assert "footer.version" not in database.settings
+        assert "footer.global_phrase" not in database.settings
+
+    asyncio.run(_run())
+
+
+def test_service_template_reset_removes_custom_value() -> None:
+    async def _run() -> None:
+        service, database = _build_footer_service()
+        await service.set_service_phrase("riassunto", "Frase servizio")
+
+        await service.set_service_phrase("riassunto", None)
+
+        assert (await service.get_service_phrases()).get("riassunto") is None
+        assert "footer.service_phrase.riassunto" not in database.settings
+
+    asyncio.run(_run())
+
+
+def test_footer_render_does_not_show_custom_phrase_after_global_reset() -> None:
+    async def _run() -> None:
+        service, _ = _build_footer_service()
+        await service.set_version("dev10")
+        await service.set_global_phrase("Frase custom")
+        await service.set_global_phrase(None)
+
+        footer, phrase = await service.render_footer(
+            service_name="riassunto",
+            contributors=["gpt-4o-mini"],
+            used_local_processing=False,
+        )
+
+        assert phrase is None
+        assert footer == "Barcellometro dev10 · Dati elaborati con gpt-4o-mini"
+        assert "Frase custom" not in footer
+
+    asyncio.run(_run())
+
+
+def test_footer_render_does_not_show_custom_phrase_after_service_reset() -> None:
+    async def _run() -> None:
+        service, _ = _build_footer_service()
+        await service.set_version("dev10")
+        await service.set_global_phrase("Fallback globale")
+        await service.set_service_phrase("riassunto", "Frase servizio")
+        await service.set_service_phrase("riassunto", None)
+
+        footer, phrase = await service.render_footer(
+            service_name="riassunto",
+            contributors=["gpt-4o-mini"],
+            used_local_processing=False,
+        )
+
+        assert phrase == "Fallback globale"
+        assert footer == "Barcellometro dev10 · Fallback globale · Dati elaborati con gpt-4o-mini"
+        assert "Frase servizio" not in footer
+
+    asyncio.run(_run())
+
+
+def test_reset_commands_do_not_raise_attribute_error_on_database_commit() -> None:
+    class _DatabaseWithoutCommit(_FakeDatabase):
+        async def execute(self, _query: str, _params: tuple[str, ...]) -> None:
+            raise AssertionError("footer reset should use delete_setting, not raw execute")
+
+    async def _run() -> None:
+        database = _DatabaseWithoutCommit()
+        service = FooterService(database)
+        await service.set_global_phrase("Frase custom")
+        await service.set_service_phrase("riassunto", "Frase servizio")
+
+        await service.set_global_phrase(None)
+        await service.set_service_phrase("riassunto", None)
+
+        assert await service.get_global_phrase() is None
+        assert (await service.get_service_phrases()).get("riassunto") is None
+
+    asyncio.run(_run())
+
+
 def test_footer_service_apply_promotes_first_custom_emoji_to_icon_and_removes_raw_token() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="emoji")
         attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev7.1")
         await service.set_global_phrase("In via di sviluppo. <:melons:1475962151502876695>")
 
@@ -428,7 +527,7 @@ def test_footer_service_apply_supports_animated_custom_emoji_urls() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="emoji")
         attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev7.1")
         await service.set_global_phrase("Sempre acceso <a:pulse:1475962151502876696>")
 
@@ -451,7 +550,7 @@ def test_footer_service_apply_keeps_explicit_footer_icon_over_custom_emoji_icon(
             used_local_processing=False,
             footer_icon_url="https://example.com/icon.png",
         )
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev7.1")
         await service.set_global_phrase("Sempre acceso <:melons:1475962151502876695>")
 
@@ -467,7 +566,7 @@ def test_footer_service_apply_preserves_unicode_emoji_in_footer_text() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="unicode")
         attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
-        service = _build_footer_service()
+        service, _ = _build_footer_service()
         await service.set_version("dev7.1")
         await service.set_global_phrase("Sempre acceso 🍉")
 
