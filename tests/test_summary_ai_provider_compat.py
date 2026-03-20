@@ -203,6 +203,54 @@ def test_call_ai_openai_keeps_full_schema() -> None:
     asyncio.run(_run())
 
 
+def test_summary_prompt_requests_human_friendly_mod_impact_reasons() -> None:
+    async def _run() -> None:
+        ai = _Ai("openai:gpt-4o-mini", '{"themes":[],"moments":[],"advice":[]}')
+        svc = SummaryService(database=_Db(), ai_service=ai)
+        await svc._call_ai(
+            messages=_minimal_messages(),
+            include_names=False,
+            tier="mod",
+            barcello_metrics={},
+            config=DEFAULT_SUMMARY_CONFIG,
+        )
+        system_prompt = ai.ask_for_task.await_args.args[2]
+        assert "motivi utili ai MOD" in system_prompt
+        assert "linguaggio semplice e non tecnico" in system_prompt
+        assert "Evita formule astratte tipo 'toni pungenti'" in system_prompt
+
+    asyncio.run(_run())
+
+
+def test_local_impact_fallback_reasons_are_human_friendly_for_mod() -> None:
+    svc = SummaryService(database=_Db(), ai_service=None)
+    degrade, invigorate = svc._extract_impact(
+        [
+            {
+                "ts": "2026-01-01T10:00:00+00:00",
+                "author_id": "u1",
+                "content": "MA BASTA <@2>, sempre la stessa storia!!",
+                "message_id": "123456789012345678",
+                "meta": {},
+            },
+            {
+                "ts": "2026-01-01T10:05:00+00:00",
+                "author_id": "u2",
+                "content": "Tranquilli, nessun problema: possiamo sistemarlo insieme, grazie.",
+                "message_id": "223456789012345678",
+                "meta": {},
+            },
+        ],
+        DEFAULT_SUMMARY_CONFIG,
+        "mod",
+    )
+    assert degrade and invigorate
+    assert degrade[0].reason != "Toni pungenti o callout frequenti."
+    assert invigorate[0].reason != "Messaggi positivi e distensivi."
+    assert "tensione" in degrade[0].reason.lower() or "scontro" in degrade[0].reason.lower()
+    assert "calma" in invigorate[0].reason.lower() or "collabor" in invigorate[0].reason.lower()
+
+
 def test_ollama_summary_path_triggers_single_ai_inference() -> None:
     async def _run() -> None:
         ai_payload = json.dumps({"themes": ["x"], "moments": [], "quotes": [], "dynamics": [], "degrade_list": [], "invigorate_list": [], "advice": []})

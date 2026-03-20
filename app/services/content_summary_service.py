@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from typing import Any, Iterable, Optional
 
 from app.services.ai_utils import model_display_name, parse_model_string
+from app.services.aura import resolve_aura_reason_label
 from app.services.barcello_service import NEGATIVE_KEYWORDS
 from app.services.database import DatabaseService
 
@@ -219,6 +220,8 @@ class SummaryImpact:
     reason: str
     ts: Optional[str]
     message_id: Optional[str]
+    aura_points_period: Optional[int] = None
+    aura_total_points: Optional[int] = None
 
 
 @dataclass
@@ -767,6 +770,12 @@ class SummaryService:
                 "Per i moments usa bullet descrittivi di 1-2 frasi quando possibile, evitando formule troppo brevi. "
                 "Tieni quotes/dynamics/degrade_list/invigorate_list/advice concisi e restituisci array vuoti quando il valore aggiunto è scarso: il renderer completa localmente i campi standard. "
                 "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
+                "Per degrade_list/invigorate_list scrivi motivi utili ai MOD: spiega in modo concreto il comportamento osservato, "
+                "con linguaggio semplice e non tecnico, in massimo 1 frase breve ma chiara. "
+                "Evita formule astratte tipo 'toni pungenti' o 'messaggi positivi'. "
+                "Esempi di qualità desiderata: "
+                "'Ha alzato la tensione con battute pungenti e risposte che hanno irrigidito il dialogo.' "
+                "'Ha tenuto un tono rassicurante e ha riportato calma quando la conversazione rischiava di irrigidirsi.' "
                 "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
                 "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
                 "quotes: oggetti con 'ts','primary_ref','refs' e 'quote_text' opzionale solo se certo al 100%. "
@@ -921,7 +930,20 @@ class SummaryService:
                     text = str(item.get("summary_text") or item.get("text") or "").strip()
                 if not text:
                     continue
-                message_ids = [str(mid) for mid in (item.get("message_ids") or []) if str(mid)]
+                ref_candidates = [
+                    item.get("primary_ref"),
+                    item.get("optional_ref"),
+                    *(item.get("refs") or []),
+                    *(item.get("message_ids") or []),
+                ]
+                message_ids = []
+                seen_ids: set[str] = set()
+                for mid in ref_candidates:
+                    mid_str = str(mid or "").strip()
+                    if not mid_str or mid_str in seen_ids:
+                        continue
+                    seen_ids.add(mid_str)
+                    message_ids.append(mid_str)
                 author_id = str(item.get("author_id") or "") or None
                 if is_quote:
                     output.append(
@@ -1449,10 +1471,15 @@ class SummaryService:
             if data["neg"] <= 0:
                 continue
             msg = data["last"]
+            reason = _humanize_local_impact_reason(
+                msg=msg,
+                polarity="neg",
+                intensity=int(data["neg"] or 0),
+            )
             degrade.append(
                 SummaryImpact(
                     author_id=author_id,
-                    reason="Toni pungenti o callout frequenti.",
+                    reason=reason,
                     ts=msg.get("ts") or None,
                     message_id=str(msg.get("message_id")) if msg.get("message_id") else None,
                 )
@@ -1461,10 +1488,15 @@ class SummaryService:
             if data["pos"] <= 0:
                 continue
             msg = data["last"]
+            reason = _humanize_local_impact_reason(
+                msg=msg,
+                polarity="pos",
+                intensity=int(data["pos"] or 0),
+            )
             invigorate.append(
                 SummaryImpact(
                     author_id=author_id,
-                    reason="Messaggi positivi e distensivi.",
+                    reason=reason,
                     ts=msg.get("ts") or None,
                     message_id=str(msg.get("message_id")) if msg.get("message_id") else None,
                 )
@@ -1556,6 +1588,47 @@ def _clean_text(text: str) -> str:
     cleaned = re.sub(r"`{1,3}.*?`{1,3}", " ", cleaned)
     cleaned = re.sub(r"\\s+", " ", cleaned)
     return cleaned.strip().lower()
+
+
+def _humanize_local_impact_reason(
+    *,
+    msg: dict[str, Any],
+    polarity: str,
+    intensity: int,
+) -> str:
+    content_raw = " ".join(str(msg.get("content") or "").split())
+    content = _clean_text(content_raw)
+    meta = msg.get("meta") or {}
+    reason_code = str(meta.get("reason_code") or msg.get("reason_code") or "").strip()
+    mention_count = len(re.findall(r"<@!?\d+>", str(msg.get("content") or "")))
+    has_caps = any(len(token) >= 4 and token.isupper() for token in re.findall(r"\b[A-ZÀ-Ý]{4,}\b", str(msg.get("content") or "")))
+    if polarity == "neg":
+        if reason_code:
+            label = resolve_aura_reason_label(reason_code, audience="mod")
+            if label and "attività registrata" not in label:
+                return f"Ha inciso soprattutto con {label.lower()}, irrigidendo il clima della conversazione."
+        if mention_count and re.search(r"\b(tu|voi|sempre|mai|basta|serio|assurdo|colpa)\b", content):
+            return "Ha alzato la tensione con richiami diretti e risposte che hanno spostato il focus sullo scontro."
+        if has_caps or "!!" in content_raw or "??" in content_raw:
+            return "Ha dato più pressione alla discussione con messaggi molto accesi che hanno reso il tono più duro."
+        if re.search(r"\b(insult|offes|aggress|provoc|attacc|flame|callout)\w*", content):
+            return "Ha spinto il dialogo verso lo scontro con messaggi provocatori o personali."
+        if intensity >= 2:
+            return "Ha contribuito a irrigidire il confronto con più interventi critici ravvicinati."
+        return "Ha reso il confronto meno disteso con un intervento che ha aumentato la frizione nel canale."
+    if reason_code:
+        label = resolve_aura_reason_label(reason_code, audience="mod")
+        if label and "attività registrata" not in label:
+            return f"Ha dato un contributo positivo soprattutto con {label.lower()}, aiutando a tenere il clima più sereno."
+    if re.search(r"\b(grazie|brav|ottim|perfett|grande)\b", content) and mention_count:
+        return "Ha alleggerito il clima con riconoscimenti diretti che hanno fatto scendere la tensione."
+    if re.search(r"\b(tranquill|calma|nessun problema|ci sta|va bene|capisco)\b", content):
+        return "Ha tenuto un tono rassicurante e ha riportato calma quando la conversazione rischiava di irrigidirsi."
+    if re.search(r"\b(possiamo|proviamo|facciamo|vediamo|aiuto|aiut)\b", content):
+        return "Ha rimesso la conversazione su un piano collaborativo proponendo una strada concreta per andare avanti."
+    if intensity >= 2:
+        return "Ha aiutato a tenere il clima più leggero con più messaggi costruttivi e distensivi nel periodo."
+    return "Ha dato un contributo positivo con un tono tranquillo che ha reso il dialogo più facile da gestire."
 
 
 def _sanitize_bullet_text(text: str) -> str:
