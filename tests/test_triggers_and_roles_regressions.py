@@ -130,6 +130,7 @@ def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypat
 
 
 def test_permission_helpers_prefer_admin_and_keep_bm_legacy_aliases(import_fresh) -> None:
+    # `bm.*` remains supported only as a legacy alias layer.
     permissions_module = import_fresh("app.plugins.commands_modular.permissions")
 
     assert permissions_module.canonical_permission_key("bm.frasi.entry_list") == "admin.frasi.entry_list"
@@ -150,12 +151,14 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     class _Db:
         async def list_role_policies(self, guild_id: str):
             return [
+                # Legacy stored policy should still be rendered through the canonical `admin.*` label.
                 {"role_id": "123", "command": "bm.test", "usage_limit": 5, "cooldown_seconds": 10},
                 {"role_id": "999", "command": "admin.test2", "usage_limit": None, "cooldown_seconds": None},
             ]
 
         async def list_user_policies(self, guild_id: str):
             return [
+                # Legacy stored policy should still be rendered through the canonical `admin.*` label.
                 {"user_id": "456", "command": "bm.test", "usage_limit": 1, "cooldown_seconds": 0},
                 {"user_id": "777", "command": "admin.other", "usage_limit": None, "cooldown_seconds": None},
             ]

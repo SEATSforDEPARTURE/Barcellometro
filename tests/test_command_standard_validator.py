@@ -31,6 +31,7 @@ def test_command_validator_uses_admin_as_canonical_root() -> None:
 
 
 def test_command_validator_tracks_bm_aliases_as_legacy_only() -> None:
+    # `bm.*` must survive only as explicit backward-compatibility aliases.
     result = validate_command_tree()
 
     legacy_messages = [issue.message for issue in result.legacy_aliases]
