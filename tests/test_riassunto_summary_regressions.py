@@ -29,6 +29,7 @@ from app.services.content_summary_service import (
 )
 from app.services.footer import FooterService, attach_footer_meta_to_all
 from app.shared.discord.delivery import _prepare_embeds_for_send, send_dm_or_followup
+from app.shared.discord.embed_limits import _split_field_chunks, normalize_embeds_for_discord
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.shared.discord.report_embeds import apply_standard_report_style
 
@@ -770,6 +771,175 @@ def test_riassunto_impact_timestamp_link_uses_nearest_message_fallback_when_mess
         assert resolved == "223456789012345678"
 
     asyncio.run(_run())
+
+
+def test_resolve_summary_primary_ref_uses_nearest_when_explicit_missing() -> None:
+    async def _run() -> None:
+        db = _PrimaryRefDb(existing={"223456789012345678"}, nearest="223456789012345678")
+        resolved = await _resolve_summary_primary_ref(
+            db,
+            item_type="moment",
+            channel_id="2",
+            start_ts="2026-03-19T00:00:00+00:00",
+            end_ts="2026-03-19T23:59:59+00:00",
+            ts="2026-03-19T06:28:00+00:00",
+            explicit_refs=None,
+        )
+        assert resolved == "223456789012345678"
+
+    asyncio.run(_run())
+
+
+def test_resolve_summary_primary_ref_accepts_valid_jump_url_or_normalizes_it() -> None:
+    async def _run() -> None:
+        channel_id = "223456789012345678"
+        jump_url = f"https://discord.com/channels/999999999999999999/{channel_id}/123456789012345678"
+        db = _PrimaryRefDb(existing={"123456789012345678"})
+        resolved = await _resolve_summary_primary_ref(
+            db,
+            item_type="quote",
+            channel_id=channel_id,
+            start_ts="2026-03-19T00:00:00+00:00",
+            end_ts="2026-03-19T23:59:59+00:00",
+            ts="2026-03-19T06:28:00+00:00",
+            explicit_refs=[jump_url],
+        )
+        assert resolved == jump_url
+
+    asyncio.run(_run())
+
+
+def test_riassunto_moment_line_keeps_clickable_timestamp_after_split() -> None:
+    link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    long_line = (
+        f"• {link} 🟢 **64** — "
+        + "Mario coordina il rilascio con molto contesto operativo e dettagli utili " * 20
+    ).strip()
+    chunks = _split_field_chunks(long_line, 180)
+    assert len(chunks) >= 2
+    assert link in chunks[0]
+    assert all("123456789012345678" not in chunk or link in chunk for chunk in chunks)
+
+
+def test_riassunto_quote_line_keeps_clickable_timestamp_after_long_text_chunking() -> None:
+    quote_link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    summary = SummaryResult(
+        themes=[],
+        moments=[],
+        quotes=[SummaryQuote(ts="2026-03-19T05:28:00+00:00", text="placeholder", author_id="u1")],
+        dynamics=[],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    embeds = build_summary_detail_embeds(
+        profile="role2",
+        summary=summary,
+        include_names=True,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary={},
+        quote_primary={id(summary.quotes[0]): "123456789012345678"},
+        dynamic_primary={},
+        impact_primary={},
+        moment_display={},
+        quote_display={id(summary.quotes[0]): "Mario"},
+        dynamic_names={},
+        quote_texts={id(summary.quotes[0]): "Messaggio molto lungo " * 80},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="PRO",
+        tier_config={"sections": ["quotes"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=lambda **kwargs: f"{quote_link} — “{kwargs['text_override']}” — **Mario**",
+        format_dynamic_line=_format_runtime_dynamic_line,
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
+    assert quote_link in rendered
+
+
+def test_embed_limits_do_not_break_masked_links_in_summary_fields() -> None:
+    link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    value = "\n".join(
+        [
+            f"• {link} — Mario coordina il rilascio con molto contesto operativo {'utile ' * 20}".strip(),
+            f"• {link} — Luca conferma il piano {'dettagliato ' * 18}".strip(),
+        ]
+    )
+    chunks = _split_field_chunks(value, 220)
+    assert len(chunks) >= 2
+    combined = "\n".join(chunks)
+    assert combined.count(link) == 2
+    assert "](" in combined
+
+
+def test_riassunto_timestamp_links_survive_full_normalize_and_pagination_pipeline() -> None:
+    link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    summary = SummaryResult(
+        themes=[],
+        moments=[],
+        quotes=[],
+        dynamics=[
+            SummaryItem(
+                ts="2026-03-19T05:28:00+00:00",
+                text=("Mario coordina il rilascio " + ("con molto contesto " * 50)).strip(),
+                author_id="u1",
+            )
+            for _ in range(20)
+        ],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    dynamic_primary = {id(item): "123456789012345678" for item in summary.dynamics}
+    embeds = build_summary_detail_embeds(
+        profile="role3",
+        summary=summary,
+        include_names=False,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary={},
+        quote_primary={},
+        dynamic_primary=dynamic_primary,
+        impact_primary={},
+        moment_display={},
+        quote_display={},
+        dynamic_names={},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="PRO MAX",
+        tier_config={"sections": ["dynamics"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=lambda **kwargs: f"{link} — {kwargs['dynamic'].text}",
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    normalized = normalize_embeds_for_discord(embeds, max_chars=4500)
+    rendered = "\n".join(field.value for embed in normalized for field in embed.fields)
+    assert link in rendered
+    assert rendered.count(link) == len(summary.dynamics)
 
 
 def test_riassunto_quote_or_dynamic_links_survive_split_and_truncation() -> None:

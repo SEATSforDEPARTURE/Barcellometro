@@ -23,6 +23,7 @@ from app.shared.discord.embed_limits import (
     _estimate_embed_size,
     _split_field_chunks,
     normalize_embeds_for_discord,
+    split_markdown_lines_into_field_values,
 )
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
@@ -45,6 +46,9 @@ logger = logging.getLogger(__name__)
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MOMENTS_FIELD_NAME = "📌 MOMENTI SALIENTI"
+_SUMMARY_TIME_LINK_RE = re.compile(
+    r"\*\*\[[^\]]+\]\(https://(?:discord\.com|discordapp\.com)/channels/\d{17,20}/\d{17,20}/\d{17,20}\)\*\*"
+)
 
 
 def _is_valid_summary_snowflake(value: str | None) -> bool:
@@ -71,6 +75,18 @@ def _is_valid_discord_jump_url(url: str | None) -> bool:
     )
 
 
+def _parse_discord_jump_url(url: str | None) -> tuple[str, str, str] | None:
+    if not _is_valid_discord_jump_url(url):
+        return None
+    match = re.fullmatch(
+        r"https://(?:discord\.com|discordapp\.com)/channels/(\d{17,20})/(\d{17,20})/(\d{17,20})",
+        str(url).strip(),
+    )
+    if not match:
+        return None
+    return match.group(1), match.group(2), match.group(3)
+
+
 def _resolve_jump_url(
     *,
     guild_id: int,
@@ -80,7 +96,16 @@ def _resolve_jump_url(
     if not message_ref:
         return None
     candidate = str(message_ref).strip()
-    if _is_valid_discord_jump_url(candidate):
+    jump_parts = _parse_discord_jump_url(candidate)
+    if jump_parts:
+        _, jump_channel_id, _ = jump_parts
+        if str(jump_channel_id) != str(channel_id):
+            logger.debug(
+                "riassunto: discarded jump_url with mismatched channel expected=%s actual=%s",
+                channel_id,
+                jump_channel_id,
+            )
+            return None
         return candidate
     if _is_valid_summary_snowflake(candidate):
         return _jump_link(guild_id, channel_id, candidate)
@@ -117,9 +142,16 @@ def _format_summary_time_link(
     placeholder: str = "--:--",
     in_call: bool = False,
     include_date: bool = False,
+    item_type: str = "unknown",
 ) -> str:
     time_label = _format_italian_time(ts, include_date=include_date) or placeholder
     jump = _resolve_jump_url(guild_id=guild_id, channel_id=channel_id, message_ref=message_ref)
+    logger.debug(
+        "riassunto: time_link_built item_type=%s has_jump=%s ref=%s",
+        item_type,
+        str(bool(jump)).lower(),
+        str(message_ref or "")[:120],
+    )
     time_link = f"**[{time_label}]({jump})**" if jump else f"**{time_label}**"
     return f"{time_link} 📞" if in_call else time_link
 
@@ -129,6 +161,14 @@ def _format_signed_points(value: int | None) -> str | None:
         return None
     number = int(value)
     return f"+{number}" if number > 0 else str(number)
+
+
+def _count_summary_time_links_in_embeds(embeds: list[discord.Embed]) -> int:
+    return sum(
+        len(_SUMMARY_TIME_LINK_RE.findall(field.value or ""))
+        for embed in embeds
+        for field in embed.fields
+    )
 
 
 async def _resolve_summary_primary_ref(
@@ -141,21 +181,40 @@ async def _resolve_summary_primary_ref(
     ts: str | None,
     explicit_refs: list[str] | None,
 ) -> str | None:
-    normalized_candidates: list[str] = []
-    seen: set[str] = set()
+    explicit_received = [str(raw_ref or "").strip() for raw_ref in explicit_refs or [] if str(raw_ref or "").strip()]
+    normalized_candidates: list[tuple[str, str]] = []
+    candidate_log_values: list[str] = []
+    seen: set[tuple[str, str]] = set()
     for raw_ref in explicit_refs or []:
         candidate = str(raw_ref or "").strip()
-        if not _is_valid_summary_snowflake(candidate) or candidate in seen:
+        if not candidate:
             continue
-        seen.add(candidate)
-        normalized_candidates.append(candidate)
+        jump_parts = _parse_discord_jump_url(candidate)
+        if jump_parts:
+            _, jump_channel_id, message_id = jump_parts
+            if str(jump_channel_id) != str(channel_id):
+                continue
+            key = ("jump_url", candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized_candidates.append((candidate, message_id))
+            candidate_log_values.append(candidate)
+            continue
+        if not _is_valid_summary_snowflake(candidate):
+            continue
+        key = ("snowflake", candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized_candidates.append((candidate, candidate))
+        candidate_log_values.append(candidate)
 
-    had_explicit_ref = bool(normalized_candidates)
     resolved: str | None = None
     used_nearest_fallback = False
 
-    for candidate in normalized_candidates:
-        if await database.message_exists_in_channel(channel_id=channel_id, message_id=candidate):
+    for candidate, message_id in normalized_candidates:
+        if await database.message_exists_in_channel(channel_id=channel_id, message_id=message_id):
             resolved = candidate
             break
 
@@ -184,12 +243,19 @@ async def _resolve_summary_primary_ref(
             used_nearest_fallback = True
 
     logger.debug(
-        "riassunto: link_resolution item_type=%s had_explicit_ref=%s used_nearest_fallback=%s resolved=%s",
+        "riassunto: link_resolution item_type=%s explicit_refs=%s candidate_valid=%s used_nearest_fallback=%s resolved=%s",
         item_type,
-        str(had_explicit_ref).lower(),
+        explicit_received,
+        candidate_log_values,
         str(used_nearest_fallback).lower(),
         resolved or "none",
     )
+    if not resolved:
+        return None
+    jump_parts = _parse_discord_jump_url(resolved)
+    if jump_parts:
+        _, jump_channel_id, _ = jump_parts
+        return resolved if str(jump_channel_id) == str(channel_id) else None
     return resolved if _is_valid_summary_snowflake(resolved) else None
 
 
@@ -457,51 +523,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         return _truncate_text(value, limit)
 
     def _split_lines_into_field_values(lines: list[str], limit: int = 1024) -> list[str]:
-        chunks: list[str] = []
-        current: list[str] = []
-        current_len = 0
-
-        def _explode_if_needed(line: str) -> list[str]:
-            if len(line) <= limit:
-                return [line]
-            if " — " in line:
-                prefix, tail = line.split(" — ", 1)
-                prefix = f"{prefix} — "
-                if len(prefix) < limit:
-                    first_tail = tail[: max(1, limit - len(prefix))]
-                    extra = tail[len(first_tail) :]
-                    expanded = [prefix + first_tail]
-                    cont_limit = max(1, limit - 2)
-                    while extra:
-                        expanded.append(f"↳ {extra[:cont_limit]}")
-                        extra = extra[cont_limit:]
-                    return expanded
-            expanded: list[str] = []
-            extra = line
-            while extra:
-                expanded.append(extra[:limit])
-                extra = extra[limit:]
-            return expanded
-
-        for raw_line in lines:
-            line = str(raw_line or "")
-            if not line:
-                continue
-            for expanded_line in _explode_if_needed(line):
-                line_len = len(expanded_line) + (1 if current else 0)
-                if current and (current_len + line_len) > limit:
-                    chunks.append("\n".join(current))
-                    current = [expanded_line]
-                    current_len = len(expanded_line)
-                    continue
-
-                current.append(expanded_line)
-                current_len += line_len
-
-        if current:
-            chunks.append("\n".join(current))
-
-        return chunks
+        return split_markdown_lines_into_field_values(lines, limit)
 
     def _safe_add_field(embed: discord.Embed, *, name: str, value: str, req_id: str, section: str) -> None:
         original_name = str(name or "")
@@ -781,6 +803,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             channel_id=channel_id,
             in_call=moment.in_call,
             include_date=include_date,
+            item_type="moment",
         )
         emoji = _barcello_emoji_from_color(getattr(barcello_status, "color", None))
         score = getattr(barcello_status, "score", None)
@@ -810,6 +833,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             channel_id=channel_id,
             in_call=quote.in_call,
             include_date=include_date,
+            item_type="quote",
         )
         line = f"{time_link} — “{text}”"
         if speaker:
@@ -842,6 +866,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             channel_id=channel_id,
             in_call=dynamic.in_call,
             include_date=include_date,
+            item_type="dynamic",
         )
         return f"{time_link} — {text}{suffix}"
 
@@ -875,6 +900,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             guild_id=guild_id,
             channel_id=channel_id,
             include_date=include_date,
+            item_type="impact",
         )
         if display_name:
             base_line = f"{time_link} — {prefix} **{display_name}** — {impact.reason}"
@@ -2015,9 +2041,24 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             normalized_status = normalize_embeds_for_discord([status_embed])
             normalized_details = normalize_embeds_for_discord(embeds)
+            built_time_link_count = _count_summary_time_links_in_embeds(embeds)
+            normalized_time_link_count = _count_summary_time_links_in_embeds(normalized_details)
+            logger.debug(
+                "riassunto: time_link_preserved_after_chunking=%s built=%s normalized=%s",
+                str(built_time_link_count == normalized_time_link_count).lower(),
+                built_time_link_count,
+                normalized_time_link_count,
+            )
             payload_embeds = _sanitize_embeds_for_discord_limits([*normalized_status, *normalized_details], req_id=req_id)
             payload_embeds = _ensure_embed_limits(payload_embeds, max_chars=5600)
             payload_embeds = _sanitize_embeds_for_discord_limits(payload_embeds, req_id=req_id)
+            payload_time_link_count = _count_summary_time_links_in_embeds(payload_embeds)
+            logger.debug(
+                "riassunto: time_link_preserved_after_normalize=%s normalized=%s payload=%s",
+                str(normalized_time_link_count == payload_time_link_count).lower(),
+                normalized_time_link_count,
+                payload_time_link_count,
+            )
             payload_embeds = apply_standard_report_style(payload_embeds, service_name="riassunto", cover_title=payload_embeds[0].title if payload_embeds else "🗒️ RIASSUNTO")
             attach_footer_meta_to_all(
                 payload_embeds,
