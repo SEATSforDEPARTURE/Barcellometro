@@ -106,12 +106,24 @@ Quando è disponibile `FooterService`, gli embed standardizzati non devono ferma
 2. frase del footer service;
 3. parte tecnica finale `Dati elaborati con ...` solo quando esistono davvero contributor/provider/model da dichiarare; se non ci sono contributor, il segmento tecnico non compare.
 
+Le prime due sezioni sono ora obbligatorie anche nel percorso `minimal=True` e negli embed admin standardizzati: se non esiste una frase persistita per il servizio o a livello globale, il renderer centrale applica il fallback coerente `In via di sviluppo.` invece di lasciare il footer ridotto alla sola brand.
+
 Esempi:
 
 - prima: `Barcellometro dev6 · Dati elaborati con gpt-4o · In via di sviluppo.`
 - dopo: `Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o`
 
-Se la frase del footer non esiste, il footer resta ben formato e concatena solo gli elementi disponibili, senza separatori doppi.
+Se la frase del footer non esiste, il footer non resta mai monco: la pipeline centralizzata usa il fallback standard e mantiene comunque l'ordine `versione → frase → eventuale segmento tecnico`, senza separatori doppi.
+
+## Emoji custom del server nel footer
+
+Le frasi footer supportano anche emoji custom Discord nei formati `<:name:id>` e `<a:name:id>`, ma la trasformazione è centralizzata in `app/services/footer.py`:
+
+1. la prima custom emoji trovata nella frase viene promossa a `footer icon_url` usando la CDN Discord corretta (`.png` per statiche, `.gif` per animate);
+2. il token raw viene rimosso dal testo footer;
+3. eventuali altre custom emoji non restano mai visibili come `<:...:...>` o `<a:...:...>` nel testo finale;
+4. le emoji Unicode normali restano nel testo;
+5. se un flusso passa già un `footer_icon_url` esplicito, quello ha precedenza sull'icona derivata dalla custom emoji.
 
 La frase legacy `Dati elaborati` + ` in loco` è abolita in tutto il progetto, così come la coda `e fallback` + ` locale`: non devono più comparire in codice, test, documentazione, configurazioni versionate, override locali o footer renderizzati. Questo vale anche per eventuali campi config come `footer`, `fallback_footer` o template equivalenti. Per output non-AI non si mostra alcuna frase tecnica finale; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare. Il flag `used_local_processing` resta metadata interno e non aggiunge testo visibile al footer.
 
