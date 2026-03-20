@@ -68,6 +68,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         interaction: discord.Interaction,
         *,
         subcommand_path: str,
+        subtitle_args: list[object] | None = None,
         lines: list[tuple[str, object]] | None = None,
         sections: list[CommandEmbedSection] | None = None,
         kind: str = "info",
@@ -78,6 +79,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             top_level="admin",
             subcommand_path=subcommand_path,
             visual_top_level="moderazione",
+            subtitle_args=subtitle_args,
             lines=lines,
             sections=sections,
             kind=kind,
@@ -137,7 +139,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             await _send(interaction, subcommand_path="moderazione channel on", lines=[("error", "Select a text channel first.")], kind="error", footer_service=ctx.footer)
             return
         await ctx.database.set_notify_channel(str(interaction.guild_id), str(target_channel.id))
-        await _send(interaction, subcommand_path="moderazione channel on", lines=[("channel", target_channel.mention), ("result", "enabled")], kind="success", footer_service=ctx.footer)
+        await _send(interaction, subcommand_path="moderazione channel on", subtitle_args=[target_channel], lines=[("channel", target_channel.mention), ("result", "enabled")], kind="success", footer_service=ctx.footer)
 
     @channel_group.command(name="off", description="Disable moderation notifications for the channel setting.")
     async def mod_channel_off(interaction: discord.Interaction) -> None:
@@ -158,7 +160,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.set_notify_channel(str(interaction.guild_id), str(channel.id))
-        await _send(interaction, subcommand_path="moderazione channel notify_set", lines=[("channel", channel.mention), ("result", "updated")], kind="success", footer_service=ctx.footer)
+        await _send(interaction, subcommand_path="moderazione channel notify_set", subtitle_args=[channel], lines=[("channel", channel.mention), ("result", "updated")], kind="success", footer_service=ctx.footer)
 
     @channel_group.command(name="notify_show", description="Show the moderation notification channel.")
     async def mod_channel_notify_show(interaction: discord.Interaction) -> None:
@@ -185,7 +187,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             await _send(interaction, subcommand_path="moderazione channel template_reset", lines=[("error", "Invalid template_name. Use inactivity, kick, ban, tempban, or grace.")], kind="error", footer_service=ctx.footer)
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), **{field_name: text})
-        await _send(interaction, subcommand_path="moderazione channel template_set", lines=[("template_name", template_name), ("result", "updated")], kind="success", footer_service=ctx.footer)
+        await _send(interaction, subcommand_path="moderazione channel template_set", subtitle_args=[template_name], lines=[("template_name", template_name), ("result", "updated")], kind="success", footer_service=ctx.footer)
 
     @channel_group.command(name="template_show", description="Show moderation notification templates.")
     @app_commands.describe(template_name="Optional template target: inactivity, kick, ban, tempban, or grace.")
@@ -198,7 +200,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             if field_name is None:
                 await _send(interaction, subcommand_path="moderazione channel template_reset", lines=[("error", "Invalid template_name. Use inactivity, kick, ban, tempban, or grace.")], kind="error", footer_service=ctx.footer)
                 return
-            await _send(interaction, subcommand_path="moderazione channel template_show", lines=[("template_name", template_name), ("value", templates.get(field_name) or "not set")], footer_service=ctx.footer)
+            await _send(interaction, subcommand_path="moderazione channel template_show", subtitle_args=[template_name], lines=[("template_name", template_name), ("value", templates.get(field_name) or "not set")], footer_service=ctx.footer)
             return
         sections_data = [("Inactivity", str(templates["template_inactivity_reason"]) or "not set"), ("Kick", str(templates["template_kick_reason"]) or "not set"), ("Ban", str(templates["template_ban_reason"]) or "not set"), ("Tempban", str(templates["template_tempban_reason"]) or "not set"), ("Grace", str(templates["template_grace_reason"]) or "not set")]
         extra = "\n\n".join(f"## {name}\n{value}" for name, value in sections_data if len(value) > FIELD_MAX)
@@ -219,7 +221,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             await _send(interaction, subcommand_path="moderazione channel template_reset", lines=[("error", "Invalid template_name. Use inactivity, kick, ban, tempban, or grace.")], kind="error", footer_service=ctx.footer)
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), **{field_name: None})
-        await _send(interaction, subcommand_path="moderazione channel template_reset", lines=[("template_name", template_name), ("result", "reset")], kind="success", footer_service=ctx.footer)
+        await _send(interaction, subcommand_path="moderazione channel template_reset", subtitle_args=[template_name], lines=[("template_name", template_name), ("result", "reset")], kind="success", footer_service=ctx.footer)
 
     @channel_group.command(name="user_card_set", description="Set whether moderation notifications include the user card.")
     @app_commands.describe(enabled="Whether the moderation notification user card is enabled.")
@@ -289,6 +291,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         await _send(
             interaction,
             subcommand_path="moderazione users kick",
+            subtitle_args=[user],
             lines=[("user", user.mention), ("result", "kicked"), ("reason", resolved_reason)],
             kind="success",
         )
@@ -312,6 +315,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         await _send(
             interaction,
             subcommand_path="moderazione users ban",
+            subtitle_args=[user],
             lines=[("user", user.mention), ("result", "banned"), ("reason", resolved_reason)],
             kind="success",
         )
@@ -346,6 +350,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         await _send(
             interaction,
             subcommand_path="moderazione users tempban",
+            subtitle_args=[user, format_duration_human(duration_seconds)],
             lines=[
                 ("user", user.mention),
                 ("duration", format_duration_human(duration_seconds)),
@@ -385,6 +390,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         await _send(
             interaction,
             subcommand_path="moderazione users grace",
+            subtitle_args=[user],
             lines=[
                 ("user", user.mention),
                 ("protected_until", expires_at.strftime("%d/%m/%Y %H:%M UTC")),

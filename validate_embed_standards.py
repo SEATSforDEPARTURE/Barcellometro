@@ -82,6 +82,28 @@ DISPLAY_TOP_LEVEL_OVERRIDES = {
     "ask",
 }
 
+RUNTIME_SUBTITLE_PARAM_NAMES = {
+    "tier",
+    "user",
+    "utente",
+    "role",
+    "channel",
+    "id",
+    "id_or_name",
+    "schedule_id",
+    "quantita",
+    "quantity",
+    "unita",
+    "unit",
+    "template_name",
+    "scope",
+    "duration",
+    "amount",
+    "priority",
+    "da",
+    "a",
+}
+
 
 @dataclass(slots=True)
 class Issue:
@@ -185,6 +207,15 @@ def _literal_str(node: ast.AST | None) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     return None
+
+
+def _contains_name(node: ast.AST | None, target_names: set[str]) -> bool:
+    if node is None:
+        return False
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id in target_names:
+            return True
+    return False
 
 
 def _is_command_decorator(decorator: ast.AST) -> bool:
@@ -414,6 +445,30 @@ def _check_display_command_context(tree: ast.AST, file_path: Path, report: Valid
             )
 
 
+def _check_manual_subtitle_concatenation(tree: ast.AST, file_path: Path, report: ValidationReport) -> None:
+    file_rel = file_path.relative_to(REPO_ROOT)
+    rel_str = file_rel.as_posix()
+    if rel_str in CANONICAL_HELPER_FILES:
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _call_name(node) not in STANDARD_COMMAND_HELPERS:
+            continue
+        if _keyword_value(node, "subtitle_args") is not None or _keyword_value(node, "relevant_parameters") is not None:
+            continue
+        subcommand_expr = _keyword_value(node, "subcommand_path")
+        if not isinstance(subcommand_expr, (ast.JoinedStr, ast.BinOp)):
+            continue
+        if _contains_name(subcommand_expr, RUNTIME_SUBTITLE_PARAM_NAMES):
+            report.add(
+                "subtitle_builder_centralization",
+                file_rel,
+                node.lineno,
+                "Do not concatenate runtime subtitle fragments into subcommand_path manually; pass them via subtitle_args.",
+            )
+
+
 def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) -> ValidationReport:
     report = ValidationReport()
     command_roots = {
@@ -429,6 +484,7 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _check_raw_text_messages(tree, path, report)
         _check_duplicate_helper_systems(tree, path, report)
         _check_display_command_context(tree, path, report)
+        _check_manual_subtitle_concatenation(tree, path, report)
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)

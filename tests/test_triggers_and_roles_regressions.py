@@ -37,7 +37,10 @@ class _Followup:
 class _Guild:
     def __init__(self) -> None:
         self._roles = {123: SimpleNamespace(id=123, mention="<@&123>", name="Moderatori")}
-        self._members = {456: SimpleNamespace(id=456, mention="<@456>", display_name="Alice")}
+        self._members = {
+            456: SimpleNamespace(id=456, mention="<@456>", display_name="Alice"),
+            789: SimpleNamespace(id=789, mention="<@789>", display_name="Mario"),
+        }
 
     def get_role(self, role_id: int):
         return self._roles.get(role_id)
@@ -177,3 +180,37 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     assert user_lines[1][0] == "Unknown user (ID: 777)"
     assert "command=admin.test" in user_lines[0][1]
     assert "command=admin.other" in user_lines[1][1]
+
+
+def test_qna_bonus_show_passes_user_as_subtitle_arg(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _check_permission(*args, **kwargs):
+        return True
+
+    sent = []
+
+    async def _send_standard_response(interaction, **kwargs):
+        sent.append(kwargs)
+
+    class _Db(_TriggerDb):
+        async def get_qna_bonus(self, guild_id: str, user_id: str):
+            assert (guild_id, user_id) == ("1", "789")
+            return 4, None
+
+    monkeypatch.setattr(triggers_module, "check_permission", _check_permission)
+    monkeypatch.setattr(triggers_module, "send_standard_response", _send_standard_response)
+
+    admin_group = discord.app_commands.Group(name="admin", description="admin")
+    campagne_group = discord.app_commands.Group(name="campagne", description="campagne")
+    qna_group = discord.app_commands.Group(name="qna", description="qna")
+    insights_group = discord.app_commands.Group(name="insights", description="insights")
+    ctx = SimpleNamespace(database=_Db(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
+    triggers_module.register_triggers(admin_group, campagne_group, qna_group, insights_group, ctx)
+
+    cmd = _find_command(qna_group, "bonus_show")
+    interaction = _Interaction(cmd)
+    user = interaction.guild.get_member(789)
+    asyncio.run(cmd.callback(interaction, user))
+
+    assert sent
+    assert sent[0]["subcommand_path"] == "qna bonus_show"
+    assert sent[0]["subtitle_args"] == [user]

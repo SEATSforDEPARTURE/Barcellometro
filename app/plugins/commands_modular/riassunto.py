@@ -74,11 +74,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         command_name = str((getattr(interaction, "data", None) or {}).get("name") or "").strip()
         return f"riassunto {command_name}".strip() or "riassunto info"
 
-    async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
+    async def send_ephemeral(interaction: discord.Interaction, message: str, *, subtitle_args: list[object] | None = None) -> None:
         await send_standard_response(
             interaction,
             top_level="riassunto",
             subcommand_path=_command_path(interaction),
+            subtitle_args=subtitle_args,
             lines=[("dettaglio", _normalize_message(message))],
             kind=_kind_from_message(message),
             footer_service=ctx.footer,
@@ -785,9 +786,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         end_dt: datetime,
         period_label: str,
         granularity_hint: str = "hours",
+        subtitle_args: list[object] | None = None,
     ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.")
+            await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.", subtitle_args=subtitle_args)
             return
         if not await check_permission(interaction, "riassunto", ctx):
             return
@@ -811,7 +813,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             command_config = await ctx.entitlements.get_command_profile_config(member, "riassunto")
             if not command_config["allowed"]:
                 dm_text = command_config["messages"].get("dm_text", "Serve almeno PLUS per usare /riassunto.")
-                await send_ephemeral(interaction, dm_text)
+                await send_ephemeral(interaction, dm_text, subtitle_args=subtitle_args)
                 return
 
             summary_config = await ctx.summary_service.get_config()
@@ -836,12 +838,14 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     await send_ephemeral(
                         interaction,
                         f"❌ Limite PLUS: massimo 24 ore. Per periodi più lunghi serve PRO.{suggestion}",
+                        subtitle_args=subtitle_args,
                     )
                     return
                 if profile == "role2":
                     await send_ephemeral(
                         interaction,
                         f"❌ Limite PRO: massimo 7 giorni. Per periodi più lunghi serve PRO MAX.{suggestion}",
+                        subtitle_args=subtitle_args,
                     )
                     return
             start_dt_utc, end_dt_utc, coverage_note = await _validate_coverage_or_adjust(
@@ -854,7 +858,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
 
             channel = interaction.channel
             if channel is None or not isinstance(channel, discord.abc.GuildChannel):
-                await send_ephemeral(interaction, "Canale non valido.")
+                await send_ephemeral(interaction, "Canale non valido.", subtitle_args=subtitle_args)
                 return
 
             channel_is_voice = isinstance(channel, (discord.VoiceChannel, discord.StageChannel))
@@ -1860,12 +1864,13 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 default_service_name="riassunto",
             )
             if sent_dm:
-                await send_ephemeral(interaction, "✅ Ti ho inviato il riassunto in DM.")
+                await send_ephemeral(interaction, "✅ Ti ho inviato il riassunto in DM.", subtitle_args=subtitle_args)
         except Exception:
             logger.exception("riassunto failed req_id=%s", req_id)
             await send_ephemeral(
                 interaction,
                 f"❌ Errore durante il riassunto (ID: {req_id}). Controlla i log.",
+                subtitle_args=subtitle_args,
             )
             return
 
@@ -1886,7 +1891,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
     ) -> None:
         window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
         if error:
-            await send_ephemeral(interaction, error)
+            await send_ephemeral(interaction, error, subtitle_args=[quantita, unita])
             return
         assert window is not None
         await _run_riassunto(
@@ -1895,6 +1900,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             end_dt=window.end_dt,
             period_label="ultimi",
             granularity_hint=_granularity_hint_for_period("ultimi", unita.value),
+            subtitle_args=[quantita, unita],
         )
 
     @riassunto_group.command(name="oggi", description="Riassunto della giornata di oggi")
@@ -1912,10 +1918,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
     async def riassunto_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:
-            await send_ephemeral(interaction, error)
+            await send_ephemeral(interaction, error, subtitle_args=[da, a])
             return
         assert window is not None
-        await _run_riassunto(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range", granularity_hint="days")
+        await _run_riassunto(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range", granularity_hint="days", subtitle_args=[da, a])
 
     def _clean_bullets(lines: list[str] | None) -> list[str]:
         if not lines:

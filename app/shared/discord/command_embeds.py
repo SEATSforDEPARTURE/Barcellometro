@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date, datetime
 import json
+import re
 from typing import Any, Literal
 
 import discord
@@ -113,6 +115,11 @@ class DisplayCommandContext:
 
 
 _MAX_DESCRIPTION = 3800
+_MAX_SUBTITLE_ARG_LENGTH = 80
+_RAW_OBJECT_HINTS = ("{", "}", "[", "]", "\n")
+_MENTION_RE = re.compile(r"^<@!?(?P<user_id>\d+)>$")
+_ROLE_MENTION_RE = re.compile(r"^<@&(?P<role_id>\d+)>$")
+_CHANNEL_MENTION_RE = re.compile(r"^<#(?P<channel_id>\d+)>$")
 
 
 def humanize_key(key: str) -> str:
@@ -148,13 +155,85 @@ def _split_command_path(path: str | None) -> list[str]:
 
 
 def _normalize_relevant_parameter(value: object) -> str | None:
+    normalized = _normalize_subtitle_argument(value)
+    if not normalized:
+        return None
+    if ":" in normalized:
+        _, tail = normalized.rsplit(":", 1)
+        normalized = tail.strip() or normalized
+    return normalized
+
+
+def _normalize_subtitle_string(value: str) -> str | None:
     raw = str(value or "").strip()
     if not raw:
         return None
-    if ":" in raw:
-        _, tail = raw.rsplit(":", 1)
-        raw = tail.strip() or raw
-    return raw
+    if raw.startswith(("discord.", "<class ", "namespace(")):
+        return None
+    mention_match = _MENTION_RE.fullmatch(raw)
+    if mention_match:
+        return f"USER {mention_match.group('user_id')}"
+    role_match = _ROLE_MENTION_RE.fullmatch(raw)
+    if role_match:
+        return f"ROLE {role_match.group('role_id')}"
+    channel_match = _CHANNEL_MENTION_RE.fullmatch(raw)
+    if channel_match:
+        return f"CHANNEL {channel_match.group('channel_id')}"
+    if any(token in raw for token in _RAW_OBJECT_HINTS) and len(raw) > 32:
+        return None
+    compact = " ".join(raw.split())
+    if len(compact) > _MAX_SUBTITLE_ARG_LENGTH:
+        return None
+    return compact
+
+
+def _discord_entity_display_name(value: object) -> str | None:
+    for attr in ("display_name", "global_name", "name"):
+        candidate = getattr(value, attr, None)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _normalize_subtitle_argument(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return _normalize_subtitle_string(value)
+    if isinstance(value, bool):
+        return "ON" if value else "OFF"
+    if isinstance(value, (int, float)):
+        return stringify_value(value)
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M UTC") if value.tzinfo is not None else value.strftime("%Y-%m-%d %H:%M")
+    if isinstance(value, date):
+        return value.isoformat()
+
+    choice_value = getattr(value, "value", None)
+    choice_name = getattr(value, "name", None)
+    if choice_value is not None:
+        normalized_choice = _normalize_subtitle_argument(choice_value)
+        if normalized_choice:
+            return normalized_choice
+        if isinstance(choice_name, str):
+            return _normalize_subtitle_string(choice_name)
+
+    if isinstance(value, discord.Role):
+        return _normalize_subtitle_string(value.name)
+    if isinstance(value, (discord.Member, discord.User)):
+        return _normalize_subtitle_string(_discord_entity_display_name(value))
+    if isinstance(value, (discord.abc.GuildChannel, discord.Thread)):
+        channel_name = getattr(value, "name", None)
+        if isinstance(channel_name, str) and channel_name.strip():
+            return _normalize_subtitle_string(channel_name)
+        channel_id = getattr(value, "id", None)
+        return _normalize_subtitle_string(str(channel_id)) if channel_id is not None else None
+
+    entity_name = _discord_entity_display_name(value)
+    if entity_name:
+        return _normalize_subtitle_string(entity_name)
+
+    return _normalize_subtitle_string(str(value))
 
 
 def get_command_emoji(command: str | None) -> str:
@@ -177,6 +256,7 @@ def normalize_display_command_context(
     subcommand_path: str,
     kind: CommandKind = "info",
     visual_top_level: str | None = None,
+    subtitle_args: Sequence[object] | None = None,
     relevant_parameters: Sequence[object] | None = None,
     top_level_emoji: str | None = None,
     subcommand_emoji: str | None = None,
@@ -197,7 +277,7 @@ def normalize_display_command_context(
     if subtitle_parts and _normalize_command_token(subtitle_parts[0]) == inferred_visual_top_level:
         subtitle_parts = subtitle_parts[1:]
 
-    for raw_parameter in relevant_parameters or ():
+    for raw_parameter in [*(subtitle_args or ()), *(relevant_parameters or ())]:
         normalized_parameter = _normalize_relevant_parameter(raw_parameter)
         if normalized_parameter is None:
             continue
@@ -267,6 +347,7 @@ async def build_command_embeds(
     top_level: str,
     subcommand_path: str,
     visual_top_level: str | None = None,
+    subtitle_args: Sequence[object] | None = None,
     relevant_parameters: Sequence[object] | None = None,
     lines: Sequence[tuple[str, Any]] | None = None,
     sections: Sequence[CommandEmbedSection | dict[str, Any]] | None = None,
@@ -285,6 +366,7 @@ async def build_command_embeds(
         subcommand_path=subcommand_path,
         kind=kind,
         visual_top_level=visual_top_level,
+        subtitle_args=subtitle_args,
         relevant_parameters=relevant_parameters,
         top_level_emoji=top_level_emoji,
         subcommand_emoji=subcommand_emoji,
@@ -407,6 +489,7 @@ async def send_standard_response(
     top_level: str,
     subcommand_path: str,
     visual_top_level: str | None = None,
+    subtitle_args: Sequence[object] | None = None,
     relevant_parameters: Sequence[object] | None = None,
     lines: Sequence[tuple[str, Any]] | None = None,
     sections: Sequence[CommandEmbedSection | dict[str, Any]] | None = None,
@@ -426,6 +509,7 @@ async def send_standard_response(
         top_level=top_level,
         subcommand_path=subcommand_path,
         visual_top_level=visual_top_level,
+        subtitle_args=subtitle_args,
         relevant_parameters=relevant_parameters,
         lines=lines,
         sections=sections,

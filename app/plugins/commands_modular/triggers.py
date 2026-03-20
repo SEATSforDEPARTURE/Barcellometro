@@ -169,6 +169,7 @@ def register_triggers(
         interaction: discord.Interaction,
         *,
         subcommand_path: str,
+        subtitle_args: list[object] | None = None,
         relevant_parameters: list[object] | None = None,
         lines: list[tuple[str, object]] | None = None,
         sections: list[CommandEmbedSection] | None = None,
@@ -179,6 +180,7 @@ def register_triggers(
             top_level="admin",
             subcommand_path=subcommand_path,
             visual_top_level=subcommand_path.split()[0] if subcommand_path.strip() else None,
+            subtitle_args=subtitle_args,
             relevant_parameters=relevant_parameters,
             lines=lines,
             sections=sections,
@@ -576,13 +578,13 @@ def register_triggers(
         guild_id, _ = scope
         cleaned_text = text.strip()
         if not cleaned_text:
-            await _send(interaction, subcommand_path="frasi template_user_set", lines=[("error", "text cannot be empty.")], kind="error")
+            await _send(interaction, subcommand_path="frasi template_user_set", subtitle_args=[user], lines=[("error", "text cannot be empty.")], kind="error")
             return
         if len(cleaned_text) > 300:
-            await _send(interaction, subcommand_path="frasi template_user_set", lines=[("error", "text is too long (max 300 characters).")], kind="error")
+            await _send(interaction, subcommand_path="frasi template_user_set", subtitle_args=[user], lines=[("error", "text is too long (max 300 characters).")], kind="error")
             return
         await ctx.database.upsert_trigger_phrase_global_user_custom_text(guild_id, str(user.id), cleaned_text)
-        await _send(interaction, subcommand_path="frasi template_user_set", lines=[("user", user.mention), ("result", "updated")], sections=[CommandEmbedSection(title="Template", lines=[cleaned_text])], kind="success")
+        await _send(interaction, subcommand_path="frasi template_user_set", subtitle_args=[user], lines=[("user", user.mention), ("result", "updated")], sections=[CommandEmbedSection(title="Template", lines=[cleaned_text])], kind="success")
 
     @frasi_group.command(name="template_user_show", description="Show a user-specific phrase template")
     @app_commands.describe(user="Target user")
@@ -593,9 +595,9 @@ def register_triggers(
         guild_id, _ = scope
         text = await ctx.database.get_trigger_phrase_global_user_custom_text(guild_id, str(user.id))
         if not text:
-            await _send(interaction, subcommand_path="frasi template_user_show", lines=[("warning", f"No user phrase template found for {user.mention}.")], kind="warning")
+            await _send(interaction, subcommand_path="frasi template_user_show", subtitle_args=[user], lines=[("warning", f"No user phrase template found for {user.mention}.")], kind="warning")
             return
-        await _send(interaction, subcommand_path="frasi template_user_show", lines=[("user", user.mention)], sections=[CommandEmbedSection(title="Template", lines=[text])])
+        await _send(interaction, subcommand_path="frasi template_user_show", subtitle_args=[user], lines=[("user", user.mention)], sections=[CommandEmbedSection(title="Template", lines=[text])])
 
     @frasi_group.command(name="template_user_reset", description="Reset a user-specific phrase template")
     @app_commands.describe(user="Target user")
@@ -606,9 +608,9 @@ def register_triggers(
         guild_id, _ = scope
         removed = await ctx.database.delete_trigger_phrase_global_user_custom_text(guild_id, str(user.id))
         if not removed:
-            await _send(interaction, subcommand_path="frasi template_user_reset", lines=[("warning", f"No user phrase template found for {user.mention}.")], kind="warning")
+            await _send(interaction, subcommand_path="frasi template_user_reset", subtitle_args=[user], lines=[("warning", f"No user phrase template found for {user.mention}.")], kind="warning")
             return
-        await _send(interaction, subcommand_path="frasi template_user_reset", lines=[("user", user.mention), ("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="frasi template_user_reset", subtitle_args=[user], lines=[("user", user.mention), ("result", "reset")], kind="success")
     @prompt_group.command(name="on", description="Enable prompt campaigns in the current channel")
     async def prompt_on(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
@@ -709,7 +711,7 @@ def register_triggers(
             embed_title=embed_title,
             embed_color=embed_color,
         )
-        await _send(interaction, subcommand_path="campagne prompt schedule_add", lines=[("schedule_id", campaign_id), ("name", resolved_name), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt schedule_add", subtitle_args=[campaign_id], lines=[("schedule_id", campaign_id), ("name", resolved_name), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
 
     @prompt_group.command(name="schedule_list", description="List prompt campaign schedules")
     async def prompt_schedule_list(interaction: discord.Interaction) -> None:
@@ -734,9 +736,9 @@ def register_triggers(
             return
         payload, error = await _resolve_prompt_campaign(str(interaction.guild_id), id_or_name)
         if payload is None:
-            await _send(interaction, subcommand_path="campagne prompt schedule_show", lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne prompt schedule_show", subtitle_args=[id_or_name], lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
             return
-        await _send(interaction, subcommand_path="campagne prompt schedule_show", lines=[("schedule_id", payload["id"])], sections=[CommandEmbedSection(title="Schedule", lines=[("name", payload["name"] or "-"), ("enabled", "on" if payload["enabled"] else "off"), ("channel", payload["channel_id"]), ("publish_at", payload["start_time_local"]), ("every", payload["interval_minutes"]), ("next", payload["next_run_at"]), ("embed_title", payload["embed_title"] or "-"), ("embed_color", payload["embed_color"] or "-"), ("prompt_text", payload["text"] or "-")])])
+        await _send(interaction, subcommand_path="campagne prompt schedule_show", subtitle_args=[payload["id"]], lines=[("schedule_id", payload["id"])], sections=[CommandEmbedSection(title="Schedule", lines=[("name", payload["name"] or "-"), ("enabled", "on" if payload["enabled"] else "off"), ("channel", payload["channel_id"]), ("publish_at", payload["start_time_local"]), ("every", payload["interval_minutes"]), ("next", payload["next_run_at"]), ("embed_title", payload["embed_title"] or "-"), ("embed_color", payload["embed_color"] or "-"), ("prompt_text", payload["text"] or "-")])])
 
     @prompt_group.command(name="schedule_remove", description="Remove a prompt campaign schedule")
     @app_commands.describe(id_or_name="Prompt schedule ID or exact name")
@@ -748,10 +750,10 @@ def register_triggers(
             return
         campaign, error = await _resolve_prompt_campaign(str(interaction.guild_id), id_or_name)
         if campaign is None:
-            await _send(interaction, subcommand_path="campagne prompt schedule_remove", lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne prompt schedule_remove", subtitle_args=[id_or_name], lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
             return
         await ctx.database.soft_delete_message_campaign(str(interaction.guild_id), int(campaign["id"]))
-        await _send(interaction, subcommand_path="campagne prompt schedule_remove", lines=[("schedule_id", campaign["id"]), ("result", "removed")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt schedule_remove", subtitle_args=[campaign["id"]], lines=[("schedule_id", campaign["id"]), ("result", "removed")], kind="success")
 
     @prompt_group.command(name="run", description="Run a prompt campaign schedule now")
     @app_commands.describe(id_or_name="Prompt schedule ID or exact name")
@@ -764,7 +766,7 @@ def register_triggers(
         await interaction.response.defer(ephemeral=True, thinking=True)
         campaign, error = await _resolve_prompt_campaign(str(interaction.guild_id), id_or_name)
         if campaign is None:
-            await _send(interaction, subcommand_path="campagne prompt run", lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne prompt run", subtitle_args=[id_or_name], lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
             return
         if ctx.message_scheduler is None:
             await _send(interaction, subcommand_path="campagne prompt run", lines=[("error", "Scheduler service unavailable.")], kind="error")
@@ -782,9 +784,9 @@ def register_triggers(
             reason,
         )
         if not rendered_text:
-            await _send(interaction, subcommand_path="campagne prompt run", lines=[("error", f"Unable to generate output ({reason or 'no_text'}).")], kind="error")
+            await _send(interaction, subcommand_path="campagne prompt run", subtitle_args=[campaign["id"]], lines=[("error", f"Unable to generate output ({reason or 'no_text'}).")], kind="error")
             return
-        await _send(interaction, subcommand_path="campagne prompt run", lines=[("schedule_id", campaign["id"]), ("result", "sent")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt run", subtitle_args=[campaign["id"]], lines=[("schedule_id", campaign["id"]), ("result", "sent")], kind="success")
         if isinstance(interaction.channel, discord.abc.Messageable):
             await ctx.message_scheduler.send_campaign_embed(interaction.channel, campaign, rendered_text)
 
@@ -817,7 +819,7 @@ def register_triggers(
             return
         campaign, error = await _resolve_prompt_campaign(str(interaction.guild_id), id_or_name)
         if campaign is None:
-            await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne prompt schedule_edit", subtitle_args=[id_or_name], lines=[("warning", error or "Prompt schedule not found.")], kind="warning")
             return
         if embed_color is not None and ctx.message_scheduler is not None and not ctx.message_scheduler.is_valid_embed_color(embed_color):
             await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
@@ -862,9 +864,9 @@ def register_triggers(
         if enabled is not None:
             await ctx.database.set_message_campaign_enabled(str(interaction.guild_id), int(campaign["id"]), enabled)
         if not updated and enabled is None:
-            await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("warning", "No changes requested.")], kind="warning")
+            await _send(interaction, subcommand_path="campagne prompt schedule_edit", subtitle_args=[campaign["id"]], lines=[("warning", "No changes requested.")], kind="warning")
             return
-        await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("schedule_id", campaign["id"]), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="campagne prompt schedule_edit", subtitle_args=[campaign["id"]], lines=[("schedule_id", campaign["id"]), ("result", "updated")], kind="success")
 
     @qna_group.command(name="on", description="Enable QnA in the current channel")
     async def qna_on(interaction: discord.Interaction) -> None:
@@ -897,7 +899,7 @@ def register_triggers(
             data = parsed if isinstance(parsed, dict) else defaults
         if tier is not None:
             value = int(data.get(tier.value, defaults[tier.value]))
-            await _send(interaction, subcommand_path="qna limits_show", relevant_parameters=[tier.value], lines=[("tier", tier.value), ("limit", value)])
+            await _send(interaction, subcommand_path="qna limits_show", subtitle_args=[tier], lines=[("tier", tier.value), ("limit", value)])
             return
         pretty = json.dumps(data, ensure_ascii=False, indent=2)
         await _send(interaction, subcommand_path="qna limits_show", sections=[CommandEmbedSection(title="Limits", lines=[pretty])])
@@ -923,7 +925,7 @@ def register_triggers(
                 data.update(parsed)
         data[tier.value] = int(limit)
         await ctx.database.set_setting("qna.daily_limits", json.dumps(data, ensure_ascii=False))
-        await _send(interaction, subcommand_path="qna limits_set", lines=[("tier", tier.value), ("limit", limit), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="qna limits_set", subtitle_args=[tier], lines=[("tier", tier.value), ("limit", limit), ("result", "updated")], kind="success")
 
     @qna_group.command(name="limits_reset", description="Reset QnA daily limits to defaults")
     async def qna_limits_reset(interaction: discord.Interaction) -> None:
@@ -940,19 +942,19 @@ def register_triggers(
         if not await _guard(interaction):
             return
         if interaction.guild_id is None:
-            await _send(interaction, subcommand_path="qna bonus_set", lines=[("error", "Use this command in a guild.")], kind="error")
+            await _send(interaction, subcommand_path="qna bonus_set", subtitle_args=[user], lines=[("error", "Use this command in a guild.")], kind="error")
             return
         if amount < 0 or amount > 999:
-            await _send(interaction, subcommand_path="qna bonus_set", lines=[("error", "amount must be between 0 and 999.")], kind="error")
+            await _send(interaction, subcommand_path="qna bonus_set", subtitle_args=[user], lines=[("error", "amount must be between 0 and 999.")], kind="error")
             return
         expires_at = None
         if hours_valid is not None:
             if hours_valid <= 0 or hours_valid > 24 * 30:
-                await _send(interaction, subcommand_path="qna bonus_set", lines=[("error", "hours_valid must be between 1 and 720.")], kind="error")
+                await _send(interaction, subcommand_path="qna bonus_set", subtitle_args=[user], lines=[("error", "hours_valid must be between 1 and 720.")], kind="error")
                 return
             expires_at = (datetime.now(timezone.utc) + timedelta(hours=hours_valid)).isoformat()
         await ctx.database.set_qna_bonus(str(interaction.guild_id), str(user.id), int(amount), expires_at)
-        await _send(interaction, subcommand_path="qna bonus_set", lines=[("user", user.mention), ("amount", amount), ("expires_at", expires_at or "-"), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="qna bonus_set", subtitle_args=[user], lines=[("user", user.mention), ("amount", amount), ("expires_at", expires_at or "-"), ("result", "updated")], kind="success")
 
     @qna_group.command(name="bonus_show", description="Show a user's QnA bonus")
     @app_commands.describe(user="Target user")
@@ -960,10 +962,10 @@ def register_triggers(
         if not await _guard(interaction):
             return
         if interaction.guild_id is None:
-            await _send(interaction, subcommand_path="qna bonus_show", lines=[("error", "Use this command in a guild.")], kind="error")
+            await _send(interaction, subcommand_path="qna bonus_show", subtitle_args=[user], lines=[("error", "Use this command in a guild.")], kind="error")
             return
         bonus, expires_at = await ctx.database.get_qna_bonus(str(interaction.guild_id), str(user.id))
-        await _send(interaction, subcommand_path="qna bonus_show", lines=[("user", user.mention), ("bonus", bonus), ("expires_at", expires_at or "-")])
+        await _send(interaction, subcommand_path="qna bonus_show", subtitle_args=[user], lines=[("user", user.mention), ("bonus", bonus), ("expires_at", expires_at or "-")])
 
     @qna_group.command(name="bonus_reset", description="Reset a user's QnA bonus")
     @app_commands.describe(user="Target user")
@@ -971,10 +973,10 @@ def register_triggers(
         if not await _guard(interaction):
             return
         if interaction.guild_id is None:
-            await _send(interaction, subcommand_path="qna bonus_reset", lines=[("error", "Use this command in a guild.")], kind="error")
+            await _send(interaction, subcommand_path="qna bonus_reset", subtitle_args=[user], lines=[("error", "Use this command in a guild.")], kind="error")
             return
         await ctx.database.clear_qna_bonus(str(interaction.guild_id), str(user.id))
-        await _send(interaction, subcommand_path="qna bonus_reset", lines=[("user", user.mention), ("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="qna bonus_reset", subtitle_args=[user], lines=[("user", user.mention), ("result", "reset")], kind="success")
 
     @insights_group.command(name="on", description="Enable insights in the current channel")
     async def insights_on(interaction: discord.Interaction) -> None:
