@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import discord
+
 from app.services.footer import get_footer_meta
 from app.shared.discord.command_embeds import build_command_embed, normalize_display_command_context
+from app.shared.discord.footer_pipeline import finalize_embed
 
 
 def test_normalize_display_context_frasi_template_global_show() -> None:
@@ -71,6 +74,33 @@ def test_build_command_embed_uses_visual_top_level_for_moderazione() -> None:
     assert get_footer_meta(embed).service_name == "status"
 
 
+def test_build_command_embed_finalize_adds_brand_and_phrase_without_contributors() -> None:
+    class _FooterService:
+        async def get_version(self) -> str | None:
+            return "dev7.1"
+
+        async def is_enabled(self) -> bool:
+            return True
+
+        async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
+            embed.set_footer(text="Barcellometro dev7.1 · In via di sviluppo.")
+            return embed
+
+    async def _run() -> discord.Embed:
+        footer_service = _FooterService()
+        embed = await build_command_embed(
+            top_level="riassunto",
+            subcommand_path="riassunto oggi",
+            footer_service=footer_service,
+        )
+        await finalize_embed(embed, footer_service, default_service_name="riassunto")
+        return embed
+
+    embed = asyncio.run(_run())
+
+    assert embed.footer.text == "Barcellometro dev7.1 · In via di sviluppo."
+
+
 def test_build_command_embed_omits_top_level_duplication_for_parameterized_command() -> None:
     embed = asyncio.run(
         build_command_embed(
@@ -103,6 +133,35 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
     assert embed.title == "❓ QNA"
     assert embed.description.startswith("**ℹ️ BONUS_SHOW MARIO ROSSI**")
     assert "<@123>" not in (embed.description or "")
+
+
+def test_build_command_embed_admin_standard_footer_keeps_brand_and_phrase() -> None:
+    class _FooterService:
+        async def get_version(self) -> str | None:
+            return "dev7.1"
+
+        async def is_enabled(self) -> bool:
+            return True
+
+        async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
+            embed.set_footer(text="Barcellometro dev7.1 · In via di sviluppo.")
+            return embed
+
+    async def _run() -> discord.Embed:
+        footer_service = _FooterService()
+        embed = await build_command_embed(
+            top_level="admin",
+            subcommand_path="footer template_global_show",
+            footer_service=footer_service,
+            footer_service_name="status",
+            lines=[("Phrase", "In via di sviluppo.")],
+        )
+        await finalize_embed(embed, footer_service, default_service_name="status")
+        return embed
+
+    embed = asyncio.run(_run())
+
+    assert embed.footer.text == "Barcellometro dev7.1 · In via di sviluppo."
 
 
 def test_build_command_embed_formats_period_subtitle_for_riassunto_ultimi() -> None:

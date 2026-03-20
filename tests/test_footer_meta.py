@@ -262,7 +262,7 @@ def test_footer_service_render_footer_orders_version_phrase_then_processing() ->
     asyncio.run(_run())
 
 
-def test_footer_service_render_footer_skips_missing_phrase_without_double_separator() -> None:
+def test_footer_service_render_footer_uses_default_phrase_when_missing() -> None:
     async def _run() -> None:
         service = _build_footer_service()
         await service.set_version("dev7.1")
@@ -273,8 +273,8 @@ def test_footer_service_render_footer_skips_missing_phrase_without_double_separa
             used_local_processing=True,
         )
 
-        assert phrase is None
-        assert footer == "Barcellometro dev7.1"
+        assert phrase == "In via di sviluppo."
+        assert footer == "Barcellometro dev7.1 · In via di sviluppo."
         assert "Dati elaborati con" not in footer
         assert "Dati elaborati" + " in loco" not in footer
         assert " ·  · " not in footer
@@ -319,10 +319,101 @@ def test_footer_service_render_footer_shows_processing_only_when_contributors_ex
             used_local_processing=False,
         )
 
-        assert with_contributors == "Barcellometro dev8 · Dati elaborati con llama3.2"
-        assert without_contributors == "Barcellometro dev8"
+        assert with_contributors == "Barcellometro dev8 · In via di sviluppo. · Dati elaborati con llama3.2"
+        assert without_contributors == "Barcellometro dev8 · In via di sviluppo."
         assert "Dati elaborati con llama3.2" in with_contributors
         assert "Dati elaborati con" not in without_contributors
         assert "Dati elaborati" + " in loco" not in without_contributors
+
+    asyncio.run(_run())
+
+
+def test_footer_service_render_footer_minimal_still_includes_brand_and_phrase() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.set_version("dev9")
+
+        footer, phrase = await service.render_footer(
+            service_name="status",
+            contributors=[],
+            used_local_processing=True,
+            minimal=True,
+        )
+
+        assert phrase == "In via di sviluppo."
+        assert footer == "Barcellometro dev9 · In via di sviluppo."
+        assert "Dati elaborati con" not in footer
+
+    asyncio.run(_run())
+
+
+def test_footer_service_apply_promotes_first_custom_emoji_to_icon_and_removes_raw_token() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="emoji")
+        attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
+        service = _build_footer_service()
+        await service.set_version("dev7.1")
+        await service.set_global_phrase("In via di sviluppo. <:melons:1475962151502876695>")
+
+        await service.apply(embed)
+
+        assert embed.footer.text == "Barcellometro dev7.1 · In via di sviluppo."
+        assert "<:melons:1475962151502876695>" not in (embed.footer.text or "")
+        assert embed.footer.icon_url == "https://cdn.discordapp.com/emojis/1475962151502876695.png"
+
+    asyncio.run(_run())
+
+
+def test_footer_service_apply_supports_animated_custom_emoji_urls() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="emoji")
+        attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
+        service = _build_footer_service()
+        await service.set_version("dev7.1")
+        await service.set_global_phrase("Sempre acceso <a:pulse:1475962151502876696>")
+
+        await service.apply(embed)
+
+        assert embed.footer.text == "Barcellometro dev7.1 · Sempre acceso"
+        assert "<a:pulse:1475962151502876696>" not in (embed.footer.text or "")
+        assert embed.footer.icon_url == "https://cdn.discordapp.com/emojis/1475962151502876696.gif"
+
+    asyncio.run(_run())
+
+
+def test_footer_service_apply_keeps_explicit_footer_icon_over_custom_emoji_icon() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="icon precedence")
+        attach_footer_meta(
+            embed,
+            service_name="status",
+            contributors=[],
+            used_local_processing=False,
+            footer_icon_url="https://example.com/icon.png",
+        )
+        service = _build_footer_service()
+        await service.set_version("dev7.1")
+        await service.set_global_phrase("Sempre acceso <:melons:1475962151502876695>")
+
+        await service.apply(embed)
+
+        assert embed.footer.text == "Barcellometro dev7.1 · Sempre acceso"
+        assert embed.footer.icon_url == "https://example.com/icon.png"
+
+    asyncio.run(_run())
+
+
+def test_footer_service_apply_preserves_unicode_emoji_in_footer_text() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="unicode")
+        attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
+        service = _build_footer_service()
+        await service.set_version("dev7.1")
+        await service.set_global_phrase("Sempre acceso 🍉")
+
+        await service.apply(embed)
+
+        assert embed.footer.text == "Barcellometro dev7.1 · Sempre acceso 🍉"
+        assert embed.footer.icon_url is None
 
     asyncio.run(_run())

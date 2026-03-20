@@ -582,11 +582,15 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
     footer_path = REPO_ROOT / "app" / "services" / "footer.py"
     footer_source = footer_path.read_text(encoding="utf-8")
     required_footer_snippets = (
+        "async def _resolve_footer_phrase(",
+        "return service_phrases.get(service_name) or global_phrase or FOOTER_DEFAULT_PHRASE",
         "parts = [brand]",
         "if phrase:",
         "parts.append(phrase)",
         "if processing:",
         "parts.append(processing)",
+        "CUSTOM_EMOJI_RE = re.compile(",
+        "_extract_footer_icon_and_clean_text(",
     )
     for snippet in required_footer_snippets:
         if snippet not in footer_source:
