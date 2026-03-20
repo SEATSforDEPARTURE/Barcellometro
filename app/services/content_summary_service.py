@@ -20,6 +20,8 @@ OLLAMA_SUMMARY_SAMPLE_MAX_ITEMS = 40
 OLLAMA_SUMMARY_SAMPLE_BUCKETS = 4
 DEFAULT_SUMMARY_SAMPLE_MAX_ITEMS = 80
 DEFAULT_SUMMARY_SAMPLE_BUCKETS = 6
+SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT = 280
+SUMMARY_PROMPT_DUPLICATE_FINGERPRINT_LIMIT = 160
 
 DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
     "tiers": {
@@ -461,27 +463,11 @@ class SummaryService:
         ai_allowed: bool,
         config: dict[str, Any],
     ) -> str | None:
-        use_ai = ai_allowed and self._ai_service is not None
-        if not use_ai:
-            return None
-        model = self._ai_service.get_model("summary") if self._ai_service else None
-        if not model:
-            return None
-        provider, _ = parse_model_string(str(model))
-        if provider == "ollama":
-            logger.info("summary: period_description skipped for ollama provider; using local template")
-            return None
-        try:
-            text = await self._call_ai_period_description(
-                period_prefix=period_prefix,
-                score=score,
-                color=color,
-                metrics=metrics,
-                trend=trend,
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("Summary AI period description failed")
-            return None
+        del tier, score, metrics, trend, ai_allowed, config
+        text = _local_period_description(period_prefix, color)
+        logger.info(
+            "summary: period_description ai_calls_before=2 ai_calls_after=1 local_period_description=true used_local_render_fields=true"
+        )
         return _trim_period_description(text, period_prefix)
 
     def _build_local_summary(
@@ -563,18 +549,7 @@ class SummaryService:
         sample_max_items = OLLAMA_SUMMARY_SAMPLE_MAX_ITEMS if is_ollama else DEFAULT_SUMMARY_SAMPLE_MAX_ITEMS
         sample_buckets = OLLAMA_SUMMARY_SAMPLE_BUCKETS if is_ollama else DEFAULT_SUMMARY_SAMPLE_BUCKETS
         sampled_messages = sample_messages_time_distributed(messages, max_items=sample_max_items, buckets=sample_buckets)
-        snippet = [
-            {
-                "ts": msg.get("ts"),
-                "author_id": msg.get("author_id"),
-                "content": msg.get("content"),
-                "meta": {
-                    "kind": (msg.get("meta") or {}).get("kind"),
-                    "in_call": (msg.get("meta") or {}).get("in_call"),
-                },
-            }
-            for msg in sampled_messages
-        ]
+        compact_messages, compact_stats = _build_summary_prompt_messages(sampled_messages)
         moments_policy_tier = _moments_policy_tier(tier)
         moments_target = _tier_limit(config, moments_policy_tier, "moments", 5)
         logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
@@ -639,9 +614,11 @@ class SummaryService:
                 + "Non inventare dettagli. "
                 + names_rule
                 + "Descrivi eventi reali senza copiare i messaggi. "
+                "I messaggi in input usano chiavi compatte: i=message_id, t=timestamp ISO, a=author_id, x=testo, k=kind, vc=1 se evento vocale/in call. "
+                "Mantieni il testo dei campi JSON essenziale: niente boilerplate, niente intestazioni, niente frasi ornamentali. "
                 "Struttura JSON minima richiesta: themes[], moments[], advice[]. "
                 "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
-                "advice: lista stringhe brevi per la community. "
+                "advice: lista stringhe brevi per la community, anche vuota se non aggiunge valore. "
                 "quotes/dynamics/degrade_list/invigorate_list/who_interacted_today/proverbio sono opzionali."
             )
         else:
@@ -652,6 +629,7 @@ class SummaryService:
                 + "Non inventare dettagli. "
                 + "Non inferire né ricostruire contenuti omessi per privacy. "
                 + names_rule
+                + "I messaggi in input usano chiavi compatte: i=message_id, t=timestamp ISO, a=author_id, x=testo, k=kind, vc=1 se evento vocale/in call. "
                 + "Se includi emoji custom, mantieni il formato Discord `<:nome:id>` o `<a:nome:id>` senza convertirle in numeri. "
                 "TEMI devono essere solo keyword brevi (no nomi). TEMI devono essere in italiano, minuscoli, una parola o snake_case, senza # e senza inglese. Se un tema ti verrebbe in inglese, traducilo in italiano. "
                 "Descrivi gli EVENTI: non copiare il testo dei messaggi. "
@@ -664,6 +642,7 @@ class SummaryService:
                 "Se i dati sono pochi, restituisci comunque fino a moments_target_count elementi (mai meno del necessario). "
                 "Distribuisci moments/quotes/dynamics su tutto l'intervallo temporale (inizio, metà, fine). "
                 "Per i moments usa bullet descrittivi di 1-2 frasi quando possibile, evitando formule troppo brevi. "
+                "Tieni quotes/dynamics/degrade_list/invigorate_list/advice concisi e restituisci array vuoti quando il valore aggiunto è scarso: il renderer completa localmente i campi standard. "
                 "dynamics devono essere descrizioni astratte e comportamentali, senza copiare testo o riportare orari. "
                 "Struttura JSON: themes[], moments[], quotes[], dynamics[], degrade_list[], invigorate_list[], advice[]. "
                 "moments: oggetti con 'ts','summary_text','primary_ref','refs'. "
@@ -685,73 +664,41 @@ class SummaryService:
                 "nessun nome inventato, una frase per riga (max 160 caratteri), italiano corretto e neutro. "
                 "Aggiungi opzionalmente `proverbio` (una riga)."
             )
-        user_payload = json.dumps(
-            {
-                "tier": tier,
-                "include_names": include_names,
-                "moments_target_count": moments_target,
-                "quotes_target_count": quotes_target,
-                "dynamics_target_count": dynamics_target,
-                "metrics": barcello_metrics,
-                "granularity_hint": _granularity_prompt_hint(granularity_hint),
-                "summary_context": summary_context or {},
-                "messages": snippet,
-            },
-            ensure_ascii=False,
-        )
+        payload_dict = {
+            "tier": tier,
+            "moments_target_count": moments_target,
+            "quotes_target_count": quotes_target,
+            "dynamics_target_count": dynamics_target,
+            "metrics": _build_summary_prompt_metrics(barcello_metrics),
+            "granularity_hint": _granularity_prompt_hint(granularity_hint),
+            "summary_context": _build_summary_prompt_context(summary_context),
+            "messages": compact_messages,
+        }
+        if include_names:
+            payload_dict["include_names"] = True
+        user_payload = json.dumps(payload_dict, ensure_ascii=False, separators=(",", ":"))
         if self._ai_service is None:
             return None
+        prompt_chars_before = compact_stats["raw_payload_chars"] + len(system_prompt)
+        prompt_chars_after = len(user_payload) + len(system_prompt)
         logger.info(
-            "summary: provider=%s schema=%s sampled_messages=%s buckets=%s",
+            "summary: provider=%s schema=%s sampled_messages=%s buckets=%s ai_calls_before=%s ai_calls_after=%s prompt_chars_before=%s prompt_chars_after=%s prompt_items_before=%s prompt_items_after=%s removed_metadata=%s used_local_render_fields=%s local_period_description=%s",
             provider or "unknown",
             schema_mode,
             len(sampled_messages),
             sample_buckets,
+            2,
+            1,
+            prompt_chars_before,
+            prompt_chars_after,
+            compact_stats["items_before"],
+            compact_stats["items_after"],
+            str(compact_stats["removed_metadata"]).lower(),
+            "true",
+            "true" if summary_mode == "default" else "false",
         )
         text = await self._ai_service.ask_for_task("summary", user_payload, system_prompt)
         return _parse_json_safe(text)
-
-    async def _call_ai_period_description(
-        self,
-        *,
-        period_prefix: str,
-        score: int,
-        color: str,
-        metrics: dict[str, Any],
-        trend: dict[str, Any] | None,
-    ) -> str:
-        emoji_map = {"verde": "🙂", "giallo": "😐", "rosso": "😟", "nero": "😨"}
-        color_label = (color or "nero").lower()
-        emoji = emoji_map.get(color_label, "😨")
-        compact_metrics = {
-            "msg_per_min": metrics.get("msg_per_min"),
-            "reply_war": metrics.get("reply_war"),
-            "top1_author_share": metrics.get("top1_author_share"),
-            "negativity_hits": metrics.get("negativity_hits"),
-            "mentions_per_msg": metrics.get("mentions_per_msg"),
-            "burst_ratio": metrics.get("burst_ratio"),
-        }
-        system_prompt = (
-            "Scrivi in italiano. Restituisci una sola frase (max 120 caratteri), senza elenco puntato. "
-            "Non copiare testo da messaggi. "
-            "Inizia con il prefisso fornito e continua con 'il barcello è stato ...'. "
-            "Inserisci una sola emoji coerente con il colore fornito."
-        )
-        user_payload = json.dumps(
-            {
-                "period_prefix": period_prefix,
-                "score": score,
-                "color": color_label,
-                "emoji": emoji,
-                "trend": trend,
-                "metrics": compact_metrics,
-            },
-            ensure_ascii=False,
-        )
-        if self._ai_service is None:
-            return ""
-        text = await self._ai_service.ask_for_task("summary", user_payload, system_prompt)
-        return text or ""
 
     def _merge_ai_summary(
         self,
@@ -2241,6 +2188,105 @@ def _granularity_prompt_hint(granularity_hint: str | None) -> str | None:
     return mapping.get(granularity_hint, granularity_hint)
 
 
+def _build_summary_prompt_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(metrics, dict):
+        return {}
+    selected_keys = (
+        "message_count",
+        "window_minutes",
+        "msg_per_min",
+        "negativity_hits",
+        "reply_war",
+        "top1_author_share",
+        "top3_author_share",
+        "burst_ratio",
+        "mentions_per_msg",
+        "voice_minutes",
+        "voice_sessions",
+        "voice_segments",
+    )
+    compact: dict[str, Any] = {}
+    for key in selected_keys:
+        value = metrics.get(key)
+        if value is None or value == "":
+            continue
+        compact[key] = value
+    return compact
+
+
+def _build_summary_prompt_context(summary_context: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(summary_context, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    for key in ("period_label", "nonce", "who_interacted_candidates"):
+        value = summary_context.get(key)
+        if value in (None, "", [], {}):
+            continue
+        compact[key] = value
+    return compact
+
+
+def _build_summary_prompt_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    compact_rows: list[dict[str, Any]] = []
+    seen_fingerprints: set[tuple[str, str, str]] = set()
+    removed_duplicates = 0
+    removed_metadata = False
+    raw_payload_chars = 0
+    for message in messages:
+        meta = message.get("meta") or {}
+        text = _compact_summary_prompt_text(message.get("content"))
+        if not text:
+            continue
+        author_id = str(message.get("author_id") or "")
+        kind = str(meta.get("kind") or "")
+        fingerprint = (
+            author_id,
+            kind,
+            _duplicate_message_fingerprint(text),
+        )
+        if fingerprint in seen_fingerprints:
+            removed_duplicates += 1
+            continue
+        seen_fingerprints.add(fingerprint)
+        row = {
+            "i": str(message.get("message_id") or ""),
+            "t": message.get("ts"),
+            "a": author_id,
+            "x": text,
+        }
+        if kind:
+            row["k"] = kind
+            removed_metadata = True
+        if meta.get("in_call"):
+            row["vc"] = 1
+            removed_metadata = True
+        compact_rows.append(row)
+        raw_payload_chars += len(json.dumps(message, ensure_ascii=False))
+    return compact_rows, {
+        "items_before": len(messages),
+        "items_after": len(compact_rows),
+        "removed_duplicates": removed_duplicates,
+        "removed_metadata": removed_metadata or (removed_duplicates > 0),
+        "raw_payload_chars": raw_payload_chars,
+    }
+
+
+def _compact_summary_prompt_text(text: Any) -> str:
+    cleaned = " ".join(str(text or "").split())
+    if not cleaned:
+        return ""
+    if len(cleaned) <= SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT:
+        return cleaned
+    return _compact_text_word_boundary(cleaned, SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT)
+
+
+def _duplicate_message_fingerprint(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(text or "").strip().lower())
+    if len(normalized) > SUMMARY_PROMPT_DUPLICATE_FINGERPRINT_LIMIT:
+        normalized = normalized[:SUMMARY_PROMPT_DUPLICATE_FINGERPRINT_LIMIT]
+    return normalized
+
+
 def _compact_text_word_boundary(text: str, limit: int) -> str:
     cleaned = " ".join((text or "").split())
     if len(cleaned) <= limit:
@@ -2269,3 +2315,15 @@ def cast_items(items: Iterable[Any], target: type) -> list[Any]:
         if isinstance(item, target):
             output.append(item)
     return output
+
+
+def _local_period_description(period_prefix: str, color: str) -> str:
+    color_label = str(color or "nero").strip().lower()
+    mapping = {
+        "verde": ("sano", "🙂"),
+        "giallo": ("delicato", "😐"),
+        "rosso": ("teso", "😟"),
+        "nero": ("critico", "😨"),
+    }
+    adjective, emoji = mapping.get(color_label, ("critico", "😨"))
+    return f"{period_prefix} il barcello è stato {adjective} {emoji}."

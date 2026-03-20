@@ -9,6 +9,12 @@ def test_riassunto_footer_logic_uses_used_ai_output_fields() -> None:
     assert 'return contributors, (not used_ai_output)' in source
 
 
+def test_riassunto_status_embed_keeps_standard_footer_and_single_pipeline_logging() -> None:
+    source = Path("app/plugins/commands_modular/riassunto.py").read_text()
+    assert 'attach_footer_meta(status_embed, service_name="riassunto", used_local_processing=True)' in source
+    assert '"riassunto: ai_calls_before=2 ai_calls_after=1 local_period_description=true used_local_render_fields=true"' in source
+
+
 def test_channel_summary_footer_logic_uses_used_ai_output_fields() -> None:
     source = Path("app/services/channel_summary_service.py").read_text()
     assert 'used_ai_output = bool(ai_status.get("used_ai_output"))' in source
