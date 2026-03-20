@@ -18,7 +18,7 @@ def test_editorial_commands_are_not_direct_children_of_campagne() -> None:
         '@campagne_group.command(name="news"',
         '@campagne_group.command(name="weather"',
         '@campagne_group.command(name="horoscope"',
-        '@campagne_group.command(name="config_set"',
+        '@campagne_group.command(name="schedule_add"',
         '@campagne_group.command(name="run"',
     ]
     for pattern in forbidden:
@@ -31,10 +31,14 @@ def test_existing_campagne_commands_and_prompt_group_are_kept() -> None:
 
     for cmd in ["on", "off", "status"]:
         assert f'@campagne_group.command(name="{cmd}"' in messaggi_source
-    for cmd in ["on", "off", "status", "entry_add", "entry_list", "entry_show", "entry_remove", "entry_run", "entry_edit"]:
+    for cmd in ["on", "off", "status", "schedule_add", "schedule_list", "schedule_show", "schedule_remove", "run", "schedule_edit"]:
         assert f'@custom_group.command(name="{cmd}"' in messaggi_source
 
     assert 'add_group_once(campagne_group, prompt_group, logger)' in triggers_source
+
+    for group_name in ["news", "weather", "horoscope"]:
+        for cmd in ["on", "off", "status", "schedule_add", "schedule_edit", "schedule_remove", "schedule_show", "schedule_list", "run"]:
+            assert f'@{group_name}_group.command(name="{cmd}"' in messaggi_source
 
 
 def test_hardening_for_group_registration_is_present() -> None:
@@ -60,5 +64,6 @@ def test_prompt_create_slash_exposes_publish_at_every() -> None:
 
     assert 'publish_at="First publication time (DD/MM/YYYY HH:MM)"' in source
     assert 'every="Repeat interval in minutes"' in source
+    assert 'prompt_text="Prompt text"' in source
     assert 'time_local: str | None = None' not in source
     assert 'interval_minutes: int | None = None' not in source

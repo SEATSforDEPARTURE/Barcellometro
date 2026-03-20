@@ -18,4 +18,4 @@ def test_command_validator_tracks_expected_exceptions() -> None:
 
     assert "domanda" in result.exceptions
     assert "riassunto.oggi" in result.exceptions
-    assert any(command.path == "campagne.prompt.entry_add" for command in result.commands)
+    assert any(command.path == "campagne.prompt.schedule_add" for command in result.commands)
