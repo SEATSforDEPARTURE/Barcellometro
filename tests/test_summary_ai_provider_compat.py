@@ -42,13 +42,25 @@ class _Db:
 
 
 class _Ai:
-    def __init__(self, model_cfg: str, output: str) -> None:
+    def __init__(self, model_cfg: str, output: str, *, fallback_model_cfg: str | None = None, runtime_model_cfg: str | None = None) -> None:
         self._model_cfg = model_cfg
+        self._fallback_model_cfg = fallback_model_cfg
+        self._runtime_model_cfg = runtime_model_cfg or model_cfg
         self.ask_for_task = AsyncMock(return_value=output)
 
     def get_model(self, task: str):
         if task == "summary":
             return self._model_cfg
+        return None
+
+    def get_fallback_model(self, task: str):
+        if task == "summary":
+            return self._fallback_model_cfg
+        return None
+
+    def get_runtime_model(self, task: str):
+        if task == "summary":
+            return self._runtime_model_cfg
         return None
 
     def client(self):
@@ -58,8 +70,10 @@ class _Ai:
 
 
 class _AiRaises(_Ai):
-    def __init__(self, model_cfg: str, exc: Exception) -> None:
+    def __init__(self, model_cfg: str, exc: Exception, *, fallback_model_cfg: str | None = None, runtime_model_cfg: str | None = None) -> None:
         self._model_cfg = model_cfg
+        self._fallback_model_cfg = fallback_model_cfg
+        self._runtime_model_cfg = runtime_model_cfg or model_cfg
         self.ask_for_task = AsyncMock(side_effect=exc)
 
 
@@ -485,5 +499,213 @@ def test_build_summary_ai_payload_with_refs_survives_row_post_sanitize() -> None
         assert result.ai_status["reason"] == "ok"
         assert result.ai_status["used_ai_output"] is True
         assert result.moments and result.moments[0].ts == "2026-01-01T10:00:00+00:00"
+
+    asyncio.run(_run())
+
+
+def test_summary_accepts_json_inside_code_fence_from_ollama() -> None:
+    async def _run() -> None:
+        ai_payload = """```json
+{
+  "themes": ["test"],
+  "moments": [{"ts": "2026-01-01T10:00:00+00:00", "summary_text": "momento", "primary_ref": "12345678901234567", "refs": []}],
+  "advice": []
+}
+```"""
+        db = _Db()
+        db._rows["12345678901234567"] = _Row({"ts": "2026-01-01T10:00:00+00:00", "author_id": "u1", "content": "ciao"})
+        svc = SummaryService(database=db, ai_service=_Ai("ollama:llama3.2:3b", ai_payload))
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=[{"ts": "2026-01-01T10:00:00+00:00", "author_id": "u1", "content": "ciao", "meta": {}, "message_id": "12345678901234567"}],
+        )
+        assert result.ai_status["used_ai_output"] is True
+        assert result.ai_status["used_model"] == "ollama:llama3.2:3b"
+
+    asyncio.run(_run())
+
+
+def test_summary_extracts_json_when_model_wraps_text_around_it() -> None:
+    async def _run() -> None:
+        ai_payload = """Risultato finale:
+{"themes":["test"],"moments":[{"ts":"2026-01-01T10:00:00+00:00","summary_text":"momento","primary_ref":"12345678901234567","refs":[]}],"advice":[]}
+Grazie"""
+        db = _Db()
+        db._rows["12345678901234567"] = _Row({"ts": "2026-01-01T10:00:00+00:00", "author_id": "u1", "content": "ciao"})
+        svc = SummaryService(database=db, ai_service=_Ai("ollama:llama3.2:3b", ai_payload))
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=[{"ts": "2026-01-01T10:00:00+00:00", "author_id": "u1", "content": "ciao", "meta": {}, "message_id": "12345678901234567"}],
+        )
+        assert result.ai_status["used_ai_output"] is True
+        assert result.moments and result.moments[0].text == "momento"
+
+    asyncio.run(_run())
+
+
+def test_summary_uses_compact_schema_for_fallback_model() -> None:
+    async def _run() -> None:
+        ai = _Ai(
+            "openai:gpt-4o-mini",
+            '{"themes":[],"moments":[],"advice":[]}',
+            fallback_model_cfg="ollama:llama3.2:3b",
+            runtime_model_cfg="ollama:llama3.2:3b",
+        )
+        svc = SummaryService(database=_Db(), ai_service=ai)
+        await svc._call_ai(
+            messages=_minimal_messages(),
+            include_names=False,
+            tier="role1",
+            barcello_metrics={},
+            config=DEFAULT_SUMMARY_CONFIG,
+        )
+        kwargs = ai.ask_for_task.await_args.kwargs
+        assert kwargs["fallback_persona_system"] is not None
+        assert "Struttura JSON minima richiesta" in kwargs["fallback_persona_system"]
+
+    asyncio.run(_run())
+
+
+def test_summary_compact_schema_is_transformed_to_standard_render_output() -> None:
+    async def _run() -> None:
+        ai_payload = json.dumps({
+            "themes": ["test"],
+            "moments": [{"ts": "2026-01-01T10:00:00+00:00", "summary_text": "momento ai", "refs": []}],
+            "advice": ["tenete il tono costruttivo"],
+        })
+        svc = SummaryService(database=_Db(), ai_service=_Ai("ollama:llama3.2:3b", ai_payload))
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role2",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=_minimal_messages(),
+        )
+        assert result.ai_status["used_ai_output"] is True
+        assert result.moments
+        assert result.quotes == []
+        assert result.advice == ["tenete il tono costruttivo"]
+
+    asyncio.run(_run())
+
+
+def test_riassunto_single_ai_call_still_preserved() -> None:
+    async def _run() -> None:
+        ai_payload = json.dumps({"themes": ["x"], "moments": [], "advice": []})
+        ai = _Ai("ollama:llama3.2:3b", ai_payload)
+        svc = SummaryService(database=_Db(), ai_service=ai)
+        await svc.build_period_description(
+            tier="role1",
+            period_prefix="Oggi",
+            score=70,
+            color="verde",
+            metrics={},
+            trend=None,
+            ai_allowed=True,
+            config=DEFAULT_SUMMARY_CONFIG,
+        )
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=_minimal_messages(),
+        )
+        assert result.ai_status["used_ai_output"] is True
+        ai.ask_for_task.assert_awaited_once()
+
+    asyncio.run(_run())
+
+
+def test_riassunto_fallback_ollama_output_is_used_when_valid() -> None:
+    async def _run() -> None:
+        ai = _Ai(
+            "openai:gpt-4o-mini",
+            '{"themes":["x"],"moments":[{"ts":"2026-01-01T10:00:00+00:00","summary_text":"momento fallback","refs":[]}],"advice":[]}',
+            fallback_model_cfg="ollama:llama3.2:3b",
+            runtime_model_cfg="ollama:llama3.2:3b",
+        )
+        svc = SummaryService(database=_Db(), ai_service=ai)
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=_minimal_messages(),
+        )
+        assert result.ai_status["used_ai_output"] is True
+        assert result.ai_status["used_model"] == "ollama:llama3.2:3b"
+        assert result.ai_status["fallback"] is True
+
+    asyncio.run(_run())
+
+
+def test_invalid_json_still_falls_back_safely_if_unrecoverable() -> None:
+    async def _run() -> None:
+        svc = SummaryService(database=_Db(), ai_service=_Ai("ollama:llama3.2:3b", "non json {oops"))
+        result = await svc.build_summary(
+            guild_id="g",
+            channel_id="c",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts="2026-01-01T23:59:59+00:00",
+            tier="role1",
+            include_names=False,
+            ai_allowed=True,
+            evidence_mode=False,
+            voice_context=False,
+            config=DEFAULT_SUMMARY_CONFIG,
+            barcello_metrics={},
+            max_message_ts="2026-01-01T10:00:00+00:00",
+            messages=_minimal_messages(),
+        )
+        assert result.ai_status["used_ai_output"] is False
+        assert result.ai_status["reason"] == "invalid_json"
+        assert result.moments
 
     asyncio.run(_run())
