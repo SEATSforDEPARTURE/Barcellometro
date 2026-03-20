@@ -7,6 +7,7 @@ import discord
 
 from app.services.footer import attach_footer_meta
 
+from app.renderers.channel_summary import _as_hashtag
 from app.services.content_summary_service import SummaryImpact, SummaryItem, SummaryQuote, SummaryResult
 from app.shared.discord.embed_limits import (
     MAX_EMBED_CHARS,
@@ -82,13 +83,15 @@ def build_summary_detail_embeds(
     footer_contributors: list[str] | None = None,
     footer_used_local_processing: bool = True,
     dm_mode: bool = False,
+    moment_barcello: dict[int, Any] | None = None,
 ) -> list[discord.Embed]:
     sections_map: dict[str, list[tuple[str, str, int]]] = {}
     has_privacy_gaps = bool(privacy_intervals)
     privacy_notice_line = "🔒 Alcuni contenuti sono stati omessi per privacy."
     privacy_empty_line = "🔒 Contenuto omesso per privacy."
 
-    themes_value = ", ".join(summary.themes) if summary.themes else "Nessun tema rilevato."
+    themes = [_as_hashtag(theme) for theme in summary.themes if str(theme or "").strip()]
+    themes_value = ", ".join(themes) if themes else "Nessun tema rilevato."
     sections_map["themes"] = [("🏷️ TEMI", themes_value, 1)]
 
     moment_lines = [
@@ -101,6 +104,7 @@ def build_summary_detail_embeds(
             link_limit=1,
             primary_id=moment_primary.get(id(moment)),
             include_date=include_date_in_time,
+            barcello_status=(moment_barcello or {}).get(id(moment)),
         )
         for moment in summary.moments
     ]

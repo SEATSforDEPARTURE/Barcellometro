@@ -2,6 +2,7 @@ import asyncio
 import sys
 import types
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import discord
 
@@ -9,14 +10,18 @@ if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Connection=object)
 
 from app.plugins.commands_modular.riassunto import _build_period_prefix, _summary_footer_inputs
+from app.renderers.channel_summary import _barcello_emoji_from_color, _bold_known_names
 from app.renderers.detail_embeds import build_summary_detail_embeds
+from app.services.barcello_service import BarcelloResult
 from app.services.content_summary_service import (
+    SummaryItem,
     SummaryResult,
     _build_summary_prompt_payload,
     _estimate_summary_prompt_tokens,
     _summary_prompt_budget,
 )
 from app.services.footer import FooterService, attach_footer_meta_to_all
+from app.shared.discord.delivery import send_dm_or_followup
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.shared.discord.report_embeds import apply_standard_report_style
 
@@ -59,6 +64,54 @@ def _dummy_summary() -> SummaryResult:
     )
 
 
+def _format_runtime_moment_line(**kwargs) -> str:
+    moment = kwargs["moment"]
+    display_name = kwargs.get("display_name")
+    include_names = kwargs.get("include_names", False)
+    text = str(moment.text or "").strip() or "(nessun dettaglio)"
+    clean_names: list[str] = []
+    if include_names and display_name and display_name.lower() not in {"un utente", "utente", "unknown"}:
+        clean_names.append(display_name)
+    if clean_names:
+        text = _bold_known_names(text, clean_names)
+    barcello_status = kwargs.get("barcello_status")
+    emoji = _barcello_emoji_from_color(getattr(barcello_status, "color", None))
+    score = getattr(barcello_status, "score", None)
+    safe_score = int(score) if isinstance(score, int) or str(score).isdigit() else "--"
+    return f"**19/03 06:28** {emoji} **{safe_score}** — {text}"
+
+
+def _format_runtime_quote_line(**kwargs) -> str:
+    quote = kwargs["quote"]
+    display_name = kwargs.get("display_name")
+    text = str(kwargs.get("text_override") or quote.text or "").strip()
+    if display_name and display_name.lower() not in {"un utente", "utente", "unknown"}:
+        text = _bold_known_names(text, [display_name])
+        return f"**19/03 06:28** — “{text}” — **{display_name}**"
+    return f"**19/03 06:28** — “{text}”"
+
+
+def _format_runtime_dynamic_line(**kwargs) -> str:
+    dynamic = kwargs["dynamic"]
+    display_names = [name for name in kwargs.get("display_names", []) if str(name or "").strip()]
+    text = str(dynamic.text or "").strip() or "(nessun dettaglio)"
+    if display_names:
+        text = _bold_known_names(text, display_names)
+        suffix = f" — Coinvolti: {', '.join([f'**{name}**' for name in display_names])}"
+    else:
+        suffix = ""
+    return f"**19/03 06:28** — {text}{suffix}"
+
+
+def _format_runtime_impact_line(**kwargs) -> str:
+    display_name = kwargs.get("display_name")
+    impact = kwargs["impact"]
+    prefix = kwargs.get("prefix", "🔥")
+    if display_name:
+        return f"**19/03 06:28** — {prefix} **{display_name}** — {impact.reason}"
+    return f"**19/03 06:28** — {prefix} {impact.reason}"
+
+
 def _build_detail_embeds(*, contributors: list[str], used_local_processing: bool, groups: int = 1) -> list[discord.Embed]:
     extra_sections = [(f"📎 EXTRA {idx}", f"Dettaglio {idx}", idx + 1) for idx in range(groups - 1)]
     return build_summary_detail_embeds(
@@ -85,14 +138,68 @@ def _build_detail_embeds(*, contributors: list[str], used_local_processing: bool
         tier_config={"sections": ["themes", "extra"]},
         details_color=0x5865F2,
         req_id="req",
-        format_moment_line=lambda **_: "",
-        format_quote_line=lambda **_: "",
-        format_dynamic_line=lambda **_: "",
-        format_impact_line=lambda **_: "",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=_format_runtime_dynamic_line,
+        format_impact_line=_format_runtime_impact_line,
         format_bullets=lambda lines: "\n".join(lines),
         footer_contributors=contributors,
         footer_used_local_processing=used_local_processing,
         dm_mode=False,
+        moment_barcello={},
+    )
+
+
+def _build_runtime_payload_embeds(*, contributors: list[str], used_local_processing: bool, groups: int = 1) -> list[discord.Embed]:
+    embeds = [
+        discord.Embed(title="🗒️ RIASSUNTO"),
+        *_build_detail_embeds(
+            contributors=contributors,
+            used_local_processing=used_local_processing,
+            groups=groups,
+        ),
+    ]
+    styled = apply_standard_report_style(embeds, service_name="riassunto", cover_title="🗒️ RIASSUNTO")
+    attach_footer_meta_to_all(
+        styled,
+        service_name="riassunto",
+        contributors=contributors,
+        used_local_processing=used_local_processing,
+    )
+    return styled
+
+
+class _DummyResp:
+    status = 403
+    reason = "Forbidden"
+    text = "closed"
+
+
+class _CapturingFollowup:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def send(self, **kwargs):
+        self.calls.append(kwargs)
+        return None
+
+
+class _CapturingUser:
+    def __init__(self, *, forbidden: bool = False) -> None:
+        self.forbidden = forbidden
+        self.calls: list[dict[str, object]] = []
+
+    async def send(self, **kwargs):
+        if self.forbidden:
+            raise discord.Forbidden(response=_DummyResp(), message="closed")
+        self.calls.append(kwargs)
+        return None
+
+
+def _build_interaction(*, forbidden_dm: bool = False):
+    return SimpleNamespace(
+        user=_CapturingUser(forbidden=forbidden_dm),
+        followup=_CapturingFollowup(),
     )
 
 
@@ -230,6 +337,54 @@ def test_riassunto_footer_includes_used_display_model_even_when_not_dm_mode() ->
     asyncio.run(_run())
 
 
+def test_riassunto_footer_includes_used_display_model_on_runtime_send_path() -> None:
+    async def _run() -> None:
+        contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": True, "used_display_model": "gpt-4o"})
+        interaction = _build_interaction()
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        sent_dm = await send_dm_or_followup(
+            interaction,
+            embeds=_build_runtime_payload_embeds(contributors=contributors, used_local_processing=used_local_processing),
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+
+        assert sent_dm is True
+        assert len(interaction.user.calls) == 1
+        sent_embeds = interaction.user.calls[0]["embeds"]
+        assert sent_embeds
+        assert all("Dati elaborati con gpt-4o" in (embed.footer.text or "") for embed in sent_embeds)
+
+    asyncio.run(_run())
+
+
+def test_riassunto_footer_includes_used_display_model_on_followup_fallback_path() -> None:
+    async def _run() -> None:
+        contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": True, "used_display_model": "gpt-4o"})
+        interaction = _build_interaction(forbidden_dm=True)
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        sent_dm = await send_dm_or_followup(
+            interaction,
+            embeds=_build_runtime_payload_embeds(contributors=contributors, used_local_processing=used_local_processing),
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+
+        assert sent_dm is False
+        assert interaction.followup.calls
+        followup_embeds = interaction.followup.calls[0]["embeds"]
+        assert followup_embeds
+        assert all("Dati elaborati con gpt-4o" in (embed.footer.text or "") for embed in followup_embeds)
+
+    asyncio.run(_run())
+
+
 def test_riassunto_footer_stays_local_when_ai_output_not_used() -> None:
     async def _run() -> None:
         contributors, used_local_processing = _summary_footer_inputs(
@@ -249,6 +404,27 @@ def test_riassunto_footer_stays_local_when_ai_output_not_used() -> None:
         await finalize_embeds(styled, service, default_service_name="riassunto")
 
         assert all("Dati elaborati con" not in (embed.footer.text or "") for embed in styled)
+
+    asyncio.run(_run())
+
+
+def test_riassunto_footer_stays_local_when_ai_output_not_used_runtime_path() -> None:
+    async def _run() -> None:
+        contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": False, "used_display_model": "gpt-4o"})
+        interaction = _build_interaction()
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        await send_dm_or_followup(
+            interaction,
+            embeds=_build_runtime_payload_embeds(contributors=contributors, used_local_processing=used_local_processing),
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+
+        sent_embeds = interaction.user.calls[0]["embeds"]
+        assert all("Dati elaborati con" not in (embed.footer.text or "") for embed in sent_embeds)
 
     asyncio.run(_run())
 
@@ -277,3 +453,128 @@ def test_riassunto_multipage_embeds_keep_same_ai_footer_on_all_pages() -> None:
         assert footers[0] == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o-mini"
 
     asyncio.run(_run())
+
+
+def test_riassunto_multipage_footer_remains_consistent_after_send_pipeline() -> None:
+    async def _run() -> None:
+        contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": True, "used_display_model": "gpt-4o-mini"})
+        interaction = _build_interaction()
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        await send_dm_or_followup(
+            interaction,
+            embeds=_build_runtime_payload_embeds(contributors=contributors, used_local_processing=used_local_processing, groups=4),
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+
+        sent_embeds = interaction.user.calls[0]["embeds"]
+        footers = [embed.footer.text for embed in sent_embeds]
+        assert len(sent_embeds) >= 4
+        assert len(set(footers)) == 1
+        assert footers[0] == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o-mini"
+
+    asyncio.run(_run())
+
+
+def test_riassunto_moments_include_barcello_dot_and_bold_score() -> None:
+    summary = SummaryResult(
+        themes=[],
+        moments=[SummaryItem(ts="2026-03-19T05:28:00+00:00", text="Mario chiude il task", author_id="u1")],
+        quotes=[],
+        dynamics=[],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    embeds = build_summary_detail_embeds(
+        profile="role1",
+        summary=summary,
+        include_names=True,
+        include_date_in_time=True,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary={id(summary.moments[0]): "111"},
+        quote_primary={},
+        dynamic_primary={},
+        impact_primary={},
+        moment_display={id(summary.moments[0]): "Mario"},
+        quote_display={},
+        dynamic_names={},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="PLUS",
+        tier_config={"sections": ["themes", "moments"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=_format_runtime_dynamic_line,
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={id(summary.moments[0]): BarcelloResult(score=64, color="verde")},
+    )
+    value = embeds[0].fields[1].value
+    assert "🟢" in value
+    assert "**64**" in value
+
+
+def test_riassunto_themes_are_rendered_as_hashtags() -> None:
+    embeds = _build_detail_embeds(contributors=[], used_local_processing=True)
+    assert embeds[0].fields[0].value == "#salute, #community"
+
+
+def test_riassunto_bolds_known_names_in_moments_or_dynamics() -> None:
+    summary = SummaryResult(
+        themes=[],
+        moments=[SummaryItem(ts=None, text="Mario ha risolto il blocco", author_id="u1")],
+        quotes=[],
+        dynamics=[SummaryItem(ts=None, text="Mario e Luca hanno coordinato il rilascio", author_id="u1")],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    embeds = build_summary_detail_embeds(
+        profile="role3",
+        summary=summary,
+        include_names=True,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary={},
+        quote_primary={},
+        dynamic_primary={},
+        impact_primary={},
+        moment_display={id(summary.moments[0]): "Mario"},
+        quote_display={},
+        dynamic_names={id(summary.dynamics[0]): ["Mario", "Luca"]},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="PRO MAX",
+        tier_config={"sections": ["themes", "moments", "dynamics"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=_format_runtime_dynamic_line,
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={id(summary.moments[0]): BarcelloResult(score=64, color="verde")},
+    )
+    rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
+    assert "**Mario**" in rendered
+    assert "**Luca**" in rendered

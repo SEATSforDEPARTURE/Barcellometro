@@ -6,7 +6,7 @@ from typing import Iterable
 import discord
 
 from app.shared.discord.embed_limits import RETRY_MAX_EMBED_CHARS, normalize_embeds_for_discord
-from app.services.footer import FooterService
+from app.services.footer import FooterService, get_footer_meta
 from app.shared.discord.footer_pipeline import finalize_embeds
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,20 @@ def _build_send_kwargs(
     return kwargs
 
 
+async def _prepare_embeds_for_send(
+    embeds: list[discord.Embed],
+    *,
+    footer_service: FooterService | None,
+    default_service_name: str,
+) -> list[discord.Embed]:
+    if footer_service is None or not embeds:
+        return embeds
+    needs_finalize = any(get_footer_meta(embed) is not None or not getattr(embed.footer, "text", None) for embed in embeds)
+    if not needs_finalize:
+        return embeds
+    return await finalize_embeds(embeds, footer_service, default_service_name=default_service_name)
+
+
 async def safe_followup_send(
     interaction: discord.Interaction,
     *,
@@ -46,8 +60,11 @@ async def safe_followup_send(
     default_service_name: str = "unknown",
 ) -> None:
     embed_list = list(embeds) if embeds is not None else []
-    if footer_service is not None and embed_list:
-        embed_list = await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
+    embed_list = await _prepare_embeds_for_send(
+        embed_list,
+        footer_service=footer_service,
+        default_service_name=default_service_name,
+    )
     try:
         await interaction.followup.send(
             **_build_send_kwargs(
@@ -64,6 +81,16 @@ async def safe_followup_send(
             detail_embeds = normalize_embeds_for_discord(
                 embed_list[1:],
                 max_chars=RETRY_MAX_EMBED_CHARS,
+            )
+            status_embeds = await _prepare_embeds_for_send(
+                status_embeds,
+                footer_service=footer_service,
+                default_service_name=default_service_name,
+            )
+            detail_embeds = await _prepare_embeds_for_send(
+                detail_embeds,
+                footer_service=footer_service,
+                default_service_name=default_service_name,
             )
             await interaction.followup.send(
                 **_build_send_kwargs(
@@ -90,8 +117,11 @@ async def send_dm_or_followup(
     default_service_name: str = "unknown",
 ) -> bool:
     embed_list = list(embeds) if embeds is not None else []
-    if footer_service is not None and embed_list:
-        embed_list = await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
+    embed_list = await _prepare_embeds_for_send(
+        embed_list,
+        footer_service=footer_service,
+        default_service_name=default_service_name,
+    )
     try:
         if embed_list or files:
             await interaction.user.send(embeds=embed_list if embed_list else None, files=files)
@@ -105,6 +135,8 @@ async def send_dm_or_followup(
             embeds=embed_list if embed_list else None,
             files=files,
             ephemeral=ephemeral_fallback,
+            footer_service=footer_service,
+            default_service_name=default_service_name,
         )
         return False
     except discord.HTTPException as exc:
@@ -114,6 +146,16 @@ async def send_dm_or_followup(
             detail_embeds = normalize_embeds_for_discord(
                 embed_list[1:],
                 max_chars=RETRY_MAX_EMBED_CHARS,
+            )
+            status_embeds = await _prepare_embeds_for_send(
+                status_embeds,
+                footer_service=footer_service,
+                default_service_name=default_service_name,
+            )
+            detail_embeds = await _prepare_embeds_for_send(
+                detail_embeds,
+                footer_service=footer_service,
+                default_service_name=default_service_name,
             )
             try:
                 await interaction.user.send(embeds=status_embeds if status_embeds else None, files=files)
@@ -127,6 +169,8 @@ async def send_dm_or_followup(
                     embeds=embed_list,
                     files=files,
                     ephemeral=ephemeral_fallback,
+                    footer_service=footer_service,
+                    default_service_name=default_service_name,
                 )
                 return False
         await safe_followup_send(
@@ -135,5 +179,7 @@ async def send_dm_or_followup(
             embeds=embed_list,
             files=files,
             ephemeral=ephemeral_fallback,
+            footer_service=footer_service,
+            default_service_name=default_service_name,
         )
         return False

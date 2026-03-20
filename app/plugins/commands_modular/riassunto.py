@@ -36,7 +36,9 @@ from app.plugins.commands_modular.time_windows import (
 )
 from app.shared.discord.command_embeds import send_standard_response
 from app.shared.discord.report_embeds import apply_standard_report_style
+from app.renderers.channel_summary import MessageMeta, _barcello_emoji_from_color, _bold_known_names
 from app.renderers.detail_embeds import build_summary_detail_embeds
+from app.services.channel_summary_service import compute_moment_barcello_map
 
 logger = logging.getLogger(__name__)
 
@@ -641,13 +643,16 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         link_limit: int,
         primary_id: str | None,
         include_date: bool = False,
+        barcello_status: Any | None = None,
     ) -> str:
-        text = moment.text
+        text = str(moment.text or "").strip() or "(nessun dettaglio)"
+        clean_names: list[str] = []
         if include_names:
             name = display_name
             if name and name.lower() in {"un utente", "utente", "unknown"}:
                 name = None
             if name:
+                clean_names.append(name)
                 placeholders = {"un utente", "una persona", "un membro", "qualcuno", "una persona"}
                 lowered = text.lower()
                 if any(token in lowered for token in placeholders):
@@ -655,6 +660,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                         if token in lowered:
                             text = re.sub(re.escape(token), name, text, count=1, flags=re.IGNORECASE)
                             break
+        if clean_names:
+            text = _bold_known_names(text, clean_names)
         time_link = _format_summary_time_link(
             moment.ts,
             primary_id,
@@ -663,7 +670,10 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             in_call=moment.in_call,
             include_date=include_date,
         )
-        return f"{time_link} — {text}"
+        emoji = _barcello_emoji_from_color(getattr(barcello_status, "color", None))
+        score = getattr(barcello_status, "score", None)
+        safe_score = int(score) if isinstance(score, int) or str(score).isdigit() else "--"
+        return f"{time_link} {emoji} **{safe_score}** — {text}"
 
     def _format_summary_quote_line(
         *,
@@ -679,6 +689,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         if display_name and display_name.lower() in {"un utente", "utente", "unknown"}:
             display_name = None
         speaker = display_name or ""
+        if speaker:
+            text = _bold_known_names(text, [speaker])
         time_link = _format_summary_time_link(
             quote.ts,
             primary_id,
@@ -689,7 +701,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         )
         line = f"{time_link} — “{text}”"
         if speaker:
-            line += f" — {speaker}"
+            line += f" — **{speaker}**"
         return line
 
     def _format_summary_dynamics_line(
@@ -702,14 +714,15 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         display_names: list[str],
         include_date: bool = False,
     ) -> str:
-        text = dynamic.text
+        text = str(dynamic.text or "").strip() or "(nessun dettaglio)"
         suffix = ""
         if include_names and display_names:
             clean_names = [
                 name for name in display_names if name.lower() not in {"un utente", "utente", "unknown"}
             ]
             if clean_names:
-                suffix = f" — Coinvolti: {', '.join(clean_names)}"
+                text = _bold_known_names(text, clean_names)
+                suffix = f" — Coinvolti: {', '.join([f'**{name}**' for name in clean_names])}"
         time_link = _format_summary_time_link(
             dynamic.ts,
             primary_id,
@@ -752,7 +765,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             include_date=include_date,
         )
         if display_name:
-            return f"{time_link} — {prefix} {display_name} — {impact.reason}"
+            return f"{time_link} — {prefix} **{display_name}** — {impact.reason}"
         return f"{time_link} — {prefix} {impact.reason}"
 
     def _build_metrics_report(metrics: dict[str, Any]) -> str:
@@ -1680,6 +1693,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     record = {
                         "author_id": row["author_id"],
                         "content": row["content"],
+                        "ts": _row_get(row, "ts"),
                         "origin": "voice_transcript" if is_voice_transcript else "chat",
                     }
                     message_cache[message_id] = record
@@ -1711,6 +1725,17 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             moment_primary: dict[int, str | None] = {}
             for moment in summary.moments:
                 moment_primary[id(moment)] = await resolve_primary_ref(moment.ts, moment.message_ids)
+
+            moment_message_index: dict[str, MessageMeta] = {}
+            for moment in summary.moments:
+                primary_id = moment_primary.get(id(moment))
+                if not primary_id:
+                    continue
+                record = await fetch_message_record(primary_id)
+                moment_message_index[str(primary_id)] = MessageMeta(
+                    message_id=str(primary_id),
+                    ts=str(_row_get(record, "ts") or moment.ts or ""),
+                )
 
             quote_primary: dict[int, str | None] = {}
             for quote in summary.quotes:
@@ -1764,6 +1789,17 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                             names.append(name)
                     dynamic_names[id(dynamic)] = names
 
+            moment_barcello = await compute_moment_barcello_map(
+                barcello_service=ctx.barcello_service,
+                guild_id=str(interaction.guild_id),
+                channel_id=str(interaction.channel_id),
+                summary=summary,
+                moment_primary=moment_primary,
+                message_index=moment_message_index,
+                fallback=barcello_result,
+                limit=10,
+            )
+
             report_id = str(uuid4())
             metrics_report: str | None = None
             if profile == "mod":
@@ -1804,6 +1840,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     footer_contributors=footer_contributors,
                     footer_used_local_processing=footer_used_local_processing,
                     dm_mode=dm_mode,
+                    moment_barcello=moment_barcello,
                 )
 
             embeds = build_embeds()
