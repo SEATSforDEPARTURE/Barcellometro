@@ -16,6 +16,7 @@ from app.shared.discord.embed_limits import (
     _ensure_embed_limits,
     _estimate_embed_size,
     _split_field_chunks,
+    split_markdown_lines_into_field_values,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,29 +51,6 @@ def _truncate_line_preserve_md_link(line: str, line_limit: int) -> str:
             return _truncate_text(line, line_limit)
         return prefix + _truncate_text(suffix, line_limit - len(prefix))
     return _truncate_text(line, line_limit)
-
-
-def _split_lines_into_field_values(lines: list[str], limit: int = 1024) -> list[str]:
-    chunks: list[str] = []
-    current: list[str] = []
-    current_len = 0
-    for raw in lines:
-        line = str(raw or "")
-        if not line:
-            continue
-        if len(line) > limit:
-            line = _truncate_line_preserve_md_link(line, limit)
-        line_len = len(line) + (1 if current else 0)
-        if current and current_len + line_len > limit:
-            chunks.append("\n".join(current))
-            current = [line]
-            current_len = len(line)
-            continue
-        current.append(line)
-        current_len += line_len
-    if current:
-        chunks.append("\n".join(current))
-    return chunks
 
 
 def build_summary_detail_embeds(
@@ -253,7 +231,11 @@ def build_summary_detail_embeds(
             "🧭 CONSIGLI PERSONALIZZATI",
         }
         for name, value, _ in section_list:
-            pieces = _split_lines_into_field_values(value.split("\n"), 1024) if name in bullet_sections else _split_field_chunks(value, 1024)
+            pieces = (
+                split_markdown_lines_into_field_values(value.split("\n"), 1024)
+                if name in bullet_sections
+                else _split_field_chunks(value, 1024)
+            )
             for idx, piece in enumerate(pieces):
                 field_name = name if idx == 0 else f"{name} (cont.)"
                 candidate = _clone_embed_shell(current)
