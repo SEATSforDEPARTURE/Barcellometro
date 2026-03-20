@@ -17,12 +17,12 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
     @voice_ingest_group.command(name="join", description="Join a voice channel manually.")
     @app_commands.describe(voice_channel="Voice channel.")
     async def voice_ingest_join(interaction: discord.Interaction, voice_channel: discord.VoiceChannel) -> None:
-        if not await check_permission(interaction, "bm.voice_ingest.join", ctx):
+        if not await check_permission(interaction, "admin.voice_ingest.join", ctx):
             return
         if not ctx.bot.user:
             await send_legacy_standard_response(
                 interaction,
-                top_level="bm",
+                top_level="admin",
                 path_parts=["voice_ingest", "join"],
                 entries=[("Reason", "Bot non pronto")],
                 tone="error",
@@ -32,7 +32,7 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
         await set_setting(ctx, voice_ingest_key(ctx.bot.user.id, "target_voice_channel_id"), str(voice_channel.id))
         await send_legacy_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             path_parts=["voice_ingest", "join"],
             entries=[("Voice Channel", voice_channel.name), ("Status", "join requested")],
             tone="success",
@@ -43,11 +43,11 @@ def register_voice_ingest(voice_ingest_group: app_commands.Group, ctx: CommandCo
 
     @voice_ingest_group.command(name="leave", description="Leave the current voice channel manually.")
     async def voice_ingest_leave(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "bm.voice_ingest.leave", ctx):
+        if not await check_permission(interaction, "admin.voice_ingest.leave", ctx):
             return
         await send_legacy_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             path_parts=["voice_ingest", "leave"],
             entries=[("Status", "leave requested")],
             tone="success",

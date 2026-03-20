@@ -69,7 +69,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
     ) -> None:
         if not await check_permission(
             interaction,
-            "bm.stt.config_set",
+            "admin.stt.config_set",
             ctx,
             legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],
         ):
@@ -77,9 +77,9 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         if all(value is None for value in (backend, model, compute, beam, language)):
             await send_standard_response(
                 interaction,
-                top_level="bm",
+                top_level="admin",
                 subcommand_path="stt config_set",
-                lines=[("error", "No changes provided. Use /bm stt config_show to inspect the current configuration.")],
+                lines=[("error", "No changes provided. Use /admin stt config_show to inspect the current configuration.")],
                 kind="error",
                 footer_service=ctx.footer,
             )
@@ -98,7 +98,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
 
         await send_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="stt config_set",
             lines=[("result", "updated")],
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
@@ -110,14 +110,14 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
     async def stt_config_show_command(interaction: discord.Interaction) -> None:
         if not await check_permission(
             interaction,
-            "bm.stt.config_show",
+            "admin.stt.config_show",
             ctx,
             legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],
         ):
             return
         await send_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="stt config_show",
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
             footer_service=ctx.footer,
@@ -127,7 +127,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
     async def stt_config_reset_command(interaction: discord.Interaction) -> None:
         if not await check_permission(
             interaction,
-            "bm.stt.config_reset",
+            "admin.stt.config_reset",
             ctx,
             legacy_aliases=["bm.stt.backend", "bm.stt.model", "bm.stt.compute", "bm.stt.beam", "bm.stt.language"],
         ):
@@ -142,7 +142,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
             await reset_setting(ctx, key)
         await send_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="stt config_reset",
             lines=[("result", "reset")],
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],

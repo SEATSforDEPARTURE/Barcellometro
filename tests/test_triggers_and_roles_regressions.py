@@ -89,12 +89,12 @@ def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypat
     monkeypatch.setattr(triggers_module, "check_permission", _check_permission)
     monkeypatch.setattr(triggers_module, "send_standard_response", _send_standard_response)
 
-    bm_group = discord.app_commands.Group(name="bm", description="bm")
+    admin_group = discord.app_commands.Group(name="admin", description="admin")
     campagne_group = discord.app_commands.Group(name="campagne", description="campagne")
     qna_group = discord.app_commands.Group(name="qna", description="qna")
     insights_group = discord.app_commands.Group(name="insights", description="insights")
     ctx = SimpleNamespace(database=_TriggerDb(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
-    frasi_group = triggers_module.register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
+    frasi_group = triggers_module.register_triggers(admin_group, campagne_group, qna_group, insights_group, ctx)
 
     entry_list = _find_command(frasi_group, "entry_list")
     asyncio.run(entry_list.callback(_Interaction(entry_list)))
@@ -110,14 +110,17 @@ def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypat
     ctx.database.get_message_campaign = types.MethodType(_get_message_campaign, ctx.database)
     asyncio.run(prompt_show.callback(_Interaction(prompt_show), "5"))
 
-    assert seen[0][0] == "bm.frasi.entry_list"
+    assert seen[0][0] == "admin.frasi.entry_list"
     assert "frasi.entry_list" in seen[0][1]
+    assert "bm.frasi.entry_list" in seen[0][1]
     assert "frasi.list" in seen[0][1]
-    assert seen[1][0] == "bm.frasi.template_global_show"
+    assert seen[1][0] == "admin.frasi.template_global_show"
     assert "frasi.template_global_show" in seen[1][1]
+    assert "bm.frasi.template_global_show" in seen[1][1]
     assert "frasi.template_show" in seen[1][1]
-    assert seen[2][0] == "bm.campagne.prompt.schedule_show"
+    assert seen[2][0] == "admin.campagne.prompt.schedule_show"
     assert "campagne.prompt.schedule_show" in seen[2][1]
+    assert "bm.campagne.prompt.schedule_show" in seen[2][1]
     assert "bm.prompt.schedule_show" in seen[2][1]
     assert "campagne.prompt.entry_show" in seen[2][1]
     assert sent[0]["subcommand_path"] == "frasi entry_list"
@@ -138,13 +141,13 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
         async def list_role_policies(self, guild_id: str):
             return [
                 {"role_id": "123", "command": "bm.test", "usage_limit": 5, "cooldown_seconds": 10},
-                {"role_id": "999", "command": "bm.test2", "usage_limit": None, "cooldown_seconds": None},
+                {"role_id": "999", "command": "admin.test2", "usage_limit": None, "cooldown_seconds": None},
             ]
 
         async def list_user_policies(self, guild_id: str):
             return [
                 {"user_id": "456", "command": "bm.test", "usage_limit": 1, "cooldown_seconds": 0},
-                {"user_id": "777", "command": "bm.other", "usage_limit": None, "cooldown_seconds": None},
+                {"user_id": "777", "command": "admin.other", "usage_limit": None, "cooldown_seconds": None},
             ]
 
     monkeypatch.setattr(roles_module, "check_permission", _check_permission)
@@ -161,7 +164,11 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     role_lines = sent[0]["sections"][0].lines
     assert role_lines[0][0] == "<@&123> (Moderatori)"
     assert role_lines[1][0] == "Deleted role (ID: 999)"
+    assert "command=admin.test" in role_lines[0][1]
+    assert "command=admin.test2" in role_lines[1][1]
 
     user_lines = sent[1]["sections"][0].lines
     assert user_lines[0][0] == "<@456> (Alice)"
     assert user_lines[1][0] == "Unknown user (ID: 777)"
+    assert "command=admin.test" in user_lines[0][1]
+    assert "command=admin.other" in user_lines[1][1]

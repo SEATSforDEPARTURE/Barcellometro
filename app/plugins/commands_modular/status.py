@@ -8,17 +8,17 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 
 
-def register_status(bm_group: app_commands.Group, ctx: CommandContext) -> None:
-    @bm_group.command(name="status", description="Show the Barcellometro status.")
+def register_status(admin_group: app_commands.Group, ctx: CommandContext) -> None:
+    @admin_group.command(name="status", description="Show the Barcellometro status.")
     @app_commands.describe(service="Optional service or plugin name.")
     async def bm_status_command(interaction: discord.Interaction, service: str | None = None) -> None:
-        if not await check_permission(interaction, "bm.status", ctx, legacy_aliases=["status.bm"]):
+        if not await check_permission(interaction, "admin.status", ctx, legacy_aliases=["status.bm"]):
             return
         if service:
             status = ctx.status.component_status(service)
             await send_legacy_standard_response(
                 interaction,
-                top_level="bm",
+                top_level="admin",
                 path_parts=["status", service],
                 entries=[
                     ("Service", service),
@@ -33,7 +33,7 @@ def register_status(bm_group: app_commands.Group, ctx: CommandContext) -> None:
         general = await ctx.status.general_status()
         await send_legacy_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             path_parts=["status"],
             entries=[
                 ("Bot", "online"),

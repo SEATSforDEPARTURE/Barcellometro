@@ -30,10 +30,10 @@ logger = logging.getLogger(__name__)
 
 
 
-def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> None:
     response_format_supported: bool | None = None
     barcello_group = app_commands.Group(name="barcello", description="Barcello controls")
-    add_group_once(bm_group, barcello_group, logger)
+    add_group_once(admin_group, barcello_group, logger)
 
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
         text = str(message or "").strip()
@@ -47,7 +47,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
         await send_standard_response(
             interaction,
             top_level="barcello",
-            subcommand_path=str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "bm barcello"),
+            subcommand_path=str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "admin barcello"),
             lines=[("dettaglio", text.lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile.")],
             kind=kind,
             footer_service=ctx.footer,
@@ -65,7 +65,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
             await send_standard_response(
                 interaction,
                 top_level="barcello",
-                subcommand_path="bm barcello run",
+                subcommand_path="admin barcello run",
                 lines=[("result", "Ti ho inviato un DM")],
                 kind="success",
                 footer_service=ctx.footer,
@@ -74,7 +74,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
         await send_standard_response(
             interaction,
             top_level="barcello",
-            subcommand_path="bm barcello run",
+            subcommand_path="admin barcello run",
             lines=[("error", blocked_message or "Non riesco a inviarti DM. Abilita i messaggi privati dal server.")],
             kind="error",
             footer_service=ctx.footer,
@@ -88,7 +88,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
         )
 
     async def _set_toggle(interaction: discord.Interaction, action: str) -> None:
-        if not await check_permission(interaction, f"bm.barcello.{action}", ctx):
+        if not await check_permission(interaction, f"admin.barcello.{action}", ctx):
             return
         scope = await _require_channel_scope(interaction)
         if scope is None:
@@ -103,7 +103,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
         await send_ephemeral(interaction, f"Barcello trigger {'enabled' if enabled else 'disabled'} for this channel.")
 
     async def _show_mood(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "bm.barcello.mood_show", ctx, legacy_aliases=["bm.barcello.mood"]):
+        if not await check_permission(interaction, "admin.barcello.mood_show", ctx, legacy_aliases=["bm.barcello.mood"]):
             return
         scope = await _require_channel_scope(interaction)
         if scope is None:
@@ -178,7 +178,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
     @barcello_group.command(name="mood_set", description="Set the Barcello mood for this channel.")
     @app_commands.describe(value="Mood value.")
     async def barcello_mood_set_command(interaction: discord.Interaction, value: str) -> None:
-        if not await check_permission(interaction, "bm.barcello.mood_set", ctx, legacy_aliases=["bm.barcello.mood"]):
+        if not await check_permission(interaction, "admin.barcello.mood_set", ctx, legacy_aliases=["bm.barcello.mood"]):
             return
         scope = await _require_channel_scope(interaction)
         if scope is None:
@@ -211,7 +211,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
 
     @barcello_group.command(name="mood_reset", description="Reset the Barcello mood for this channel.")
     async def barcello_mood_reset_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "bm.barcello.mood_reset", ctx, legacy_aliases=["bm.barcello.mood_reset"]):
+        if not await check_permission(interaction, "admin.barcello.mood_reset", ctx, legacy_aliases=["bm.barcello.mood_reset"]):
             return
         scope = await _require_channel_scope(interaction)
         if scope is None:
@@ -222,7 +222,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
 
     @barcello_group.command(name="calibrate", description="Recalculate Barcello calibration weights.")
     async def barcello_calibrate_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "bm.barcello.calibrate", ctx):
+        if not await check_permission(interaction, "admin.barcello.calibrate", ctx):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         result = await ctx.barcello_calibration_service.run_calibration(days=14, min_samples=20)
@@ -233,7 +233,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
         await send_standard_response(
             interaction,
             top_level="barcello",
-            subcommand_path="bm barcello calibrate",
+            subcommand_path="admin barcello calibrate",
             lines=[("samples", result.get("samples")), ("summary", result.get("summary"))],
             kind="success" if result.get("updated") else "warning",
             footer_service=ctx.footer,
@@ -1139,7 +1139,7 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
                     await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
                 return
 
-            if not await check_permission(interaction, "bm.barcello.run", ctx, legacy_aliases=["barcello"]):
+            if not await check_permission(interaction, "admin.barcello.run", ctx, legacy_aliases=["barcello"]):
                 return
 
             if window_minutes is None:
@@ -1670,13 +1670,13 @@ def register_barcello(bm_group: app_commands.Group, ctx: CommandContext) -> None
             await send_standard_response(
                 interaction,
                 top_level="barcello",
-                subcommand_path="bm barcello run",
+                subcommand_path="admin barcello run",
                 lines=[("error", "Errore temporaneo, riprova.")],
                 kind="error",
                 footer_service=ctx.footer,
             )
 
     logger.info(
-        "Registered /bm barcello subcommands=%s",
+        "Registered /admin barcello subcommands=%s",
         [command.name for command in barcello_group.commands],
     )

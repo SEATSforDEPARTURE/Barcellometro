@@ -8,6 +8,24 @@ from app.shared.discord.command_embeds import send_legacy_standard_response
 from app.plugins.commands_modular.ctx import CommandContext
 
 
+def canonical_permission_key(command_name: str) -> str:
+    normalized = str(command_name or "").strip().lower()
+    if normalized == "bm":
+        return "admin"
+    if normalized.startswith("bm."):
+        return f"admin.{normalized[3:]}"
+    return normalized
+
+
+def legacy_permission_candidates(command_name: str) -> list[str]:
+    canonical = canonical_permission_key(command_name)
+    if canonical == "admin":
+        return ["bm"]
+    if canonical.startswith("admin."):
+        return [f"bm.{canonical[6:]}"]
+    return []
+
+
 async def check_permission(
     interaction: discord.Interaction,
     command_name: str,
@@ -18,7 +36,16 @@ async def check_permission(
     guild = interaction.guild
     is_admin = bool(guild and interaction.user.guild_permissions.administrator)
     role_ids = [role.id for role in getattr(interaction.user, "roles", [])]
-    command_candidates = [command_name, *[alias for alias in legacy_aliases if alias and alias != command_name]]
+    canonical_name = canonical_permission_key(command_name)
+    command_candidates = list(
+        dict.fromkeys(
+            [
+                canonical_name,
+                *legacy_permission_candidates(canonical_name),
+                *[str(alias).strip().lower() for alias in legacy_aliases if str(alias).strip()],
+            ]
+        )
+    )
     result = None
     for candidate in command_candidates:
         result = await ctx.guard.check_command(
@@ -42,7 +69,7 @@ async def check_permission(
     ephemeral = interaction.guild_id is not None
     await send_legacy_standard_response(
         interaction,
-        top_level="bm",
+        top_level="admin",
         path_parts=["warning"],
         entries=[("Reason", message)],
         tone="warning",

@@ -4,7 +4,7 @@ from pathlib import Path
 def test_root_namespaces_include_mod_and_inactivity() -> None:
     source = Path("app/plugins/commands.py").read_text()
 
-    assert 'app_commands.Group(name="bm"' in source
+    assert 'app_commands.Group(name="admin"' in source
     assert 'app_commands.Group(name="mod"' in source
     assert 'app_commands.Group(name="inactivity"' in source
     assert 'app_commands.Group(name="moderazione"' not in source
