@@ -572,21 +572,21 @@ class FooterService:
                 continue
             seen.add(clean)
             contributors_deduped.append(clean)
-        if not contributors_deduped:
-            processing = "Dati elaborati in loco"
-        elif len(contributors_deduped) == 1:
+        processing: str | None = None
+        if len(contributors_deduped) == 1:
             processing = f"Dati elaborati con {contributors_deduped[0]}"
         elif len(contributors_deduped) == 2:
             processing = f"Dati elaborati con {contributors_deduped[0]} e {contributors_deduped[1]}"
-        else:
+        elif len(contributors_deduped) > 2:
             processing = f"Dati elaborati con {', '.join(contributors_deduped[:-1])} e {contributors_deduped[-1]}"
-        if contributors_deduped and used_local_processing:
+        if contributors_deduped and used_local_processing and processing:
             processing = f"{processing} e fallback locale"
 
         parts = [brand]
         if phrase:
             parts.append(phrase)
-        parts.append(processing)
+        if processing:
+            parts.append(processing)
         return _truncate(FOOTER_SEPARATOR.join(parts)), phrase
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:

@@ -86,6 +86,35 @@ SECTION_EMOJIS: dict[str, str] = {
     "details": "📋",
 }
 
+SECTION_FALLBACK_EMOJIS: dict[str, str] = {
+    "info": "🛠️",
+    "status": "📊",
+    "show": "📋",
+    "list": "📋",
+    "config": "⚙️",
+    "set": "🛠️",
+    "reset": "🧩",
+    "test": "🧪",
+    "success": "📋",
+    "result": "📋",
+    "error": "🧩",
+    "warning": "📋",
+    "metrics": "📊",
+    "templates": "🧩",
+    "details": "📋",
+    "configuration": "⚙️",
+    "defaults": "🧩",
+    "schedule": "📋",
+    "limits": "📊",
+}
+
+_KIND_SECTION_FALLBACKS: dict[CommandKind, tuple[str, ...]] = {
+    "info": ("🛠️", "📋", "📊", "🧩"),
+    "success": ("📋", "🛠️", "📊", "🧩"),
+    "warning": ("📋", "📊", "🛠️", "🧩"),
+    "error": ("🧩", "📋", "📊", "🛠️"),
+}
+
 KIND_EMOJIS: dict[CommandKind, str] = {
     "info": "ℹ️",
     "success": "✅",
@@ -236,17 +265,17 @@ def _clean_narrative_text(value: Any) -> str:
     return text
 
 
-def _strip_duplicate_kind_emoji(text: str, *, kind: CommandKind) -> str:
+def _strip_duplicate_leading_emoji(text: str, *, emoji: str | None) -> str:
     cleaned = str(text or "").strip()
-    if not cleaned:
+    target_emoji = str(emoji or "").strip()
+    if not cleaned or not target_emoji:
         return cleaned
-    kind_emoji = KIND_EMOJIS[kind]
-    patterns = (
-        rf"^(?P<prefix>•\s*)?{re.escape(kind_emoji)}\s*[:\-–—]?\s*",
-    )
-    for pattern in patterns:
-        cleaned = re.sub(pattern, lambda match: match.group("prefix") or "", cleaned, count=1)
-    return cleaned.strip()
+    pattern = rf"^(?P<prefix>•\s*)?{re.escape(target_emoji)}\s*[:\-–—]?\s*"
+    return re.sub(pattern, lambda match: match.group("prefix") or "", cleaned, count=1).strip()
+
+
+def _strip_duplicate_kind_emoji(text: str, *, kind: CommandKind) -> str:
+    return _strip_duplicate_leading_emoji(text, emoji=KIND_EMOJIS[kind])
 
 
 def _has_entity_argument(raw_parameters: Sequence[object], *, labels: set[str]) -> bool:
@@ -441,6 +470,45 @@ def get_section_emoji(title: str | None, *, kind: CommandKind = "info") -> str:
     return SECTION_EMOJIS.get(key, KIND_EMOJIS[kind])
 
 
+def _iter_section_emoji_candidates(
+    title: str | None,
+    *,
+    kind: CommandKind,
+    explicit_emoji: str | None = None,
+) -> Iterable[str]:
+    normalized_title = _normalize_command_token(title)
+    tokens = [token for token in re.split(r"[\s_-]+", normalized_title) if token]
+    if explicit_emoji:
+        yield explicit_emoji
+    semantic_emoji = get_section_emoji(title, kind=kind)
+    if semantic_emoji:
+        yield semantic_emoji
+    for token in (normalized_title, *tokens):
+        fallback = SECTION_FALLBACK_EMOJIS.get(token)
+        if fallback:
+            yield fallback
+    yield from _KIND_SECTION_FALLBACKS[kind]
+
+
+def _resolve_section_emoji(
+    title: str | None,
+    *,
+    kind: CommandKind,
+    explicit_emoji: str | None = None,
+    subtitle_emoji: str | None = None,
+) -> str:
+    blocked = {str(subtitle_emoji or "").strip()} - {""}
+    seen: set[str] = set()
+    for candidate in _iter_section_emoji_candidates(title, kind=kind, explicit_emoji=explicit_emoji):
+        clean_candidate = str(candidate or "").strip()
+        if not clean_candidate or clean_candidate in seen:
+            continue
+        seen.add(clean_candidate)
+        if clean_candidate not in blocked:
+            return clean_candidate
+    return "📋" if "📋" not in blocked else "🧩"
+
+
 def get_semantic_color(kind: CommandKind) -> int:
     return KIND_COLORS[kind]
 
@@ -535,16 +603,20 @@ def build_section(
     *,
     kind: CommandKind = "info",
     line_formatter: Callable[[str, Any], str] | None = None,
+    subtitle_emoji: str | None = None,
 ) -> str:
-    header_emoji = emoji or get_section_emoji(title, kind=kind)
+    header_emoji = _resolve_section_emoji(title, kind=kind, explicit_emoji=emoji, subtitle_emoji=subtitle_emoji)
     rendered = [f"**{header_emoji} {title.upper()}**"]
     for line in lines:
         if isinstance(line, str):
-            rendered.append(_strip_duplicate_kind_emoji(line, kind=kind))
+            cleaned_line = _strip_duplicate_kind_emoji(line, kind=kind)
+            rendered.append(_strip_duplicate_leading_emoji(cleaned_line, emoji=subtitle_emoji))
         else:
             formatter = line_formatter or (lambda label, value: format_bullet(label, value, kind=kind))
-            rendered.append(_strip_duplicate_kind_emoji(formatter(line[0], line[1]), kind=kind))
+            cleaned_line = _strip_duplicate_kind_emoji(formatter(line[0], line[1]), kind=kind)
+            rendered.append(_strip_duplicate_leading_emoji(cleaned_line, emoji=subtitle_emoji))
     return "\n".join(rendered)
+
 
 
 async def _resolve_brand_text(footer_service: FooterService | None) -> str:
@@ -610,7 +682,7 @@ async def build_command_embeds(
     header = f"**{display_context.subtitle_emoji} {display_context.visual_subtitle}**" if display_context.visual_subtitle else ""
     resolved_line_formatter = line_formatter or (lambda label, value: format_bullet(label, value, kind=kind))
     rendered_lines = [
-        rendered
+        _strip_duplicate_leading_emoji(rendered, emoji=display_context.subtitle_emoji)
         for label, value in lines or []
         if (rendered := _format_primary_bullet(
             label,
@@ -637,7 +709,16 @@ async def build_command_embeds(
         else:
             item = section
         section_title = (section_title_formatter or str)(item.title)
-        blocks.append(build_section(section_title, item.lines, item.emoji, kind=kind, line_formatter=line_formatter))
+        blocks.append(
+            build_section(
+                section_title,
+                item.lines,
+                item.emoji,
+                kind=kind,
+                line_formatter=line_formatter,
+                subtitle_emoji=display_context.subtitle_emoji,
+            )
+        )
 
     chunks: list[str] = []
     current = ""

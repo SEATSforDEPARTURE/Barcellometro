@@ -273,7 +273,55 @@ def test_footer_service_render_footer_skips_missing_phrase_without_double_separa
         )
 
         assert phrase is None
-        assert footer == "Barcellometro dev7.1 · Dati elaborati in loco"
+        assert footer == "Barcellometro dev7.1"
+        assert "Dati elaborati con" not in footer
+        assert "Dati elaborati" + " in loco" not in footer
         assert " ·  · " not in footer
+
+    asyncio.run(_run())
+
+
+def test_footer_service_render_footer_with_phrase_and_no_contributors_skips_processing_segment() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.set_version("dev8")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        footer, phrase = await service.render_footer(
+            service_name="status",
+            contributors=[],
+            used_local_processing=True,
+        )
+
+        assert phrase == "In via di sviluppo."
+        assert footer == "Barcellometro dev8 · In via di sviluppo."
+        assert "Dati elaborati con" not in footer
+        assert "Dati elaborati" + " in loco" not in footer
+        assert " ·  · " not in footer
+
+    asyncio.run(_run())
+
+
+def test_footer_service_render_footer_shows_processing_only_when_contributors_exist() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.set_version("dev8")
+
+        with_contributors, _ = await service.render_footer(
+            service_name="status",
+            contributors=["llama3.2"],
+            used_local_processing=False,
+        )
+        without_contributors, _ = await service.render_footer(
+            service_name="status",
+            contributors=[],
+            used_local_processing=False,
+        )
+
+        assert with_contributors == "Barcellometro dev8 · Dati elaborati con llama3.2"
+        assert without_contributors == "Barcellometro dev8"
+        assert "Dati elaborati con llama3.2" in with_contributors
+        assert "Dati elaborati con" not in without_contributors
+        assert "Dati elaborati" + " in loco" not in without_contributors
 
     asyncio.run(_run())

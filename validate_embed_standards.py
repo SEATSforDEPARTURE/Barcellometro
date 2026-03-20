@@ -160,6 +160,15 @@ def _iter_python_files(root: Path, scan_roots: Iterable[str]) -> list[Path]:
     return sorted(set(files))
 
 
+def _iter_repo_text_files(root: Path) -> list[Path]:
+    files: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or any(part in IGNORED_PARTS for part in path.parts):
+            continue
+        files.append(path)
+    return sorted(files)
+
+
 def _attribute_chain(node: ast.AST) -> tuple[str, ...] | None:
     parts: list[str] = []
     current = node
@@ -554,12 +563,29 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
             "Standard command embeds must derive the subtitle icon from KIND_EMOJIS[kind].",
         )
 
+    required_section_snippets = (
+        "def _resolve_section_emoji(",
+        "subtitle_emoji: str | None = None",
+        "header_emoji = _resolve_section_emoji(",
+        "subtitle_emoji=display_context.subtitle_emoji",
+    )
+    for snippet in required_section_snippets:
+        if snippet not in command_source:
+            report.add(
+                "canonical_section_emoji_dedup",
+                command_embeds_path.relative_to(REPO_ROOT),
+                1,
+                f"Standard command embeds must route section icons through the centralized subtitle/body dedup logic; missing snippet: {snippet!r}.",
+            )
+            break
+
     footer_path = REPO_ROOT / "app" / "services" / "footer.py"
     footer_source = footer_path.read_text(encoding="utf-8")
     required_footer_snippets = (
         "parts = [brand]",
         "if phrase:",
         "parts.append(phrase)",
+        "if processing:",
         "parts.append(processing)",
     )
     for snippet in required_footer_snippets:
@@ -572,6 +598,25 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
             )
             break
 
+
+    forbidden_repo_strings = {
+        "Dati elaborati" + " in loco": "The local-only technical footer wording is forbidden project-wide.",
+    }
+    for repo_path in _iter_repo_text_files(REPO_ROOT):
+        try:
+            source = repo_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for forbidden, message in forbidden_repo_strings.items():
+            if forbidden not in source:
+                continue
+            line = source[: source.index(forbidden)].count("\n") + 1
+            report.add(
+                "forbidden_footer_phrase",
+                repo_path.relative_to(REPO_ROOT),
+                line,
+                message,
+            )
 
 def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) -> ValidationReport:
     report = ValidationReport()
