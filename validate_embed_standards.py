@@ -601,6 +601,7 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
 
     forbidden_repo_strings = {
         "Dati elaborati" + " in loco": "The local-only technical footer wording is forbidden project-wide.",
+        "e fallback" + " locale": "The local-fallback footer wording is forbidden project-wide.",
     }
     for repo_path in _iter_repo_text_files(REPO_ROOT):
         try:
