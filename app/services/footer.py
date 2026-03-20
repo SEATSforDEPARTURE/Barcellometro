@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,8 @@ FOOTER_LAST_META_PREFIX = "footer.last_meta."
 FOOTER_VARIANTS_PREFIX = "footer.variants."
 FOOTER_SEPARATOR = " · "
 FOOTER_MAX_LEN = 2048
+FOOTER_DEFAULT_PHRASE = "In via di sviluppo."
+CUSTOM_EMOJI_RE = re.compile(r"<(?P<animated>a?):(?P<name>[A-Za-z0-9_]+):(?P<emoji_id>\d+)>")
 
 SUPPORTED_FOOTER_SERVICES: tuple[str, ...] = (
     "riassunto",
@@ -130,6 +133,30 @@ def _truncate(text: str, max_len: int = FOOTER_MAX_LEN) -> str:
     return text[: max_len - 1].rstrip() + "…"
 
 
+def _custom_emoji_icon_url(match: re.Match[str]) -> str:
+    extension = "gif" if match.group("animated") else "png"
+    emoji_id = match.group("emoji_id")
+    return f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
+
+
+def _clean_footer_text(text: str) -> str:
+    normalized = CUSTOM_EMOJI_RE.sub("", text)
+    normalized = re.sub(r"\s{2,}", " ", normalized)
+    normalized = re.sub(r"\s+([,.;:!?])", r"\1", normalized)
+    normalized = re.sub(r"([(\[])\s+", r"\1", normalized)
+    normalized = re.sub(r"\s+([)\]])", r"\1", normalized)
+    return normalized.strip()
+
+
+def _extract_footer_icon_and_clean_text(text: str, *, icon_url: str | None = None) -> tuple[str, str | None]:
+    clean_icon_url = _clean(icon_url) or None
+    clean_text = _clean(text)
+    matches = list(CUSTOM_EMOJI_RE.finditer(clean_text))
+    derived_icon_url = _custom_emoji_icon_url(matches[0]) if matches and clean_icon_url is None else clean_icon_url
+    sanitized_text = _clean_footer_text(clean_text)
+    return _truncate(sanitized_text), derived_icon_url
+
+
 def _is_persistable_service_name(name: str | None) -> bool:
     service = _clean(name)
     return bool(service and service not in {"unknown", "default", "fallback"})
@@ -236,8 +263,8 @@ def pop_footer_meta(embed: discord.Embed) -> FooterMeta | None:
 def attach_minimal_footer(embed: discord.Embed, *, text: str, icon_url: str | None = None) -> discord.Embed:
     if embed is None:
         raise ValueError("attach_minimal_footer requires a discord.Embed instance, got None")
-    footer_text = _clean(text) or "Barcellometro"
-    clean_icon_url = _clean(icon_url) or None
+    footer_text, clean_icon_url = _extract_footer_icon_and_clean_text(_clean(text) or "Barcellometro", icon_url=icon_url)
+    footer_text = footer_text or "Barcellometro"
     embed.set_footer(text=footer_text, icon_url=clean_icon_url)
     _MINIMAL_FOOTERS[id(embed)] = (embed, footer_text, clean_icon_url)
     return embed
@@ -548,6 +575,11 @@ class FooterService:
                 profiles[service] = profile
         return profiles
 
+    async def _resolve_footer_phrase(self, service_name: str) -> str:
+        global_phrase = await self.get_global_phrase()
+        service_phrases = await self.get_service_phrases()
+        return service_phrases.get(service_name) or global_phrase or FOOTER_DEFAULT_PHRASE
+
     async def render_footer(
         self,
         *,
@@ -557,13 +589,9 @@ class FooterService:
         minimal: bool = False,
     ) -> tuple[str, str | None]:
         version = await self.get_version()
-        global_phrase = await self.get_global_phrase()
-        service_phrases = await self.get_service_phrases()
-        phrase = service_phrases.get(service_name) or global_phrase
+        phrase = await self._resolve_footer_phrase(service_name)
 
         brand = f"Barcellometro {version}" if version else "Barcellometro"
-        if minimal:
-            return brand, phrase
         contributors_deduped: list[str] = []
         seen: set[str] = set()
         for item in contributors:
@@ -583,13 +611,16 @@ class FooterService:
         if phrase:
             parts.append(phrase)
         if processing:
-            parts.append(processing)
-        return _truncate(FOOTER_SEPARATOR.join(parts)), phrase
+            if not minimal:
+                parts.append(processing)
+        footer_text, _ = _extract_footer_icon_and_clean_text(FOOTER_SEPARATOR.join(parts))
+        return footer_text, _clean_footer_text(phrase) or FOOTER_DEFAULT_PHRASE
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
         minimal_footer = pop_minimal_footer(embed)
         if minimal_footer is not None:
             text, icon_url = minimal_footer
+            text, icon_url = _extract_footer_icon_and_clean_text(text, icon_url=icon_url)
             embed.set_footer(text=text, icon_url=icon_url)
             return embed
         meta = pop_footer_meta(embed)
@@ -604,6 +635,9 @@ class FooterService:
             used_local_processing=meta.used_local_processing,
             minimal=meta.minimal,
         )
+        phrase = await self._resolve_footer_phrase(meta.service_name)
+        _, parsed_icon_url = _extract_footer_icon_and_clean_text(phrase, icon_url=meta.footer_icon_url)
+        text, parsed_icon_url = _extract_footer_icon_and_clean_text(text, icon_url=parsed_icon_url)
         if persistable:
             try:
                 await self.record_service_footer_profile(
@@ -618,7 +652,7 @@ class FooterService:
                     logger.warning("Footer profile persistence skipped due to SQLite lock service=%s", meta.service_name)
                 else:
                     logger.warning("Footer profile persistence failed service=%s err=%s", meta.service_name, exc)
-        embed.set_footer(text=text, icon_url=meta.footer_icon_url)
+        embed.set_footer(text=text, icon_url=parsed_icon_url)
         return embed
 
     def _dedupe_contributors(self, contributors: Iterable[str]) -> list[str]:
