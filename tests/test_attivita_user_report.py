@@ -245,6 +245,30 @@ def test_attivita_ultimi_validation_uses_standard_embed(attivita_module, monkeyp
     assert payload is not None
     assert payload["embed"] is not None
     assert "ATTIVITA" in (payload["embed"].title or "")
-    assert "ULTIMI" in (payload["embed"].description or "")
+    assert "ULTIMI 0 GIORNI" in (payload["embed"].description or "")
     assert "ATTIVITA ULTIMI" not in (payload["embed"].description or "")
     assert payload["content"] is None
+
+
+def test_attivita_ultimi_dm_status_keeps_runtime_window_in_subtitle(attivita_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _allowed(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(attivita_module, "check_permission", _allowed)
+    group = discord.app_commands.Group(name="attivita", description="x")
+    ctx = SimpleNamespace(
+        config=SimpleNamespace(MAX_ULTIMI_MINUTI=60, MAX_ULTIMI_ORE=24, MAX_ULTIMI_GIORNI=30, MAX_ULTIMI_SETTIMANE=8),
+        activity_insights=_ActivityInsights(),
+        footer=None,
+    )
+    attivita_module.register_attivita(group, ctx)
+    cmd = next(c for c in group.commands if c.name == "ultimi")
+    interaction = _Interaction()
+    interaction.user = _NoopUser()
+    interaction.command = cmd
+    asyncio.run(cmd.callback(interaction, 7, discord.app_commands.Choice(name="giorni", value="giorni")))
+    payload = interaction.response.payload
+
+    assert payload is not None
+    assert "ATTIVITA" in (payload["embed"].title or "")
+    assert "ULTIMI 7 GIORNI" in (payload["embed"].description or "")

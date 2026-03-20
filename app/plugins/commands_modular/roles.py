@@ -45,6 +45,7 @@ async def _send_roles_response(
     ctx: CommandContext,
     *,
     subcommand_path: str,
+    subtitle_args: list[object] | None = None,
     lines: list[tuple[str, object]] | None = None,
     sections: list[CommandEmbedSection] | None = None,
     kind: str = "info",
@@ -55,6 +56,7 @@ async def _send_roles_response(
         top_level="admin",
         subcommand_path=subcommand_path,
         visual_top_level="roles",
+        subtitle_args=subtitle_args,
         lines=lines,
         sections=sections,
         kind=kind,
@@ -82,7 +84,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
             return
         canonical_command = _canonical_policy_command(command)
         await ctx.database.upsert_role_policy(guild_id=str(interaction.guild_id), role_id=str(role.id), command=canonical_command, usage_limit=usage_limit, cooldown_seconds=cooldown_seconds)
-        await _send_roles_response(interaction, ctx, subcommand_path="roles role_add", lines=[("role", role.mention), ("command", canonical_command), ("result", "added")], kind="success", footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles role_add", subtitle_args=[role, canonical_command], lines=[("role", role.mention), ("command", canonical_command), ("result", "added")], kind="success", footer_service=ctx.footer)
 
     @commandguard_group.command(name="role_edit", description="Edit a role command policy.")
     @app_commands.describe(role="Target role.", command="Command path.", usage_limit="Optional daily usage limit.", cooldown_seconds="Optional cooldown in seconds.")
@@ -93,7 +95,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
             return
         canonical_command = _canonical_policy_command(command)
         await ctx.database.upsert_role_policy(guild_id=str(interaction.guild_id), role_id=str(role.id), command=canonical_command, usage_limit=usage_limit, cooldown_seconds=cooldown_seconds)
-        await _send_roles_response(interaction, ctx, subcommand_path="roles role_edit", lines=[("role", role.mention), ("command", canonical_command), ("result", "updated")], kind="success", footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles role_edit", subtitle_args=[role, canonical_command], lines=[("role", role.mention), ("command", canonical_command), ("result", "updated")], kind="success", footer_service=ctx.footer)
 
     @commandguard_group.command(name="role_remove", description="Remove a role command policy.")
     @app_commands.describe(role="Target role.", command="Command path.")
@@ -101,7 +103,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
         if not await check_permission(interaction, "admin.commandguard.role_remove", ctx):
             return
         await ctx.database.delete_role_policy(guild_id=str(interaction.guild_id), role_id=str(role.id), command=_canonical_policy_command(command))
-        await _send_roles_response(interaction, ctx, subcommand_path="roles role_remove", lines=[("role", role.mention), ("command", _canonical_policy_command(command)), ("result", "removed")], kind="success", footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles role_remove", subtitle_args=[role, _canonical_policy_command(command)], lines=[("role", role.mention), ("command", _canonical_policy_command(command)), ("result", "removed")], kind="success", footer_service=ctx.footer)
 
     @commandguard_group.command(name="role_show", description="Show role policies.")
     @app_commands.describe(role="Target role.", command="Optional command path filter.")
@@ -112,9 +114,9 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
         if command is not None:
             rows = [row for row in rows if _policy_command_matches(row["command"], command)]
         if not rows:
-            await _send_roles_response(interaction, ctx, subcommand_path="roles role_show", lines=[("warning", "No policies found for that role.")], kind="warning", footer_service=ctx.footer)
+            await _send_roles_response(interaction, ctx, subcommand_path="roles role_show", subtitle_args=[role, command] if command is not None else [role], lines=[("warning", "No policies found for that role.")], kind="warning", footer_service=ctx.footer)
             return
-        await _send_roles_response(interaction, ctx, subcommand_path="roles role_show", lines=[("role", role.mention), ("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(_canonical_policy_command(row["command"]), _policy_line(_canonical_policy_command(row["command"]), row["usage_limit"], row["cooldown_seconds"])) for row in rows])], footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles role_show", subtitle_args=[role, command] if command is not None else [role], lines=[("role", role.mention), ("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(_canonical_policy_command(row["command"]), _policy_line(_canonical_policy_command(row["command"]), row["usage_limit"], row["cooldown_seconds"])) for row in rows])], footer_service=ctx.footer)
 
     @commandguard_group.command(name="role_list", description="List all role policies.")
     async def role_list_command(interaction: discord.Interaction) -> None:
@@ -132,7 +134,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
         if not await check_permission(interaction, "admin.commandguard.role_reset", ctx):
             return
         await ctx.database.delete_role_policies(str(interaction.guild_id), str(role.id))
-        await _send_roles_response(interaction, ctx, subcommand_path="roles role_reset", lines=[("role", role.mention), ("result", "reset")], kind="success", footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles role_reset", subtitle_args=[role], lines=[("role", role.mention), ("result", "reset")], kind="success", footer_service=ctx.footer)
 
     @commandguard_group.command(name="user_add", description="Add a user command policy.")
     @app_commands.describe(user="Target user.", command="Command path.", usage_limit="Optional daily usage limit.", cooldown_seconds="Optional cooldown in seconds.")
@@ -143,7 +145,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
             return
         canonical_command = _canonical_policy_command(command)
         await ctx.database.upsert_user_policy(guild_id=str(interaction.guild_id), user_id=str(user.id), command=canonical_command, usage_limit=usage_limit, cooldown_seconds=cooldown_seconds)
-        await _send_roles_response(interaction, ctx, subcommand_path="roles user_add", lines=[("user", getattr(user, "mention", user.display_name)), ("command", canonical_command), ("result", "added")], kind="success", footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles user_add", subtitle_args=[user, canonical_command], lines=[("user", getattr(user, "mention", user.display_name)), ("command", canonical_command), ("result", "added")], kind="success", footer_service=ctx.footer)
 
     @commandguard_group.command(name="user_edit", description="Edit a user command policy.")
     @app_commands.describe(user="Target user.", command="Command path.", usage_limit="Optional daily usage limit.", cooldown_seconds="Optional cooldown in seconds.")
@@ -154,7 +156,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
             return
         canonical_command = _canonical_policy_command(command)
         await ctx.database.upsert_user_policy(guild_id=str(interaction.guild_id), user_id=str(user.id), command=canonical_command, usage_limit=usage_limit, cooldown_seconds=cooldown_seconds)
-        await _send_roles_response(interaction, ctx, subcommand_path="roles user_edit", lines=[("user", getattr(user, "mention", user.display_name)), ("command", canonical_command), ("result", "updated")], kind="success", footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles user_edit", subtitle_args=[user, canonical_command], lines=[("user", getattr(user, "mention", user.display_name)), ("command", canonical_command), ("result", "updated")], kind="success", footer_service=ctx.footer)
 
     @commandguard_group.command(name="user_remove", description="Remove a user command policy.")
     @app_commands.describe(user="Target user.", command="Command path.")
@@ -162,7 +164,7 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
         if not await check_permission(interaction, "admin.commandguard.user_remove", ctx):
             return
         await ctx.database.delete_user_policy(guild_id=str(interaction.guild_id), user_id=str(user.id), command=_canonical_policy_command(command))
-        await _send_roles_response(interaction, ctx, subcommand_path="roles user_remove", lines=[("user", getattr(user, "mention", user.display_name)), ("command", _canonical_policy_command(command)), ("result", "removed")], kind="success", footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles user_remove", subtitle_args=[user, _canonical_policy_command(command)], lines=[("user", getattr(user, "mention", user.display_name)), ("command", _canonical_policy_command(command)), ("result", "removed")], kind="success", footer_service=ctx.footer)
 
     @commandguard_group.command(name="user_show", description="Show user policies.")
     @app_commands.describe(user="Target user.", command="Optional command path filter.")
@@ -173,9 +175,9 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
         if command is not None:
             rows = [row for row in rows if _policy_command_matches(row["command"], command)]
         if not rows:
-            await _send_roles_response(interaction, ctx, subcommand_path="roles user_show", lines=[("warning", "No policies found for that user.")], kind="warning", footer_service=ctx.footer)
+            await _send_roles_response(interaction, ctx, subcommand_path="roles user_show", subtitle_args=[user, command] if command is not None else [user], lines=[("warning", "No policies found for that user.")], kind="warning", footer_service=ctx.footer)
             return
-        await _send_roles_response(interaction, ctx, subcommand_path="roles user_show", lines=[("user", getattr(user, "mention", user.display_name)), ("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(_canonical_policy_command(row["command"]), _policy_line(_canonical_policy_command(row["command"]), row["usage_limit"], row["cooldown_seconds"])) for row in rows])], footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles user_show", subtitle_args=[user, command] if command is not None else [user], lines=[("user", getattr(user, "mention", user.display_name)), ("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(_canonical_policy_command(row["command"]), _policy_line(_canonical_policy_command(row["command"]), row["usage_limit"], row["cooldown_seconds"])) for row in rows])], footer_service=ctx.footer)
 
     @commandguard_group.command(name="user_list", description="List all user policies.")
     async def user_list_command(interaction: discord.Interaction) -> None:
@@ -193,4 +195,4 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) 
         if not await check_permission(interaction, "admin.commandguard.user_reset", ctx):
             return
         await ctx.database.delete_user_policies(str(interaction.guild_id), str(user.id))
-        await _send_roles_response(interaction, ctx, subcommand_path="roles user_reset", lines=[("user", getattr(user, "mention", user.display_name)), ("result", "reset")], kind="success", footer_service=ctx.footer)
+        await _send_roles_response(interaction, ctx, subcommand_path="roles user_reset", subtitle_args=[user], lines=[("user", getattr(user, "mention", user.display_name)), ("result", "reset")], kind="success", footer_service=ctx.footer)

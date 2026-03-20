@@ -375,6 +375,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
         interaction: discord.Interaction,
         *,
         subcommand_path: str,
+        subtitle_args: list[object] | None = None,
         lines: list[tuple[str, object]] | None = None,
         sections: list[CommandEmbedSection] | None = None,
         kind: str = "info",
@@ -385,6 +386,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             top_level="admin",
             subcommand_path=subcommand_path,
             visual_top_level="attivita",
+            subtitle_args=subtitle_args,
             lines=lines,
             sections=sections,
             kind=kind,
@@ -402,11 +404,18 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
         kind, lines = messages[status]
         await _send_standard(interaction, subcommand_path=subcommand_path, lines=lines, kind=kind)
 
-    async def _send_activity_report(interaction: discord.Interaction, window, utente: discord.Member | None = None) -> None:
+    async def _send_activity_report(
+        interaction: discord.Interaction,
+        window,
+        utente: discord.Member | None = None,
+        *,
+        subcommand_path: str,
+        subtitle_args: list[object] | None = None,
+    ) -> None:
         if not await check_permission(interaction, "attivita.dm", ctx):
             return
         if not interaction.guild_id or not interaction.channel_id or not interaction.guild or not interaction.channel:
-            await _send_dm_status(interaction, subcommand_path="attivita report", status="guild_only")
+            await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("error", "Comando disponibile solo nei server.")], kind="error")
             return
 
         start_ts = window.start_dt.astimezone(timezone.utc).isoformat()
@@ -453,9 +462,9 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
             txt_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=filename)
             try:
                 await interaction.user.send(embeds=embeds, file=txt_file)
-                await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_sent")
+                await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("result", "Ti ho inviato il resoconto attività in DM ✅")], kind="success")
             except Forbidden:
-                await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_forbidden")
+                await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("error", "Non posso inviarti DM. Abilita i DM dal server e riprova.")], kind="error")
             return
 
         enabled_channels = await ctx.database.list_enabled_activity_channels(str(interaction.guild_id))
@@ -567,9 +576,9 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
 
         try:
             await interaction.user.send(embeds=embeds)
-            await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_sent")
+            await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("result", "Ti ho inviato il resoconto attività in DM ✅")], kind="success")
         except Forbidden:
-            await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_forbidden")
+            await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("error", "Non posso inviarti DM. Abilita i DM dal server e riprova.")], kind="error")
         except discord.HTTPException as exc:
             logger.exception("Errore invio DM report utente attivita guild=%s user=%s", interaction.guild_id, utente.id)
             if exc.status == 400 and ("50035" in str(exc) or "Invalid Form Body" in str(exc)):
@@ -583,23 +592,23 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
                     period_slug = _safe_filename(window.label_periodo)
                     fallback_file = discord.File(io.BytesIO(txt_payload.encode("utf-8")), filename=f"attivita_{utente.id}_{period_slug}.txt")
                     await interaction.user.send(embed=fallback, file=fallback_file)
-                    await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_sent")
+                    await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("result", "Ti ho inviato il resoconto attività in DM ✅")], kind="success")
                 except Forbidden:
-                    await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_forbidden")
+                    await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("error", "Non posso inviarti DM. Abilita i DM dal server e riprova.")], kind="error")
                 except discord.HTTPException:
-                    await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_unavailable")
+                    await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("error", "Non riesco a inviarti il report in DM al momento. Riprova tra poco.")], kind="error")
             else:
-                await _send_dm_status(interaction, subcommand_path="attivita report", status="dm_unavailable")
+                await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("error", "Non riesco a inviarti il report in DM al momento. Riprova tra poco.")], kind="error")
 
     @attivita_group.command(name="oggi", description="Report attività di oggi (DM staff)")
     @app_commands.describe(utente="Utente da analizzare (opzionale)")
     async def attivita_oggi(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
-        await _send_activity_report(interaction, resolve_oggi_window(), utente)
+        await _send_activity_report(interaction, resolve_oggi_window(), utente, subcommand_path="attivita oggi", subtitle_args=[utente] if utente is not None else None)
 
     @attivita_group.command(name="ieri", description="Report attività di ieri (DM staff)")
     @app_commands.describe(utente="Utente da analizzare (opzionale)")
     async def attivita_ieri(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
-        await _send_activity_report(interaction, resolve_ieri_window(), utente)
+        await _send_activity_report(interaction, resolve_ieri_window(), utente, subcommand_path="attivita ieri", subtitle_args=[utente] if utente is not None else None)
 
     @attivita_group.command(name="ultimi", description="Report attività ultimi N periodi")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", utente="Utente da analizzare (opzionale)")
@@ -616,17 +625,23 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
         if error:
-            await _send_standard(interaction, subcommand_path="attivita ultimi", lines=[("error", error)], kind="error")
+            await _send_standard(interaction, subcommand_path="attivita ultimi", subtitle_args=[quantita, unita], lines=[("error", error)], kind="error")
             return
         assert window is not None
-        await _send_activity_report(interaction, window, utente)
+        subtitle_args = [quantita, unita]
+        if utente is not None:
+            subtitle_args.append(utente)
+        await _send_activity_report(interaction, window, utente, subcommand_path="attivita ultimi", subtitle_args=subtitle_args)
 
     @attivita_group.command(name="range", description="Report attività per range custom")
     @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)", utente="Utente da analizzare (opzionale)")
     async def attivita_range(interaction: discord.Interaction, da: str, a: str, utente: discord.Member | None = None) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:
-            await _send_standard(interaction, subcommand_path="attivita range", lines=[("error", error)], kind="error")
+            await _send_standard(interaction, subcommand_path="attivita range", subtitle_args=[da, a], lines=[("error", error)], kind="error")
             return
         assert window is not None
-        await _send_activity_report(interaction, window, utente)
+        subtitle_args = [da, a]
+        if utente is not None:
+            subtitle_args.append(utente)
+        await _send_activity_report(interaction, window, utente, subcommand_path="attivita range", subtitle_args=subtitle_args)

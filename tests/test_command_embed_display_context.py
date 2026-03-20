@@ -22,7 +22,7 @@ def test_normalize_display_context_qna_limits_with_parameter() -> None:
         top_level="admin",
         subcommand_path="qna limits_show",
         visual_top_level="qna",
-        relevant_parameters=["parameter:base"],
+        subtitle_args=["parameter:base"],
     )
 
     assert context.visual_title == "QNA"
@@ -74,7 +74,7 @@ def test_build_command_embed_omits_top_level_duplication_for_parameterized_comma
             top_level="admin",
             subcommand_path="qna limits_show",
             visual_top_level="qna",
-            relevant_parameters=["base"],
+            subtitle_args=["base"],
             lines=[("tier", "base")],
             footer_service=None,
         )
@@ -83,3 +83,66 @@ def test_build_command_embed_omits_top_level_duplication_for_parameterized_comma
     assert embed.title == "❓ QNA"
     assert embed.description.startswith("**🛠️ LIMITS_SHOW BASE**")
     assert "QNA LIMITS_SHOW BASE" not in (embed.description or "")
+
+
+def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="admin",
+            subcommand_path="qna bonus_show",
+            visual_top_level="qna",
+            subtitle_args=[SimpleNamespace(display_name="Mario Rossi", global_name=None, name="mario")],
+            lines=[("user", "<@123>")],
+            footer_service=None,
+        )
+    )
+
+    assert embed.title == "❓ QNA"
+    assert embed.description.startswith("**🛠️ BONUS_SHOW MARIO ROSSI**")
+    assert "<@123>" in (embed.description or "")
+
+
+def test_build_command_embed_formats_period_subtitle_for_riassunto_ultimi() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="riassunto",
+            subcommand_path="riassunto ultimi",
+            subtitle_args=[30, "minuti"],
+            footer_service=None,
+        )
+    )
+
+    assert embed.title == "🗒️ RIASSUNTO"
+    assert embed.description.startswith("**🛠️ ULTIMI 30 MINUTI**")
+
+
+def test_build_command_embed_formats_period_subtitle_for_attivita_ultimi() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="admin",
+            visual_top_level="attivita",
+            subcommand_path="attivita ultimi",
+            subtitle_args=[7, "giorni"],
+            footer_service=None,
+        )
+    )
+
+    assert embed.title == "📈 ATTIVITA"
+    assert embed.description.startswith("**🛠️ ULTIMI 7 GIORNI**")
+
+
+def test_build_command_embed_skips_long_unreadable_subtitle_input() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="admin",
+            visual_top_level="frasi",
+            subcommand_path="frasi template_user_set",
+            subtitle_args=["x" * 120],
+            lines=[("user", "Mario"), ("text", "x" * 120)],
+            footer_service=None,
+        )
+    )
+
+    assert embed.title == "💬 FRASI"
+    assert embed.description.startswith("**🛠️ TEMPLATE_USER_SET**")
+    assert "X" * 120 not in (embed.description or "")

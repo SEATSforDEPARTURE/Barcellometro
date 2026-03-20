@@ -62,6 +62,7 @@ def register_resoconto(
         *,
         scope: str,
         path: str,
+        subtitle_args: list[object] | None = None,
         kind: str = "info",
         lines: list[tuple[str, object]] | None = None,
         sections: list[CommandEmbedSection] | None = None,
@@ -72,6 +73,7 @@ def register_resoconto(
             interaction,
             top_level="resoconto",
             subcommand_path=f"{scope} {path}",
+            subtitle_args=subtitle_args,
             lines=lines,
             sections=sections,
             kind=kind,
@@ -86,11 +88,13 @@ def register_resoconto(
         scope: str,
         path: str,
         message: str,
+        subtitle_args: list[object] | None = None,
     ) -> None:
         await _send_resoconto_response(
             interaction,
             scope=scope,
             path=path,
+            subtitle_args=subtitle_args,
             kind=_kind_from_message(message),
             lines=[("dettaglio", _normalize_message(message))],
         )
@@ -634,7 +638,7 @@ def register_resoconto(
     async def canale_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
         window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
         if error:
-            await _send_message(interaction, scope="canale", path="ultimi", message=error)
+            await _send_message(interaction, scope="canale", path="ultimi", subtitle_args=[quantita, unita], message=error)
             return
         await _send_channel_aura(interaction, window=window)
 
@@ -654,7 +658,7 @@ def register_resoconto(
     async def canale_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:
-            await _send_message(interaction, scope="canale", path="range", message=error)
+            await _send_message(interaction, scope="canale", path="range", subtitle_args=[da, a], message=error)
             return
         await _send_channel_aura(interaction, window=window)
 
@@ -906,7 +910,7 @@ def register_resoconto(
     async def server_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
         window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
         if error:
-            await _send_message(interaction, scope="server", path="ultimi", message=error)
+            await _send_message(interaction, scope="server", path="ultimi", subtitle_args=[quantita, unita], message=error)
             return
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ultimi")
 
@@ -926,7 +930,7 @@ def register_resoconto(
     async def server_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:
-            await _send_message(interaction, scope="server", path="range", message=error)
+            await _send_message(interaction, scope="server", path="range", subtitle_args=[da, a], message=error)
             return
         await _run_server_aura_report(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="range")
 
