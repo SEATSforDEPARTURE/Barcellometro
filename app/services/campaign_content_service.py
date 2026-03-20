@@ -67,7 +67,11 @@ class CampaignContentService:
         fallback_used = False
         if not payload.get("categories"):
             fallback_used = True
-            embeds = build_fallback_embed(config, payload.get("sources", []))
+            embeds = build_fallback_embed(
+                config,
+                payload.get("sources", []),
+                service_name=self._campaign_footer_service_name("NEWS"),
+            )
         else:
             used_model = await self._rewrite_news_payload(payload)
             embeds = build_news_embeds(config, payload)
