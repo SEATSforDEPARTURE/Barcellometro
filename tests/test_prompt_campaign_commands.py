@@ -67,8 +67,15 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
         assert kwargs["name"].startswith("prompt-")
         assert len(kwargs["start_time_local"]) == 5 and ":" in kwargs["start_time_local"]
         sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
-        assert "Schedule Id" in (sent_embed.description or "")
-        assert "created" in (sent_embed.description or "")
+        description = sent_embed.description or ""
+        description_upper = description.upper()
+        assert "PROMPT" in description_upper
+        assert "SCHEDULE_ADD" in description_upper
+        assert "42" in description_upper
+        assert "CREATED" in description_upper
+        if "NEXT RUN" in description_upper:
+            next_run_section = description_upper.split("NEXT RUN", 1)[1]
+            assert any(char.isdigit() for char in next_run_section)
 
     asyncio.run(_run())
 
