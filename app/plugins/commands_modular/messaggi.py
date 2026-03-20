@@ -150,8 +150,12 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         count_child_commands(campagne_group),
     )
 
-    async def _check(interaction: discord.Interaction, command_name: str) -> bool:
-        return await check_permission(interaction, command_name, ctx)
+    async def _check(interaction: discord.Interaction, *permission_keys: str) -> bool:
+        candidates = [str(permission_key).strip() for permission_key in permission_keys if str(permission_key).strip()]
+        for permission_key in candidates:
+            if await check_permission(interaction, permission_key, ctx):
+                return True
+        return False
 
     async def _send(
         interaction: discord.Interaction,
