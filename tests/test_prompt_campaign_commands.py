@@ -168,7 +168,8 @@ def test_prompt_show_resolves_schedule_by_name() -> None:
 
         sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
         assert "morning-news" in (sent_embed.description or "")
-        assert "prompt_text" in (sent_embed.description or "")
+        assert "Prompt Text" in (sent_embed.description or "")
+        assert "Scrivi un update" in (sent_embed.description or "")
 
     asyncio.run(_run())
 
