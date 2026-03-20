@@ -44,6 +44,56 @@ ROME_TZ = ZoneInfo("Europe/Rome")
 MOMENTS_FIELD_NAME = "📌 MOMENTI SALIENTI"
 
 
+def _italian_recent_period_phrase(value: int, unit: str) -> str:
+    quantity = max(1, int(value))
+    normalized_unit = str(unit or "").strip().lower()
+    forms: dict[str, tuple[str, str, str, str]] = {
+        "settimana": ("Nell'ultima", "Nelle ultime", "settimana", "settimane"),
+        "ora": ("Nell'ultima", "Nelle ultime", "ora", "ore"),
+        "giorno": ("Nell'ultimo", "Negli ultimi", "giorno", "giorni"),
+        "minuto": ("Nell'ultimo", "Negli ultimi", "minuto", "minuti"),
+    }
+    singular_prefix, plural_prefix, singular_unit, plural_unit = forms.get(
+        normalized_unit,
+        ("Nell'ultimo", "Negli ultimi", normalized_unit or "periodo", f"{normalized_unit or 'periodo'}i"),
+    )
+    if quantity == 1:
+        return f"{singular_prefix} {singular_unit}"
+    return f"{plural_prefix} {quantity} {plural_unit}"
+
+
+def _build_period_prefix(
+    period_label: str,
+    *,
+    start_dt: datetime,
+    end_dt: datetime,
+    start_ts: str,
+    end_ts: str,
+) -> str:
+    if period_label == "ieri":
+        return "Ieri"
+    if period_label == "oggi":
+        return "Oggi"
+    if period_label == "ultimi":
+        delta = end_dt - start_dt
+        total_seconds = max(int(delta.total_seconds()), 0)
+        if delta.days >= 7:
+            weeks = max(1, int(round(delta.days / 7)))
+            return _italian_recent_period_phrase(weeks, "settimana")
+        if delta.days >= 1:
+            return _italian_recent_period_phrase(delta.days, "giorno")
+        hours = total_seconds // 3600
+        if hours >= 1:
+            return _italian_recent_period_phrase(hours, "ora")
+        minutes = max(1, total_seconds // 60)
+        return _italian_recent_period_phrase(minutes, "minuto")
+    if period_label == "range":
+        start_label = _format_italian_ts(start_ts)
+        end_label = _format_italian_ts(end_ts)
+        return f"Dal {start_label} al {end_label}"
+    return "Nel periodo indicato"
+
+
 
 
 def _summary_footer_inputs(ai_status: dict[str, Any]) -> tuple[list[str], bool]:
@@ -91,41 +141,6 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         filled = int(round(score / 10))
         empty = max(0, 10 - filled)
         return f"{color_emoji * filled}{'⚪' * empty}"
-
-    def _build_period_prefix(
-        period_label: str,
-        *,
-        start_dt: datetime,
-        end_dt: datetime,
-        start_ts: str,
-        end_ts: str,
-    ) -> str:
-        if period_label == "ieri":
-            return "Ieri"
-        if period_label == "oggi":
-            return "Oggi"
-        if period_label == "ultimi":
-            delta = end_dt - start_dt
-            if delta.days >= 7:
-                weeks = max(1, int(round(delta.days / 7)))
-                unit = "settimane" if weeks > 1 else "settimana"
-                return f"Negli ultimi {weeks} {unit}"
-            if delta.days >= 1:
-                days = max(1, delta.days)
-                unit = "giorni" if days > 1 else "giorno"
-                return f"Negli ultimi {days} {unit}"
-            hours = max(1, int(delta.total_seconds() // 3600))
-            if hours >= 1:
-                unit = "ore" if hours > 1 else "ora"
-                return f"Negli ultimi {hours} {unit}"
-            minutes = max(1, int(delta.total_seconds() // 60))
-            unit = "minuti" if minutes > 1 else "minuto"
-            return f"Negli ultimi {minutes} {unit}"
-        if period_label == "range":
-            start_label = _format_italian_ts(start_ts)
-            end_label = _format_italian_ts(end_ts)
-            return f"Tra {start_label} e {end_label}"
-        return "Nel periodo indicato"
 
     def _local_period_description(prefix: str, color_label: str) -> str:
         color = (color_label or "nero").lower()
@@ -1754,6 +1769,8 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             if profile == "mod":
                 metrics_report = _build_metrics_report(metrics)
 
+            footer_contributors, footer_used_local_processing = _summary_footer_inputs(summary.ai_status)
+
             def build_embeds() -> list[discord.Embed]:
                 return build_summary_detail_embeds(
                     profile=profile,
@@ -1784,25 +1801,26 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                     format_dynamic_line=_format_summary_dynamics_line,
                     format_impact_line=_format_summary_impact_line,
                     format_bullets=_format_bullets,
+                    footer_contributors=footer_contributors,
+                    footer_used_local_processing=footer_used_local_processing,
                     dm_mode=dm_mode,
                 )
 
             embeds = build_embeds()
-            if dm_mode and embeds:
-                ai_reason = str(summary.ai_status.get("reason") or "")
-                contributors, used_local_processing = _summary_footer_inputs(summary.ai_status)
+            ai_reason = str(summary.ai_status.get("reason") or "")
+            if embeds:
                 attach_footer_meta_to_all(
                     embeds,
                     service_name="riassunto",
-                    contributors=contributors,
-                    used_local_processing=used_local_processing,
+                    contributors=footer_contributors,
+                    used_local_processing=footer_used_local_processing,
                 )
-                attach_footer_meta(
-                    status_embed,
-                    service_name="riassunto",
-                    contributors=contributors,
-                    used_local_processing=used_local_processing,
-                )
+            attach_footer_meta(
+                status_embed,
+                service_name="riassunto",
+                contributors=footer_contributors,
+                used_local_processing=footer_used_local_processing,
+            )
 
             logger.info(
                 "riassunto: report id=%s user=%s channel=%s range=%s-%s tier=%s ai=%s cache=%s voice=%s",
@@ -1829,6 +1847,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
             payload_embeds = _ensure_embed_limits(payload_embeds, max_chars=5600)
             payload_embeds = _sanitize_embeds_for_discord_limits(payload_embeds, req_id=req_id)
             payload_embeds = apply_standard_report_style(payload_embeds, service_name="riassunto", cover_title=payload_embeds[0].title if payload_embeds else "🗒️ RIASSUNTO")
+            attach_footer_meta_to_all(
+                payload_embeds,
+                service_name="riassunto",
+                contributors=footer_contributors,
+                used_local_processing=footer_used_local_processing,
+            )
             metrics_file = build_metrics_attachment()
             files = [metrics_file] if metrics_file else None
             logger.info(

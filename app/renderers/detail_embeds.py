@@ -79,6 +79,8 @@ def build_summary_detail_embeds(
     format_dynamic_line: Callable[..., str],
     format_impact_line: Callable[..., str],
     format_bullets: Callable[[list[str]], str],
+    footer_contributors: list[str] | None = None,
+    footer_used_local_processing: bool = True,
     dm_mode: bool = False,
 ) -> list[discord.Embed]:
     sections_map: dict[str, list[tuple[str, str, int]]] = {}
@@ -202,7 +204,12 @@ def build_summary_detail_embeds(
 
     def build_shell() -> discord.Embed:
         e = discord.Embed(title=f"🗒️ DETTAGLI RIASSUNTO — {tier_label}", color=details_color)
-        attach_footer_meta(e, service_name="riassunto", used_local_processing=True)
+        attach_footer_meta(
+            e,
+            service_name="riassunto",
+            contributors=footer_contributors or [],
+            used_local_processing=footer_used_local_processing,
+        )
         return e
 
     def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
