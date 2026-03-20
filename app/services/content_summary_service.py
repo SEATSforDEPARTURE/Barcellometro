@@ -16,11 +16,11 @@ from app.services.database import DatabaseService
 logger = logging.getLogger(__name__)
 MOMENT_TEXT_LIMIT = 200
 ROME_TZ = ZoneInfo("Europe/Rome")
-OLLAMA_SUMMARY_SAMPLE_MAX_ITEMS = 40
-OLLAMA_SUMMARY_SAMPLE_BUCKETS = 4
-DEFAULT_SUMMARY_SAMPLE_MAX_ITEMS = 80
-DEFAULT_SUMMARY_SAMPLE_BUCKETS = 6
+SUMMARY_PROMPT_TARGET_TOKENS = 10000
+SUMMARY_PROMPT_CHAR_BUDGET_TARGET = 36000
+SUMMARY_PROMPT_CHAR_BUDGET_HARD_CAP = 40000
 SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT = 280
+SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT_MIN = 96
 SUMMARY_PROMPT_DUPLICATE_FINGERPRINT_LIMIT = 160
 
 DEFAULT_SUMMARY_CONFIG: dict[str, Any] = {
@@ -249,6 +249,103 @@ class SummaryJsonParseResult:
     @property
     def parse_recovered(self) -> bool:
         return self.extraction_strategy != "direct" or self.normalized_invalid_json
+
+
+def _summary_prompt_budget(
+    *,
+    start_ts: str | None,
+    end_ts: str | None,
+    granularity_hint: str | None,
+    period_label: str | None,
+    is_ollama: bool,
+    ollama_compatible_fallback: bool,
+) -> dict[str, int | str]:
+    duration_secs = 0
+    start_dt = _parse_ts(_normalize_ts_value(start_ts))
+    end_dt = _parse_ts(_normalize_ts_value(end_ts))
+    if start_dt and end_dt:
+        duration_secs = max(int((end_dt - start_dt).total_seconds()), 0)
+    label = str(period_label or "").strip().lower()
+    hint = str(granularity_hint or "").strip().lower()
+
+    max_items = 96
+    buckets = 8
+    per_message_char_limit = 320
+    total_prompt_char_budget = SUMMARY_PROMPT_CHAR_BUDGET_TARGET
+    if duration_secs >= 30 * 24 * 3600:
+        max_items = 32
+        buckets = 4
+        per_message_char_limit = 140
+        total_prompt_char_budget = 22000
+    elif duration_secs >= 14 * 24 * 3600:
+        max_items = 40
+        buckets = 4
+        per_message_char_limit = 160
+        total_prompt_char_budget = 24000
+    elif duration_secs >= 7 * 24 * 3600:
+        max_items = 52
+        buckets = 5
+        per_message_char_limit = 180
+        total_prompt_char_budget = 26000
+    elif duration_secs >= 3 * 24 * 3600:
+        max_items = 64
+        buckets = 6
+        per_message_char_limit = 210
+        total_prompt_char_budget = 30000
+    elif duration_secs >= 24 * 3600:
+        max_items = 80
+        buckets = 7
+        per_message_char_limit = 240
+        total_prompt_char_budget = 33000
+    elif duration_secs >= 6 * 3600:
+        max_items = 92
+        buckets = 8
+        per_message_char_limit = 280
+        total_prompt_char_budget = 35000
+
+    if label in {"oggi", "ieri"}:
+        max_items = max(max_items, 92)
+        buckets = max(buckets, 8)
+        per_message_char_limit = max(per_message_char_limit, 280)
+        total_prompt_char_budget = max(total_prompt_char_budget, 35000)
+    elif label == "range" and duration_secs >= 7 * 24 * 3600:
+        max_items = min(max_items, 48)
+        buckets = min(buckets, 5)
+        per_message_char_limit = min(per_message_char_limit, 170)
+        total_prompt_char_budget = min(total_prompt_char_budget, 25000)
+
+    if hint in {"weeks", "months"}:
+        max_items = min(max_items, 48)
+        buckets = min(buckets, 5)
+        per_message_char_limit = min(per_message_char_limit, 170)
+        total_prompt_char_budget = min(total_prompt_char_budget, 25000)
+    elif hint == "days" and duration_secs >= 7 * 24 * 3600:
+        max_items = min(max_items, 56)
+        buckets = min(buckets, 5)
+        per_message_char_limit = min(per_message_char_limit, 180)
+
+    if is_ollama or ollama_compatible_fallback:
+        max_items = min(40, max(24, int(max_items * 0.75)))
+        buckets = max(3, min(buckets, 5))
+        per_message_char_limit = max(SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT_MIN, int(per_message_char_limit * 0.85))
+        total_prompt_char_budget = max(18000, int(total_prompt_char_budget * 0.8))
+
+    return {
+        "duration_secs": duration_secs,
+        "period_label": label or "unspecified",
+        "max_items": max_items,
+        "min_items": max(18, min(24, max_items)),
+        "buckets": max(3, min(buckets, max_items)),
+        "per_message_char_limit": max(SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT_MIN, per_message_char_limit),
+        "min_per_message_char_limit": SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT_MIN,
+        "total_prompt_char_budget": min(total_prompt_char_budget, SUMMARY_PROMPT_CHAR_BUDGET_HARD_CAP),
+        "hard_prompt_char_cap": SUMMARY_PROMPT_CHAR_BUDGET_HARD_CAP,
+        "target_tokens": SUMMARY_PROMPT_TARGET_TOKENS,
+    }
+
+
+def _estimate_summary_prompt_tokens(char_count: int) -> int:
+    return max(1, math.ceil(max(char_count, 0) / 4))
 
 
 class SummaryService:
@@ -574,10 +671,6 @@ class SummaryService:
         fallback_provider, _ = parse_model_string(str(fallback_model_cfg or "")) if fallback_model_cfg else (None, None)
         is_ollama = provider == "ollama"
         ollama_compatible_fallback = provider != "ollama" and fallback_provider == "ollama"
-        sample_max_items = OLLAMA_SUMMARY_SAMPLE_MAX_ITEMS if (is_ollama or ollama_compatible_fallback) else DEFAULT_SUMMARY_SAMPLE_MAX_ITEMS
-        sample_buckets = OLLAMA_SUMMARY_SAMPLE_BUCKETS if (is_ollama or ollama_compatible_fallback) else DEFAULT_SUMMARY_SAMPLE_BUCKETS
-        sampled_messages = sample_messages_time_distributed(messages, max_items=sample_max_items, buckets=sample_buckets)
-        compact_messages, compact_stats = _build_summary_prompt_messages(sampled_messages)
         moments_policy_tier = _moments_policy_tier(tier)
         moments_target = _tier_limit(config, moments_policy_tier, "moments", 5)
         logger.info("summary: moments_policy=role3 requested_tier=%s", tier)
@@ -694,7 +787,28 @@ class SummaryService:
                 "nessun nome inventato, una frase per riga (max 160 caratteri), italiano corretto e neutro. "
                 "Aggiungi opzionalmente `proverbio` (una riga)."
             )
-        payload_dict = {
+        period_label = str((summary_context or {}).get("period_label") or period_label or "").strip().lower()
+        budget = _summary_prompt_budget(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            granularity_hint=granularity_hint,
+            period_label=period_label,
+            is_ollama=is_ollama,
+            ollama_compatible_fallback=ollama_compatible_fallback,
+        )
+        logger.info(
+            "summary: period_budget duration_secs=%s period_label=%s granularity_hint=%s target_tokens=%s",
+            budget["duration_secs"],
+            budget["period_label"],
+            granularity_hint or "unspecified",
+            budget["target_tokens"],
+        )
+        logger.info(
+            "summary: prompt_budget_chars=%s hard_cap_chars=%s",
+            budget["total_prompt_char_budget"],
+            budget["hard_prompt_char_cap"],
+        )
+        payload_base = {
             "tier": tier,
             "moments_target_count": moments_target,
             "quotes_target_count": quotes_target,
@@ -702,28 +816,40 @@ class SummaryService:
             "metrics": _build_summary_prompt_metrics(barcello_metrics),
             "granularity_hint": _granularity_prompt_hint(granularity_hint),
             "summary_context": _build_summary_prompt_context(summary_context),
-            "messages": compact_messages,
         }
         if include_names:
-            payload_dict["include_names"] = True
-        user_payload = json.dumps(payload_dict, ensure_ascii=False, separators=(",", ":"))
+            payload_base["include_names"] = True
+        user_payload, compact_messages, compact_stats = _build_summary_prompt_payload(
+            messages=messages,
+            payload_base=payload_base,
+            system_prompt=system_prompt,
+            budget=budget,
+        )
         if self._ai_service is None:
             return None
         prompt_chars_before = compact_stats["raw_payload_chars"] + len(system_prompt)
         prompt_chars_after = len(user_payload) + len(system_prompt)
+        logger.info("summary: sampled_messages_before_budget=%s", compact_stats["sampled_before_budget"])
+        logger.info("summary: sampled_messages_after_budget=%s", compact_stats["sampled_after_budget"])
+        logger.info("summary: per_message_char_limit=%s", compact_stats["per_message_char_limit"])
+        logger.info(
+            "summary: prompt_chars_final=%s estimated_tokens=%s",
+            compact_stats["prompt_chars_final"],
+            _estimate_summary_prompt_tokens(int(compact_stats["prompt_chars_final"])),
+        )
         logger.info(
             "summary: provider=%s schema=%s sampled_messages=%s buckets=%s ai_calls_before=%s ai_calls_after=%s prompt_chars_before=%s prompt_chars_after=%s prompt_items_before=%s prompt_items_after=%s removed_metadata=%s used_local_render_fields=%s local_period_description=%s",
             provider or "unknown",
             schema_mode,
-            len(sampled_messages),
-            sample_buckets,
+            compact_stats["sampled_after_budget"],
+            compact_stats["buckets_used"],
             2,
             1,
             prompt_chars_before,
             prompt_chars_after,
-            compact_stats["items_before"],
+            compact_stats["sampled_before_budget"],
             compact_stats["items_after"],
-            str(compact_stats["removed_metadata"]).lower(),
+            str(bool(compact_stats["removed_metadata"]) or bool(compact_stats["metadata_reduced"])).lower(),
             "true",
             "true" if summary_mode == "default" else "false",
         )
@@ -2346,7 +2472,89 @@ def _build_summary_prompt_context(summary_context: dict[str, Any] | None) -> dic
     return compact
 
 
-def _build_summary_prompt_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _build_summary_prompt_payload(
+    *,
+    messages: list[dict[str, Any]],
+    payload_base: dict[str, Any],
+    system_prompt: str,
+    budget: dict[str, int | str],
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+    max_items = int(budget["max_items"])
+    min_items = int(budget["min_items"])
+    buckets = int(budget["buckets"])
+    per_message_char_limit = int(budget["per_message_char_limit"])
+    min_per_message_char_limit = int(budget["min_per_message_char_limit"])
+    total_prompt_char_budget = int(budget["total_prompt_char_budget"])
+    hard_prompt_char_cap = int(budget["hard_prompt_char_cap"])
+    include_kind = True
+    include_voice_meta = True
+    sampled_messages = sample_messages_time_distributed(messages, max_items=max_items, buckets=buckets)
+    sampled_before_budget = len(sampled_messages)
+    compact_messages: list[dict[str, Any]] = []
+    compact_stats: dict[str, Any] = {
+        "items_before": 0,
+        "items_after": 0,
+        "removed_duplicates": 0,
+        "removed_metadata": False,
+        "raw_payload_chars": 0,
+    }
+    user_payload = ""
+    metadata_reduced = False
+    guard = 0
+    while guard < 12:
+        guard += 1
+        compact_messages, compact_stats = _build_summary_prompt_messages(
+            sampled_messages,
+            per_message_char_limit=per_message_char_limit,
+            include_kind=include_kind,
+            include_voice_meta=include_voice_meta,
+        )
+        payload_dict = dict(payload_base)
+        payload_dict["messages"] = compact_messages
+        user_payload = json.dumps(payload_dict, ensure_ascii=False, separators=(",", ":"))
+        prompt_chars = len(user_payload) + len(system_prompt)
+        if prompt_chars <= total_prompt_char_budget and len(user_payload) <= hard_prompt_char_cap:
+            break
+        if include_kind or include_voice_meta:
+            include_kind = False
+            include_voice_meta = False
+            metadata_reduced = True
+            continue
+        if per_message_char_limit > min_per_message_char_limit:
+            per_message_char_limit = max(min_per_message_char_limit, int(per_message_char_limit * 0.82))
+            continue
+        if max_items > min_items:
+            max_items = max(min_items, int(max_items * 0.82))
+            buckets = max(3, min(buckets, max_items))
+            sampled_messages = sample_messages_time_distributed(messages, max_items=max_items, buckets=buckets)
+            continue
+        while compact_messages and (len(user_payload) + len(system_prompt) > total_prompt_char_budget or len(user_payload) > hard_prompt_char_cap):
+            compact_messages = compact_messages[:-1]
+            payload_dict["messages"] = compact_messages
+            user_payload = json.dumps(payload_dict, ensure_ascii=False, separators=(",", ":"))
+        break
+    compact_stats.update(
+        {
+            "sampled_before_budget": sampled_before_budget,
+            "sampled_after_budget": len(compact_messages),
+            "per_message_char_limit": per_message_char_limit,
+            "max_items_used": max_items,
+            "buckets_used": buckets,
+            "metadata_reduced": metadata_reduced,
+            "prompt_chars_final": len(user_payload) + len(system_prompt),
+            "prompt_payload_chars_final": len(user_payload),
+        }
+    )
+    return user_payload, compact_messages, compact_stats
+
+
+def _build_summary_prompt_messages(
+    messages: list[dict[str, Any]],
+    *,
+    per_message_char_limit: int = SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT,
+    include_kind: bool = True,
+    include_voice_meta: bool = True,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     compact_rows: list[dict[str, Any]] = []
     seen_fingerprints: set[tuple[str, str, str]] = set()
     removed_duplicates = 0
@@ -2354,7 +2562,7 @@ def _build_summary_prompt_messages(messages: list[dict[str, Any]]) -> tuple[list
     raw_payload_chars = 0
     for message in messages:
         meta = message.get("meta") or {}
-        text = _compact_summary_prompt_text(message.get("content"))
+        text = _compact_summary_prompt_text(message.get("content"), limit=per_message_char_limit)
         if not text:
             continue
         author_id = str(message.get("author_id") or "")
@@ -2374,10 +2582,10 @@ def _build_summary_prompt_messages(messages: list[dict[str, Any]]) -> tuple[list
             "a": author_id,
             "x": text,
         }
-        if kind:
+        if include_kind and kind:
             row["k"] = kind
             removed_metadata = True
-        if meta.get("in_call"):
+        if include_voice_meta and meta.get("in_call"):
             row["vc"] = 1
             removed_metadata = True
         compact_rows.append(row)
@@ -2391,13 +2599,13 @@ def _build_summary_prompt_messages(messages: list[dict[str, Any]]) -> tuple[list
     }
 
 
-def _compact_summary_prompt_text(text: Any) -> str:
+def _compact_summary_prompt_text(text: Any, *, limit: int = SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT) -> str:
     cleaned = " ".join(str(text or "").split())
     if not cleaned:
         return ""
-    if len(cleaned) <= SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT:
+    if len(cleaned) <= limit:
         return cleaned
-    return _compact_text_word_boundary(cleaned, SUMMARY_PROMPT_MESSAGE_CHAR_LIMIT)
+    return _compact_text_word_boundary(cleaned, limit)
 
 
 def _duplicate_message_fingerprint(text: str) -> str:
