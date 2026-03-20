@@ -61,15 +61,15 @@ def _install_audio_notes_mocks(monkeypatch: pytest.MonkeyPatch, module, db: _Fak
     monkeypatch.setattr(module, "get_setting", AsyncMock(side_effect=_get_setting))
     monkeypatch.setattr(module, "set_setting", AsyncMock(side_effect=_set_setting))
     monkeypatch.setattr(module, "reset_setting", AsyncMock(side_effect=_reset_setting))
-    send_embed = AsyncMock()
-    monkeypatch.setattr(module, "send_standard_command_embed", send_embed)
-    return send_embed
+    send_response = AsyncMock()
+    monkeypatch.setattr(module, "send_legacy_standard_response", send_response)
+    return send_response
 
 
 def test_audio_notes_config_set_updates_only_passed_fields(audio_notes_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         db = _FakeDatabase({"audio_notes.max_duration_s": "180", "audio_notes.discord_max_chars": "1900", "audio_notes.queue_max": "50"})
-        send_embed = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
+        send_response = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
         _, group = _register_group(audio_notes_module, db)
 
         callback = _get_command_callback(group, "config_set")
@@ -79,7 +79,12 @@ def test_audio_notes_config_set_updates_only_passed_fields(audio_notes_module, m
         assert db.values["audio_notes.chars_summary"] == "1200"
         assert db.values["audio_notes.max_duration_s"] == "180"
         assert db.set_calls == [("audio_notes.max_mb", "30"), ("audio_notes.chars_summary", "1200")]
-        assert send_embed.await_count == 1
+        kwargs = send_response.await_args.kwargs
+        assert send_response.await_count == 1
+        assert kwargs["path_parts"] == ["audionotes", "config_set"]
+        assert kwargs["tone"] == "success"
+        assert kwargs["entries"] == [("Status", "updated")]
+        assert kwargs["service_name"] == "audio_notes"
 
     asyncio.run(_run())
 
@@ -96,13 +101,13 @@ def test_audio_notes_status_reads_current_values_and_does_not_crash(audio_notes_
                 "audio_notes.chars_summary": "1800",
             }
         )
-        send_embed = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
+        send_response = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
         _, group = _register_group(audio_notes_module, db)
 
         callback = _get_command_callback(group, "status")
         await callback(SimpleNamespace())
 
-        kwargs = send_embed.await_args.kwargs
+        kwargs = send_response.await_args.kwargs
         assert kwargs["path_parts"] == ["audionotes", "status"]
         assert ("Enabled", True) in kwargs["entries"]
         assert ("Chars Summary", "1800") in kwargs["entries"]
@@ -122,13 +127,13 @@ def test_audio_notes_config_show_reads_current_values_and_does_not_crash(audio_n
                 "audio_notes.chars_summary": "1800",
             }
         )
-        send_embed = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
+        send_response = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
         _, group = _register_group(audio_notes_module, db)
 
         callback = _get_command_callback(group, "config_show")
         await callback(SimpleNamespace())
 
-        kwargs = send_embed.await_args.kwargs
+        kwargs = send_response.await_args.kwargs
         assert kwargs["path_parts"] == ["audionotes", "config_show"]
         assert ("Max Mb", "42") in kwargs["entries"]
         assert ("Chars Summary", "1800") in kwargs["entries"]
@@ -147,14 +152,14 @@ def test_audio_notes_config_set_with_all_none_returns_without_write(audio_notes_
                 "audio_notes.chars_summary": "1500",
             }
         )
-        send_embed = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
+        send_response = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
         _, group = _register_group(audio_notes_module, db)
 
         callback = _get_command_callback(group, "config_set")
         await callback(SimpleNamespace(), max_mb=None, max_duration_s=None, discord_max_chars=None, queue_max=None, chars_summary=None)
 
         assert db.set_calls == []
-        kwargs = send_embed.await_args.kwargs
+        kwargs = send_response.await_args.kwargs
         assert kwargs["tone"] == "warning"
         assert ("Reason", "No changes provided") in kwargs["entries"]
 
@@ -187,7 +192,7 @@ def test_audio_notes_config_set_returns_updated_config_after_write(audio_notes_m
                 "audio_notes.chars_summary": "",
             }
         )
-        send_embed = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
+        send_response = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
         _, group = _register_group(audio_notes_module, db)
 
         callback = _get_command_callback(group, "config_set")
@@ -195,7 +200,11 @@ def test_audio_notes_config_set_returns_updated_config_after_write(audio_notes_m
 
         assert db.values["audio_notes.max_mb"] == "30"
         assert db.values["audio_notes.discord_max_chars"] == "2100"
-        sections = send_embed.await_args.kwargs["sections"]
+        kwargs = send_response.await_args.kwargs
+        assert kwargs["path_parts"] == ["audionotes", "config_set"]
+        assert kwargs["tone"] == "success"
+        assert kwargs["entries"] == [("Status", "updated")]
+        sections = kwargs["sections"]
         config_section = sections[0]
         assert config_section[0] == "Config"
         assert ("Discord Max Chars", "2100") in config_section[1]
@@ -221,13 +230,13 @@ def test_audio_notes_config_reset_clears_stored_settings(audio_notes_module, mon
 def test_audio_notes_config_reset_returns_defaults_after_reset(audio_notes_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         db = _FakeDatabase({"audio_notes.max_mb": "42", "audio_notes.queue_max": "99"})
-        send_embed = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
+        send_response = _install_audio_notes_mocks(monkeypatch, audio_notes_module, db)
         _, group = _register_group(audio_notes_module, db)
 
         callback = _get_command_callback(group, "config_reset")
         await callback(SimpleNamespace())
 
-        kwargs = send_embed.await_args.kwargs
+        kwargs = send_response.await_args.kwargs
         assert kwargs["tone"] == "success"
         config_entries = kwargs["sections"][0][1]
         assert ("Queue Max", "50") in config_entries
