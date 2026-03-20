@@ -26,11 +26,11 @@ def test_admin_group_is_the_registered_root_namespace() -> None:
     assert '        admin_group,' in source
 
 
-def test_campaign_and_trigger_outputs_use_admin_namespace() -> None:
+def test_campaign_and_trigger_outputs_use_visual_top_levels() -> None:
     triggers_source = Path("app/plugins/commands_modular/triggers.py").read_text()
     messaggi_source = Path("app/plugins/commands_modular/messaggi.py").read_text()
+    command_embeds_source = Path("app/shared/discord/command_embeds.py").read_text()
 
-    assert 'top_level="admin"' in triggers_source
-    assert 'top_level="admin"' in messaggi_source
-    assert triggers_source.count('top_level="admin"') >= 1
-    assert messaggi_source.count('top_level="admin"') >= 1
+    assert 'visual_top_level=subcommand_path.split()[0] if subcommand_path.strip() else None' in triggers_source
+    assert 'visual_top_level="campagne"' in messaggi_source
+    assert "normalize_display_command_context" in command_embeds_source

@@ -63,6 +63,25 @@ DUPLICATE_HELPER_NAME_PATTERNS = (
     "component_notice",
 )
 
+DISPLAY_TOP_LEVEL_OVERRIDES = {
+    "frasi",
+    "campagne",
+    "qna",
+    "insights",
+    "moderazione",
+    "inattivi",
+    "privacy",
+    "roles",
+    "attivita",
+    "aura",
+    "riassunto",
+    "resoconto",
+    "resocontocanale",
+    "resocontoserver",
+    "domanda",
+    "ask",
+}
+
 
 @dataclass(slots=True)
 class Issue:
@@ -358,6 +377,43 @@ def _check_duplicate_helper_systems(tree: ast.AST, file_path: Path, report: Vali
             )
 
 
+def _check_display_command_context(tree: ast.AST, file_path: Path, report: ValidationReport) -> None:
+    file_rel = file_path.relative_to(REPO_ROOT)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _call_name(node) not in STANDARD_COMMAND_HELPERS:
+            continue
+        top_level = _literal_str(_keyword_value(node, "top_level"))
+        subcommand_path = _literal_str(_keyword_value(node, "subcommand_path"))
+        visual_top_level = _literal_str(_keyword_value(node, "visual_top_level"))
+        if not top_level or not subcommand_path:
+            continue
+
+        path_parts = [part.strip().lower() for part in subcommand_path.split() if part.strip()]
+        if not path_parts:
+            continue
+        expected_visual_top = path_parts[0]
+        if expected_visual_top not in DISPLAY_TOP_LEVEL_OVERRIDES:
+            continue
+        if top_level.lower() != "admin" and top_level.lower() != expected_visual_top:
+            if visual_top_level != expected_visual_top:
+                report.add(
+                    "display_command_context",
+                    file_rel,
+                    node.lineno,
+                    f"top_level='{top_level}' does not match visible command root '{expected_visual_top}' for subcommand_path='{subcommand_path}'.",
+                )
+                continue
+        if top_level.lower() == "admin" and visual_top_level != expected_visual_top:
+            report.add(
+                "display_command_context",
+                file_rel,
+                node.lineno,
+                f"Provide visual_top_level='{expected_visual_top}' so the embed title matches the visible command root instead of the technical namespace.",
+            )
+
+
 def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) -> ValidationReport:
     report = ValidationReport()
     command_roots = {
@@ -372,6 +428,7 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         tree = ast.parse(source, filename=str(path))
         _check_raw_text_messages(tree, path, report)
         _check_duplicate_helper_systems(tree, path, report)
+        _check_display_command_context(tree, path, report)
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)
@@ -385,6 +442,7 @@ def _print_report(report: ValidationReport) -> None:
     print("- Slash commands must use the standard command embed builder helpers.")
     print("- Embed construction must include footer meta wiring.")
     print("- No duplicate generic embed helper systems are allowed.")
+    print("- Technical namespaces must not leak into standard command embed titles.")
     print()
 
     if not report.errors:

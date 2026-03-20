@@ -12,8 +12,30 @@ from app.services.footer import attach_footer_meta, attach_minimal_footer, Foote
 CommandKind = Literal["info", "success", "warning", "error"]
 FooterMode = Literal["minimal", "meta", "none"]
 
+DISPLAY_TOP_LEVEL_OVERRIDES: set[str] = {
+    "frasi",
+    "campagne",
+    "qna",
+    "insights",
+    "moderazione",
+    "inattivi",
+    "privacy",
+    "roles",
+    "attivita",
+    "aura",
+    "riassunto",
+    "resoconto",
+    "resocontocanale",
+    "resocontoserver",
+    "domanda",
+    "ask",
+}
+
 TOP_LEVEL_EMOJIS: dict[str, str] = {
     "admin": "🫛",
+    "campagne": "📣",
+    "frasi": "💬",
+    "qna": "❓",
     "status": "📊",
     "ai": "🧠",
     "retention": "🗂️",
@@ -81,6 +103,15 @@ class CommandEmbedSection:
     emoji: str | None = None
 
 
+@dataclass(slots=True)
+class DisplayCommandContext:
+    visual_top_level: str
+    visual_title: str
+    title_emoji: str
+    visual_subtitle: str
+    subtitle_emoji: str
+
+
 _MAX_DESCRIPTION = 3800
 
 
@@ -108,6 +139,24 @@ def normalize_command_path(*parts: str | None) -> str:
     return " ".join(values).upper()
 
 
+def _normalize_command_token(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def _split_command_path(path: str | None) -> list[str]:
+    return [part.strip() for part in str(path or "").split() if part and str(part).strip()]
+
+
+def _normalize_relevant_parameter(value: object) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if ":" in raw:
+        _, tail = raw.rsplit(":", 1)
+        raw = tail.strip() or raw
+    return raw
+
+
 def get_command_emoji(command: str | None) -> str:
     key = str(command or "").strip().lower()
     return TOP_LEVEL_EMOJIS.get(key, "🫛")
@@ -120,6 +169,53 @@ def get_section_emoji(title: str | None, *, kind: CommandKind = "info") -> str:
 
 def get_semantic_color(kind: CommandKind) -> int:
     return KIND_COLORS[kind]
+
+
+def normalize_display_command_context(
+    *,
+    top_level: str,
+    subcommand_path: str,
+    kind: CommandKind = "info",
+    visual_top_level: str | None = None,
+    relevant_parameters: Sequence[object] | None = None,
+    top_level_emoji: str | None = None,
+    subcommand_emoji: str | None = None,
+) -> DisplayCommandContext:
+    path_parts = _split_command_path(subcommand_path)
+    raw_top_level = _normalize_command_token(top_level)
+    inferred_visual_top_level = _normalize_command_token(visual_top_level)
+
+    if not inferred_visual_top_level and path_parts:
+        candidate = _normalize_command_token(path_parts[0])
+        if candidate in DISPLAY_TOP_LEVEL_OVERRIDES:
+            inferred_visual_top_level = candidate
+
+    if not inferred_visual_top_level:
+        inferred_visual_top_level = raw_top_level or _normalize_command_token(path_parts[0] if path_parts else "")
+
+    subtitle_parts = list(path_parts)
+    if subtitle_parts and _normalize_command_token(subtitle_parts[0]) == inferred_visual_top_level:
+        subtitle_parts = subtitle_parts[1:]
+
+    for raw_parameter in relevant_parameters or ():
+        normalized_parameter = _normalize_relevant_parameter(raw_parameter)
+        if normalized_parameter is None:
+            continue
+        if any(_normalize_command_token(part) == _normalize_command_token(normalized_parameter) for part in subtitle_parts):
+            continue
+        subtitle_parts.append(normalized_parameter)
+
+    visual_subtitle = normalize_command_path(*subtitle_parts)
+    resolved_subtitle_emoji = subcommand_emoji or get_section_emoji(subtitle_parts[-1] if subtitle_parts else None, kind=kind)
+    resolved_title_emoji = top_level_emoji or get_command_emoji(inferred_visual_top_level or raw_top_level)
+
+    return DisplayCommandContext(
+        visual_top_level=inferred_visual_top_level.upper(),
+        visual_title=inferred_visual_top_level.upper(),
+        title_emoji=resolved_title_emoji,
+        visual_subtitle=visual_subtitle,
+        subtitle_emoji=resolved_subtitle_emoji,
+    )
 
 
 def stringify_value(value: Any) -> str:
@@ -170,6 +266,8 @@ async def build_command_embeds(
     *,
     top_level: str,
     subcommand_path: str,
+    visual_top_level: str | None = None,
+    relevant_parameters: Sequence[object] | None = None,
     lines: Sequence[tuple[str, Any]] | None = None,
     sections: Sequence[CommandEmbedSection | dict[str, Any]] | None = None,
     kind: CommandKind = "info",
@@ -182,15 +280,24 @@ async def build_command_embeds(
     line_formatter: Callable[[str, Any], str] | None = None,
     section_title_formatter: Callable[[str], str] | None = None,
 ) -> list[discord.Embed]:
-    title = f"{top_level_emoji or get_command_emoji(top_level)} {str(top_level).upper()}"
-    sub_emoji = subcommand_emoji or get_section_emoji(subcommand_path.split()[-1] if subcommand_path else None, kind=kind)
+    display_context = normalize_display_command_context(
+        top_level=top_level,
+        subcommand_path=subcommand_path,
+        kind=kind,
+        visual_top_level=visual_top_level,
+        relevant_parameters=relevant_parameters,
+        top_level_emoji=top_level_emoji,
+        subcommand_emoji=subcommand_emoji,
+    )
+    title = f"{display_context.title_emoji} {display_context.visual_title}"
     blocks: list[str] = []
-    header = f"**{sub_emoji} {normalize_command_path(subcommand_path)}**"
+    header = f"**{display_context.subtitle_emoji} {display_context.visual_subtitle}**" if display_context.visual_subtitle else ""
     rendered_lines = [(line_formatter or format_bullet)(label, value) for label, value in lines or []]
-    if compact_lines and rendered_lines:
+    if header and compact_lines and rendered_lines:
         blocks.append("\n".join([header, *rendered_lines]))
     else:
-        blocks.append(header)
+        if header:
+            blocks.append(header)
         blocks.extend(rendered_lines)
     for section in sections or []:
         if isinstance(section, dict):
@@ -299,6 +406,8 @@ async def send_standard_response(
     *,
     top_level: str,
     subcommand_path: str,
+    visual_top_level: str | None = None,
+    relevant_parameters: Sequence[object] | None = None,
     lines: Sequence[tuple[str, Any]] | None = None,
     sections: Sequence[CommandEmbedSection | dict[str, Any]] | None = None,
     kind: CommandKind = "info",
@@ -316,6 +425,8 @@ async def send_standard_response(
     embeds = await build_command_embeds(
         top_level=top_level,
         subcommand_path=subcommand_path,
+        visual_top_level=visual_top_level,
+        relevant_parameters=relevant_parameters,
         lines=lines,
         sections=sections,
         kind=kind,

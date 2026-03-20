@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import discord
 
-from app.shared.discord.command_embeds import send_legacy_standard_response
+from app.shared.discord.command_embeds import send_standard_response
 from app.plugins.commands_modular.ctx import CommandContext
 
 
@@ -35,13 +35,17 @@ async def check_permission(
     if result.cooldown_remaining is not None:
         message += f" Cooldown: {result.cooldown_remaining}s."
     ephemeral = interaction.guild_id is not None
-    await send_legacy_standard_response(
+    qualified_name = str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "").strip()
+    subcommand_path = f"{qualified_name} warning" if qualified_name else "warning"
+    visual_top_level = qualified_name.split()[0] if qualified_name else None
+    await send_standard_response(
         interaction,
         top_level="admin",
-        path_parts=["warning"],
-        entries=[("Reason", message)],
-        tone="warning",
-        service_name="status",
+        subcommand_path=subcommand_path,
+        visual_top_level=visual_top_level,
+        lines=[("reason", message)],
+        kind="warning",
+        footer_service=ctx.footer,
         ephemeral=ephemeral,
     )
     return False
