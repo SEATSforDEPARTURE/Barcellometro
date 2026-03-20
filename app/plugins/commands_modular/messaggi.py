@@ -150,8 +150,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         count_child_commands(campagne_group),
     )
 
-    async def _check(interaction: discord.Interaction, command_name: str, *legacy_aliases: str) -> bool:
-        return await check_permission(interaction, command_name, ctx, legacy_aliases=legacy_aliases)
+    async def _check(interaction: discord.Interaction, command_name: str) -> bool:
+        return await check_permission(interaction, command_name, ctx)
 
     async def _send(
         interaction: discord.Interaction,
@@ -229,9 +229,9 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             return None
         return dict(row)
 
-    async def _set_service_enabled(interaction: discord.Interaction, *, service_type: str, action: str, legacy_aliases: tuple[str, ...] = ()) -> None:
+    async def _set_service_enabled(interaction: discord.Interaction, *, service_type: str, action: str) -> None:
         subcommand_path = f"campagne {service_type.lower()} {action}"
-        if not await _check(interaction, f"campagne.{service_type.lower()}.{action}", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.{action}"):
             return
         scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
         if scope is None:
@@ -264,9 +264,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         *,
         service_type: str,
         schedule_id: int,
-        legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_show", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_show"):
             return
         subcommand_path = f"campagne {service_type.lower()} schedule_show"
         guild_id = await _require_guild(interaction, subcommand_path=subcommand_path)
@@ -283,9 +282,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         *,
         service_type: str,
         schedule_id: int,
-        legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_remove", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_remove"):
             return
         subcommand_path = f"campagne {service_type.lower()} schedule_remove"
         guild_id = await _require_guild(interaction, subcommand_path=subcommand_path)
@@ -302,9 +300,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         interaction: discord.Interaction,
         *,
         service_type: str,
-        legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_list", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_list"):
             return
         subcommand_path = f"campagne {service_type.lower()} schedule_list"
         guild_id = await _require_guild(interaction, subcommand_path=subcommand_path)
@@ -327,9 +324,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         interaction: discord.Interaction,
         *,
         service_type: str,
-        legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.run", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.run"):
             return
         subcommand_path = f"campagne {service_type.lower()} run"
         scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
@@ -362,9 +358,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         embed_color: str | None,
         sources: str | None,
         categories: str | None,
-        legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_add", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_add"):
             return
         subcommand_path = f"campagne {service_type.lower()} schedule_add"
         scope = await _require_guild_channel(interaction, subcommand_path=subcommand_path)
@@ -413,9 +408,8 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
         enabled: bool | None,
         sources: str | None = None,
         categories: str | None = None,
-        legacy_aliases: tuple[str, ...] = (),
     ) -> None:
-        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_edit", *legacy_aliases):
+        if not await _check(interaction, f"campagne.{service_type.lower()}.schedule_edit"):
             return
         subcommand_path = f"campagne {service_type.lower()} schedule_edit"
         guild_id = await _require_guild(interaction, subcommand_path=subcommand_path)
@@ -898,15 +892,15 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
 
     @news_group.command(name="on", description="Enable news campaigns in the current channel")
     async def news_on(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="NEWS", action="on", legacy_aliases=("campagne.notizie", "campagne.servizi_on"))
+        await _set_service_enabled(interaction, service_type="NEWS", action="on")
 
     @news_group.command(name="off", description="Disable news campaigns in the current channel")
     async def news_off(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="NEWS", action="off", legacy_aliases=("campagne.notizie", "campagne.servizi_off"))
+        await _set_service_enabled(interaction, service_type="NEWS", action="off")
 
     @news_group.command(name="status", description="Show news campaign status for the current channel")
     async def news_status(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="NEWS", action="status", legacy_aliases=("campagne.notizie",))
+        await _set_service_enabled(interaction, service_type="NEWS", action="status")
 
     @news_group.command(name="schedule_add", description="Add a news campaign schedule")
     @app_commands.describe(
@@ -935,7 +929,6 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_color=embed_color,
             sources=sources,
             categories=categories,
-            legacy_aliases=("campagne.news.config_set", "campagne.notizie"),
         )
 
     @news_group.command(name="schedule_edit", description="Edit a news campaign schedule")
@@ -965,38 +958,37 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_title=embed_title,
             embed_color=embed_color,
             enabled=enabled,
-            legacy_aliases=("campagne.news.config_set", "campagne.notizie"),
         )
 
     @news_group.command(name="schedule_show", description="Show a news campaign schedule")
     @app_commands.describe(id="News schedule ID")
     async def news_schedule_show(interaction: discord.Interaction, id: int) -> None:
-        await _service_schedule_show(interaction, service_type="NEWS", schedule_id=id, legacy_aliases=("campagne.news.config_show", "campagne.notizie", "campagne.servizi_lista"))
+        await _service_schedule_show(interaction, service_type="NEWS", schedule_id=id)
 
     @news_group.command(name="schedule_remove", description="Remove a news campaign schedule")
     @app_commands.describe(id="News schedule ID")
     async def news_schedule_remove(interaction: discord.Interaction, id: int) -> None:
-        await _service_schedule_remove(interaction, service_type="NEWS", schedule_id=id, legacy_aliases=("campagne.news.config_reset", "campagne.servizi_delete"))
+        await _service_schedule_remove(interaction, service_type="NEWS", schedule_id=id)
 
     @news_group.command(name="schedule_list", description="List news campaign schedules")
     async def news_schedule_list(interaction: discord.Interaction) -> None:
-        await _service_schedule_list(interaction, service_type="NEWS", legacy_aliases=("campagne.news.config_show", "campagne.notizie", "campagne.servizi_lista"))
+        await _service_schedule_list(interaction, service_type="NEWS")
 
     @news_group.command(name="run", description="Run the news campaign immediately")
     async def news_run(interaction: discord.Interaction) -> None:
-        await _service_run(interaction, service_type="NEWS", legacy_aliases=("campagne.servizi_test",))
+        await _service_run(interaction, service_type="NEWS")
 
     @weather_group.command(name="on", description="Enable weather campaigns in the current channel")
     async def weather_on(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="WEATHER", action="on", legacy_aliases=("campagne.meteo", "campagne.servizi_on"))
+        await _set_service_enabled(interaction, service_type="WEATHER", action="on")
 
     @weather_group.command(name="off", description="Disable weather campaigns in the current channel")
     async def weather_off(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="WEATHER", action="off", legacy_aliases=("campagne.meteo", "campagne.servizi_off"))
+        await _set_service_enabled(interaction, service_type="WEATHER", action="off")
 
     @weather_group.command(name="status", description="Show weather campaign status for the current channel")
     async def weather_status(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="WEATHER", action="status", legacy_aliases=("campagne.meteo",))
+        await _set_service_enabled(interaction, service_type="WEATHER", action="status")
 
     @weather_group.command(name="schedule_add", description="Add a weather campaign schedule")
     @app_commands.describe(
@@ -1023,7 +1015,6 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_color=embed_color,
             sources=sources,
             categories=None,
-            legacy_aliases=("campagne.weather.config_set", "campagne.meteo"),
         )
 
     @weather_group.command(name="schedule_edit", description="Edit a weather campaign schedule")
@@ -1056,38 +1047,37 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_color=embed_color,
             sources=sources,
             enabled=enabled,
-            legacy_aliases=("campagne.weather.config_set", "campagne.meteo"),
         )
 
     @weather_group.command(name="schedule_show", description="Show a weather campaign schedule")
     @app_commands.describe(id="Weather schedule ID")
     async def weather_schedule_show(interaction: discord.Interaction, id: int) -> None:
-        await _service_schedule_show(interaction, service_type="WEATHER", schedule_id=id, legacy_aliases=("campagne.weather.config_show", "campagne.meteo", "campagne.servizi_lista"))
+        await _service_schedule_show(interaction, service_type="WEATHER", schedule_id=id)
 
     @weather_group.command(name="schedule_remove", description="Remove a weather campaign schedule")
     @app_commands.describe(id="Weather schedule ID")
     async def weather_schedule_remove(interaction: discord.Interaction, id: int) -> None:
-        await _service_schedule_remove(interaction, service_type="WEATHER", schedule_id=id, legacy_aliases=("campagne.weather.config_reset", "campagne.servizi_delete"))
+        await _service_schedule_remove(interaction, service_type="WEATHER", schedule_id=id)
 
     @weather_group.command(name="schedule_list", description="List weather campaign schedules")
     async def weather_schedule_list(interaction: discord.Interaction) -> None:
-        await _service_schedule_list(interaction, service_type="WEATHER", legacy_aliases=("campagne.weather.config_show", "campagne.meteo", "campagne.servizi_lista"))
+        await _service_schedule_list(interaction, service_type="WEATHER")
 
     @weather_group.command(name="run", description="Run the weather campaign immediately")
     async def weather_run(interaction: discord.Interaction) -> None:
-        await _service_run(interaction, service_type="WEATHER", legacy_aliases=("campagne.servizi_test",))
+        await _service_run(interaction, service_type="WEATHER")
 
     @horoscope_group.command(name="on", description="Enable horoscope campaigns in the current channel")
     async def horoscope_on(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="HOROSCOPE", action="on", legacy_aliases=("campagne.oroscopo", "campagne.servizi_on"))
+        await _set_service_enabled(interaction, service_type="HOROSCOPE", action="on")
 
     @horoscope_group.command(name="off", description="Disable horoscope campaigns in the current channel")
     async def horoscope_off(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="HOROSCOPE", action="off", legacy_aliases=("campagne.oroscopo", "campagne.servizi_off"))
+        await _set_service_enabled(interaction, service_type="HOROSCOPE", action="off")
 
     @horoscope_group.command(name="status", description="Show horoscope campaign status for the current channel")
     async def horoscope_status(interaction: discord.Interaction) -> None:
-        await _set_service_enabled(interaction, service_type="HOROSCOPE", action="status", legacy_aliases=("campagne.oroscopo",))
+        await _set_service_enabled(interaction, service_type="HOROSCOPE", action="status")
 
     @horoscope_group.command(name="schedule_add", description="Add a horoscope campaign schedule")
     @app_commands.describe(
@@ -1114,7 +1104,6 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_color=embed_color,
             sources=sources,
             categories=None,
-            legacy_aliases=("campagne.horoscope.config_set", "campagne.oroscopo"),
         )
 
     @horoscope_group.command(name="schedule_edit", description="Edit a horoscope campaign schedule")
@@ -1147,23 +1136,22 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             embed_color=embed_color,
             sources=sources,
             enabled=enabled,
-            legacy_aliases=("campagne.horoscope.config_set", "campagne.oroscopo"),
         )
 
     @horoscope_group.command(name="schedule_show", description="Show a horoscope campaign schedule")
     @app_commands.describe(id="Horoscope schedule ID")
     async def horoscope_schedule_show(interaction: discord.Interaction, id: int) -> None:
-        await _service_schedule_show(interaction, service_type="HOROSCOPE", schedule_id=id, legacy_aliases=("campagne.horoscope.config_show", "campagne.oroscopo", "campagne.servizi_lista"))
+        await _service_schedule_show(interaction, service_type="HOROSCOPE", schedule_id=id)
 
     @horoscope_group.command(name="schedule_remove", description="Remove a horoscope campaign schedule")
     @app_commands.describe(id="Horoscope schedule ID")
     async def horoscope_schedule_remove(interaction: discord.Interaction, id: int) -> None:
-        await _service_schedule_remove(interaction, service_type="HOROSCOPE", schedule_id=id, legacy_aliases=("campagne.horoscope.config_reset", "campagne.servizi_delete"))
+        await _service_schedule_remove(interaction, service_type="HOROSCOPE", schedule_id=id)
 
     @horoscope_group.command(name="schedule_list", description="List horoscope campaign schedules")
     async def horoscope_schedule_list(interaction: discord.Interaction) -> None:
-        await _service_schedule_list(interaction, service_type="HOROSCOPE", legacy_aliases=("campagne.horoscope.config_show", "campagne.oroscopo", "campagne.servizi_lista"))
+        await _service_schedule_list(interaction, service_type="HOROSCOPE")
 
     @horoscope_group.command(name="run", description="Run the horoscope campaign immediately")
     async def horoscope_run(interaction: discord.Interaction) -> None:
-        await _service_run(interaction, service_type="HOROSCOPE", legacy_aliases=("campagne.servizi_test",))
+        await _service_run(interaction, service_type="HOROSCOPE")

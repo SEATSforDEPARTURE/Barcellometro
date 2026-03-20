@@ -144,37 +144,26 @@ def register_triggers(
         app_commands.Choice(name="regex", value="REGEX"),
     ]
 
-    def _command_permission_candidates(interaction: discord.Interaction) -> list[str]:
-        # Keep `bm.*` candidates only as legacy permission aliases while `admin.*` stays canonical.
+    def _command_permission_key(interaction: discord.Interaction) -> str:
         command = getattr(interaction, "command", None)
         qualified_name = str(getattr(command, "qualified_name", "") or "").strip().lower()
         if not qualified_name:
-            return ["admin.unknown", "bm.unknown"]
+            return "admin.unknown"
 
         parts = [part for part in qualified_name.split() if part]
-        if parts and parts[0] in {"admin", "bm"}:
+        if parts and parts[0] == "admin":
             parts = parts[1:]
         if not parts:
-            return ["admin.unknown", "bm.unknown"]
+            return "admin.unknown"
 
         canonical_parts = parts[:]
         if canonical_parts[0] == "prompt":
             canonical_parts.insert(0, "campagne")
 
-        canonical = ".".join(canonical_parts)
-        candidates: list[str] = [f"admin.{canonical}", canonical, f"bm.{canonical}"]
-        if canonical_parts[:2] == ["campagne", "prompt"]:
-            prompt_parts = canonical_parts[1:]
-            prompt_path = ".".join(prompt_parts)
-            candidates.extend((prompt_path, f"admin.{prompt_path}", f"bm.{prompt_path}"))
+        return f"admin.{'.'.join(canonical_parts)}"
 
-        return list(dict.fromkeys(candidate for candidate in candidates if candidate and candidate not in {"admin.", "bm."}))
-
-    async def _guard(interaction: discord.Interaction, *legacy_aliases: str) -> bool:
-        candidates = _command_permission_candidates(interaction)
-        permission_key = candidates[0]
-        resolved_aliases = [*candidates[1:], *legacy_aliases]
-        return await check_permission(interaction, permission_key, ctx, legacy_aliases=resolved_aliases)
+    async def _guard(interaction: discord.Interaction) -> bool:
+        return await check_permission(interaction, _command_permission_key(interaction), ctx)
 
     async def _send(
         interaction: discord.Interaction,
@@ -194,8 +183,8 @@ def register_triggers(
             footer_service=ctx.footer,
         )
 
-    async def _require_channel(interaction: discord.Interaction, *legacy_aliases: str) -> tuple[str, str] | None:
-        if not await _guard(interaction, *legacy_aliases):
+    async def _require_channel(interaction: discord.Interaction) -> tuple[str, str] | None:
+        if not await _guard(interaction):
             return None
         if interaction.guild_id is None or interaction.channel_id is None:
             command_path = interaction.command.qualified_name if interaction.command else "unknown"
@@ -224,8 +213,8 @@ def register_triggers(
             return None, f"Prompt schedule name `{token}` is ambiguous. Use the numeric id."
         return matches[0], None
 
-    async def _set_toggle(interaction: discord.Interaction, key: str, action: str, *legacy_aliases: str) -> None:
-        scope = await _require_channel(interaction, *legacy_aliases)
+    async def _set_toggle(interaction: discord.Interaction, key: str, action: str) -> None:
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, channel_id = scope
@@ -315,7 +304,7 @@ def register_triggers(
         cooldown_seconds: int | None = None,
         role_ids: str | None = None,
     ) -> None:
-        scope = await _require_channel(interaction, "frasi.add")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, channel_id = scope
@@ -350,7 +339,7 @@ def register_triggers(
     @frasi_group.command(name="entry_remove", description="Remove a phrase trigger entry")
     @app_commands.describe(id="Phrase entry ID")
     async def frasi_entry_remove(interaction: discord.Interaction, id: int) -> None:
-        scope = await _require_channel(interaction, "frasi.remove")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -363,7 +352,7 @@ def register_triggers(
 
     @frasi_group.command(name="entry_list", description="List phrase trigger entries")
     async def frasi_entry_list(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction, "frasi.list")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -429,7 +418,7 @@ def register_triggers(
         reset_color: bool = False,
         enabled: bool | None = None,
     ) -> None:
-        scope = await _require_channel(interaction, "frasi.edit")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -490,7 +479,7 @@ def register_triggers(
     @frasi_group.command(name="template_milestone_set", description="Create or update a milestone template")
     @app_commands.describe(threshold="Milestone threshold", text="Milestone template text")
     async def frasi_template_milestone_set(interaction: discord.Interaction, threshold: int, text: str) -> None:
-        scope = await _require_channel(interaction, "frasi.milestone_global_set")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -507,7 +496,7 @@ def register_triggers(
 
     @frasi_group.command(name="template_milestone_show", description="Show milestone templates")
     async def frasi_template_milestone_show(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction, "frasi.milestone_global_list", "frasi.milestone_global_status")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -520,7 +509,7 @@ def register_triggers(
 
     @frasi_group.command(name="template_milestone_reset", description="Reset all milestone templates")
     async def frasi_template_milestone_reset(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction, "frasi.milestone_global_remove")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -533,7 +522,7 @@ def register_triggers(
     @frasi_group.command(name="template_global_set", description="Set the global phrase template")
     @app_commands.describe(text="Template text")
     async def frasi_template_global_set(interaction: discord.Interaction, text: str) -> None:
-        scope = await _require_channel(interaction, "frasi.template_set")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -547,7 +536,7 @@ def register_triggers(
 
     @frasi_group.command(name="template_global_show", description="Show the global phrase template")
     async def frasi_template_global_show(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction, "frasi.template_show")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -560,7 +549,7 @@ def register_triggers(
 
     @frasi_group.command(name="template_global_reset", description="Reset the global phrase template")
     async def frasi_template_global_reset(interaction: discord.Interaction) -> None:
-        scope = await _require_channel(interaction, "frasi.template_reset")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -578,7 +567,7 @@ def register_triggers(
     @frasi_group.command(name="template_user_set", description="Set a user-specific phrase template")
     @app_commands.describe(user="Target user", text="Template text")
     async def frasi_template_user_set(interaction: discord.Interaction, user: discord.Member, text: str) -> None:
-        scope = await _require_channel(interaction, "frasi.userphrase_set")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -595,7 +584,7 @@ def register_triggers(
     @frasi_group.command(name="template_user_show", description="Show a user-specific phrase template")
     @app_commands.describe(user="Target user")
     async def frasi_template_user_show(interaction: discord.Interaction, user: discord.Member) -> None:
-        scope = await _require_channel(interaction, "frasi.userphrase_show")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -608,7 +597,7 @@ def register_triggers(
     @frasi_group.command(name="template_user_reset", description="Reset a user-specific phrase template")
     @app_commands.describe(user="Target user")
     async def frasi_template_user_reset(interaction: discord.Interaction, user: discord.Member) -> None:
-        scope = await _require_channel(interaction, "frasi.userphrase_remove")
+        scope = await _require_channel(interaction)
         if scope is None:
             return
         guild_id, _ = scope
@@ -670,7 +659,7 @@ def register_triggers(
         embed_title: str | None = None,
         embed_color: str | None = None,
     ) -> None:
-        if not await _guard(interaction, "campagne.prompt.schedule_add", "campagne.prompt.create", "campagne.prompt.entry_add"):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
             await _send(interaction, subcommand_path="campagne prompt schedule_add", lines=[("error", "Use this command in a guild channel.")], kind="error")
@@ -721,7 +710,7 @@ def register_triggers(
 
     @prompt_group.command(name="schedule_list", description="List prompt campaign schedules")
     async def prompt_schedule_list(interaction: discord.Interaction) -> None:
-        if not await _guard(interaction, "campagne.prompt.schedule_list", "campagne.prompt.list", "campagne.prompt.entry_list"):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None:
             await _send(interaction, subcommand_path="campagne prompt schedule_list", lines=[("error", "Use this command in a guild.")], kind="error")
@@ -735,7 +724,7 @@ def register_triggers(
     @prompt_group.command(name="schedule_show", description="Show a prompt campaign schedule")
     @app_commands.describe(id_or_name="Prompt schedule ID or exact name")
     async def prompt_schedule_show(interaction: discord.Interaction, id_or_name: str) -> None:
-        if not await _guard(interaction, "campagne.prompt.schedule_show", "campagne.prompt.entry_show"):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None:
             await _send(interaction, subcommand_path="campagne prompt schedule_show", lines=[("error", "Use this command in a guild.")], kind="error")
@@ -749,7 +738,7 @@ def register_triggers(
     @prompt_group.command(name="schedule_remove", description="Remove a prompt campaign schedule")
     @app_commands.describe(id_or_name="Prompt schedule ID or exact name")
     async def prompt_schedule_remove(interaction: discord.Interaction, id_or_name: str) -> None:
-        if not await _guard(interaction, "campagne.prompt.schedule_remove", "campagne.prompt.delete", "campagne.prompt.entry_remove"):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None:
             await _send(interaction, subcommand_path="campagne prompt schedule_remove", lines=[("error", "Use this command in a guild.")], kind="error")
@@ -764,7 +753,7 @@ def register_triggers(
     @prompt_group.command(name="run", description="Run a prompt campaign schedule now")
     @app_commands.describe(id_or_name="Prompt schedule ID or exact name")
     async def prompt_run(interaction: discord.Interaction, id_or_name: str) -> None:
-        if not await _guard(interaction, "campagne.prompt.run", "campagne.prompt.test", "campagne.prompt.entry_run"):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None or interaction.channel is None or interaction.channel_id is None:
             await _send(interaction, subcommand_path="campagne prompt run", lines=[("error", "Use this command in a guild channel.")], kind="error")
@@ -818,7 +807,7 @@ def register_triggers(
         embed_color: str | None = None,
         enabled: bool | None = None,
     ) -> None:
-        if not await _guard(interaction, "campagne.prompt.schedule_edit", "campagne.prompt.create", "campagne.prompt.entry_edit"):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None:
             await _send(interaction, subcommand_path="campagne prompt schedule_edit", lines=[("error", "Use this command in a guild.")], kind="error")
@@ -945,7 +934,7 @@ def register_triggers(
     @qna_group.command(name="bonus_set", description="Set a QnA bonus for a user")
     @app_commands.describe(user="Target user", amount="Bonus amount", hours_valid="Optional validity in hours")
     async def qna_bonus_set(interaction: discord.Interaction, user: discord.Member, amount: int, hours_valid: int | None = None) -> None:
-        if not await _guard(interaction, "qna.bonus_add"):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None:
             await _send(interaction, subcommand_path="qna bonus_set", lines=[("error", "Use this command in a guild.")], kind="error")
@@ -976,7 +965,7 @@ def register_triggers(
     @qna_group.command(name="bonus_reset", description="Reset a user's QnA bonus")
     @app_commands.describe(user="Target user")
     async def qna_bonus_reset(interaction: discord.Interaction, user: discord.Member) -> None:
-        if not await _guard(interaction, "qna.bonus_clear"):
+        if not await _guard(interaction):
             return
         if interaction.guild_id is None:
             await _send(interaction, subcommand_path="qna bonus_reset", lines=[("error", "Use this command in a guild.")], kind="error")
@@ -1008,7 +997,7 @@ def register_triggers(
     @insights_group.command(name="template_set", description="Set the insights template")
     @app_commands.describe(text="Template text or natural-language config prompt")
     async def insights_template_set(interaction: discord.Interaction, text: str) -> None:
-        if not await _guard(interaction, "insights.config"):
+        if not await _guard(interaction):
             return
         if ctx.trigger_engine is None:
             await _send(interaction, subcommand_path="insights template_set", lines=[("error", "Trigger engine unavailable.")], kind="error")
@@ -1030,7 +1019,7 @@ def register_triggers(
 
     @insights_group.command(name="template_reset", description="Reset the insights template to defaults")
     async def insights_template_reset(interaction: discord.Interaction) -> None:
-        if not await _guard(interaction, "insights.config"):
+        if not await _guard(interaction):
             return
         await ctx.database.set_setting("community_insights.config", "{}")
         await _send(interaction, subcommand_path="insights template_reset", lines=[("result", "reset")], kind="success")

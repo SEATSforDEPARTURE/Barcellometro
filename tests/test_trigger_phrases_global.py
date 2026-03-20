@@ -929,13 +929,13 @@ def test_template_set_user_command_is_not_registered() -> None:
     asyncio.run(_run())
 
 
-def test_register_triggers_permission_candidates_prefer_admin_and_keep_bm_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_triggers_permission_candidates_use_admin_only(monkeypatch: pytest.MonkeyPatch) -> None:
     from discord import app_commands
 
     seen: list[tuple[str, tuple[str, ...]]] = []
 
-    async def _check_permission(interaction, command_name, ctx, *, legacy_aliases=()):
-        seen.append((command_name, tuple(legacy_aliases)))
+    async def _check_permission(interaction, command_name, ctx):
+        seen.append(command_name)
         return True
 
     monkeypatch.setattr(trigger_commands_module, "check_permission", _check_permission)
@@ -962,18 +962,10 @@ def test_register_triggers_permission_candidates_prefer_admin_and_keep_bm_aliase
     interaction = SimpleNamespace(
         guild_id=1,
         channel_id=2,
-        # Simulate the legacy root alias to verify backward-compatible permission fallback.
-        command=SimpleNamespace(qualified_name="bm prompt schedule_show"),
+        command=SimpleNamespace(qualified_name="admin prompt schedule_show"),
         data={"name": "schedule_show"},
         response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
     )
     asyncio.run(prompt_show.callback(interaction, "5"))
 
-    assert len(seen) == 1
-    assert seen[0][0] == "admin.campagne.prompt.schedule_show"
-    assert "campagne.prompt.schedule_show" in seen[0][1]
-    assert "bm.campagne.prompt.schedule_show" in seen[0][1]
-    assert "prompt.schedule_show" in seen[0][1]
-    assert "admin.prompt.schedule_show" in seen[0][1]
-    assert "bm.prompt.schedule_show" in seen[0][1]
-    assert "campagne.prompt.entry_show" in seen[0][1]
+    assert seen == ["admin.campagne.prompt.schedule_show"]

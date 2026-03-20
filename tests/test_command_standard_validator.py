@@ -27,12 +27,10 @@ def test_command_validator_uses_admin_as_canonical_root() -> None:
     admin_paths = [command.path for command in result.commands if command.root == "admin"]
     assert admin_paths
     assert "admin.status" in admin_paths
-    assert not any(command.root == "bm" for command in result.commands)
+    assert set(command.root for command in result.commands if command.root == "admin")
 
 
-def test_command_validator_tracks_bm_aliases_as_legacy_only() -> None:
-    # `bm.*` must survive only as explicit backward-compatibility aliases.
+def test_command_validator_has_no_legacy_tracking_fields() -> None:
     result = validate_command_tree()
 
-    legacy_messages = [issue.message for issue in result.legacy_aliases]
-    assert any("bm." in message for message in legacy_messages)
+    assert all(issue.code != "legacy_root" for issue in result.warnings)

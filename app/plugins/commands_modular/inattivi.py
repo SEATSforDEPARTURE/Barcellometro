@@ -13,7 +13,6 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, build_command_embeds, send_command_embeds, send_standard_response
 
 PERM = "inactivity"
-LEGACY_PERMISSION_ALIASES = ("inattivi.config", "moderazione.inattivi")
 DEFAULT_GRACE_DAYS = 7
 DEFAULT_REMINDER_COOLDOWN_DAYS = 14
 DEFAULT_TEMPBAN_DAYS = 7
@@ -131,7 +130,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
     inactivity_group.add_command(policy_group)
 
     async def _ensure(interaction: discord.Interaction) -> bool:
-        return await check_permission(interaction, PERM, ctx, legacy_aliases=LEGACY_PERMISSION_ALIASES)
+        return await check_permission(interaction, PERM, ctx)
 
     async def _send(
         interaction: discord.Interaction,

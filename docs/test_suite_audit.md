@@ -79,7 +79,7 @@ La suite è **ampia** e copre bene diverse aree di dominio pure o quasi-pure (Au
 | `tests/test_instance_mode.py` | OBSOLETO / DA RISCRIVERE | Per testare una helper pura importa `app.core.bot`, trascinando STT/faster-whisper: segnale netto di mancato allineamento architetturale. |
 | `tests/test_member_flow_notifications.py` | FRAGILE | Mescola behavior test utili con import hacking, monkeypatch di `builtins.__import__` e assert sul sorgente. |
 | `tests/test_message_scheduler.py` | AFFIDABILE | Uno dei file migliori: copre logica scheduler, CRUD DB e footer metadata in modo concreto. |
-| `tests/test_moderation_actions_db.py` | AFFIDABILE | Buona copertura su backward compatibility DB e liste moderazione con fake `aiosqlite` ragionevole. |
+| `tests/test_moderation_actions_db.py` | AFFIDABILE | Buona copertura su regressioni DB e liste moderazione con fake `aiosqlite` ragionevole. |
 | `tests/test_moderazione_utenti_commands.py` | SOSPETTO | Controlla solo stringhe nel sorgente dei namespace/nomi comando. |
 | `tests/test_pii_and_triggers.py` | OBSOLETO / DA RISCRIVERE | File monolitico, molti stub globali a livello modulo, ampio rischio di contaminazione e mismatch con interfacce condivise attuali. |
 | `tests/test_prompt_campaign_commands.py` | FRAGILE | Verifica behavior utile, ma patcha globali di modulo (`check_permission`) e asserisce raw text invece del rendering standard. |

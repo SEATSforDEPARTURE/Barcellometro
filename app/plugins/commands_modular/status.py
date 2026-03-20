@@ -11,8 +11,8 @@ from app.plugins.commands_modular.permissions import check_permission
 def register_status(admin_group: app_commands.Group, ctx: CommandContext) -> None:
     @admin_group.command(name="status", description="Show the Barcellometro status.")
     @app_commands.describe(service="Optional service or plugin name.")
-    async def bm_status_command(interaction: discord.Interaction, service: str | None = None) -> None:
-        if not await check_permission(interaction, "admin.status", ctx, legacy_aliases=["status.bm"]):
+    async def admin_status_command(interaction: discord.Interaction, service: str | None = None) -> None:
+        if not await check_permission(interaction, "admin.status", ctx):
             return
         if service:
             status = ctx.status.component_status(service)
