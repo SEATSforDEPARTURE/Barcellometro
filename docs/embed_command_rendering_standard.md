@@ -102,18 +102,20 @@ In pratica:
 
 Quando è disponibile `FooterService`, gli embed standardizzati non devono fermarsi a versione/minimal footer: devono usare la pipeline footer comune e quindi includere, quando disponibili, tutti i segmenti nell’ordine:
 
-1. versione bot;
-2. frase del footer service;
-3. parte tecnica finale `Dati elaborati con ...` solo quando esistono davvero contributor/provider/model da dichiarare; se non ci sono contributor, il segmento tecnico non compare.
+1. versione bot, sempre presente;
+2. frase del footer service, solo quando esiste davvero una frase configurata e non vuota;
+3. parte tecnica finale `Dati elaborati con ...`, solo quando esistono davvero contributor/provider/model da dichiarare.
 
-Le prime due sezioni sono ora obbligatorie anche nel percorso `minimal=True` e negli embed admin standardizzati: se non esiste una frase persistita per il servizio o a livello globale, il renderer centrale applica il fallback coerente `In via di sviluppo.` invece di lasciare il footer ridotto alla sola brand.
+Questa regola vale anche nel percorso `minimal=True`, negli embed admin standardizzati e in ogni helper/pipeline collegata: non esiste alcun fallback testuale automatico per la seconda sezione del footer. Se la frase non è configurata, il footer mostra soltanto la brand/versione e, se applicabile, il segmento tecnico finale.
 
 Esempi:
 
-- prima: `Barcellometro dev6 · Dati elaborati con gpt-4o · In via di sviluppo.`
-- dopo: `Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o`
+- nessuna frase, nessun contributor: `Barcellometro dev6`
+- frase presente, nessun contributor: `Barcellometro dev6 · Sempre acceso.`
+- nessuna frase, contributor presente: `Barcellometro dev6 · Dati elaborati con gpt-4o`
+- frase presente, contributor presente: `Barcellometro dev6 · Sempre acceso. · Dati elaborati con gpt-4o`
 
-Se la frase del footer non esiste, il footer non resta mai monco: la pipeline centralizzata usa il fallback standard e mantiene comunque l'ordine `versione → frase → eventuale segmento tecnico`, senza separatori doppi.
+Se la frase del footer non esiste, la pipeline centralizzata non aggiunge placeholder, non aggiunge sezioni vuote e non produce separatori doppi.
 
 ## Emoji custom del server nel footer
 

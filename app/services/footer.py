@@ -23,7 +23,6 @@ FOOTER_LAST_META_PREFIX = "footer.last_meta."
 FOOTER_VARIANTS_PREFIX = "footer.variants."
 FOOTER_SEPARATOR = " · "
 FOOTER_MAX_LEN = 2048
-FOOTER_DEFAULT_PHRASE = "In via di sviluppo."
 CUSTOM_EMOJI_RE = re.compile(r"<(?P<animated>a?):(?P<name>[A-Za-z0-9_]+):(?P<emoji_id>\d+)>")
 
 SUPPORTED_FOOTER_SERVICES: tuple[str, ...] = (
@@ -575,10 +574,10 @@ class FooterService:
                 profiles[service] = profile
         return profiles
 
-    async def _resolve_footer_phrase(self, service_name: str) -> str:
+    async def _resolve_footer_phrase(self, service_name: str) -> str | None:
         global_phrase = await self.get_global_phrase()
         service_phrases = await self.get_service_phrases()
-        return service_phrases.get(service_name) or global_phrase or FOOTER_DEFAULT_PHRASE
+        return service_phrases.get(service_name) or global_phrase or None
 
     async def render_footer(
         self,
@@ -611,10 +610,10 @@ class FooterService:
         if phrase:
             parts.append(phrase)
         if processing:
-            if not minimal:
-                parts.append(processing)
+            parts.append(processing)
         footer_text, _ = _extract_footer_icon_and_clean_text(FOOTER_SEPARATOR.join(parts))
-        return footer_text, _clean_footer_text(phrase) or FOOTER_DEFAULT_PHRASE
+        clean_phrase = _clean_footer_text(phrase) if phrase else ""
+        return footer_text, clean_phrase or None
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
         minimal_footer = pop_minimal_footer(embed)

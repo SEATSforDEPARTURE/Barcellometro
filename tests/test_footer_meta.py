@@ -262,7 +262,26 @@ def test_footer_service_render_footer_orders_version_phrase_then_processing() ->
     asyncio.run(_run())
 
 
-def test_footer_service_render_footer_uses_default_phrase_when_missing() -> None:
+def test_footer_service_render_footer_with_configured_phrase_and_no_contributors_keeps_brand_then_phrase() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.set_version("dev8")
+        await service.set_global_phrase("Sempre acceso.")
+
+        footer, phrase = await service.render_footer(
+            service_name="status",
+            contributors=[],
+            used_local_processing=True,
+        )
+
+        assert phrase == "Sempre acceso."
+        assert footer == "Barcellometro dev8 · Sempre acceso."
+        assert "Dati elaborati con" not in footer
+
+    asyncio.run(_run())
+
+
+def test_footer_service_render_footer_without_phrase_or_contributors_keeps_only_brand() -> None:
     async def _run() -> None:
         service = _build_footer_service()
         await service.set_version("dev7.1")
@@ -273,8 +292,9 @@ def test_footer_service_render_footer_uses_default_phrase_when_missing() -> None
             used_local_processing=True,
         )
 
-        assert phrase == "In via di sviluppo."
-        assert footer == "Barcellometro dev7.1 · In via di sviluppo."
+        assert phrase is None
+        assert footer == "Barcellometro dev7.1"
+        assert "In via di sviluppo." not in footer
         assert "Dati elaborati con" not in footer
         assert "Dati elaborati" + " in loco" not in footer
         assert " ·  · " not in footer
@@ -319,8 +339,10 @@ def test_footer_service_render_footer_shows_processing_only_when_contributors_ex
             used_local_processing=False,
         )
 
-        assert with_contributors == "Barcellometro dev8 · In via di sviluppo. · Dati elaborati con llama3.2"
-        assert without_contributors == "Barcellometro dev8 · In via di sviluppo."
+        assert with_contributors == "Barcellometro dev8 · Dati elaborati con llama3.2"
+        assert without_contributors == "Barcellometro dev8"
+        assert "In via di sviluppo." not in with_contributors
+        assert "In via di sviluppo." not in without_contributors
         assert "Dati elaborati con llama3.2" in with_contributors
         assert "Dati elaborati con" not in without_contributors
         assert "Dati elaborati" + " in loco" not in without_contributors
@@ -328,7 +350,7 @@ def test_footer_service_render_footer_shows_processing_only_when_contributors_ex
     asyncio.run(_run())
 
 
-def test_footer_service_render_footer_minimal_still_includes_brand_and_phrase() -> None:
+def test_footer_service_render_footer_minimal_without_phrase_keeps_only_brand() -> None:
     async def _run() -> None:
         service = _build_footer_service()
         await service.set_version("dev9")
@@ -340,9 +362,29 @@ def test_footer_service_render_footer_minimal_still_includes_brand_and_phrase() 
             minimal=True,
         )
 
-        assert phrase == "In via di sviluppo."
-        assert footer == "Barcellometro dev9 · In via di sviluppo."
+        assert phrase is None
+        assert footer == "Barcellometro dev9"
+        assert "In via di sviluppo." not in footer
         assert "Dati elaborati con" not in footer
+
+    asyncio.run(_run())
+
+
+def test_footer_service_render_footer_minimal_with_contributors_matches_standard_rules() -> None:
+    async def _run() -> None:
+        service = _build_footer_service()
+        await service.set_version("dev9")
+
+        footer, phrase = await service.render_footer(
+            service_name="status",
+            contributors=["llama3.2"],
+            used_local_processing=False,
+            minimal=True,
+        )
+
+        assert phrase is None
+        assert footer == "Barcellometro dev9 · Dati elaborati con llama3.2"
+        assert "In via di sviluppo." not in footer
 
     asyncio.run(_run())
 
