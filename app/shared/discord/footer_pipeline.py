@@ -6,12 +6,24 @@ from typing import Any
 
 import discord
 
-from app.services.footer import FooterService
+from app.services.footer import FooterService, get_footer_meta, render_footer_text
 
 logger = logging.getLogger(__name__)
 
 
-async def finalize_embed(embed: discord.Embed, footer_service: FooterService, *, default_service_name: str = "unknown") -> discord.Embed:
+async def finalize_embed(
+    embed: discord.Embed,
+    footer_service: FooterService | None,
+    *,
+    default_service_name: str = "unknown",
+) -> discord.Embed:
+    meta = get_footer_meta(embed)
+    if footer_service is None:
+        contributors = getattr(meta, "contributors", ())
+        text, _ = render_footer_text(version=None, phrase=None, contributors=contributors)
+        if not getattr(embed.footer, "text", None):
+            embed.set_footer(text=text)
+        return embed
     try:
         if not await footer_service.is_enabled():
             return embed
@@ -21,12 +33,19 @@ async def finalize_embed(embed: discord.Embed, footer_service: FooterService, *,
             logger.warning("Footer finalize skipped due to SQLite lock")
         else:
             logger.warning("Footer finalize failed: %s", exc)
+        if not getattr(embed.footer, "text", None):
+            fallback_text, _ = render_footer_text(
+                version=None,
+                phrase=None,
+                contributors=getattr(meta, "contributors", ()),
+            )
+            embed.set_footer(text=fallback_text)
         return embed
 
 
 async def finalize_embeds(
     embeds: Iterable[discord.Embed] | None,
-    footer_service: FooterService,
+    footer_service: FooterService | None,
     *,
     default_service_name: str = "unknown",
 ) -> list[discord.Embed]:

@@ -108,6 +108,8 @@ Non esiste più un output finale `minimal`: tutti gli embed standardizzati devon
 
 `attach_minimal_footer(...)` sopravvive solo come shim di compatibilità interna: non decide più il testo finale del footer e non può bypassare `FooterService.apply(...)`. Se la frase non è configurata, il footer mostra soltanto la brand/versione e, se applicabile, il segmento tecnico finale.
 
+Se `footer_service` non è disponibile (`None`), la pipeline standard non lascia mai l'embed senza footer: usa comunque il fallback base dello stesso contratto unico e rende almeno `Barcellometro <versione>`. La versione arriva dal valore centralizzato del footer quando il service esiste; se il service manca del tutto, la pipeline usa il fallback runtime condiviso (`BARCELLOMETRO_VERSION` oppure `dev`) invece di inventare una frase. In questo scenario la seconda parte non compare, mentre la terza parte `Dati elaborati con ...` continua a comparire quando i metadata hanno contributor reali.
+
 Vale esplicitamente per **tutti** i percorsi del repo: admin legacy, status/show/list/set/reset/config, embed campagne, renderer aura/report, finalize helpers, delivery helpers e qualunque invio che passi da `send_legacy_standard_response(...)`, `send_standard_response(...)`, `finalize_embed(...)`, `finalize_embeds(...)` o metadata footer condivisi. Se la frase globale o di servizio esiste, non sono ammesse eccezioni silenziose che mostrano solo `Barcellometro <version>`.
 
 Di conseguenza, i renderer locali non devono usare `embed.set_footer(...)` con stringhe custom per bypassare il contratto centrale: devono invece allegare footer metadata e lasciare che la pipeline comune renderizzi sempre `versione → frase configurata → eventuale parte tecnica`.

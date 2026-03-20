@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ FOOTER_LAST_META_PREFIX = "footer.last_meta."
 FOOTER_VARIANTS_PREFIX = "footer.variants."
 FOOTER_SEPARATOR = " · "
 FOOTER_MAX_LEN = 2048
+FOOTER_FALLBACK_VERSION = str(os.getenv("BARCELLOMETRO_VERSION") or "").strip() or "dev"
 CUSTOM_EMOJI_RE = re.compile(r"<(?P<animated>a?):(?P<name>[A-Za-z0-9_]+):(?P<emoji_id>\d+)>")
 
 SUPPORTED_FOOTER_SERVICES: tuple[str, ...] = (
@@ -132,6 +134,45 @@ def _truncate(text: str, max_len: int = FOOTER_MAX_LEN) -> str:
     return text[: max_len - 1].rstrip() + "…"
 
 
+def _dedupe_footer_contributors(contributors: Iterable[str] | None) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for entry in contributors or []:
+        item = _clean(entry)
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
+def render_footer_text(
+    *,
+    version: str | None = None,
+    phrase: str | None = None,
+    contributors: Iterable[str] | None = None,
+) -> tuple[str, str | None]:
+    brand_version = _clean(version) or FOOTER_FALLBACK_VERSION
+    brand = f"Barcellometro {brand_version}"
+    contributors_deduped = _dedupe_footer_contributors(contributors)
+    processing: str | None = None
+    if len(contributors_deduped) == 1:
+        processing = f"Dati elaborati con {contributors_deduped[0]}"
+    elif len(contributors_deduped) == 2:
+        processing = f"Dati elaborati con {contributors_deduped[0]} e {contributors_deduped[1]}"
+    elif len(contributors_deduped) > 2:
+        processing = f"Dati elaborati con {', '.join(contributors_deduped[:-1])} e {contributors_deduped[-1]}"
+
+    parts = [brand]
+    if phrase:
+        parts.append(phrase)
+    if processing:
+        parts.append(processing)
+    footer_text, _ = _extract_footer_icon_and_clean_text(FOOTER_SEPARATOR.join(parts))
+    clean_phrase = _clean_footer_text(phrase) if phrase else ""
+    return footer_text, clean_phrase or None
+
+
 def _custom_emoji_icon_url(match: re.Match[str]) -> str:
     extension = "gif" if match.group("animated") else "png"
     emoji_id = match.group("emoji_id")
@@ -189,14 +230,7 @@ def attach_footer_meta(
     if embed is None:
         raise ValueError("attach_footer_meta requires a discord.Embed instance, got None")
 
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for entry in contributors or []:
-        item = _clean(entry)
-        if not item or item in seen:
-            continue
-        seen.add(item)
-        deduped.append(item)
+    deduped = _dedupe_footer_contributors(contributors)
     _EMBED_META[id(embed)] = (
         embed,
         FooterMeta(
@@ -596,24 +630,11 @@ class FooterService:
     ) -> tuple[str, str | None]:
         version = await self.get_version()
         phrase = await self._resolve_footer_phrase(service_name)
-
-        brand = f"Barcellometro {version}" if version else "Barcellometro"
-        contributors_deduped = self._dedupe_contributors(contributors)
-        processing: str | None = None
-        if len(contributors_deduped) == 1:
-            processing = f"Dati elaborati con {contributors_deduped[0]}"
-        elif len(contributors_deduped) == 2:
-            processing = f"Dati elaborati con {contributors_deduped[0]} e {contributors_deduped[1]}"
-        elif len(contributors_deduped) > 2:
-            processing = f"Dati elaborati con {', '.join(contributors_deduped[:-1])} e {contributors_deduped[-1]}"
-        parts = [brand]
-        if phrase:
-            parts.append(phrase)
-        if processing:
-            parts.append(processing)
-        footer_text, _ = _extract_footer_icon_and_clean_text(FOOTER_SEPARATOR.join(parts))
-        clean_phrase = _clean_footer_text(phrase) if phrase else ""
-        return footer_text, clean_phrase or None
+        return render_footer_text(
+            version=version,
+            phrase=phrase,
+            contributors=contributors,
+        )
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
         minimal_footer = pop_minimal_footer(embed)
@@ -655,15 +676,7 @@ class FooterService:
         return embed
 
     def _dedupe_contributors(self, contributors: Iterable[str]) -> list[str]:
-        out: list[str] = []
-        seen: set[str] = set()
-        for item in contributors:
-            clean = _clean(item)
-            if not clean or clean in seen:
-                continue
-            out.append(clean)
-            seen.add(clean)
-        return out
+        return _dedupe_footer_contributors(contributors)
 
     def _parse_profile(self, service_name: str, payload: object) -> ServiceFooterProfile | None:
         if not isinstance(payload, dict):

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import discord
 
-from app.services.footer import FooterService, get_footer_meta
+from app.services.footer import FooterService, attach_footer_meta, get_footer_meta
 from app.shared.discord.command_embeds import build_command_embed, normalize_display_command_context
 from app.shared.discord.footer_pipeline import finalize_embed
 
@@ -479,3 +479,44 @@ def test_build_command_embed_config_embed_includes_global_phrase() -> None:
 
     assert embed.footer is not None
     assert embed.footer.text == 'Barcellometro dev7.1 · Footer globale'
+
+
+def test_finalize_embed_without_footer_service_sets_brand_version_footer() -> None:
+    async def _run() -> discord.Embed:
+        embed = await build_command_embed(
+            top_level="riassunto",
+            subcommand_path="riassunto oggi",
+            footer_service=None,
+        )
+        await finalize_embed(embed, None, default_service_name="riassunto")
+        return embed
+
+    embed = asyncio.run(_run())
+
+    assert embed.footer is not None
+    assert embed.footer.text is not None
+    assert embed.footer.text.startswith("Barcellometro ")
+    assert embed.footer.text != "Barcellometro"
+    assert "Dati elaborati con" not in embed.footer.text
+
+
+
+def test_finalize_embed_without_footer_service_keeps_contributor_segment() -> None:
+    async def _run() -> discord.Embed:
+        embed = discord.Embed(title="Status")
+        attach_footer_meta(
+            embed,
+            service_name="status",
+            contributors=["llama3.2"],
+            used_local_processing=False,
+        )
+        await finalize_embed(embed, None, default_service_name="status")
+        return embed
+
+    embed = asyncio.run(_run())
+
+    assert embed.footer is not None
+    assert embed.footer.text is not None
+    assert embed.footer.text.startswith("Barcellometro ")
+    assert embed.footer.text != "Barcellometro"
+    assert embed.footer.text.endswith("Dati elaborati con llama3.2")

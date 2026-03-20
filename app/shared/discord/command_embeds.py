@@ -11,6 +11,7 @@ import discord
 
 from app.plugins.commands_modular.time_windows import format_italian_ts, format_rolling_window_label, parse_italian_datetime
 from app.services.footer import FooterService, attach_footer_meta
+from app.shared.discord.footer_pipeline import finalize_embeds
 
 CommandKind = Literal["info", "success", "warning", "error"]
 FooterMode = Literal["minimal", "meta", "none"]
@@ -787,6 +788,8 @@ async def send_command_embeds(
     embed_list = list(embeds)
     if not embed_list:
         return
+    if any(not getattr(embed.footer, "text", None) for embed in embed_list):
+        await finalize_embeds(embed_list, None)
     first = embed_list[0]
     extras = embed_list[1:]
     kwargs: dict[str, Any] = {
@@ -844,6 +847,13 @@ async def send_standard_response(
         top_level_emoji=top_level_emoji,
         subcommand_emoji=subcommand_emoji,
     )
+    resolved_footer_service_name = _resolve_footer_service_name(
+        footer_service_name=footer_service_name,
+        visual_top_level=visual_top_level,
+        top_level=top_level,
+    )
+    if footer_service is None:
+        await finalize_embeds(embeds, footer_service, default_service_name=resolved_footer_service_name)
     await send_command_embeds(interaction, embeds=embeds, ephemeral=ephemeral, files=files)
 
 
