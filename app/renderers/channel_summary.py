@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.services.barcello_service import BarcelloResult
-from app.services.footer import attach_footer_meta_to_all
+from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 from app.services.content_summary_service import SummaryItem, SummaryResult
 from app.domain.reporting.trend import render_trend_value
 from app.plugins.commands_modular.time_windows import format_rolling_window_label, infer_rolling_window_request
@@ -215,6 +215,7 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     trend_text = trend_value or render_trend_value(barcello_status.trend)
     if trend_text:
         status_embed.add_field(name="📈 TREND", value=trend_text, inline=False)
+    attach_footer_meta(status_embed, service_name="channel_summary", used_local_processing=True)
 
     pages: list[discord.Embed] = [discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)]
     themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]
@@ -271,4 +272,5 @@ def build_channel_summary_insufficient_data_embed(*, channel_name: str, window_h
         description=f"{window_header}\n\n⚠️ Dati non sufficienti alla generazione del resoconto.",
         color=0x2F3136,
     )
+    attach_footer_meta(embed, service_name="channel_summary", used_local_processing=True)
     return embed

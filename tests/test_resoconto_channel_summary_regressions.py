@@ -51,6 +51,12 @@ def test_renderer_supports_per_moment_barcello_map() -> None:
     assert "(moment_barcello or {}).get(id(it), barcello_status)" in source
 
 
+def test_channel_summary_renderer_applies_footer_to_status_and_insufficient_data_embeds() -> None:
+    source = Path("app/renderers/channel_summary.py").read_text()
+    assert 'attach_footer_meta(status_embed, service_name="channel_summary", used_local_processing=True)' in source
+    assert 'attach_footer_meta(embed, service_name="channel_summary", used_local_processing=True)' in source
+
+
 def test_channel_summary_trend_uses_previous_equivalent_window() -> None:
     source = Path("app/services/channel_summary_service.py").read_text()
     assert "duration = max(timedelta(minutes=1), current_end_local - current_start_local)" in source

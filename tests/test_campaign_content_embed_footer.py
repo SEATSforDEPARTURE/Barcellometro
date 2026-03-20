@@ -5,6 +5,7 @@ from app.services.campaign_content_formatter import (
     build_news_embeds,
     build_weather_embeds,
 )
+from app.services.footer import get_footer_meta
 
 
 def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
@@ -23,9 +24,9 @@ def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
     assert embeds[1].title == "🌞 METEO CRICETOSO • Nord"
     assert embeds[2].title == "🌞 METEO CRICETOSO • Centro"
     assert embeds[3].title == "🌞 METEO CRICETOSO • Sud e Isole"
-    footers = [embed.footer.text for embed in embeds]
-    assert len(set(footers)) == 1
-    assert all("Pagina" not in (f or "") for f in footers)
+    footer_meta = [get_footer_meta(embed) for embed in embeds]
+    assert all(meta is not None for meta in footer_meta)
+    assert {meta.service_name for meta in footer_meta if meta is not None} == {"campagne_meteo"}
 
 
 def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() -> None:
@@ -43,16 +44,17 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
         {"signs": {"Ariete": {"text": "Focus"}}},
     )
-    footer_text = "Barcellometro dev6 · Dati elaborati con open-meteo e gpt-4o"
-
     assert news[0].title == "📰 NOTIZIARIO CRICETOSO • Inizio"
     assert news[1].title == "📰 NOTIZIARIO CRICETOSO • Trash"
     assert news[2].title == "📰 NOTIZIARIO CRICETOSO • Viral"
     assert horoscope[0].title == "🔮 OROSCOPO DEL GIORNO • Inizio"
     assert horoscope[1].title == "🔮 OROSCOPO DEL GIORNO • Ariete"
-    assert all(getattr(embed.footer, "text", None) in ("", None) for embed in news)
-    assert all(getattr(embed.footer, "text", None) in ("", None) for embed in horoscope)
-    assert all("Pagina" not in (embed.footer.text or "") for embed in news + horoscope)
+    news_meta = [get_footer_meta(embed) for embed in news]
+    horoscope_meta = [get_footer_meta(embed) for embed in horoscope]
+    assert all(meta is not None for meta in news_meta)
+    assert all(meta is not None for meta in horoscope_meta)
+    assert {meta.service_name for meta in news_meta if meta is not None} == {"campagne_notizie"}
+    assert {meta.service_name for meta in horoscope_meta if meta is not None} == {"campagne_oroscopo"}
 
 
 def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
@@ -129,3 +131,12 @@ def test_campaign_service_resolve_model_uses_task_parameter_for_editorial() -> N
     assert 'def _resolve_ai_model_name(self, task: str)' in source
     assert 'self._ai.get_model_config(task)' in source
     assert 'self._ai.get_model_config("summary")' not in source
+
+
+def test_campaign_formatter_applies_footer_meta_in_all_builders() -> None:
+    source = Path("app/services/campaign_content_formatter.py").read_text()
+    assert 'def _apply_campaign_footer' in source
+    assert 'return _apply_campaign_footer(embeds, service_name="campagne_notizie")' in source
+    assert 'return _apply_campaign_footer(embeds, service_name="campagne_meteo")' in source
+    assert 'return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")' in source
+    assert 'return _apply_campaign_footer([embed], service_name=service_name)' in source

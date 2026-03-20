@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 import discord
+from app.services.footer import attach_footer_meta_to_all
 
 DEFAULT_COLOR = 0x2F3136
 
@@ -107,6 +108,11 @@ def apply_shared_footer_and_pagination(embeds: list[discord.Embed], footer_text:
     total = max(1, len(embeds))
     for idx, embed in enumerate(embeds, start=1):
         _with_footer(embed, idx, total)
+    return embeds
+
+
+def _apply_campaign_footer(embeds: list[discord.Embed], *, service_name: str) -> list[discord.Embed]:
+    attach_footer_meta_to_all(embeds, service_name=service_name, used_local_processing=True)
     return embeds
 
 
@@ -241,7 +247,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             lines.append("")
         embed.description = "\n".join(lines)[:3900] or f"Nessuna notizia valida per {emoji} {display}."
         embeds.append(embed)
-    return embeds
+    return _apply_campaign_footer(embeds, service_name="campagne_notizie")
 
 
 def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -316,7 +322,7 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         e = discord.Embed(title=f"{title} • {page_title}", description=description[:3900], color=color)
         e.add_field(name="Commento", value=comment[:1024], inline=False)
         embeds.append(e)
-    return embeds
+    return _apply_campaign_footer(embeds, service_name="campagne_meteo")
 
 
 def build_weather_page_map() -> list[dict[str, Any]]:
@@ -366,7 +372,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         e.add_field(name="🔥 Con chi barcellerai oggi", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("friction") or "Con chi ti mette fretta")), limit=220)[:1024], inline=False)
         e.add_field(name="🐹 Consiglio cricetoso", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("advice") or "Piccoli passi, grandi risultati")), limit=220)[:1024], inline=False)
         embeds.append(e)
-    return embeds
+    return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")
 
 
 def build_horoscope_page_map() -> list[dict[str, Any]]:
@@ -376,7 +382,7 @@ def build_horoscope_page_map() -> list[dict[str, Any]]:
     return page_map
 
 
-def build_fallback_embed(config: dict[str, Any], sources: list[str]) -> list[discord.Embed]:
+def build_fallback_embed(config: dict[str, Any], sources: list[str], *, service_name: str = "campagne_notizie") -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
     title = config.get("embed_title") or "Servizio campagne"
     embed = discord.Embed(
@@ -385,4 +391,4 @@ def build_fallback_embed(config: dict[str, Any], sources: list[str]) -> list[dis
         color=color,
     )
     embed.add_field(name="Fonti tentate", value="\n".join(sources) or "n/d", inline=False)
-    return [embed]
+    return _apply_campaign_footer([embed], service_name=service_name)
