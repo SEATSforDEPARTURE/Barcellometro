@@ -13,6 +13,7 @@ from app.services.content_summary_service import SummaryImpact, SummaryItem, Sum
 from app.shared.discord.embed_limits import (
     MAX_EMBED_CHARS,
     _clone_embed_shell,
+    extract_protected_masked_link_prefix,
     _ensure_embed_limits,
     _estimate_embed_size,
     _split_field_chunks,
@@ -43,10 +44,9 @@ def _truncate_line_preserve_md_link(line: str, line_limit: int) -> str:
         if len(fixed_prefix) >= line_limit:
             return _truncate_text(line, line_limit)
         return fixed_prefix + _truncate_text(tail, line_limit - len(fixed_prefix))
-    link_match = re.search(r"\[[^\]]+\]\([^\)]+\)", line)
-    if link_match:
-        prefix = line[: link_match.end()]
-        suffix = line[link_match.end() :]
+    protected_link = extract_protected_masked_link_prefix(line)
+    if protected_link:
+        prefix, suffix = protected_link
         if len(prefix) >= line_limit:
             return _truncate_text(line, line_limit)
         return prefix + _truncate_text(suffix, line_limit - len(prefix))

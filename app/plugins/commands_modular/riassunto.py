@@ -19,6 +19,7 @@ from app.shared.discord.delivery import send_dm_or_followup
 from app.shared.discord.embed_limits import (
     MAX_EMBED_CHARS,
     _clone_embed_shell,
+    extract_protected_masked_link_prefix,
     _ensure_embed_limits,
     _estimate_embed_size,
     _split_field_chunks,
@@ -449,11 +450,9 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
                 return _truncate_text(line, line_limit)
             return fixed_prefix + _truncate_text(tail, line_limit - fixed_len)
 
-        link_match = re.search(r"\[[^\]]+\]\([^\)]+\)", line)
-        if link_match:
-            link_end = link_match.end()
-            prefix = line[:link_end]
-            suffix = line[link_end:]
+        protected_link = extract_protected_masked_link_prefix(line)
+        if protected_link:
+            prefix, suffix = protected_link
             if len(prefix) >= line_limit:
                 return _truncate_text(line, line_limit)
             return prefix + _truncate_text(suffix, line_limit - len(prefix))

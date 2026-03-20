@@ -8,10 +8,20 @@ from app.services.footer import copy_footer_meta
 
 MAX_EMBED_CHARS: int = 5800
 RETRY_MAX_EMBED_CHARS: int = 5200
-_MASKED_LINK_RE = re.compile(r"\[[^\]]+\]\([^)]+\)")
+_MASKED_LINK_TOKEN_PATTERN = r"\*\*\[[^\]]+\]\([^)]+\)\*\*|\[[^\]]+\]\([^)]+\)"
+_MASKED_LINK_RE = re.compile(rf"(?:{_MASKED_LINK_TOKEN_PATTERN})")
 _SUMMARY_LINK_PREFIX_RE = re.compile(
-    r"^(?P<prefix>(?:•\s+)?\*\*\[[^\]]+\]\([^)]+\)\*\*(?:\s+📞)?\s+—\s+)(?P<tail>.*)$"
+    rf"^(?P<prefix>(?:•\s+)?(?:{_MASKED_LINK_TOKEN_PATTERN})(?:\s+📞)?(?:\s+\S+\s+\*\*[^*\n]+\*\*)?\s+—\s+)(?P<tail>.*)$"
 )
+
+
+def extract_protected_masked_link_prefix(line: str) -> tuple[str, str] | None:
+    match = _MASKED_LINK_RE.search(line)
+    if not match:
+        return None
+    prefix = line[: match.end()]
+    tail = line[match.end() :]
+    return prefix, tail
 
 
 def _split_long_token(token: str, limit: int) -> list[str]:
@@ -32,7 +42,7 @@ def _split_markdown_text_chunks(
     budget = max(1, limit - len(first_prefix))
     current = first_prefix
     chunks: list[str] = []
-    tokens = re.findall(r"\[[^\]]+\]\([^)]+\)|\s+|\S+", text)
+    tokens = re.findall(rf"{_MASKED_LINK_TOKEN_PATTERN}|\s+|\S+", text)
     for token in tokens:
         remaining_tokens = _split_long_token(token, budget if current == first_prefix else max(1, limit - len(continuation_prefix)))
         for piece in remaining_tokens:
