@@ -99,7 +99,7 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
 
     assert embed.title == "❓ QNA"
     assert embed.description.startswith("**🛠️ BONUS_SHOW MARIO ROSSI**")
-    assert "<@123>" in (embed.description or "")
+    assert "<@123>" not in (embed.description or "")
 
 
 def test_build_command_embed_formats_period_subtitle_for_riassunto_ultimi() -> None:
@@ -107,13 +107,13 @@ def test_build_command_embed_formats_period_subtitle_for_riassunto_ultimi() -> N
         build_command_embed(
             top_level="riassunto",
             subcommand_path="riassunto ultimi",
-            subtitle_args=[30, "minuti"],
+            subtitle_args=[1, "ore"],
             footer_service=None,
         )
     )
 
     assert embed.title == "🗒️ RIASSUNTO"
-    assert embed.description.startswith("**🛠️ ULTIMI 30 MINUTI**")
+    assert embed.description.startswith("**🛠️ ULTIMA ORA**")
 
 
 def test_build_command_embed_formats_period_subtitle_for_attivita_ultimi() -> None:
@@ -122,13 +122,105 @@ def test_build_command_embed_formats_period_subtitle_for_attivita_ultimi() -> No
             top_level="admin",
             visual_top_level="attivita",
             subcommand_path="attivita ultimi",
-            subtitle_args=[7, "giorni"],
+            subtitle_args=[1, "minuti"],
             footer_service=None,
         )
     )
 
     assert embed.title == "📈 ATTIVITA"
-    assert embed.description.startswith("**🛠️ ULTIMI 7 GIORNI**")
+    assert embed.description.startswith("**🛠️ ULTIMO MINUTO**")
+
+
+def test_build_command_embed_formats_range_subtitle_centrally() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="riassunto",
+            subcommand_path="riassunto range",
+            subtitle_args=["20/03/2026 10:15", "21/03/2026 11:45"],
+            footer_service=None,
+        )
+    )
+
+    assert embed.title == "🗒️ RIASSUNTO"
+    assert embed.description.startswith("**🛠️ DAL 20/03 10:15 AL 21/03 11:45**")
+
+
+def test_build_command_embed_uses_real_top_level_for_resocontocanale() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="resocontocanale",
+            subcommand_path="resocontocanale status",
+            footer_service=None,
+        )
+    )
+
+    assert embed.title == "📓 RESOCONTOCANALE"
+    assert embed.description.startswith("**🛠️ STATUS**")
+    assert "RESOCONTO STATUS" not in (embed.description or "")
+
+
+def test_build_command_embed_strips_ugly_prefixes_from_narrative_bullets() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="riassunto",
+            subcommand_path="riassunto oggi",
+            lines=[
+                ("dettaglio", "Ti ho inviato il riassunto in DM."),
+                ("warning", "Phrase entry #1 not found."),
+                ("result", "updated"),
+                ("error", "Qualcosa è andato storto."),
+            ],
+            kind="warning",
+            footer_service=None,
+        )
+    )
+
+    description = embed.description or ""
+    assert "Dettaglio:" not in description
+    assert "Warning:" not in description
+    assert "Result:" not in description
+    assert "Error:" not in description
+    assert "• Ti ho inviato il riassunto in DM." in description
+    assert "• Phrase entry #1 not found." in description
+    assert "• Updated." in description
+    assert "• Qualcosa è andato storto." in description
+
+
+def test_build_command_embed_deduplicates_identity_lines_already_in_subtitle() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="admin",
+            visual_top_level="qna",
+            subcommand_path="qna bonus_show",
+            subtitle_args=[SimpleNamespace(display_name="Mario", global_name=None, name="mario")],
+            lines=[("user", "<@123>"), ("bonus", 3), ("expires_at", "2026-03-21 10:00 UTC")],
+            footer_service=None,
+        )
+    )
+
+    description = embed.description or ""
+    assert description.startswith("**🛠️ BONUS_SHOW MARIO**")
+    assert "• User:" not in description
+    assert "<@123>" not in description
+    assert "• Bonus: **3**" in description
+
+
+def test_build_command_embed_deduplicates_tier_line_already_in_subtitle() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="admin",
+            visual_top_level="qna",
+            subcommand_path="qna limits_show",
+            subtitle_args=["base"],
+            lines=[("tier", "base"), ("limit", 5)],
+            footer_service=None,
+        )
+    )
+
+    description = embed.description or ""
+    assert description.startswith("**🛠️ LIMITS_SHOW BASE**")
+    assert "Tier: **base**" not in description
+    assert "• Limit: **5**" in description
 
 
 def test_build_command_embed_skips_long_unreadable_subtitle_input() -> None:

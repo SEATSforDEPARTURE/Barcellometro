@@ -69,10 +69,14 @@ def register_resoconto(
         files: list[discord.File] | None = None,
         ephemeral: bool = True,
     ) -> None:
+        visual_top_level = {
+            "canale": "resocontocanale",
+            "server": "resocontoserver",
+        }.get(scope, "resoconto")
         await send_standard_response(
             interaction,
-            top_level="resoconto",
-            subcommand_path=f"{scope} {path}",
+            top_level=visual_top_level,
+            subcommand_path=f"{visual_top_level} {path}",
             subtitle_args=subtitle_args,
             lines=lines,
             sections=sections,
