@@ -49,7 +49,7 @@ def setup(registry: ServiceRegistry) -> None:
     if not use_guild:
         logger.warning("GUILD_ID missing/invalid; registering GLOBAL commands")
 
-    bm_group = app_commands.Group(name="bm", description="Barcellometro control commands")
+    admin_group = app_commands.Group(name="admin", description="Barcellometro control commands")
     commandguard_group = app_commands.Group(name="commandguard", description="Command guard policies")
     stt_group = app_commands.Group(name="stt", description="Speech-to-text configuration")
     translate_group = app_commands.Group(name="translate", description="Translation configuration")
@@ -67,13 +67,13 @@ def setup(registry: ServiceRegistry) -> None:
     resocontocanale_group = app_commands.Group(name="resocontocanale", description="Channel summary schedules")
     resocontoserver_group = app_commands.Group(name="resocontoserver", description="Server summary schedules")
 
-    add_group_once(bm_group, commandguard_group, logger)
-    add_group_once(bm_group, stt_group, logger)
-    add_group_once(bm_group, translate_group, logger)
-    add_group_once(bm_group, audionotes_group, logger)
-    add_group_once(bm_group, voice_ingest_group, logger)
+    add_group_once(admin_group, commandguard_group, logger)
+    add_group_once(admin_group, stt_group, logger)
+    add_group_once(admin_group, translate_group, logger)
+    add_group_once(admin_group, audionotes_group, logger)
+    add_group_once(admin_group, voice_ingest_group, logger)
 
-    register_admin(bm_group, ctx)
+    register_admin(admin_group, ctx)
     register_roles(commandguard_group, ctx)
     register_stt(stt_group, ctx)
     register_translate(translate_group, ctx)
@@ -81,8 +81,8 @@ def setup(registry: ServiceRegistry) -> None:
     register_messaggi(campagne_group, ctx)
     register_voice_ingest(voice_ingest_group, ctx)
     register_privacy(privacy_group, ctx)
-    register_status(bm_group, ctx)
-    register_barcello(bm_group, ctx)
+    register_status(admin_group, ctx)
+    register_barcello(admin_group, ctx)
     register_riassunto(riassunto_group, ctx)
     register_aura(aura_group, ctx)
     register_attivita(attivita_group, ctx)
@@ -91,11 +91,11 @@ def setup(registry: ServiceRegistry) -> None:
     register_moderazione_utenti(mod_group, ctx)
 
     register_resoconto(resocontocanale_group, resocontoserver_group, ctx)
-    frasi_group = register_triggers(bm_group, campagne_group, qna_group, insights_group, ctx)
+    frasi_group = register_triggers(admin_group, campagne_group, qna_group, insights_group, ctx)
 
     logger.info(
-        "Group children summary bm=%d campagne=%d qna=%d insights=%d",
-        len(bm_group.commands),
+        "Group children summary admin=%d campagne=%d qna=%d insights=%d",
+        len(admin_group.commands),
         len(campagne_group.commands),
         len(qna_group.commands),
         len(insights_group.commands),
@@ -106,7 +106,7 @@ def setup(registry: ServiceRegistry) -> None:
     logger.info("Registered commands scope=%s top_level=%s", scope_label, [c.qualified_name for c in top_level])
 
     root_commands: list[app_commands.Command | app_commands.Group] = [
-        bm_group,
+        admin_group,
         qna_group,
         insights_group,
         campagne_group,

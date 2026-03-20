@@ -13,6 +13,7 @@ CommandKind = Literal["info", "success", "warning", "error"]
 FooterMode = Literal["minimal", "meta", "none"]
 
 TOP_LEVEL_EMOJIS: dict[str, str] = {
+    "admin": "🫛",
     "bm": "🫛",
     "status": "📊",
     "ai": "🧠",
@@ -332,6 +333,7 @@ async def send_standard_response(
 
 
 _LEGACY_TOP_LEVEL_EMOJIS: dict[str, str] = {
+    "admin": "🧭",
     "bm": "🧭",
 }
 

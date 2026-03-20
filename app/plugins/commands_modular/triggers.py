@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def register_triggers(
-    bm_group: app_commands.Group,
+    admin_group: app_commands.Group,
     campagne_group: app_commands.Group,
     qna_group: app_commands.Group,
     insights_group: app_commands.Group,
@@ -148,24 +148,26 @@ def register_triggers(
         command = getattr(interaction, "command", None)
         qualified_name = str(getattr(command, "qualified_name", "") or "").strip().lower()
         if not qualified_name:
-            return ["bm.unknown"]
+            return ["admin.unknown", "bm.unknown"]
 
         parts = [part for part in qualified_name.split() if part]
-        if parts and parts[0] == "bm":
+        if parts and parts[0] in {"admin", "bm"}:
             parts = parts[1:]
         if not parts:
-            return ["bm.unknown"]
+            return ["admin.unknown", "bm.unknown"]
 
         canonical_parts = parts[:]
         if canonical_parts[0] == "prompt":
             canonical_parts.insert(0, "campagne")
 
-        candidates: list[str] = ["bm." + ".".join(canonical_parts), ".".join(canonical_parts)]
+        canonical = ".".join(canonical_parts)
+        candidates: list[str] = [f"admin.{canonical}", canonical, f"bm.{canonical}"]
         if canonical_parts[:2] == ["campagne", "prompt"]:
             prompt_parts = canonical_parts[1:]
-            candidates.extend(("bm." + ".".join(prompt_parts), ".".join(prompt_parts)))
+            prompt_path = ".".join(prompt_parts)
+            candidates.extend((prompt_path, f"admin.{prompt_path}", f"bm.{prompt_path}"))
 
-        return list(dict.fromkeys(candidate for candidate in candidates if candidate and candidate != "bm."))
+        return list(dict.fromkeys(candidate for candidate in candidates if candidate and candidate not in {"admin.", "bm."}))
 
     async def _guard(interaction: discord.Interaction, *legacy_aliases: str) -> bool:
         candidates = _command_permission_candidates(interaction)

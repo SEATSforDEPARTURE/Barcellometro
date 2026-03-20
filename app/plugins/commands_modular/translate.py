@@ -36,7 +36,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
     ) -> None:
         if not await check_permission(
             interaction,
-            "bm.translate.config_set",
+            "admin.translate.config_set",
             ctx,
             legacy_aliases=["bm.translate.backend", "bm.translate.target"],
         ):
@@ -44,9 +44,9 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
         if backend is None and target is None:
             await send_standard_response(
                 interaction,
-                top_level="bm",
+                top_level="admin",
                 subcommand_path="translate config_set",
-                lines=[("error", "No changes provided. Use /bm translate config_show to inspect the current configuration.")],
+                lines=[("error", "No changes provided. Use /admin translate config_show to inspect the current configuration.")],
                 kind="error",
                 footer_service=ctx.footer,
             )
@@ -57,7 +57,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             await set_setting(ctx, "translate.target_lang", target.value)
         await send_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="translate config_set",
             lines=[("result", "updated")],
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
@@ -69,14 +69,14 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
     async def translate_config_show_command(interaction: discord.Interaction) -> None:
         if not await check_permission(
             interaction,
-            "bm.translate.config_show",
+            "admin.translate.config_show",
             ctx,
             legacy_aliases=["bm.translate.backend", "bm.translate.target"],
         ):
             return
         await send_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="translate config_show",
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
             footer_service=ctx.footer,
@@ -86,7 +86,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
     async def translate_config_reset_command(interaction: discord.Interaction) -> None:
         if not await check_permission(
             interaction,
-            "bm.translate.config_reset",
+            "admin.translate.config_reset",
             ctx,
             legacy_aliases=["bm.translate.backend", "bm.translate.target"],
         ):
@@ -95,7 +95,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             await reset_setting(ctx, key)
         await send_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="translate config_reset",
             lines=[("result", "reset")],
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],

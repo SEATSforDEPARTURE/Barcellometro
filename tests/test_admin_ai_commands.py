@@ -12,7 +12,7 @@ def test_ai_model_choices_include_campaign_and_audio_tasks() -> None:
 def test_ai_commands_are_registered_under_ai_group_namespace() -> None:
     source = Path("app/plugins/commands_modular/admin.py").read_text()
     assert 'ai_group = app_commands.Group(name="ai", description="AI service controls")' in source
-    assert 'bm_group.add_command(ai_group)' in source
+    assert 'admin_group.add_command(ai_group)' in source
     assert '@ai_group.command(name="on"' in source
     assert '@ai_group.command(name="off"' in source
     assert '@ai_group.command(name="model_set"' in source
