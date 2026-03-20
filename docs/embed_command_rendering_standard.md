@@ -113,7 +113,7 @@ Esempi:
 
 Se la frase del footer non esiste, il footer resta ben formato e concatena solo gli elementi disponibili, senza separatori doppi.
 
-La frase legacy `Dati elaborati` + ` in loco` è abolita in tutto il progetto, così come la coda `e fallback` + ` locale`: non devono più comparire in codice, test, documentazione o footer renderizzati. Per output non-AI non si mostra alcuna frase tecnica finale; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare. Il flag `used_local_processing` resta metadata interno e non aggiunge testo visibile al footer.
+La frase legacy `Dati elaborati` + ` in loco` è abolita in tutto il progetto, così come la coda `e fallback` + ` locale`: non devono più comparire in codice, test, documentazione, configurazioni versionate, override locali o footer renderizzati. Questo vale anche per eventuali campi config come `footer`, `fallback_footer` o template equivalenti. Per output non-AI non si mostra alcuna frase tecnica finale; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare. Il flag `used_local_processing` resta metadata interno e non aggiunge testo visibile al footer.
 
 ## Quali input entrano nel sottotitolo
 
