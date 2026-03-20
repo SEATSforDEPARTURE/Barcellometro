@@ -15,8 +15,10 @@ COMMANDS_MODULAR_INIT = COMMANDS_ROOT / "commands_modular" / "__init__.py"
 MODULAR_DIR = COMMANDS_ROOT / "commands_modular"
 DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / "command_tree_report.md"
 
+CANONICAL_ADMIN_ROOT = "admin"
+LEGACY_ADMIN_ROOT_ALIASES = {"bm"}
 BANNED_SEGMENTS = {"delete", "clear", "create", "update", "stats", "get", "toggle"}
-ENGLISH_ALLOWED_SHORT = {"ai", "dm", "dms", "qna", "stt", "bm"}
+ENGLISH_ALLOWED_SHORT = {"admin", "ai", "dm", "dms", "qna", "stt"}
 ITALIAN_MARKERS = {
     "attivita",
     "calibra",
@@ -419,6 +421,16 @@ def _validate_commands(result: ValidationResult) -> ValidationResult:
             _add_issue(result, "error", "snake_case", f"Action '{action}' must be snake_case with at most two underscores.", command.path, command.source_file, command.line)
         if action.count("_") > 2:
             _add_issue(result, "error", "underscore_limit", f"Action '{action}' exceeds the max underscore limit.", command.path, command.source_file, command.line)
+        if command.root in LEGACY_ADMIN_ROOT_ALIASES:
+            _add_issue(
+                result,
+                "warning",
+                "legacy_root",
+                f"Legacy root '{command.root}' is still compatible, but '{CANONICAL_ADMIN_ROOT}' is the canonical namespace.",
+                command.path,
+                command.source_file,
+                command.line,
+            )
         if (not _should_skip_localized_checks(command)) and _looks_localized(command.description):
             _add_issue(result, "warning", "localized_description", "Command description looks non-English.", command.path, command.source_file, command.line)
         if not command.description:
@@ -478,7 +490,7 @@ def _scan_legacy_aliases(result: ValidationResult) -> None:
             if "legacy_aliases" not in line and "_require_channel(interaction," not in line and '"frasi.' not in line:
                 continue
             lowered = line.lower()
-            if not any(hint in lowered for hint in LEGACY_ALIAS_HINTS):
+            if not any(hint in lowered for hint in LEGACY_ALIAS_HINTS) and "bm." not in lowered and '"bm"' not in lowered and "'bm'" not in lowered:
                 continue
             result.legacy_aliases.append(
                 Issue(
@@ -531,6 +543,10 @@ def render_markdown_report(result: ValidationResult) -> str:
         lines.append("- No validator errors or warnings.")
     lines.extend(["", "## Legacy alias review", ""])
     if result.legacy_aliases:
+        lines.append(
+            f"Legacy aliases remain compatibility-only. In particular, `{next(iter(sorted(LEGACY_ADMIN_ROOT_ALIASES)))}.*` paths are allowed for backward compatibility, while `{CANONICAL_ADMIN_ROOT}.*` is the canonical namespace."
+        )
+        lines.append("")
         for issue in result.legacy_aliases:
             lines.append(f"- **WARNING legacy_alias** — `{issue.path}`: `{issue.message}` (`{issue.source_file}:{issue.line}`)")
     else:
