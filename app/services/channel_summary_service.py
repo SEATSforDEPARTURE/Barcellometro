@@ -38,6 +38,45 @@ def _summary_footer_inputs(ai_status: dict[str, Any]) -> tuple[list[str], bool]:
     return contributors, (not used_ai_output)
 
 
+async def compute_moment_barcello_map(
+    *,
+    barcello_service: BarcelloService,
+    guild_id: str,
+    channel_id: str,
+    summary: SummaryResult,
+    moment_primary: dict[int, str | None],
+    message_index: dict[str, MessageMeta],
+    fallback: BarcelloResult,
+    limit: int = 8,
+) -> dict[int, BarcelloResult]:
+    snapshots: dict[int, BarcelloResult] = {}
+    half_window = timedelta(minutes=30)
+    for moment in summary.moments[:limit]:
+        point_ts = moment.ts
+        primary_id = moment_primary.get(id(moment))
+        if primary_id and primary_id in message_index:
+            point_ts = message_index[primary_id].ts or point_ts
+        if not point_ts:
+            snapshots[id(moment)] = fallback
+            continue
+        try:
+            point_dt = datetime.fromisoformat(str(point_ts).replace("Z", "+00:00"))
+            if point_dt.tzinfo is None:
+                point_dt = point_dt.replace(tzinfo=timezone.utc)
+            start_dt = point_dt - half_window
+            end_dt = point_dt + half_window
+            snapshots[id(moment)] = await barcello_service.compute_channel_range(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                start_ts=start_dt.astimezone(timezone.utc).isoformat(),
+                end_ts=end_dt.astimezone(timezone.utc).isoformat(),
+            )
+        except Exception:
+            logger.exception("channel_summary moment barcello failed guild=%s channel=%s", guild_id, channel_id)
+            snapshots[id(moment)] = fallback
+    return snapshots
+
+
 class ChannelSummaryService:
     def __init__(
         self,
@@ -895,32 +934,15 @@ class ChannelSummaryService:
         message_index: dict[str, MessageMeta],
         fallback: BarcelloResult,
     ) -> dict[int, BarcelloResult]:
-        snapshots: dict[int, BarcelloResult] = {}
-        half_window = timedelta(minutes=30)
-        for moment in summary.moments[:8]:
-            point_ts = moment.ts
-            primary_id = moment_primary.get(id(moment))
-            if primary_id and primary_id in message_index:
-                point_ts = message_index[primary_id].ts or point_ts
-            if not point_ts:
-                snapshots[id(moment)] = fallback
-                continue
-            try:
-                point_dt = datetime.fromisoformat(str(point_ts).replace("Z", "+00:00"))
-                if point_dt.tzinfo is None:
-                    point_dt = point_dt.replace(tzinfo=timezone.utc)
-                start_dt = point_dt - half_window
-                end_dt = point_dt + half_window
-                snapshots[id(moment)] = await self._barcello.compute_channel_range(
-                    guild_id=guild_id,
-                    channel_id=channel_id,
-                    start_ts=start_dt.astimezone(timezone.utc).isoformat(),
-                    end_ts=end_dt.astimezone(timezone.utc).isoformat(),
-                )
-            except Exception:
-                logger.exception("channel_summary moment barcello failed guild=%s channel=%s", guild_id, channel_id)
-                snapshots[id(moment)] = fallback
-        return snapshots
+        return await compute_moment_barcello_map(
+            barcello_service=self._barcello,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            summary=summary,
+            moment_primary=moment_primary,
+            message_index=message_index,
+            fallback=fallback,
+        )
 
     def _build_trend_vs_previous_equivalent(
         self,

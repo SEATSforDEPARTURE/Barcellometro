@@ -114,12 +114,25 @@ Vale esplicitamente per **tutti** i percorsi del repo: admin legacy, status/show
 
 Di conseguenza, i renderer locali non devono usare `embed.set_footer(...)` con stringhe custom per bypassare il contratto centrale: devono invece allegare footer metadata e lasciare che la pipeline comune renderizzi sempre `versione → frase configurata → eventuale parte tecnica`.
 
+Per `/riassunto` questo requisito copre esplicitamente il path runtime completo di consegna: build dettagli, normalize/sanitize, `apply_standard_report_style(...)`, `finalize_embeds(...)`, `send_dm_or_followup(...)` ed eventuale fallback DM negato → followup ephemeral. Se `summary.ai_status.used_ai_output == True` e `used_display_model` è presente, tutte le pagine finali devono mantenere la terza parte `Dati elaborati con <used_display_model>` senza perderla durante split, retry o fallback.
+
 Semantica dei contributor/provider:
 
 - i comandi puramente informativi o configurativi (`status`, `show`, `list`, `set`, `reset`, `config`, admin locale, ecc.) **non** mostrano mai la terza parte se non usano davvero strumenti esterni per elaborare dati;
 - i servizi AI o pipeline ibride **devono** dichiarare i contributor reali che hanno elaborato i dati, anche quando girano in locale;
 - per esempio audio notes deve poter mostrare contributor come `faster-whisper`, `argos` e `llama3.2` nello stesso footer quando STT, traduzione e summary hanno tutti partecipato all’elaborazione;
 - i contributor vengono deduplicati e mostrati con nomi display puliti, nell’ordine semantico raccolto dal servizio.
+
+## Grammatica visuale condivisa tra `/riassunto` e `/resocontocanale`
+
+I dettagli di `/riassunto` devono seguire la stessa grammatica visuale del renderer di `/resocontocanale` quando i dati equivalenti sono disponibili:
+
+- `🏷️ TEMI` usa hashtag espliciti (`#settimana, #video_grafici, #progetto`);
+- `📌 MOMENTI SALIENTI` mostra timestamp/link, pallino colore Barcello del momento e score in grassetto prima del testo;
+- i nomi/nickname noti vengono resi in grassetto in momenti, frasi iconiche, dinamiche e sezioni analoghe con approccio conservativo;
+- la mappa `moment -> barcello snapshot` deve riusare la stessa logica di finestra locale ±30 minuti già usata dal canale summary, per evitare divergenze tra `/riassunto` e `/resocontocanale`.
+
+La regressione deve essere coperta anche lato test sul percorso reale di invio, includendo DM riusciti, fallback followup/ephemeral e coerenza multipagina del footer AI.
 
 Esempi:
 
