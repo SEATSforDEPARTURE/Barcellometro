@@ -9,12 +9,19 @@ import discord
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Connection=object)
 
-from app.plugins.commands_modular.riassunto import _build_period_prefix, _summary_footer_inputs
+from app.plugins.commands_modular.riassunto import (
+    _build_period_prefix,
+    _format_summary_time_link,
+    _resolve_summary_primary_ref,
+    _summary_footer_inputs,
+)
 from app.renderers.channel_summary import _barcello_emoji_from_color, _bold_known_names
 from app.renderers.detail_embeds import build_summary_detail_embeds
 from app.services.barcello_service import BarcelloResult
 from app.services.content_summary_service import (
+    SummaryImpact,
     SummaryItem,
+    SummaryQuote,
     SummaryResult,
     _build_summary_prompt_payload,
     _estimate_summary_prompt_tokens,
@@ -44,6 +51,19 @@ class _FakeDatabase:
 
     async def fetchall(self, _query: str, _params: tuple[str, ...]):
         return []
+
+
+class _PrimaryRefDb:
+    def __init__(self, *, existing: set[str] | None = None, nearest: str | None = None) -> None:
+        self.existing = existing or set()
+        self.nearest = nearest
+
+    async def message_exists_in_channel(self, *, channel_id: str, message_id: str) -> bool:
+        _ = channel_id
+        return message_id in self.existing
+
+    async def fetch_nearest_message_id_in_range(self, **_kwargs):
+        return self.nearest
 
 
 def _build_footer_service() -> FooterService:
@@ -723,3 +743,255 @@ def test_riassunto_bolds_known_names_in_moments_or_dynamics() -> None:
     rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
     assert "**Mario**" in rendered
     assert "**Luca**" in rendered
+
+
+def test_riassunto_moment_timestamp_link_is_clickable_when_primary_ref_exists() -> None:
+    rendered = _format_summary_time_link(
+        "2026-03-19T05:28:00+00:00",
+        "123456789012345678",
+        guild_id=1,
+        channel_id=2,
+    )
+    assert rendered == "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+
+
+def test_riassunto_impact_timestamp_link_uses_nearest_message_fallback_when_message_id_missing() -> None:
+    async def _run() -> None:
+        db = _PrimaryRefDb(existing={"223456789012345678"}, nearest="223456789012345678")
+        resolved = await _resolve_summary_primary_ref(
+            db,
+            item_type="impact",
+            channel_id="2",
+            start_ts="2026-03-19T00:00:00+00:00",
+            end_ts="2026-03-19T23:59:59+00:00",
+            ts="2026-03-19T05:28:00+00:00",
+            explicit_refs=[],
+        )
+        assert resolved == "223456789012345678"
+
+    asyncio.run(_run())
+
+
+def test_riassunto_quote_or_dynamic_links_survive_split_and_truncation() -> None:
+    quote_link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    dynamic_link = "**[06:31](https://discord.com/channels/1/2/223456789012345678)**"
+    summary = SummaryResult(
+        themes=[],
+        moments=[],
+        quotes=[SummaryQuote(ts="2026-03-19T05:28:00+00:00", text="placeholder", author_id="u1")],
+        dynamics=[
+            SummaryItem(
+                ts="2026-03-19T05:31:00+00:00",
+                text="Mario e Luca hanno coordinato il rilascio con " + ("dettagli utili " * 40),
+                author_id="u1",
+            )
+        ],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    embeds = build_summary_detail_embeds(
+        profile="role3",
+        summary=summary,
+        include_names=True,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary={},
+        quote_primary={id(summary.quotes[0]): "123456789012345678"},
+        dynamic_primary={id(summary.dynamics[0]): "223456789012345678"},
+        impact_primary={},
+        moment_display={},
+        quote_display={id(summary.quotes[0]): "Mario"},
+        dynamic_names={id(summary.dynamics[0]): ["Mario", "Luca"]},
+        quote_texts={id(summary.quotes[0]): "Messaggio molto lungo " * 50},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="PRO MAX",
+        tier_config={"sections": ["quotes", "dynamics"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=lambda **kwargs: f"{quote_link} — “{kwargs['text_override']}” — **Mario**",
+        format_dynamic_line=lambda **kwargs: f"{dynamic_link} — {kwargs['dynamic'].text} — Coinvolti: **Mario**, **Luca**",
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
+    assert quote_link in rendered
+    assert dynamic_link in rendered
+
+
+def test_riassunto_mod_impact_includes_aura_points_for_period() -> None:
+    impact = SummaryImpact(
+        author_id="u1",
+        reason="Ha riportato calma nel momento più teso.",
+        ts="2026-03-19T05:28:00+00:00",
+        message_id="123456789012345678",
+        aura_points_period=9,
+        aura_total_points=12,
+    )
+    summary = SummaryResult(
+        themes=[],
+        moments=[],
+        quotes=[],
+        dynamics=[],
+        degrade=[],
+        invigorate=[impact],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    embeds = build_summary_detail_embeds(
+        profile="mod",
+        summary=summary,
+        include_names=False,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={"u1": "Mario"},
+        moment_primary={},
+        quote_primary={},
+        dynamic_primary={},
+        impact_primary={id(impact): "123456789012345678"},
+        moment_display={},
+        quote_display={},
+        dynamic_names={},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="MOD",
+        tier_config={"sections": ["impact"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=_format_runtime_dynamic_line,
+        format_impact_line=lambda **kwargs: (
+            f"**[06:28](https://discord.com/channels/1/2/123456789012345678)** — 🌿 **Mario** — {kwargs['impact'].reason}\n"
+            "  Aura nel periodo: **+9** · Totale Aura finestra: **+12**"
+        ),
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
+    assert "Aura nel periodo: **+9**" in rendered
+    assert "Totale Aura finestra: **+12**" in rendered
+
+
+def test_riassunto_mod_impact_handles_missing_aura_data_gracefully() -> None:
+    impact = SummaryImpact(
+        author_id="u1",
+        reason="Ha alzato la tensione con richiami diretti.",
+        ts="2026-03-19T05:28:00+00:00",
+        message_id="123456789012345678",
+    )
+    summary = SummaryResult(
+        themes=[],
+        moments=[],
+        quotes=[],
+        dynamics=[],
+        degrade=[impact],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    embeds = build_summary_detail_embeds(
+        profile="mod",
+        summary=summary,
+        include_names=False,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={"u1": "Mario"},
+        moment_primary={},
+        quote_primary={},
+        dynamic_primary={},
+        impact_primary={id(impact): "123456789012345678"},
+        moment_display={},
+        quote_display={},
+        dynamic_names={},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="MOD",
+        tier_config={"sections": ["impact"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=_format_runtime_dynamic_line,
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
+    assert "Aura nel periodo" not in rendered
+
+
+def test_riassunto_links_remain_valid_after_pagination() -> None:
+    link = "**[06:28](https://discord.com/channels/1/2/123456789012345678)**"
+    summary = SummaryResult(
+        themes=[],
+        moments=[],
+        quotes=[],
+        dynamics=[
+            SummaryItem(
+                ts="2026-03-19T05:28:00+00:00",
+                text=("Mario coordina il rilascio " + ("con molto contesto " * 40)).strip(),
+                author_id="u1",
+            )
+            for _ in range(24)
+        ],
+        degrade=[],
+        invigorate=[],
+        advice=[],
+        metrics={},
+        ai_status={},
+    )
+    dynamic_primary = {id(item): "123456789012345678" for item in summary.dynamics}
+    embeds = build_summary_detail_embeds(
+        profile="role3",
+        summary=summary,
+        include_names=False,
+        include_date_in_time=False,
+        guild_id=1,
+        channel_id=2,
+        name_map={},
+        moment_primary={},
+        quote_primary={},
+        dynamic_primary=dynamic_primary,
+        impact_primary={},
+        moment_display={},
+        quote_display={},
+        dynamic_names={},
+        quote_texts={},
+        privacy_intervals=None,
+        privacy_disclaimer_lines=None,
+        metrics_report=None,
+        extra_sections=None,
+        tier_label="PRO MAX",
+        tier_config={"sections": ["dynamics"]},
+        details_color=0x5865F2,
+        req_id="req",
+        format_moment_line=_format_runtime_moment_line,
+        format_quote_line=_format_runtime_quote_line,
+        format_dynamic_line=lambda **kwargs: f"{link} — {kwargs['dynamic'].text}",
+        format_impact_line=_format_runtime_impact_line,
+        format_bullets=lambda lines: "\n".join(f"• {line}" for line in lines),
+        moment_barcello={},
+    )
+    assert len(embeds) >= 2
+    rendered = "\n".join(field.value for embed in embeds for field in embed.fields)
+    assert link in rendered

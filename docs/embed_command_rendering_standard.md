@@ -129,10 +129,13 @@ I dettagli di `/riassunto` devono seguire la stessa grammatica visuale del rende
 
 - `🏷️ TEMI` usa hashtag espliciti (`#settimana, #video_grafici, #progetto`);
 - `📌 MOMENTI SALIENTI` mostra timestamp/link, pallino colore Barcello del momento e score in grassetto prima del testo;
+- in tutte le sezioni a bullet con timestamp (`MOMENTI SALIENTI`, frasi iconiche, dinamiche, `CHI DEGRADA`, `CHI RINVIGORISCE`) il masked link markdown del timestamp deve restare cliccabile quando esiste un messaggio sorgente valido, anche dopo split, truncation o pagination degli embed;
 - i nomi/nickname noti vengono resi in grassetto in momenti, frasi iconiche, dinamiche e sezioni analoghe con approccio conservativo;
+- nelle sezioni MOD `🔥 CHI DEGRADA` e `🌿 CHI RINVIGORISCE` i motivi devono essere chiari, leggibili e non tecnici: una frase breve che descrive il comportamento osservato e perché è utile ai MOD;
+- il dettaglio MOD di `/riassunto` può integrare i punti Aura nella finestra temporale richiesta, mostrando almeno il saldo Aura nel periodo e, quando utile, il totale Aura della finestra senza appesantire il layout;
 - la mappa `moment -> barcello snapshot` deve riusare la stessa logica di finestra locale ±30 minuti già usata dal canale summary, per evitare divergenze tra `/riassunto` e `/resocontocanale`.
 
-La regressione deve essere coperta anche lato test sul percorso reale di invio, includendo DM riusciti, fallback followup/ephemeral e coerenza multipagina del footer AI.
+La regressione deve essere coperta anche lato test sul percorso reale di invio, includendo DM riusciti, fallback followup/ephemeral, persistenza dei masked links dopo split/truncation/pagination e coerenza multipagina del footer AI.
 
 Esempi:
 
