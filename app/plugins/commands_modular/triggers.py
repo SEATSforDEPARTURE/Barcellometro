@@ -169,6 +169,7 @@ def register_triggers(
         interaction: discord.Interaction,
         *,
         subcommand_path: str,
+        relevant_parameters: list[object] | None = None,
         lines: list[tuple[str, object]] | None = None,
         sections: list[CommandEmbedSection] | None = None,
         kind: CommandKind = "info",
@@ -177,6 +178,8 @@ def register_triggers(
             interaction,
             top_level="admin",
             subcommand_path=subcommand_path,
+            visual_top_level=subcommand_path.split()[0] if subcommand_path.strip() else None,
+            relevant_parameters=relevant_parameters,
             lines=lines,
             sections=sections,
             kind=kind,
@@ -894,7 +897,7 @@ def register_triggers(
             data = parsed if isinstance(parsed, dict) else defaults
         if tier is not None:
             value = int(data.get(tier.value, defaults[tier.value]))
-            await _send(interaction, subcommand_path="qna limits_show", lines=[("tier", tier.value), ("limit", value)])
+            await _send(interaction, subcommand_path="qna limits_show", relevant_parameters=[tier.value], lines=[("tier", tier.value), ("limit", value)])
             return
         pretty = json.dumps(data, ensure_ascii=False, indent=2)
         await _send(interaction, subcommand_path="qna limits_show", sections=[CommandEmbedSection(title="Limits", lines=[pretty])])

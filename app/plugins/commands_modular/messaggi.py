@@ -169,6 +169,7 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
             interaction,
             top_level="admin",
             subcommand_path=subcommand_path,
+            visual_top_level="campagne",
             lines=lines,
             sections=sections,
             kind=kind,

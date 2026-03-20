@@ -119,6 +119,9 @@ def test_triggers_guard_uses_canonical_admin_permission_keys(triggers_module, mo
     assert sent[1]["subcommand_path"] == "frasi template_global_show"
     assert sent[2]["subcommand_path"] == "campagne prompt schedule_show"
     assert all(payload["top_level"] == "admin" for payload in sent)
+    assert sent[0]["visual_top_level"] == "frasi"
+    assert sent[1]["visual_top_level"] == "frasi"
+    assert sent[2]["visual_top_level"] == "campagne"
 
 
 def test_permission_helpers_keep_only_canonical_keys(import_fresh) -> None:
@@ -162,6 +165,8 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     asyncio.run(user_list.callback(_Interaction(user_list)))
 
     role_lines = sent[0]["sections"][0].lines
+    assert sent[0]["visual_top_level"] == "roles"
+    assert sent[1]["visual_top_level"] == "roles"
     assert role_lines[0][0] == "<@&123> (Moderatori)"
     assert role_lines[1][0] == "Deleted role (ID: 999)"
     assert "command=admin.test" in role_lines[0][1]

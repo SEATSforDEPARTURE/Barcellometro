@@ -145,6 +145,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
             interaction,
             top_level="admin",
             subcommand_path=subcommand_path,
+            visual_top_level="inattivi",
             lines=lines,
             sections=sections,
             kind=kind,
@@ -161,6 +162,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
         embeds = await build_command_embeds(
             top_level="admin",
             subcommand_path=subcommand_path,
+            visual_top_level="inattivi",
             lines=[("entries", len(lines))],
             sections=[CommandEmbedSection(title=title, lines=lines or ["No results."])],
             footer_service=ctx.footer,

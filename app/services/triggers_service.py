@@ -1753,6 +1753,7 @@ class TriggerEngineService:
                 embed = await build_command_embed(
                     top_level="triggers",
                     subcommand_path="insights post",
+                    visual_top_level="insights",
                     lines=[("dettaglio", text)],
                     footer_service=self._footer,
                 )
