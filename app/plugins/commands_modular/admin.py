@@ -31,6 +31,10 @@ def _format_value(value: str | None) -> str:
     return value if value else "(not set)"
 
 
+def _format_override_value(value: str | None, *, missing: str) -> str:
+    return value if value else missing
+
+
 def _human_service_name(service_name: str) -> str:
     labels = {
         "campagne_notizie": "campagne_notizie",
@@ -760,7 +764,10 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
         await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["footer", "template_global_show"],
-            entries=[("Version", _format_value(current_version)), ("Phrase", _format_value(current_global))],
+            entries=[
+                ("Version", _format_override_value(current_version, missing="No custom override (default brand version in use)")),
+                ("Phrase", _format_override_value(current_global, missing="No custom override (default footer phrase in use)")),
+            ],
             service_name="status",
         )
 
@@ -773,7 +780,13 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
             return
         await ctx.footer.set_version(None)
         await ctx.footer.set_global_phrase(None)
-        await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_global_reset"], entries=[("Status", "reset")], tone="success", service_name="status")
+        await _send_admin_response(
+            interaction,
+            ctx,
+            subcommand_path="footer template_global_reset",
+            lines=[("result", "reset")],
+            kind="success",
+        )
 
     @footer_group.command(name="template_service_set", description="Set a service-specific footer template.")
     @app_commands.describe(service="Service name.", phrase="Service-specific footer phrase.")
@@ -810,7 +823,10 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
         await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["footer", "template_service_show"],
-            entries=[("Service", service_name), ("Phrase", _format_value(phrase))],
+            entries=[
+                ("Service", service_name),
+                ("Phrase", _format_override_value(phrase, missing="No custom override (service uses default footer behavior)")),
+            ],
             service_name="status",
         )
 
@@ -827,7 +843,13 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
             await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_service_reset"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
             return
         await ctx.footer.set_service_phrase(service_name, None)
-        await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_service_reset"], entries=[("Service", service_name), ("Status", "reset")], tone="success", service_name="status")
+        await _send_admin_response(
+            interaction,
+            ctx,
+            subcommand_path="footer template_service_reset",
+            lines=[("service", service_name), ("result", "reset")],
+            kind="success",
+        )
 
     @footer_group.command(name="status", description="Show footer status and rendered variants.")
     async def footer_status_command(interaction: discord.Interaction) -> None:

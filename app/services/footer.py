@@ -816,7 +816,10 @@ class FooterService:
     async def _set_or_clear(self, key: str, value: str | None) -> None:
         cleaned = _clean(value)
         if not cleaned:
-            await self._database.execute("DELETE FROM settings WHERE key = ?", (key,))
-            await self._database.commit()
+            delete_setting = getattr(self._database, "delete_setting", None)
+            if callable(delete_setting):
+                await delete_setting(key)
+            else:
+                await self._database.execute("DELETE FROM settings WHERE key = ?", (key,))
             return
         await self._database.set_setting(key, cleaned)
