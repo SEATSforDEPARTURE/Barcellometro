@@ -185,7 +185,7 @@ def register_triggers(
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path=subcommand_path,
             lines=lines,
             sections=sections,

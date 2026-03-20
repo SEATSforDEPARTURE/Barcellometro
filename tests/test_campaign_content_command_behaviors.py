@@ -130,7 +130,7 @@ def test_custom_run_reports_not_found_when_campaign_missing(messaggi_module) -> 
 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="campagne custom run",
             lines=[("warning", "Custom schedule not found.")],
             sections=None,
@@ -157,7 +157,7 @@ def test_weather_run_dispatches_editorial_service(messaggi_module) -> None:
 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="campagne weather run",
             lines=[("channel", "<#10>"), ("result", "running")],
             sections=None,
@@ -212,7 +212,7 @@ def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module
 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path="campagne custom run",
             lines=[("schedule_id", 11), ("result", "running")],
             sections=None,

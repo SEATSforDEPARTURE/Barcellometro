@@ -126,6 +126,16 @@ def test_triggers_guard_uses_resolved_permission_keys(triggers_module, monkeypat
     assert sent[0]["subcommand_path"] == "frasi entry_list"
     assert sent[1]["subcommand_path"] == "frasi template_global_show"
     assert sent[2]["subcommand_path"] == "campagne prompt schedule_show"
+    assert all(payload["top_level"] == "admin" for payload in sent)
+
+
+def test_permission_helpers_prefer_admin_and_keep_bm_legacy_aliases(import_fresh) -> None:
+    permissions_module = import_fresh("app.plugins.commands_modular.permissions")
+
+    assert permissions_module.canonical_permission_key("bm.frasi.entry_list") == "admin.frasi.entry_list"
+    assert permissions_module.canonical_permission_key("admin.commandguard.role_add") == "admin.commandguard.role_add"
+    assert permissions_module.legacy_permission_candidates("admin.frasi.entry_list") == ["bm.frasi.entry_list"]
+    assert permissions_module.legacy_permission_candidates("admin") == ["bm"]
 
 
 def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest.MonkeyPatch) -> None:
