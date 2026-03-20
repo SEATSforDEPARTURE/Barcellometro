@@ -6,8 +6,8 @@ from typing import Iterable
 import discord
 
 from app.shared.discord.embed_limits import RETRY_MAX_EMBED_CHARS, normalize_embeds_for_discord
-from app.services.footer import FooterService, copy_footer_meta, get_footer_meta
-from app.shared.discord.footer_pipeline import finalize_embeds
+from app.services.footer import FooterService, copy_footer_meta
+from app.shared.discord.footer_pipeline import _needs_footer_finalize, finalize_embeds
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ async def _prepare_embeds_for_send(
 ) -> list[discord.Embed]:
     if footer_service is None or not embeds:
         return embeds
-    needs_finalize = any(get_footer_meta(embed) is not None or not getattr(embed.footer, "text", None) for embed in embeds)
+    needs_finalize = any(_needs_footer_finalize(embed) for embed in embeds)
     if not needs_finalize:
         return embeds
     return await finalize_embeds(embeds, footer_service, default_service_name=default_service_name)

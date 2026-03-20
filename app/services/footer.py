@@ -637,6 +637,7 @@ class FooterService:
         )
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
+        footer_text_before = getattr(embed.footer, "text", None)
         minimal_footer = pop_minimal_footer(embed)
         meta = pop_footer_meta(embed)
         if meta is None:
@@ -673,6 +674,13 @@ class FooterService:
                 else:
                     logger.warning("Footer profile persistence failed service=%s err=%s", meta.service_name, exc)
         embed.set_footer(text=text, icon_url=parsed_icon_url)
+        logger.debug(
+            "footer finalize: contributors_preserved=%s service=%s footer_text_before=%r footer_text_after=%r",
+            all(contributor in text for contributor in meta.contributors),
+            meta.service_name,
+            footer_text_before,
+            text,
+        )
         return embed
 
     def _dedupe_contributors(self, contributors: Iterable[str]) -> list[str]:

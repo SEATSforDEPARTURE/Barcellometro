@@ -21,7 +21,7 @@ from app.services.content_summary_service import (
     _summary_prompt_budget,
 )
 from app.services.footer import FooterService, attach_footer_meta_to_all
-from app.shared.discord.delivery import send_dm_or_followup
+from app.shared.discord.delivery import _prepare_embeds_for_send, send_dm_or_followup
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.shared.discord.report_embeds import apply_standard_report_style
 
@@ -400,6 +400,31 @@ def test_riassunto_footer_includes_used_display_model_on_runtime_send_path() -> 
     asyncio.run(_run())
 
 
+def test_riassunto_footer_survives_explicit_finalize_then_auto_finalize_runtime_path() -> None:
+    async def _run() -> None:
+        contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": True, "used_display_model": "gpt-4o"})
+        embeds = _build_runtime_payload_embeds(contributors=contributors, used_local_processing=used_local_processing)
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        prepared = await _prepare_embeds_for_send(
+            embeds,
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+        before_second_finalize = [embed.footer.text for embed in prepared]
+
+        await finalize_embeds(prepared, service, default_service_name="riassunto")
+
+        after_second_finalize = [embed.footer.text for embed in prepared]
+        assert before_second_finalize
+        assert before_second_finalize == after_second_finalize
+        assert all(text == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o" for text in after_second_finalize)
+
+    asyncio.run(_run())
+
+
 def test_riassunto_footer_includes_used_display_model_on_followup_fallback_path() -> None:
     async def _run() -> None:
         contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": True, "used_display_model": "gpt-4o"})
@@ -420,6 +445,39 @@ def test_riassunto_footer_includes_used_display_model_on_followup_fallback_path(
         followup_embeds = interaction.followup.calls[0]["embeds"]
         assert followup_embeds
         assert all("Dati elaborati con gpt-4o" in (embed.footer.text or "") for embed in followup_embeds)
+
+    asyncio.run(_run())
+
+
+def test_riassunto_footer_survives_explicit_finalize_then_auto_finalize_followup_fallback() -> None:
+    async def _run() -> None:
+        contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": True, "used_display_model": "gpt-4o"})
+        embeds = _build_runtime_payload_embeds(contributors=contributors, used_local_processing=used_local_processing)
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        prepared = await _prepare_embeds_for_send(
+            embeds,
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+        await finalize_embeds(prepared, service, default_service_name="riassunto")
+
+        assert all("Dati elaborati con gpt-4o" in (embed.footer.text or "") for embed in prepared)
+
+        interaction = _build_interaction(forbidden_dm=True)
+        sent_dm = await send_dm_or_followup(
+            interaction,
+            embeds=prepared,
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+
+        assert sent_dm is False
+        followup_embeds = interaction.followup.calls[0]["embeds"]
+        assert followup_embeds
+        assert all(embed.footer.text == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o" for embed in followup_embeds)
 
     asyncio.run(_run())
 
@@ -512,6 +570,29 @@ def test_riassunto_multipage_footer_remains_consistent_after_send_pipeline() -> 
         sent_embeds = interaction.user.calls[0]["embeds"]
         footers = [embed.footer.text for embed in sent_embeds]
         assert len(sent_embeds) >= 4
+        assert len(set(footers)) == 1
+        assert footers[0] == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o-mini"
+
+    asyncio.run(_run())
+
+
+def test_riassunto_multipage_footer_remains_consistent_after_double_finalize() -> None:
+    async def _run() -> None:
+        contributors, used_local_processing = _summary_footer_inputs({"used_ai_output": True, "used_display_model": "gpt-4o-mini"})
+        embeds = _build_runtime_payload_embeds(contributors=contributors, used_local_processing=used_local_processing, groups=4)
+        service = _build_footer_service()
+        await service.set_version("dev6")
+        await service.set_global_phrase("In via di sviluppo.")
+
+        prepared = await _prepare_embeds_for_send(
+            embeds,
+            footer_service=service,
+            default_service_name="riassunto",
+        )
+        await finalize_embeds(prepared, service, default_service_name="riassunto")
+
+        footers = [embed.footer.text for embed in prepared]
+        assert len(prepared) >= 4
         assert len(set(footers)) == 1
         assert footers[0] == "Barcellometro dev6 · In via di sviluppo. · Dati elaborati con gpt-4o-mini"
 
