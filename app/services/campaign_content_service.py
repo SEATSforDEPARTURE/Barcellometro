@@ -28,6 +28,7 @@ from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.shared.discord.component_notices import send_standard_component_notice
+from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import calculate_next_run_after_send
 
 logger = logging.getLogger(__name__)
@@ -146,6 +147,7 @@ class CampaignContentService:
             contributors=contributors,
             used_local_processing=not contributors,
         )
+        await finalize_embeds(embeds, self._footer, default_service_name=footer_service_name)
         apply_shared_footer_and_pagination(embeds, footer_text)
         channel = self._bot.get_channel(int(channel_id))
         if channel is None:

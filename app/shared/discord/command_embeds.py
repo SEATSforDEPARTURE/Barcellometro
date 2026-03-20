@@ -923,6 +923,7 @@ async def send_legacy_standard_response(
     tone: CommandKind = "info",
     sections: Sequence[tuple[str, Sequence[tuple[str, object]]]] | None = None,
     service_name: str = "status",
+    footer_service: FooterService | None = None,
     ephemeral: bool = True,
 ) -> None:
     normalized_path = [part.strip().lower() for part in path_parts if part and part.strip()]
@@ -947,6 +948,7 @@ async def send_legacy_standard_response(
         ephemeral=ephemeral,
         compact_lines=True,
         line_formatter=_legacy_format_bullet,
+        footer_service=footer_service,
         footer_mode="meta",
         footer_service_name=service_name,
         top_level_emoji=_LEGACY_TOP_LEVEL_EMOJIS.get(top_level.strip().lower(), "🧭"),

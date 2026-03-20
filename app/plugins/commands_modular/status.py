@@ -8,6 +8,10 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 
 
+async def _send_legacy(interaction: discord.Interaction, ctx: CommandContext, **kwargs) -> None:
+    await send_legacy_standard_response(interaction, footer_service=ctx.footer, **kwargs)
+
+
 def register_status(admin_group: app_commands.Group, ctx: CommandContext) -> None:
     @admin_group.command(name="status", description="Show the Barcellometro status.")
     @app_commands.describe(service="Optional service or plugin name.")
@@ -16,8 +20,7 @@ def register_status(admin_group: app_commands.Group, ctx: CommandContext) -> Non
             return
         if service:
             status = ctx.status.component_status(service)
-            await send_legacy_standard_response(
-                interaction,
+            await _send_legacy(interaction, ctx,
                 top_level="admin",
                 path_parts=["status", service],
                 entries=[
@@ -31,8 +34,7 @@ def register_status(admin_group: app_commands.Group, ctx: CommandContext) -> Non
             )
             return
         general = await ctx.status.general_status()
-        await send_legacy_standard_response(
-            interaction,
+        await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["status"],
             entries=[

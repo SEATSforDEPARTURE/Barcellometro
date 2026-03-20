@@ -483,7 +483,7 @@ def test_channel_aura_embed_uses_final_title_and_footer_in_size_budget() -> None
     )
 
     assert embed.title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
-    assert embed.footer and embed.footer.text == "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati."
+    assert getattr(embed.footer, "text", None) in (None, "")
     assert _estimate_embed_size(embed) <= AURA_DETAILS_INTERNAL_BUDGET
 
 
