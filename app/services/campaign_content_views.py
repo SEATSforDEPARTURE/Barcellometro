@@ -4,6 +4,8 @@ from typing import Any
 
 import discord
 
+from app.shared.discord.component_notices import send_standard_component_notice
+
 
 class PageJumpButton(discord.ui.Button["BaseCampaignNavigatorView"]):
     def __init__(self, *, label: str, custom_id: str, target_index: int, row: int, style: discord.ButtonStyle = discord.ButtonStyle.secondary) -> None:
@@ -12,7 +14,7 @@ class PageJumpButton(discord.ui.Button["BaseCampaignNavigatorView"]):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.view is None:
-            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning", ephemeral=True)
             return
         await self.view.navigate(interaction, self._target_index)
 
@@ -94,18 +96,18 @@ class PersistentCampaignLauncherView(discord.ui.View):
             ok = await self._service.open_personal_navigator(interaction, target_index=target_index, service_type=self._service_type)
         except Exception:
             if interaction.response.is_done():
-                await interaction.followup.send("Navigazione non disponibile.", ephemeral=True)
+                await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning", ephemeral=True)
             else:
-                await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+                await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning", ephemeral=True)
             return
 
         if ok:
             return
 
         if interaction.response.is_done():
-            await interaction.followup.send("Navigazione non disponibile.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning", ephemeral=True)
         else:
-            await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning", ephemeral=True)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return True
@@ -123,7 +125,7 @@ async def _page_jump_callback(self: PageJumpButton, interaction: discord.Interac
     if isinstance(view, BaseCampaignNavigatorView):
         await view.navigate(interaction, self._target_index)
         return
-    await interaction.response.send_message("Navigazione non disponibile.", ephemeral=True)
+    await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning", ephemeral=True)
 
 
 PageJumpButton.callback = _page_jump_callback  # type: ignore[method-assign]

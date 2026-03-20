@@ -17,7 +17,7 @@ import discord
 
 from app.core.config_paths import BARCELLO_TRIGGER_JSON
 from app.services.footer import FooterService, attach_footer_meta
-from app.shared.discord.command_embeds import send_standard_response
+from app.shared.discord.command_embeds import build_command_embed, send_standard_response
 from app.shared.discord.report_embeds import build_report_cover_embed
 
 from app.services.barcello_service import BarcelloService
@@ -1750,7 +1750,13 @@ class TriggerEngineService:
             )
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable):
-                await channel.send(text)
+                embed = await build_command_embed(
+                    top_level="triggers",
+                    subcommand_path="insights post",
+                    lines=[("dettaglio", text)],
+                    footer_service=self._footer,
+                )
+                await channel.send(embed=embed)
                 await self._database.set_trigger_state(guild_id, channel_id, "insights", {"last_post_at": now.isoformat()})
                 await self._database.mark_hobby_used(
                     guild_id,
