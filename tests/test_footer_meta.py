@@ -11,6 +11,7 @@ from app.services.footer import (
     FooterService,
     attach_footer_meta,
     attach_footer_meta_to_all,
+    attach_minimal_footer,
     copy_footer_meta,
     get_footer_meta,
 )
@@ -88,6 +89,23 @@ def test_footer_service_apply_sets_footer_text() -> None:
         await service.apply(embed, default_service_name="fallback")
 
         assert embed.footer.text == "Barcellometro 1.0 · In via di sviluppo. · Dati elaborati con gpt-4o-mini"
+
+    asyncio.run(_run())
+
+
+def test_footer_service_apply_ignores_legacy_minimal_text_and_uses_centralized_meta() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_minimal_footer(embed, text="Legacy footer da non usare")
+        attach_footer_meta(embed, service_name="riassunto", contributors=["gpt-4o-mini"], used_local_processing=False)
+        service = _build_footer_service()
+        await service.set_version("1.0")
+        await service.set_global_phrase("Sempre acceso.")
+
+        await service.apply(embed, default_service_name="fallback")
+
+        assert embed.footer.text == "Barcellometro 1.0 · Sempre acceso. · Dati elaborati con gpt-4o-mini"
+        assert "Legacy footer da non usare" not in (embed.footer.text or "")
 
     asyncio.run(_run())
 

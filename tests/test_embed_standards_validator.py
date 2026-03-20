@@ -36,3 +36,10 @@ def test_footer_service_has_no_implicit_default_phrase_fallback() -> None:
 
     assert "FOOTER_DEFAULT_PHRASE" not in source
     assert "global_phrase or None" in source
+
+
+def test_command_embed_helpers_do_not_default_to_minimal_or_attach_local_footer_text() -> None:
+    source = Path("app/shared/discord/command_embeds.py").read_text(encoding="utf-8")
+
+    assert 'footer_mode: FooterMode = "minimal"' not in source
+    assert "attach_minimal_footer(" not in source

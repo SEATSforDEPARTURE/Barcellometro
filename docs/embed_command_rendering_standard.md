@@ -100,17 +100,24 @@ In pratica:
 
 ## Footer centralizzato
 
-Quando è disponibile `FooterService`, gli embed standardizzati non devono fermarsi a versione/minimal footer: devono usare la pipeline footer comune e quindi includere, quando disponibili, tutti i segmenti nell’ordine:
+Non esiste più un output finale `minimal`: tutti gli embed standardizzati devono passare dalla stessa pipeline footer comune e includere, quando disponibili, tutti i segmenti nell’ordine:
 
-1. versione bot, sempre presente;
+1. `Barcellometro <versione>`, sempre presente;
 2. frase del footer service, solo quando esiste davvero una frase configurata e non vuota;
-3. parte tecnica finale `Dati elaborati con ...`, solo quando esistono davvero contributor/provider/model da dichiarare.
+3. parte tecnica finale `Dati elaborati con ...`, solo quando esistono davvero contributor/provider/model/strumenti esterni da dichiarare.
 
-Questa regola vale anche nel percorso `minimal=True`, negli embed admin standardizzati e in ogni helper/pipeline collegata: non esiste alcun fallback testuale automatico per la seconda sezione del footer. Se la frase non è configurata, il footer mostra soltanto la brand/versione e, se applicabile, il segmento tecnico finale.
+`attach_minimal_footer(...)` sopravvive solo come shim di compatibilità interna: non decide più il testo finale del footer e non può bypassare `FooterService.apply(...)`. Se la frase non è configurata, il footer mostra soltanto la brand/versione e, se applicabile, il segmento tecnico finale.
 
-Vale esplicitamente per **tutti** i percorsi del repo: admin legacy, status/show/list/set/reset/config, embed campagne, report renderer, helper `minimal`, finalize helpers, delivery helpers e qualunque invio che passi da `send_legacy_standard_response(...)`, `send_standard_response(...)`, `finalize_embed(...)`, `finalize_embeds(...)` o metadata footer condivisi. Se la frase globale o di servizio esiste, non sono ammesse eccezioni silenziose che mostrano solo `Barcellometro <version>`.
+Vale esplicitamente per **tutti** i percorsi del repo: admin legacy, status/show/list/set/reset/config, embed campagne, renderer aura/report, finalize helpers, delivery helpers e qualunque invio che passi da `send_legacy_standard_response(...)`, `send_standard_response(...)`, `finalize_embed(...)`, `finalize_embeds(...)` o metadata footer condivisi. Se la frase globale o di servizio esiste, non sono ammesse eccezioni silenziose che mostrano solo `Barcellometro <version>`.
 
 Di conseguenza, i renderer locali non devono usare `embed.set_footer(...)` con stringhe custom per bypassare il contratto centrale: devono invece allegare footer metadata e lasciare che la pipeline comune renderizzi sempre `versione → frase configurata → eventuale parte tecnica`.
+
+Semantica dei contributor/provider:
+
+- i comandi puramente informativi o configurativi (`status`, `show`, `list`, `set`, `reset`, `config`, admin locale, ecc.) **non** mostrano mai la terza parte se non usano davvero strumenti esterni per elaborare dati;
+- i servizi AI o pipeline ibride **devono** dichiarare i contributor reali che hanno elaborato i dati, anche quando girano in locale;
+- per esempio audio notes deve poter mostrare contributor come `faster-whisper`, `argos` e `llama3.2` nello stesso footer quando STT, traduzione e summary hanno tutti partecipato all’elaborazione;
+- i contributor vengono deduplicati e mostrati con nomi display puliti, nell’ordine semantico raccolto dal servizio.
 
 Esempi:
 
@@ -119,7 +126,7 @@ Esempi:
 - nessuna frase, contributor presente: `Barcellometro dev6 · Dati elaborati con gpt-4o`
 - frase presente, contributor presente: `Barcellometro dev6 · Sempre acceso. · Dati elaborati con gpt-4o`
 
-Se la frase del footer non esiste, la pipeline centralizzata non aggiunge placeholder, non aggiunge sezioni vuote e non produce separatori doppi.
+Se la frase del footer non esiste, la pipeline centralizzata non aggiunge placeholder, non aggiunge sezioni vuote e non produce separatori doppi. Il flag `used_local_processing` resta metadata interno per profiling/persistenza e non genera testo visibile da solo.
 
 ## Emoji custom del server nel footer
 

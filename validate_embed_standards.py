@@ -599,6 +599,20 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
             "Standard command embeds must derive the subtitle icon from KIND_EMOJIS[kind].",
         )
 
+    forbidden_command_snippets = (
+        'footer_mode: FooterMode = "minimal"',
+        "attach_minimal_footer(",
+    )
+    for snippet in forbidden_command_snippets:
+        if snippet in command_source:
+            report.add(
+                "canonical_footer_pipeline_defaults",
+                command_embeds_path.relative_to(REPO_ROOT),
+                1,
+                "Standard command embed helpers must default to centralized footer metadata and must not render minimal footers locally.",
+            )
+            break
+
     required_section_snippets = (
         "def _resolve_section_emoji(",
         "subtitle_emoji: str | None = None",
@@ -625,10 +639,11 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
         "parts.append(phrase)",
         "if processing:",
         "parts.append(processing)",
-        "clean_phrase = _clean_footer_text(phrase) if phrase else """,
+        'clean_phrase = _clean_footer_text(phrase) if phrase else ""',
         "return footer_text, clean_phrase or None",
         "CUSTOM_EMOJI_RE = re.compile(",
         "_extract_footer_icon_and_clean_text(",
+        "if meta.footer_icon_url is None and minimal_icon_url is not None:",
     )
     for snippet in required_footer_snippets:
         if snippet not in footer_source:

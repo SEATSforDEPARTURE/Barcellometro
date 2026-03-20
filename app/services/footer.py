@@ -264,7 +264,14 @@ def attach_minimal_footer(embed: discord.Embed, *, text: str, icon_url: str | No
         raise ValueError("attach_minimal_footer requires a discord.Embed instance, got None")
     footer_text, clean_icon_url = _extract_footer_icon_and_clean_text(_clean(text) or "Barcellometro", icon_url=icon_url)
     footer_text = footer_text or "Barcellometro"
-    embed.set_footer(text=footer_text, icon_url=clean_icon_url)
+    attach_footer_meta(
+        embed,
+        service_name="unknown",
+        contributors=[],
+        used_local_processing=True,
+        footer_icon_url=clean_icon_url,
+        minimal=True,
+    )
     _MINIMAL_FOOTERS[id(embed)] = (embed, footer_text, clean_icon_url)
     return embed
 
@@ -591,14 +598,7 @@ class FooterService:
         phrase = await self._resolve_footer_phrase(service_name)
 
         brand = f"Barcellometro {version}" if version else "Barcellometro"
-        contributors_deduped: list[str] = []
-        seen: set[str] = set()
-        for item in contributors:
-            clean = _clean(item)
-            if not clean or clean in seen:
-                continue
-            seen.add(clean)
-            contributors_deduped.append(clean)
+        contributors_deduped = self._dedupe_contributors(contributors)
         processing: str | None = None
         if len(contributors_deduped) == 1:
             processing = f"Dati elaborati con {contributors_deduped[0]}"
@@ -617,14 +617,14 @@ class FooterService:
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
         minimal_footer = pop_minimal_footer(embed)
-        if minimal_footer is not None:
-            text, icon_url = minimal_footer
-            text, icon_url = _extract_footer_icon_and_clean_text(text, icon_url=icon_url)
-            embed.set_footer(text=text, icon_url=icon_url)
-            return embed
         meta = pop_footer_meta(embed)
         if meta is None:
             meta = FooterMeta(service_name=_clean(default_service_name) or "unknown", contributors=[], used_local_processing=False)
+        minimal_icon_url: str | None = None
+        if minimal_footer is not None:
+            _, minimal_icon_url = minimal_footer
+        if meta.footer_icon_url is None and minimal_icon_url is not None:
+            meta.footer_icon_url = minimal_icon_url
         persistable = _is_persistable_service_name(meta.service_name)
         if persistable:
             await self.register_known_service(meta.service_name, source="runtime")

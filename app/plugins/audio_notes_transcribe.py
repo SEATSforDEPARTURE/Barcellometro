@@ -213,10 +213,6 @@ def _build_audio_footer_contributors(
     has_translation_text: bool,
     summary_model: str | None = None,
 ) -> tuple[list[str], bool]:
-    summary_name = (summary_model or "").strip()
-    if summary_name:
-        return [summary_name], False
-
     contributors: list[str] = []
     used_local_processing = False
 
@@ -234,6 +230,10 @@ def _build_audio_footer_contributors(
             contributors.append(translation_name)
         if normalized_translate_backend == "local":
             used_local_processing = True
+
+    summary_name = (summary_model or "").strip()
+    if summary_name:
+        contributors.append(summary_name)
 
     deduped: list[str] = []
     seen: set[str] = set()

@@ -440,7 +440,7 @@ def test_build_command_embed_admin_embed_includes_global_phrase() -> None:
     assert embed.footer.text == 'Barcellometro dev7.1 · In via di sviluppo'
 
 
-def test_build_command_embed_minimal_mode_uses_global_phrase_when_footer_service_exists() -> None:
+def test_build_command_embed_default_footer_mode_uses_centralized_meta_pipeline() -> None:
     async def _run() -> discord.Embed:
         footer_service = _build_footer_service()
         await footer_service.set_version('dev7.1')
@@ -449,7 +449,6 @@ def test_build_command_embed_minimal_mode_uses_global_phrase_when_footer_service
             top_level='admin',
             subcommand_path='status',
             footer_service=footer_service,
-            footer_mode='minimal',
             footer_service_name='status',
         )
         await finalize_embed(embed, footer_service, default_service_name='status')
