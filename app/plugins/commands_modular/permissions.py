@@ -9,6 +9,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 
 
 def canonical_permission_key(command_name: str) -> str:
+    # Legacy `bm` keys are normalized to the canonical `admin` namespace.
     normalized = str(command_name or "").strip().lower()
     if normalized == "bm":
         return "admin"
@@ -18,6 +19,7 @@ def canonical_permission_key(command_name: str) -> str:
 
 
 def legacy_permission_candidates(command_name: str) -> list[str]:
+    # Emit only backward-compatibility aliases; callers should persist/use `admin.*`.
     canonical = canonical_permission_key(command_name)
     if canonical == "admin":
         return ["bm"]

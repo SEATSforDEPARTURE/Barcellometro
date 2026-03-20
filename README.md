@@ -65,7 +65,7 @@ python -m app.main
 
 ## Note importanti
 
-- Il bot **non registra nulla di default**: abilita ogni canale con `/bm check on` prima di inviare messaggi da tracciare.
+- Il bot **non registra nulla di default**: abilita ogni canale con `/admin events on` prima di inviare messaggi da tracciare.
 - Assicurati di attivare **Message Content Intent** e **Server Members Intent** nelle impostazioni del bot su Discord Developer Portal, altrimenti gli eventi messaggio e membro non arrivano.
 - Per la traduzione locale serve installare i modelli Argos Translate (lingua sorgente → italiano).
 
@@ -78,17 +78,17 @@ python -m app.main
 - `messages_daily_cap`: limite invii/giorno per canale per messaggi community (default 6).
 
 ### Abilitazione canali
-- `/bm check on` → abilita raccolta eventi nel canale.
-- `/bm check off` → disabilita raccolta eventi nel canale.
+- `/admin events on` → abilita raccolta eventi nel canale.
+- `/admin events off` → disabilita raccolta eventi nel canale.
 
 ### Retention
-- `/bm retention get` → mostra i giorni correnti.
-- `/bm retention set days:<int>` → aggiorna la retention.
+- `/admin retention status` → mostra i giorni correnti.
+- `/admin retention config_set days:<int>` → aggiorna la retention.
 
 ### Backfill
-- `/bm backfill on` → abilita il backfill e lo esegue subito.
-- `/bm backfill off` → disabilita il backfill.
-- `/bm backfill <giorni>` → aggiorna i giorni di backfill.
+- `/admin backfill on` → abilita il backfill e lo esegue subito.
+- `/admin backfill off` → disabilita il backfill.
+- `/admin backfill config_set days:<giorni>` → aggiorna i giorni di backfill.
 
 Il backfill verifica il gap tra l'ultimo evento registrato e l'ora attuale e recupera i messaggi mancanti
 nei canali abilitati fino al limite di giorni configurato (default 30). Se il primo evento salvato è più
@@ -97,37 +97,37 @@ parte automaticamente ad ogni riavvio del bot. I comandi manuali forzano una sca
 finestra configurata in modo idempotente.
 
 ### Status
-- `/status bm` → stato generale bot/DB.
-- `/status bm service:<nome>` → stato servizio/plugin.
+- `/admin status` → stato generale bot/DB.
+- `/admin status service:<nome>` → stato servizio/plugin.
 
 ### AI centrale
-- `/bm ai on` → abilita il servizio AI.
-- `/bm ai off` → disabilita il servizio AI.
-- `/bm ai-model task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `server_summary`, `audio_summary`, `qa`, `analysis`, `transcription`, `translation`).
-- `/bm barcello calibrate` → calibra i pesi del motore barcello (mod).
+- `/admin ai on` → abilita il servizio AI.
+- `/admin ai off` → disabilita il servizio AI.
+- `/admin ai model_set task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `server_summary`, `audio_summary`, `qa`, `analysis`, `transcription`, `translation`).
+- `/admin barcello calibrate` → calibra i pesi del motore barcello (mod).
 
 ### STT
-- `/bm stt backend local|ai`
-- `/bm stt model small|medium|large-v3`
-- `/bm stt compute int8|int8_float16|float16`
-- `/bm stt beam 1|3|5`
-- `/bm stt language it|auto`
+- `/admin stt config_set backend:local|ai`
+- `/admin stt config_set model:small|medium|large-v3`
+- `/admin stt config_set compute:int8|int8_float16|float16`
+- `/admin stt config_set beam:1|3|5`
+- `/admin stt config_set language:it|auto`
 
 ### Translate
-- `/bm translate backend local|ai`
-- `/bm translate target it`
+- `/admin translate config_set backend:local|ai`
+- `/admin translate config_set target:it`
 
 ### Audio notes
-- `/bm audio_notes on`
-- `/bm audio_notes off`
-- `/bm audio_notes status`
-- `/bm audio_notes limits max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
+- `/admin audionotes on`
+- `/admin audionotes off`
+- `/admin audionotes status`
+- `/admin audionotes config_set max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
 
 Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa viene usato il binario fornito da `imageio-ffmpeg`).
 
 ### Voice ingest
-- `/bm voice_ingest join <voice_channel>`
-- `/bm voice_ingest leave`
+- `/admin voice_ingest join <voice_channel>`
+- `/admin voice_ingest leave`
 - `/privacy on [voice_channel]`
 - `/privacy off [voice_channel]`
 - `/privacy status [voice_channel]`
@@ -189,12 +189,12 @@ Il comando legge il JSON da `summary.config` (settings). Esempio di default:
 ```
 
 ### Policy ruoli/utenti
-- `/bm role set-role role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
-- `/bm role set-user user:<utente> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
-- `/bm role clear-role role:<ruolo> command:<cmd>`
-- `/bm role clear-user user:<utente> command:<cmd>`
-- `/bm role show-role role:<ruolo>`
-- `/bm role show-user user:<utente>`
+- `/admin commandguard role_add role:<ruolo> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
+- `/admin commandguard user_add user:<utente> command:<cmd> usage_limit:<n> cooldown_seconds:<sec>`
+- `/admin commandguard role_remove role:<ruolo> command:<cmd>`
+- `/admin commandguard user_remove user:<utente> command:<cmd>`
+- `/admin commandguard role_show role:<ruolo>`
+- `/admin commandguard user_show user:<utente>`
 
 Se non esiste alcuna policy, i comandi sono accessibili solo agli admin. Le policy utente hanno priorità
 su quelle di ruolo. I limiti e cooldown vengono conteggiati e sono disponibili ai plugin che li richiedono.

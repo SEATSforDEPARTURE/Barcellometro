@@ -145,6 +145,7 @@ def register_triggers(
     ]
 
     def _command_permission_candidates(interaction: discord.Interaction) -> list[str]:
+        # Keep `bm.*` candidates only as legacy permission aliases while `admin.*` stays canonical.
         command = getattr(interaction, "command", None)
         qualified_name = str(getattr(command, "qualified_name", "") or "").strip().lower()
         if not qualified_name:

@@ -962,6 +962,7 @@ def test_register_triggers_permission_candidates_prefer_admin_and_keep_bm_aliase
     interaction = SimpleNamespace(
         guild_id=1,
         channel_id=2,
+        # Simulate the legacy root alias to verify backward-compatible permission fallback.
         command=SimpleNamespace(qualified_name="bm prompt schedule_show"),
         data={"name": "schedule_show"},
         response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),

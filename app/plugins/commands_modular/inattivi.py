@@ -144,7 +144,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level="bm",
+            top_level="admin",
             subcommand_path=subcommand_path,
             lines=lines,
             sections=sections,
@@ -160,7 +160,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
             filename=f"{txt_prefix}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.txt",
         )
         embeds = await build_command_embeds(
-            top_level="bm",
+            top_level="admin",
             subcommand_path=subcommand_path,
             lines=[("entries", len(lines))],
             sections=[CommandEmbedSection(title=title, lines=lines or ["No results."])],
