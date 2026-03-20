@@ -223,3 +223,38 @@ def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module
         scheduler.send_campaign_embed.assert_awaited_once()
 
     asyncio.run(_run())
+
+
+def test_custom_run_checks_permission_candidates_in_order(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.message_campaign = {"id": 12, "type": "CUSTOM", "text": "hello", "mood_mode": "AUTO"}
+        scheduler = _FakeScheduler()
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
+        group = discord.app_commands.Group(name="campagne", description="x")
+
+        messaggi_module.check_permission.reset_mock()
+        messaggi_module.check_permission.side_effect = [False, True]
+
+        messaggi_module.register_messaggi(group, ctx)
+        custom_group = _get_subgroup(group, "custom")
+        callback = _get_command_callback(custom_group, "run")
+        interaction = _FakeInteraction()
+        await callback(interaction, id=12)
+
+        assert [call.args[1] for call in messaggi_module.check_permission.await_args_list] == [
+            "campagne.custom.run",
+            "campagne.custom.entry_run",
+        ]
+        messaggi_module.send_standard_response.assert_awaited_once_with(
+            interaction,
+            top_level="admin",
+            subcommand_path="campagne custom run",
+            lines=[("schedule_id", 12), ("result", "running")],
+            sections=None,
+            kind="success",
+            footer_service=ctx.footer,
+        )
+        scheduler.preview_campaign_text.assert_awaited_once_with(db.message_campaign, channel_id_override="10")
+
+    asyncio.run(_run())
