@@ -583,12 +583,14 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
     footer_source = footer_path.read_text(encoding="utf-8")
     required_footer_snippets = (
         "async def _resolve_footer_phrase(",
-        "return service_phrases.get(service_name) or global_phrase or FOOTER_DEFAULT_PHRASE",
+        "return service_phrases.get(service_name) or global_phrase or None",
         "parts = [brand]",
         "if phrase:",
         "parts.append(phrase)",
         "if processing:",
         "parts.append(processing)",
+        "clean_phrase = _clean_footer_text(phrase) if phrase else """,
+        "return footer_text, clean_phrase or None",
         "CUSTOM_EMOJI_RE = re.compile(",
         "_extract_footer_icon_and_clean_text(",
     )
@@ -601,6 +603,14 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
                 f"Footer renderer must keep ordered parts version → phrase → processing; missing snippet: {snippet!r}.",
             )
             break
+
+    if "FOOTER_DEFAULT_PHRASE" in footer_source or "or FOOTER_DEFAULT_PHRASE" in footer_source:
+        report.add(
+            "footer_phrase_fallback",
+            footer_path.relative_to(REPO_ROOT),
+            1,
+            "FooterService must not use a hardcoded automatic fallback phrase for the central footer.",
+        )
 
 
     forbidden_repo_strings = {

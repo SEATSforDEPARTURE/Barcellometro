@@ -29,3 +29,10 @@ def test_project_has_no_legacy_footer_phrases_in_scanned_dirs() -> None:
             source = path.read_text(encoding="utf-8")
             for forbidden in FORBIDDEN_FOOTER_PHRASES:
                 assert forbidden not in source, f"Forbidden footer phrase found in {path}: {forbidden}"
+
+
+def test_footer_service_has_no_implicit_default_phrase_fallback() -> None:
+    source = Path("app/services/footer.py").read_text(encoding="utf-8")
+
+    assert "FOOTER_DEFAULT_PHRASE" not in source
+    assert "global_phrase or None" in source

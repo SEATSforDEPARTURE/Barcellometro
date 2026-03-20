@@ -74,7 +74,7 @@ def test_build_command_embed_uses_visual_top_level_for_moderazione() -> None:
     assert get_footer_meta(embed).service_name == "status"
 
 
-def test_build_command_embed_finalize_adds_brand_and_phrase_without_contributors() -> None:
+def test_build_command_embed_finalize_keeps_only_brand_without_configured_phrase() -> None:
     class _FooterService:
         async def get_version(self) -> str | None:
             return "dev7.1"
@@ -83,7 +83,7 @@ def test_build_command_embed_finalize_adds_brand_and_phrase_without_contributors
             return True
 
         async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
-            embed.set_footer(text="Barcellometro dev7.1 · In via di sviluppo.")
+            embed.set_footer(text="Barcellometro dev7.1")
             return embed
 
     async def _run() -> discord.Embed:
@@ -98,7 +98,7 @@ def test_build_command_embed_finalize_adds_brand_and_phrase_without_contributors
 
     embed = asyncio.run(_run())
 
-    assert embed.footer.text == "Barcellometro dev7.1 · In via di sviluppo."
+    assert embed.footer.text == "Barcellometro dev7.1"
 
 
 def test_build_command_embed_omits_top_level_duplication_for_parameterized_command() -> None:
@@ -135,7 +135,7 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
     assert "<@123>" not in (embed.description or "")
 
 
-def test_build_command_embed_admin_standard_footer_keeps_brand_and_phrase() -> None:
+def test_build_command_embed_admin_standard_footer_omits_invented_phrase() -> None:
     class _FooterService:
         async def get_version(self) -> str | None:
             return "dev7.1"
@@ -144,7 +144,7 @@ def test_build_command_embed_admin_standard_footer_keeps_brand_and_phrase() -> N
             return True
 
         async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
-            embed.set_footer(text="Barcellometro dev7.1 · In via di sviluppo.")
+            embed.set_footer(text="Barcellometro dev7.1")
             return embed
 
     async def _run() -> discord.Embed:
@@ -161,7 +161,7 @@ def test_build_command_embed_admin_standard_footer_keeps_brand_and_phrase() -> N
 
     embed = asyncio.run(_run())
 
-    assert embed.footer.text == "Barcellometro dev7.1 · In via di sviluppo."
+    assert embed.footer.text == "Barcellometro dev7.1"
 
 
 def test_build_command_embed_formats_period_subtitle_for_riassunto_ultimi() -> None:
