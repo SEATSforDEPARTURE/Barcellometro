@@ -19,6 +19,11 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert 'app_commands.Group(name="greetings"' in source
     assert 'register_greetings(greetings_group, ctx)' in source
     assert 'app_commands.Group(name="users"' in modular
+    assert 'app_commands.Group(name="backfill"' in greetings
+    assert '@backfill_group.command(name="on"' in greetings
+    assert '@backfill_group.command(name="off"' in greetings
+    assert '@backfill_group.command(name="status"' in greetings
+    assert '@backfill_group.command(name="run"' in greetings
     assert '@greetings_group.command(name="on"' in greetings
     assert '@greetings_group.command(name="off"' in greetings
     assert '@greetings_group.command(name="status"' in greetings
@@ -87,6 +92,7 @@ def test_greetings_tree_has_no_preview_command() -> None:
 
     names = {command.name for command in group.commands}
     assert names == {
+        "backfill",
         "on",
         "off",
         "status",

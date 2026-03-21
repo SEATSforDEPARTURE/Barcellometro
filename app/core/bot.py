@@ -34,6 +34,7 @@ from app.services.translate.argos import ArgosTranslateService
 from app.services.aura import AuraAggregationJob, AuraEligibilityService, AuraRollingStatsService, ArchetypeAnalyzerService
 from app.services.footer import FooterService
 from app.services.member_flow_notifications import MemberFlowNotificationsService
+from app.services.greetings_backfill_service import GreetingsBackfillService
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     aura_aggregation = None
     archetype_analyzer = None
     member_flow_notifications = None
+    greetings_backfill = None
 
     instance_mode = normalize_instance_mode(config.instance_mode)
     logger.info("Instance mode raw=%s normalized=%s", config.instance_mode, instance_mode)
@@ -149,6 +151,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         inactivity_service = InactivityService(database_service)
         activity_insights = ActivityInsightsService(database_service)
         member_flow_notifications = MemberFlowNotificationsService(database_service, bot, barcello_service=barcello_service)
+        greetings_backfill = GreetingsBackfillService(database_service)
         inactive_members_moderation = InactiveMembersModerationService(database_service, bot, member_flow_notifications=member_flow_notifications)
         daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights, inactive_members_moderation=inactive_members_moderation)
     footer_service = FooterService(database_service)
@@ -176,6 +179,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("daily_activity_report", daily_activity_report)
         registry.register("inactive_members_moderation", inactive_members_moderation)
         registry.register("member_flow_notifications", member_flow_notifications)
+        registry.register("greetings_backfill", greetings_backfill)
         registry.register("aura_eligibility", aura_eligibility)
         registry.register("aura_rolling", aura_rolling)
         registry.register("aura_aggregation", aura_aggregation)
@@ -244,6 +248,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         status_service.register_component("translate.ai", translate_ai_service)
         status_service.register_component("aura_aggregation", aura_aggregation)
         status_service.register_component("archetype_analyzer", archetype_analyzer)
+        status_service.register_component("greetings_backfill", greetings_backfill)
         status_service.register_component("plugins", plugin_loader)
 
     if instance_mode == "main" and message_scheduler is not None:

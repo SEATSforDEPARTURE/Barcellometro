@@ -31,6 +31,7 @@ def main() -> None:
     daily_resoconto = None
     daily_activity_report = None
     trigger_engine = None
+    greetings_backfill = None
     if instance_mode == "main":
         retention = registry.get("retention")
         backfill = registry.get("backfill")
@@ -38,6 +39,7 @@ def main() -> None:
         daily_resoconto = registry.get("daily_resoconto") if registry.has("daily_resoconto") else None
         daily_activity_report = registry.get("daily_activity_report") if registry.has("daily_activity_report") else None
         trigger_engine = registry.get("trigger_engine") if registry.has("trigger_engine") else None
+        greetings_backfill = registry.get("greetings_backfill") if registry.has("greetings_backfill") else None
 
     async def runner() -> None:
         await database.connect()
@@ -53,6 +55,8 @@ def main() -> None:
             await retention.load_retention()
             await backfill.load_settings()
             await ai_service.load_settings()
+            if greetings_backfill is not None:
+                await greetings_backfill.load_settings()
             retention.start()
             backfill.start()
             if daily_resoconto:
