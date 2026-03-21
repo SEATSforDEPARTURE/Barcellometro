@@ -51,7 +51,7 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 
 - Le chiavi template GREETINGS sono quelle canoniche del dominio: `join`, `leave`, `kick`, `ban`, `tempban`, `grace`, `inactive_kick`, `inactive_tempban`, `inactive_grace`.
 - `kick` resta la chiave tecnica di compatibilità, ma il wording user-facing deve essere `allontanamento`.
-- Il file governa solo copy e variazioni mood/time/count/barcello: non ridefinisce il layout live, che resta fisso a 2 campi in `🚪 INGRESSI & USCITE` (`Evento` + campo narrativo largo).
+- Il file governa solo copy e variazioni mood/time/count/barcello: non ridefinisce il layout live di `🚪 INGRESSI & USCITE`, che ora usa author fisso `🚪 INGRESSI & USCITE`, titolo embed = label evento, narrativa in description, thumbnail = avatar utente e nessun campo separato `Evento`.
 - Il vecchio campo separato `Stato barcello "<server>"` non esiste più: eventuali riferimenti al barcello vanno integrati direttamente nel testo narrativo tramite placeholder/template.
 - Per il testo narrativo è consigliato usare `{mention}` invece di `{display_name}` quando il soggetto deve comparire come tag utente.
 - Le occorrenze lette nei placeholder (`{occurrence_number}`, `{occurrence_ordinal}`, `{event_label}`) arrivano dalla timeline canonica `member_flow_events`, non dal ledger raw `moderation_actions`.

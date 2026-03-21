@@ -399,8 +399,12 @@ def test_member_flow_renderer_source_mentions_final_author_title_layout() -> Non
 
     assert "Layout canonico live: author fisso per il canale GREETINGS" in source
     assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' in source
+    assert "embed.set_thumbnail(url=avatar_url)" in source
+    assert 'title=copy.event_label' in source
+    assert 'description=copy.narrative[:4096]' in source
     assert 'embed.add_field(name="Evento"' not in source
     assert 'Stato barcello "' not in source
+    assert 'Oggi alle' not in source
 
 
 def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_module, monkeypatch) -> None:

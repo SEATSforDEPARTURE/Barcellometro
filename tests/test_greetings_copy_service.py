@@ -348,7 +348,9 @@ def test_example_config_documents_json_as_single_editorial_source() -> None:
     purpose_lines = payload["docs"]["purpose"]
     assert any("Fonte ufficiale" in line for line in purpose_lines)
     assert any("controlla solo il copy narrativo" in line for line in purpose_lines)
+    assert any("label evento nel titolo dell'embed" in line for line in purpose_lines)
     assert payload["docs"]["placeholders"]["barcello_state"]["description"].endswith("va integrato nella frase.")
+    assert payload["docs"]["placeholders"]["event_label"]["description"] == "Label completa già formattata per il titolo dell'embed."
 
 
 def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> None:

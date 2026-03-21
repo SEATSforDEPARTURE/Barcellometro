@@ -4,7 +4,7 @@
     "purpose": [
       "Fonte ufficiale dei testi narrativi del servizio GREETINGS / INGRESSI & USCITE.",
       "Il layout live dell'embed resta fisso: questo file controlla solo il copy narrativo e la sua selezione.",
-      "Le emoji narrative nel testo sono volutamente diverse dall'emoji tecnica del campo Evento, per evitare duplicazioni stilistiche."
+      "Le emoji narrative nel testo sono volutamente diverse dall'emoji tecnica della label evento nel titolo dell'embed, per evitare duplicazioni stilistiche."
     ],
     "selection_order": [
       "moods[mood].time[time_bucket].barcello[state].count[count_tier].templates[event_type_key]",
@@ -105,7 +105,7 @@
         "description": "Chiave tecnica dell'evento."
       },
       "event_label": {
-        "description": "Label completa già formattata per il campo Evento.",
+        "description": "Label completa già formattata per il titolo dell'embed.",
         "example": "**✨ PRIMO INGRESSO**"
       },
       "event_label_text": {
