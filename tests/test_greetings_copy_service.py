@@ -192,3 +192,30 @@ def test_render_moderation_preview_renders_context_placeholders() -> None:
 
     assert rendered == "SECONDO BAN TEMPORANEO teso night 🔴 ALLERTA ROSSA 41/100"
     assert context["moderator"] == "Moderator"
+
+
+def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canonical_event() -> None:
+    service = _service(occurrence_number=9)
+
+    result = asyncio.run(
+        service.render_canonical_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            canonical_event={
+                "event_type_key": "inactive_tempban",
+                "reason": "Assenza prolungata",
+                "duration_seconds": 7 * 86400,
+                "visible_in_greetings": True,
+                "metadata": {
+                    "inactivity_text": "30 giorni",
+                    "occurrence_number": 3,
+                },
+            },
+            barcello_status={"color": "rosso", "score": 41},
+            now=datetime(2026, 3, 21, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert result.occurrence_number == 3
+    assert result.event_label == "**💤 TERZO BAN TEMPORANEO PER INATTIVITÀ**"
+    assert "30 giorni" in result.narrative

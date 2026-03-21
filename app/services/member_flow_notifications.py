@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*([dhm])\s*$", re.IGNORECASE)
 _CARD_SIZE = (900, 300)
 _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS = 300
+_BLANK_FIELD_NAME = "​"
 _VISIBLE_DEPARTURE_PRECEDENCE = {
     "leave": 10,
     "inactive_kick": 20,
@@ -263,6 +264,7 @@ class MemberFlowNotificationsService:
         duration_seconds: int | None = None,
         expires_at: datetime | None = None,
         metadata: dict[str, Any] | None = None,
+        canonical_event: dict[str, Any] | None = None,
     ) -> None:
         cfg = await self._database.get_inactivity_config(str(guild.id))
         if cfg is None:
@@ -275,37 +277,35 @@ class MemberFlowNotificationsService:
             return
 
         created_at = datetime.now(timezone.utc)
-        copy = await self._copy_service.render_event_copy(
-            guild=guild,
-            user=user,
-            event_type_key=action_type,
-            moderator=moderator,
+        canonical_payload = canonical_event or self._build_fallback_canonical_event(
+            action_type=action_type,
             reason=reason,
             duration_seconds=duration_seconds,
             expires_at=expires_at,
-            metadata={
-                **(metadata or {}),
-                "notify_channel_id": str(notify_channel_id),
-                "atrio_channel_id": str(cfg.get("atrio_channel_id") or ""),
-                "rejoin_link": str(cfg.get("invite_url") or ""),
-            },
+            metadata=metadata,
+        )
+        if not bool(canonical_payload.get("visible_in_greetings", True)):
+            return
+        canonical_metadata = canonical_payload.get("metadata")
+        canonical_metadata_dict = dict(canonical_metadata) if isinstance(canonical_metadata, dict) else {}
+        canonical_payload["metadata"] = {
+            **canonical_metadata_dict,
+            "notify_channel_id": str(notify_channel_id),
+            "atrio_channel_id": str(cfg.get("atrio_channel_id") or ""),
+            "rejoin_link": str(cfg.get("invite_url") or ""),
+        }
+        copy = await self._copy_service.render_canonical_event_copy(
+            guild=guild,
+            user=user,
+            canonical_event=canonical_payload,
+            moderator=moderator,
             channel_id=str(notify_channel_id),
+            now=created_at,
         )
         embed = discord.Embed(title="🚪 INGRESSI & USCITE", colour=discord.Colour.blurple(), timestamp=created_at)
-        embed.add_field(name="Utente", value=getattr(user, "mention", f"<@{user.id}>"), inline=True)
         embed.add_field(name="Evento", value=copy.event_label, inline=True)
-        embed.add_field(name=copy.status_field_name, value=copy.status_field_value[:1024], inline=False)
-        embed.add_field(name="Narrazione", value=copy.narrative[:1024], inline=False)
-        if reason:
-            embed.add_field(name="Motivo", value=reason[:1024], inline=False)
-        if duration_seconds is not None:
-            embed.add_field(name="Durata", value=format_duration_human(duration_seconds) or "n/d", inline=True)
-        if expires_at is not None:
-            embed.add_field(name="Scadenza", value=expires_at.strftime("%d/%m/%Y %H:%M UTC"), inline=True)
-        if moderator is not None:
-            embed.add_field(name="Moderatore", value=getattr(moderator, "mention", moderator.display_name), inline=True)
-        if metadata and metadata.get("inactivity_text"):
-            embed.add_field(name="Dettaglio", value=str(metadata["inactivity_text"])[:1024], inline=False)
+        embed.add_field(name=copy.status_field_name, value=copy.status_field_value[:1024], inline=True)
+        embed.add_field(name=_BLANK_FIELD_NAME, value=copy.narrative[:1024], inline=False)
         attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)
 
         files: list[discord.File] = []
@@ -318,3 +318,21 @@ class MemberFlowNotificationsService:
             await channel.send(embed=embed, files=files or None)
         except Exception:
             logger.warning("member flow notification send failed guild=%s action=%s", guild.id, action_type, exc_info=True)
+
+    def _build_fallback_canonical_event(
+        self,
+        *,
+        action_type: str,
+        reason: str | None,
+        duration_seconds: int | None,
+        expires_at: datetime | None,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return {
+            "event_type_key": action_type,
+            "reason": reason,
+            "duration_seconds": duration_seconds,
+            "expires_at": expires_at.isoformat() if expires_at is not None else None,
+            "visible_in_greetings": True,
+            "metadata": dict(metadata or {}),
+        }

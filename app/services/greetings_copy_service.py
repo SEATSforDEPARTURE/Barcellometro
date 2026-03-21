@@ -367,6 +367,36 @@ class GreetingsCopyService:
             raw_template=template,
         )
 
+    async def render_canonical_event_copy(
+        self,
+        *,
+        guild: Any,
+        user: Any,
+        canonical_event: dict[str, Any],
+        moderator: Any | None = None,
+        channel_id: str | None = None,
+        barcello_status: dict[str, Any] | None = None,
+        now: datetime | None = None,
+    ) -> GreetingsRenderResult:
+        metadata = canonical_event.get("metadata")
+        metadata_dict = metadata if isinstance(metadata, dict) else {}
+        expires_at_value = self._parse_event_datetime(canonical_event.get("expires_at"))
+        return await self.render_event_copy(
+            guild=guild,
+            user=user,
+            event_type_key=str(canonical_event.get("event_type_key") or ""),
+            moderator=moderator,
+            reason=self._as_optional_str(canonical_event.get("reason")),
+            duration_seconds=self._coerce_int(canonical_event.get("duration_seconds")),
+            expires_at=expires_at_value,
+            metadata=metadata_dict,
+            channel_id=channel_id,
+            occurrence_number=self._resolve_occurrence_from_canonical_event(canonical_event),
+            mood=None,
+            barcello_status=barcello_status,
+            now=now,
+        )
+
     def build_barcello_status_field(self, *, guild_name: str, barcello_color: str | None, barcello_score: int | None) -> tuple[str, str]:
         name = f'Stato barcello "{guild_name}"'
         value = "\n".join(
@@ -585,6 +615,35 @@ class GreetingsCopyService:
             if value is not None and str(value).strip():
                 return str(value)
         return None
+
+    def _resolve_occurrence_from_canonical_event(self, canonical_event: dict[str, Any]) -> int | None:
+        occurrence = self._coerce_int(canonical_event.get("occurrence_number"))
+        if occurrence is not None:
+            return max(1, occurrence)
+        metadata = canonical_event.get("metadata")
+        if isinstance(metadata, dict):
+            metadata_occurrence = self._coerce_int(metadata.get("occurrence_number"))
+            if metadata_occurrence is not None:
+                return max(1, metadata_occurrence)
+        return None
+
+    def _parse_event_datetime(self, value: Any) -> datetime | None:
+        raw = self._as_optional_str(value)
+        if raw is None:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    def _as_optional_str(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     def _event_label_text(self, event_type_key: str) -> str:
         self._validate_event_type(event_type_key)

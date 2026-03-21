@@ -429,7 +429,13 @@ def setup(registry: ServiceRegistry) -> None:
                 metadata={"source": "discord_adapter"},
             )
             if result.get("canonical_written") and result.get("canonical_visible"):
-                await member_flow_notifications.send_notification(guild=member.guild, user=member, action_type="join", reason="Ingresso nel server")
+                await member_flow_notifications.send_notification(
+                    guild=member.guild,
+                    user=member,
+                    action_type="join",
+                    reason="Ingresso nel server",
+                    canonical_event=result.get("canonical_event"),
+                )
         await emit_event(
             "member.join",
             guild_id=str(member.guild.id),
@@ -453,7 +459,13 @@ def setup(registry: ServiceRegistry) -> None:
                 metadata={"source": "discord_adapter"},
             )
             if result.get("canonical_written") and result.get("canonical_visible"):
-                await member_flow_notifications.send_notification(guild=member.guild, user=member, action_type="leave", reason="Uscita dal server")
+                await member_flow_notifications.send_notification(
+                    guild=member.guild,
+                    user=member,
+                    action_type="leave",
+                    reason="Uscita dal server",
+                    canonical_event=result.get("canonical_event"),
+                )
         await emit_event(
             "member.leave",
             guild_id=str(member.guild.id),
