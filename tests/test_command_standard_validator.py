@@ -19,6 +19,12 @@ def test_command_validator_tracks_expected_exceptions() -> None:
     assert "domanda" in result.exceptions
     assert "riassunto.oggi" in result.exceptions
     assert any(command.path == "campagne.prompt.schedule_add" for command in result.commands)
+    assert any(command.path == "greetings.template_show" for command in result.commands)
+    assert "preview" not in {
+        command.path.split(".")[-1]
+        for command in result.commands
+        if command.path.startswith("greetings.")
+    }
 
 
 def test_command_validator_uses_admin_as_canonical_root() -> None:
