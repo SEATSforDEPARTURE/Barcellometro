@@ -231,3 +231,12 @@ Quando un wrapper inoltra un comando non-admin verso il renderer standardizzato:
 - non deve usare top-level semantici troppo generici (`resoconto`) quando il comando reale esposto è più specifico (`resocontocanale`, `resocontoserver`).
 
 Non introdurre renderer paralleli o embed manuali per aggirare questo standard.
+
+## Appendice: standard runtime per `🚪 INGRESSI & USCITE`
+
+Il feed GREETINGS / `🚪 INGRESSI & USCITE` segue inoltre un contratto visivo fisso, distinto dagli embed comando standardizzati:
+
+- il renderer live usa sempre **3 campi** e solo quelli: `Evento`, stato Barcello, narrativa;
+- il payload visualizzato deve provenire dalla **timeline canonica** `member_flow_events`;
+- non è ammesso un doppio embed di uscita per la stessa sequenza tecnica (per esempio `inactive_kick` assorbito da `inactive_tempban`, oppure `leave` gateway successivo a una departure esplicita già visibile);
+- i label user-facing devono mostrare `ALLONTANAMENTO` / `ALLONTANAMENTO PER INATTIVITÀ` e non il termine raw `KICK`.

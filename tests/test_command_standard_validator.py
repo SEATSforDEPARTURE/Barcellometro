@@ -29,6 +29,8 @@ def test_command_validator_tracks_expected_exceptions() -> None:
         for command in result.commands
         if command.path.startswith("greetings.")
     }
+    assert any(command.path == "mod.users.kick" and command.description == "Remove a user from the server." for command in result.commands)
+    assert any(command.path == "mod.users.kick_list" and command.description == "List recent user removals." for command in result.commands)
 
 
 def test_command_validator_uses_admin_as_canonical_root() -> None:

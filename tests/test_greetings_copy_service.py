@@ -11,17 +11,22 @@ from app.services.greetings_copy_service import GreetingsCopyService, format_gre
 class _FakeDatabase:
     def __init__(self, *, occurrence_number: int = 1) -> None:
         self._occurrence_number = occurrence_number
+        self.count_calls: list[tuple[str, str, str]] = []
 
     async def count_member_flow_events_for_user(self, guild_id: str, user_id: str, event_type_key: str) -> int:
+        self.count_calls.append((guild_id, user_id, event_type_key))
         return self._occurrence_number
 
 
 def _service(*, tmp_path=None, occurrence_number: int = 1, payload: dict | None = None) -> GreetingsCopyService:
+    database = _FakeDatabase(occurrence_number=occurrence_number)
     config_path = None
     if tmp_path is not None and payload is not None:
         config_path = tmp_path / "greetings_trigger.test.json"
         config_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    return GreetingsCopyService(_FakeDatabase(occurrence_number=occurrence_number), config_path=config_path)
+    service = GreetingsCopyService(database, config_path=config_path)
+    service._test_database = database  # type: ignore[attr-defined]
+    return service
 
 
 def test_format_greetings_event_label_covers_supported_keys() -> None:
@@ -61,6 +66,24 @@ def test_render_event_copy_uses_second_occurrence_for_ordinals() -> None:
 
     assert result.occurrence_number == 2
     assert result.event_label == "**👋 SECONDO USCITA**"
+    assert service._test_database.count_calls == [("1", "42", "leave")]  # type: ignore[attr-defined]
+
+
+def test_render_event_copy_counts_by_user_and_event_type_key_only() -> None:
+    service = _service(occurrence_number=4)
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=99, name="new_user", display_name="New User", mention="<@99>"),
+            event_type_key="kick",
+            barcello_status={"color": "verde", "score": 84},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert result.occurrence_number == 4
+    assert service._test_database.count_calls == [("1", "99", "kick")]  # type: ignore[attr-defined]
 
 
 def test_join_narrative_uses_reentry_language_and_not_entra() -> None:

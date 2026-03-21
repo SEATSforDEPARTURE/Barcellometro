@@ -25,7 +25,7 @@ TEMPLATE_FIELDS = {
 TEMPLATE_CHOICES = ", ".join(TEMPLATE_FIELDS)
 _TEMPLATE_LABELS = {
     "inactivity": "Inactivity",
-    "kick": "Kick",
+    "kick": "Allontanamento",
     "ban": "Ban",
     "tempban": "Tempban",
     "grace": "Grace",

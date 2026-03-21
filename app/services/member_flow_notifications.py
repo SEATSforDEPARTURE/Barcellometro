@@ -68,38 +68,6 @@ def format_duration_human(duration_seconds: int | None) -> str | None:
     return " ".join(parts)
 
 
-def build_template_context(
-    *,
-    user: discord.abc.User | discord.Member | Any,
-    guild: discord.Guild | Any,
-    event_type_key: str = "kick",
-    moderator: discord.abc.User | discord.Member | None = None,
-    reason: str | None = None,
-    duration_seconds: int | None = None,
-    expires_at: datetime | None = None,
-    rejoin_link: str | None = None,
-    days_inactive: int | None = None,
-    inactivity_text: str | None = None,
-) -> dict[str, Any]:
-    service = GreetingsCopyService(database=None)
-    return service.build_template_context(
-        user=user,
-        guild=guild,
-        event_type_key=event_type_key,
-        moderator=moderator,
-        reason=reason,
-        duration_seconds=duration_seconds,
-        expires_at=expires_at,
-        rejoin_link=rejoin_link,
-        days_inactive=days_inactive,
-        inactivity_text=inactivity_text,
-    )
-
-
-def render_moderation_template(template: str | None, **context: Any) -> str:
-    return GreetingsCopyService(database=None).render_moderation_template(template, **context)
-
-
 async def generate_member_flow_card(
     *,
     member: discord.abc.User | discord.Member,
@@ -152,7 +120,6 @@ async def generate_member_flow_card(
 class MemberFlowNotificationsService:
     def __init__(self, database: Any, bot: discord.Client, *, barcello_service: Any | None = None) -> None:
         self._database = database
-        self._bot = bot
         self._copy_service = GreetingsCopyService(database, barcello_service=barcello_service)
         self._recent_departures: dict[tuple[str, str], tuple[str, datetime]] = {}
 
@@ -203,6 +170,9 @@ class MemberFlowNotificationsService:
         expires_at: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # `moderation_actions` resta l'audit raw append-only di qualunque azione
+        # osservata o eseguita dal runtime; `member_flow_events` è invece la
+        # timeline canonica letta dai GREETINGS per rendering, conteggi e dedupe.
         metadata_dict = dict(metadata or {})
         action_id = await self._database.log_moderation_action(
             guild_id=guild_id,
@@ -303,6 +273,8 @@ class MemberFlowNotificationsService:
             now=created_at,
         )
         embed = discord.Embed(title="🚪 INGRESSI & USCITE", colour=discord.Colour.blurple(), timestamp=created_at)
+        # Layout canonico live: sempre e solo 3 campi, nell'ordine evento →
+        # stato barcello → narrativa. I valori arrivano dalla timeline canonica.
         embed.add_field(name="Evento", value=copy.event_label, inline=True)
         embed.add_field(name=copy.status_field_name, value=copy.status_field_value[:1024], inline=True)
         embed.add_field(name=_BLANK_FIELD_NAME, value=copy.narrative[:1024], inline=False)

@@ -46,3 +46,10 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - Per evitare path duplicati nel codice Python, i riferimenti centralizzati stanno in `app/core/config_paths.py`.
 - Gli override locali non devono reintrodurre wording legacy nei footer o nei template: `Dati elaborati` + ` in loco` ed `e fallback` + ` locale` sono aboliti in tutto il progetto.
 - Se un file runtime come `settings/barcello_trigger.json` contiene campi come `footer`, `fallback_footer` o simili, per output non-AI non va salvata alcuna frase tecnica finale equivalente; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare.
+
+## Note specifiche per `settings/greetings_trigger.example.json`
+
+- Le chiavi template GREETINGS sono quelle canoniche del dominio: `join`, `leave`, `kick`, `ban`, `tempban`, `grace`, `inactive_kick`, `inactive_tempban`, `inactive_grace`.
+- `kick` resta la chiave tecnica di compatibilità, ma il wording user-facing deve essere `allontanamento`.
+- Il file governa solo copy e variazioni mood/time/count/barcello: non ridefinisce il layout live, che resta fisso a 3 campi in `🚪 INGRESSI & USCITE`.
+- Le occorrenze lette nei placeholder (`{occurrence_number}`, `{occurrence_ordinal}`, `{event_label}`) arrivano dalla timeline canonica `member_flow_events`, non dal ledger raw `moderation_actions`.
