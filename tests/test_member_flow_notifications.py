@@ -174,9 +174,17 @@ def test_member_flow_log_action_writes_raw_and_canonical_join_leave_and_manual_d
         }
         canonical_rows = await db.fetchall(
             """
-            SELECT event_type_key, visible_in_greetings, source
+            SELECT event_type_key, visible_in_greetings, source, reason, metadata_json
             FROM member_flow_events
             ORDER BY occurred_at ASC
+            """,
+        )
+        raw_rows = await db.fetchall(
+            """
+            SELECT action_type, reason, metadata_json
+            FROM moderation_actions
+            WHERE action_type IN ('kick', 'ban')
+            ORDER BY created_at ASC
             """,
         )
 
@@ -199,6 +207,16 @@ def test_member_flow_log_action_writes_raw_and_canonical_join_leave_and_manual_d
             ("ban", 1, "moderazione_utenti"),
             ("tempban", 1, "moderazione_utenti"),
         ]
+        assert [(row["action_type"], row["reason"]) for row in raw_rows] == [
+            ("kick", "Kick manuale"),
+            ("ban", "Ban manuale"),
+        ]
+        kick_canonical = canonical_rows[2]
+        ban_canonical = canonical_rows[3]
+        assert kick_canonical["reason"] == "Kick manuale"
+        assert ban_canonical["reason"] == "Ban manuale"
+        assert '"raw_action_id"' in kick_canonical["metadata_json"]
+        assert '"raw_action_id"' in ban_canonical["metadata_json"]
 
         await db.close()
 
