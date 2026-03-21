@@ -11,7 +11,7 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.discord_embed_utils import FIELD_MAX
-from app.services.member_flow_notifications import build_template_context, render_moderation_template
+from app.services.greetings_copy_service import GreetingsCopyService
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 
 PERM = "mod"
@@ -59,7 +59,10 @@ async def render_greetings_template(
 ) -> str:
     templates = await ctx.database.get_moderation_templates(guild_id)
     template = str(templates.get(template_key) or "")
-    context = build_template_context(
+    copy_service = GreetingsCopyService(ctx.database, barcello_service=getattr(ctx, "barcello_service", None))
+    rendered, _ = await copy_service.render_moderation_preview(
+        template=template,
+        event_type_key="inactive_kick" if template_key == "template_inactivity_reason" else template_key.removeprefix("template_").removesuffix("_reason"),
         user=user,
         guild=guild,
         moderator=moderator,
@@ -70,7 +73,7 @@ async def render_greetings_template(
         days_inactive=days_inactive,
         inactivity_text=inactivity_text,
     )
-    return render_moderation_template(template, **context)
+    return rendered
 
 
 async def _render_preview(
