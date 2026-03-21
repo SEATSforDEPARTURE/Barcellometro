@@ -30,6 +30,13 @@ def test_command_validator_uses_admin_as_canonical_root() -> None:
     assert set(command.root for command in result.commands if command.root == "admin")
 
 
+def test_command_validator_tracks_top_level_legacy_barcello() -> None:
+    result = validate_command_tree()
+
+    assert any(command.path == "barcello" for command in result.commands)
+    assert any(command.path == "admin.barcello.run" for command in result.commands)
+
+
 def test_command_validator_has_no_legacy_tracking_fields() -> None:
     result = validate_command_tree()
 

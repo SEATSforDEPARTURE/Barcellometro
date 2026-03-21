@@ -26,6 +26,18 @@ def test_admin_group_is_the_registered_root_namespace() -> None:
     assert '        admin_group,' in source
 
 
+def test_barcello_restores_top_level_registration_alongside_admin_group() -> None:
+    commands_source = Path("app/plugins/commands.py").read_text()
+    barcello_source = Path("app/plugins/commands_modular/barcello.py").read_text()
+
+    assert "register_barcello(admin_group, bot.tree, guild_obj, ctx)" in commands_source
+    assert '@app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")' in barcello_source
+    assert '@app_commands.rename(window_minutes="minuti")' in barcello_source
+    assert 'permission_name="barcello"' in barcello_source
+    assert 'legacy_user_facing=True' in barcello_source
+    assert 'tree.add_command(barcello_command, guild=guild)' in barcello_source
+
+
 def test_campaign_and_trigger_outputs_use_visual_top_levels() -> None:
     triggers_source = Path("app/plugins/commands_modular/triggers.py").read_text()
     messaggi_source = Path("app/plugins/commands_modular/messaggi.py").read_text()

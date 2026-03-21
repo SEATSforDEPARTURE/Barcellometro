@@ -101,6 +101,7 @@ finestra configurata in modo idempotente.
 - `/admin status service:<nome>` → stato servizio/plugin.
 
 ### AI centrale
+- `/barcello [user1] [user2] [minuti]` → report legacy user-facing del barcello in DM.
 - `/admin ai on` → abilita il servizio AI.
 - `/admin ai off` → disabilita il servizio AI.
 - `/admin ai model_set task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `server_summary`, `audio_summary`, `qa`, `analysis`, `transcription`, `translation`).

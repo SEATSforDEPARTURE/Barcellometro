@@ -129,7 +129,7 @@ class GroupDef:
 
 @dataclass(slots=True)
 class PendingCommand:
-    group_var: str
+    group_var: str | None
     name: str
     description: str | None
     params: list[ParameterRecord]
@@ -170,7 +170,7 @@ def _is_app_commands_describe(call: ast.AST) -> bool:
     )
 
 
-def _decorated_command_info(node: ast.AsyncFunctionDef | ast.FunctionDef) -> tuple[str, str, str | None] | None:
+def _decorated_command_info(node: ast.AsyncFunctionDef | ast.FunctionDef) -> tuple[str | None, str, str | None] | None:
     for decorator in node.decorator_list:
         if not isinstance(decorator, ast.Call):
             continue
@@ -179,7 +179,7 @@ def _decorated_command_info(node: ast.AsyncFunctionDef | ast.FunctionDef) -> tup
             continue
         if func.attr != "command" or not isinstance(func.value, ast.Name):
             continue
-        group_var = func.value.id
+        group_var = None if func.value.id == "app_commands" else func.value.id
         name = _literal_str(_call_keyword(decorator, "name"))
         description = _literal_str(_call_keyword(decorator, "description"))
         if name:
@@ -323,11 +323,13 @@ def _parse_root_group_mapping(register_defs: dict[str, dict[str, Any]]) -> dict[
 
 
 def _resolve_group_path(
-    group_var: str,
+    group_var: str | None,
     root_mapping: dict[str, str | None],
     local_groups: dict[str, GroupDef],
     parents: dict[str, str],
 ) -> list[str]:
+    if group_var is None:
+        return []
     if group_var in root_mapping:
         root_name = root_mapping[group_var]
         return [] if root_name is None else [root_name]

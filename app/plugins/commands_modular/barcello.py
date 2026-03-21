@@ -30,7 +30,12 @@ logger = logging.getLogger(__name__)
 
 
 
-def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_barcello(
+    admin_group: app_commands.Group,
+    tree: app_commands.CommandTree,
+    guild: discord.abc.Snowflake | None,
+    ctx: CommandContext,
+) -> None:
     response_format_supported: bool | None = None
     barcello_group = app_commands.Group(name="barcello", description="Barcello controls")
     add_group_once(admin_group, barcello_group, logger)
@@ -53,6 +58,13 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
             footer_service=ctx.footer,
             ephemeral=interaction.guild_id is not None,
         )
+
+    async def send_plain_ephemeral(interaction: discord.Interaction, message: str) -> None:
+        ephemeral = interaction.guild_id is not None
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=ephemeral)
+        else:
+            await interaction.response.send_message(message, ephemeral=ephemeral)
 
     async def _require_channel_scope(interaction: discord.Interaction) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
@@ -86,6 +98,9 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
             service_name="barcello",
             cover_title=public_embed.title or "❤️ REPORT BARCELLO",
         )
+
+    def _build_legacy_barcello_dm_report(*, public_embed: discord.Embed, details_embed: discord.Embed) -> list[discord.Embed]:
+        return [public_embed, details_embed]
 
     async def _set_toggle(interaction: discord.Interaction, action: str) -> None:
         if not await check_permission(interaction, f"admin.barcello.{action}", ctx):
@@ -1086,18 +1101,16 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
         payload = _parse_json_safe(ai_text)
         return payload, ai_text
 
-    @barcello_group.command(name="run", description="Run the Barcello analysis.")
-    @app_commands.describe(
-        user1="Optional first user.",
-        user2="Optional second user.",
-        window_minutes="Analysis window in minutes.",
-    )
-    async def barcello_command(
+    async def _run_barcello_command(
         interaction: discord.Interaction,
+        *,
         user1: discord.Member | None = None,
         user2: discord.Member | None = None,
         window_minutes: int | None = None,
+        permission_name: str,
+        legacy_user_facing: bool,
     ) -> None:
+        send_user_notice = send_plain_ephemeral if legacy_user_facing else send_ephemeral
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1105,7 +1118,7 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
             except Exception:
                 logger.exception("barcello: failed to defer")
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.")
+            await send_user_notice(interaction, "Questo comando funziona solo nei canali della guild.")
             return
 
         try:
@@ -1134,12 +1147,12 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
             if not command_config["allowed"]:
                 dm_text = command_config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
                 if await try_send_dm(dm_text):
-                    await send_ephemeral(interaction, "Ti ho inviato un DM")
+                    await send_user_notice(interaction, "Ti ho inviato un DM")
                 else:
-                    await send_ephemeral(interaction, "Apri i DM per ricevere la risposta")
+                    await send_user_notice(interaction, "Apri i DM per ricevere la risposta")
                 return
 
-            if not await check_permission(interaction, "admin.barcello.run", ctx):
+            if not await check_permission(interaction, permission_name, ctx):
                 return
 
             if window_minutes is None:
@@ -1155,14 +1168,14 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
                 window_minutes = 30
 
             if user2 is not None and user1 is None:
-                await send_ephemeral(interaction, "Specifica il primo utente.")
+                await send_user_notice(interaction, "Specifica il primo utente.")
                 return
             if user1 is not None and user2 is not None and user1.id == user2.id:
-                await send_ephemeral(interaction, "Seleziona due utenti diversi.")
+                await send_user_notice(interaction, "Seleziona due utenti diversi.")
                 return
             if ctx.config.ignore_bots:
                 if (user1 and user1.bot) or (user2 and user2.bot):
-                    await send_ephemeral(interaction, "Non posso usare bot per il barcello.")
+                    await send_user_notice(interaction, "Non posso usare bot per il barcello.")
                     return
 
             pair_mode = user1 is not None
@@ -1173,20 +1186,20 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
             if pair_mode:
                 if user2 is not None:
                     if profile != "mod":
-                        await send_ephemeral(interaction, "Solo i mod possono usare due utenti.")
+                        await send_user_notice(interaction, "Solo i mod possono usare due utenti.")
                         return
                     pair_mode_profile = "mod"
                     pair_user_a = user1
                     pair_user_b = user2
                 else:
                     if profile not in {"role3", "mod"}:
-                        await send_ephemeral(interaction, "Solo ruolo 3 o mod possono usare questo comando.")
+                        await send_user_notice(interaction, "Solo ruolo 3 o mod possono usare questo comando.")
                         return
                     pair_mode_profile = "role3"
                     pair_user_a = interaction.user if isinstance(interaction.user, discord.Member) else None
                     pair_user_b = user1
                 if pair_user_a is None or pair_user_b is None:
-                    await send_ephemeral(interaction, "Utenti non validi.")
+                    await send_user_notice(interaction, "Utenti non validi.")
                     return
 
             if pair_mode:
@@ -1242,9 +1255,18 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
                 )
                 no_data_embed = _build_barcello_no_data_embed(title=title, window_minutes=window_minutes)
                 if await try_send_dm(embed=no_data_embed):
-                    await _send_barcello_dm_notice(interaction, sent=True)
+                    if legacy_user_facing:
+                        await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
+                    else:
+                        await _send_barcello_dm_notice(interaction, sent=True)
                 else:
-                    await _send_barcello_dm_notice(interaction, sent=False)
+                    if legacy_user_facing:
+                        await interaction.followup.send(
+                            "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
+                            ephemeral=True,
+                        )
+                    else:
+                        await _send_barcello_dm_notice(interaction, sent=False)
                 return
 
             insufficient_data = (
@@ -1558,9 +1580,8 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
                                         ai_affinity = ai_payload.get("affinity_bullets")
                                         personal_advice = clean_bullets(normalize_bullets(ai_advice))
                                         affinity_bullets = clean_bullets(normalize_bullets(ai_affinity))
-                                        fallback_personal = _fallback_pair_personal_advice(result.metrics)
                                         if len(personal_advice) < 3:
-                                            personal_advice = (personal_advice + fallback_personal)[:3]
+                                            personal_advice = (personal_advice + _fallback_pair_personal_advice(result.metrics))[:3]
                                         if len(affinity_bullets) < 3:
                                             affinity_bullets = (_fallback_pair_affinity(result.metrics) + affinity_bullets)[:3]
                                     elif pair_mode and pair_mode_profile == "mod":
@@ -1579,9 +1600,8 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
                                         ai_mod = ai_payload.get("mod_advice_bullets")
                                         personal_advice = clean_bullets(normalize_bullets(ai_personal))
                                         mod_advice = clean_bullets(normalize_bullets(ai_mod))
-                                        fallback_personal = _fallback_personal_advice(color_label)
                                         if len(personal_advice) < 3:
-                                            personal_advice = (personal_advice + fallback_personal)[:3]
+                                            personal_advice = (personal_advice + _fallback_personal_advice(color_label))[:3]
                                         if len(mod_advice) < 3:
                                             mod_advice = (mod_advice + _fallback_mod_advice(color_label))[:3]
                             except Exception as exc:  # noqa: BLE001
@@ -1660,21 +1680,87 @@ def register_barcello(admin_group: app_commands.Group, ctx: CommandContext) -> N
                     profile=profile,
                 )
 
-            report_embeds = _build_barcello_dm_report(public_embed=public_embed, details_embed=details_embed)
+            report_embeds = (
+                _build_legacy_barcello_dm_report(public_embed=public_embed, details_embed=details_embed)
+                if legacy_user_facing
+                else _build_barcello_dm_report(public_embed=public_embed, details_embed=details_embed)
+            )
             if await try_send_dm(embeds=report_embeds, view=feedback_view):
-                await _send_barcello_dm_notice(interaction, sent=True)
+                if legacy_user_facing:
+                    await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
+                else:
+                    await _send_barcello_dm_notice(interaction, sent=True)
             else:
-                await _send_barcello_dm_notice(interaction, sent=False)
+                if legacy_user_facing:
+                    await interaction.followup.send(
+                        "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
+                        ephemeral=True,
+                    )
+                else:
+                    await _send_barcello_dm_notice(interaction, sent=False)
         except Exception:
             logger.exception("barcello: unexpected error")
-            await send_standard_response(
-                interaction,
-                top_level="barcello",
-                subcommand_path="admin barcello run",
-                lines=[("error", "Errore temporaneo, riprova.")],
-                kind="error",
-                footer_service=ctx.footer,
-            )
+            if legacy_user_facing:
+                await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
+            else:
+                await send_standard_response(
+                    interaction,
+                    top_level="barcello",
+                    subcommand_path="admin barcello run",
+                    lines=[("error", "Errore temporaneo, riprova.")],
+                    kind="error",
+                    footer_service=ctx.footer,
+                )
+
+    @barcello_group.command(name="run", description="Run the Barcello analysis.")
+    @app_commands.describe(
+        user1="Optional first user.",
+        user2="Optional second user.",
+        window_minutes="Analysis window in minutes.",
+    )
+    async def admin_barcello_run_command(
+        interaction: discord.Interaction,
+        user1: discord.Member | None = None,
+        user2: discord.Member | None = None,
+        window_minutes: int | None = None,
+    ) -> None:
+        await _run_barcello_command(
+            interaction,
+            user1=user1,
+            user2=user2,
+            window_minutes=window_minutes,
+            permission_name="admin.barcello.run",
+            legacy_user_facing=False,
+        )
+
+    @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
+    @app_commands.rename(window_minutes="minuti")
+    @app_commands.describe(
+        user1="Utente 1 (opzionale)",
+        user2="Utente 2 (opzionale)",
+        window_minutes="Finestra in minuti",
+    )
+    async def barcello_command(
+        interaction: discord.Interaction,
+        user1: discord.Member | None = None,
+        user2: discord.Member | None = None,
+        window_minutes: int | None = None,
+    ) -> None:
+        await _run_barcello_command(
+            interaction,
+            user1=user1,
+            user2=user2,
+            window_minutes=window_minutes,
+            permission_name="barcello",
+            legacy_user_facing=True,
+        )
+
+    if guild is not None:
+        tree.add_command(barcello_command, guild=guild)
+        logger.info("Registered /barcello scope=guild guild_id=%s", getattr(guild, "id", None))
+    else:
+        tree.add_command(barcello_command)
+        logger.info("Registered /barcello scope=global")
 
     logger.info(
         "Registered /admin barcello subcommands=%s",
