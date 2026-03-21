@@ -208,7 +208,7 @@ def test_render_event_copy_uses_mood_time_barcello_and_count_override(tmp_path) 
     assert result.time_bucket == "morning"
     assert result.count_tier == "t2"
     assert result.barcello_state == "rosso"
-    assert result.narrative == "override teso morning rosso t2 🔴 ALLERTA ROSSA 41"
+    assert result.narrative == "override **teso** **morning** **rosso** **t2** **🔴 ALLERTA ROSSA** **41**"
 
 
 def test_render_moderation_preview_renders_context_placeholders() -> None:
@@ -230,7 +230,7 @@ def test_render_moderation_preview_renders_context_placeholders() -> None:
         )
     )
 
-    assert rendered == "SECONDO BAN TEMPORANEO teso night 🔴 ALLERTA ROSSA 41/100"
+    assert rendered == "**SECONDO** **BAN TEMPORANEO** **teso** **night** **🔴 ALLERTA ROSSA** **41/100**"
     assert context["moderator"] == "Moderator"
 
 
@@ -374,4 +374,56 @@ def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> 
         )
     )
 
-    assert result.narrative == "fallback kick <@42>"
+    assert result.narrative == "fallback kick **<@42>**"
+
+
+def test_render_moderation_preview_bolds_primary_dynamic_placeholders_without_breaking_mentions() -> None:
+    service = _service()
+    rendered, _ = asyncio.run(
+        service.render_moderation_preview(
+            template=(
+                "{mention} / {display_name} / {username} / {guild_name} / {reason} / {duration} / "
+                "{expires_at} / {barcello_state} / {barcello_score} / {mood} / {time_bucket}"
+            ),
+            event_type_key="tempban",
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            moderator=SimpleNamespace(id=7, name="Mod", display_name="Moderator", mention="<@7>"),
+            reason="spam creativo",
+            duration_seconds=7 * 86400,
+            expires_at=datetime(2026, 3, 28, 8, 0, tzinfo=timezone.utc),
+            occurrence_number=2,
+            mood="teso",
+            time_bucket="night",
+            count_tier="t2",
+            barcello_color="rosso",
+            barcello_score=41,
+        )
+    )
+
+    assert rendered == (
+        "**<@42>** / **New User** / **new_user** / **Barcellometro** / **spam creativo** / **7g** / "
+        "**28/03/2026 08:00 UTC** / **rosso** / **41** / **teso** / **night**"
+    )
+
+
+def test_render_moderation_preview_bolds_reason_suffix_but_keeps_prefix_outside_markdown() -> None:
+    service = _service()
+    rendered, _ = asyncio.run(
+        service.render_moderation_preview(
+            template="Motivo{reason_suffix}",
+            event_type_key="kick",
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            moderator=SimpleNamespace(id=7, name="Mod", display_name="Moderator", mention="<@7>"),
+            reason="spam creativo",
+            occurrence_number=1,
+            mood="teso",
+            time_bucket="night",
+            count_tier="t1",
+            barcello_color="rosso",
+            barcello_score=41,
+        )
+    )
+
+    assert rendered == "Motivo: **spam creativo**"

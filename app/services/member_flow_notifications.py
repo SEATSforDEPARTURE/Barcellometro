@@ -275,9 +275,9 @@ class MemberFlowNotificationsService:
         # Layout canonico live: author fisso per il canale GREETINGS, titolo per
         # la label evento e narrativa come contenuto principale dell'embed.
         embed.set_author(name="🚪 INGRESSI & USCITE")
-        avatar_url = getattr(getattr(user, "display_avatar", None), "url", None)
+        avatar_url = self._resolve_user_avatar_url(user)
         if avatar_url:
-            embed.set_thumbnail(url=str(avatar_url))
+            embed.set_thumbnail(url=avatar_url)
         attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)
 
         files: list[discord.File] = []
@@ -290,6 +290,15 @@ class MemberFlowNotificationsService:
             await channel.send(embed=embed, files=files or None)
         except Exception:
             logger.warning("member flow notification send failed guild=%s action=%s", guild.id, action_type, exc_info=True)
+
+    @staticmethod
+    def _resolve_user_avatar_url(user: discord.abc.User | discord.Member) -> str | None:
+        for attr_name in ("display_avatar", "avatar", "default_avatar"):
+            asset = getattr(user, attr_name, None)
+            url = getattr(asset, "url", None)
+            if url:
+                return str(url)
+        return None
 
     def _build_fallback_canonical_event(
         self,

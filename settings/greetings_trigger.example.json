@@ -37,6 +37,7 @@
     "placeholders": {
       "mention": {
         "description": "Mention Discord completa dell'utente; placeholder consigliato per join/leave/kick/ban.",
+        "rendering": "Nel testo finale viene resa in grassetto senza rompere la mention Discord.",
         "example": "<@42>",
         "notes": [
           "Alias legacy concettuali: {tag}, {user_mention}."
@@ -44,7 +45,8 @@
       },
       "display_name": {
         "description": "Display name/nickname preferito dell'utente.",
-        "example": "New User"
+        "example": "New User",
+        "rendering": "I placeholder dinamici testuali dei greetings vengono evidenziati automaticamente in grassetto nel render finale."
       },
       "username": {
         "description": "Username raw dell'utente.",

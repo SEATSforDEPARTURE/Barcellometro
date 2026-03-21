@@ -642,3 +642,102 @@ def test_send_notification_reads_runtime_values_only_from_canonical_timeline(mem
         assert embed.fields == []
 
     asyncio.run(_run())
+
+
+def test_send_notification_uses_avatar_fallback_when_display_avatar_is_missing(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append(embed)
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=None,
+            avatar=types.SimpleNamespace(url="https://example.test/avatar-fallback.png"),
+        )
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="leave",
+            canonical_event={
+                "event_type_key": "leave",
+                "reason": "Uscita dal server",
+                "visible_in_greetings": True,
+                "metadata": {"occurrence_number": 1},
+            },
+        )
+
+        embed = channel.sent[0]
+        assert embed.thumbnail.url == "https://example.test/avatar-fallback.png"
+
+    asyncio.run(_run())
+
+
+def test_send_notification_keeps_thumbnail_empty_when_no_avatar_is_available(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append(embed)
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=None,
+            avatar=None,
+            default_avatar=None,
+        )
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="leave",
+            canonical_event={
+                "event_type_key": "leave",
+                "reason": "Uscita dal server",
+                "visible_in_greetings": True,
+                "metadata": {"occurrence_number": 1},
+            },
+        )
+
+        embed = channel.sent[0]
+        assert embed.thumbnail.url is None
+
+    asyncio.run(_run())
