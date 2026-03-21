@@ -252,3 +252,46 @@ def test_native_discord_ban_is_classified_as_ban_not_leave_and_deduped_across_ev
         assert member_flow.send_notification.await_args.kwargs["canonical_event"]["event_type_key"] == "ban"
 
     asyncio.run(_run())
+
+
+def test_recent_tempban_memory_suppresses_member_remove_and_member_ban_duplicates(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1)
+        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0)
+        monkeypatch.setattr(
+            discord_adapter_module.discord,
+            "AuditLogAction",
+            SimpleNamespace(ban="ban", kick="kick", unban="unban"),
+            raising=False,
+        )
+
+        member_flow = SimpleNamespace(
+            get_recent_departure_action=lambda guild_id, user_id, **_kwargs: "tempban" if (guild_id, user_id) == ("99", "5") else None,
+            log_action=AsyncMock(),
+            send_notification=AsyncMock(),
+        )
+        database = SimpleNamespace(
+            upsert_user=AsyncMock(),
+            upsert_guild_membership=AsyncMock(),
+        )
+        registry, bot = _configure_registry(member_flow=member_flow, database=database)
+        setup_discord_adapter(registry)
+
+        guild = _FakeGuild(guild_id=99)
+        member = _build_member(guild=guild)
+        banned_user = SimpleNamespace(
+            id=5,
+            name="User",
+            display_name="User",
+            global_name=None,
+            display_avatar=SimpleNamespace(url="https://example.test/avatar.png"),
+            bot=False,
+        )
+
+        await bot.listeners["on_member_remove"](member)
+        await bot.listeners["on_member_ban"](guild, banned_user)
+
+        assert member_flow.log_action.await_count == 0
+        assert member_flow.send_notification.await_count == 0
+
+    asyncio.run(_run())

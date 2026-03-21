@@ -140,13 +140,34 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
                 canonical_event=result.get("canonical_event"),
             )
 
+    def _remember_departure(guild: discord.Guild, user: discord.abc.User | discord.Member, action_type: str) -> None:
+        if ctx.member_flow_notifications is None:
+            return
+        remember = getattr(ctx.member_flow_notifications, "remember_departure_action", None)
+        if remember is None:
+            return
+        remember(str(guild.id), str(user.id), action_type)
+
+    def _forget_departure(guild: discord.Guild, user: discord.abc.User | discord.Member) -> None:
+        if ctx.member_flow_notifications is None:
+            return
+        forget = getattr(ctx.member_flow_notifications, "forget_departure_action", None)
+        if forget is None:
+            return
+        forget(str(guild.id), str(user.id))
+
     @users_group.command(name="kick", description="Remove a user from the server.")
     @app_commands.describe(user="Member to kick.", reason="Optional reason override.")
     async def mod_users_kick(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
         resolved_reason = reason or await _default_reason("kick", user=user, guild=interaction.guild, moderator=interaction.user)
-        await user.kick(reason=resolved_reason)
+        _remember_departure(interaction.guild, user, "kick")
+        try:
+            await user.kick(reason=resolved_reason)
+        except Exception:
+            _forget_departure(interaction.guild, user)
+            raise
         await _notify_action(guild=interaction.guild, user=user, action_type="kick", reason=resolved_reason, moderator=interaction.user)
         await _send(
             interaction,
@@ -173,7 +194,12 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         if not await _ensure(interaction) or interaction.guild is None:
             return
         resolved_reason = reason or await _default_reason("ban", user=user, guild=interaction.guild, moderator=interaction.user)
-        await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
+        _remember_departure(interaction.guild, user, "ban")
+        try:
+            await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
+        except Exception:
+            _forget_departure(interaction.guild, user)
+            raise
         await _notify_action(guild=interaction.guild, user=user, action_type="ban", reason=resolved_reason, moderator=interaction.user)
         await _send(
             interaction,
@@ -206,7 +232,12 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             duration_seconds=duration_seconds,
             expires_at=expires_at,
         )
-        await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
+        _remember_departure(interaction.guild, user, "tempban")
+        try:
+            await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
+        except Exception:
+            _forget_departure(interaction.guild, user)
+            raise
         await ctx.database.add_temp_ban(str(interaction.guild.id), str(user.id), expires_at.isoformat(), resolved_reason)
         await _notify_action(guild=interaction.guild, user=user, action_type="tempban", reason=resolved_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
         await _send(
