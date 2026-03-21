@@ -17,18 +17,32 @@ from app.services.database import DatabaseService
 
 @pytest.fixture
 def member_flow_module(monkeypatch):
-    if "discord" not in sys.modules:
-        discord_stub = types.ModuleType("discord")
-        discord_stub.File = lambda *args, **kwargs: (args, kwargs)
-        discord_stub.Client = object
-        discord_stub.Member = object
-        discord_stub.Guild = object
-        discord_stub.Embed = object
-        discord_stub.Colour = types.SimpleNamespace(blurple=lambda: 0)
-        discord_stub.ButtonStyle = types.SimpleNamespace(primary=1, danger=2, secondary=3)
-        discord_stub.abc = types.SimpleNamespace(User=object, Messageable=object)
-        discord_stub.ui = types.SimpleNamespace(View=object, Button=object, button=lambda *args, **kwargs: (lambda fn: fn))
-        monkeypatch.setitem(sys.modules, "discord", discord_stub)
+    discord_stub = types.ModuleType("discord")
+
+    class _Embed:
+        def __init__(self, *, title=None, colour=None, timestamp=None):
+            self.title = title
+            self.colour = colour
+            self.timestamp = timestamp
+            self.fields = []
+            self.footer = types.SimpleNamespace(text=None)
+
+        def add_field(self, *, name, value, inline=True):
+            self.fields.append(types.SimpleNamespace(name=name, value=value, inline=inline))
+
+        def set_footer(self, *, text=None):
+            self.footer = types.SimpleNamespace(text=text)
+
+    discord_stub.File = lambda *args, **kwargs: (args, kwargs)
+    discord_stub.Client = object
+    discord_stub.Member = object
+    discord_stub.Guild = object
+    discord_stub.Embed = _Embed
+    discord_stub.Colour = types.SimpleNamespace(blurple=lambda: 0)
+    discord_stub.ButtonStyle = types.SimpleNamespace(primary=1, danger=2, secondary=3)
+    discord_stub.abc = types.SimpleNamespace(User=object, Messageable=object)
+    discord_stub.ui = types.SimpleNamespace(View=object, Button=object, button=lambda *args, **kwargs: (lambda fn: fn))
+    monkeypatch.setitem(sys.modules, "discord", discord_stub)
 
     footer_stub = types.ModuleType("app.services.footer")
     footer_stub.attach_footer_meta = lambda embed, **kwargs: embed
@@ -44,6 +58,14 @@ class _FakeDB:
 
     async def list_recent_visible_departures(self, guild_id: str, user_id: str, since_iso: str):
         return []
+
+    async def get_inactivity_config(self, guild_id: str):
+        return {
+            "notify_channel_id": "77",
+            "atrio_channel_id": "55",
+            "invite_url": "https://discord.gg/barcello",
+            "notify_card_enabled": False,
+        }
 
 
 def test_parse_duration_input_supports_days_hours_minutes(member_flow_module) -> None:
@@ -291,3 +313,174 @@ def test_source_contains_fixed_title_and_footer_service_name() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text()
     assert 'title="🚪 INGRESSI & USCITE"' in source
     assert 'service_name="member_flow_notifications"' in source
+
+
+def test_send_notification_renders_fixed_three_field_layout_from_canonical_event(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append({"embed": embed, "files": files})
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel if channel_id == 77 else None
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="inactive_tempban",
+            canonical_event={
+                "event_type_key": "inactive_tempban",
+                "reason": "Assenza prolungata",
+                "duration_seconds": 7 * 86400,
+                "visible_in_greetings": True,
+                "metadata": {
+                    "inactivity_text": "30 giorni",
+                    "occurrence_number": 1,
+                },
+            },
+        )
+
+        payload = channel.sent[0]["embed"]
+        assert payload.title == "🚪 INGRESSI & USCITE"
+        assert len(payload.fields) == 3
+        assert [field.name for field in payload.fields] == [
+            "Evento",
+            'Stato barcello "Barcellometro"',
+            "​",
+        ]
+        assert [field.inline for field in payload.fields] == [True, True, False]
+        assert payload.fields[0].value == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
+        assert payload.fields[1].value == "⚪ ALLERTA SCONOSCIUTA\n(🫀: **n/d**)"
+        assert "inattività" in payload.fields[2].value.lower()
+
+    asyncio.run(_run())
+
+
+def test_send_notification_uses_copy_service_values_and_join_reentry_language(member_flow_module, monkeypatch) -> None:
+    attached = {}
+
+    def _attach_footer(embed, **kwargs):
+        attached["service_name"] = kwargs.get("service_name")
+        embed.set_footer(text="Barcellometro dev")
+        return embed
+
+    monkeypatch.setattr(member_flow_module, "attach_footer_meta", _attach_footer)
+
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append(embed)
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="join",
+            canonical_event={
+                "event_type_key": "join",
+                "reason": "Ingresso nel server",
+                "visible_in_greetings": True,
+                "metadata": {
+                    "occurrence_number": 1,
+                },
+            },
+        )
+
+        embed = channel.sent[0]
+        assert len(embed.fields) == 3
+        assert "rientrat" in embed.fields[2].value.lower() or "torna" in embed.fields[2].value.lower()
+        assert " entra" not in embed.fields[2].value.lower()
+        assert embed.footer.text == "Barcellometro dev"
+        assert attached["service_name"] == "member_flow_notifications"
+
+    asyncio.run(_run())
+
+
+def test_send_notification_uses_copy_service_as_single_source_for_field_values(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append(embed)
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+        service._copy_service.render_canonical_event_copy = types.MethodType(
+            lambda self, **kwargs: asyncio.sleep(
+                0,
+                result=types.SimpleNamespace(
+                    event_label="COPY EVENT LABEL",
+                    status_field_name='Stato barcello "Barcellometro"',
+                    status_field_value="COPY STATUS",
+                    narrative="COPY NARRATIVE",
+                ),
+            ),
+            service._copy_service,
+        )
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="leave",
+            canonical_event={
+                "event_type_key": "leave",
+                "reason": "Uscita dal server",
+                "visible_in_greetings": True,
+                "metadata": {},
+            },
+        )
+
+        embed = channel.sent[0]
+        assert [field.value for field in embed.fields] == [
+            "COPY EVENT LABEL",
+            "COPY STATUS",
+            "COPY NARRATIVE",
+        ]
+
+    asyncio.run(_run())

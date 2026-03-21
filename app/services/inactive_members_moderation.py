@@ -891,6 +891,7 @@ class InactiveMembersModerationService:
                                     "days_inactive": candidate.days_inactive,
                                     "inactivity_text": inactivity_text,
                                 },
+                                canonical_event=result.get("canonical_event"),
                             )
                         stats["notify_ok"] += 1
                 except Exception as exc:
@@ -913,6 +914,7 @@ class InactiveMembersModerationService:
                             "days_inactive": candidate.days_inactive,
                             "inactivity_text": inactivity_text,
                         },
+                        canonical_event=kick_result.get("canonical_event"),
                     )
                     stats["notify_ok"] += 1
         logger.info(

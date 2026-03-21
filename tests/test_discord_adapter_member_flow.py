@@ -39,7 +39,7 @@ def test_member_join_and_remove_notifications_follow_canonical_write_result() ->
         member_flow = SimpleNamespace(
             log_action=AsyncMock(
                 side_effect=[
-                    {"canonical_written": True, "canonical_visible": True},
+                    {"canonical_written": True, "canonical_visible": True, "canonical_event": {"event_type_key": "join"}},
                     {"canonical_written": False, "canonical_visible": False},
                 ]
             ),
@@ -77,5 +77,6 @@ def test_member_join_and_remove_notifications_follow_canonical_write_result() ->
         assert member_flow.log_action.await_count == 2
         assert member_flow.send_notification.await_count == 1
         assert member_flow.send_notification.await_args.kwargs["action_type"] == "join"
+        assert member_flow.send_notification.await_args.kwargs["canonical_event"] == {"event_type_key": "join"}
 
     asyncio.run(_run())

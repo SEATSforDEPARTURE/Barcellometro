@@ -128,6 +128,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
                 duration_seconds=duration_seconds,
                 expires_at=expires_at,
                 metadata=metadata_dict,
+                canonical_event=result.get("canonical_event"),
             )
 
     @users_group.command(name="kick", description="Kick a user.")
