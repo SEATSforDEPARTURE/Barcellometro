@@ -148,7 +148,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         trigger_engine = TriggerEngineService(database_service, barcello_service, entitlements_service, ai_service, community_insights)
         inactivity_service = InactivityService(database_service)
         activity_insights = ActivityInsightsService(database_service)
-        member_flow_notifications = MemberFlowNotificationsService(database_service, bot)
+        member_flow_notifications = MemberFlowNotificationsService(database_service, bot, barcello_service=barcello_service)
         inactive_members_moderation = InactiveMembersModerationService(database_service, bot, member_flow_notifications=member_flow_notifications)
         daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights, inactive_members_moderation=inactive_members_moderation)
     footer_service = FooterService(database_service)

@@ -16,6 +16,8 @@ AURA_MISSIONS_JSON = SETTINGS_DIR / "aura_missions.json"
 AURA_MISSIONS_EXAMPLE_JSON = SETTINGS_DIR / "aura_missions.example.json"
 BARCELLO_TRIGGER_JSON = SETTINGS_DIR / "barcello_trigger.json"
 BARCELLO_TRIGGER_EXAMPLE_JSON = SETTINGS_DIR / "barcello_trigger.example.json"
+GREETINGS_TRIGGER_JSON = SETTINGS_DIR / "greetings_trigger.json"
+GREETINGS_TRIGGER_EXAMPLE_JSON = SETTINGS_DIR / "greetings_trigger.example.json"
 
 
 _CANONICAL_SETTINGS_FILES = {
@@ -29,6 +31,8 @@ _CANONICAL_SETTINGS_FILES = {
     "aura_missions.example.json": AURA_MISSIONS_EXAMPLE_JSON,
     "barcello_trigger.json": BARCELLO_TRIGGER_JSON,
     "barcello_trigger.example.json": BARCELLO_TRIGGER_EXAMPLE_JSON,
+    "greetings_trigger.json": GREETINGS_TRIGGER_JSON,
+    "greetings_trigger.example.json": GREETINGS_TRIGGER_EXAMPLE_JSON,
 }
 
 

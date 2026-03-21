@@ -9,6 +9,7 @@ from typing import Any
 import discord
 
 from app.services.footer import attach_footer_meta
+from app.services.greetings_copy_service import GreetingsCopyService
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def build_template_context(
     *,
     user: discord.abc.User | discord.Member | Any,
     guild: discord.Guild | Any,
+    event_type_key: str = "kick",
     moderator: discord.abc.User | discord.Member | None = None,
     reason: str | None = None,
     duration_seconds: int | None = None,
@@ -60,42 +62,23 @@ def build_template_context(
     days_inactive: int | None = None,
     inactivity_text: str | None = None,
 ) -> dict[str, Any]:
-    username = getattr(user, "name", "Utente")
-    display_name = getattr(user, "display_name", username)
-    mention = getattr(user, "mention", f"<@{getattr(user, 'id', '0')}>")
-    moderator_name = getattr(moderator, "display_name", getattr(moderator, "name", "Sistema")) if moderator else "Sistema"
-    moderator_mention = getattr(moderator, "mention", moderator_name) if moderator else "Sistema"
-    duration_human = format_duration_human(duration_seconds)
-    duration_days = None if duration_seconds is None else max(1, int(duration_seconds // 86400))
-    expires_text = ""
-    if expires_at is not None:
-        expires_text = expires_at.astimezone(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
-    return {
-        "user": username,
-        "username": username,
-        "display_name": display_name,
-        "mention": mention,
-        "user_id": str(getattr(user, "id", "")),
-        "server": getattr(guild, "name", "Server"),
-        "guild_id": str(getattr(guild, "id", "")),
-        "moderator": moderator_name,
-        "moderator_mention": moderator_mention,
-        "reason": reason or "",
-        "duration": duration_human or "",
-        "duration_days": "" if duration_days is None else str(duration_days),
-        "expires_at": expires_text,
-        "rejoin_link": rejoin_link or "",
-        "days_inactive": "" if days_inactive is None else str(days_inactive),
-        "inactivity_text": inactivity_text or "",
-    }
+    service = GreetingsCopyService(database=None)
+    return service.build_template_context(
+        user=user,
+        guild=guild,
+        event_type_key=event_type_key,
+        moderator=moderator,
+        reason=reason,
+        duration_seconds=duration_seconds,
+        expires_at=expires_at,
+        rejoin_link=rejoin_link,
+        days_inactive=days_inactive,
+        inactivity_text=inactivity_text,
+    )
 
 
 def render_moderation_template(template: str | None, **context: Any) -> str:
-    base = template or ""
-    try:
-        return base.format(**context)
-    except Exception as exc:  # noqa: BLE001
-        return f"[Errore render template: {exc}]\n{base}"
+    return GreetingsCopyService(database=None).render_moderation_template(template, **context)
 
 
 async def generate_member_flow_card(
@@ -148,9 +131,10 @@ async def generate_member_flow_card(
 
 
 class MemberFlowNotificationsService:
-    def __init__(self, database: Any, bot: discord.Client) -> None:
+    def __init__(self, database: Any, bot: discord.Client, *, barcello_service: Any | None = None) -> None:
         self._database = database
         self._bot = bot
+        self._copy_service = GreetingsCopyService(database, barcello_service=barcello_service)
         self._recent_departures: dict[tuple[str, str], tuple[str, datetime]] = {}
 
     def remember_departure_action(self, guild_id: str, user_id: str, action_type: str) -> None:
@@ -179,7 +163,7 @@ class MemberFlowNotificationsService:
         expires_at: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        await self._database.log_moderation_action(
+        action_id = await self._database.log_moderation_action(
             guild_id=guild_id,
             user_id=user_id,
             moderator_id=moderator_id,
@@ -189,6 +173,24 @@ class MemberFlowNotificationsService:
             expires_at=expires_at,
             metadata=metadata or {},
         )
+        source = str((metadata or {}).get("source") or "member_flow_notifications")
+        try:
+            await self._database.insert_member_flow_event(
+                guild_id=guild_id,
+                user_id=user_id,
+                event_type_key=action_type,
+                moderator_id=moderator_id,
+                reason=reason,
+                duration_seconds=duration_seconds,
+                expires_at=expires_at,
+                source=source,
+                source_ref=f"moderation_actions:{action_id}",
+                operation_id=str((metadata or {}).get("operation_id")) if (metadata or {}).get("operation_id") else None,
+                visible_in_greetings=bool((metadata or {}).get("visible_in_greetings", True)),
+                metadata=metadata or {},
+            )
+        except Exception:
+            logger.warning("member flow event mirror failed guild=%s user=%s action=%s", guild_id, user_id, action_type, exc_info=True)
         if action_type in {"kick", "ban", "tempban", "inactive_kick", "inactive_tempban"}:
             self.remember_departure_action(guild_id, user_id, action_type)
 
@@ -215,9 +217,27 @@ class MemberFlowNotificationsService:
             return
 
         created_at = datetime.now(timezone.utc)
+        copy = await self._copy_service.render_event_copy(
+            guild=guild,
+            user=user,
+            event_type_key=action_type,
+            moderator=moderator,
+            reason=reason,
+            duration_seconds=duration_seconds,
+            expires_at=expires_at,
+            metadata={
+                **(metadata or {}),
+                "notify_channel_id": str(notify_channel_id),
+                "atrio_channel_id": str(cfg.get("atrio_channel_id") or ""),
+                "rejoin_link": str(cfg.get("invite_url") or ""),
+            },
+            channel_id=str(notify_channel_id),
+        )
         embed = discord.Embed(title="🚪 INGRESSI & USCITE", colour=discord.Colour.blurple(), timestamp=created_at)
         embed.add_field(name="Utente", value=getattr(user, "mention", f"<@{user.id}>"), inline=True)
-        embed.add_field(name="Evento", value=action_type.replace("_", " "), inline=True)
+        embed.add_field(name="Evento", value=copy.event_label, inline=True)
+        embed.add_field(name=copy.status_field_name, value=copy.status_field_value[:1024], inline=False)
+        embed.add_field(name="Narrazione", value=copy.narrative[:1024], inline=False)
         if reason:
             embed.add_field(name="Motivo", value=reason[:1024], inline=False)
         if duration_seconds is not None:
