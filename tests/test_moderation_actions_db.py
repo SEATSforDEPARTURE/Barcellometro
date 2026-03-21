@@ -76,7 +76,7 @@ if "aiosqlite" not in sys.modules:
 from app.services.database import DatabaseService
 
 
-def test_inactivity_config_backward_compatibility_notify_and_template(tmp_path) -> None:
+def test_inactivity_config_backward_compatibility_notify_channel_only(tmp_path) -> None:
     async def _run() -> None:
         db = DatabaseService(str(tmp_path / "test.sqlite"))
         await db.connect()
@@ -84,13 +84,11 @@ def test_inactivity_config_backward_compatibility_notify_and_template(tmp_path) 
         await db.upsert_inactivity_config("1", atrio_channel_id="555", atrio_template="legacy {display_name}")
 
         cfg = await db.get_inactivity_config("1")
-        templates = await db.get_moderation_templates("1")
 
         assert cfg is not None
         assert cfg["notify_channel_id"] == "555"
-        assert cfg["template_inactivity_reason"] == "legacy {display_name}"
-        assert templates["notify_channel_id"] == "555"
-        assert templates["template_inactivity_reason"] == "legacy {display_name}"
+        assert cfg["atrio_template"] == "legacy {display_name}"
+        assert cfg["template_inactivity_reason"] is None
 
         await db.close()
     asyncio.run(_run())

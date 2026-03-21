@@ -4516,7 +4516,6 @@ class DatabaseService:
             return None
         data = dict(row)
         data["notify_channel_id"] = data.get("notify_channel_id") or data.get("atrio_channel_id")
-        data["template_inactivity_reason"] = data.get("template_inactivity_reason") or data.get("atrio_template")
         return data
 
     async def upsert_inactivity_config(self, guild_id: str, **fields: Any) -> None:
@@ -4582,21 +4581,6 @@ class DatabaseService:
             f"INSERT INTO inactivity_config ({', '.join(columns)}) VALUES ({placeholders}) ON CONFLICT(guild_id) DO UPDATE SET {update_cols}",
             tuple(values),
         )
-
-    async def get_moderation_templates(self, guild_id: str) -> dict[str, Any]:
-        cfg = await self.get_inactivity_config(guild_id)
-        data = dict(cfg) if cfg else {}
-        return {
-            "notify_channel_id": data.get("notify_channel_id") or data.get("atrio_channel_id"),
-            "notify_card_enabled": int(data.get("notify_card_enabled") or 0),
-            "template_inactivity_reason": data.get("template_inactivity_reason") or data.get("atrio_template") or "{display_name} ha lasciato il server per inattività ({inactivity_text}).",
-            "template_kick_reason": data.get("template_kick_reason") or "Allontanamento manuale dal server.",
-            "template_ban_reason": data.get("template_ban_reason") or "Ban permanente manuale dal server.",
-            "template_tempban_reason": data.get("template_tempban_reason") or "Ban temporaneo dal server per {duration}.",
-            "template_grace_reason": data.get("template_grace_reason") or "Grace attiva per {duration}.",
-            "dm_reminder_template": data.get("dm_reminder_template") or "",
-            "dm_kick_template": data.get("dm_kick_template") or "",
-        }
 
     async def set_notify_channel(self, guild_id: str, channel_id: str) -> None:
         await self.upsert_inactivity_config(guild_id, notify_channel_id=channel_id)

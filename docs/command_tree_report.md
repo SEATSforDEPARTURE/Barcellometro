@@ -2,9 +2,9 @@
 
 Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.
 
-- Commands discovered: **271**
+- Commands discovered: **268**
 - Errors: **0**
-- Warnings: **51**
+- Warnings: **50**
 
 ## Inventory
 
@@ -157,22 +157,19 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `frasi` | `—` | `template_user_reset` | Reset a user-specific phrase template | `app/plugins/commands_modular/triggers.py:604` |
 | `frasi` | `—` | `template_user_set` | Set a user-specific phrase template | `app/plugins/commands_modular/triggers.py:574` |
 | `frasi` | `—` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:591` |
-| `greetings` | `backfill` | `off` | Disable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:195` |
-| `greetings` | `backfill` | `on` | Enable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:184` |
-| `greetings` | `backfill` | `run` | Run greetings timeline backfill now. | `app/plugins/commands_modular/greetings.py:212` |
-| `greetings` | `backfill` | `status` | Show greetings timeline backfill status. | `app/plugins/commands_modular/greetings.py:206` |
-| `greetings` | `—` | `notify_reset` | Reset the greetings notification channel. | `app/plugins/commands_modular/greetings.py:299` |
-| `greetings` | `—` | `notify_set` | Set the greetings notification channel. | `app/plugins/commands_modular/greetings.py:277` |
-| `greetings` | `—` | `notify_show` | Show the greetings notification channel. | `app/plugins/commands_modular/greetings.py:291` |
-| `greetings` | `—` | `off` | Disable greetings notifications. | `app/plugins/commands_modular/greetings.py:263` |
-| `greetings` | `—` | `on` | Enable greetings notifications for a channel. | `app/plugins/commands_modular/greetings.py:243` |
-| `greetings` | `—` | `status` | Show the greetings configuration status. | `app/plugins/commands_modular/greetings.py:270` |
-| `greetings` | `—` | `template_reset` | Reset a greetings template. | `app/plugins/commands_modular/greetings.py:372` |
-| `greetings` | `—` | `template_set` | Set a greetings template. | `app/plugins/commands_modular/greetings.py:307` |
-| `greetings` | `—` | `template_show` | Show greetings templates. | `app/plugins/commands_modular/greetings.py:319` |
-| `greetings` | `—` | `user_card_reset` | Reset the greetings notification user card setting. | `app/plugins/commands_modular/greetings.py:399` |
-| `greetings` | `—` | `user_card_set` | Set whether greetings notifications include the user card. | `app/plugins/commands_modular/greetings.py:384` |
-| `greetings` | `—` | `user_card_show` | Show whether the greetings notification user card is enabled. | `app/plugins/commands_modular/greetings.py:391` |
+| `greetings` | `backfill` | `off` | Disable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:102` |
+| `greetings` | `backfill` | `on` | Enable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:91` |
+| `greetings` | `backfill` | `run` | Run greetings timeline backfill now. | `app/plugins/commands_modular/greetings.py:119` |
+| `greetings` | `backfill` | `status` | Show greetings timeline backfill status. | `app/plugins/commands_modular/greetings.py:113` |
+| `greetings` | `—` | `notify_reset` | Reset the greetings notification channel. | `app/plugins/commands_modular/greetings.py:206` |
+| `greetings` | `—` | `notify_set` | Set the greetings notification channel. | `app/plugins/commands_modular/greetings.py:184` |
+| `greetings` | `—` | `notify_show` | Show the greetings notification channel. | `app/plugins/commands_modular/greetings.py:198` |
+| `greetings` | `—` | `off` | Disable greetings notifications. | `app/plugins/commands_modular/greetings.py:170` |
+| `greetings` | `—` | `on` | Enable greetings notifications for a channel. | `app/plugins/commands_modular/greetings.py:150` |
+| `greetings` | `—` | `status` | Show the greetings configuration status. | `app/plugins/commands_modular/greetings.py:177` |
+| `greetings` | `—` | `user_card_reset` | Reset the greetings notification user card setting. | `app/plugins/commands_modular/greetings.py:229` |
+| `greetings` | `—` | `user_card_set` | Set whether greetings notifications include the user card. | `app/plugins/commands_modular/greetings.py:214` |
+| `greetings` | `—` | `user_card_show` | Show whether the greetings notification user card is enabled. | `app/plugins/commands_modular/greetings.py:221` |
 | `inactivity` | `autokick` | `off` | Disable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:226` |
 | `inactivity` | `autokick` | `on` | Enable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:219` |
 | `inactivity` | `autokick` | `status` | Show the automatic inactivity action status. | `app/plugins/commands_modular/inattivi.py:233` |
@@ -217,13 +214,13 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `insights` | `—` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1026` |
 | `insights` | `—` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:1004` |
 | `insights` | `—` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1014` |
-| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:171` |
-| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:186` |
+| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:172` |
+| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:187` |
 | `mod` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:235` |
-| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:265` |
-| `mod` | `users` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:144` |
-| `mod` | `users` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:159` |
-| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:195` |
+| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:264` |
+| `mod` | `users` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:145` |
+| `mod` | `users` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:160` |
+| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:196` |
 | `mod` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:226` |
 | `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:90` |
 | `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:68` |
@@ -316,8 +313,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'threshold' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:486`)
 - **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:486`)
 - **WARNING required_param** — `frasi.template_user_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:574`)
-- **WARNING required_param** — `greetings.template_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/greetings.py:307`)
-- **WARNING required_param** — `greetings.user_card_set`: Parameter 'enabled' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/greetings.py:384`)
+- **WARNING required_param** — `greetings.user_card_set`: Parameter 'enabled' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/greetings.py:214`)
 - **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:364`)
 - **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:389`)
 - **WARNING required_param** — `inactivity.dms.template_reminder_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:335`)
