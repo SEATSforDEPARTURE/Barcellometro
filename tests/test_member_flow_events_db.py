@@ -214,9 +214,13 @@ def test_member_flow_events_recent_visible_departures_and_operation_id(tmp_path)
         )
 
         recent_departures = await db.list_recent_visible_departures("55", "7", "2026-03-18T00:00:00+00:00")
+        has_departure_cause = await db.has_recent_visible_departure_cause("55", "7", "2026-03-18T00:00:00+00:00")
+        has_grace_departure_cause = await db.has_recent_visible_departure_cause("55", "7", "2026-03-20T08:00:01+00:00")
         operation_rows = await db.list_member_flow_events_by_operation_id("55", operation_id)
 
         assert [row["event_type_key"] for row in recent_departures] == ["inactive_tempban"]
+        assert has_departure_cause is True
+        assert has_grace_departure_cause is False
         assert recent_departures[0]["id"] == visible_departure["id"]
         assert [row["event_type_key"] for row in operation_rows] == ["inactive_grace", "inactive_tempban"]
         assert all(row["operation_id"] == operation_id for row in operation_rows)

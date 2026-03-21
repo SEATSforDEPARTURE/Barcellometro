@@ -811,6 +811,9 @@ class InactiveMembersModerationService:
                 stats["dm_fail"] += 1
                 stats["errors"].append(f"dm {user_id}: {exc.__class__.__name__}")
             try:
+                if self._member_flow_notifications is not None and hasattr(self._member_flow_notifications, "remember_departure_intent"):
+                    departure_type = "inactive_tempban" if ban_days > 0 else "inactive_kick"
+                    self._member_flow_notifications.remember_departure_intent(guild_id, str(user_id), departure_type)
                 await candidate.member.kick(reason="Inattività prolungata")
                 stats["kick_ok"] += 1
             except Exception as exc:

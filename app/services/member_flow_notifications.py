@@ -17,14 +17,6 @@ _DURATION_RE = re.compile(r"^\s*(\d+)\s*([dhm])\s*$", re.IGNORECASE)
 _CARD_SIZE = (900, 300)
 _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS = 300
 _BLANK_FIELD_NAME = "​"
-_VISIBLE_DEPARTURE_PRECEDENCE = {
-    "leave": 10,
-    "inactive_kick": 20,
-    "kick": 30,
-    "ban": 40,
-    "tempban": 50,
-    "inactive_tempban": 60,
-}
 _EXPLICIT_DEPARTURE_TYPES = frozenset(
     {
         "kick",
@@ -143,20 +135,22 @@ class MemberFlowNotificationsService:
             return bool(metadata["visible_in_greetings"])
         return True
 
+    def remember_departure_intent(self, guild_id: str, user_id: str, action_type: str) -> None:
+        if action_type in _EXPLICIT_DEPARTURE_TYPES:
+            self.remember_departure_action(guild_id, user_id, action_type)
+
     async def should_skip_leave_event(self, guild_id: str, user_id: str, *, window_seconds: int = _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS) -> bool:
         recent_action = self._recent_memory_departure(guild_id, user_id, window_seconds=window_seconds)
         if recent_action in _EXPLICIT_DEPARTURE_TYPES:
             return True
 
         since_iso = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).isoformat()
+        if hasattr(self._database, "has_recent_visible_departure_cause"):
+            return bool(await self._database.has_recent_visible_departure_cause(guild_id, user_id, since_iso))
         if not hasattr(self._database, "list_recent_visible_departures"):
             return False
         rows = await self._database.list_recent_visible_departures(guild_id, user_id, since_iso)
-        for row in rows:
-            event_type = str(row.get("event_type_key") or "")
-            if _VISIBLE_DEPARTURE_PRECEDENCE.get(event_type, 0) > _VISIBLE_DEPARTURE_PRECEDENCE["leave"]:
-                return True
-        return False
+        return any(str(row.get("event_type_key") or "") in _EXPLICIT_DEPARTURE_TYPES for row in rows)
 
     async def log_action(
         self,

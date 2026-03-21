@@ -146,6 +146,8 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         if not await _ensure(interaction) or interaction.guild is None:
             return
         resolved_reason = reason or await _default_reason("kick", user=user, guild=interaction.guild, moderator=interaction.user)
+        if ctx.member_flow_notifications is not None and hasattr(ctx.member_flow_notifications, "remember_departure_intent"):
+            ctx.member_flow_notifications.remember_departure_intent(str(interaction.guild.id), str(user.id), "kick")
         await user.kick(reason=resolved_reason)
         await _notify_action(guild=interaction.guild, user=user, action_type="kick", reason=resolved_reason, moderator=interaction.user)
         await _send(
@@ -173,6 +175,8 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         if not await _ensure(interaction) or interaction.guild is None:
             return
         resolved_reason = reason or await _default_reason("ban", user=user, guild=interaction.guild, moderator=interaction.user)
+        if ctx.member_flow_notifications is not None and hasattr(ctx.member_flow_notifications, "remember_departure_intent"):
+            ctx.member_flow_notifications.remember_departure_intent(str(interaction.guild.id), str(user.id), "ban")
         await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
         await _notify_action(guild=interaction.guild, user=user, action_type="ban", reason=resolved_reason, moderator=interaction.user)
         await _send(
@@ -206,6 +210,8 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             duration_seconds=duration_seconds,
             expires_at=expires_at,
         )
+        if ctx.member_flow_notifications is not None and hasattr(ctx.member_flow_notifications, "remember_departure_intent"):
+            ctx.member_flow_notifications.remember_departure_intent(str(interaction.guild.id), str(user.id), "tempban")
         await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
         await ctx.database.add_temp_ban(str(interaction.guild.id), str(user.id), expires_at.isoformat(), resolved_reason)
         await _notify_action(guild=interaction.guild, user=user, action_type="tempban", reason=resolved_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)

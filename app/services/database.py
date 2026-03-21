@@ -32,6 +32,13 @@ _MEMBER_FLOW_EVENT_TYPES = (
     "inactive_grace",
 )
 _MEMBER_FLOW_VISIBLE_DEPARTURE_TYPES = tuple(event_type for event_type in _MEMBER_FLOW_EVENT_TYPES if event_type != "join")
+_MEMBER_FLOW_LEAVE_SUPPRESSING_EVENT_TYPES = (
+    "kick",
+    "ban",
+    "tempban",
+    "inactive_kick",
+    "inactive_tempban",
+)
 
 
 class _AsyncCursorWrapper:
@@ -4844,6 +4851,24 @@ class DatabaseService:
             (guild_id, user_id, since_iso, *_MEMBER_FLOW_VISIBLE_DEPARTURE_TYPES),
         )
         return [self._normalize_member_flow_event_row(row) for row in rows]
+
+    async def has_recent_visible_departure_cause(self, guild_id: str, user_id: str, since_iso: str) -> bool:
+        placeholders = ", ".join("?" for _ in _MEMBER_FLOW_LEAVE_SUPPRESSING_EVENT_TYPES)
+        row = await self.fetchone(
+            f"""
+            SELECT 1
+            FROM member_flow_events
+            WHERE guild_id = ?
+              AND user_id = ?
+              AND visible_in_greetings = 1
+              AND occurred_at >= ?
+              AND event_type_key IN ({placeholders})
+            ORDER BY occurred_at DESC
+            LIMIT 1
+            """,
+            (guild_id, user_id, since_iso, *_MEMBER_FLOW_LEAVE_SUPPRESSING_EVENT_TYPES),
+        )
+        return row is not None
 
     async def list_member_flow_events_by_operation_id(self, guild_id: str, operation_id: str) -> list[dict[str, Any]]:
         rows = await self.fetchall(

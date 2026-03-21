@@ -105,6 +105,14 @@ def test_member_flow_service_dedupes_leave_after_explicit_action(member_flow_mod
     assert asyncio.run(service.should_skip_leave_event("1", "2")) is True
 
 
+def test_member_flow_service_remember_departure_intent_ignores_non_departures(member_flow_module) -> None:
+    service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+    service.remember_departure_intent("1", "2", "grace")
+    assert asyncio.run(service.should_skip_leave_event("1", "2")) is False
+    service.remember_departure_intent("1", "2", "ban")
+    assert asyncio.run(service.should_skip_leave_event("1", "2")) is True
+
+
 def test_member_flow_log_action_writes_raw_and_canonical_join_leave_and_manual_departures(member_flow_module, tmp_path) -> None:
     async def _run() -> None:
         db = DatabaseService(str(tmp_path / "member_flow.sqlite"))
@@ -259,6 +267,81 @@ def test_member_flow_leave_dedupe_is_restart_safe_and_ignores_non_departures(mem
         assert leave_after_grace["canonical_written"] is True
         assert int(raw_leave_count["total"]) == 1
         assert int(canonical_leave_count["total"]) == 0
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_member_flow_leave_is_suppressed_for_all_visible_departure_causes(member_flow_module, tmp_path) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "member_flow_departure_causes.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+
+        service = member_flow_module.MemberFlowNotificationsService(db, object())
+        suppressing_actions = (
+            "kick",
+            "inactive_kick",
+            "ban",
+            "tempban",
+            "inactive_tempban",
+        )
+        for index, action_type in enumerate(suppressing_actions, start=1):
+            user_id = str(index)
+            kwargs = {
+                "guild_id": "500",
+                "user_id": user_id,
+                "action_type": action_type,
+                "reason": f"{action_type} test",
+                "metadata": {"source": "tests"},
+            }
+            if "tempban" in action_type:
+                kwargs["duration_seconds"] = 3600
+                kwargs["expires_at"] = f"2026-03-21T0{index}:00:00+00:00"
+            departure_result = await service.log_action(**kwargs)
+            leave_result = await service.log_action(
+                guild_id="500",
+                user_id=user_id,
+                action_type="leave",
+                reason=f"leave dopo {action_type}",
+                metadata={"source": "discord_adapter"},
+            )
+            canonical_leave_count = await db.count_member_flow_events_for_user("500", user_id, "leave", visible_only=False)
+
+            assert departure_result["canonical_written"] is True
+            assert leave_result["canonical_written"] is False
+            assert canonical_leave_count == 0
+
+        voluntary_leave = await service.log_action(
+            guild_id="500",
+            user_id="voluntary",
+            action_type="leave",
+            reason="uscita volontaria",
+            metadata={"source": "discord_adapter"},
+        )
+        voluntary_leave_count = await db.count_member_flow_events_for_user("500", "voluntary", "leave")
+
+        assert voluntary_leave["canonical_written"] is True
+        assert voluntary_leave_count == 1
+
+        rows = await db.fetchall(
+            """
+            SELECT user_id, event_type_key, visible_in_greetings
+            FROM member_flow_events
+            WHERE guild_id = ?
+            ORDER BY user_id ASC, occurred_at ASC, id ASC
+            """,
+            ("500",),
+        )
+        assert [(row["user_id"], row["event_type_key"], int(row["visible_in_greetings"])) for row in rows] == [
+            ("1", "kick", 1),
+            ("2", "inactive_kick", 1),
+            ("3", "ban", 1),
+            ("4", "tempban", 1),
+            ("5", "inactive_tempban", 1),
+            ("voluntary", "leave", 1),
+        ]
 
         await db.close()
 

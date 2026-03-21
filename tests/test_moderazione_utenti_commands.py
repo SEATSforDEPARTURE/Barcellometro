@@ -2,9 +2,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import discord
+import pytest
 
-from app.plugins.commands_modular.greetings import register_greetings
+discord = pytest.importorskip("discord")
+try:
+    from app.plugins.commands_modular.greetings import register_greetings
+except ImportError:  # pragma: no cover - environment-dependent optional import
+    pytestmark = pytest.mark.skip(reason="discord.app_commands non disponibile nell'ambiente di test")
 
 
 def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None:
@@ -106,3 +110,18 @@ def test_greetings_tree_has_no_preview_command() -> None:
         "user_card_reset",
     }
     assert "preview" not in names
+
+
+def test_manual_departure_commands_predeclare_departure_intent() -> None:
+    source = Path("app/plugins/commands_modular/moderazione_utenti.py").read_text()
+
+    assert 'remember_departure_intent(str(interaction.guild.id), str(user.id), "kick")' in source
+    assert 'remember_departure_intent(str(interaction.guild.id), str(user.id), "ban")' in source
+    assert 'remember_departure_intent(str(interaction.guild.id), str(user.id), "tempban")' in source
+
+
+def test_inactive_pipeline_predeclares_final_departure_intent() -> None:
+    source = Path("app/services/inactive_members_moderation.py").read_text()
+
+    assert 'departure_type = "inactive_tempban" if ban_days > 0 else "inactive_kick"' in source
+    assert "remember_departure_intent(guild_id, str(user_id), departure_type)" in source
