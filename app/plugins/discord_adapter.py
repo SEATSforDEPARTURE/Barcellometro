@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 import discord
@@ -13,6 +14,9 @@ from app.services.ingest import EventEnvelope, IngestService
 from app.shared.safety.pii import redact_pii
 
 logger = logging.getLogger(__name__)
+_DISCORD_NATIVE_MOD_AUDIT_WINDOW_SECONDS = 15
+_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS = 3
+_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS = 0.75
 
 
 def _now_iso() -> str:
@@ -35,6 +39,109 @@ def setup(registry: ServiceRegistry) -> None:
     warned_disabled_channels: set[str] = set()
     channel_runtime_fingerprint: dict[str, tuple[str, str, str | None, int, int]] = {}
     voice_event_dedupe: dict[tuple[str, str, str, str | None, str | None], datetime] = {}
+
+    def _get_audit_action(action_name: str) -> Any | None:
+        audit_enum = getattr(discord, "AuditLogAction", None)
+        return getattr(audit_enum, action_name, None) if audit_enum is not None else None
+
+    def _normalize_audit_timestamp(value: Any) -> datetime | None:
+        if not isinstance(value, datetime):
+            return None
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+    async def _fetch_recent_audit_entry(
+        guild: discord.Guild,
+        *,
+        action_name: str,
+        target_id: str,
+        window_seconds: int = _DISCORD_NATIVE_MOD_AUDIT_WINDOW_SECONDS,
+    ) -> dict[str, Any] | None:
+        action = _get_audit_action(action_name)
+        audit_logs = getattr(guild, "audit_logs", None)
+        if action is None or audit_logs is None:
+            return None
+        try:
+            async for entry in audit_logs(limit=6, action=action):
+                entry_target = getattr(entry, "target", None)
+                if str(getattr(entry_target, "id", "")) != target_id:
+                    continue
+                created_at = _normalize_audit_timestamp(getattr(entry, "created_at", None))
+                if created_at is not None and (datetime.now(timezone.utc) - created_at) > timedelta(seconds=window_seconds):
+                    continue
+                moderator = getattr(entry, "user", None)
+                return {
+                    "entry_id": str(getattr(entry, "id", "")) or None,
+                    "reason": str(getattr(entry, "reason", "")).strip() or None,
+                    "moderator_id": str(getattr(moderator, "id", "")) or None,
+                    "moderator": moderator,
+                    "created_at": created_at.isoformat() if created_at is not None else None,
+                    "action_type": "ban" if action_name == "ban" else "kick",
+                }
+        except (discord.Forbidden, discord.HTTPException):
+            logger.info("Native moderation audit log unavailable guild=%s action=%s", guild.id, action_name, exc_info=True)
+        except Exception:
+            logger.warning("Native moderation audit log lookup failed guild=%s action=%s", guild.id, action_name, exc_info=True)
+        return None
+
+    async def _resolve_native_departure(member: discord.Member) -> dict[str, Any] | None:
+        guild_id = str(member.guild.id)
+        user_id = str(member.id)
+        recent_departure_getter = getattr(member_flow_notifications, "get_recent_departure_action", None)
+        if recent_departure_getter is not None:
+            recent_action = recent_departure_getter(guild_id, user_id)
+            if recent_action in {"ban", "kick"}:
+                return {
+                    "action_type": recent_action,
+                    "reason": None,
+                    "moderator_id": None,
+                    "moderator": None,
+                    "entry_id": None,
+                    "created_at": None,
+                    "source": "departure_memory",
+                    "skip_logging": True,
+                }
+
+        for attempt in range(_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS):
+            ban_match = await _fetch_recent_audit_entry(member.guild, action_name="ban", target_id=user_id)
+            if ban_match is not None:
+                return {**ban_match, "source": "audit_log", "skip_logging": False}
+            kick_match = await _fetch_recent_audit_entry(member.guild, action_name="kick", target_id=user_id)
+            if kick_match is not None:
+                return {**kick_match, "source": "audit_log", "skip_logging": False}
+            if attempt + 1 < _DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS:
+                await asyncio.sleep(_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS)
+        return None
+
+    async def _log_member_flow_action(
+        *,
+        guild: discord.Guild,
+        user: discord.abc.User | discord.Member,
+        action_type: str,
+        reason: str | None,
+        moderator_id: str | None = None,
+        moderator: discord.abc.User | discord.Member | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if member_flow_notifications is None:
+            return None
+        result = await member_flow_notifications.log_action(
+            guild_id=str(guild.id),
+            user_id=str(user.id),
+            moderator_id=moderator_id,
+            action_type=action_type,
+            reason=reason,
+            metadata=metadata,
+        )
+        if result.get("canonical_written") and result.get("canonical_visible"):
+            await member_flow_notifications.send_notification(
+                guild=guild,
+                user=user,
+                action_type=action_type,
+                reason=reason,
+                moderator=moderator,
+                canonical_event=result.get("canonical_event"),
+            )
+        return result
 
     async def ensure_channel_record(channel: discord.abc.GuildChannel) -> bool:
         channel_id = str(channel.id)
@@ -419,23 +526,13 @@ def setup(registry: ServiceRegistry) -> None:
     async def on_member_join(member: discord.Member) -> None:
         ts = _now_iso()
         await record_user(member, member.guild, False, ts)
-        if member_flow_notifications is not None:
-            result = await member_flow_notifications.log_action(
-                guild_id=str(member.guild.id),
-                user_id=str(member.id),
-                moderator_id=None,
-                action_type="join",
-                reason="Ingresso nel server",
-                metadata={"source": "discord_adapter"},
-            )
-            if result.get("canonical_written") and result.get("canonical_visible"):
-                await member_flow_notifications.send_notification(
-                    guild=member.guild,
-                    user=member,
-                    action_type="join",
-                    reason="Ingresso nel server",
-                    canonical_event=result.get("canonical_event"),
-                )
+        await _log_member_flow_action(
+            guild=member.guild,
+            user=member,
+            action_type="join",
+            reason="Ingresso nel server",
+            metadata={"source": "discord_adapter"},
+        )
         await emit_event(
             "member.join",
             guild_id=str(member.guild.id),
@@ -449,30 +546,122 @@ def setup(registry: ServiceRegistry) -> None:
     async def on_member_remove(member: discord.Member) -> None:
         ts = _now_iso()
         await record_user(member, member.guild, False, ts)
-        if member_flow_notifications is not None:
-            result = await member_flow_notifications.log_action(
-                guild_id=str(member.guild.id),
-                user_id=str(member.id),
-                moderator_id=None,
-                action_type="leave",
-                reason="Uscita dal server",
-                metadata={"source": "discord_adapter"},
+        native_departure = await _resolve_native_departure(member)
+        action_type = str(native_departure.get("action_type") or "leave") if native_departure is not None else "leave"
+        reason = (
+            str(native_departure.get("reason") or "").strip() or None
+            if native_departure is not None
+            else None
+        )
+        if action_type == "kick":
+            default_reason = "Allontanamento tramite moderazione nativa Discord"
+        elif action_type == "ban":
+            default_reason = "Ban tramite moderazione nativa Discord"
+        else:
+            default_reason = "Uscita dal server"
+        metadata = {
+            "source": "discord_adapter",
+            "native_moderation": native_departure is not None,
+        }
+        if native_departure is not None:
+            metadata.update(
+                {
+                    "native_moderation_source": native_departure.get("source"),
+                    "discord_audit_action": native_departure.get("action_type"),
+                    "discord_audit_entry_id": native_departure.get("entry_id"),
+                    "discord_audit_created_at": native_departure.get("created_at"),
+                }
             )
-            if result.get("canonical_written") and result.get("canonical_visible"):
-                await member_flow_notifications.send_notification(
-                    guild=member.guild,
-                    user=member,
-                    action_type="leave",
-                    reason="Uscita dal server",
-                    canonical_event=result.get("canonical_event"),
-                )
+        if not bool(native_departure and native_departure.get("skip_logging")):
+            await _log_member_flow_action(
+                guild=member.guild,
+                user=member,
+                action_type=action_type,
+                reason=reason or default_reason,
+                moderator_id=(
+                    str(native_departure.get("moderator_id") or "").strip() or None
+                    if native_departure is not None
+                    else None
+                ),
+                moderator=native_departure.get("moderator") if native_departure is not None else None,
+                metadata=metadata,
+            )
         await emit_event(
             "member.leave",
             guild_id=str(member.guild.id),
             channel_id=None,
             author_id=str(member.id),
             content=None,
-            meta={"target_id": str(member.id)},
+            meta={
+                "target_id": str(member.id),
+                "departure_type": action_type,
+                "native_moderation": native_departure is not None,
+            },
+        )
+
+    @bot.event
+    async def on_member_ban(guild: discord.Guild, user: discord.abc.User) -> None:
+        ts = _now_iso()
+        await record_user(user, guild, False, ts)
+        native_departure = await _fetch_recent_audit_entry(guild, action_name="ban", target_id=str(user.id))
+        recent_departure_getter = getattr(member_flow_notifications, "get_recent_departure_action", None)
+        if recent_departure_getter is not None and recent_departure_getter(str(guild.id), str(user.id)) == "ban":
+            native_departure = native_departure or {"action_type": "ban", "reason": None, "moderator_id": None, "moderator": None, "entry_id": None, "created_at": None}
+        else:
+            metadata = {
+                "source": "discord_adapter",
+                "native_moderation": True,
+                "native_moderation_source": "member_ban_event",
+                "discord_audit_action": "ban",
+                "discord_audit_entry_id": native_departure.get("entry_id") if native_departure is not None else None,
+                "discord_audit_created_at": native_departure.get("created_at") if native_departure is not None else None,
+            }
+            await _log_member_flow_action(
+                guild=guild,
+                user=user,
+                action_type="ban",
+                reason=(native_departure.get("reason") if native_departure is not None else None) or "Ban tramite moderazione nativa Discord",
+                moderator_id=(native_departure.get("moderator_id") if native_departure is not None else None),
+                moderator=(native_departure.get("moderator") if native_departure is not None else None),
+                metadata=metadata,
+            )
+        await emit_event(
+            "member.ban",
+            guild_id=str(guild.id),
+            channel_id=None,
+            author_id=str(user.id),
+            content=None,
+            meta={"target_id": str(user.id)},
+        )
+
+    @bot.event
+    async def on_member_unban(guild: discord.Guild, user: discord.abc.User) -> None:
+        ts = _now_iso()
+        await record_user(user, guild, False, ts)
+        native_departure = await _fetch_recent_audit_entry(guild, action_name="unban", target_id=str(user.id))
+        if member_flow_notifications is not None:
+            await member_flow_notifications.log_action(
+                guild_id=str(guild.id),
+                user_id=str(user.id),
+                moderator_id=(native_departure.get("moderator_id") if native_departure is not None else None),
+                action_type="unban",
+                reason=(native_departure.get("reason") if native_departure is not None else None) or "Revoca ban tramite moderazione nativa Discord",
+                metadata={
+                    "source": "discord_adapter",
+                    "native_moderation": True,
+                    "native_moderation_source": "member_unban_event",
+                    "discord_audit_action": "unban",
+                    "discord_audit_entry_id": native_departure.get("entry_id") if native_departure is not None else None,
+                    "discord_audit_created_at": native_departure.get("created_at") if native_departure is not None else None,
+                },
+            )
+        await emit_event(
+            "member.unban",
+            guild_id=str(guild.id),
+            channel_id=None,
+            author_id=str(user.id),
+            content=None,
+            meta={"target_id": str(user.id)},
         )
 
     @bot.event

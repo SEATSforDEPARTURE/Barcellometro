@@ -144,6 +144,9 @@ class MemberFlowNotificationsService:
     def remember_departure_action(self, guild_id: str, user_id: str, action_type: str) -> None:
         self._recent_departures[(guild_id, user_id)] = (action_type, datetime.now(timezone.utc))
 
+    def get_recent_departure_action(self, guild_id: str, user_id: str, *, window_seconds: int = _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS) -> str | None:
+        return self._recent_memory_departure(guild_id, user_id, window_seconds=window_seconds)
+
     def _recent_memory_departure(self, guild_id: str, user_id: str, *, window_seconds: int) -> str | None:
         key = (guild_id, user_id)
         current = self._recent_departures.get(key)
