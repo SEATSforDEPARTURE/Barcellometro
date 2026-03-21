@@ -20,18 +20,27 @@ def member_flow_module(monkeypatch):
     discord_stub = types.ModuleType("discord")
 
     class _Embed:
-        def __init__(self, *, title=None, colour=None, timestamp=None):
+        def __init__(self, *, title=None, description=None, colour=None, timestamp=None):
             self.title = title
+            self.description = description
             self.colour = colour
             self.timestamp = timestamp
             self.fields = []
             self.footer = types.SimpleNamespace(text=None)
+            self.author = types.SimpleNamespace(name=None)
+            self.thumbnail = types.SimpleNamespace(url=None)
 
         def add_field(self, *, name, value, inline=True):
             self.fields.append(types.SimpleNamespace(name=name, value=value, inline=inline))
 
         def set_footer(self, *, text=None):
             self.footer = types.SimpleNamespace(text=text)
+
+        def set_author(self, *, name=None):
+            self.author = types.SimpleNamespace(name=name)
+
+        def set_thumbnail(self, *, url=None):
+            self.thumbnail = types.SimpleNamespace(url=url)
 
     discord_stub.File = lambda *args, **kwargs: (args, kwargs)
     discord_stub.Client = object
@@ -311,16 +320,18 @@ def test_member_flow_inactive_tempban_hides_inactive_kick_in_same_operation(memb
     asyncio.run(_run())
 
 
-def test_source_contains_fixed_title_and_footer_service_name() -> None:
-    source = Path("app/services/member_flow_notifications.py").read_text()
-    assert 'title="🚪 INGRESSI & USCITE"' in source
+def test_source_contains_author_title_mapping_and_footer_service_name() -> None:
+    source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
+    assert 'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=discord.Colour.blurple())' in source
+    assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' in source
     assert 'service_name="member_flow_notifications"' in source
+    assert 'embed.add_field(name="Evento"' not in source
     assert 'timestamp=created_at' not in source
     assert 'set_footer(' not in source
     assert 'Oggi alle' not in source
 
 
-def test_send_notification_renders_final_two_field_layout_from_canonical_event(member_flow_module) -> None:
+def test_send_notification_renders_author_title_description_and_footer_from_canonical_event(member_flow_module) -> None:
     class _Channel:
         def __init__(self) -> None:
             self.sent = []
@@ -341,7 +352,13 @@ def test_send_notification_renders_final_two_field_layout_from_canonical_event(m
     async def _run() -> None:
         channel = _Channel()
         guild = _Guild(channel)
-        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
         service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
 
         await service.send_notification(
@@ -361,27 +378,26 @@ def test_send_notification_renders_final_two_field_layout_from_canonical_event(m
         )
 
         payload = channel.sent[0]["embed"]
-        assert payload.title == "🚪 INGRESSI & USCITE"
-        assert len(payload.fields) == 2
-        assert [field.name for field in payload.fields] == [
-            "Evento",
-            "​",
-        ]
-        assert [field.inline for field in payload.fields] == [True, False]
-        assert payload.fields[0].value == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
+        assert payload.author.name == "🚪 INGRESSI & USCITE"
+        assert payload.title == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
+        assert payload.description is not None
+        assert payload.description == payload.description[:4096]
+        assert payload.fields == []
+        assert payload.thumbnail.url == "https://example.test/avatar.png"
         assert payload.timestamp is None
-        assert 'Stato barcello "Barcellometro"' not in payload.fields[1].value
-        assert "ALLERTA" not in payload.fields[0].value
-        assert "inattività" in payload.fields[1].value.lower()
+        assert 'Stato barcello "Barcellometro"' not in payload.description
+        assert "ALLERTA" not in payload.title
+        assert "inattività" in payload.description.lower()
 
     asyncio.run(_run())
 
 
-def test_member_flow_renderer_source_mentions_final_fixed_layout() -> None:
+def test_member_flow_renderer_source_mentions_final_author_title_layout() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
 
-    assert "Layout canonico live: sempre e solo 2 campi" in source
-    assert 'embed.add_field(name="Evento"' in source
+    assert "Layout canonico live: author fisso per il canale GREETINGS" in source
+    assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' in source
+    assert 'embed.add_field(name="Evento"' not in source
     assert 'Stato barcello "' not in source
 
 
@@ -415,7 +431,13 @@ def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_mo
     async def _run() -> None:
         channel = _Channel()
         guild = _Guild(channel)
-        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
         service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
 
         await service.send_notification(
@@ -433,9 +455,10 @@ def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_mo
         )
 
         embed = channel.sent[0]
-        assert len(embed.fields) == 2
-        assert "benvenut" in embed.fields[1].value.lower()
-        assert "<@42>" in embed.fields[1].value
+        assert embed.author.name == "🚪 INGRESSI & USCITE"
+        assert embed.title == "**✨ PRIMO INGRESSO**"
+        assert "benvenut" in embed.description.lower()
+        assert "<@42>" in embed.description
         assert embed.footer.text == "Barcellometro dev"
         assert attached["service_name"] == "member_flow_notifications"
 
@@ -463,7 +486,13 @@ def test_send_notification_ignores_legacy_db_template_values(member_flow_module)
     async def _run() -> None:
         channel = _Channel()
         guild = _Guild(channel)
-        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
         service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
 
         await service.send_notification(
@@ -481,7 +510,7 @@ def test_send_notification_ignores_legacy_db_template_values(member_flow_module)
             },
         )
 
-        narrative = channel.sent[0].fields[1].value
+        narrative = channel.sent[0].description
         assert "LEGACY DB TEMPLATE" not in narrative
         assert "LEGACY ATRIO TEMPLATE" not in narrative
         assert "30 giorni" in narrative
@@ -489,7 +518,7 @@ def test_send_notification_ignores_legacy_db_template_values(member_flow_module)
     asyncio.run(_run())
 
 
-def test_send_notification_uses_copy_service_as_single_source_for_field_values(member_flow_module) -> None:
+def test_send_notification_uses_copy_service_as_single_source_for_title_and_description(member_flow_module) -> None:
     class _Channel:
         def __init__(self) -> None:
             self.sent = []
@@ -510,7 +539,13 @@ def test_send_notification_uses_copy_service_as_single_source_for_field_values(m
     async def _run() -> None:
         channel = _Channel()
         guild = _Guild(channel)
-        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
         service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
         service._copy_service.render_canonical_event_copy = types.MethodType(
             lambda self, **kwargs: asyncio.sleep(
@@ -536,10 +571,10 @@ def test_send_notification_uses_copy_service_as_single_source_for_field_values(m
         )
 
         embed = channel.sent[0]
-        assert [field.value for field in embed.fields] == [
-            "COPY EVENT LABEL",
-            "COPY NARRATIVE",
-        ]
+        assert embed.author.name == "🚪 INGRESSI & USCITE"
+        assert embed.title == "COPY EVENT LABEL"
+        assert embed.description == "COPY NARRATIVE"
+        assert embed.fields == []
 
     asyncio.run(_run())
 
@@ -565,7 +600,13 @@ def test_send_notification_reads_runtime_values_only_from_canonical_timeline(mem
     async def _run() -> None:
         channel = _Channel()
         guild = _Guild(channel)
-        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
         service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
         service._copy_service.render_event_copy = types.MethodType(  # type: ignore[method-assign]
             lambda self, **kwargs: (_ for _ in ()).throw(AssertionError("live runtime must use canonical timeline copy")),
@@ -595,9 +636,9 @@ def test_send_notification_reads_runtime_values_only_from_canonical_timeline(mem
         )
 
         embed = channel.sent[0]
-        assert [field.value for field in embed.fields] == [
-            "CANONICAL EVENT",
-            "CANONICAL NARRATIVE",
-        ]
+        assert embed.author.name == "🚪 INGRESSI & USCITE"
+        assert embed.title == "CANONICAL EVENT"
+        assert embed.description == "CANONICAL NARRATIVE"
+        assert embed.fields == []
 
     asyncio.run(_run())

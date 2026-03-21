@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*([dhm])\s*$", re.IGNORECASE)
 _CARD_SIZE = (900, 300)
 _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS = 300
-_BLANK_FIELD_NAME = "​"
 _VISIBLE_DEPARTURE_PRECEDENCE = {
     "leave": 10,
     "inactive_kick": 20,
@@ -272,12 +271,13 @@ class MemberFlowNotificationsService:
             channel_id=str(notify_channel_id),
             now=created_at,
         )
-        embed = discord.Embed(title="🚪 INGRESSI & USCITE", colour=discord.Colour.blurple())
-        # Layout canonico live: sempre e solo 2 campi, nell'ordine evento →
-        # narrativa larga. Lo stato barcello vive eventualmente nel testo
-        # narrativo tramite template JSON.
-        embed.add_field(name="Evento", value=copy.event_label, inline=True)
-        embed.add_field(name=_BLANK_FIELD_NAME, value=copy.narrative[:1024], inline=False)
+        embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=discord.Colour.blurple())
+        # Layout canonico live: author fisso per il canale GREETINGS, titolo per
+        # la label evento e narrativa come contenuto principale dell'embed.
+        embed.set_author(name="🚪 INGRESSI & USCITE")
+        avatar_url = getattr(getattr(user, "display_avatar", None), "url", None)
+        if avatar_url:
+            embed.set_thumbnail(url=str(avatar_url))
         attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)
 
         files: list[discord.File] = []
