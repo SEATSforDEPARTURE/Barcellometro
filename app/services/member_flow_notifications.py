@@ -34,6 +34,25 @@ _EXPLICIT_DEPARTURE_TYPES = frozenset(
     }
 )
 
+# Palette canonica GREETINGS / INGRESSI & USCITE.
+# - ingresso o stato ancora aperto nel server -> marrone chiaro
+# - uscita effettiva o enforcement equivalente -> marrone scuro
+# Grace resta un evento di attenzione/pre-enforcement: non implica uscita immediata,
+# quindi eredita il colore narrativo degli eventi non terminali.
+_GREETINGS_ENTRY_COLOUR = 0xC58C5C
+_GREETINGS_EXIT_COLOUR = 0x6B4423
+_ENTRY_LIKE_EVENT_TYPES = frozenset({"join", "grace", "inactive_grace"})
+_EXIT_LIKE_EVENT_TYPES = frozenset(
+    {
+        "leave",
+        "kick",
+        "ban",
+        "tempban",
+        "inactive_kick",
+        "inactive_tempban",
+    }
+)
+
 
 def parse_duration_input(raw: str) -> int:
     match = _DURATION_RE.match((raw or "").strip())
@@ -271,7 +290,7 @@ class MemberFlowNotificationsService:
             channel_id=str(notify_channel_id),
             now=created_at,
         )
-        embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=discord.Colour.blurple())
+        embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))
         # Layout canonico live: author fisso per il canale GREETINGS, titolo per
         # la label evento e narrativa come contenuto principale dell'embed.
         embed.set_author(name="🚪 INGRESSI & USCITE")
@@ -290,6 +309,16 @@ class MemberFlowNotificationsService:
             await channel.send(embed=embed, files=files or None)
         except Exception:
             logger.warning("member flow notification send failed guild=%s action=%s", guild.id, action_type, exc_info=True)
+
+    @staticmethod
+    def _colour_for_event_type(event_type_key: str) -> int:
+        normalized = str(event_type_key or "").strip().lower()
+        if normalized in _EXIT_LIKE_EVENT_TYPES:
+            return _GREETINGS_EXIT_COLOUR
+        if normalized in _ENTRY_LIKE_EVENT_TYPES:
+            return _GREETINGS_ENTRY_COLOUR
+        logger.debug("unknown greetings event type for colour mapping: %s", normalized)
+        return _GREETINGS_ENTRY_COLOUR
 
     @staticmethod
     def _resolve_user_avatar_url(user: discord.abc.User | discord.Member) -> str | None:
