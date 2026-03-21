@@ -309,6 +309,72 @@ def _function_contains_call_names(node: ast.AST, names: set[str]) -> bool:
     return False
 
 
+def _find_function_def(tree: ast.AST, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    for node in getattr(tree, "body", []):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return node
+    return None
+
+
+def _is_name(node: ast.AST | None, expected: str) -> bool:
+    return isinstance(node, ast.Name) and node.id == expected
+
+
+def _is_truthy_name_test(node: ast.AST | None, expected: str) -> bool:
+    return _is_name(node, expected)
+
+
+def _is_parts_append_call(node: ast.AST, expected_name: str) -> bool:
+    if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+        return False
+    call = node.value
+    return (
+        isinstance(call.func, ast.Attribute)
+        and _is_name(call.func.value, "parts")
+        and call.func.attr == "append"
+        and len(call.args) == 1
+        and _is_name(call.args[0], expected_name)
+    )
+
+
+def _render_footer_text_has_canonical_order(tree: ast.AST) -> bool:
+    node = _find_function_def(tree, "render_footer_text")
+    if node is None:
+        return False
+
+    has_brand_parts_assignment = False
+    has_clean_phrase_assignment = False
+    append_order: list[str] = []
+    for statement in node.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if _is_name(target, "parts") and isinstance(statement.value, ast.List):
+                if len(statement.value.elts) == 1 and _is_name(statement.value.elts[0], "brand"):
+                    has_brand_parts_assignment = True
+            if _is_name(target, "clean_phrase") and isinstance(statement.value, ast.IfExp):
+                test = statement.value.test
+                body = statement.value.body
+                orelse = statement.value.orelse
+                if (
+                    _is_truthy_name_test(test, "phrase")
+                    and isinstance(body, ast.Call)
+                    and _call_name(body) == "_clean_footer_text"
+                    and len(body.args) == 1
+                    and _is_name(body.args[0], "phrase")
+                    and isinstance(orelse, ast.Constant)
+                    and orelse.value == ""
+                ):
+                    has_clean_phrase_assignment = True
+        if isinstance(statement, ast.If) and _is_truthy_name_test(statement.test, "clean_phrase"):
+            if len(statement.body) == 1 and _is_parts_append_call(statement.body[0], "clean_phrase"):
+                append_order.append("phrase")
+        if isinstance(statement, ast.If) and _is_truthy_name_test(statement.test, "processing"):
+            if len(statement.body) == 1 and _is_parts_append_call(statement.body[0], "processing"):
+                append_order.append("processing")
+
+    return has_brand_parts_assignment and has_clean_phrase_assignment and append_order == ["phrase", "processing"]
+
+
 def _is_discord_embed_call(node: ast.AST) -> bool:
     return isinstance(node, ast.Call) and _attribute_chain(node.func) == ("discord", "Embed")
 
@@ -648,21 +714,16 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
 
     footer_path = REPO_ROOT / "app" / "services" / "footer.py"
     footer_source = footer_path.read_text(encoding="utf-8")
+    footer_tree = ast.parse(footer_source, filename=str(footer_path))
     required_footer_snippets = (
         "FOOTER_FALLBACK_VERSION =",
+        "def _clean_footer_text(",
         "def render_footer_text(",
         "brand_version = _clean(version) or FOOTER_FALLBACK_VERSION",
         "async def _resolve_footer_phrase(",
         "return service_phrases.get(service_name) or global_phrase or None",
-        "parts = [brand]",
-        "if phrase:",
-        "parts.append(phrase)",
-        "if processing:",
-        "parts.append(processing)",
-        'clean_phrase = _clean_footer_text(phrase) if phrase else ""',
         "return footer_text, clean_phrase or None",
         "CUSTOM_EMOJI_RE = re.compile(",
-        "_extract_footer_icon_and_clean_text(",
         "if meta.footer_icon_url is None and minimal_icon_url is not None:",
     )
     for snippet in required_footer_snippets:
@@ -674,6 +735,14 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
                 f"Footer renderer must keep ordered parts version → phrase → processing; missing snippet: {snippet!r}.",
             )
             break
+    else:
+        if not _render_footer_text_has_canonical_order(footer_tree):
+            report.add(
+                "canonical_footer_order",
+                footer_path.relative_to(REPO_ROOT),
+                1,
+                "Footer renderer must keep ordered parts version → phrase → processing using an explicit cleaned phrase variable.",
+            )
 
     if "FOOTER_DEFAULT_PHRASE" in footer_source or "or FOOTER_DEFAULT_PHRASE" in footer_source:
         report.add(
