@@ -73,6 +73,38 @@ _BARCELLO_ALERTS = {
 }
 
 _TEMPLATE_RE = re.compile(r"\{([a-zA-Z0-9_]+)\}")
+_HIGHLIGHTED_PLACEHOLDERS = frozenset(
+    {
+        "mention",
+        "display_name",
+        "username",
+        "user",
+        "guild_name",
+        "server",
+        "moderator",
+        "moderator_mention",
+        "reason",
+        "reason_suffix",
+        "duration",
+        "duration_days",
+        "expires_at",
+        "rejoin_link",
+        "days_inactive",
+        "inactivity_text",
+        "event_label",
+        "event_label_text",
+        "occurrence_number",
+        "occurrence_ordinal",
+        "mood",
+        "time_bucket",
+        "count_tier",
+        "barcello_state",
+        "barcello_color",
+        "barcello_alert",
+        "barcello_score",
+        "barcello_score_text",
+    }
+)
 
 _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
     "docs": {
@@ -298,10 +330,52 @@ class GreetingsCopyService:
 
     def render_moderation_template(self, template: str | None, **context: Any) -> str:
         base = template or ""
+        formatted_context = {key: self._format_placeholder_value(key, value) for key, value in context.items()}
         try:
-            return base.format(**context)
+            return base.format(**formatted_context)
         except Exception as exc:  # noqa: BLE001
             return f"[Errore render template: {exc}]\n{base}"
+
+
+    def _format_placeholder_value(self, placeholder: str, value: Any) -> Any:
+        if value is None:
+            return ""
+        if placeholder not in _HIGHLIGHTED_PLACEHOLDERS:
+            return value
+        text = str(value)
+        if not text:
+            return text
+        if placeholder == "reason_suffix":
+            stripped = text.strip()
+            if not stripped:
+                return ""
+            leading = text[: len(text) - len(text.lstrip())]
+            trailing = text[len(text.rstrip()) :]
+            core = stripped
+            prefix = ""
+            if core.startswith(":"):
+                prefix = ":"
+                core = core[1:].lstrip()
+                if core:
+                    prefix += " "
+            elif core.startswith("-"):
+                prefix = "-"
+                core = core[1:].lstrip()
+                if core:
+                    prefix += " "
+            return f"{leading}{prefix}{self._bold_discord_text(core)}{trailing}" if core else f"{leading}{text.strip()}{trailing}"
+        return self._bold_discord_text(text)
+
+    @staticmethod
+    def _bold_discord_text(value: str) -> str:
+        text = value.strip()
+        if not text:
+            return value
+        if text.startswith("**") and text.endswith("**") and len(text) >= 4:
+            return value
+        leading = value[: len(value) - len(value.lstrip())]
+        trailing = value[len(value.rstrip()) :]
+        return f"{leading}**{text}**{trailing}"
 
     async def render_moderation_preview(
         self,
