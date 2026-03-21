@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 FOOTER_VERSION_KEY = "footer.version"
 FOOTER_GLOBAL_PHRASE_KEY = "footer.global_phrase"
+FOOTER_GLOBAL_THUMBNAIL_KEY = "footer.global_thumbnail"
 FOOTER_SERVICE_PHRASE_PREFIX = "footer.service_phrase."
+FOOTER_SERVICE_THUMBNAIL_PREFIX = "footer.service_thumbnail."
 FOOTER_KNOWN_SERVICES_KEY = "footer.known_services"
 FOOTER_KNOWN_SERVICE_SOURCES_KEY = "footer.known_service_sources"
 FOOTER_LAST_META_PREFIX = "footer.last_meta."
@@ -134,6 +137,10 @@ def _truncate(text: str, max_len: int = FOOTER_MAX_LEN) -> str:
     return text[: max_len - 1].rstrip() + "…"
 
 
+class InvalidFooterThumbnailError(ValueError):
+    pass
+
+
 def _dedupe_footer_contributors(contributors: Iterable[str] | None) -> list[str]:
     deduped: list[str] = []
     seen: set[str] = set()
@@ -168,8 +175,8 @@ def render_footer_text(
         parts.append(phrase)
     if processing:
         parts.append(processing)
-    footer_text, _ = _extract_footer_icon_and_clean_text(FOOTER_SEPARATOR.join(parts))
-    clean_phrase = _clean_footer_text(phrase) if phrase else ""
+    footer_text = _truncate(FOOTER_SEPARATOR.join(parts))
+    clean_phrase = _clean(phrase) if phrase else ""
     return footer_text, clean_phrase or None
 
 
@@ -179,22 +186,27 @@ def _custom_emoji_icon_url(match: re.Match[str]) -> str:
     return f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
 
 
-def _clean_footer_text(text: str) -> str:
-    normalized = CUSTOM_EMOJI_RE.sub("", text)
-    normalized = re.sub(r"\s{2,}", " ", normalized)
-    normalized = re.sub(r"\s+([,.;:!?])", r"\1", normalized)
-    normalized = re.sub(r"([(\[])\s+", r"\1", normalized)
-    normalized = re.sub(r"\s+([)\]])", r"\1", normalized)
-    return normalized.strip()
+def normalize_footer_thumbnail(value: str | None) -> str:
+    cleaned = _clean(value)
+    if not cleaned:
+        raise InvalidFooterThumbnailError("Thumbnail must be a Discord custom emoji or an http/https image URL")
+
+    emoji_match = CUSTOM_EMOJI_RE.fullmatch(cleaned)
+    if emoji_match is not None:
+        return _custom_emoji_icon_url(emoji_match)
+
+    parsed = urlparse(cleaned)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return cleaned
+
+    raise InvalidFooterThumbnailError("Thumbnail must be a Discord custom emoji or an http/https image URL")
 
 
-def _extract_footer_icon_and_clean_text(text: str, *, icon_url: str | None = None) -> tuple[str, str | None]:
-    clean_icon_url = _clean(icon_url) or None
-    clean_text = _clean(text)
-    matches = list(CUSTOM_EMOJI_RE.finditer(clean_text))
-    derived_icon_url = _custom_emoji_icon_url(matches[0]) if matches and clean_icon_url is None else clean_icon_url
-    sanitized_text = _clean_footer_text(clean_text)
-    return _truncate(sanitized_text), derived_icon_url
+def _normalize_optional_thumbnail(value: str | None) -> str | None:
+    cleaned = _clean(value)
+    if not cleaned:
+        return None
+    return normalize_footer_thumbnail(cleaned)
 
 
 def _is_persistable_service_name(name: str | None) -> bool:
@@ -296,7 +308,8 @@ def pop_footer_meta(embed: discord.Embed) -> FooterMeta | None:
 def attach_minimal_footer(embed: discord.Embed, *, text: str, icon_url: str | None = None) -> discord.Embed:
     if embed is None:
         raise ValueError("attach_minimal_footer requires a discord.Embed instance, got None")
-    footer_text, clean_icon_url = _extract_footer_icon_and_clean_text(_clean(text) or "Barcellometro", icon_url=icon_url)
+    footer_text = _truncate(_clean(text) or "Barcellometro")
+    clean_icon_url = _clean(icon_url) or None
     footer_text = footer_text or "Barcellometro"
     attach_footer_meta(
         embed,
@@ -360,6 +373,9 @@ class FooterService:
     async def set_global_phrase(self, phrase: str | None) -> None:
         await self._set_or_clear(FOOTER_GLOBAL_PHRASE_KEY, phrase)
 
+    async def set_global_thumbnail(self, thumbnail: str | None) -> None:
+        await self._set_or_clear(FOOTER_GLOBAL_THUMBNAIL_KEY, _normalize_optional_thumbnail(thumbnail))
+
     async def set_service_phrase(self, service_name: str, phrase: str | None) -> None:
         service = _clean(service_name)
         if not service:
@@ -367,11 +383,21 @@ class FooterService:
         await self._set_or_clear(f"{FOOTER_SERVICE_PHRASE_PREFIX}{service}", phrase)
         await self.register_known_service(service, source="db")
 
+    async def set_service_thumbnail(self, service_name: str, thumbnail: str | None) -> None:
+        service = _clean(service_name)
+        if not service:
+            return
+        await self._set_or_clear(f"{FOOTER_SERVICE_THUMBNAIL_PREFIX}{service}", _normalize_optional_thumbnail(thumbnail))
+        await self.register_known_service(service, source="db")
+
     async def get_version(self) -> str | None:
         return _clean(await self._database.get_setting(FOOTER_VERSION_KEY)) or None
 
     async def get_global_phrase(self) -> str | None:
         return _clean(await self._database.get_setting(FOOTER_GLOBAL_PHRASE_KEY)) or None
+
+    async def get_global_thumbnail(self) -> str | None:
+        return _clean(await self._database.get_setting(FOOTER_GLOBAL_THUMBNAIL_KEY)) or None
 
     async def get_service_phrases(self) -> dict[str, str]:
         rows = await self._database.fetchall(
@@ -387,9 +413,23 @@ class FooterService:
             out[key.replace(FOOTER_SERVICE_PHRASE_PREFIX, "", 1)] = value
         return out
 
+    async def get_service_thumbnails(self) -> dict[str, str]:
+        rows = await self._database.fetchall(
+            "SELECT key, value FROM settings WHERE key LIKE ? ORDER BY key",
+            (f"{FOOTER_SERVICE_THUMBNAIL_PREFIX}%",),
+        )
+        out: dict[str, str] = {}
+        for row in rows:
+            key = row["key"]
+            value = _clean(row["value"])
+            if not value:
+                continue
+            out[key.replace(FOOTER_SERVICE_THUMBNAIL_PREFIX, "", 1)] = value
+        return out
+
     async def sync_known_services_on_startup(self) -> list[str]:
         startup_services = self._scan_services_from_codebase()
-        db_services = await self._load_services_from_phrase_keys()
+        db_services = await self._load_services_from_template_keys()
         persisted_services, persisted_sources = await self._load_known_services_from_settings()
 
         merged: set[str] = {
@@ -620,6 +660,19 @@ class FooterService:
         service_phrases = await self.get_service_phrases()
         return service_phrases.get(service_name) or global_phrase or None
 
+    async def _resolve_footer_thumbnail(
+        self,
+        service_name: str,
+        *,
+        explicit_icon_url: str | None = None,
+    ) -> str | None:
+        if _clean(explicit_icon_url):
+            return _clean(explicit_icon_url) or None
+        service_thumbnails = await self.get_service_thumbnails()
+        if service_thumbnails.get(service_name):
+            return service_thumbnails[service_name]
+        return await self.get_global_thumbnail()
+
     async def render_footer(
         self,
         *,
@@ -656,9 +709,10 @@ class FooterService:
             used_local_processing=meta.used_local_processing,
             minimal=meta.minimal,
         )
-        phrase = await self._resolve_footer_phrase(meta.service_name)
-        _, parsed_icon_url = _extract_footer_icon_and_clean_text(phrase, icon_url=meta.footer_icon_url)
-        text, parsed_icon_url = _extract_footer_icon_and_clean_text(text, icon_url=parsed_icon_url)
+        parsed_icon_url = await self._resolve_footer_thumbnail(
+            meta.service_name,
+            explicit_icon_url=meta.footer_icon_url,
+        )
         if persistable:
             try:
                 await self.record_service_footer_profile(
@@ -778,9 +832,10 @@ class FooterService:
                 found.add(service_name)
         return found
 
-    async def _load_services_from_phrase_keys(self) -> set[str]:
+    async def _load_services_from_template_keys(self) -> set[str]:
         phrases = await self.get_service_phrases()
-        return set(phrases.keys())
+        thumbnails = await self.get_service_thumbnails()
+        return set(phrases.keys()) | set(thumbnails.keys())
 
     async def _load_known_services_from_settings(self) -> tuple[list[str], dict[str, set[str]]]:
         raw = await self._database.get_setting(FOOTER_KNOWN_SERVICES_KEY)

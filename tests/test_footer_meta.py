@@ -3,17 +3,20 @@ import sys
 import types
 
 import discord
+import pytest
 
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Connection=object)
 
 from app.services.footer import (
     FooterService,
+    InvalidFooterThumbnailError,
     attach_footer_meta,
     attach_footer_meta_to_all,
     attach_minimal_footer,
     copy_footer_meta,
     get_footer_meta,
+    normalize_footer_thumbnail,
 )
 from app.shared.discord.embed_limits import normalize_embeds_for_discord
 from app.shared.discord.embed_limits import _clone_embed_shell
@@ -545,41 +548,58 @@ def test_reset_commands_do_not_raise_attribute_error_on_database_commit() -> Non
     asyncio.run(_run())
 
 
-def test_footer_service_apply_promotes_first_custom_emoji_to_icon_and_removes_raw_token() -> None:
+def test_normalize_footer_thumbnail_supports_static_custom_emoji() -> None:
+    assert normalize_footer_thumbnail("<:melons:1475962151502876695>") == "https://cdn.discordapp.com/emojis/1475962151502876695.png"
+
+
+def test_normalize_footer_thumbnail_supports_animated_custom_emoji() -> None:
+    assert normalize_footer_thumbnail("<a:pulse:1475962151502876696>") == "https://cdn.discordapp.com/emojis/1475962151502876696.gif"
+
+
+def test_normalize_footer_thumbnail_keeps_remote_image_url() -> None:
+    assert normalize_footer_thumbnail("https://example.com/icon.png") == "https://example.com/icon.png"
+
+
+def test_normalize_footer_thumbnail_rejects_invalid_value() -> None:
+    with pytest.raises(InvalidFooterThumbnailError):
+        normalize_footer_thumbnail("not-a-thumbnail")
+
+
+def test_footer_service_apply_uses_service_specific_thumbnail() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="emoji")
         attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
         service, _ = _build_footer_service()
         await service.set_version("dev7.1")
-        await service.set_global_phrase("In via di sviluppo. <:melons:1475962151502876695>")
+        await service.set_global_phrase("In via di sviluppo.")
+        await service.set_service_thumbnail("status", "<:melons:1475962151502876695>")
 
         await service.apply(embed)
 
         assert embed.footer.text == "Barcellometro dev7.1 · In via di sviluppo."
-        assert "<:melons:1475962151502876695>" not in (embed.footer.text or "")
         assert embed.footer.icon_url == "https://cdn.discordapp.com/emojis/1475962151502876695.png"
 
     asyncio.run(_run())
 
 
-def test_footer_service_apply_supports_animated_custom_emoji_urls() -> None:
+def test_footer_service_apply_falls_back_to_global_thumbnail() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="emoji")
-        attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
+        attach_footer_meta(embed, service_name="riassunto", contributors=[], used_local_processing=False)
         service, _ = _build_footer_service()
         await service.set_version("dev7.1")
-        await service.set_global_phrase("Sempre acceso <a:pulse:1475962151502876696>")
+        await service.set_global_phrase("Sempre acceso")
+        await service.set_global_thumbnail("<a:pulse:1475962151502876696>")
 
         await service.apply(embed)
 
         assert embed.footer.text == "Barcellometro dev7.1 · Sempre acceso"
-        assert "<a:pulse:1475962151502876696>" not in (embed.footer.text or "")
         assert embed.footer.icon_url == "https://cdn.discordapp.com/emojis/1475962151502876696.gif"
 
     asyncio.run(_run())
 
 
-def test_footer_service_apply_keeps_explicit_footer_icon_over_custom_emoji_icon() -> None:
+def test_footer_service_apply_keeps_explicit_footer_icon_over_configured_thumbnails() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="icon precedence")
         attach_footer_meta(
@@ -591,7 +611,9 @@ def test_footer_service_apply_keeps_explicit_footer_icon_over_custom_emoji_icon(
         )
         service, _ = _build_footer_service()
         await service.set_version("dev7.1")
-        await service.set_global_phrase("Sempre acceso <:melons:1475962151502876695>")
+        await service.set_global_phrase("Sempre acceso")
+        await service.set_global_thumbnail("<:melons:1475962151502876695>")
+        await service.set_service_thumbnail("status", "<a:pulse:1475962151502876696>")
 
         await service.apply(embed)
 
@@ -612,6 +634,22 @@ def test_footer_service_apply_preserves_unicode_emoji_in_footer_text() -> None:
         await service.apply(embed)
 
         assert embed.footer.text == "Barcellometro dev7.1 · Sempre acceso 🍉"
+        assert embed.footer.icon_url is None
+
+    asyncio.run(_run())
+
+
+def test_footer_service_apply_does_not_promote_custom_emoji_from_phrase() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="custom-text")
+        attach_footer_meta(embed, service_name="status", contributors=[], used_local_processing=False)
+        service, _ = _build_footer_service()
+        await service.set_version("dev7.1")
+        await service.set_global_phrase("Sempre acceso <:melons:1475962151502876695>")
+
+        await service.apply(embed)
+
+        assert embed.footer.text == "Barcellometro dev7.1 · Sempre acceso <:melons:1475962151502876695>"
         assert embed.footer.icon_url is None
 
     asyncio.run(_run())
