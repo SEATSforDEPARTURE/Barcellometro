@@ -76,11 +76,11 @@
         "description": "Mention del moderatore, se disponibile."
       },
       "reason": {
-        "description": "Motivazione nuda dell'evento, senza prefissi.",
+        "description": "Motivazione nuda dell'evento, senza prefissi. Se il renderer la riceve per un evento moderativo supportato, aggiunge in coda anche il blocco '**👇 La moderazione aggiunge:**'.",
         "example": "spam creativo"
       },
       "reason_suffix": {
-        "description": "Versione pronta all'uso del motivo, es. ': spam creativo', oppure stringa vuota."
+        "description": "Versione pronta all'uso del motivo, es. ': spam creativo', oppure stringa vuota. Il blocco dedicato finale del reason viene comunque composto separatamente dal renderer."
       },
       "duration": {
         "description": "Durata formattata in modo umano, es. '7g', '2h 30m'."

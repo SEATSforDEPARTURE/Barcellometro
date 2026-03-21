@@ -27,6 +27,11 @@ def _bool_int(value: bool) -> int:
     return 1 if value else 0
 
 
+def _normalize_optional_reason(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 def setup(registry: ServiceRegistry) -> None:
     bot: discord.Client = registry.get("bot")
     database = registry.get("database")
@@ -550,7 +555,7 @@ def setup(registry: ServiceRegistry) -> None:
         native_departure = await _resolve_native_departure(member)
         action_type = str(native_departure.get("action_type") or "leave") if native_departure is not None else "leave"
         reason = (
-            str(native_departure.get("reason") or "").strip() or None
+            _normalize_optional_reason(native_departure.get("reason"))
             if native_departure is not None
             else None
         )
@@ -563,6 +568,7 @@ def setup(registry: ServiceRegistry) -> None:
         metadata = {
             "source": "discord_adapter",
             "native_moderation": native_departure is not None,
+            "greetings_reason": reason,
         }
         if native_departure is not None:
             metadata.update(
@@ -616,6 +622,7 @@ def setup(registry: ServiceRegistry) -> None:
                 "discord_audit_action": "ban",
                 "discord_audit_entry_id": native_departure.get("entry_id") if native_departure is not None else None,
                 "discord_audit_created_at": native_departure.get("created_at") if native_departure is not None else None,
+                "greetings_reason": _normalize_optional_reason(native_departure.get("reason") if native_departure is not None else None),
             }
             await _log_member_flow_action(
                 guild=guild,
