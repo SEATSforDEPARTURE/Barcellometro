@@ -101,10 +101,11 @@ finestra configurata in modo idempotente.
 - `/admin status service:<nome>` → stato servizio/plugin.
 
 ### AI centrale
-- `/barcello [user1] [user2] [minuti]` → report legacy user-facing del barcello in DM.
+- `/barcello [user1] [user2] [minuti]` → report user-facing del barcello inviato in DM con conferma standardizzata nel canale.
 - `/admin ai on` → abilita il servizio AI.
 - `/admin ai off` → disabilita il servizio AI.
 - `/admin ai model_set task:<task> model:<nome>` → imposta il modello AI per task (`summary`, `server_summary`, `audio_summary`, `qa`, `analysis`, `transcription`, `translation`).
+- `/admin barcello run [user1] [user2] [window_minutes]` → esegue lo stesso report barcello dal namespace admin senza rimuovere i comandi di configurazione.
 - `/admin barcello calibrate` → calibra i pesi del motore barcello (mod).
 
 ### STT

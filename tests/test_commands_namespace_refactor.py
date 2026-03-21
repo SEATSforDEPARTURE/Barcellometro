@@ -34,7 +34,9 @@ def test_barcello_restores_top_level_registration_alongside_admin_group() -> Non
     assert '@app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")' in barcello_source
     assert '@app_commands.rename(window_minutes="minuti")' in barcello_source
     assert 'permission_name="barcello"' in barcello_source
-    assert 'legacy_user_facing=True' in barcello_source
+    assert 'command_path="barcello"' in barcello_source
+    assert "send_dm_or_followup(" in barcello_source
+    assert "_build_barcello_dm_report(public_embed=public_embed, details_embed=details_embed)" in barcello_source
     assert 'tree.add_command(barcello_command, guild=guild)' in barcello_source
 
 

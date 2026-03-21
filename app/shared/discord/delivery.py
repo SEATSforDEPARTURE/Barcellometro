@@ -21,6 +21,7 @@ def _build_send_kwargs(
     content: str | None = None,
     embeds: list[discord.Embed] | None = None,
     files: list[discord.File] | None = None,
+    view: discord.ui.View | None = None,
     ephemeral: bool | None = None,
 ) -> dict[str, object]:
     kwargs: dict[str, object] = {}
@@ -30,6 +31,8 @@ def _build_send_kwargs(
         kwargs["embeds"] = embeds
     if files:
         kwargs["files"] = files
+    if view is not None:
+        kwargs["view"] = view
     if ephemeral is not None:
         kwargs["ephemeral"] = ephemeral
     return kwargs
@@ -64,6 +67,7 @@ async def safe_followup_send(
     embeds: Iterable[discord.Embed] | None = None,
     content: str | None = None,
     files: list[discord.File] | None = None,
+    view: discord.ui.View | None = None,
     ephemeral: bool = True,
     footer_service: FooterService | None = None,
     default_service_name: str = "unknown",
@@ -81,6 +85,7 @@ async def safe_followup_send(
                 content=content,
                 embeds=embed_list,
                 files=files,
+                view=view,
                 ephemeral=ephemeral,
             )
         )
@@ -107,6 +112,7 @@ async def safe_followup_send(
                     content=content,
                     embeds=status_embeds,
                     files=files,
+                    view=view,
                     ephemeral=ephemeral,
                 )
             )
@@ -122,6 +128,7 @@ async def send_dm_or_followup(
     embeds: Iterable[discord.Embed] | None = None,
     content: str | None = None,
     files: list[discord.File] | None = None,
+    view: discord.ui.View | None = None,
     ephemeral_fallback: bool = True,
     footer_service: FooterService | None = None,
     default_service_name: str = "unknown",
@@ -135,9 +142,9 @@ async def send_dm_or_followup(
     )
     try:
         if embed_list or files:
-            await interaction.user.send(embeds=embed_list if embed_list else None, files=files)
+            await interaction.user.send(embeds=embed_list if embed_list else None, files=files, view=view)
         else:
-            await interaction.user.send(content or "")
+            await interaction.user.send(content or "", view=view)
         return True
     except discord.Forbidden:
         await safe_followup_send(
@@ -145,6 +152,7 @@ async def send_dm_or_followup(
             content=content,
             embeds=retry_embeds if retry_embeds else None,
             files=files,
+            view=view,
             ephemeral=ephemeral_fallback,
             footer_service=footer_service,
             default_service_name=default_service_name,
@@ -169,7 +177,7 @@ async def send_dm_or_followup(
                 default_service_name=default_service_name,
             )
             try:
-                await interaction.user.send(embeds=status_embeds if status_embeds else None, files=files)
+                await interaction.user.send(embeds=status_embeds if status_embeds else None, files=files, view=view)
                 if detail_embeds:
                     await interaction.user.send(embeds=detail_embeds)
                 return True
@@ -179,6 +187,7 @@ async def send_dm_or_followup(
                     content=content,
                     embeds=retry_embeds,
                     files=files,
+                    view=view,
                     ephemeral=ephemeral_fallback,
                     footer_service=footer_service,
                     default_service_name=default_service_name,
@@ -189,6 +198,7 @@ async def send_dm_or_followup(
             content=content,
             embeds=retry_embeds,
             files=files,
+            view=view,
             ephemeral=ephemeral_fallback,
             footer_service=footer_service,
             default_service_name=default_service_name,
