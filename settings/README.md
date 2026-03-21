@@ -64,4 +64,5 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - Il resolver dei template segue una cascata precisa: override più specifici (`mood` + `time` + `barcello` + `count`) → override medi → `templates[...]` → `defaults.fallbacks[...]`.
 - La grammatica evento resta canonica e coerente col renderer live: `kick` / `inactive_kick` sono chiavi tecniche, ma le etichette e le frasi user-facing devono parlare di `allontanamento`, mai di `KICK`.
 - I flussi di moderazione del bot (`/mod users ...`) e la moderazione nativa Discord devono convergere nella stessa timeline canonica `member_flow_events`: il feed deve mostrare solo l'evento dedicato (`BAN`, `ALLONTANAMENTO`, `BAN TEMPORANEO`, `USCITA`) senza embed duplicati della stessa sequenza tecnica.
+- `unban` deve essere tracciato sia nel raw log sia nel mirror canonico per audit, backfill e pulizia coerente dello stato ban/tempban, ma non deve comparire nel feed GREETINGS come uscita o rientro visibile.
 - Quando esiste una `greetings_reason`, il renderer finale GREETINGS la mostra in coda nel blocco `👇 La moderazione aggiunge`; la narrativa principale non deve ripeterla inline.

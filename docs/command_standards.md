@@ -143,7 +143,7 @@ Per il dominio GREETINGS la persistenza segue una separazione normativa esplicit
 Regole obbligatorie:
 
 - il runtime live di GREETINGS deve leggere la timeline canonica e non reinterpretare direttamente il ledger raw;
-- la moderazione nativa Discord (`kick` / `ban` UI, audit log) deve confluire nello stesso contratto canonico della moderazione del bot, senza drift semantico tra record backend e feed live;
+- la moderazione nativa Discord (`kick` / `ban` / `unban` UI, audit log) deve confluire nello stesso contratto canonico della moderazione del bot, senza drift semantico tra record backend e feed live;
 - il layout visuale live deve esporre author `🚪 INGRESSI & USCITE`, titolo = label evento, narrativa in description, thumbnail avatar quando disponibile e nessun field separato `Evento`;
 - i conteggi di ricorrenza devono essere per `user + event_type_key`;
 - il backfill storico deve essere idempotente sulla coppia `source + source_ref`;
@@ -151,6 +151,7 @@ Regole obbligatorie:
 - `grace` e `inactive_grace` condividono l'emoji `🛟`, ma devono mantenere label e copy distinti;
 - il wording user-facing deve mostrare `allontanamento` dove l'action tecnica interna resta `kick`.
 - se un evento moderativo porta una motivazione user-facing, il feed GREETINGS la espone solo nel blocco finale `👇 La moderazione aggiunge`, non come duplicazione inline nel corpo principale.
+- `unban` deve essere persistito nel ledger raw e nel mirror canonico per coerenza audit/backfill, ma resta nascosto nel feed GREETINGS salvo override espliciti di visibilità.
 
 ## 8. Eccezioni consentite
 

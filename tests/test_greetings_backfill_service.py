@@ -197,6 +197,17 @@ def test_greetings_backfill_service_status_and_run_are_idempotent(tmp_path) -> N
             expires_at=_iso(14, 0),
             metadata_json='{"source": "inactive_members_moderation"}',
         )
+        await _insert_moderation_action(
+            db,
+            action_id="unban-1",
+            guild_id="1",
+            user_id="12",
+            action_type="unban",
+            created_at=_iso(19, 0),
+            moderator_id="98",
+            reason="Revoca storica",
+            metadata_json='{"source": "discord_adapter", "discord_audit_action": "unban"}',
+        )
         await db.execute(
             "INSERT INTO temp_bans (guild_id, user_id, unban_at, reason, created_at) VALUES (?, ?, ?, ?, ?)",
             ("1", "12", _iso(19, 0), "Inattività", _iso(12, 1)),
@@ -214,12 +225,12 @@ def test_greetings_backfill_service_status_and_run_are_idempotent(tmp_path) -> N
         first = await service.run_once(guild_id="1")
         second = await service.run_once(guild_id="1")
 
-        assert first.imported_count == 7
+        assert first.imported_count == 8
         assert first.skipped_count == 1
-        assert first.canonical_count == 7
+        assert first.canonical_count == 8
         assert second.imported_count == 0
-        assert second.skipped_count == 8
-        assert second.canonical_count == 7
+        assert second.skipped_count == 9
+        assert second.canonical_count == 8
 
         rows = await db.fetchall(
             "SELECT event_type_key, user_id, visible_in_greetings, source, source_ref, expires_at, metadata_json FROM member_flow_events WHERE guild_id = ? ORDER BY occurred_at ASC, id ASC",
@@ -245,6 +256,7 @@ def test_greetings_backfill_service_status_and_run_are_idempotent(tmp_path) -> N
             ("inactive_tempban", "12", True),
             ("inactive_grace", "13", False),
             ("join", "14", True),
+            ("unban", "12", False),
         ]
         assert all(source_ref != "events:2" for _, _, _, source_ref, _, _ in simplified)
         tempban_row = next(item for item in rows if item["event_type_key"] == "inactive_tempban")
@@ -252,12 +264,16 @@ def test_greetings_backfill_service_status_and_run_are_idempotent(tmp_path) -> N
         assert '"backfill_source": "moderation_actions"' in tempban_row["metadata_json"]
         assert '"reminder_count": 2' in tempban_row["metadata_json"]
         assert '"state_last_kick_at": "2026-03-20T12:00:00+00:00"' in tempban_row["metadata_json"]
+        unban_row = next(item for item in rows if item["event_type_key"] == "unban")
+        assert bool(unban_row["visible_in_greetings"]) is False
+        assert '"discord_audit_action": "unban"' in unban_row["metadata_json"]
+        assert '"backfill_source": "moderation_actions"' in unban_row["metadata_json"]
 
         status = await service.status("1")
         assert status["enabled"] is True
-        assert status["canonical_count"] == 7
+        assert status["canonical_count"] == 8
         assert status["last_run_imported_count"] == 0
-        assert status["last_run_skipped_count"] == 8
+        assert status["last_run_skipped_count"] == 9
         assert status["last_run_at"] is not None
 
         await db.close()

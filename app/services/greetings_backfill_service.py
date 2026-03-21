@@ -8,20 +8,19 @@ from typing import Any
 
 from app.services.database import DatabaseService
 
-_SUPPORTED_EVENT_TYPES = frozenset(
-    {
-        "join",
-        "leave",
-        "kick",
-        "ban",
-        "unban",
-        "tempban",
-        "grace",
-        "inactive_kick",
-        "inactive_tempban",
-        "inactive_grace",
-    }
+_MODERATION_ACTION_EVENT_TYPES = (
+    "join",
+    "leave",
+    "kick",
+    "ban",
+    "unban",
+    "tempban",
+    "grace",
+    "inactive_kick",
+    "inactive_tempban",
+    "inactive_grace",
 )
+_SUPPORTED_EVENT_TYPES = frozenset(_MODERATION_ACTION_EVENT_TYPES)
 _EXPLICIT_DEPARTURE_TYPES = frozenset({"kick", "ban", "tempban", "inactive_kick", "inactive_tempban"})
 _NON_DEPARTURE_TYPES = frozenset({"grace", "inactive_grace"})
 _LEAVE_DEDUPE_WINDOW_SECONDS = 300
@@ -148,8 +147,9 @@ class GreetingsBackfillService:
         return int(row["total"] if row is not None else 0)
 
     async def _load_moderation_candidates(self, guild_id: str | None) -> list[_BackfillCandidate]:
-        filters = ["action_type IN ('join', 'leave', 'kick', 'ban', 'tempban', 'grace', 'inactive_kick', 'inactive_tempban', 'inactive_grace')"]
-        params: list[Any] = []
+        placeholders = ", ".join("?" for _ in _MODERATION_ACTION_EVENT_TYPES)
+        filters = [f"action_type IN ({placeholders})"]
+        params: list[Any] = [*_MODERATION_ACTION_EVENT_TYPES]
         if guild_id is not None:
             filters.append("guild_id = ?")
             params.append(guild_id)
