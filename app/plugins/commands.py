@@ -82,7 +82,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_voice_ingest(voice_ingest_group, ctx)
     register_privacy(privacy_group, ctx)
     register_status(admin_group, ctx)
-    register_barcello(admin_group, ctx)
+    register_barcello(admin_group, bot.tree, guild_obj, ctx)
     register_riassunto(riassunto_group, ctx)
     register_aura(aura_group, ctx)
     register_attivita(attivita_group, ctx)
