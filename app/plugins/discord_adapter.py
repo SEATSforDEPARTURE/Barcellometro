@@ -679,6 +679,7 @@ def setup(registry: ServiceRegistry) -> None:
     async def on_member_unban(guild: discord.Guild, user: discord.abc.User) -> None:
         ts = _now_iso()
         await record_user(user, guild, False, ts)
+        await database.clear_user_ban_state(str(guild.id), str(user.id))
         native_departure = await _fetch_recent_audit_entry(guild, action_name="unban", target_id=str(user.id))
         if member_flow_notifications is not None:
             await member_flow_notifications.log_action(

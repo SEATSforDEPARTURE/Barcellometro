@@ -53,7 +53,9 @@ class _AsyncAuditLogIterator:
 
 
 class _FakeGuild:
-    def __init__(self, *, guild_id: int, audit_entries: dict[str, list[object]] | None = None) -> None:
+    def __init__(
+        self, *, guild_id: int, audit_entries: dict[str, list[object]] | None = None
+    ) -> None:
         self.id = guild_id
         self.name = "Guild"
         self._audit_entries = audit_entries or {}
@@ -82,15 +84,23 @@ def _configure_registry(*, member_flow, database) -> tuple[ServiceRegistry, _Fak
     registry.register("bot", bot)
     registry.register("database", database)
     registry.register("member_flow_notifications", member_flow)
-    registry.register("ingest", SimpleNamespace(emit=AsyncMock(), register_consumer=lambda *_: None))
+    registry.register(
+        "ingest", SimpleNamespace(emit=AsyncMock(), register_consumer=lambda *_: None)
+    )
     registry.register("config", SimpleNamespace(ignore_bots=True))
     return registry, bot
 
 
-def test_member_join_and_voluntary_remove_notifications_follow_canonical_write_result(monkeypatch) -> None:
+def test_member_join_and_voluntary_remove_notifications_follow_canonical_write_result(
+    monkeypatch,
+) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1)
-        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0)
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1
+        )
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0
+        )
         monkeypatch.setattr(
             discord_adapter_module.discord,
             "AuditLogAction",
@@ -102,7 +112,11 @@ def test_member_join_and_voluntary_remove_notifications_follow_canonical_write_r
             get_recent_departure_action=lambda *_args, **_kwargs: None,
             log_action=AsyncMock(
                 side_effect=[
-                    {"canonical_written": True, "canonical_visible": True, "canonical_event": {"event_type_key": "join"}},
+                    {
+                        "canonical_written": True,
+                        "canonical_visible": True,
+                        "canonical_event": {"event_type_key": "join"},
+                    },
                     {"canonical_written": False, "canonical_visible": False},
                 ]
             ),
@@ -122,18 +136,28 @@ def test_member_join_and_voluntary_remove_notifications_follow_canonical_write_r
         await bot.listeners["on_member_remove"](member)
 
         assert member_flow.log_action.await_count == 2
-        assert member_flow.log_action.await_args_list[1].kwargs["action_type"] == "leave"
+        assert (
+            member_flow.log_action.await_args_list[1].kwargs["action_type"] == "leave"
+        )
         assert member_flow.send_notification.await_count == 1
         assert member_flow.send_notification.await_args.kwargs["action_type"] == "join"
-        assert member_flow.send_notification.await_args.kwargs["canonical_event"] == {"event_type_key": "join"}
+        assert member_flow.send_notification.await_args.kwargs["canonical_event"] == {
+            "event_type_key": "join"
+        }
 
     asyncio.run(_run())
 
 
-def test_native_discord_kick_is_classified_as_kick_not_leave_and_preserves_reason(monkeypatch) -> None:
+def test_native_discord_kick_is_classified_as_kick_not_leave_and_preserves_reason(
+    monkeypatch,
+) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1)
-        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0)
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1
+        )
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0
+        )
         monkeypatch.setattr(
             discord_adapter_module.discord,
             "AuditLogAction",
@@ -156,7 +180,10 @@ def test_native_discord_kick_is_classified_as_kick_not_leave_and_preserves_reaso
             return {
                 "canonical_written": True,
                 "canonical_visible": True,
-                "canonical_event": {"event_type_key": kwargs["action_type"], "reason": kwargs["reason"]},
+                "canonical_event": {
+                    "event_type_key": kwargs["action_type"],
+                    "reason": kwargs["reason"],
+                },
             }
 
         member_flow = SimpleNamespace(
@@ -184,15 +211,26 @@ def test_native_discord_kick_is_classified_as_kick_not_leave_and_preserves_reaso
         assert kwargs["metadata"]["greetings_reason"] == "Spam ripetuto"
         assert member_flow.send_notification.await_count == 1
         assert member_flow.send_notification.await_args.kwargs["action_type"] == "kick"
-        assert member_flow.send_notification.await_args.kwargs["canonical_event"]["event_type_key"] == "kick"
+        assert (
+            member_flow.send_notification.await_args.kwargs["canonical_event"][
+                "event_type_key"
+            ]
+            == "kick"
+        )
 
     asyncio.run(_run())
 
 
-def test_native_discord_ban_is_classified_as_ban_not_leave_and_deduped_across_events(monkeypatch) -> None:
+def test_native_discord_ban_is_classified_as_ban_not_leave_and_deduped_across_events(
+    monkeypatch,
+) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1)
-        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0)
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1
+        )
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0
+        )
         monkeypatch.setattr(
             discord_adapter_module.discord,
             "AuditLogAction",
@@ -221,15 +259,22 @@ def test_native_discord_ban_is_classified_as_ban_not_leave_and_deduped_across_ev
         )
 
         async def _log_action(**kwargs):
-            recent_departures[(kwargs["guild_id"], kwargs["user_id"])] = kwargs["action_type"]
+            recent_departures[(kwargs["guild_id"], kwargs["user_id"])] = kwargs[
+                "action_type"
+            ]
             return {
                 "canonical_written": True,
                 "canonical_visible": True,
-                "canonical_event": {"event_type_key": kwargs["action_type"], "reason": kwargs["reason"]},
+                "canonical_event": {
+                    "event_type_key": kwargs["action_type"],
+                    "reason": kwargs["reason"],
+                },
             }
 
         member_flow = SimpleNamespace(
-            get_recent_departure_action=lambda guild_id, user_id, **_kwargs: recent_departures.get((guild_id, user_id)),
+            get_recent_departure_action=lambda guild_id, user_id, **_kwargs: recent_departures.get(
+                (guild_id, user_id)
+            ),
             log_action=AsyncMock(side_effect=_log_action),
             send_notification=AsyncMock(),
         )
@@ -253,15 +298,26 @@ def test_native_discord_ban_is_classified_as_ban_not_leave_and_deduped_across_ev
         assert kwargs["metadata"]["greetings_reason"] == "Ban definitivo"
         assert member_flow.send_notification.await_count == 1
         assert member_flow.send_notification.await_args.kwargs["action_type"] == "ban"
-        assert member_flow.send_notification.await_args.kwargs["canonical_event"]["event_type_key"] == "ban"
+        assert (
+            member_flow.send_notification.await_args.kwargs["canonical_event"][
+                "event_type_key"
+            ]
+            == "ban"
+        )
 
     asyncio.run(_run())
 
 
-def test_recent_tempban_memory_suppresses_member_remove_and_member_ban_duplicates(monkeypatch) -> None:
+def test_recent_tempban_memory_suppresses_member_remove_and_member_ban_duplicates(
+    monkeypatch,
+) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1)
-        monkeypatch.setattr(discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0)
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1
+        )
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0
+        )
         monkeypatch.setattr(
             discord_adapter_module.discord,
             "AuditLogAction",
@@ -270,7 +326,9 @@ def test_recent_tempban_memory_suppresses_member_remove_and_member_ban_duplicate
         )
 
         member_flow = SimpleNamespace(
-            get_recent_departure_action=lambda guild_id, user_id, **_kwargs: "tempban" if (guild_id, user_id) == ("99", "5") else None,
+            get_recent_departure_action=lambda guild_id, user_id, **_kwargs: (
+                "tempban" if (guild_id, user_id) == ("99", "5") else None
+            ),
             log_action=AsyncMock(),
             send_notification=AsyncMock(),
         )
@@ -297,5 +355,62 @@ def test_recent_tempban_memory_suppresses_member_remove_and_member_ban_duplicate
 
         assert member_flow.log_action.await_count == 0
         assert member_flow.send_notification.await_count == 0
+
+    asyncio.run(_run())
+
+
+def test_native_discord_unban_clears_local_ban_state_and_logs_unban(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1
+        )
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0
+        )
+        monkeypatch.setattr(
+            discord_adapter_module.discord,
+            "AuditLogAction",
+            SimpleNamespace(ban="ban", kick="kick", unban="unban"),
+            raising=False,
+        )
+
+        moderator = SimpleNamespace(id=77, mention="<@77>", display_name="Admin")
+        audit_entry = SimpleNamespace(
+            id=9001,
+            target=SimpleNamespace(id=5),
+            user=moderator,
+            reason="Revoca verificata",
+            created_at=datetime.now(timezone.utc),
+        )
+        guild = _FakeGuild(guild_id=99, audit_entries={"unban": [audit_entry]})
+        user = SimpleNamespace(
+            id=5,
+            name="User",
+            display_name="User",
+            global_name=None,
+            display_avatar=SimpleNamespace(url="https://example.test/avatar.png"),
+            bot=False,
+        )
+        member_flow = SimpleNamespace(log_action=AsyncMock())
+        database = SimpleNamespace(
+            upsert_user=AsyncMock(),
+            upsert_guild_membership=AsyncMock(),
+            clear_user_ban_state=AsyncMock(),
+        )
+        registry, bot = _configure_registry(member_flow=member_flow, database=database)
+        setup_discord_adapter(registry)
+
+        await bot.listeners["on_member_unban"](guild, user)
+
+        database.clear_user_ban_state.assert_awaited_once_with("99", "5")
+        member_flow.log_action.assert_awaited_once()
+        kwargs = member_flow.log_action.await_args.kwargs
+        assert kwargs["action_type"] == "unban"
+        assert kwargs["reason"] == "Revoca verificata"
+        assert kwargs["moderator_id"] == "77"
+        assert kwargs["metadata"]["source"] == "discord_adapter"
+        assert kwargs["metadata"]["discord_audit_action"] == "unban"
 
     asyncio.run(_run())

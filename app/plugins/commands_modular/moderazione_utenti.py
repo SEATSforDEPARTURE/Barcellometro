@@ -245,6 +245,32 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         lines = [f"• <@{row['user_id']}> · ban · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
         await _send_lines(interaction, ctx, subcommand_path="moderazione users ban_list", title="Active permanent bans", lines=lines, prefix="mod_users_ban_list")
 
+    @users_group.command(name="unban", description="Revoke an active ban for a user.")
+    @app_commands.describe(user="User to unban.", reason="Optional reason override.")
+    async def mod_users_unban(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+        if not await _ensure(interaction) or interaction.guild is None:
+            return
+        explicit_reason = _normalize_optional_reason(reason)
+        resolved_reason = explicit_reason or "Revoca ban manuale"
+        await interaction.guild.unban(user, reason=resolved_reason)
+        await ctx.database.clear_user_ban_state(str(interaction.guild.id), str(user.id))
+        _forget_departure(interaction.guild, user)
+        await _notify_action(
+            guild=interaction.guild,
+            user=user,
+            action_type="unban",
+            reason=resolved_reason,
+            greetings_reason=explicit_reason,
+            moderator=interaction.user,
+        )
+        await _send(
+            interaction,
+            subcommand_path="moderazione users unban",
+            subtitle_args=[user],
+            lines=[("user", user.mention), ("result", "unbanned"), ("reason", resolved_reason)],
+            kind="success",
+        )
+
     @users_group.command(name="tempban", description="Ban a user temporarily.")
     @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
     async def mod_users_tempban(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:

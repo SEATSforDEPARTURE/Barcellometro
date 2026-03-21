@@ -2,7 +2,7 @@
 
 Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.
 
-- Commands discovered: **268**
+- Commands discovered: **269**
 - Errors: **0**
 - Warnings: **50**
 
@@ -214,14 +214,15 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `insights` | `—` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1026` |
 | `insights` | `—` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:1004` |
 | `insights` | `—` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1014` |
-| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:172` |
-| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:187` |
-| `mod` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:235` |
-| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:264` |
-| `mod` | `users` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:145` |
-| `mod` | `users` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:160` |
-| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:196` |
-| `mod` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:226` |
+| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:211` |
+| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:241` |
+| `mod` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:332` |
+| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:362` |
+| `mod` | `users` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:169` |
+| `mod` | `users` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:199` |
+| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:276` |
+| `mod` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:323` |
+| `mod` | `users` | `unban` | Revoke an active ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:250` |
 | `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:90` |
 | `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:68` |
 | `privacy` | `—` | `status` | Show the current voice privacy status. | `app/plugins/commands_modular/privacy.py:113` |

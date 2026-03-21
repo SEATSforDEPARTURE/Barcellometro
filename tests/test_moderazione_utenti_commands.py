@@ -1,10 +1,14 @@
 from pathlib import Path
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
+
+import app.plugins.commands_modular.moderazione_utenti as moderazione_utenti_module
 
 import discord
 
 from app.plugins.commands_modular.greetings import register_greetings
+from app.plugins.commands_modular.moderazione_utenti import register_moderazione_utenti
 
 
 def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None:
@@ -14,8 +18,9 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
 
     assert "register_moderazione_utenti" in source
     assert 'app_commands.Group(name="greetings"' in source
-    assert 'register_greetings(greetings_group, ctx)' in source
-    assert 'app_commands.Group(name="users"' in modular
+    assert "register_greetings(greetings_group, ctx)" in source
+    assert 'name="users"' in modular
+    assert 'description="Moderation actions for users"' in modular
     assert 'app_commands.Group(name="backfill"' in greetings
     assert '@backfill_group.command(name="on"' in greetings
     assert '@backfill_group.command(name="off"' in greetings
@@ -38,10 +43,12 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert '@users_group.command(name="kick_list"' in modular
     assert '@users_group.command(name="ban"' in modular
     assert '@users_group.command(name="ban_list"' in modular
+    assert '@users_group.command(name="unban"' in modular
     assert '@users_group.command(name="tempban"' in modular
     assert '@users_group.command(name="tempban_list"' in modular
-    assert '@users_group.command(name="grace"' in modular
+    assert 'name="grace"' in modular
     assert '@users_group.command(name="grace_list"' in modular
+    assert 'description="Revoke an active ban for a user."' in modular
     assert 'description="Remove a user from the server."' in modular
     assert 'description="List recent user removals."' in modular
 
@@ -53,19 +60,35 @@ def test_legacy_mod_channel_namespace_is_removed() -> None:
     docs_source = Path("docs/command_tree_report.md").read_text()
 
     assert 'app_commands.Group(name="channel"' not in source
-    assert 'mod channel' not in source
-    assert 'moderazione channel' not in source
-    assert 'mod channel' not in greetings
-    assert 'moderazione channel' not in greetings
+    assert "mod channel" not in source
+    assert "moderazione channel" not in source
+    assert "mod channel" not in greetings
+    assert "moderazione channel" not in greetings
     assert 'app_commands.Group(name="channel"' not in commands_source
-    assert '| `mod` | `channel` |' not in docs_source
+    assert "| `mod` | `channel` |" not in docs_source
     assert "| `greetings` | `—` | `template_set` |" not in docs_source
     assert "| `greetings` | `—` | `template_show` |" not in docs_source
     assert "| `greetings` | `—` | `template_reset` |" not in docs_source
-    assert "| `greetings` | `backfill` | `on` | Enable greetings timeline backfill. |" in docs_source
-    assert "| `greetings` | `backfill` | `off` | Disable greetings timeline backfill. |" in docs_source
-    assert "| `greetings` | `backfill` | `status` | Show greetings timeline backfill status. |" in docs_source
-    assert "| `greetings` | `backfill` | `run` | Run greetings timeline backfill now. |" in docs_source
+    assert (
+        "| `greetings` | `backfill` | `on` | Enable greetings timeline backfill. |"
+        in docs_source
+    )
+    assert (
+        "| `greetings` | `backfill` | `off` | Disable greetings timeline backfill. |"
+        in docs_source
+    )
+    assert (
+        "| `greetings` | `backfill` | `status` | Show greetings timeline backfill status. |"
+        in docs_source
+    )
+    assert (
+        "| `greetings` | `backfill` | `run` | Run greetings timeline backfill now. |"
+        in docs_source
+    )
+    assert (
+        "| `mod` | `users` | `unban` | Revoke an active ban for a user. |"
+        in docs_source
+    )
 
 
 def test_legacy_moderation_namespace_commands_are_removed() -> None:
@@ -110,3 +133,75 @@ def test_greetings_tree_has_no_preview_command() -> None:
         "user_card_reset",
     }
     assert "preview" not in names
+
+
+def _find_command(group: discord.app_commands.Group, *names: str):
+    current = group
+    for name in names[:-1]:
+        current = next(
+            cmd
+            for cmd in current.commands
+            if isinstance(cmd, discord.app_commands.Group) and cmd.name == name
+        )
+    return next(cmd for cmd in current.commands if cmd.name == names[-1])
+
+
+def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(
+            moderazione_utenti_module, "send_standard_response", send_standard_response
+        )
+        monkeypatch.setattr(
+            moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
+        )
+
+        database = SimpleNamespace(clear_user_ban_state=AsyncMock())
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(
+                return_value={"canonical_written": True, "canonical_visible": False}
+            ),
+            send_notification=AsyncMock(),
+            forget_departure_action=Mock(),
+        )
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=member_flow_notifications,
+            barcello_service=None,
+        )
+        mod_group = discord.app_commands.Group(name="mod", description="mod")
+        register_moderazione_utenti(mod_group, ctx)
+        command = _find_command(mod_group, "users", "unban")
+
+        guild = SimpleNamespace(id=1, unban=AsyncMock())
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
+        moderator = SimpleNamespace(id=9)
+        interaction = SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            user=moderator,
+            command=SimpleNamespace(qualified_name="mod users unban"),
+        )
+
+        await command.callback(interaction, target_user)
+
+        guild.unban.assert_awaited_once_with(target_user, reason="Revoca ban manuale")
+        database.clear_user_ban_state.assert_awaited_once_with("1", "42")
+        member_flow_notifications.forget_departure_action.assert_called_once_with(
+            "1", "42"
+        )
+        member_flow_notifications.log_action.assert_awaited_once()
+        notify_kwargs = member_flow_notifications.log_action.await_args.kwargs
+        assert notify_kwargs["action_type"] == "unban"
+        assert notify_kwargs["reason"] == "Revoca ban manuale"
+        assert notify_kwargs["metadata"]["source"] == "moderazione_utenti"
+        send_standard_response.assert_awaited_once()
+        response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["subcommand_path"] == "moderazione users unban"
+        assert response_kwargs["kind"] == "success"
+        assert ("result", "unbanned") in response_kwargs["lines"]
+
+    asyncio.run(_run())
