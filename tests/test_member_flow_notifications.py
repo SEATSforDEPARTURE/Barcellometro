@@ -317,7 +317,7 @@ def test_source_contains_fixed_title_and_footer_service_name() -> None:
     assert 'service_name="member_flow_notifications"' in source
 
 
-def test_send_notification_renders_fixed_two_field_layout_from_canonical_event(member_flow_module) -> None:
+def test_send_notification_renders_final_two_field_layout_from_canonical_event(member_flow_module) -> None:
     class _Channel:
         def __init__(self) -> None:
             self.sent = []
@@ -367,9 +367,18 @@ def test_send_notification_renders_fixed_two_field_layout_from_canonical_event(m
         assert [field.inline for field in payload.fields] == [True, False]
         assert payload.fields[0].value == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
         assert 'Stato barcello "Barcellometro"' not in payload.fields[1].value
+        assert "ALLERTA" not in payload.fields[0].value
         assert "inattività" in payload.fields[1].value.lower()
 
     asyncio.run(_run())
+
+
+def test_member_flow_renderer_source_mentions_final_fixed_layout() -> None:
+    source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
+
+    assert "Layout canonico live: sempre e solo 2 campi" in source
+    assert 'embed.add_field(name="Evento"' in source
+    assert 'Stato barcello "' not in source
 
 
 def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_module, monkeypatch) -> None:

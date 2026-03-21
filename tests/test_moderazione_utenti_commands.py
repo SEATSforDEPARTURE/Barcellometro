@@ -62,6 +62,10 @@ def test_legacy_mod_channel_namespace_is_removed() -> None:
     assert "| `greetings` | `—` | `template_set` |" not in docs_source
     assert "| `greetings` | `—` | `template_show` |" not in docs_source
     assert "| `greetings` | `—` | `template_reset` |" not in docs_source
+    assert "| `greetings` | `backfill` | `on` | Enable greetings timeline backfill. |" in docs_source
+    assert "| `greetings` | `backfill` | `off` | Disable greetings timeline backfill. |" in docs_source
+    assert "| `greetings` | `backfill` | `status` | Show greetings timeline backfill status. |" in docs_source
+    assert "| `greetings` | `backfill` | `run` | Run greetings timeline backfill now. |" in docs_source
 
 
 def test_legacy_moderation_namespace_commands_are_removed() -> None:

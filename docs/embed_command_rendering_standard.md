@@ -236,7 +236,9 @@ Non introdurre renderer paralleli o embed manuali per aggirare questo standard.
 
 Il feed GREETINGS / `🚪 INGRESSI & USCITE` segue inoltre un contratto visivo fisso, distinto dagli embed comando standardizzati:
 
-- il renderer live usa sempre **3 campi** e solo quelli: `Evento`, stato Barcello, narrativa;
+- il renderer live usa sempre **2 campi** e solo quelli: `Evento` + campo narrativo largo;
 - il payload visualizzato deve provenire dalla **timeline canonica** `member_flow_events`;
+- il file `settings/greetings_trigger.example.json` / relativo override runtime `settings/greetings_trigger.json` è la source of truth editoriale unica per frasi, fallback e override mood/time/barcello/count;
+- non esiste più un campo separato `Stato barcello "<server>"`: ogni riferimento al Barcello va integrato direttamente nella narrativa quando il template JSON lo rende naturale;
 - non è ammesso un doppio embed di uscita per la stessa sequenza tecnica (per esempio `inactive_kick` assorbito da `inactive_tempban`, oppure `leave` gateway successivo a una departure esplicita già visibile);
 - i label user-facing devono mostrare `ALLONTANAMENTO` / `ALLONTANAMENTO PER INATTIVITÀ` e non il termine raw `KICK`.
