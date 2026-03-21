@@ -355,16 +355,16 @@ class GreetingsCopyService:
         *,
         event_type_key: str,
         narrative: str,
-        reason: str | None,
+        reason_block: str | None,
     ) -> str:
         base_narrative = (narrative or "").strip()
-        normalized_reason = self._normalize_reason(reason)
+        normalized_reason = self._normalize_reason(reason_block)
         if normalized_reason is None or event_type_key not in _REASON_BLOCK_EVENT_TYPES:
             return base_narrative
-        reason_block = f"{_MODERATION_REASON_BLOCK_HEADER}\n{normalized_reason}"
+        reason_block_text = f"{_MODERATION_REASON_BLOCK_HEADER}\n{normalized_reason}"
         if not base_narrative:
-            return reason_block
-        return f"{base_narrative}\n\n{reason_block}"
+            return reason_block_text
+        return f"{base_narrative}\n\n{reason_block_text}"
 
     def _format_placeholder_value(self, placeholder: str, value: Any) -> Any:
         if value is None:
@@ -463,6 +463,7 @@ class GreetingsCopyService:
         mood: str | None = None,
         barcello_status: dict[str, Any] | None = None,
         now: datetime | None = None,
+        reason_block: str | None = None,
     ) -> GreetingsRenderResult:
         self._validate_event_type(event_type_key)
         metadata = metadata or {}
@@ -508,7 +509,7 @@ class GreetingsCopyService:
         narrative = self.compose_final_narrative(
             event_type_key=event_type_key,
             narrative=self.render_moderation_template(template, **context),
-            reason=reason,
+            reason_block=reason_block if reason_block is not None else reason,
         )
         return GreetingsRenderResult(
             event_label=format_greetings_event_label(event_type_key, max(1, int(occurrence_number))),
@@ -532,6 +533,7 @@ class GreetingsCopyService:
         channel_id: str | None = None,
         barcello_status: dict[str, Any] | None = None,
         now: datetime | None = None,
+        reason_block: str | None = None,
     ) -> GreetingsRenderResult:
         metadata = canonical_event.get("metadata")
         metadata_dict = metadata if isinstance(metadata, dict) else {}
@@ -542,7 +544,8 @@ class GreetingsCopyService:
             user=user,
             event_type_key=str(canonical_event.get("event_type_key") or ""),
             moderator=moderator,
-            reason=render_reason,
+            reason=None,
+            reason_block=render_reason,
             duration_seconds=self._coerce_int(canonical_event.get("duration_seconds")),
             expires_at=expires_at_value,
             metadata=metadata_dict,

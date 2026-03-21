@@ -32,6 +32,23 @@ def _normalize_optional_reason(value: Any) -> str | None:
     return text or None
 
 
+def _build_native_moderation_operation_id(
+    *,
+    guild_id: str,
+    user_id: str,
+    action_type: str,
+    entry_id: Any,
+    created_at: Any,
+) -> str | None:
+    entry_text = str(entry_id or "").strip()
+    if entry_text:
+        return f"discord_native:{guild_id}:{action_type}:{entry_text}"
+    created_text = str(created_at or "").strip()
+    if created_text:
+        return f"discord_native:{guild_id}:{action_type}:{user_id}:{created_text}"
+    return None
+
+
 def setup(registry: ServiceRegistry) -> None:
     bot: discord.Client = registry.get("bot")
     database = registry.get("database")
@@ -571,8 +588,16 @@ def setup(registry: ServiceRegistry) -> None:
             "greetings_reason": reason,
         }
         if native_departure is not None:
+            operation_id = _build_native_moderation_operation_id(
+                guild_id=str(member.guild.id),
+                user_id=str(member.id),
+                action_type=action_type,
+                entry_id=native_departure.get("entry_id"),
+                created_at=native_departure.get("created_at"),
+            )
             metadata.update(
                 {
+                    "operation_id": operation_id,
                     "native_moderation_source": native_departure.get("source"),
                     "discord_audit_action": native_departure.get("action_type"),
                     "discord_audit_entry_id": native_departure.get("entry_id"),
@@ -615,8 +640,16 @@ def setup(registry: ServiceRegistry) -> None:
         if recent_departure_getter is not None and recent_departure_getter(str(guild.id), str(user.id)) in {"ban", "tempban", "inactive_tempban"}:
             native_departure = native_departure or {"action_type": "ban", "reason": None, "moderator_id": None, "moderator": None, "entry_id": None, "created_at": None}
         else:
+            operation_id = _build_native_moderation_operation_id(
+                guild_id=str(guild.id),
+                user_id=str(user.id),
+                action_type="ban",
+                entry_id=native_departure.get("entry_id") if native_departure is not None else None,
+                created_at=native_departure.get("created_at") if native_departure is not None else None,
+            )
             metadata = {
                 "source": "discord_adapter",
+                "operation_id": operation_id,
                 "native_moderation": True,
                 "native_moderation_source": "member_ban_event",
                 "discord_audit_action": "ban",

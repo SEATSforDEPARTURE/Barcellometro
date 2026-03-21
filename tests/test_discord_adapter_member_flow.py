@@ -180,6 +180,7 @@ def test_native_discord_kick_is_classified_as_kick_not_leave_and_preserves_reaso
         assert kwargs["moderator_id"] == "88"
         assert kwargs["metadata"]["native_moderation"] is True
         assert kwargs["metadata"]["discord_audit_action"] == "kick"
+        assert kwargs["metadata"]["operation_id"] == "discord_native:99:kick:7001"
         assert kwargs["metadata"]["greetings_reason"] == "Spam ripetuto"
         assert member_flow.send_notification.await_count == 1
         assert member_flow.send_notification.await_args.kwargs["action_type"] == "kick"
@@ -248,6 +249,7 @@ def test_native_discord_ban_is_classified_as_ban_not_leave_and_deduped_across_ev
         assert kwargs["reason"] == "Ban definitivo"
         assert kwargs["metadata"]["native_moderation"] is True
         assert kwargs["metadata"]["discord_audit_action"] == "ban"
+        assert kwargs["metadata"]["operation_id"] == "discord_native:99:ban:8001"
         assert kwargs["metadata"]["greetings_reason"] == "Ban definitivo"
         assert member_flow.send_notification.await_count == 1
         assert member_flow.send_notification.await_args.kwargs["action_type"] == "ban"
