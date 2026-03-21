@@ -164,6 +164,11 @@ class MemberFlowNotificationsService:
 
     @staticmethod
     def _canonical_visibility_for_action(action_type: str, metadata: dict[str, Any]) -> bool:
+        # `unban` lives in the canonical model for audit/mirroring consistency,
+        # but it is intentionally hidden from the GREETINGS feed by default:
+        # unblocking a member is not itself an ingresso/uscita timeline event.
+        if action_type == "unban":
+            return bool(metadata["visible_in_greetings"]) if "visible_in_greetings" in metadata else False
         if "visible_in_greetings" in metadata:
             return bool(metadata["visible_in_greetings"])
         return True
@@ -396,11 +401,12 @@ class MemberFlowNotificationsService:
         expires_at: datetime | None,
         metadata: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        metadata_dict = dict(metadata or {})
         return {
             "event_type_key": action_type,
             "reason": reason,
             "duration_seconds": duration_seconds,
             "expires_at": expires_at.isoformat() if expires_at is not None else None,
-            "visible_in_greetings": True,
-            "metadata": dict(metadata or {}),
+            "visible_in_greetings": self._canonical_visibility_for_action(action_type, metadata_dict),
+            "metadata": metadata_dict,
         }

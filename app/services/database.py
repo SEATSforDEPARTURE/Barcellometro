@@ -25,13 +25,21 @@ _MEMBER_FLOW_EVENT_TYPES = (
     "leave",
     "kick",
     "ban",
+    "unban",
     "tempban",
     "grace",
     "inactive_kick",
     "inactive_tempban",
     "inactive_grace",
 )
-_MEMBER_FLOW_VISIBLE_DEPARTURE_TYPES = tuple(event_type for event_type in _MEMBER_FLOW_EVENT_TYPES if event_type != "join")
+_MEMBER_FLOW_VISIBLE_DEPARTURE_TYPES = (
+    "leave",
+    "kick",
+    "ban",
+    "tempban",
+    "inactive_kick",
+    "inactive_tempban",
+)
 
 
 class _AsyncCursorWrapper:
@@ -737,6 +745,7 @@ class DatabaseService:
                         'leave',
                         'kick',
                         'ban',
+                        'unban',
                         'tempban',
                         'grace',
                         'inactive_kick',
@@ -856,6 +865,7 @@ class DatabaseService:
         await self._ensure_daily_report_pagination_state_columns()
         await self._ensure_inactivity_config_columns()
         await self._ensure_moderation_actions_columns()
+        await self._ensure_member_flow_event_types()
         await self._conn.commit()
         logger.info("Database schema initialized")
 
@@ -894,6 +904,113 @@ class DatabaseService:
         for name, col_def in missing.items():
             if name not in existing:
                 await self._conn.execute(f"ALTER TABLE moderation_actions ADD COLUMN {name} {col_def}")
+
+    async def _ensure_member_flow_event_types(self) -> None:
+        """Rebuilds the canonical timeline table when the event-type CHECK is outdated.
+
+        SQLite cannot ALTER an existing CHECK constraint in place. When a runtime
+        starts on a database created before `unban` support, the old
+        `member_flow_events` definition still rejects the canonical mirror insert.
+        Rebuilding the table keeps existing rows/indexes while extending the
+        canonical model with the new event type.
+        """
+
+        assert self._conn is not None
+        table_row = await self.fetchone(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'member_flow_events'
+            LIMIT 1
+            """,
+        )
+        if table_row is None:
+            return
+        create_sql = str(table_row["sql"] or "")
+        if "'unban'" in create_sql:
+            return
+
+        await self._conn.executescript(
+            """
+            CREATE TABLE member_flow_events__new (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                event_type_key TEXT NOT NULL CHECK (
+                    event_type_key IN (
+                        'join',
+                        'leave',
+                        'kick',
+                        'ban',
+                        'unban',
+                        'tempban',
+                        'grace',
+                        'inactive_kick',
+                        'inactive_tempban',
+                        'inactive_grace'
+                    )
+                ),
+                occurred_at TEXT NOT NULL,
+                moderator_id TEXT NULL,
+                reason TEXT NULL,
+                duration_seconds INTEGER NULL,
+                expires_at TEXT NULL,
+                source TEXT NOT NULL,
+                source_ref TEXT NULL,
+                operation_id TEXT NULL,
+                visible_in_greetings INTEGER NOT NULL DEFAULT 1,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            INSERT INTO member_flow_events__new (
+                id,
+                guild_id,
+                user_id,
+                event_type_key,
+                occurred_at,
+                moderator_id,
+                reason,
+                duration_seconds,
+                expires_at,
+                source,
+                source_ref,
+                operation_id,
+                visible_in_greetings,
+                metadata_json
+            )
+            SELECT
+                id,
+                guild_id,
+                user_id,
+                event_type_key,
+                occurred_at,
+                moderator_id,
+                reason,
+                duration_seconds,
+                expires_at,
+                source,
+                source_ref,
+                operation_id,
+                visible_in_greetings,
+                metadata_json
+            FROM member_flow_events;
+
+            DROP TABLE member_flow_events;
+            ALTER TABLE member_flow_events__new RENAME TO member_flow_events;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_member_flow_events_source_ref
+            ON member_flow_events (source, source_ref);
+
+            CREATE INDEX IF NOT EXISTS idx_member_flow_events_guild_user_type_occurred
+            ON member_flow_events (guild_id, user_id, event_type_key, occurred_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_member_flow_events_visible_departures
+            ON member_flow_events (guild_id, user_id, visible_in_greetings, occurred_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_member_flow_events_operation
+            ON member_flow_events (guild_id, operation_id, occurred_at DESC);
+            """
+        )
 
     async def _ensure_daily_report_pagination_state_columns(self) -> None:
         assert self._conn is not None
