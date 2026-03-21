@@ -406,6 +406,66 @@ def test_member_flow_inactive_tempban_hides_inactive_kick_in_same_operation(memb
     asyncio.run(_run())
 
 
+def test_member_flow_operation_duplicate_keeps_backend_audit_but_hides_second_feed_event(member_flow_module, tmp_path) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "member_flow_operation_dupe.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+        service = member_flow_module.MemberFlowNotificationsService(db, object())
+
+        first = await service.log_action(
+            guild_id="88",
+            user_id="55",
+            action_type="ban",
+            reason="Ban audit 1",
+            metadata={
+                "source": "discord_adapter",
+                "operation_id": "discord_native:88:ban:entry-1",
+            },
+        )
+        second = await service.log_action(
+            guild_id="88",
+            user_id="55",
+            action_type="ban",
+            reason="Ban audit 2",
+            metadata={
+                "source": "discord_adapter",
+                "operation_id": "discord_native:88:ban:entry-1",
+            },
+        )
+
+        raw_rows = await db.fetchall(
+            """
+            SELECT action_type, reason
+            FROM moderation_actions
+            WHERE guild_id = ? AND user_id = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            ("88", "55"),
+        )
+        canonical_rows = await db.fetchall(
+            """
+            SELECT event_type_key, visible_in_greetings, reason, operation_id
+            FROM member_flow_events
+            WHERE guild_id = ? AND user_id = ?
+            ORDER BY occurred_at ASC, id ASC
+            """,
+            ("88", "55"),
+        )
+
+        assert first["canonical_visible"] is True
+        assert second["canonical_visible"] is False
+        assert [row["reason"] for row in raw_rows] == ["Ban audit 1", "Ban audit 2"]
+        assert [(row["event_type_key"], int(row["visible_in_greetings"]), row["operation_id"]) for row in canonical_rows] == [
+            ("ban", 1, "discord_native:88:ban:entry-1"),
+            ("ban", 0, "discord_native:88:ban:entry-1"),
+        ]
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
 def test_source_contains_author_title_mapping_and_footer_service_name() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
     assert 'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))' in source

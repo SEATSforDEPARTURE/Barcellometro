@@ -63,3 +63,5 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
   - `moods -> time -> barcello -> count` permette override sempre più specifici senza reintrodurre campi separati nell'embed.
 - Il resolver dei template segue una cascata precisa: override più specifici (`mood` + `time` + `barcello` + `count`) → override medi → `templates[...]` → `defaults.fallbacks[...]`.
 - La grammatica evento resta canonica e coerente col renderer live: `kick` / `inactive_kick` sono chiavi tecniche, ma le etichette e le frasi user-facing devono parlare di `allontanamento`, mai di `KICK`.
+- I flussi di moderazione del bot (`/mod users ...`) e la moderazione nativa Discord devono convergere nella stessa timeline canonica `member_flow_events`: il feed deve mostrare solo l'evento dedicato (`BAN`, `ALLONTANAMENTO`, `BAN TEMPORANEO`, `USCITA`) senza embed duplicati della stessa sequenza tecnica.
+- Quando esiste una `greetings_reason`, il renderer finale GREETINGS la mostra in coda nel blocco `👇 La moderazione aggiunge`; la narrativa principale non deve ripeterla inline.

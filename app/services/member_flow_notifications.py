@@ -180,6 +180,26 @@ class MemberFlowNotificationsService:
         ]
         return tuple(suppressed)
 
+    async def _has_visible_operation_duplicate(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        action_type: str,
+        operation_id: str | None,
+    ) -> bool:
+        if not operation_id or not hasattr(self._database, "list_member_flow_events_by_operation_id"):
+            return False
+        rows = await self._database.list_member_flow_events_by_operation_id(guild_id, operation_id)
+        for row in rows:
+            if str(row.get("user_id") or "") != user_id:
+                continue
+            if str(row.get("event_type_key") or "") != action_type:
+                continue
+            if bool(row.get("visible_in_greetings")):
+                return True
+        return False
+
     async def should_skip_leave_event(self, guild_id: str, user_id: str, *, window_seconds: int = _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS) -> bool:
         recent_action = self._recent_memory_departure(guild_id, user_id, window_seconds=window_seconds)
         if recent_action in _EXPLICIT_DEPARTURE_TYPES:
@@ -224,6 +244,13 @@ class MemberFlowNotificationsService:
         source = str(metadata_dict.get("source") or "member_flow_notifications")
         operation_id = str(metadata_dict["operation_id"]) if metadata_dict.get("operation_id") else None
         visible_in_greetings = self._canonical_visibility_for_action(action_type, metadata_dict)
+        if visible_in_greetings and await self._has_visible_operation_duplicate(
+            guild_id=guild_id,
+            user_id=user_id,
+            action_type=action_type,
+            operation_id=operation_id,
+        ):
+            visible_in_greetings = False
         if action_type == "leave":
             visible_in_greetings = visible_in_greetings and not await self.should_skip_leave_event(guild_id, user_id)
 

@@ -359,6 +359,10 @@ def test_render_canonical_event_copy_prefers_metadata_greetings_reason_for_final
 
     assert "Spam creativo" in result.narrative
     assert "Motivo tecnico interno" not in result.narrative
+    assert result.narrative.count("Spam creativo") == 1
+    narrative_body, reason_block = result.narrative.split("**👇 La moderazione aggiunge:**", 1)
+    assert "Spam creativo" not in narrative_body
+    assert "Spam creativo" in reason_block
 
 
 def test_default_narrative_does_not_auto_duplicate_event_emoji() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import discord
 from discord import app_commands
@@ -170,13 +171,22 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         explicit_reason = _normalize_optional_reason(reason)
         resolved_reason = explicit_reason or await _default_reason("kick", user=user, guild=interaction.guild, moderator=interaction.user)
+        operation_id = str(uuid4())
         _remember_departure(interaction.guild, user, "kick")
         try:
             await user.kick(reason=resolved_reason)
         except Exception:
             _forget_departure(interaction.guild, user)
             raise
-        await _notify_action(guild=interaction.guild, user=user, action_type="kick", reason=resolved_reason, greetings_reason=explicit_reason, moderator=interaction.user)
+        await _notify_action(
+            guild=interaction.guild,
+            user=user,
+            action_type="kick",
+            reason=resolved_reason,
+            greetings_reason=explicit_reason,
+            moderator=interaction.user,
+            metadata={"operation_id": operation_id},
+        )
         await _send(
             interaction,
             subcommand_path="moderazione users kick",
@@ -203,13 +213,22 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         explicit_reason = _normalize_optional_reason(reason)
         resolved_reason = explicit_reason or await _default_reason("ban", user=user, guild=interaction.guild, moderator=interaction.user)
+        operation_id = str(uuid4())
         _remember_departure(interaction.guild, user, "ban")
         try:
             await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
         except Exception:
             _forget_departure(interaction.guild, user)
             raise
-        await _notify_action(guild=interaction.guild, user=user, action_type="ban", reason=resolved_reason, greetings_reason=explicit_reason, moderator=interaction.user)
+        await _notify_action(
+            guild=interaction.guild,
+            user=user,
+            action_type="ban",
+            reason=resolved_reason,
+            greetings_reason=explicit_reason,
+            moderator=interaction.user,
+            metadata={"operation_id": operation_id},
+        )
         await _send(
             interaction,
             subcommand_path="moderazione users ban",
@@ -234,6 +253,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         duration_seconds = parse_duration_input(duration)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
         explicit_reason = _normalize_optional_reason(reason)
+        operation_id = str(uuid4())
         resolved_reason = explicit_reason or await _default_reason(
             "tempban",
             user=user,
@@ -249,7 +269,17 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             _forget_departure(interaction.guild, user)
             raise
         await ctx.database.add_temp_ban(str(interaction.guild.id), str(user.id), expires_at.isoformat(), resolved_reason)
-        await _notify_action(guild=interaction.guild, user=user, action_type="tempban", reason=resolved_reason, greetings_reason=explicit_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
+        await _notify_action(
+            guild=interaction.guild,
+            user=user,
+            action_type="tempban",
+            reason=resolved_reason,
+            greetings_reason=explicit_reason,
+            moderator=interaction.user,
+            duration_seconds=duration_seconds,
+            expires_at=expires_at,
+            metadata={"operation_id": operation_id},
+        )
         await _send(
             interaction,
             subcommand_path="moderazione users tempban",
