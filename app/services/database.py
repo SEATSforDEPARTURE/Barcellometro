@@ -20,6 +20,18 @@ logger = logging.getLogger(__name__)
 
 _LOCKED_MAX_RETRIES = 3
 _LOCKED_BACKOFF_SECONDS = 0.15
+_MEMBER_FLOW_EVENT_TYPES = (
+    "join",
+    "leave",
+    "kick",
+    "ban",
+    "tempban",
+    "grace",
+    "inactive_kick",
+    "inactive_tempban",
+    "inactive_grace",
+)
+_MEMBER_FLOW_VISIBLE_DEPARTURE_TYPES = tuple(event_type for event_type in _MEMBER_FLOW_EVENT_TYPES if event_type != "join")
 
 
 class _AsyncCursorWrapper:
@@ -711,6 +723,47 @@ class DatabaseService:
             CREATE INDEX IF NOT EXISTS idx_moderation_actions_type
             ON moderation_actions (guild_id, action_type, created_at DESC);
 
+            CREATE TABLE IF NOT EXISTS member_flow_events (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                event_type_key TEXT NOT NULL CHECK (
+                    event_type_key IN (
+                        'join',
+                        'leave',
+                        'kick',
+                        'ban',
+                        'tempban',
+                        'grace',
+                        'inactive_kick',
+                        'inactive_tempban',
+                        'inactive_grace'
+                    )
+                ),
+                occurred_at TEXT NOT NULL,
+                moderator_id TEXT NULL,
+                reason TEXT NULL,
+                duration_seconds INTEGER NULL,
+                expires_at TEXT NULL,
+                source TEXT NOT NULL,
+                source_ref TEXT NULL,
+                operation_id TEXT NULL,
+                visible_in_greetings INTEGER NOT NULL DEFAULT 1,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_member_flow_events_source_ref
+            ON member_flow_events (source, source_ref);
+
+            CREATE INDEX IF NOT EXISTS idx_member_flow_events_guild_user_type_occurred
+            ON member_flow_events (guild_id, user_id, event_type_key, occurred_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_member_flow_events_visible_departures
+            ON member_flow_events (guild_id, user_id, visible_in_greetings, occurred_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_member_flow_events_operation
+            ON member_flow_events (guild_id, operation_id, occurred_at DESC);
+
             CREATE TABLE IF NOT EXISTS aura_user_profile (
                 guild_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
@@ -1010,6 +1063,16 @@ class DatabaseService:
         data["allowed_role_ids"] = self._parse_allowed_role_ids(data.get("allowed_role_ids"))
         cooldown = data.get("cooldown_seconds")
         data["cooldown_seconds"] = int(cooldown) if cooldown is not None else None
+        return data
+
+    def _normalize_member_flow_event_row(self, row: aiosqlite.Row) -> dict[str, Any]:
+        data = dict(row)
+        try:
+            metadata = json.loads(str(data.get("metadata_json") or "{}"))
+        except json.JSONDecodeError:
+            metadata = {}
+        data["visible_in_greetings"] = bool(data.get("visible_in_greetings"))
+        data["metadata"] = metadata if isinstance(metadata, dict) else {}
         return data
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
@@ -4664,6 +4727,148 @@ class DatabaseService:
             ),
         )
         return action_id
+
+    async def insert_member_flow_event(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        event_type_key: str,
+        occurred_at: str | None = None,
+        moderator_id: str | None = None,
+        reason: str | None = None,
+        duration_seconds: int | None = None,
+        expires_at: str | None = None,
+        source: str,
+        source_ref: str | None = None,
+        operation_id: str | None = None,
+        visible_in_greetings: bool = True,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if event_type_key not in _MEMBER_FLOW_EVENT_TYPES:
+            raise ValueError(f"Unsupported member flow event type: {event_type_key}")
+
+        event_id = str(uuid.uuid4())
+        occurred_at_value = occurred_at or datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO member_flow_events (
+                id,
+                guild_id,
+                user_id,
+                event_type_key,
+                occurred_at,
+                moderator_id,
+                reason,
+                duration_seconds,
+                expires_at,
+                source,
+                source_ref,
+                operation_id,
+                visible_in_greetings,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source, source_ref) DO NOTHING
+            """,
+            (
+                event_id,
+                guild_id,
+                user_id,
+                event_type_key,
+                occurred_at_value,
+                moderator_id,
+                reason,
+                duration_seconds,
+                expires_at,
+                source,
+                source_ref,
+                operation_id,
+                int(visible_in_greetings),
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+
+        row: dict[str, Any] | None
+        if source_ref is not None:
+            row = await self.find_member_flow_event_by_source_ref(source=source, source_ref=source_ref)
+        else:
+            stored_row = await self.fetchone("SELECT * FROM member_flow_events WHERE id = ?", (event_id,))
+            row = self._normalize_member_flow_event_row(stored_row) if stored_row is not None else None
+        if row is None:
+            raise RuntimeError("Unable to load member flow event after insert")
+        return row
+
+    async def find_member_flow_event_by_source_ref(self, *, source: str, source_ref: str) -> dict[str, Any] | None:
+        row = await self.fetchone(
+            """
+            SELECT *
+            FROM member_flow_events
+            WHERE source = ? AND source_ref = ?
+            LIMIT 1
+            """,
+            (source, source_ref),
+        )
+        if row is None:
+            return None
+        return self._normalize_member_flow_event_row(row)
+
+    async def count_member_flow_events_for_user(
+        self,
+        guild_id: str,
+        user_id: str,
+        event_type_key: str,
+        *,
+        visible_only: bool = True,
+    ) -> int:
+        if event_type_key not in _MEMBER_FLOW_EVENT_TYPES:
+            raise ValueError(f"Unsupported member flow event type: {event_type_key}")
+
+        params: list[Any] = [guild_id, user_id, event_type_key]
+        visibility_clause = ""
+        if visible_only:
+            visibility_clause = " AND visible_in_greetings = 1"
+        row = await self.fetchone(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM member_flow_events
+            WHERE guild_id = ?
+              AND user_id = ?
+              AND event_type_key = ?
+              {visibility_clause}
+            """,
+            tuple(params),
+        )
+        return int(row["total"] if row is not None else 0)
+
+    async def list_recent_visible_departures(self, guild_id: str, user_id: str, since_iso: str) -> list[dict[str, Any]]:
+        placeholders = ", ".join("?" for _ in _MEMBER_FLOW_VISIBLE_DEPARTURE_TYPES)
+        rows = await self.fetchall(
+            f"""
+            SELECT *
+            FROM member_flow_events
+            WHERE guild_id = ?
+              AND user_id = ?
+              AND visible_in_greetings = 1
+              AND occurred_at >= ?
+              AND event_type_key IN ({placeholders})
+            ORDER BY occurred_at DESC
+            """,
+            (guild_id, user_id, since_iso, *_MEMBER_FLOW_VISIBLE_DEPARTURE_TYPES),
+        )
+        return [self._normalize_member_flow_event_row(row) for row in rows]
+
+    async def list_member_flow_events_by_operation_id(self, guild_id: str, operation_id: str) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT *
+            FROM member_flow_events
+            WHERE guild_id = ?
+              AND operation_id = ?
+            ORDER BY occurred_at ASC, id ASC
+            """,
+            (guild_id, operation_id),
+        )
+        return [self._normalize_member_flow_event_row(row) for row in rows]
 
     async def list_recent_kicked_users(self, guild_id: str, *, limit: int = 25) -> list[aiosqlite.Row]:
         return await self.fetchall(
