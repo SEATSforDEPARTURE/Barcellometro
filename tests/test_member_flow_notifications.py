@@ -315,7 +315,7 @@ def test_source_contains_fixed_title_and_footer_service_name() -> None:
     assert 'service_name="member_flow_notifications"' in source
 
 
-def test_send_notification_renders_fixed_three_field_layout_from_canonical_event(member_flow_module) -> None:
+def test_send_notification_renders_fixed_two_field_layout_from_canonical_event(member_flow_module) -> None:
     class _Channel:
         def __init__(self) -> None:
             self.sent = []
@@ -357,21 +357,20 @@ def test_send_notification_renders_fixed_three_field_layout_from_canonical_event
 
         payload = channel.sent[0]["embed"]
         assert payload.title == "🚪 INGRESSI & USCITE"
-        assert len(payload.fields) == 3
+        assert len(payload.fields) == 2
         assert [field.name for field in payload.fields] == [
             "Evento",
-            'Stato barcello "Barcellometro"',
             "​",
         ]
-        assert [field.inline for field in payload.fields] == [True, True, False]
+        assert [field.inline for field in payload.fields] == [True, False]
         assert payload.fields[0].value == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
-        assert payload.fields[1].value == "⚪ ALLERTA SCONOSCIUTA\n(🫀: **n/d**)"
-        assert "inattività" in payload.fields[2].value.lower()
+        assert 'Stato barcello "Barcellometro"' not in payload.fields[1].value
+        assert "inattività" in payload.fields[1].value.lower()
 
     asyncio.run(_run())
 
 
-def test_send_notification_uses_copy_service_values_and_join_reentry_language(member_flow_module, monkeypatch) -> None:
+def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_module, monkeypatch) -> None:
     attached = {}
 
     def _attach_footer(embed, **kwargs):
@@ -419,9 +418,9 @@ def test_send_notification_uses_copy_service_values_and_join_reentry_language(me
         )
 
         embed = channel.sent[0]
-        assert len(embed.fields) == 3
-        assert "rientrat" in embed.fields[2].value.lower() or "torna" in embed.fields[2].value.lower()
-        assert " entra" not in embed.fields[2].value.lower()
+        assert len(embed.fields) == 2
+        assert "benvenut" in embed.fields[1].value.lower()
+        assert "<@42>" in embed.fields[1].value
         assert embed.footer.text == "Barcellometro dev"
         assert attached["service_name"] == "member_flow_notifications"
 
@@ -456,8 +455,6 @@ def test_send_notification_uses_copy_service_as_single_source_for_field_values(m
                 0,
                 result=types.SimpleNamespace(
                     event_label="COPY EVENT LABEL",
-                    status_field_name='Stato barcello "Barcellometro"',
-                    status_field_value="COPY STATUS",
                     narrative="COPY NARRATIVE",
                 ),
             ),
@@ -479,7 +476,6 @@ def test_send_notification_uses_copy_service_as_single_source_for_field_values(m
         embed = channel.sent[0]
         assert [field.value for field in embed.fields] == [
             "COPY EVENT LABEL",
-            "COPY STATUS",
             "COPY NARRATIVE",
         ]
 
@@ -518,8 +514,6 @@ def test_send_notification_reads_runtime_values_only_from_canonical_timeline(mem
                 0,
                 result=types.SimpleNamespace(
                     event_label="CANONICAL EVENT",
-                    status_field_name='Stato barcello "Barcellometro"',
-                    status_field_value="CANONICAL STATUS",
                     narrative="CANONICAL NARRATIVE",
                 ),
             ),
@@ -541,7 +535,6 @@ def test_send_notification_reads_runtime_values_only_from_canonical_timeline(mem
         embed = channel.sent[0]
         assert [field.value for field in embed.fields] == [
             "CANONICAL EVENT",
-            "CANONICAL STATUS",
             "CANONICAL NARRATIVE",
         ]
 

@@ -31,7 +31,8 @@ def _service(*, tmp_path=None, occurrence_number: int = 1, payload: dict | None 
 
 def test_format_greetings_event_label_covers_supported_keys() -> None:
     assert format_greetings_event_label("join", 1) == "**✨ PRIMO INGRESSO**"
-    assert format_greetings_event_label("leave", 2) == "**👋 SECONDO USCITA**"
+    assert format_greetings_event_label("leave", 1) == "**👋 PRIMA USCITA**"
+    assert format_greetings_event_label("leave", 2) == "**👋 SECONDA USCITA**"
     assert format_greetings_event_label("kick", 1) == "**🥾 PRIMO ALLONTANAMENTO**"
     assert format_greetings_event_label("ban", 1) == "**🔨 PRIMO BAN**"
     assert format_greetings_event_label("tempban", 1) == "**⏳ PRIMO BAN TEMPORANEO**"
@@ -40,15 +41,6 @@ def test_format_greetings_event_label_covers_supported_keys() -> None:
     assert format_greetings_event_label("inactive_tempban", 1) == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
     assert format_greetings_event_label("inactive_grace", 1) == "**🛟 PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**"
     assert "KICK" not in format_greetings_event_label("kick", 3)
-
-
-def test_build_barcello_status_field_matches_expected_format() -> None:
-    service = _service()
-
-    name, value = service.build_barcello_status_field(guild_name="Barcellometro", barcello_color="verde", barcello_score=84)
-
-    assert name == 'Stato barcello "Barcellometro"'
-    assert value == "🟢 ALLERTA VERDE\n(🫀: **84/100**)"
 
 
 def test_render_event_copy_uses_second_occurrence_for_ordinals() -> None:
@@ -65,7 +57,7 @@ def test_render_event_copy_uses_second_occurrence_for_ordinals() -> None:
     )
 
     assert result.occurrence_number == 2
-    assert result.event_label == "**👋 SECONDO USCITA**"
+    assert result.event_label == "**👋 SECONDA USCITA**"
     assert service._test_database.count_calls == [("1", "42", "leave")]  # type: ignore[attr-defined]
 
 
@@ -86,7 +78,7 @@ def test_render_event_copy_counts_by_user_and_event_type_key_only() -> None:
     assert service._test_database.count_calls == [("1", "99", "kick")]  # type: ignore[attr-defined]
 
 
-def test_join_narrative_uses_reentry_language_and_not_entra() -> None:
+def test_first_join_narrative_is_welcome_and_uses_user_mention() -> None:
     service = _service()
 
     result = asyncio.run(
@@ -100,8 +92,28 @@ def test_join_narrative_uses_reentry_language_and_not_entra() -> None:
     )
 
     lowered = result.narrative.lower()
-    assert "rientrat" in lowered or "torna" in lowered
-    assert " entra" not in lowered
+    assert "<@42>" in result.narrative
+    assert "benvenut" in lowered
+    assert "rientrat" not in lowered
+    assert "torna" not in lowered
+
+
+def test_second_join_narrative_can_use_reentry_language_and_uses_user_mention() -> None:
+    service = _service(occurrence_number=2)
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="join",
+            barcello_status={"color": "verde", "score": 84},
+            now=datetime(2026, 3, 21, 9, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    lowered = result.narrative.lower()
+    assert "<@42>" in result.narrative
+    assert "torna" in lowered or "rientra" in lowered
 
 
 def test_grace_manual_and_inactive_have_distinct_copy() -> None:
@@ -242,3 +254,19 @@ def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canoni
     assert result.occurrence_number == 3
     assert result.event_label == "**💤 TERZO BAN TEMPORANEO PER INATTIVITÀ**"
     assert "30 giorni" in result.narrative
+
+
+def test_default_narrative_does_not_auto_duplicate_event_emoji() -> None:
+    service = _service()
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="leave",
+            barcello_status={"color": "giallo", "score": 72},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert "👋" not in result.narrative

@@ -273,10 +273,10 @@ class MemberFlowNotificationsService:
             now=created_at,
         )
         embed = discord.Embed(title="🚪 INGRESSI & USCITE", colour=discord.Colour.blurple(), timestamp=created_at)
-        # Layout canonico live: sempre e solo 3 campi, nell'ordine evento →
-        # stato barcello → narrativa. I valori arrivano dalla timeline canonica.
+        # Layout canonico live: sempre e solo 2 campi, nell'ordine evento →
+        # narrativa larga. Lo stato barcello vive eventualmente nel testo
+        # narrativo tramite template JSON.
         embed.add_field(name="Evento", value=copy.event_label, inline=True)
-        embed.add_field(name=copy.status_field_name, value=copy.status_field_value[:1024], inline=True)
         embed.add_field(name=_BLANK_FIELD_NAME, value=copy.narrative[:1024], inline=False)
         attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)
 
