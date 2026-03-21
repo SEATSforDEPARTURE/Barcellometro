@@ -45,6 +45,8 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert '@users_group.command(name="tempban_list"' in modular
     assert '@users_group.command(name="grace"' in modular
     assert '@users_group.command(name="grace_list"' in modular
+    assert 'description="Remove a user from the server."' in modular
+    assert 'description="List recent user removals."' in modular
 
 
 def test_legacy_mod_channel_namespace_is_removed() -> None:
@@ -285,7 +287,7 @@ def test_greetings_template_show_without_type_keeps_overview_templates() -> None
             assert sections[0].title == "Templates"
             assert sections[0].lines == [
                 ("Inactivity", "Inactivity template"),
-                ("Kick", "Kick template"),
+                ("Allontanamento", "Kick template"),
                 ("Ban", "Ban template"),
                 ("Tempban", "Tempban template"),
                 ("Grace", "Grace template"),

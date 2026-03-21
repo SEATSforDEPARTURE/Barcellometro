@@ -41,6 +41,14 @@ async def _send_lines(
     await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=[txt])
 
 
+def _render_departure_action_label(action_type: str) -> str:
+    labels = {
+        "kick": "allontanamento",
+        "inactive_kick": "allontanamento per inattività",
+    }
+    return labels.get(action_type, action_type)
+
+
 def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandContext) -> None:
     users_group = app_commands.Group(name="users", description="Moderation actions for users")
     mod_group.add_command(users_group)
@@ -131,7 +139,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
                 canonical_event=result.get("canonical_event"),
             )
 
-    @users_group.command(name="kick", description="Kick a user.")
+    @users_group.command(name="kick", description="Remove a user from the server.")
     @app_commands.describe(user="Member to kick.", reason="Optional reason override.")
     async def mod_users_kick(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
@@ -143,17 +151,20 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             interaction,
             subcommand_path="moderazione users kick",
             subtitle_args=[user],
-            lines=[("user", user.mention), ("result", "kicked"), ("reason", resolved_reason)],
+            lines=[("user", user.mention), ("result", "allontanato"), ("reason", resolved_reason)],
             kind="success",
         )
 
-    @users_group.command(name="kick_list", description="List recent kicks.")
+    @users_group.command(name="kick_list", description="List recent user removals.")
     async def mod_users_kick_list(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_recent_kicked_users(str(interaction.guild_id))
-        lines = [f"• <@{row['user_id']}> · {row['action_type']} · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
-        await _send_lines(interaction, ctx, subcommand_path="moderazione users kick_list", title="Recent kicks", lines=lines, prefix="mod_users_kick_list")
+        lines = [
+            f"• <@{row['user_id']}> · {_render_departure_action_label(str(row['action_type'] or 'kick'))} · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}"
+            for row in rows
+        ]
+        await _send_lines(interaction, ctx, subcommand_path="moderazione users kick_list", title="Recent allontanamenti", lines=lines, prefix="mod_users_kick_list")
 
     @users_group.command(name="ban", description="Ban a user permanently.")
     @app_commands.describe(user="Member to ban.", reason="Optional reason override.")

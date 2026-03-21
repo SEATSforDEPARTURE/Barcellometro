@@ -133,6 +133,22 @@ Regole obbligatorie:
 - il database non deve duplicare inutilmente i default già determinabili dal dominio;
 - `reset` deve normalmente tradursi nella rimozione dell'override persistito, non nella scrittura ridondante del valore di default.
 
+## 7.1 Canonical timeline per GREETINGS / INGRESSI & USCITE
+
+Per il dominio GREETINGS la persistenza segue una separazione normativa esplicita:
+
+- `moderation_actions` è il ledger **raw di audit** delle azioni osservate o prodotte dal runtime;
+- `member_flow_events` è la **timeline canonica** consumata dal runtime GREETINGS per rendering live, conteggi per occorrenza, deduplica delle uscite e backfill storico.
+
+Regole obbligatorie:
+
+- il runtime live di GREETINGS deve leggere la timeline canonica e non reinterpretare direttamente il ledger raw;
+- i conteggi di ricorrenza devono essere per `user + event_type_key`;
+- il backfill storico deve essere idempotente sulla coppia `source + source_ref`;
+- gli eventi di inattività (`inactive_*`) restano semanticamente distinti dagli eventi manuali omologhi;
+- `grace` e `inactive_grace` condividono l'emoji `🛟`, ma devono mantenere label e copy distinti;
+- il wording user-facing deve mostrare `allontanamento` dove l'action tecnica interna resta `kick`.
+
 ## 8. Eccezioni consentite
 
 Sono consentite eccezioni mirate quando la semantica resta chiara e coerente, in particolare:

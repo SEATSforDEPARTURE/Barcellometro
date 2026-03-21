@@ -484,3 +484,65 @@ def test_send_notification_uses_copy_service_as_single_source_for_field_values(m
         ]
 
     asyncio.run(_run())
+
+
+def test_send_notification_reads_runtime_values_only_from_canonical_timeline(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append(embed)
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+        service._copy_service.render_event_copy = types.MethodType(  # type: ignore[method-assign]
+            lambda self, **kwargs: (_ for _ in ()).throw(AssertionError("live runtime must use canonical timeline copy")),
+            service._copy_service,
+        )
+        service._copy_service.render_canonical_event_copy = types.MethodType(
+            lambda self, **kwargs: asyncio.sleep(
+                0,
+                result=types.SimpleNamespace(
+                    event_label="CANONICAL EVENT",
+                    status_field_name='Stato barcello "Barcellometro"',
+                    status_field_value="CANONICAL STATUS",
+                    narrative="CANONICAL NARRATIVE",
+                ),
+            ),
+            service._copy_service,
+        )
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="leave",
+            canonical_event={
+                "event_type_key": "leave",
+                "reason": "Uscita dal server",
+                "visible_in_greetings": True,
+                "metadata": {"occurrence_number": 2},
+            },
+        )
+
+        embed = channel.sent[0]
+        assert [field.value for field in embed.fields] == [
+            "CANONICAL EVENT",
+            "CANONICAL STATUS",
+            "CANONICAL NARRATIVE",
+        ]
+
+    asyncio.run(_run())

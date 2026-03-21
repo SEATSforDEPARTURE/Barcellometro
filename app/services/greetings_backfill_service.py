@@ -54,6 +54,13 @@ class _BackfillCandidate:
 
 
 class GreetingsBackfillService:
+    """Rebuilds the canonical greetings timeline from raw historical sources.
+
+    `moderation_actions` remains the raw audit trail.
+    `member_flow_events` is the idempotent, canonical timeline consumed by
+    greetings live rendering/counting/deduplication.
+    """
+
     ENABLED_KEY = "greetings.backfill.enabled"
     LAST_RUN_AT_KEY = "greetings.backfill.last_run_at"
     LAST_RUN_IMPORTED_KEY = "greetings.backfill.last_run_imported_count"
@@ -313,6 +320,8 @@ class GreetingsBackfillService:
         *,
         inactive_tempban_index: dict[tuple[str, str], list[_BackfillCandidate]],
     ) -> bool:
+        # Idempotenza forte: la timeline canonica non reinserisce lo stesso
+        # evento se la sorgente raw è già stata importata una volta.
         existing = await self._database.find_member_flow_event_by_source_ref(source=candidate.source, source_ref=candidate.source_ref)
         if existing is not None:
             return False
@@ -345,6 +354,9 @@ class GreetingsBackfillService:
     ) -> bool:
         if candidate.event_type_key in _NON_DEPARTURE_TYPES:
             return False
+        # Gli eventi di inattività restano distinti da quelli manuali e le
+        # pipeline kick→tempban per inattività non devono produrre doppie uscite
+        # visibili nella timeline greetings.
         if candidate.event_type_key == "inactive_kick" and self._inactive_kick_is_absorbed(candidate, inactive_tempban_index):
             return False
         if candidate.event_type_key == "leave":
