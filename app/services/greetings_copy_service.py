@@ -75,6 +75,35 @@ _BARCELLO_ALERTS = {
 _TEMPLATE_RE = re.compile(r"\{([a-zA-Z0-9_]+)\}")
 
 _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
+    "docs": {
+        "placeholders": {
+            "mention": {"description": "Mention Discord completa dell'utente."},
+            "display_name": {"description": "Display name/nickname preferito dell'utente."},
+            "username": {"description": "Username raw dell'utente."},
+            "guild_name": {"description": "Nome del server."},
+        }
+    },
+    "defaults": {
+        "fallbacks": {
+            "join": {
+                "first_occurrence": ["{mention} arriva in {guild_name}. Benvenuto."],
+                "repeat": ["{mention} torna in {guild_name}."],
+                "default": ["{mention} passa da {guild_name}."],
+            },
+            "leave": {
+                "first_occurrence": ["{mention} lascia {guild_name}."],
+                "repeat": ["{mention} esce di nuovo da {guild_name}."],
+                "default": ["{mention} saluta {guild_name}."],
+            },
+            "kick": {"default": ["{mention} viene allontanato da {guild_name}{reason_suffix}."]},
+            "ban": {"default": ["{mention} riceve un ban da {guild_name}{reason_suffix}."]},
+            "tempban": {"default": ["{mention} riceve un ban temporaneo da {guild_name} per {duration}{reason_suffix}."]},
+            "grace": {"default": ["{mention} entra in periodo di grazia su {guild_name} per {duration}."]},
+            "inactive_kick": {"default": ["{mention} viene allontanato da {guild_name} per inattività ({inactivity_text})."]},
+            "inactive_tempban": {"default": ["{mention} riceve un ban temporaneo per inattività su {guild_name} per {duration} ({inactivity_text})."]},
+            "inactive_grace": {"default": ["{mention} entra in grazia per inattività su {guild_name} per {duration} ({inactivity_text})."]},
+        }
+    },
     "mood_default": "accogliente",
     "time_buckets": {
         "night": {"start": 0, "end": 6},
@@ -88,34 +117,22 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
         {"min_occurrence": 3, "label": "t3"},
     ],
     "templates": {
-        "join": [
-            "{mention} entra in {server}.",
-        ],
+        "join": {
+            "first_occurrence": ["{mention} entra in {server}."],
+            "repeat": ["{mention} torna in {server}."],
+            "default": ["{mention} passa da {server}."],
+        },
         "leave": [
             "{mention} ha lasciato {server}.",
             "{mention} si allontana da {server}.",
         ],
-        "kick": [
-            "{mention} è stato allontanato da {server}{reason_suffix}.",
-        ],
-        "ban": [
-            "{mention} è stato bannato da {server}{reason_suffix}.",
-        ],
-        "tempban": [
-            "{mention} è stato escluso temporaneamente da {server} per {duration}{reason_suffix}.",
-        ],
-        "grace": [
-            "{mention} riceve un periodo di grazia nel server {server} per {duration}.",
-        ],
-        "inactive_kick": [
-            "{mention} viene allontanato da {server} per inattività ({inactivity_text}).",
-        ],
-        "inactive_tempban": [
-            "{mention} riceve un ban temporaneo per inattività in {server} per {duration} ({inactivity_text}).",
-        ],
-        "inactive_grace": [
-            "{mention} entra in periodo di grazia per inattività su {server} per {duration} ({inactivity_text}).",
-        ],
+        "kick": ["{mention} è stato allontanato da {server}{reason_suffix}."],
+        "ban": ["{mention} è stato bannato da {server}{reason_suffix}."],
+        "tempban": ["{mention} è stato escluso temporaneamente da {server} per {duration}{reason_suffix}."],
+        "grace": ["{mention} riceve un periodo di grazia nel server {server} per {duration}."],
+        "inactive_kick": ["{mention} viene allontanato da {server} per inattività ({inactivity_text})."],
+        "inactive_tempban": ["{mention} riceve un ban temporaneo per inattività in {server} per {duration} ({inactivity_text})."],
+        "inactive_grace": ["{mention} entra in periodo di grazia per inattività su {server} per {duration} ({inactivity_text})."],
     },
     "moods": {
         "accogliente": {
@@ -383,6 +400,7 @@ class GreetingsCopyService:
             time_bucket=time_bucket,
             barcello_state=normalized_barcello,
             count_tier=count_tier,
+            occurrence_number=max(1, int(occurrence_number)),
         )
         narrative = self.render_moderation_template(template, **context)
         return GreetingsRenderResult(
@@ -522,18 +540,30 @@ class GreetingsCopyService:
         time_bucket: str,
         barcello_state: str,
         count_tier: str,
+        occurrence_number: int,
     ) -> str:
         moods = cfg.get("moods") if isinstance(cfg.get("moods"), dict) else {}
         mood_cfg = moods.get(mood) if isinstance(moods.get(mood), dict) else None
         candidates: list[object] = []
         candidates.extend(self._collect_candidates(mood_cfg, key=key, time_bucket=time_bucket, barcello_state=barcello_state, count_tier=count_tier))
         candidates.extend(self._collect_candidates(cfg, key=key, time_bucket=time_bucket, barcello_state=barcello_state, count_tier=count_tier))
+        defaults_cfg = cfg.get("defaults") if isinstance(cfg.get("defaults"), dict) else {}
+        fallback_cfg = defaults_cfg.get("fallbacks") if isinstance(defaults_cfg.get("fallbacks"), dict) else {}
+        candidates.append(fallback_cfg.get(key))
         for candidate in candidates:
-            selected = self._resolve_template_value(candidate, seed_parts=(key, mood, time_bucket, barcello_state, count_tier))
+            selected = self._resolve_template_value(
+                candidate,
+                seed_parts=(key, mood, time_bucket, barcello_state, count_tier, str(occurrence_number)),
+                occurrence_number=occurrence_number,
+            )
             if selected:
                 return selected
-        fallback = _DEFAULT_GREETINGS_TRIGGER["templates"].get(key)
-        return self._resolve_template_value(fallback, seed_parts=(key, "default", time_bucket, barcello_state, count_tier))
+        fallback = _DEFAULT_GREETINGS_TRIGGER["defaults"]["fallbacks"].get(key)
+        return self._resolve_template_value(
+            fallback,
+            seed_parts=(key, "default", time_bucket, barcello_state, count_tier, str(occurrence_number)),
+            occurrence_number=occurrence_number,
+        )
 
     def _collect_candidates(
         self,
@@ -595,7 +625,7 @@ class GreetingsCopyService:
         candidates.append(templates.get(key))
         return candidates
 
-    def _resolve_template_value(self, value: object, *, seed_parts: tuple[str, ...]) -> str:
+    def _resolve_template_value(self, value: object, *, seed_parts: tuple[str, ...], occurrence_number: int) -> str:
         if isinstance(value, str):
             return value.strip()
         if isinstance(value, list):
@@ -605,6 +635,27 @@ class GreetingsCopyService:
             seed = "|".join(seed_parts)
             hashed = hashlib.sha256(seed.encode("utf-8")).hexdigest()
             return options[int(hashed[:8], 16) % len(options)]
+        if isinstance(value, dict):
+            variant_order: list[str]
+            if max(1, int(occurrence_number)) == 1:
+                variant_order = ["first_occurrence", "first_time", "welcome", "default", "fallback", "all"]
+            else:
+                variant_order = ["repeat", "returning", "reentry", "default", "fallback", "all"]
+            for variant_key in variant_order:
+                selected = self._resolve_template_value(
+                    value.get(variant_key),
+                    seed_parts=seed_parts + (variant_key,),
+                    occurrence_number=occurrence_number,
+                )
+                if selected:
+                    return selected
+            templates_value = value.get("templates")
+            if templates_value is not None:
+                return self._resolve_template_value(
+                    templates_value,
+                    seed_parts=seed_parts + ("templates",),
+                    occurrence_number=occurrence_number,
+                )
         return ""
 
     async def _resolve_occurrence_number(self, guild_id: str, user_id: str, event_type_key: str) -> int:

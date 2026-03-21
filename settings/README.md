@@ -55,3 +55,10 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - Il vecchio campo separato `Stato barcello "<server>"` non esiste più: eventuali riferimenti al barcello vanno integrati direttamente nel testo narrativo tramite placeholder/template.
 - Per il testo narrativo è consigliato usare `{mention}` invece di `{display_name}` quando il soggetto deve comparire come tag utente.
 - Le occorrenze lette nei placeholder (`{occurrence_number}`, `{occurrence_ordinal}`, `{event_label}`) arrivano dalla timeline canonica `member_flow_events`, non dal ledger raw `moderation_actions`.
+- La struttura example aggiornata è pensata come source of truth editoriale unica ed esplicita:
+  - `docs.placeholders` documenta i placeholder supportati e gli alias legacy compatibili;
+  - `defaults.fallbacks` garantisce un fallback robusto per ogni `event_type_key`;
+  - `templates[event_type_key]` contiene la baseline narrativa generale;
+  - `first_occurrence` e `repeat` distinguono il primo ingresso dai rientri, e più in generale prima occorrenza vs successive;
+  - `moods -> time -> barcello -> count` permette override sempre più specifici senza reintrodurre campi separati nell'embed.
+- Il resolver dei template segue una cascata precisa: override più specifici (`mood` + `time` + `barcello` + `count`) → override medi → `templates[...]` → `defaults.fallbacks[...]`.

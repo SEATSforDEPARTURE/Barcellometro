@@ -3,9 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
-from app.services.greetings_copy_service import GreetingsCopyService, format_greetings_event_label
+from app.services.greetings_copy_service import (
+    SUPPORTED_GREETINGS_EVENT_TYPES,
+    GreetingsCopyService,
+    format_greetings_event_label,
+)
 
 
 class _FakeDatabase:
@@ -270,3 +275,74 @@ def test_default_narrative_does_not_auto_duplicate_event_emoji() -> None:
     )
 
     assert "👋" not in result.narrative
+
+
+def test_example_config_loads_and_documents_core_placeholders() -> None:
+    service = GreetingsCopyService(_FakeDatabase(), config_path="settings/greetings_trigger.example.json")
+    cfg = service._load_cfg()  # type: ignore[attr-defined]
+
+    placeholders = cfg["docs"]["placeholders"]
+    for key in (
+        "mention",
+        "display_name",
+        "username",
+        "guild_name",
+        "reason",
+        "duration",
+        "expires_at",
+        "event_label",
+        "occurrence_number",
+        "barcello_state",
+        "barcello_score",
+        "mood",
+        "time_bucket",
+    ):
+        assert key in placeholders
+
+
+def test_example_config_has_fallbacks_for_every_supported_event() -> None:
+    payload = json.loads(Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8"))
+
+    fallbacks = payload["defaults"]["fallbacks"]
+    assert set(fallbacks) == SUPPORTED_GREETINGS_EVENT_TYPES
+    for event_type_key in SUPPORTED_GREETINGS_EVENT_TYPES:
+        template_group = fallbacks[event_type_key]
+        assert isinstance(template_group, dict)
+        assert any(template_group.get(name) for name in ("default", "first_occurrence", "repeat"))
+
+
+def test_example_config_join_has_explicit_first_and_repeat_copy() -> None:
+    payload = json.loads(Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8"))
+
+    join_templates = payload["templates"]["join"]
+    assert join_templates["first_occurrence"]
+    assert join_templates["repeat"]
+    assert join_templates["first_occurrence"] != join_templates["repeat"]
+    assert all("{mention}" in phrase for phrase in join_templates["first_occurrence"])
+    assert all("{mention}" in phrase for phrase in join_templates["repeat"])
+
+
+def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> None:
+    payload = {
+        "templates": {"kick": []},
+        "defaults": {
+            "fallbacks": {
+                "kick": {
+                    "default": ["fallback kick {mention}"],
+                },
+            }
+        },
+    }
+    service = _service(tmp_path=tmp_path, occurrence_number=2, payload=payload)
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="kick",
+            barcello_status={"color": "verde", "score": 84},
+            now=datetime(2026, 3, 21, 9, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert result.narrative == "fallback kick <@42>"
