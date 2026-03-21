@@ -13,6 +13,7 @@ from app.plugins.commands_modular import (
     register_ask,
     register_audio_notes,
     register_attivita,
+    register_greetings,
     register_aura,
     register_barcello,
     register_inattivi,
@@ -63,6 +64,7 @@ def setup(registry: ServiceRegistry) -> None:
     aura_group = app_commands.Group(name="aura", description="Aura reports")
     attivita_group = app_commands.Group(name="attivita", description="User activity commands")
     mod_group = app_commands.Group(name="mod", description="Moderation controls")
+    greetings_group = app_commands.Group(name="greetings", description="Greetings controls")
     inactivity_group = app_commands.Group(name="inactivity", description="Inactive member moderation")
     resocontocanale_group = app_commands.Group(name="resocontocanale", description="Channel summary schedules")
     resocontoserver_group = app_commands.Group(name="resocontoserver", description="Server summary schedules")
@@ -88,6 +90,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_attivita(attivita_group, ctx)
 
     register_inattivi(inactivity_group, ctx)
+    register_greetings(greetings_group, ctx)
     register_moderazione_utenti(mod_group, ctx)
 
     register_resoconto(resocontocanale_group, resocontoserver_group, ctx)
@@ -114,6 +117,7 @@ def setup(registry: ServiceRegistry) -> None:
         aura_group,
         attivita_group,
         mod_group,
+        greetings_group,
         inactivity_group,
         resocontocanale_group,
         resocontoserver_group,

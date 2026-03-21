@@ -69,7 +69,7 @@ CONFIG_TARGET_NAMES = {
     "schedule_id",
     "service",
     "task",
-    "template_name",
+    "type",
     "user",
     "utente",
     "voice_channel",
