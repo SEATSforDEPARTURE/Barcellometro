@@ -131,6 +131,10 @@ def _clean(value: str | None) -> str:
     return (value or "").strip()
 
 
+def _clean_footer_text(value: str | None) -> str:
+    return _clean(value)
+
+
 def _truncate(text: str, max_len: int = FOOTER_MAX_LEN) -> str:
     if len(text) <= max_len:
         return text
@@ -161,6 +165,7 @@ def render_footer_text(
 ) -> tuple[str, str | None]:
     brand_version = _clean(version) or FOOTER_FALLBACK_VERSION
     brand = f"Barcellometro {brand_version}"
+    clean_phrase = _clean_footer_text(phrase) if phrase else ""
     contributors_deduped = _dedupe_footer_contributors(contributors)
     processing: str | None = None
     if len(contributors_deduped) == 1:
@@ -171,12 +176,11 @@ def render_footer_text(
         processing = f"Dati elaborati con {', '.join(contributors_deduped[:-1])} e {contributors_deduped[-1]}"
 
     parts = [brand]
-    if phrase:
-        parts.append(phrase)
+    if clean_phrase:
+        parts.append(clean_phrase)
     if processing:
         parts.append(processing)
     footer_text = _truncate(FOOTER_SEPARATOR.join(parts))
-    clean_phrase = _clean(phrase) if phrase else ""
     return footer_text, clean_phrase or None
 
 
