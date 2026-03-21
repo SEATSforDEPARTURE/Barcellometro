@@ -322,7 +322,9 @@ def test_member_flow_inactive_tempban_hides_inactive_kick_in_same_operation(memb
 
 def test_source_contains_author_title_mapping_and_footer_service_name() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
-    assert 'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=discord.Colour.blurple())' in source
+    assert 'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))' in source
+    assert '_ENTRY_LIKE_EVENT_TYPES = frozenset({"join", "grace", "inactive_grace"})' in source
+    assert '"inactive_tempban",' in source
     assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' in source
     assert 'service_name="member_flow_notifications"' in source
     assert 'embed.add_field(name="Evento"' not in source
@@ -514,6 +516,70 @@ def test_send_notification_ignores_legacy_db_template_values(member_flow_module)
         assert "LEGACY DB TEMPLATE" not in narrative
         assert "LEGACY ATRIO TEMPLATE" not in narrative
         assert "30 giorni" in narrative
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("event_type", "expected_colour"),
+    [
+        ("join", 0xC58C5C),
+        ("grace", 0xC58C5C),
+        ("inactive_grace", 0xC58C5C),
+        ("leave", 0x6B4423),
+        ("kick", 0x6B4423),
+        ("ban", 0x6B4423),
+        ("tempban", 0x6B4423),
+        ("inactive_kick", 0x6B4423),
+        ("inactive_tempban", 0x6B4423),
+    ],
+)
+def test_send_notification_uses_canonical_greetings_palette_by_event_type(member_flow_module, event_type: str, expected_colour: int) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append(embed)
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type=event_type,
+            canonical_event={
+                "event_type_key": event_type,
+                "reason": f"Evento {event_type}",
+                "visible_in_greetings": True,
+                "metadata": {"occurrence_number": 1},
+            },
+        )
+
+        embed = channel.sent[0]
+        assert embed.colour == expected_colour
+        assert embed.author.name == "🚪 INGRESSI & USCITE"
+        assert embed.fields == []
 
     asyncio.run(_run())
 
