@@ -20,6 +20,7 @@ ALLOWED_LEGACY_SETTINGS_LITERALS = {
 CANONICAL_SETTINGS_FILES = {
     "settings/barcello_trigger.example.json",
     "settings/entitlements.example.json",
+    "settings/greetings_trigger.example.json",
     "settings/aura_rules.example.json",
     "settings/aura_archetypes.example.json",
     "settings/aura_missions.example.json",
