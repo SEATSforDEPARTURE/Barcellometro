@@ -104,7 +104,11 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
     ) -> None:
         if ctx.member_flow_notifications is None:
             return
-        await ctx.member_flow_notifications.log_action(
+        metadata_dict = {
+            **(metadata or {}),
+            "source": "moderazione_utenti",
+        }
+        result = await ctx.member_flow_notifications.log_action(
             guild_id=str(guild.id),
             user_id=str(user.id),
             moderator_id=str(moderator.id),
@@ -112,18 +116,19 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             reason=reason,
             duration_seconds=duration_seconds,
             expires_at=expires_at.isoformat() if expires_at else None,
-            metadata=metadata or {},
+            metadata=metadata_dict,
         )
-        await ctx.member_flow_notifications.send_notification(
-            guild=guild,
-            user=user,
-            action_type=action_type,
-            reason=reason,
-            moderator=moderator,
-            duration_seconds=duration_seconds,
-            expires_at=expires_at,
-            metadata=metadata or {},
-        )
+        if result.get("canonical_written") and result.get("canonical_visible"):
+            await ctx.member_flow_notifications.send_notification(
+                guild=guild,
+                user=user,
+                action_type=action_type,
+                reason=reason,
+                moderator=moderator,
+                duration_seconds=duration_seconds,
+                expires_at=expires_at,
+                metadata=metadata_dict,
+            )
 
     @users_group.command(name="kick", description="Kick a user.")
     @app_commands.describe(user="Member to kick.", reason="Optional reason override.")

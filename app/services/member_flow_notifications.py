@@ -15,6 +15,24 @@ logger = logging.getLogger(__name__)
 
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*([dhm])\s*$", re.IGNORECASE)
 _CARD_SIZE = (900, 300)
+_DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS = 300
+_VISIBLE_DEPARTURE_PRECEDENCE = {
+    "leave": 10,
+    "inactive_kick": 20,
+    "kick": 30,
+    "ban": 40,
+    "tempban": 50,
+    "inactive_tempban": 60,
+}
+_EXPLICIT_DEPARTURE_TYPES = frozenset(
+    {
+        "kick",
+        "ban",
+        "tempban",
+        "inactive_kick",
+        "inactive_tempban",
+    }
+)
 
 
 def parse_duration_input(raw: str) -> int:
@@ -140,16 +158,37 @@ class MemberFlowNotificationsService:
     def remember_departure_action(self, guild_id: str, user_id: str, action_type: str) -> None:
         self._recent_departures[(guild_id, user_id)] = (action_type, datetime.now(timezone.utc))
 
-    def should_skip_leave_event(self, guild_id: str, user_id: str, *, window_seconds: int = 15) -> bool:
+    def _recent_memory_departure(self, guild_id: str, user_id: str, *, window_seconds: int) -> str | None:
         key = (guild_id, user_id)
         current = self._recent_departures.get(key)
         if current is None:
-            return False
-        _, ts = current
+            return None
+        action_type, ts = current
         if (datetime.now(timezone.utc) - ts) > timedelta(seconds=window_seconds):
             self._recent_departures.pop(key, None)
-            return False
+            return None
+        return action_type
+
+    @staticmethod
+    def _canonical_visibility_for_action(action_type: str, metadata: dict[str, Any]) -> bool:
+        if "visible_in_greetings" in metadata:
+            return bool(metadata["visible_in_greetings"])
         return True
+
+    async def should_skip_leave_event(self, guild_id: str, user_id: str, *, window_seconds: int = _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS) -> bool:
+        recent_action = self._recent_memory_departure(guild_id, user_id, window_seconds=window_seconds)
+        if recent_action in _EXPLICIT_DEPARTURE_TYPES:
+            return True
+
+        since_iso = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).isoformat()
+        if not hasattr(self._database, "list_recent_visible_departures"):
+            return False
+        rows = await self._database.list_recent_visible_departures(guild_id, user_id, since_iso)
+        for row in rows:
+            event_type = str(row.get("event_type_key") or "")
+            if _VISIBLE_DEPARTURE_PRECEDENCE.get(event_type, 0) > _VISIBLE_DEPARTURE_PRECEDENCE["leave"]:
+                return True
+        return False
 
     async def log_action(
         self,
@@ -162,7 +201,8 @@ class MemberFlowNotificationsService:
         duration_seconds: int | None = None,
         expires_at: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
+        metadata_dict = dict(metadata or {})
         action_id = await self._database.log_moderation_action(
             guild_id=guild_id,
             user_id=user_id,
@@ -171,28 +211,46 @@ class MemberFlowNotificationsService:
             reason=reason,
             duration_seconds=duration_seconds,
             expires_at=expires_at,
-            metadata=metadata or {},
+            metadata=metadata_dict,
         )
-        source = str((metadata or {}).get("source") or "member_flow_notifications")
+        source = str(metadata_dict.get("source") or "member_flow_notifications")
+        operation_id = str(metadata_dict["operation_id"]) if metadata_dict.get("operation_id") else None
+        visible_in_greetings = self._canonical_visibility_for_action(action_type, metadata_dict)
+        should_write_canonical = True
+        if action_type == "leave":
+            should_write_canonical = not await self.should_skip_leave_event(guild_id, user_id)
+
+        canonical_event: dict[str, Any] | None = None
         try:
-            await self._database.insert_member_flow_event(
-                guild_id=guild_id,
-                user_id=user_id,
-                event_type_key=action_type,
-                moderator_id=moderator_id,
-                reason=reason,
-                duration_seconds=duration_seconds,
-                expires_at=expires_at,
-                source=source,
-                source_ref=f"moderation_actions:{action_id}",
-                operation_id=str((metadata or {}).get("operation_id")) if (metadata or {}).get("operation_id") else None,
-                visible_in_greetings=bool((metadata or {}).get("visible_in_greetings", True)),
-                metadata=metadata or {},
-            )
+            if should_write_canonical:
+                canonical_event = await self._database.insert_member_flow_event(
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    event_type_key=action_type,
+                    moderator_id=moderator_id,
+                    reason=reason,
+                    duration_seconds=duration_seconds,
+                    expires_at=expires_at,
+                    source=source,
+                    source_ref=f"moderation_actions:{action_id}",
+                    operation_id=operation_id,
+                    visible_in_greetings=visible_in_greetings,
+                    metadata={
+                        **metadata_dict,
+                        "raw_action_id": action_id,
+                    },
+                )
         except Exception:
             logger.warning("member flow event mirror failed guild=%s user=%s action=%s", guild_id, user_id, action_type, exc_info=True)
-        if action_type in {"kick", "ban", "tempban", "inactive_kick", "inactive_tempban"}:
+        if action_type in _EXPLICIT_DEPARTURE_TYPES and visible_in_greetings:
             self.remember_departure_action(guild_id, user_id, action_type)
+        return {
+            "action_id": action_id,
+            "canonical_event": canonical_event,
+            "canonical_written": canonical_event is not None,
+            "canonical_visible": bool(canonical_event and canonical_event.get("visible_in_greetings")),
+            "canonical_event_type": action_type if canonical_event is not None else None,
+        }
 
     async def send_notification(
         self,
