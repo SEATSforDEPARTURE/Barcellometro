@@ -17,6 +17,13 @@ app/
 ## Regole architetturali
 
 - `settings/` resta l'unica root per i file di configurazione versionati.
+- I template config versionati ufficialmente ammessi in `settings/` sono:
+  - `settings/barcello_trigger.example.json`
+  - `settings/entitlements.example.json`
+  - `settings/greetings_trigger.example.json`
+  - `settings/aura_rules.example.json`
+  - `settings/aura_archetypes.example.json`
+  - `settings/aura_missions.example.json`
 - `app/services/` è la root canonica per logica applicativa, business logic e integrazioni infrastructure.
 - `app/renderers/` contiene tutti i renderer Discord/embed/output.
 - `app/utils/` è riservata a helper puri/stateless e può anche restare vuota.

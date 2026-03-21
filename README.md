@@ -22,6 +22,7 @@ cp .env.example .env
 
 ```bash
 cp settings/entitlements.example.json settings/entitlements.json
+cp settings/greetings_trigger.example.json settings/greetings_trigger.json
 cp settings/aura_rules.example.json settings/aura_rules.json
 cp settings/aura_archetypes.example.json settings/aura_archetypes.json
 cp settings/aura_missions.example.json settings/aura_missions.json
