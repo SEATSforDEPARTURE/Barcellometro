@@ -187,7 +187,7 @@ Entrano nel sottotitolo gli input che cambiano l'identità semantica della richi
 - tier (`BASE`, `ROLE2`, ecc.);
 - utenti/ruoli/canali quando il comando opera su un target preciso;
 - `quantita + unita` per comandi come `ultimi`;
-- `schedule_id`, `id`, `id_or_name`, `template_name`, `scope`, `duration` e simili quando il comando mostra/modifica una singola entità.
+- `schedule_id`, `id`, `id_or_name`, `type`, `scope`, `duration` e simili quando il comando mostra/modifica una singola entità.
 - finestre temporali normalizzate (`ULTIMA ORA`, `ULTIMI 30 MINUTI`, `DAL 20/03 10:15 AL 21/03 11:45`) per i comandi `oggi`, `ieri`, `ultimi`, `range`.
 
 Non devono invece sporcare il sottotitolo:

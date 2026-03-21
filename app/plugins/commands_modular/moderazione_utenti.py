@@ -6,27 +6,13 @@ from datetime import datetime, timedelta, timezone
 import discord
 from discord import app_commands
 
-from app.plugins.commands_modular.placeholders import describe_placeholders
 from app.plugins.commands_modular.ctx import CommandContext
+from app.plugins.commands_modular.greetings import render_greetings_template
 from app.plugins.commands_modular.permissions import check_permission
-from app.services.discord_embed_utils import FIELD_MAX, truncate
+from app.services.member_flow_notifications import format_duration_human, parse_duration_input
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
-from app.services.member_flow_notifications import (
-    build_template_context,
-    format_duration_human,
-    parse_duration_input,
-    render_moderation_template,
-)
 
 PERM = "mod"
-TEMPLATE_HELP = f"Supported placeholders: {describe_placeholders()}"
-TEMPLATE_FIELDS = {
-    "inactivity": "template_inactivity_reason",
-    "kick": "template_kick_reason",
-    "ban": "template_ban_reason",
-    "tempban": "template_tempban_reason",
-    "grace": "template_grace_reason",
-}
 
 
 async def _send_lines(
@@ -56,9 +42,7 @@ async def _send_lines(
 
 
 def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandContext) -> None:
-    channel_group = app_commands.Group(name="channel", description="Moderation notification channel settings")
     users_group = app_commands.Group(name="users", description="Moderation actions for users")
-    mod_group.add_command(channel_group)
     mod_group.add_command(users_group)
 
     async def _ensure(interaction: discord.Interaction) -> bool:
@@ -86,12 +70,6 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             footer_service=ctx.footer if footer_service is None else footer_service,
         )
 
-    async def _ensure_cfg(guild_id: str) -> dict:
-        if await ctx.database.get_inactivity_config(guild_id) is None:
-            await ctx.database.upsert_inactivity_config(guild_id)
-        cfg = await ctx.database.get_inactivity_config(guild_id)
-        return dict(cfg) if cfg else {}
-
     async def _default_reason(
         guild_id: str,
         template_key: str,
@@ -102,149 +80,16 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         duration_seconds: int | None = None,
         expires_at: datetime | None = None,
     ) -> str:
-        templates = await ctx.database.get_moderation_templates(guild_id)
-        template = str(templates.get(template_key) or "")
-        context = build_template_context(
+        return await render_greetings_template(
+            ctx,
+            guild_id,
+            template_key,
             user=user,
             guild=guild,
             moderator=moderator,
             duration_seconds=duration_seconds,
             expires_at=expires_at,
-            rejoin_link=(await _ensure_cfg(guild_id)).get("invite_url"),
         )
-        return render_moderation_template(template, **context)
-
-    def _resolve_template_field(template_name: str) -> str | None:
-        return TEMPLATE_FIELDS.get(template_name.strip().lower())
-
-    async def _send_channel_status(interaction: discord.Interaction) -> None:
-        templates = await ctx.database.get_moderation_templates(str(interaction.guild_id))
-        notify_channel_id = templates.get("notify_channel_id")
-        message = (
-            f"enabled={'on' if bool(notify_channel_id) else 'off'}\n"
-            f"notify_channel={f'<#{notify_channel_id}>' if notify_channel_id else 'not set'}\n"
-            f"user_card={'on' if bool(int(templates.get('notify_card_enabled') or 0)) else 'off'}"
-        )
-        await _send(interaction, subcommand_path="moderazione channel status", lines=[("enabled", "on" if bool(notify_channel_id) else "off"), ("notify_channel", f"<#{notify_channel_id}>" if notify_channel_id else "not set"), ("user_card", "on" if bool(int(templates.get('notify_card_enabled') or 0)) else "off")])
-
-    @channel_group.command(name="on", description="Enable moderation notifications for a channel.")
-    @app_commands.describe(channel="Optional text channel. Defaults to the current channel.")
-    async def mod_channel_on(interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        target_channel = channel
-        if target_channel is None and isinstance(interaction.channel, discord.TextChannel):
-            target_channel = interaction.channel
-        if target_channel is None:
-            await _send(interaction, subcommand_path="moderazione channel on", lines=[("error", "Select a text channel first.")], kind="error", footer_service=ctx.footer)
-            return
-        await ctx.database.set_notify_channel(str(interaction.guild_id), str(target_channel.id))
-        await _send(interaction, subcommand_path="moderazione channel on", subtitle_args=[target_channel], lines=[("channel", target_channel.mention), ("result", "enabled")], kind="success", footer_service=ctx.footer)
-
-    @channel_group.command(name="off", description="Disable moderation notifications for the channel setting.")
-    async def mod_channel_off(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), notify_channel_id=None)
-        await _send(interaction, subcommand_path="moderazione channel off", lines=[("result", "disabled")], kind="success", footer_service=ctx.footer)
-
-    @channel_group.command(name="status", description="Show the moderation channel configuration status.")
-    async def mod_channel_status(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await _send_channel_status(interaction)
-
-    @channel_group.command(name="notify_set", description="Set the moderation notification channel.")
-    @app_commands.describe(channel="Text channel used for moderation notifications.")
-    async def mod_channel_notify_set(interaction: discord.Interaction, channel: discord.TextChannel) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await ctx.database.set_notify_channel(str(interaction.guild_id), str(channel.id))
-        await _send(interaction, subcommand_path="moderazione channel notify_set", subtitle_args=[channel], lines=[("channel", channel.mention), ("result", "updated")], kind="success", footer_service=ctx.footer)
-
-    @channel_group.command(name="notify_show", description="Show the moderation notification channel.")
-    async def mod_channel_notify_show(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        templates = await ctx.database.get_moderation_templates(str(interaction.guild_id))
-        notify_channel_id = templates.get("notify_channel_id")
-        await _send(interaction, subcommand_path="moderazione channel notify_show", lines=[("notify_channel", f"<#{notify_channel_id}>" if notify_channel_id else "not set")], footer_service=ctx.footer)
-
-    @channel_group.command(name="notify_reset", description="Reset the moderation notification channel.")
-    async def mod_channel_notify_reset(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), notify_channel_id=None)
-        await _send(interaction, subcommand_path="moderazione channel notify_reset", lines=[("result", "reset")], kind="success", footer_service=ctx.footer)
-
-    @channel_group.command(name="template_set", description="Set a moderation notification template.")
-    @app_commands.describe(template_name="Template target: inactivity, kick, ban, tempban, or grace.", text=TEMPLATE_HELP)
-    async def mod_channel_template_set(interaction: discord.Interaction, template_name: str, text: str) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        field_name = _resolve_template_field(template_name)
-        if field_name is None:
-            await _send(interaction, subcommand_path="moderazione channel template_reset", lines=[("error", "Invalid template_name. Use inactivity, kick, ban, tempban, or grace.")], kind="error", footer_service=ctx.footer)
-            return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), **{field_name: text})
-        await _send(interaction, subcommand_path="moderazione channel template_set", subtitle_args=[template_name], lines=[("template_name", template_name), ("result", "updated")], kind="success", footer_service=ctx.footer)
-
-    @channel_group.command(name="template_show", description="Show moderation notification templates.")
-    @app_commands.describe(template_name="Optional template target: inactivity, kick, ban, tempban, or grace.")
-    async def mod_channel_template_show(interaction: discord.Interaction, template_name: str | None = None) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        templates = await ctx.database.get_moderation_templates(str(interaction.guild_id))
-        if template_name:
-            field_name = _resolve_template_field(template_name)
-            if field_name is None:
-                await _send(interaction, subcommand_path="moderazione channel template_reset", lines=[("error", "Invalid template_name. Use inactivity, kick, ban, tempban, or grace.")], kind="error", footer_service=ctx.footer)
-                return
-            await _send(interaction, subcommand_path="moderazione channel template_show", subtitle_args=[template_name], lines=[("template_name", template_name), ("value", templates.get(field_name) or "not set")], footer_service=ctx.footer)
-            return
-        sections_data = [("Inactivity", str(templates["template_inactivity_reason"]) or "not set"), ("Kick", str(templates["template_kick_reason"]) or "not set"), ("Ban", str(templates["template_ban_reason"]) or "not set"), ("Tempban", str(templates["template_tempban_reason"]) or "not set"), ("Grace", str(templates["template_grace_reason"]) or "not set")]
-        extra = "\n\n".join(f"## {name}\n{value}" for name, value in sections_data if len(value) > FIELD_MAX)
-        files = None
-        if extra:
-            payload = extra.encode("utf-8")
-            files = [discord.File(io.BytesIO(payload), filename=f"mod_channel_template_show_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.txt")]
-        embeds = await build_command_embeds(top_level="admin", visual_top_level="moderazione", subcommand_path="moderazione channel template_show", sections=[CommandEmbedSection(title="Templates", lines=sections_data)], footer_service=ctx.footer)
-        await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=files)
-
-    @channel_group.command(name="template_reset", description="Reset a moderation notification template.")
-    @app_commands.describe(template_name="Template target: inactivity, kick, ban, tempban, or grace.")
-    async def mod_channel_template_reset(interaction: discord.Interaction, template_name: str) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        field_name = _resolve_template_field(template_name)
-        if field_name is None:
-            await _send(interaction, subcommand_path="moderazione channel template_reset", lines=[("error", "Invalid template_name. Use inactivity, kick, ban, tempban, or grace.")], kind="error", footer_service=ctx.footer)
-            return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), **{field_name: None})
-        await _send(interaction, subcommand_path="moderazione channel template_reset", subtitle_args=[template_name], lines=[("template_name", template_name), ("result", "reset")], kind="success", footer_service=ctx.footer)
-
-    @channel_group.command(name="user_card_set", description="Set whether moderation notifications include the user card.")
-    @app_commands.describe(enabled="Whether the moderation notification user card is enabled.")
-    async def mod_channel_user_card_set(interaction: discord.Interaction, enabled: bool) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await ctx.database.set_notify_card_enabled(str(interaction.guild_id), enabled)
-        await _send(interaction, subcommand_path="moderazione channel user_card_set", lines=[("user_card", "enabled" if enabled else "disabled")], kind="success", footer_service=ctx.footer)
-
-    @channel_group.command(name="user_card_show", description="Show whether the moderation notification user card is enabled.")
-    async def mod_channel_user_card_show(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        templates = await ctx.database.get_moderation_templates(str(interaction.guild_id))
-        enabled = bool(int(templates.get("notify_card_enabled") or 0))
-        await _send(interaction, subcommand_path="moderazione channel user_card_show", lines=[("user_card", "on" if enabled else "off")], footer_service=ctx.footer)
-
-    @channel_group.command(name="user_card_reset", description="Reset the moderation notification user card setting.")
-    async def mod_channel_user_card_reset(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await ctx.database.set_notify_card_enabled(str(interaction.guild_id), False)
-        await _send(interaction, subcommand_path="moderazione channel user_card_reset", lines=[("result", "reset")], kind="success", footer_service=ctx.footer)
 
     async def _notify_action(
         *,
@@ -373,7 +218,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
     async def mod_users_grace(interaction: discord.Interaction, user: discord.Member, duration: str | None = None, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
-        cfg = await _ensure_cfg(str(interaction.guild.id))
+        cfg = await ctx.database.get_inactivity_config(str(interaction.guild.id)) or {}
         duration_seconds = parse_duration_input(duration) if duration else int(cfg.get("grace_days_after_reminder", 7)) * 86400
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
         await ctx.database.extend_user_grace(str(interaction.guild.id), str(user.id), datetime.now(timezone.utc).isoformat())

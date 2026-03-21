@@ -22,6 +22,7 @@ DISPLAY_TOP_LEVEL_OVERRIDES: set[str] = {
     "qna",
     "insights",
     "moderazione",
+    "greetings",
     "inattivi",
     "privacy",
     "roles",
@@ -60,6 +61,7 @@ TOP_LEVEL_EMOJIS: dict[str, str] = {
     "resocontoserver": "📓",
     "riassunto": "🗒️",
     "moderazione": "🛠️",
+    "greetings": "👋",
     "moderazione_utenti": "🛠️",
     "inattivi": "🛠️",
     "commandguard": "👥",
@@ -187,7 +189,7 @@ _IDENTITY_LABELS = {
     "schedule_id",
     "id",
     "id_or_name",
-    "template_name",
+    "type",
 }
 _FOOTER_SERVICE_FALLBACKS: dict[str, str] = {
     "ask": "qna",
@@ -195,6 +197,7 @@ _FOOTER_SERVICE_FALLBACKS: dict[str, str] = {
     "resocontocanale": "resoconto",
     "resocontoserver": "resoconto",
     "moderazione": "status",
+    "greetings": "status",
     "roles": "status",
     "settings": "status",
     "permissions": "status",
