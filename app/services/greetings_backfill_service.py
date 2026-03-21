@@ -14,6 +14,7 @@ _SUPPORTED_EVENT_TYPES = frozenset(
         "leave",
         "kick",
         "ban",
+        "unban",
         "tempban",
         "grace",
         "inactive_kick",
@@ -352,6 +353,12 @@ class GreetingsBackfillService:
         *,
         inactive_tempban_index: dict[tuple[str, str], list[_BackfillCandidate]],
     ) -> bool:
+        if candidate.event_type_key == "unban":
+            # Canonical-only by default: retained for audit/history, hidden from
+            # the greetings feed because it does not represent a visible
+            # join/leave style transition on its own.
+            metadata_visible = candidate.metadata.get("visible_in_greetings")
+            return bool(metadata_visible) if metadata_visible is not None else False
         if candidate.event_type_key in _NON_DEPARTURE_TYPES:
             return False
         # Gli eventi di inattività restano distinti da quelli manuali e le

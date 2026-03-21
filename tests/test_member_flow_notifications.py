@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 import sys
 import types
 from pathlib import Path
@@ -217,6 +218,46 @@ def test_member_flow_log_action_writes_raw_and_canonical_join_leave_and_manual_d
         assert ban_canonical["reason"] == "Ban manuale"
         assert '"raw_action_id"' in kick_canonical["metadata_json"]
         assert '"raw_action_id"' in ban_canonical["metadata_json"]
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_member_flow_log_action_supports_unban_without_mirror_warning(member_flow_module, tmp_path, caplog) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "member_flow_unban.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+        service = member_flow_module.MemberFlowNotificationsService(db, object())
+
+        with caplog.at_level(logging.WARNING):
+            result = await service.log_action(
+                guild_id="1",
+                user_id="88",
+                action_type="unban",
+                reason="Revoca ban",
+                moderator_id="9",
+                metadata={"source": "discord_adapter"},
+            )
+
+        stored = await db.fetchall(
+            """
+            SELECT event_type_key, visible_in_greetings, source, reason
+            FROM member_flow_events
+            ORDER BY occurred_at ASC
+            """,
+        )
+
+        assert result["canonical_written"] is True
+        assert result["canonical_visible"] is False
+        assert result["canonical_event"] is not None
+        assert result["canonical_event"]["event_type_key"] == "unban"
+        assert result["canonical_event"]["visible_in_greetings"] is False
+        assert [(row["event_type_key"], int(row["visible_in_greetings"]), row["source"], row["reason"]) for row in stored] == [
+            ("unban", 0, "discord_adapter", "Revoca ban"),
+        ]
+        assert "member flow event mirror failed" not in caplog.text
 
         await db.close()
 

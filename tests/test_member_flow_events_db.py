@@ -173,6 +173,113 @@ def test_member_flow_events_insert_count_visibility_and_idempotency(tmp_path) ->
     asyncio.run(_run())
 
 
+def test_member_flow_events_support_hidden_unban_records(tmp_path) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "test.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+
+        event = await db.insert_member_flow_event(
+            guild_id="1",
+            user_id="42",
+            event_type_key="unban",
+            occurred_at="2026-03-21T10:00:00+00:00",
+            source="discord_adapter",
+            source_ref="moderation_actions:unban-1",
+            visible_in_greetings=False,
+            metadata={"raw_action_id": "unban-1"},
+        )
+        stored = await db.find_member_flow_event_by_source_ref(
+            source="discord_adapter",
+            source_ref="moderation_actions:unban-1",
+        )
+        visible_count = await db.count_member_flow_events_for_user("1", "42", "unban")
+        all_count = await db.count_member_flow_events_for_user("1", "42", "unban", visible_only=False)
+
+        assert event["event_type_key"] == "unban"
+        assert event["visible_in_greetings"] is False
+        assert stored is not None
+        assert stored["event_type_key"] == "unban"
+        assert stored["visible_in_greetings"] is False
+        assert visible_count == 0
+        assert all_count == 1
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_initialize_schema_migrates_member_flow_events_to_support_unban(tmp_path) -> None:
+    async def _run() -> None:
+        db_path = tmp_path / "legacy.sqlite"
+        db = DatabaseService(str(db_path))
+        await db.connect()
+        await db.execute(
+            """
+            CREATE TABLE member_flow_events (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                event_type_key TEXT NOT NULL CHECK (
+                    event_type_key IN (
+                        'join',
+                        'leave',
+                        'kick',
+                        'ban',
+                        'tempban',
+                        'grace',
+                        'inactive_kick',
+                        'inactive_tempban',
+                        'inactive_grace'
+                    )
+                ),
+                occurred_at TEXT NOT NULL,
+                moderator_id TEXT NULL,
+                reason TEXT NULL,
+                duration_seconds INTEGER NULL,
+                expires_at TEXT NULL,
+                source TEXT NOT NULL,
+                source_ref TEXT NULL,
+                operation_id TEXT NULL,
+                visible_in_greetings INTEGER NOT NULL DEFAULT 1,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """,
+        )
+        await db.execute(
+            """
+            INSERT INTO member_flow_events (
+                id, guild_id, user_id, event_type_key, occurred_at, source, source_ref, visible_in_greetings, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("evt-1", "1", "42", "ban", "2026-03-20T10:00:00+00:00", "legacy", "legacy:ban-1", 1, "{}"),
+        )
+
+        await db.initialize_schema()
+
+        migrated = await db.insert_member_flow_event(
+            guild_id="1",
+            user_id="42",
+            event_type_key="unban",
+            occurred_at="2026-03-21T10:00:00+00:00",
+            source="legacy",
+            source_ref="legacy:unban-1",
+            visible_in_greetings=False,
+            metadata={"raw_action_id": "legacy-unban"},
+        )
+        rows = await db.fetchall("SELECT event_type_key, source_ref FROM member_flow_events ORDER BY occurred_at ASC")
+
+        assert migrated["event_type_key"] == "unban"
+        assert [(row["event_type_key"], row["source_ref"]) for row in rows] == [
+            ("ban", "legacy:ban-1"),
+            ("unban", "legacy:unban-1"),
+        ]
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
 def test_member_flow_events_recent_visible_departures_and_operation_id(tmp_path) -> None:
     async def _run() -> None:
         db = DatabaseService(str(tmp_path / "test.sqlite"))
