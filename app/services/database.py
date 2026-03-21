@@ -4858,6 +4858,49 @@ class DatabaseService:
         )
         return [self._normalize_member_flow_event_row(row) for row in rows]
 
+    async def hide_member_flow_events(
+        self,
+        guild_id: str,
+        user_id: str,
+        event_type_keys: list[str] | tuple[str, ...],
+        *,
+        since_iso: str | None = None,
+        operation_id: str | None = None,
+    ) -> int:
+        normalized_types = [event_type for event_type in event_type_keys if event_type in _MEMBER_FLOW_EVENT_TYPES]
+        if not normalized_types:
+            return 0
+
+        where_clauses = [
+            "guild_id = ?",
+            "user_id = ?",
+            "visible_in_greetings = 1",
+        ]
+        params: list[Any] = [guild_id, user_id]
+
+        if since_iso is not None:
+            where_clauses.append("occurred_at >= ?")
+            params.append(since_iso)
+
+        if operation_id is not None:
+            where_clauses.append("operation_id = ?")
+            params.append(operation_id)
+
+        placeholders = ", ".join("?" for _ in normalized_types)
+        where_clauses.append(f"event_type_key IN ({placeholders})")
+        params.extend(normalized_types)
+
+        await self.execute(
+            f"""
+            UPDATE member_flow_events
+            SET visible_in_greetings = 0
+            WHERE {" AND ".join(where_clauses)}
+            """,
+            tuple(params),
+        )
+        row = await self.fetchone("SELECT changes() AS total")
+        return int(row["total"] if row is not None else 0)
+
     async def list_recent_kicked_users(self, guild_id: str, *, limit: int = 25) -> list[aiosqlite.Row]:
         return await self.fetchall(
             """

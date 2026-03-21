@@ -33,6 +33,7 @@ _EXPLICIT_DEPARTURE_TYPES = frozenset(
         "inactive_tempban",
     }
 )
+_NON_VOLUNTARY_DEPARTURE_TYPES = frozenset(_EXPLICIT_DEPARTURE_TYPES)
 
 # Palette canonica GREETINGS / INGRESSI & USCITE.
 # - ingresso o stato ancora aperto nel server -> marrone chiaro
@@ -144,6 +145,9 @@ class MemberFlowNotificationsService:
     def remember_departure_action(self, guild_id: str, user_id: str, action_type: str) -> None:
         self._recent_departures[(guild_id, user_id)] = (action_type, datetime.now(timezone.utc))
 
+    def forget_departure_action(self, guild_id: str, user_id: str) -> None:
+        self._recent_departures.pop((guild_id, user_id), None)
+
     def get_recent_departure_action(self, guild_id: str, user_id: str, *, window_seconds: int = _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS) -> str | None:
         return self._recent_memory_departure(guild_id, user_id, window_seconds=window_seconds)
 
@@ -163,6 +167,18 @@ class MemberFlowNotificationsService:
         if "visible_in_greetings" in metadata:
             return bool(metadata["visible_in_greetings"])
         return True
+
+    @staticmethod
+    def _suppressed_departure_types_for_action(action_type: str) -> tuple[str, ...]:
+        current_precedence = _VISIBLE_DEPARTURE_PRECEDENCE.get(action_type, 0)
+        if current_precedence <= 0:
+            return ()
+        suppressed = [
+            event_type
+            for event_type, precedence in _VISIBLE_DEPARTURE_PRECEDENCE.items()
+            if precedence < current_precedence
+        ]
+        return tuple(suppressed)
 
     async def should_skip_leave_event(self, guild_id: str, user_id: str, *, window_seconds: int = _DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS) -> bool:
         recent_action = self._recent_memory_departure(guild_id, user_id, window_seconds=window_seconds)
@@ -208,30 +224,42 @@ class MemberFlowNotificationsService:
         source = str(metadata_dict.get("source") or "member_flow_notifications")
         operation_id = str(metadata_dict["operation_id"]) if metadata_dict.get("operation_id") else None
         visible_in_greetings = self._canonical_visibility_for_action(action_type, metadata_dict)
-        should_write_canonical = True
         if action_type == "leave":
-            should_write_canonical = not await self.should_skip_leave_event(guild_id, user_id)
+            visible_in_greetings = visible_in_greetings and not await self.should_skip_leave_event(guild_id, user_id)
 
         canonical_event: dict[str, Any] | None = None
         try:
-            if should_write_canonical:
-                canonical_event = await self._database.insert_member_flow_event(
-                    guild_id=guild_id,
-                    user_id=user_id,
-                    event_type_key=action_type,
-                    moderator_id=moderator_id,
-                    reason=reason,
-                    duration_seconds=duration_seconds,
-                    expires_at=expires_at,
-                    source=source,
-                    source_ref=f"moderation_actions:{action_id}",
-                    operation_id=operation_id,
-                    visible_in_greetings=visible_in_greetings,
-                    metadata={
-                        **metadata_dict,
-                        "raw_action_id": action_id,
-                    },
-                )
+            canonical_event = await self._database.insert_member_flow_event(
+                guild_id=guild_id,
+                user_id=user_id,
+                event_type_key=action_type,
+                moderator_id=moderator_id,
+                reason=reason,
+                duration_seconds=duration_seconds,
+                expires_at=expires_at,
+                source=source,
+                source_ref=f"moderation_actions:{action_id}",
+                operation_id=operation_id,
+                visible_in_greetings=visible_in_greetings,
+                metadata={
+                    **metadata_dict,
+                    "raw_action_id": action_id,
+                },
+            )
+            if (
+                visible_in_greetings
+                and action_type in _NON_VOLUNTARY_DEPARTURE_TYPES
+                and hasattr(self._database, "hide_member_flow_events")
+            ):
+                suppressed_types = self._suppressed_departure_types_for_action(action_type)
+                if suppressed_types:
+                    since_iso = (datetime.now(timezone.utc) - timedelta(seconds=_DEFAULT_LEAVE_DEDUPE_WINDOW_SECONDS)).isoformat()
+                    await self._database.hide_member_flow_events(
+                        guild_id,
+                        user_id,
+                        suppressed_types,
+                        since_iso=since_iso,
+                    )
         except Exception:
             logger.warning("member flow event mirror failed guild=%s user=%s action=%s", guild_id, user_id, action_type, exc_info=True)
         if action_type in _EXPLICIT_DEPARTURE_TYPES and visible_in_greetings:

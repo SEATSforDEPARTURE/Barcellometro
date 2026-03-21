@@ -89,9 +89,10 @@ def setup(registry: ServiceRegistry) -> None:
         recent_departure_getter = getattr(member_flow_notifications, "get_recent_departure_action", None)
         if recent_departure_getter is not None:
             recent_action = recent_departure_getter(guild_id, user_id)
-            if recent_action in {"ban", "kick"}:
+            if recent_action in {"ban", "kick", "tempban", "inactive_kick", "inactive_tempban"}:
+                action_type = "ban" if recent_action in {"ban", "tempban", "inactive_tempban"} else "kick"
                 return {
-                    "action_type": recent_action,
+                    "action_type": action_type,
                     "reason": None,
                     "moderator_id": None,
                     "moderator": None,
@@ -605,7 +606,7 @@ def setup(registry: ServiceRegistry) -> None:
         await record_user(user, guild, False, ts)
         native_departure = await _fetch_recent_audit_entry(guild, action_name="ban", target_id=str(user.id))
         recent_departure_getter = getattr(member_flow_notifications, "get_recent_departure_action", None)
-        if recent_departure_getter is not None and recent_departure_getter(str(guild.id), str(user.id)) == "ban":
+        if recent_departure_getter is not None and recent_departure_getter(str(guild.id), str(user.id)) in {"ban", "tempban", "inactive_tempban"}:
             native_departure = native_departure or {"action_type": "ban", "reason": None, "moderator_id": None, "moderator": None, "entry_id": None, "created_at": None}
         else:
             metadata = {

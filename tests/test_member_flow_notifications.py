@@ -281,11 +281,79 @@ def test_member_flow_leave_dedupe_is_restart_safe_and_ignores_non_departures(mem
             "SELECT COUNT(*) AS total FROM member_flow_events WHERE guild_id = ? AND user_id = ? AND event_type_key = 'leave'",
             ("55", "7"),
         )
+        hidden_leave = await db.fetchone(
+            """
+            SELECT visible_in_greetings
+            FROM member_flow_events
+            WHERE guild_id = ? AND user_id = ? AND event_type_key = 'leave'
+            ORDER BY occurred_at DESC
+            LIMIT 1
+            """,
+            ("55", "7"),
+        )
 
-        assert leave_result["canonical_written"] is False
+        assert leave_result["canonical_written"] is True
+        assert leave_result["canonical_visible"] is False
         assert leave_after_grace["canonical_written"] is True
         assert int(raw_leave_count["total"]) == 1
-        assert int(canonical_leave_count["total"]) == 0
+        assert int(canonical_leave_count["total"]) == 1
+        assert int(hidden_leave["visible_in_greetings"]) == 0
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
+def test_member_flow_explicit_departure_hides_recent_visible_leave_but_keeps_backend_history(member_flow_module, tmp_path) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "member_flow_leave_suppression.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+        service = member_flow_module.MemberFlowNotificationsService(db, object())
+
+        leave_result = await service.log_action(
+            guild_id="77",
+            user_id="42",
+            action_type="leave",
+            reason="Gateway remove iniziale",
+            metadata={"source": "discord_adapter"},
+        )
+        kick_result = await service.log_action(
+            guild_id="77",
+            user_id="42",
+            action_type="kick",
+            reason="Kick manuale definitivo",
+            metadata={"source": "moderazione_utenti"},
+        )
+
+        raw_rows = await db.fetchall(
+            """
+            SELECT action_type
+            FROM moderation_actions
+            WHERE guild_id = ? AND user_id = ?
+            ORDER BY created_at ASC
+            """,
+            ("77", "42"),
+        )
+        canonical_rows = await db.fetchall(
+            """
+            SELECT event_type_key, visible_in_greetings
+            FROM member_flow_events
+            WHERE guild_id = ? AND user_id = ?
+            ORDER BY occurred_at ASC, id ASC
+            """,
+            ("77", "42"),
+        )
+
+        assert leave_result["canonical_written"] is True
+        assert leave_result["canonical_visible"] is True
+        assert kick_result["canonical_written"] is True
+        assert kick_result["canonical_visible"] is True
+        assert [row["action_type"] for row in raw_rows] == ["leave", "kick"]
+        assert [(row["event_type_key"], int(row["visible_in_greetings"])) for row in canonical_rows] == [
+            ("leave", 0),
+            ("kick", 1),
+        ]
 
         await db.close()
 

@@ -224,3 +224,52 @@ def test_member_flow_events_recent_visible_departures_and_operation_id(tmp_path)
         await db.close()
 
     asyncio.run(_run())
+
+
+def test_member_flow_events_can_be_hidden_without_deleting_backend_timeline(tmp_path) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "test.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+
+        await db.insert_member_flow_event(
+            guild_id="91",
+            user_id="12",
+            event_type_key="leave",
+            occurred_at="2026-03-20T10:00:00+00:00",
+            source="discord_adapter",
+            source_ref="moderation_actions:leave-1",
+            visible_in_greetings=True,
+            metadata={"raw_action_id": "leave-1"},
+        )
+        await db.insert_member_flow_event(
+            guild_id="91",
+            user_id="12",
+            event_type_key="kick",
+            occurred_at="2026-03-20T10:01:00+00:00",
+            source="moderazione_utenti",
+            source_ref="moderation_actions:kick-1",
+            visible_in_greetings=True,
+            metadata={"raw_action_id": "kick-1"},
+        )
+
+        updated = await db.hide_member_flow_events("91", "12", ["leave"], since_iso="2026-03-20T09:59:00+00:00")
+        rows = await db.fetchall(
+            """
+            SELECT event_type_key, visible_in_greetings
+            FROM member_flow_events
+            WHERE guild_id = ? AND user_id = ?
+            ORDER BY occurred_at ASC
+            """,
+            ("91", "12"),
+        )
+
+        assert updated == 1
+        assert [(row["event_type_key"], int(row["visible_in_greetings"])) for row in rows] == [
+            ("leave", 0),
+            ("kick", 1),
+        ]
+
+        await db.close()
+
+    asyncio.run(_run())
