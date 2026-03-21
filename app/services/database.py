@@ -4804,6 +4804,13 @@ class DatabaseService:
     async def remove_temp_ban(self, guild_id: str, user_id: str) -> None:
         await self.execute("DELETE FROM temp_bans WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
 
+    async def clear_user_ban_state(self, guild_id: str, user_id: str) -> None:
+        await self.remove_temp_ban(guild_id, user_id)
+        await self.execute(
+            "UPDATE inactivity_user_state SET last_kick_at = NULL WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+
     async def log_moderation_action(
         self,
         *,

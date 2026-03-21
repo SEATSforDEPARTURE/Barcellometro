@@ -218,7 +218,7 @@ class InactiveMembersModerationService:
             user_id = int(row["user_id"])
             try:
                 await guild.unban(discord.Object(id=user_id), reason="Scadenza ban temporaneo inattività")
-                await self._database.remove_temp_ban(str(guild.id), str(user_id))
+                await self._database.clear_user_ban_state(str(guild.id), str(user_id))
                 if self._member_flow_notifications is not None:
                     await self._member_flow_notifications.log_action(guild_id=str(guild.id), user_id=str(user_id), moderator_id=None, action_type="unban", reason="Scadenza ban temporaneo inattività", metadata={"source": "inactive_members_moderation"})
                 logger.info("inactive moderation: unbanned user=%s guild=%s", user_id, guild.id)
