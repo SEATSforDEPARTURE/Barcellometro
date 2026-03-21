@@ -202,6 +202,74 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
         response_kwargs = send_standard_response.await_args.kwargs
         assert response_kwargs["subcommand_path"] == "moderazione users unban"
         assert response_kwargs["kind"] == "success"
-        assert ("result", "unbanned") in response_kwargs["lines"]
+        assert ("result", "ban revocato") in response_kwargs["lines"]
+
+    asyncio.run(_run())
+
+
+def test_mod_users_unban_handles_unknown_ban_without_crashing(
+    monkeypatch, caplog
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(
+            moderazione_utenti_module, "send_standard_response", send_standard_response
+        )
+        monkeypatch.setattr(
+            moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
+        )
+
+        database = SimpleNamespace(clear_user_ban_state=AsyncMock())
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(
+                return_value={"canonical_written": True, "canonical_visible": False}
+            ),
+            send_notification=AsyncMock(),
+            forget_departure_action=Mock(),
+        )
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=member_flow_notifications,
+            barcello_service=None,
+        )
+        mod_group = discord.app_commands.Group(name="mod", description="mod")
+        register_moderazione_utenti(mod_group, ctx)
+        command = _find_command(mod_group, "users", "unban")
+
+        not_found = discord.NotFound(
+            Mock(status=404, reason="Not Found"),
+            {"code": 10026, "message": "Unknown Ban"},
+        )
+        guild = SimpleNamespace(id=1, unban=AsyncMock(side_effect=not_found))
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
+        moderator = SimpleNamespace(id=9)
+        interaction = SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            user=moderator,
+            command=SimpleNamespace(qualified_name="mod users unban"),
+        )
+
+        with caplog.at_level("INFO"):
+            await command.callback(interaction, target_user)
+
+        guild.unban.assert_awaited_once_with(target_user, reason="Revoca ban manuale")
+        database.clear_user_ban_state.assert_awaited_once_with("1", "42")
+        member_flow_notifications.forget_departure_action.assert_called_once_with(
+            "1", "42"
+        )
+        member_flow_notifications.log_action.assert_awaited_once()
+        notify_kwargs = member_flow_notifications.log_action.await_args.kwargs
+        assert notify_kwargs["action_type"] == "unban"
+        assert notify_kwargs["metadata"]["source"] == "moderazione_utenti"
+        assert notify_kwargs["metadata"]["discord_unban_result"] == "discord_ban_missing"
+        send_standard_response.assert_awaited_once()
+        response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["subcommand_path"] == "moderazione users unban"
+        assert response_kwargs["kind"] == "success"
+        assert ("result", "nessun ban attivo trovato su Discord") in response_kwargs["lines"]
+        assert ("sync", "stati locali riallineati") in response_kwargs["lines"]
+        assert "discord ban already missing guild=1 user=42" in caplog.text
 
     asyncio.run(_run())

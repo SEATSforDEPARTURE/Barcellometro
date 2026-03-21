@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -12,6 +13,8 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.services.greetings_copy_service import GreetingsCopyService
 from app.services.member_flow_notifications import format_duration_human, parse_duration_input
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
+
+logger = logging.getLogger(__name__)
 
 PERM = "mod"
 
@@ -252,7 +255,18 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         explicit_reason = _normalize_optional_reason(reason)
         resolved_reason = explicit_reason or "Revoca ban manuale"
-        await interaction.guild.unban(user, reason=resolved_reason)
+        discord_unban_result = "unbanned"
+        try:
+            await interaction.guild.unban(user, reason=resolved_reason)
+        except discord.NotFound as exc:
+            if exc.code != 10026:
+                raise
+            discord_unban_result = "discord_ban_missing"
+            logger.info(
+                "mod users unban: discord ban already missing guild=%s user=%s",
+                interaction.guild.id,
+                user.id,
+            )
         await ctx.database.clear_user_ban_state(str(interaction.guild.id), str(user.id))
         _forget_departure(interaction.guild, user)
         await _notify_action(
@@ -262,12 +276,21 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             reason=resolved_reason,
             greetings_reason=explicit_reason,
             moderator=interaction.user,
+            metadata={"discord_unban_result": discord_unban_result},
         )
+        response_lines = [("user", user.mention), ("reason", resolved_reason)]
+        if discord_unban_result == "unbanned":
+            response_lines.insert(1, ("result", "ban revocato"))
+        else:
+            response_lines.extend([
+                ("result", "nessun ban attivo trovato su Discord"),
+                ("sync", "stati locali riallineati"),
+            ])
         await _send(
             interaction,
             subcommand_path="moderazione users unban",
             subtitle_args=[user],
-            lines=[("user", user.mention), ("result", "unbanned"), ("reason", resolved_reason)],
+            lines=response_lines,
             kind="success",
         )
 
