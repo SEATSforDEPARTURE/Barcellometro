@@ -27,7 +27,7 @@ SUPPORTED_GREETINGS_EVENT_TYPES = {
     "inactive_grace",
 }
 
-_ORDINALS_UPPER = {
+_ORDINALS_UPPER_MASCULINE = {
     1: "PRIMO",
     2: "SECONDO",
     3: "TERZO",
@@ -40,16 +40,29 @@ _ORDINALS_UPPER = {
     10: "DECIMO",
 }
 
+_ORDINALS_UPPER_FEMININE = {
+    1: "PRIMA",
+    2: "SECONDA",
+    3: "TERZA",
+    4: "QUARTA",
+    5: "QUINTA",
+    6: "SESTA",
+    7: "SETTIMA",
+    8: "OTTAVA",
+    9: "NONA",
+    10: "DECIMA",
+}
+
 _EVENT_LABELS = {
-    "join": ("✨", "INGRESSO"),
-    "leave": ("👋", "USCITA"),
-    "kick": ("🥾", "ALLONTANAMENTO"),
-    "ban": ("🔨", "BAN"),
-    "tempban": ("⏳", "BAN TEMPORANEO"),
-    "grace": ("🛟", "PERIODO DI GRAZIA"),
-    "inactive_kick": ("💤", "ALLONTANAMENTO PER INATTIVITÀ"),
-    "inactive_tempban": ("💤", "BAN TEMPORANEO PER INATTIVITÀ"),
-    "inactive_grace": ("🛟", "PERIODO DI GRAZIA PER INATTIVITÀ"),
+    "join": ("✨", "INGRESSO", "m"),
+    "leave": ("👋", "USCITA", "f"),
+    "kick": ("🥾", "ALLONTANAMENTO", "m"),
+    "ban": ("🔨", "BAN", "m"),
+    "tempban": ("⏳", "BAN TEMPORANEO", "m"),
+    "grace": ("🛟", "PERIODO DI GRAZIA", "m"),
+    "inactive_kick": ("💤", "ALLONTANAMENTO PER INATTIVITÀ", "m"),
+    "inactive_tempban": ("💤", "BAN TEMPORANEO PER INATTIVITÀ", "m"),
+    "inactive_grace": ("🛟", "PERIODO DI GRAZIA PER INATTIVITÀ", "m"),
 }
 
 _BARCELLO_ALERTS = {
@@ -76,33 +89,32 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
     ],
     "templates": {
         "join": [
-            "✨ {display_name} è rientrato nel server {server}.",
-            "✨ {display_name} torna nel server {server}.",
+            "{mention} entra in {server}.",
         ],
         "leave": [
-            "👋 {display_name} ha lasciato il server {server}.",
-            "👋 {display_name} saluta e si allontana da {server}.",
+            "{mention} ha lasciato {server}.",
+            "{mention} si allontana da {server}.",
         ],
         "kick": [
-            "🥾 {display_name} è stato allontanato da {server}{reason_suffix}.",
+            "{mention} è stato allontanato da {server}{reason_suffix}.",
         ],
         "ban": [
-            "🔨 {display_name} è stato bannato da {server}{reason_suffix}.",
+            "{mention} è stato bannato da {server}{reason_suffix}.",
         ],
         "tempban": [
-            "⏳ {display_name} è stato escluso temporaneamente da {server} per {duration}{reason_suffix}.",
+            "{mention} è stato escluso temporaneamente da {server} per {duration}{reason_suffix}.",
         ],
         "grace": [
-            "🛟 {display_name} riceve un periodo di grazia nel server {server} per {duration}.",
+            "{mention} riceve un periodo di grazia nel server {server} per {duration}.",
         ],
         "inactive_kick": [
-            "💤 {display_name} viene allontanato da {server} per inattività ({inactivity_text}).",
+            "{mention} viene allontanato da {server} per inattività ({inactivity_text}).",
         ],
         "inactive_tempban": [
-            "💤 {display_name} riceve un ban temporaneo per inattività in {server} per {duration} ({inactivity_text}).",
+            "{mention} riceve un ban temporaneo per inattività in {server} per {duration} ({inactivity_text}).",
         ],
         "inactive_grace": [
-            "🛟 {display_name} entra in periodo di grazia per inattività su {server} per {duration} ({inactivity_text}).",
+            "{mention} entra in periodo di grazia per inattività su {server} per {duration} ({inactivity_text}).",
         ],
     },
     "moods": {
@@ -110,30 +122,47 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
             "time": {
                 "morning": {
                     "templates": {
-                        "join": ["☀️ {display_name} torna nel server {server}: buongiorno e bentornato."],
+                        "join": ["Buongiorno {mention}, benvenuto su {server}."],
                     }
                 }
             },
             "barcello": {
                 "verde": {
                     "templates": {
-                        "join": ["🟢 {display_name} è rientrato nel server {server} con barcello verde."],
+                        "join": ["{mention}, benvenuto su {server}. {barcello_alert}, cuore del server su **{barcello_score_text}**."],
                     }
                 }
+            },
+            "count": {
+                "t1": {
+                    "templates": {
+                        "join": ["{mention}, benvenuto su {server}."],
+                    }
+                },
+                "t2": {
+                    "templates": {
+                        "join": ["{mention} torna su {server}."],
+                    }
+                },
+                "t3": {
+                    "templates": {
+                        "join": ["{mention} rientra di nuovo su {server}."],
+                    }
+                },
             },
         },
         "teso": {
             "barcello": {
                 "rosso": {
                     "templates": {
-                        "kick": ["🔴 Clima già delicato: {display_name} viene allontanato da {server}{reason_suffix}."],
-                        "ban": ["🔴 Con barcello rosso, {display_name} riceve un ban da {server}{reason_suffix}."],
+                        "kick": ["Clima già delicato: {mention} viene allontanato da {server}{reason_suffix}. {barcello_alert}."],
+                        "ban": ["Con barcello rosso, {mention} riceve un ban da {server}{reason_suffix}. {barcello_alert}."],
                     }
                 },
                 "nero": {
                     "templates": {
                         "inactive_tempban": [
-                            "⚫ Nel pieno dell'allerta nera, {display_name} riceve un ban temporaneo per inattività in {server}."
+                            "Nel pieno dell'allerta nera, {mention} riceve un ban temporaneo per inattività in {server}. {barcello_alert}."
                         ],
                     }
                 },
@@ -141,7 +170,13 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
             "count": {
                 "t2": {
                     "templates": {
-                        "leave": ["👋 È già la seconda uscita: {display_name} si allontana di nuovo da {server}."],
+                        "join": ["{mention} torna in {server}, ma il clima resta teso."],
+                        "leave": ["È già la seconda uscita: {mention} si allontana di nuovo da {server}."],
+                    }
+                },
+                "t1": {
+                    "templates": {
+                        "join": ["{mention}, benvenuto in {server}. Il clima resta da osservare."],
                     }
                 }
             },
@@ -155,8 +190,6 @@ class GreetingsRenderResult:
     event_label: str
     occurrence_number: int
     template_context: dict[str, Any]
-    status_field_name: str
-    status_field_value: str
     narrative: str
     mood: str
     time_bucket: str
@@ -205,7 +238,7 @@ class GreetingsCopyService:
         score_text = "n/d" if barcello_score is None else f"{int(barcello_score)}/100"
         event_label = format_greetings_event_label(event_type_key, occurrence_number)
         label_text = self._event_label_text(event_type_key)
-        ordinal = self._format_ordinal_upper(occurrence_number)
+        ordinal = self._format_ordinal_upper(event_type_key, occurrence_number)
         reason_text = reason or ""
         reason_suffix = f": {reason_text}" if reason_text else ""
         return {
@@ -213,6 +246,8 @@ class GreetingsCopyService:
             "username": username,
             "display_name": display_name,
             "mention": mention,
+            "tag": mention,
+            "user_mention": mention,
             "user_id": str(getattr(user, "id", "")),
             "server": getattr(guild, "name", "Server"),
             "guild_name": getattr(guild, "name", "Server"),
@@ -232,6 +267,8 @@ class GreetingsCopyService:
             "event_label_text": label_text,
             "occurrence_number": str(max(1, int(occurrence_number))),
             "occurrence_ordinal": ordinal,
+            "is_first_occurrence": max(1, int(occurrence_number)) == 1,
+            "is_returning": event_type_key == "join" and max(1, int(occurrence_number)) >= 2,
             "mood": mood or "",
             "time_bucket": time_bucket or "",
             "count_tier": count_tier or "",
@@ -348,17 +385,10 @@ class GreetingsCopyService:
             count_tier=count_tier,
         )
         narrative = self.render_moderation_template(template, **context)
-        status_field_name, status_field_value = self.build_barcello_status_field(
-            guild_name=getattr(guild, "name", "Server"),
-            barcello_color=normalized_barcello,
-            barcello_score=barcello_score,
-        )
         return GreetingsRenderResult(
             event_label=format_greetings_event_label(event_type_key, max(1, int(occurrence_number))),
             occurrence_number=max(1, int(occurrence_number)),
             template_context=context,
-            status_field_name=status_field_name,
-            status_field_value=status_field_value,
             narrative=narrative,
             mood=selected_mood,
             time_bucket=time_bucket,
@@ -396,16 +426,6 @@ class GreetingsCopyService:
             barcello_status=barcello_status,
             now=now,
         )
-
-    def build_barcello_status_field(self, *, guild_name: str, barcello_color: str | None, barcello_score: int | None) -> tuple[str, str]:
-        name = f'Stato barcello "{guild_name}"'
-        value = "\n".join(
-            [
-                self.format_barcello_alert_line(barcello_color),
-                f"(🫀: **{self._format_barcello_score(barcello_score)}**)",
-            ]
-        )
-        return name, value
 
     @staticmethod
     def format_duration_human(duration_seconds: int | None) -> str | None:
@@ -569,9 +589,9 @@ class GreetingsCopyService:
         candidates.append(time_barcello_templates.get(key))
         candidates.append(time_count_templates.get(key))
         candidates.append(barcello_count_templates.get(key))
+        candidates.append(count_templates.get(key))
         candidates.append(time_templates.get(key))
         candidates.append(barcello_templates.get(key))
-        candidates.append(count_templates.get(key))
         candidates.append(templates.get(key))
         return candidates
 
@@ -653,10 +673,13 @@ class GreetingsCopyService:
         if event_type_key not in SUPPORTED_GREETINGS_EVENT_TYPES:
             raise ValueError(f"Unsupported greetings event type: {event_type_key}")
 
-    def _format_ordinal_upper(self, occurrence_number: int) -> str:
-        if occurrence_number in _ORDINALS_UPPER:
-            return _ORDINALS_UPPER[occurrence_number]
-        return f"{occurrence_number}°"
+    def _format_ordinal_upper(self, event_type_key: str, occurrence_number: int) -> str:
+        gender = _EVENT_LABELS[event_type_key][2]
+        occurrence = max(1, int(occurrence_number))
+        mapping = _ORDINALS_UPPER_FEMININE if gender == "f" else _ORDINALS_UPPER_MASCULINE
+        if occurrence in mapping:
+            return mapping[occurrence]
+        return f"{occurrence}{'ª' if gender == 'f' else '°'}"
 
     def _coerce_int(self, value: Any) -> int | None:
         try:
@@ -669,6 +692,7 @@ def format_greetings_event_label(event_type_key: str, occurrence_number: int) ->
     if event_type_key not in _EVENT_LABELS:
         raise ValueError(f"Unsupported greetings event type: {event_type_key}")
     occurrence = max(1, int(occurrence_number))
-    ordinal = _ORDINALS_UPPER.get(occurrence, f"{occurrence}°")
-    emoji, label = _EVENT_LABELS[event_type_key]
+    emoji, label, gender = _EVENT_LABELS[event_type_key]
+    mapping = _ORDINALS_UPPER_FEMININE if gender == "f" else _ORDINALS_UPPER_MASCULINE
+    ordinal = mapping.get(occurrence, f"{occurrence}{'ª' if gender == 'f' else '°'}")
     return f"**{emoji} {ordinal} {label}**"

@@ -13,33 +13,32 @@
   ],
   "templates": {
     "join": [
-      "✨ {display_name} è rientrato nel server {server}.",
-      "✨ {display_name} torna nel server {server}."
+      "{mention} entra in {server}."
     ],
     "leave": [
-      "👋 {display_name} ha lasciato il server {server}.",
-      "👋 {display_name} si allontana da {server}."
+      "{mention} ha lasciato {server}.",
+      "{mention} si allontana da {server}."
     ],
     "kick": [
-      "🥾 {display_name} è stato allontanato da {server}{reason_suffix}."
+      "{mention} è stato allontanato da {server}{reason_suffix}."
     ],
     "ban": [
-      "🔨 {display_name} è stato bannato da {server}{reason_suffix}."
+      "{mention} è stato bannato da {server}{reason_suffix}."
     ],
     "tempban": [
-      "⏳ {display_name} è stato escluso temporaneamente da {server} per {duration}{reason_suffix}."
+      "{mention} è stato escluso temporaneamente da {server} per {duration}{reason_suffix}."
     ],
     "grace": [
-      "🛟 {display_name} riceve un periodo di grazia nel server {server} per {duration}."
+      "{mention} riceve un periodo di grazia nel server {server} per {duration}."
     ],
     "inactive_kick": [
-      "💤 {display_name} viene allontanato da {server} per inattività ({inactivity_text})."
+      "{mention} viene allontanato da {server} per inattività ({inactivity_text})."
     ],
     "inactive_tempban": [
-      "💤 {display_name} riceve un ban temporaneo per inattività in {server} per {duration} ({inactivity_text})."
+      "{mention} riceve un ban temporaneo per inattività in {server} per {duration} ({inactivity_text})."
     ],
     "inactive_grace": [
-      "🛟 {display_name} entra in periodo di grazia per inattività su {server} per {duration} ({inactivity_text})."
+      "{mention} entra in periodo di grazia per inattività su {server} per {duration} ({inactivity_text})."
     ]
   },
   "moods": {
@@ -48,14 +47,14 @@
         "morning": {
           "templates": {
             "join": [
-              "☀️ {display_name} torna nel server {server}: buongiorno e bentornato."
+              "Buongiorno {mention}, benvenuto su {server}."
             ]
           }
         },
         "evening": {
           "templates": {
             "leave": [
-              "🌙 {display_name} chiude la giornata e lascia {server}."
+              "{mention} chiude la giornata e lascia {server}."
             ]
           }
         }
@@ -64,7 +63,30 @@
         "verde": {
           "templates": {
             "join": [
-              "🟢 {display_name} è rientrato nel server {server} con barcello verde."
+              "{mention}, benvenuto su {server}. {barcello_alert}, cuore del server su **{barcello_score_text}**."
+            ]
+          }
+        }
+      },
+      "count": {
+        "t1": {
+          "templates": {
+            "join": [
+              "{mention}, benvenuto su {server}."
+            ]
+          }
+        },
+        "t2": {
+          "templates": {
+            "join": [
+              "{mention} torna su {server}."
+            ]
+          }
+        },
+        "t3": {
+          "templates": {
+            "join": [
+              "{mention} rientra di nuovo su {server}."
             ]
           }
         }
@@ -75,26 +97,36 @@
         "rosso": {
           "templates": {
             "kick": [
-              "🔴 Clima già delicato: {display_name} viene allontanato da {server}{reason_suffix}."
+              "Clima già delicato: {mention} viene allontanato da {server}{reason_suffix}. {barcello_alert}."
             ],
             "ban": [
-              "🔴 Con barcello rosso, {display_name} riceve un ban da {server}{reason_suffix}."
+              "Con barcello rosso, {mention} riceve un ban da {server}{reason_suffix}. {barcello_alert}."
             ]
           }
         },
         "nero": {
           "templates": {
             "inactive_tempban": [
-              "⚫ Nel pieno dell'allerta nera, {display_name} riceve un ban temporaneo per inattività in {server}."
+              "Nel pieno dell'allerta nera, {mention} riceve un ban temporaneo per inattività in {server}. {barcello_alert}."
             ]
           }
         }
       },
       "count": {
+        "t1": {
+          "templates": {
+            "join": [
+              "{mention}, benvenuto in {server}. Il clima resta da osservare."
+            ]
+          }
+        },
         "t2": {
           "templates": {
+            "join": [
+              "{mention} torna in {server}, ma il clima resta teso."
+            ],
             "leave": [
-              "👋 È già la seconda uscita: {display_name} si allontana di nuovo da {server}."
+              "È già la seconda uscita: {mention} si allontana di nuovo da {server}."
             ]
           }
         }
