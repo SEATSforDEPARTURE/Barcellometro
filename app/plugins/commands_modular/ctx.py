@@ -44,6 +44,7 @@ class CommandContext:
     aura_rolling: Optional[Any] = None
     footer: Optional[FooterService] = None
     member_flow_notifications: Optional[Any] = None
+    greetings_backfill: Optional[Any] = None
 
     @classmethod
     def from_registry(cls, registry: ServiceRegistry) -> "CommandContext":
@@ -79,6 +80,7 @@ class CommandContext:
         ingest: IngestService = registry.get("ingest")
         footer = registry.get("footer") if registry.has("footer") else None
         member_flow_notifications = registry.get("member_flow_notifications") if registry.has("member_flow_notifications") else None
+        greetings_backfill = registry.get("greetings_backfill") if registry.has("greetings_backfill") else None
         config = registry.get("config")
         timezone = ZoneInfo("Europe/Rome")
         return cls(
@@ -108,5 +110,6 @@ class CommandContext:
             aura_rolling=aura_rolling,
             footer=footer,
             member_flow_notifications=member_flow_notifications,
+            greetings_backfill=greetings_backfill,
             timezone=timezone,
         )

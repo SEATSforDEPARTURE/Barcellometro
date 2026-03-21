@@ -20,6 +20,10 @@ def test_command_validator_tracks_expected_exceptions() -> None:
     assert "riassunto.oggi" in result.exceptions
     assert any(command.path == "campagne.prompt.schedule_add" for command in result.commands)
     assert any(command.path == "greetings.template_show" for command in result.commands)
+    assert any(command.path == "greetings.backfill.on" for command in result.commands)
+    assert any(command.path == "greetings.backfill.off" for command in result.commands)
+    assert any(command.path == "greetings.backfill.status" for command in result.commands)
+    assert any(command.path == "greetings.backfill.run" for command in result.commands)
     assert "preview" not in {
         command.path.split(".")[-1]
         for command in result.commands

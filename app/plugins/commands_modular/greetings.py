@@ -113,8 +113,14 @@ async def _render_preview(
 
 
 def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext) -> None:
+    backfill_group = app_commands.Group(name="backfill", description="Greetings timeline backfill controls")
+    greetings_group.add_command(backfill_group)
+
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, PERM, ctx)
+
+    def _backfill_service() -> Any | None:
+        return getattr(ctx, "greetings_backfill", None)
 
     async def _send(
         interaction: discord.Interaction,
@@ -149,6 +155,87 @@ def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext)
                 ("notify_channel", f"<#{notify_channel_id}>" if notify_channel_id else "not set"),
                 ("user_card", "on" if bool(int(templates.get("notify_card_enabled") or 0)) else "off"),
             ],
+        )
+
+    async def _send_backfill_status(interaction: discord.Interaction) -> None:
+        service = _backfill_service()
+        if service is None:
+            await _send(
+                interaction,
+                subcommand_path="greetings backfill status",
+                lines=[("error", "service unavailable")],
+                kind="error",
+            )
+            return
+        status = await service.status(str(interaction.guild_id) if interaction.guild_id is not None else None)
+        await _send(
+            interaction,
+            subcommand_path="greetings backfill status",
+            lines=[
+                ("enabled", "on" if status["enabled"] else "off"),
+                ("last_run_at", status.get("last_run_at") or "never"),
+                ("canonical_records", status.get("canonical_count", 0)),
+                ("last_run_imported", status.get("last_run_imported_count") if status.get("last_run_imported_count") is not None else "n/a"),
+                ("last_run_skipped", status.get("last_run_skipped_count") if status.get("last_run_skipped_count") is not None else "n/a"),
+            ],
+        )
+
+    @backfill_group.command(name="on", description="Enable greetings timeline backfill.")
+    async def greetings_backfill_on(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction):
+            return
+        service = _backfill_service()
+        if service is None:
+            await _send(interaction, subcommand_path="greetings backfill on", lines=[("error", "service unavailable")], kind="error")
+            return
+        await service.set_enabled(True)
+        await _send(interaction, subcommand_path="greetings backfill on", lines=[("enabled", "on")], kind="success")
+
+    @backfill_group.command(name="off", description="Disable greetings timeline backfill.")
+    async def greetings_backfill_off(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction):
+            return
+        service = _backfill_service()
+        if service is None:
+            await _send(interaction, subcommand_path="greetings backfill off", lines=[("error", "service unavailable")], kind="error")
+            return
+        await service.set_enabled(False)
+        await _send(interaction, subcommand_path="greetings backfill off", lines=[("enabled", "off")], kind="success")
+
+    @backfill_group.command(name="status", description="Show greetings timeline backfill status.")
+    async def greetings_backfill_status(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await _send_backfill_status(interaction)
+
+    @backfill_group.command(name="run", description="Run greetings timeline backfill now.")
+    async def greetings_backfill_run(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        service = _backfill_service()
+        if service is None:
+            await _send(interaction, subcommand_path="greetings backfill run", lines=[("error", "service unavailable")], kind="error")
+            return
+        if not await service.is_enabled():
+            await _send(
+                interaction,
+                subcommand_path="greetings backfill run",
+                lines=[("error", "backfill disabled"), ("action", "enable it first")],
+                kind="warning",
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await service.run_once(guild_id=str(interaction.guild_id))
+        await _send(
+            interaction,
+            subcommand_path="greetings backfill run",
+            lines=[
+                ("imported", result.imported_count),
+                ("skipped", result.skipped_count),
+                ("canonical_records", result.canonical_count),
+                ("last_run_at", result.last_run_at or "n/a"),
+            ],
+            kind="success",
         )
 
     @greetings_group.command(name="on", description="Enable greetings notifications for a channel.")
