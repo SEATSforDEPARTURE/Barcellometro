@@ -24,6 +24,7 @@ def member_flow_module(monkeypatch):
             self.title = title
             self.colour = colour
             self.timestamp = timestamp
+            self.description = None
             self.fields = []
             self.footer = types.SimpleNamespace(text=None)
 
@@ -315,6 +316,8 @@ def test_source_contains_fixed_title_and_footer_service_name() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text()
     assert 'title="🚪 INGRESSI & USCITE"' in source
     assert 'service_name="member_flow_notifications"' in source
+    assert "timestamp=created_at" not in source
+    assert "set_footer(" not in source
 
 
 def test_send_notification_renders_fixed_two_field_layout_from_canonical_event(member_flow_module) -> None:
@@ -359,6 +362,8 @@ def test_send_notification_renders_fixed_two_field_layout_from_canonical_event(m
 
         payload = channel.sent[0]["embed"]
         assert payload.title == "🚪 INGRESSI & USCITE"
+        assert payload.timestamp is None
+        assert payload.description is None
         assert len(payload.fields) == 2
         assert [field.name for field in payload.fields] == [
             "Evento",
@@ -420,6 +425,8 @@ def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_mo
         )
 
         embed = channel.sent[0]
+        assert embed.timestamp is None
+        assert embed.description is None
         assert len(embed.fields) == 2
         assert "benvenut" in embed.fields[1].value.lower()
         assert "<@42>" in embed.fields[1].value
