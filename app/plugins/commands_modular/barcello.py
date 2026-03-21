@@ -23,6 +23,7 @@ from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
 from app.shared.discord.command_embeds import send_standard_response
 from app.shared.discord.component_notices import send_standard_component_notice
+from app.shared.discord.delivery import send_dm_or_followup
 from app.shared.discord.report_embeds import apply_standard_report_style
 from app.domain.reporting.trend import normalize_trend, render_trend, render_trend_value
 
@@ -40,31 +41,42 @@ def register_barcello(
     barcello_group = app_commands.Group(name="barcello", description="Barcello controls")
     add_group_once(admin_group, barcello_group, logger)
 
-    async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
+    def _kind_from_message(message: str) -> str:
         text = str(message or "").strip()
-        kind = "info"
         if text.startswith("✅"):
-            kind = "success"
-        elif text.startswith("⚠️"):
-            kind = "warning"
-        elif text.startswith("❌"):
-            kind = "error"
+            return "success"
+        if text.startswith("⚠️"):
+            return "warning"
+        if text.startswith("❌"):
+            return "error"
+        return "info"
+
+    def _normalize_message(message: str) -> str:
+        return str(message or "").lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile."
+
+    def _command_path(interaction: discord.Interaction, *, fallback: str) -> str:
+        qualified_name = str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "").strip()
+        if qualified_name:
+            return qualified_name
+        command_name = str((getattr(interaction, "data", None) or {}).get("name") or "").strip()
+        return command_name or fallback
+
+    async def send_ephemeral(
+        interaction: discord.Interaction,
+        message: str,
+        *,
+        command_path: str | None = None,
+    ) -> None:
+        text = str(message or "").strip()
         await send_standard_response(
             interaction,
             top_level="barcello",
-            subcommand_path=str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "admin barcello"),
-            lines=[("dettaglio", text.lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile.")],
-            kind=kind,
+            subcommand_path=command_path or _command_path(interaction, fallback="barcello"),
+            lines=[("dettaglio", _normalize_message(text))],
+            kind=_kind_from_message(text),
             footer_service=ctx.footer,
             ephemeral=interaction.guild_id is not None,
         )
-
-    async def send_plain_ephemeral(interaction: discord.Interaction, message: str) -> None:
-        ephemeral = interaction.guild_id is not None
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=ephemeral)
-        else:
-            await interaction.response.send_message(message, ephemeral=ephemeral)
 
     async def _require_channel_scope(interaction: discord.Interaction) -> tuple[str, str] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
@@ -72,12 +84,18 @@ def register_barcello(
             return None
         return str(interaction.guild_id), str(interaction.channel_id)
 
-    async def _send_barcello_dm_notice(interaction: discord.Interaction, *, sent: bool, blocked_message: str | None = None) -> None:
+    async def _send_barcello_dm_notice(
+        interaction: discord.Interaction,
+        *,
+        sent: bool,
+        command_path: str,
+        blocked_message: str | None = None,
+    ) -> None:
         if sent:
             await send_standard_response(
                 interaction,
                 top_level="barcello",
-                subcommand_path="admin barcello run",
+                subcommand_path=command_path,
                 lines=[("result", "Ti ho inviato un DM")],
                 kind="success",
                 footer_service=ctx.footer,
@@ -86,9 +104,9 @@ def register_barcello(
         await send_standard_response(
             interaction,
             top_level="barcello",
-            subcommand_path="admin barcello run",
-            lines=[("error", blocked_message or "Non riesco a inviarti DM. Abilita i messaggi privati dal server.")],
-            kind="error",
+            subcommand_path=command_path,
+            lines=[("warning", blocked_message or "Non riesco a inviarti DM. Ti mostro il report qui in privato.")],
+            kind="warning",
             footer_service=ctx.footer,
         )
 
@@ -1108,9 +1126,8 @@ def register_barcello(
         user2: discord.Member | None = None,
         window_minutes: int | None = None,
         permission_name: str,
-        legacy_user_facing: bool,
+        command_path: str,
     ) -> None:
-        send_user_notice = send_plain_ephemeral if legacy_user_facing else send_ephemeral
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1118,7 +1135,7 @@ def register_barcello(
             except Exception:
                 logger.exception("barcello: failed to defer")
         if interaction.guild_id is None or interaction.channel_id is None:
-            await send_user_notice(interaction, "Questo comando funziona solo nei canali della guild.")
+            await send_ephemeral(interaction, "Questo comando funziona solo nei canali della guild.", command_path=command_path)
             return
 
         try:
@@ -1126,30 +1143,24 @@ def register_barcello(
             command_config = await entitlements_service.get_command_profile_config(interaction.user, "barcello")
             profile, winner_role_id = await entitlements_service.resolve_profile_with_role_id(interaction.user)
 
-            async def try_send_dm(
-                content: str | None = None,
-                *,
-                embed: discord.Embed | None = None,
-                embeds: list[discord.Embed] | None = None,
-                view: discord.ui.View | None = None,
-            ) -> bool:
-                try:
-                    if embeds is not None:
-                        await interaction.user.send(embeds=embeds, view=view)
-                    elif embed is not None:
-                        await interaction.user.send(embed=embed, view=view)
-                    else:
-                        await interaction.user.send(content or "")
-                    return True
-                except discord.Forbidden:
-                    return False
-
             if not command_config["allowed"]:
                 dm_text = command_config["messages"].get("dm_text", "Serve almeno PLUS per usare /barcello.")
-                if await try_send_dm(dm_text):
-                    await send_user_notice(interaction, "Ti ho inviato un DM")
+                sent_dm = await send_dm_or_followup(
+                    interaction,
+                    content=dm_text,
+                    ephemeral_fallback=True,
+                    footer_service=ctx.footer,
+                    default_service_name="barcello",
+                )
+                if sent_dm:
+                    await _send_barcello_dm_notice(interaction, sent=True, command_path=command_path)
                 else:
-                    await send_user_notice(interaction, "Apri i DM per ricevere la risposta")
+                    await _send_barcello_dm_notice(
+                        interaction,
+                        sent=False,
+                        command_path=command_path,
+                        blocked_message="Apri i DM per ricevere la risposta completa.",
+                    )
                 return
 
             if not await check_permission(interaction, permission_name, ctx):
@@ -1168,14 +1179,14 @@ def register_barcello(
                 window_minutes = 30
 
             if user2 is not None and user1 is None:
-                await send_user_notice(interaction, "Specifica il primo utente.")
+                await send_ephemeral(interaction, "Specifica il primo utente.", command_path=command_path)
                 return
             if user1 is not None and user2 is not None and user1.id == user2.id:
-                await send_user_notice(interaction, "Seleziona due utenti diversi.")
+                await send_ephemeral(interaction, "Seleziona due utenti diversi.", command_path=command_path)
                 return
             if ctx.config.ignore_bots:
                 if (user1 and user1.bot) or (user2 and user2.bot):
-                    await send_user_notice(interaction, "Non posso usare bot per il barcello.")
+                    await send_ephemeral(interaction, "Non posso usare bot per il barcello.", command_path=command_path)
                     return
 
             pair_mode = user1 is not None
@@ -1186,20 +1197,20 @@ def register_barcello(
             if pair_mode:
                 if user2 is not None:
                     if profile != "mod":
-                        await send_user_notice(interaction, "Solo i mod possono usare due utenti.")
+                        await send_ephemeral(interaction, "Solo i mod possono usare due utenti.", command_path=command_path)
                         return
                     pair_mode_profile = "mod"
                     pair_user_a = user1
                     pair_user_b = user2
                 else:
                     if profile not in {"role3", "mod"}:
-                        await send_user_notice(interaction, "Solo ruolo 3 o mod possono usare questo comando.")
+                        await send_ephemeral(interaction, "Solo ruolo 3 o mod possono usare questo comando.", command_path=command_path)
                         return
                     pair_mode_profile = "role3"
                     pair_user_a = interaction.user if isinstance(interaction.user, discord.Member) else None
                     pair_user_b = user1
                 if pair_user_a is None or pair_user_b is None:
-                    await send_user_notice(interaction, "Utenti non validi.")
+                    await send_ephemeral(interaction, "Utenti non validi.", command_path=command_path)
                     return
 
             if pair_mode:
@@ -1254,19 +1265,14 @@ def register_barcello(
                     },
                 )
                 no_data_embed = _build_barcello_no_data_embed(title=title, window_minutes=window_minutes)
-                if await try_send_dm(embed=no_data_embed):
-                    if legacy_user_facing:
-                        await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
-                    else:
-                        await _send_barcello_dm_notice(interaction, sent=True)
-                else:
-                    if legacy_user_facing:
-                        await interaction.followup.send(
-                            "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
-                            ephemeral=True,
-                        )
-                    else:
-                        await _send_barcello_dm_notice(interaction, sent=False)
+                sent_dm = await send_dm_or_followup(
+                    interaction,
+                    embeds=[no_data_embed],
+                    ephemeral_fallback=True,
+                    footer_service=ctx.footer,
+                    default_service_name="barcello",
+                )
+                await _send_barcello_dm_notice(interaction, sent=sent_dm, command_path=command_path)
                 return
 
             insufficient_data = (
@@ -1680,37 +1686,26 @@ def register_barcello(
                     profile=profile,
                 )
 
-            report_embeds = (
-                _build_legacy_barcello_dm_report(public_embed=public_embed, details_embed=details_embed)
-                if legacy_user_facing
-                else _build_barcello_dm_report(public_embed=public_embed, details_embed=details_embed)
+            report_embeds = _build_barcello_dm_report(public_embed=public_embed, details_embed=details_embed)
+            sent_dm = await send_dm_or_followup(
+                interaction,
+                embeds=report_embeds,
+                view=feedback_view,
+                ephemeral_fallback=True,
+                footer_service=ctx.footer,
+                default_service_name="barcello",
             )
-            if await try_send_dm(embeds=report_embeds, view=feedback_view):
-                if legacy_user_facing:
-                    await interaction.followup.send("Ti ho inviato un DM", ephemeral=True)
-                else:
-                    await _send_barcello_dm_notice(interaction, sent=True)
-            else:
-                if legacy_user_facing:
-                    await interaction.followup.send(
-                        "Non riesco a inviarti DM (privacy). Abilita i messaggi privati dal server.",
-                        ephemeral=True,
-                    )
-                else:
-                    await _send_barcello_dm_notice(interaction, sent=False)
+            await _send_barcello_dm_notice(interaction, sent=sent_dm, command_path=command_path)
         except Exception:
             logger.exception("barcello: unexpected error")
-            if legacy_user_facing:
-                await interaction.followup.send("Errore temporaneo, riprova.", ephemeral=True)
-            else:
-                await send_standard_response(
-                    interaction,
-                    top_level="barcello",
-                    subcommand_path="admin barcello run",
-                    lines=[("error", "Errore temporaneo, riprova.")],
-                    kind="error",
-                    footer_service=ctx.footer,
-                )
+            await send_standard_response(
+                interaction,
+                top_level="barcello",
+                subcommand_path=command_path,
+                lines=[("error", "Errore temporaneo, riprova.")],
+                kind="error",
+                footer_service=ctx.footer,
+            )
 
     @barcello_group.command(name="run", description="Run the Barcello analysis.")
     @app_commands.describe(
@@ -1730,7 +1725,7 @@ def register_barcello(
             user2=user2,
             window_minutes=window_minutes,
             permission_name="admin.barcello.run",
-            legacy_user_facing=False,
+            command_path="admin barcello run",
         )
 
     @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
@@ -1752,7 +1747,7 @@ def register_barcello(
             user2=user2,
             window_minutes=window_minutes,
             permission_name="barcello",
-            legacy_user_facing=True,
+            command_path="barcello",
         )
 
     if guild is not None:
