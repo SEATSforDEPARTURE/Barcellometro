@@ -272,7 +272,7 @@ class MemberFlowNotificationsService:
             channel_id=str(notify_channel_id),
             now=created_at,
         )
-        embed = discord.Embed(title="🚪 INGRESSI & USCITE", colour=discord.Colour.blurple(), timestamp=created_at)
+        embed = discord.Embed(title="🚪 INGRESSI & USCITE", colour=discord.Colour.blurple())
         # Layout canonico live: sempre e solo 2 campi, nell'ordine evento →
         # narrativa larga. Lo stato barcello vive eventualmente nel testo
         # narrativo tramite template JSON.
