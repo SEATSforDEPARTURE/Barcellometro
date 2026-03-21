@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import aiosqlite
@@ -745,7 +746,19 @@ class InactiveMembersModerationService:
                 await self._database.mark_user_reminded(guild_id, str(candidate.member.id), now.isoformat())
                 if self._member_flow_notifications is not None:
                     expires_at = now + timedelta(days=int(cfg.get("grace_days_after_reminder", 7)))
-                    await self._member_flow_notifications.log_action(guild_id=guild_id, user_id=str(candidate.member.id), moderator_id=None, action_type="inactive_grace", reason="Reminder inattività inviato", duration_seconds=int(cfg.get("grace_days_after_reminder", 7)) * 86400, expires_at=expires_at.isoformat(), metadata={"days_inactive": candidate.days_inactive})
+                    await self._member_flow_notifications.log_action(
+                        guild_id=guild_id,
+                        user_id=str(candidate.member.id),
+                        moderator_id=None,
+                        action_type="inactive_grace",
+                        reason="Reminder inattività inviato",
+                        duration_seconds=int(cfg.get("grace_days_after_reminder", 7)) * 86400,
+                        expires_at=expires_at.isoformat(),
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "days_inactive": candidate.days_inactive,
+                        },
+                    )
                 ok += 1
             except Exception as exc:
                 fail += 1
@@ -810,6 +823,8 @@ class InactiveMembersModerationService:
                 days_inactive = (now - last_message_at).days
                 inactivity_text = f"è stato inattivo per {days_inactive} giorni"
             reason_text = None
+            operation_id = str(uuid4())
+            kick_result: dict[str, Any] | None = None
             if self._member_flow_notifications is not None:
                 reason_text = self._render_template(
                     notify_template,
@@ -823,7 +838,20 @@ class InactiveMembersModerationService:
                     reason="Inattività prolungata",
                     inactivity_text=inactivity_text,
                 )
-                await self._member_flow_notifications.log_action(guild_id=guild_id, user_id=str(user_id), moderator_id=None, action_type="inactive_kick", reason=reason_text, metadata={"days_inactive": candidate.days_inactive, "inactivity_text": inactivity_text})
+                kick_result = await self._member_flow_notifications.log_action(
+                    guild_id=guild_id,
+                    user_id=str(user_id),
+                    moderator_id=None,
+                    action_type="inactive_kick",
+                    reason=reason_text,
+                    metadata={
+                        "source": "inactive_members_moderation",
+                        "operation_id": operation_id,
+                        "visible_in_greetings": ban_days <= 0,
+                        "days_inactive": candidate.days_inactive,
+                        "inactivity_text": inactivity_text,
+                    },
+                )
 
             if ban_days > 0:
                 try:
@@ -834,8 +862,36 @@ class InactiveMembersModerationService:
                     await self._database.add_temp_ban(guild_id, str(user_id), unban_at, "Inattività")
                     await self._database.mark_user_kicked(guild_id, str(user_id), now.isoformat())
                     if self._member_flow_notifications is not None and reason_text is not None:
-                        await self._member_flow_notifications.log_action(guild_id=guild_id, user_id=str(user_id), moderator_id=None, action_type="inactive_tempban", reason=reason_text, duration_seconds=ban_days * 86400, expires_at=unban_at, metadata={"days_inactive": candidate.days_inactive, "inactivity_text": inactivity_text})
-                        await self._member_flow_notifications.send_notification(guild=guild, user=candidate.member, action_type="inactive_tempban", reason=reason_text, duration_seconds=ban_days * 86400, expires_at=expires_at, metadata={"days_inactive": candidate.days_inactive, "inactivity_text": inactivity_text})
+                        result = await self._member_flow_notifications.log_action(
+                            guild_id=guild_id,
+                            user_id=str(user_id),
+                            moderator_id=None,
+                            action_type="inactive_tempban",
+                            reason=reason_text,
+                            duration_seconds=ban_days * 86400,
+                            expires_at=unban_at,
+                            metadata={
+                                "source": "inactive_members_moderation",
+                                "operation_id": operation_id,
+                                "days_inactive": candidate.days_inactive,
+                                "inactivity_text": inactivity_text,
+                            },
+                        )
+                        if result.get("canonical_written") and result.get("canonical_visible"):
+                            await self._member_flow_notifications.send_notification(
+                                guild=guild,
+                                user=candidate.member,
+                                action_type="inactive_tempban",
+                                reason=reason_text,
+                                duration_seconds=ban_days * 86400,
+                                expires_at=expires_at,
+                                metadata={
+                                    "source": "inactive_members_moderation",
+                                    "operation_id": operation_id,
+                                    "days_inactive": candidate.days_inactive,
+                                    "inactivity_text": inactivity_text,
+                                },
+                            )
                         stats["notify_ok"] += 1
                 except Exception as exc:
                     stats["ban_fail"] += 1
@@ -843,8 +899,21 @@ class InactiveMembersModerationService:
                     continue
             else:
                 await self._database.mark_user_kicked(guild_id, str(user_id), now.isoformat())
-                if self._member_flow_notifications is not None and reason_text is not None:
-                    await self._member_flow_notifications.send_notification(guild=guild, user=candidate.member, action_type="inactive_kick", reason=reason_text, metadata={"days_inactive": candidate.days_inactive, "inactivity_text": inactivity_text})
+                if self._member_flow_notifications is not None and reason_text is not None and kick_result is not None:
+                    if not (kick_result.get("canonical_written") and kick_result.get("canonical_visible")):
+                        continue
+                    await self._member_flow_notifications.send_notification(
+                        guild=guild,
+                        user=candidate.member,
+                        action_type="inactive_kick",
+                        reason=reason_text,
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "operation_id": operation_id,
+                            "days_inactive": candidate.days_inactive,
+                            "inactivity_text": inactivity_text,
+                        },
+                    )
                     stats["notify_ok"] += 1
         logger.info(
             "inactive kick pipeline guild=%s dm_ok=%s kick_ok=%s ban_ok=%s",

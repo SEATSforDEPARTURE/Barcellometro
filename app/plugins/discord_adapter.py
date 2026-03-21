@@ -420,8 +420,16 @@ def setup(registry: ServiceRegistry) -> None:
         ts = _now_iso()
         await record_user(member, member.guild, False, ts)
         if member_flow_notifications is not None:
-            await member_flow_notifications.log_action(guild_id=str(member.guild.id), user_id=str(member.id), moderator_id=None, action_type="join", reason="Ingresso nel server", metadata={"source": "discord_adapter"})
-            await member_flow_notifications.send_notification(guild=member.guild, user=member, action_type="join", reason="Ingresso nel server")
+            result = await member_flow_notifications.log_action(
+                guild_id=str(member.guild.id),
+                user_id=str(member.id),
+                moderator_id=None,
+                action_type="join",
+                reason="Ingresso nel server",
+                metadata={"source": "discord_adapter"},
+            )
+            if result.get("canonical_written") and result.get("canonical_visible"):
+                await member_flow_notifications.send_notification(guild=member.guild, user=member, action_type="join", reason="Ingresso nel server")
         await emit_event(
             "member.join",
             guild_id=str(member.guild.id),
@@ -435,9 +443,17 @@ def setup(registry: ServiceRegistry) -> None:
     async def on_member_remove(member: discord.Member) -> None:
         ts = _now_iso()
         await record_user(member, member.guild, False, ts)
-        if member_flow_notifications is not None and not member_flow_notifications.should_skip_leave_event(str(member.guild.id), str(member.id)):
-            await member_flow_notifications.log_action(guild_id=str(member.guild.id), user_id=str(member.id), moderator_id=None, action_type="leave", reason="Uscita dal server", metadata={"source": "discord_adapter"})
-            await member_flow_notifications.send_notification(guild=member.guild, user=member, action_type="leave", reason="Uscita dal server")
+        if member_flow_notifications is not None:
+            result = await member_flow_notifications.log_action(
+                guild_id=str(member.guild.id),
+                user_id=str(member.id),
+                moderator_id=None,
+                action_type="leave",
+                reason="Uscita dal server",
+                metadata={"source": "discord_adapter"},
+            )
+            if result.get("canonical_written") and result.get("canonical_visible"):
+                await member_flow_notifications.send_notification(guild=member.guild, user=member, action_type="leave", reason="Uscita dal server")
         await emit_event(
             "member.leave",
             guild_id=str(member.guild.id),
