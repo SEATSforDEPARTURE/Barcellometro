@@ -2,7 +2,7 @@
 
 Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.
 
-- Commands discovered: **268**
+- Commands discovered: **267**
 - Errors: **0**
 - Warnings: **51**
 
@@ -162,14 +162,13 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `greetings` | `—` | `notify_show` | Show the greetings notification channel. | `app/plugins/commands_modular/greetings.py:201` |
 | `greetings` | `—` | `off` | Disable greetings notifications. | `app/plugins/commands_modular/greetings.py:173` |
 | `greetings` | `—` | `on` | Enable greetings notifications for a channel. | `app/plugins/commands_modular/greetings.py:153` |
-| `greetings` | `—` | `preview` | Preview a greetings template. | `app/plugins/commands_modular/greetings.py:292` |
 | `greetings` | `—` | `status` | Show the greetings configuration status. | `app/plugins/commands_modular/greetings.py:180` |
-| `greetings` | `—` | `template_reset` | Reset a greetings template. | `app/plugins/commands_modular/greetings.py:257` |
+| `greetings` | `—` | `template_reset` | Reset a greetings template. | `app/plugins/commands_modular/greetings.py:282` |
 | `greetings` | `—` | `template_set` | Set a greetings template. | `app/plugins/commands_modular/greetings.py:217` |
 | `greetings` | `—` | `template_show` | Show greetings templates. | `app/plugins/commands_modular/greetings.py:229` |
-| `greetings` | `—` | `user_card_reset` | Reset the greetings notification user card setting. | `app/plugins/commands_modular/greetings.py:284` |
-| `greetings` | `—` | `user_card_set` | Set whether greetings notifications include the user card. | `app/plugins/commands_modular/greetings.py:269` |
-| `greetings` | `—` | `user_card_show` | Show whether the greetings notification user card is enabled. | `app/plugins/commands_modular/greetings.py:276` |
+| `greetings` | `—` | `user_card_reset` | Reset the greetings notification user card setting. | `app/plugins/commands_modular/greetings.py:309` |
+| `greetings` | `—` | `user_card_set` | Set whether greetings notifications include the user card. | `app/plugins/commands_modular/greetings.py:294` |
+| `greetings` | `—` | `user_card_show` | Show whether the greetings notification user card is enabled. | `app/plugins/commands_modular/greetings.py:301` |
 | `inactivity` | `autokick` | `off` | Disable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:226` |
 | `inactivity` | `autokick` | `on` | Enable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:219` |
 | `inactivity` | `autokick` | `status` | Show the automatic inactivity action status. | `app/plugins/commands_modular/inattivi.py:233` |
@@ -314,7 +313,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:486`)
 - **WARNING required_param** — `frasi.template_user_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:574`)
 - **WARNING required_param** — `greetings.template_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/greetings.py:217`)
-- **WARNING required_param** — `greetings.user_card_set`: Parameter 'enabled' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/greetings.py:269`)
+- **WARNING required_param** — `greetings.user_card_set`: Parameter 'enabled' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/greetings.py:294`)
 - **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:364`)
 - **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:389`)
 - **WARNING required_param** — `inactivity.dms.template_reminder_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:335`)

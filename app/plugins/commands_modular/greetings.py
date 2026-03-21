@@ -229,14 +229,39 @@ def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext)
     async def greetings_template_show(interaction: discord.Interaction, type: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        templates = await ctx.database.get_moderation_templates(str(interaction.guild_id))
         if type:
-            field_name = resolve_greetings_template_field(type)
-            if field_name is None:
+            if resolve_greetings_template_field(type) is None:
                 await _send(interaction, subcommand_path="greetings template_show", lines=[("error", f"Invalid type. Use {TEMPLATE_CHOICES}.")], kind="error", footer_service=ctx.footer)
                 return
-            await _send(interaction, subcommand_path="greetings template_show", subtitle_args=[type], lines=[("type", type), ("value", templates.get(field_name) or "not set")], footer_service=ctx.footer)
+            try:
+                configured_template, rendered_preview = await _render_preview(ctx, interaction, type)
+            except ValueError as exc:
+                await _send(interaction, subcommand_path="greetings template_show", lines=[("error", str(exc))], kind="error", footer_service=ctx.footer)
+                return
+            attachments: list[str] = []
+            sections = [
+                CommandEmbedSection(title="Template", lines=[configured_template[:FIELD_MAX]]),
+                CommandEmbedSection(title="Preview", lines=[rendered_preview[:FIELD_MAX]]),
+            ]
+            if len(configured_template) > FIELD_MAX:
+                attachments.append(f"## Template\n{configured_template}")
+            if len(rendered_preview) > FIELD_MAX:
+                attachments.append(f"## Preview\n{rendered_preview}")
+            files = None
+            if attachments:
+                payload = "\n\n".join(attachments).encode("utf-8")
+                files = [discord.File(io.BytesIO(payload), filename=f"greetings_template_show_{type}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.txt")]
+            embeds = await build_command_embeds(
+                top_level="admin",
+                visual_top_level="greetings",
+                subcommand_path="greetings template_show",
+                subtitle_args=[type],
+                sections=sections,
+                footer_service=ctx.footer,
+            )
+            await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=files)
             return
+        templates = await ctx.database.get_moderation_templates(str(interaction.guild_id))
         sections_data = [(_TEMPLATE_LABELS[name], str(templates[field_name]) or "not set") for name, field_name in TEMPLATE_FIELDS.items()]
         extra = "\n\n".join(f"## {name}\n{value}" for name, value in sections_data if len(value) > FIELD_MAX)
         files = None
@@ -286,32 +311,3 @@ def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext)
             return
         await ctx.database.set_notify_card_enabled(str(interaction.guild_id), False)
         await _send(interaction, subcommand_path="greetings user_card_reset", lines=[("result", "reset")], kind="success", footer_service=ctx.footer)
-
-    @greetings_group.command(name="preview", description="Preview a greetings template.")
-    @app_commands.describe(type="Template type to preview: inactivity, kick, ban, tempban, or grace.")
-    async def greetings_preview(interaction: discord.Interaction, type: str) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        try:
-            configured_template, rendered_preview = await _render_preview(ctx, interaction, type)
-        except ValueError as exc:
-            await _send(interaction, subcommand_path="greetings preview", lines=[("error", str(exc))], kind="error", footer_service=ctx.footer)
-            return
-        extra = rendered_preview if len(rendered_preview) > FIELD_MAX else ""
-        files = None
-        sections = [
-            CommandEmbedSection(title="Template", lines=[configured_template]),
-            CommandEmbedSection(title="Preview", lines=[rendered_preview[:FIELD_MAX]]),
-        ]
-        if extra:
-            payload = rendered_preview.encode("utf-8")
-            files = [discord.File(io.BytesIO(payload), filename=f"greetings_preview_{type}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.txt")]
-        embeds = await build_command_embeds(
-            top_level="admin",
-            visual_top_level="greetings",
-            subcommand_path="greetings preview",
-            subtitle_args=[type],
-            sections=sections,
-            footer_service=ctx.footer,
-        )
-        await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=files)
