@@ -65,6 +65,8 @@ class _FakeDB:
             "atrio_channel_id": "55",
             "invite_url": "https://discord.gg/barcello",
             "notify_card_enabled": False,
+            "template_inactivity_reason": "LEGACY DB TEMPLATE {display_name}",
+            "atrio_template": "LEGACY ATRIO TEMPLATE {display_name}",
         }
 
 
@@ -423,6 +425,53 @@ def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_mo
         assert "<@42>" in embed.fields[1].value
         assert embed.footer.text == "Barcellometro dev"
         assert attached["service_name"] == "member_flow_notifications"
+
+    asyncio.run(_run())
+
+
+def test_send_notification_ignores_legacy_db_template_values(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append(embed)
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="inactive_kick",
+            canonical_event={
+                "event_type_key": "inactive_kick",
+                "reason": "Inattività prolungata",
+                "visible_in_greetings": True,
+                "metadata": {
+                    "inactivity_text": "30 giorni",
+                    "occurrence_number": 1,
+                },
+            },
+        )
+
+        narrative = channel.sent[0].fields[1].value
+        assert "LEGACY DB TEMPLATE" not in narrative
+        assert "LEGACY ATRIO TEMPLATE" not in narrative
+        assert "30 giorni" in narrative
 
     asyncio.run(_run())
 

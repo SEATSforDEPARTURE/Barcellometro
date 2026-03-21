@@ -94,7 +94,6 @@ def test_execute_kick_pipeline_uses_operation_id_and_hides_inactive_kick_when_te
                     "grace_days_after_reminder": 7,
                     "ban_days": 3,
                     "dm_kick_template": "Kick {user}",
-                    "template_inactivity_reason": "Via per inattività: {inactivity_text}",
                     "invite_url": "https://example.test/invite",
                 },
             )
@@ -111,6 +110,7 @@ def test_execute_kick_pipeline_uses_operation_id_and_hides_inactive_kick_when_te
         assert member_flow_notifications.log_action.await_args_list[1].kwargs["action_type"] == "inactive_tempban"
         assert first_metadata["visible_in_greetings"] is False
         assert first_metadata["operation_id"] == second_metadata["operation_id"]
+        assert member_flow_notifications.log_action.await_args_list[0].kwargs["reason"] != "Via per inattività: è stato inattivo per 40 giorni"
         assert member_flow_notifications.send_notification.await_count == 1
         assert member_flow_notifications.send_notification.await_args.kwargs["action_type"] == "inactive_tempban"
 

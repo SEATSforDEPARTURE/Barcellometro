@@ -16,6 +16,7 @@ import discord
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
+from app.services.greetings_copy_service import GreetingsCopyService
 from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
@@ -193,6 +194,7 @@ class InactiveMembersModerationService:
         self._database = database
         self._bot = bot
         self._member_flow_notifications = member_flow_notifications
+        self._greetings_copy_service = GreetingsCopyService(database)
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -439,7 +441,7 @@ class InactiveMembersModerationService:
         mode = str(policy.get("mode", "OR")).upper()
         auto_enabled = "ON" if bool(cfg.get("auto_enabled")) else "OFF"
         invite_set = "si" if bool(cfg.get("invite_url")) else "no"
-        atrio_set = "si" if bool(cfg.get("notify_channel_id") or cfg.get("atrio_channel_id") or cfg.get("template_inactivity_reason") or cfg.get("atrio_template")) else "no"
+        atrio_set = "si" if bool(cfg.get("notify_channel_id") or cfg.get("atrio_channel_id")) else "no"
         min_account_age_days = int(policy.get("min_account_age_days", 0))
         return (
             f"- Inattivita: {policy.get('inactive_days', 30)} giorni\n"
@@ -454,7 +456,7 @@ class InactiveMembersModerationService:
             f"- Modalita auto kick: {auto_enabled}\n"
             f"- Reminder cooldown: {cfg.get('reminder_cooldown_days', 14)} giorni\n"
             f"- Invite link impostato: {invite_set}\n"
-            f"- Notify/template uscita configurati: {atrio_set}"
+            f"- Canale greetings configurato: {atrio_set}"
         )
 
     def _format_excluded_roles(self, guild: discord.Guild, cfg: dict[str, Any]) -> str:
@@ -775,7 +777,6 @@ class InactiveMembersModerationService:
         grace_days = int(cfg.get("grace_days_after_reminder", 7))
         ban_days = int(cfg.get("ban_days", 7))
         kick_template = cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}"
-        notify_template = cfg.get("template_inactivity_reason") or cfg.get("atrio_template") or "{display_name} ha lasciato il server per inattività ({inactivity_text})."
         stats = {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "notify_ok": 0, "errors": []}
         by_id = {c.member.id: c for c in inactive}
         for user_id, candidate in by_id.items():
@@ -826,18 +827,22 @@ class InactiveMembersModerationService:
             operation_id = str(uuid4())
             kick_result: dict[str, Any] | None = None
             if self._member_flow_notifications is not None:
-                reason_text = self._render_template(
-                    notify_template,
-                    member=candidate.member,
+                greetings_event_type = "inactive_tempban" if ban_days > 0 else "inactive_kick"
+                rendered = await self._greetings_copy_service.render_event_copy(
                     guild=guild,
-                    days_inactive=candidate.days_inactive,
-                    policy=candidate.policy,
-                    cfg=cfg,
-                    message_count=candidate.count_in_window,
-                    reminder_count=reminder_count,
+                    user=candidate.member,
+                    event_type_key=greetings_event_type,
                     reason="Inattività prolungata",
-                    inactivity_text=inactivity_text,
+                    metadata={
+                        "notify_channel_id": str(cfg.get("notify_channel_id") or cfg.get("atrio_channel_id") or ""),
+                        "atrio_channel_id": str(cfg.get("atrio_channel_id") or ""),
+                        "rejoin_link": str(cfg.get("invite_url") or ""),
+                        "days_inactive": candidate.days_inactive,
+                        "inactivity_text": inactivity_text,
+                    },
+                    occurrence_number=1,
                 )
+                reason_text = rendered.narrative
                 kick_result = await self._member_flow_notifications.log_action(
                     guild_id=guild_id,
                     user_id=str(user_id),

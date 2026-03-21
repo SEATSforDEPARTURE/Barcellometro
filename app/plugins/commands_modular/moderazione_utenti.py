@@ -7,8 +7,8 @@ import discord
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
-from app.plugins.commands_modular.greetings import render_greetings_template
 from app.plugins.commands_modular.permissions import check_permission
+from app.services.greetings_copy_service import GreetingsCopyService
 from app.services.member_flow_notifications import format_duration_human, parse_duration_input
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 
@@ -52,6 +52,7 @@ def _render_departure_action_label(action_type: str) -> str:
 def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandContext) -> None:
     users_group = app_commands.Group(name="users", description="Moderation actions for users")
     mod_group.add_command(users_group)
+    greetings_copy_service = GreetingsCopyService(ctx.database, barcello_service=getattr(ctx, "barcello_service", None))
 
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, PERM, ctx)
@@ -79,8 +80,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         )
 
     async def _default_reason(
-        guild_id: str,
-        template_key: str,
+        action_type: str,
         *,
         user: discord.abc.User | discord.Member,
         guild: discord.Guild,
@@ -88,16 +88,17 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         duration_seconds: int | None = None,
         expires_at: datetime | None = None,
     ) -> str:
-        return await render_greetings_template(
-            ctx,
-            guild_id,
-            template_key,
+        rendered = await greetings_copy_service.render_event_copy(
             user=user,
             guild=guild,
+            event_type_key=action_type,
             moderator=moderator,
             duration_seconds=duration_seconds,
             expires_at=expires_at,
+            occurrence_number=1,
+            metadata={},
         )
+        return rendered.narrative
 
     async def _notify_action(
         *,
@@ -144,7 +145,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
     async def mod_users_kick(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
-        resolved_reason = reason or await _default_reason(str(interaction.guild_id), "template_kick_reason", user=user, guild=interaction.guild, moderator=interaction.user)
+        resolved_reason = reason or await _default_reason("kick", user=user, guild=interaction.guild, moderator=interaction.user)
         await user.kick(reason=resolved_reason)
         await _notify_action(guild=interaction.guild, user=user, action_type="kick", reason=resolved_reason, moderator=interaction.user)
         await _send(
@@ -171,7 +172,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
     async def mod_users_ban(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
-        resolved_reason = reason or await _default_reason(str(interaction.guild_id), "template_ban_reason", user=user, guild=interaction.guild, moderator=interaction.user)
+        resolved_reason = reason or await _default_reason("ban", user=user, guild=interaction.guild, moderator=interaction.user)
         await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
         await _notify_action(guild=interaction.guild, user=user, action_type="ban", reason=resolved_reason, moderator=interaction.user)
         await _send(
@@ -198,8 +199,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         duration_seconds = parse_duration_input(duration)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
         resolved_reason = reason or await _default_reason(
-            str(interaction.guild_id),
-            "template_tempban_reason",
+            "tempban",
             user=user,
             guild=interaction.guild,
             moderator=interaction.user,
@@ -240,8 +240,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
         await ctx.database.extend_user_grace(str(interaction.guild.id), str(user.id), datetime.now(timezone.utc).isoformat())
         resolved_reason = reason or await _default_reason(
-            str(interaction.guild.id),
-            "template_grace_reason",
+            "grace",
             user=user,
             guild=interaction.guild,
             moderator=interaction.user,

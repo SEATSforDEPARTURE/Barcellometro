@@ -234,6 +234,26 @@ def test_render_moderation_preview_renders_context_placeholders() -> None:
     assert context["moderator"] == "Moderator"
 
 
+def test_render_event_copy_does_not_read_legacy_greetings_templates_from_database() -> None:
+    class _NoLegacyTemplateDB(_FakeDatabase):
+        async def get_moderation_templates(self, guild_id: str) -> dict[str, str]:  # pragma: no cover - must stay unused
+            raise AssertionError("legacy greetings templates must not be read")
+
+    service = GreetingsCopyService(_NoLegacyTemplateDB())
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="kick",
+            barcello_status={"color": "verde", "score": 84},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert "<@42>" in result.narrative
+
+
 def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canonical_event() -> None:
     service = _service(occurrence_number=9)
 
