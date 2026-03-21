@@ -482,6 +482,8 @@ def render_markdown_report(result: ValidationResult) -> str:
     lines = [
         "# Command Tree Validation Report",
         "",
+        "Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.",
+        "",
         f"- Commands discovered: **{len(result.commands)}**",
         f"- Errors: **{error_count}**",
         f"- Warnings: **{warning_count}**",

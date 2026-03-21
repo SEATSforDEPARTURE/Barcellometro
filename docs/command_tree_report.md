@@ -1,5 +1,7 @@
 # Command Tree Validation Report
 
+Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.
+
 - Commands discovered: **267**
 - Errors: **0**
 - Warnings: **53**
