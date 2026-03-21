@@ -236,7 +236,14 @@ Non introdurre renderer paralleli o embed manuali per aggirare questo standard.
 
 Il feed GREETINGS / `🚪 INGRESSI & USCITE` segue inoltre un contratto visivo fisso, distinto dagli embed comando standardizzati:
 
-- il renderer live usa sempre **2 campi** e solo quelli: `Evento` + campo narrativo largo;
+- il renderer live usa sempre author fisso `🚪 INGRESSI & USCITE`;
+- il titolo dell'embed coincide con la label evento (`event_label`);
+- la narrativa occupa la `description` principale dell'embed;
+- non esiste più il field separato `Evento`;
+- non esiste più un timestamp custom nel footer/testo tipo `Oggi alle ...`;
+- la thumbnail dell'embed deve usare l'avatar dell'utente quando disponibile;
+- i placeholder dinamici renderizzati nel testo finale restano evidenziati in **grassetto**;
+- la palette cromatica distingue ingressi/stati non terminali vs uscite/enforcement;
 - il payload visualizzato deve provenire dalla **timeline canonica** `member_flow_events`;
 - il file `settings/greetings_trigger.example.json` / relativo override runtime `settings/greetings_trigger.json` è la source of truth editoriale unica per frasi, fallback e override mood/time/barcello/count;
 - non esiste più un campo separato `Stato barcello "<server>"`: ogni riferimento al Barcello va integrato direttamente nella narrativa quando il template JSON lo rende naturale;

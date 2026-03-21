@@ -774,6 +774,94 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
                 message,
             )
 
+
+def _check_greetings_live_layout_contract(report: ValidationReport) -> None:
+    member_flow_path = REPO_ROOT / "app" / "services" / "member_flow_notifications.py"
+    member_flow_source = member_flow_path.read_text(encoding="utf-8")
+    required_member_flow_snippets = (
+        'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))',
+        'embed.set_author(name="🚪 INGRESSI & USCITE")',
+        "embed.set_thumbnail(url=avatar_url)",
+        'attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)',
+    )
+    for snippet in required_member_flow_snippets:
+        if snippet not in member_flow_source:
+            report.add(
+                "greetings_live_layout_contract",
+                member_flow_path.relative_to(REPO_ROOT),
+                1,
+                f"GREETINGS live renderer must keep the finalized author/title/thumbnail/footer layout; missing snippet: {snippet!r}.",
+            )
+            break
+
+    forbidden_member_flow_snippets = (
+        'embed.add_field(name="Evento"',
+        "timestamp=created_at",
+        "Oggi alle",
+    )
+    for snippet in forbidden_member_flow_snippets:
+        if snippet in member_flow_source:
+            report.add(
+                "greetings_live_layout_contract",
+                member_flow_path.relative_to(REPO_ROOT),
+                1,
+                f"GREETINGS live renderer must not reintroduce legacy layout fragments; forbidden snippet found: {snippet!r}.",
+            )
+            break
+
+    docs_expectations = {
+        REPO_ROOT / "docs" / "embed_command_rendering_standard.md": (
+            "il renderer live usa sempre author fisso `🚪 INGRESSI & USCITE`",
+            "il titolo dell'embed coincide con la label evento (`event_label`)",
+            "non esiste più il field separato `Evento`",
+            "la thumbnail dell'embed deve usare l'avatar dell'utente quando disponibile",
+        ),
+        REPO_ROOT / "settings" / "README.md": (
+            "author fisso `🚪 INGRESSI & USCITE`",
+            "titolo embed = label evento",
+            "thumbnail = avatar utente",
+            "nessun campo separato `Evento`",
+        ),
+        REPO_ROOT / "settings" / "greetings_trigger.example.json": (
+            "label evento nel titolo dell'embed",
+            "titolo dell'embed",
+        ),
+    }
+    for path, snippets in docs_expectations.items():
+        source = path.read_text(encoding="utf-8")
+        for snippet in snippets:
+            if snippet not in source:
+                report.add(
+                    "greetings_live_layout_contract",
+                    path.relative_to(REPO_ROOT),
+                    1,
+                    f"GREETINGS docs/config inventory must reflect the final layout; missing snippet: {snippet!r}.",
+                )
+                break
+
+    forbidden_repo_strings = {
+        "2 campi in `🚪 INGRESSI & USCITE` (`Evento` + campo narrativo largo)": "Legacy GREETINGS two-field layout wording must not appear in the repo.",
+        "usa sempre **2 campi** e solo quelli: `Evento` + campo narrativo largo;": "Legacy GREETINGS two-field layout wording must not appear in the repo.",
+        "campo Evento": "Legacy GREETINGS wording must refer to the embed title instead of a dedicated Evento field.",
+    }
+    for repo_path in (
+        REPO_ROOT / "docs" / "embed_command_rendering_standard.md",
+        REPO_ROOT / "settings" / "README.md",
+        REPO_ROOT / "settings" / "greetings_trigger.example.json",
+    ):
+        source = repo_path.read_text(encoding="utf-8")
+        for forbidden, message in forbidden_repo_strings.items():
+            if forbidden not in source:
+                continue
+            line = source[: source.index(forbidden)].count("\n") + 1
+            report.add(
+                "greetings_live_layout_contract",
+                repo_path.relative_to(REPO_ROOT),
+                line,
+                message,
+            )
+
+
 def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) -> ValidationReport:
     report = ValidationReport()
     command_roots = {
@@ -796,6 +884,7 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)
     _check_canonical_embed_configuration(report)
+    _check_greetings_live_layout_contract(report)
     return report
 
 

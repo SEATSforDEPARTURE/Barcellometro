@@ -43,3 +43,29 @@ def test_command_embed_helpers_do_not_default_to_minimal_or_attach_local_footer_
 
     assert 'footer_mode: FooterMode = "minimal"' not in source
     assert "attach_minimal_footer(" not in source
+
+
+def test_greetings_layout_docs_and_renderer_reflect_final_visual_contract() -> None:
+    member_flow_source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
+    docs_source = Path("docs/embed_command_rendering_standard.md").read_text(encoding="utf-8")
+    settings_readme = Path("settings/README.md").read_text(encoding="utf-8")
+    greetings_json = Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8")
+
+    assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' in member_flow_source
+    assert "embed.set_thumbnail(url=avatar_url)" in member_flow_source
+    assert 'embed.add_field(name="Evento"' not in member_flow_source
+    assert "timestamp=created_at" not in member_flow_source
+    assert "Oggi alle" not in member_flow_source
+
+    assert "il renderer live usa sempre author fisso `🚪 INGRESSI & USCITE`" in docs_source
+    assert "il titolo dell'embed coincide con la label evento (`event_label`)" in docs_source
+    assert "non esiste più il field separato `Evento`" in docs_source
+    assert "la thumbnail dell'embed deve usare l'avatar dell'utente quando disponibile" in docs_source
+
+    assert "author fisso `🚪 INGRESSI & USCITE`" in settings_readme
+    assert "titolo embed = label evento" in settings_readme
+    assert "thumbnail = avatar utente" in settings_readme
+    assert "nessun campo separato `Evento`" in settings_readme
+
+    assert "label evento nel titolo dell'embed" in greetings_json
+    assert "titolo dell'embed" in greetings_json

@@ -143,6 +143,7 @@ Per il dominio GREETINGS la persistenza segue una separazione normativa esplicit
 Regole obbligatorie:
 
 - il runtime live di GREETINGS deve leggere la timeline canonica e non reinterpretare direttamente il ledger raw;
+- il layout visuale live deve esporre author `🚪 INGRESSI & USCITE`, titolo = label evento, narrativa in description, thumbnail avatar quando disponibile e nessun field separato `Evento`;
 - i conteggi di ricorrenza devono essere per `user + event_type_key`;
 - il backfill storico deve essere idempotente sulla coppia `source + source_ref`;
 - gli eventi di inattività (`inactive_*`) restano semanticamente distinti dagli eventi manuali omologhi;
