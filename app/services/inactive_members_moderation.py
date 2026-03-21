@@ -16,7 +16,6 @@ import discord
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
-from app.services.greetings_copy_service import GreetingsCopyService
 from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
@@ -194,7 +193,6 @@ class InactiveMembersModerationService:
         self._database = database
         self._bot = bot
         self._member_flow_notifications = member_flow_notifications
-        self._greetings_copy_service = GreetingsCopyService(database)
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -733,6 +731,7 @@ class InactiveMembersModerationService:
             state = await self._database.get_inactivity_user_state(guild_id, str(candidate.member.id))
             if state and state["last_reminder_at"]:
                 continue
+            inactivity_text = f"è stato inattivo per {candidate.days_inactive} giorni"
             body = self._render_template(
                 template,
                 member=candidate.member,
@@ -758,7 +757,9 @@ class InactiveMembersModerationService:
                         expires_at=expires_at.isoformat(),
                         metadata={
                             "source": "inactive_members_moderation",
+                            "greetings_reason": inactivity_text,
                             "days_inactive": candidate.days_inactive,
+                            "inactivity_text": inactivity_text,
                         },
                     )
                 ok += 1
@@ -831,26 +832,11 @@ class InactiveMembersModerationService:
             else:
                 days_inactive = (now - last_message_at).days
                 inactivity_text = f"è stato inattivo per {days_inactive} giorni"
-            reason_text = None
+            reason_text = inactivity_text[:1].upper() + inactivity_text[1:] if inactivity_text else None
             operation_id = str(uuid4())
             kick_result: dict[str, Any] | None = None
             if self._member_flow_notifications is not None:
                 greetings_event_type = "inactive_tempban" if ban_days > 0 else "inactive_kick"
-                rendered = await self._greetings_copy_service.render_event_copy(
-                    guild=guild,
-                    user=candidate.member,
-                    event_type_key=greetings_event_type,
-                    reason="Inattività prolungata",
-                    metadata={
-                        "notify_channel_id": str(cfg.get("notify_channel_id") or cfg.get("atrio_channel_id") or ""),
-                        "atrio_channel_id": str(cfg.get("atrio_channel_id") or ""),
-                        "rejoin_link": str(cfg.get("invite_url") or ""),
-                        "days_inactive": candidate.days_inactive,
-                        "inactivity_text": inactivity_text,
-                    },
-                    occurrence_number=1,
-                )
-                reason_text = rendered.narrative
                 kick_result = await self._member_flow_notifications.log_action(
                     guild_id=guild_id,
                     user_id=str(user_id),
@@ -861,6 +847,7 @@ class InactiveMembersModerationService:
                         "source": "inactive_members_moderation",
                         "operation_id": operation_id,
                         "visible_in_greetings": ban_days <= 0,
+                        "greetings_reason": reason_text,
                         "days_inactive": candidate.days_inactive,
                         "inactivity_text": inactivity_text,
                     },
@@ -886,6 +873,7 @@ class InactiveMembersModerationService:
                             metadata={
                                 "source": "inactive_members_moderation",
                                 "operation_id": operation_id,
+                                "greetings_reason": reason_text,
                                 "days_inactive": candidate.days_inactive,
                                 "inactivity_text": inactivity_text,
                             },
@@ -901,6 +889,7 @@ class InactiveMembersModerationService:
                                 metadata={
                                     "source": "inactive_members_moderation",
                                     "operation_id": operation_id,
+                                    "greetings_reason": reason_text,
                                     "days_inactive": candidate.days_inactive,
                                     "inactivity_text": inactivity_text,
                                 },
@@ -924,6 +913,7 @@ class InactiveMembersModerationService:
                         metadata={
                             "source": "inactive_members_moderation",
                             "operation_id": operation_id,
+                            "greetings_reason": reason_text,
                             "days_inactive": candidate.days_inactive,
                             "inactivity_text": inactivity_text,
                         },

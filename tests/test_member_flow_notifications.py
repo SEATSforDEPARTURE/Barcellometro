@@ -480,6 +480,114 @@ def test_send_notification_renders_author_title_description_and_footer_from_cano
     asyncio.run(_run())
 
 
+def test_send_notification_appends_reason_block_inside_description_without_extra_fields(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append({"embed": embed, "files": files})
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel if channel_id == 77 else None
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="kick",
+            canonical_event={
+                "event_type_key": "kick",
+                "reason": "Motivo tecnico non editoriale",
+                "visible_in_greetings": True,
+                "metadata": {
+                    "occurrence_number": 1,
+                    "greetings_reason": "Spam creativo",
+                },
+            },
+        )
+
+        payload = channel.sent[0]["embed"]
+        assert payload.description is not None
+        assert "**👇 La moderazione aggiunge:**" in payload.description
+        assert "Spam creativo" in payload.description
+        assert "Motivo tecnico non editoriale" not in payload.description
+        assert payload.fields == []
+
+    asyncio.run(_run())
+
+
+def test_send_notification_skips_reason_block_when_greetings_reason_is_missing(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append({"embed": embed, "files": files})
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel if channel_id == 77 else None
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="ban",
+            canonical_event={
+                "event_type_key": "ban",
+                "reason": "Ban tramite moderazione nativa Discord",
+                "visible_in_greetings": True,
+                "metadata": {
+                    "occurrence_number": 1,
+                    "greetings_reason": None,
+                },
+            },
+        )
+
+        payload = channel.sent[0]["embed"]
+        assert payload.description is not None
+        assert "**👇 La moderazione aggiunge:**" not in payload.description
+        assert payload.fields == []
+
+    asyncio.run(_run())
+
+
 def test_member_flow_renderer_source_mentions_final_author_title_layout() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
 

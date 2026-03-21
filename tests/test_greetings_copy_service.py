@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.greetings_copy_service import (
     SUPPORTED_GREETINGS_EVENT_TYPES,
     GreetingsCopyService,
@@ -279,6 +281,84 @@ def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canoni
     assert result.occurrence_number == 3
     assert result.event_label == "**💤 TERZO BAN TEMPORANEO PER INATTIVITÀ**"
     assert "30 giorni" in result.narrative
+
+
+@pytest.mark.parametrize(
+    ("event_type_key", "duration_seconds", "metadata"),
+    [
+        ("kick", None, None),
+        ("ban", None, None),
+        ("tempban", 7 * 86400, None),
+        ("grace", 7 * 86400, None),
+        ("inactive_kick", None, {"inactivity_text": "30 giorni"}),
+        ("inactive_tempban", 7 * 86400, {"inactivity_text": "30 giorni"}),
+        ("inactive_grace", 7 * 86400, {"inactivity_text": "30 giorni"}),
+    ],
+)
+def test_render_event_copy_appends_reason_block_for_supported_moderation_events(
+    event_type_key: str,
+    duration_seconds: int | None,
+    metadata: dict | None,
+) -> None:
+    service = _service()
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key=event_type_key,
+            reason="Motivo test",
+            duration_seconds=duration_seconds,
+            metadata=metadata or {},
+            barcello_status={"color": "rosso", "score": 41},
+            now=datetime(2026, 3, 21, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert "**👇 La moderazione aggiunge:**" in result.narrative
+    assert result.narrative.endswith("Motivo test")
+
+
+def test_render_event_copy_skips_reason_block_when_reason_is_missing() -> None:
+    service = _service()
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="kick",
+            reason="   ",
+            barcello_status={"color": "verde", "score": 84},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert "**👇 La moderazione aggiunge:**" not in result.narrative
+
+
+def test_render_canonical_event_copy_prefers_metadata_greetings_reason_for_final_block() -> None:
+    service = _service()
+
+    result = asyncio.run(
+        service.render_canonical_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            canonical_event={
+                "event_type_key": "kick",
+                "reason": "Motivo tecnico interno",
+                "visible_in_greetings": True,
+                "metadata": {
+                    "occurrence_number": 1,
+                    "greetings_reason": "Spam creativo",
+                },
+            },
+            barcello_status={"color": "rosso", "score": 41},
+            now=datetime(2026, 3, 21, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert "Spam creativo" in result.narrative
+    assert "Motivo tecnico interno" not in result.narrative
 
 
 def test_default_narrative_does_not_auto_duplicate_event_emoji() -> None:

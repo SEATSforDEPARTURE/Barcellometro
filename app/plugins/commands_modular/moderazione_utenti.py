@@ -15,6 +15,11 @@ from app.shared.discord.command_embeds import CommandEmbedSection, build_command
 PERM = "mod"
 
 
+def _normalize_optional_reason(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 async def _send_lines(
     interaction: discord.Interaction,
     ctx: CommandContext,
@@ -106,6 +111,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         user: discord.abc.User | discord.Member,
         action_type: str,
         reason: str,
+        greetings_reason: str | None,
         moderator: discord.Member | discord.User,
         duration_seconds: int | None = None,
         expires_at: datetime | None = None,
@@ -116,6 +122,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         metadata_dict = {
             **(metadata or {}),
             "source": "moderazione_utenti",
+            "greetings_reason": greetings_reason,
         }
         result = await ctx.member_flow_notifications.log_action(
             guild_id=str(guild.id),
@@ -161,14 +168,15 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
     async def mod_users_kick(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
-        resolved_reason = reason or await _default_reason("kick", user=user, guild=interaction.guild, moderator=interaction.user)
+        explicit_reason = _normalize_optional_reason(reason)
+        resolved_reason = explicit_reason or await _default_reason("kick", user=user, guild=interaction.guild, moderator=interaction.user)
         _remember_departure(interaction.guild, user, "kick")
         try:
             await user.kick(reason=resolved_reason)
         except Exception:
             _forget_departure(interaction.guild, user)
             raise
-        await _notify_action(guild=interaction.guild, user=user, action_type="kick", reason=resolved_reason, moderator=interaction.user)
+        await _notify_action(guild=interaction.guild, user=user, action_type="kick", reason=resolved_reason, greetings_reason=explicit_reason, moderator=interaction.user)
         await _send(
             interaction,
             subcommand_path="moderazione users kick",
@@ -193,14 +201,15 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
     async def mod_users_ban(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
-        resolved_reason = reason or await _default_reason("ban", user=user, guild=interaction.guild, moderator=interaction.user)
+        explicit_reason = _normalize_optional_reason(reason)
+        resolved_reason = explicit_reason or await _default_reason("ban", user=user, guild=interaction.guild, moderator=interaction.user)
         _remember_departure(interaction.guild, user, "ban")
         try:
             await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
         except Exception:
             _forget_departure(interaction.guild, user)
             raise
-        await _notify_action(guild=interaction.guild, user=user, action_type="ban", reason=resolved_reason, moderator=interaction.user)
+        await _notify_action(guild=interaction.guild, user=user, action_type="ban", reason=resolved_reason, greetings_reason=explicit_reason, moderator=interaction.user)
         await _send(
             interaction,
             subcommand_path="moderazione users ban",
@@ -224,7 +233,8 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         duration_seconds = parse_duration_input(duration)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-        resolved_reason = reason or await _default_reason(
+        explicit_reason = _normalize_optional_reason(reason)
+        resolved_reason = explicit_reason or await _default_reason(
             "tempban",
             user=user,
             guild=interaction.guild,
@@ -239,7 +249,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             _forget_departure(interaction.guild, user)
             raise
         await ctx.database.add_temp_ban(str(interaction.guild.id), str(user.id), expires_at.isoformat(), resolved_reason)
-        await _notify_action(guild=interaction.guild, user=user, action_type="tempban", reason=resolved_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
+        await _notify_action(guild=interaction.guild, user=user, action_type="tempban", reason=resolved_reason, greetings_reason=explicit_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
         await _send(
             interaction,
             subcommand_path="moderazione users tempban",
@@ -270,7 +280,8 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         duration_seconds = parse_duration_input(duration) if duration else int(cfg.get("grace_days_after_reminder", 7)) * 86400
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
         await ctx.database.extend_user_grace(str(interaction.guild.id), str(user.id), datetime.now(timezone.utc).isoformat())
-        resolved_reason = reason or await _default_reason(
+        explicit_reason = _normalize_optional_reason(reason)
+        resolved_reason = explicit_reason or await _default_reason(
             "grace",
             user=user,
             guild=interaction.guild,
@@ -278,7 +289,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             duration_seconds=duration_seconds,
             expires_at=expires_at,
         )
-        await _notify_action(guild=interaction.guild, user=user, action_type="grace", reason=resolved_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
+        await _notify_action(guild=interaction.guild, user=user, action_type="grace", reason=resolved_reason, greetings_reason=explicit_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
         await _send(
             interaction,
             subcommand_path="moderazione users grace",

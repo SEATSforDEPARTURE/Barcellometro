@@ -106,6 +106,20 @@ _HIGHLIGHTED_PLACEHOLDERS = frozenset(
     }
 )
 
+_REASON_BLOCK_EVENT_TYPES = frozenset(
+    {
+        "kick",
+        "ban",
+        "tempban",
+        "grace",
+        "inactive_kick",
+        "inactive_tempban",
+        "inactive_grace",
+    }
+)
+
+_MODERATION_REASON_BLOCK_HEADER = "**👇 La moderazione aggiunge:**"
+
 _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
     "docs": {
         "placeholders": {
@@ -336,6 +350,21 @@ class GreetingsCopyService:
         except Exception as exc:  # noqa: BLE001
             return f"[Errore render template: {exc}]\n{base}"
 
+    def compose_final_narrative(
+        self,
+        *,
+        event_type_key: str,
+        narrative: str,
+        reason: str | None,
+    ) -> str:
+        base_narrative = (narrative or "").strip()
+        normalized_reason = self._normalize_reason(reason)
+        if normalized_reason is None or event_type_key not in _REASON_BLOCK_EVENT_TYPES:
+            return base_narrative
+        reason_block = f"{_MODERATION_REASON_BLOCK_HEADER}\n{normalized_reason}"
+        if not base_narrative:
+            return reason_block
+        return f"{base_narrative}\n\n{reason_block}"
 
     def _format_placeholder_value(self, placeholder: str, value: Any) -> Any:
         if value is None:
@@ -476,7 +505,11 @@ class GreetingsCopyService:
             count_tier=count_tier,
             occurrence_number=max(1, int(occurrence_number)),
         )
-        narrative = self.render_moderation_template(template, **context)
+        narrative = self.compose_final_narrative(
+            event_type_key=event_type_key,
+            narrative=self.render_moderation_template(template, **context),
+            reason=reason,
+        )
         return GreetingsRenderResult(
             event_label=format_greetings_event_label(event_type_key, max(1, int(occurrence_number))),
             occurrence_number=max(1, int(occurrence_number)),
@@ -503,12 +536,13 @@ class GreetingsCopyService:
         metadata = canonical_event.get("metadata")
         metadata_dict = metadata if isinstance(metadata, dict) else {}
         expires_at_value = self._parse_event_datetime(canonical_event.get("expires_at"))
+        render_reason = self._resolve_canonical_render_reason(canonical_event, metadata_dict)
         return await self.render_event_copy(
             guild=guild,
             user=user,
             event_type_key=str(canonical_event.get("event_type_key") or ""),
             moderator=moderator,
-            reason=self._as_optional_str(canonical_event.get("reason")),
+            reason=render_reason,
             duration_seconds=self._coerce_int(canonical_event.get("duration_seconds")),
             expires_at=expires_at_value,
             metadata=metadata_dict,
@@ -552,6 +586,16 @@ class GreetingsCopyService:
 
     def _format_barcello_score(self, barcello_score: int | None) -> str:
         return "n/d" if barcello_score is None else f"{int(barcello_score)}/100"
+
+    def _resolve_canonical_render_reason(self, canonical_event: dict[str, Any], metadata: dict[str, Any]) -> str | None:
+        if "greetings_reason" in metadata:
+            return self._normalize_reason(metadata.get("greetings_reason"))
+        return self._normalize_reason(canonical_event.get("reason"))
+
+    @staticmethod
+    def _normalize_reason(value: Any) -> str | None:
+        text = str(value or "").strip()
+        return text or None
 
     def _load_cfg(self) -> dict[str, Any]:
         loaded = load_json_file(self._config_path, example_path=GREETINGS_TRIGGER_EXAMPLE_JSON)
