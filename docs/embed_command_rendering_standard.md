@@ -151,15 +151,32 @@ Esempi:
 
 Se la frase del footer non esiste, la pipeline centralizzata non aggiunge placeholder, non aggiunge sezioni vuote e non produce separatori doppi. Il flag `used_local_processing` resta metadata interno per profiling/persistenza e non genera testo visibile da solo.
 
-## Emoji custom del server nel footer
+## Thumbnail footer e frase
 
-Le frasi footer supportano anche emoji custom Discord nei formati `<:name:id>` e `<a:name:id>`, ma la trasformazione è centralizzata in `app/services/footer.py`:
+La configurazione del footer separa in modo esplicito la **frase** dalla **thumbnail**:
 
-1. la prima custom emoji trovata nella frase viene promossa a `footer icon_url` usando la CDN Discord corretta (`.png` per statiche, `.gif` per animate);
-2. il token raw viene rimosso dal testo footer;
-3. eventuali altre custom emoji non restano mai visibili come `<:...:...>` o `<a:...:...>` nel testo finale;
-4. le emoji Unicode normali restano nel testo;
-5. se un flusso passa già un `footer_icon_url` esplicito, quello ha precedenza sull'icona derivata dalla custom emoji.
+- `footer.global_phrase` e `footer.service_phrase.<service>` controllano solo il testo;
+- `footer.global_thumbnail` e `footer.service_thumbnail.<service>` controllano solo l'icona del footer;
+- i comandi admin `/admin footer template_global_set` e `/admin footer template_service_set` accettano un parametro opzionale `thumbnail`.
+
+Il parametro `thumbnail` supporta soltanto:
+
+1. custom emoji Discord statica `<:name:id>` → normalizzata in `https://cdn.discordapp.com/emojis/<id>.png`;
+2. custom emoji Discord animata `<a:name:id>` → normalizzata in `https://cdn.discordapp.com/emojis/<id>.gif`;
+3. URL immagine remoto `http://` o `https://`.
+
+La frase del footer **non** viene più usata come sorgente implicita per la thumbnail:
+
+1. le custom emoji presenti nella frase restano testo della frase e non vengono promosse automaticamente a `icon_url`;
+2. le emoji Unicode normali restano nel testo;
+3. la pipeline non prova a “ripulire” la frase per ricavarne l'icona configurativa.
+
+L'ordine di precedenza finale per l'icona del footer è:
+
+1. `footer_icon_url` esplicito già allegato nei metadata runtime;
+2. thumbnail configurata per il servizio;
+3. thumbnail globale configurata;
+4. nessuna icona (`None`).
 
 La frase legacy `Dati elaborati` + ` in loco` è abolita in tutto il progetto, così come la coda `e fallback` + ` locale`: non devono più comparire in codice, test, documentazione, configurazioni versionate, override locali o footer renderizzati. Questo vale anche per eventuali campi config come `footer`, `fallback_footer` o template equivalenti. Per output non-AI non si mostra alcuna frase tecnica finale; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare. Il flag `used_local_processing` resta metadata interno e non aggiunge testo visibile al footer.
 

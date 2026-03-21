@@ -13,7 +13,7 @@ from app.shared.discord.command_embeds import (
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.services.ai_model_catalog import build_model_autocomplete_choices
-from app.services.footer import ServiceFooterProfile, ServiceFooterVariant, _is_persistable_service_name
+from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile, ServiceFooterVariant, _is_persistable_service_name
 
 
 async def _send_legacy(interaction: discord.Interaction, ctx: CommandContext, **kwargs) -> None:
@@ -719,18 +719,19 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
         await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "off"], entries=[("Status", "disabled")], tone="success", service_name="status")
 
     @footer_group.command(name="template_global_set", description="Set the global footer template.")
-    @app_commands.describe(version="Optional footer brand version.", phrase="Optional global footer phrase.")
+    @app_commands.describe(version="Optional footer brand version.", phrase="Optional global footer phrase.", thumbnail="Optional footer thumbnail: Discord custom emoji or http/https image URL.")
     async def footer_template_global_set_command(
         interaction: discord.Interaction,
         version: str | None = None,
         phrase: str | None = None,
+        thumbnail: str | None = None,
     ) -> None:
         if not await check_permission(interaction, "admin.footer.template_global_set", ctx):
             return
         if ctx.footer is None:
             await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_global_set"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
-        if version is None and phrase is None:
+        if version is None and phrase is None and thumbnail is None:
             await _send_legacy(interaction, ctx,
                 top_level="admin",
                 path_parts=["footer", "template_global_set"],
@@ -744,10 +745,21 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
             await ctx.footer.set_version(_clean_opt(version))
         if phrase is not None:
             await ctx.footer.set_global_phrase(_clean_opt(phrase))
+        if thumbnail is not None:
+            try:
+                await ctx.footer.set_global_thumbnail(_clean_opt(thumbnail))
+            except InvalidFooterThumbnailError as exc:
+                await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_global_set"], entries=[("Reason", str(exc))], tone="error", service_name="status")
+                return
         await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["footer", "template_global_set"],
-            entries=[("Status", "updated"), ("Version", _format_value(await ctx.footer.get_version())), ("Phrase", _format_value(await ctx.footer.get_global_phrase()))],
+            entries=[
+                ("Status", "updated"),
+                ("Version", _format_value(await ctx.footer.get_version())),
+                ("Phrase", _format_value(await ctx.footer.get_global_phrase())),
+                ("Thumbnail", _format_value(await ctx.footer.get_global_thumbnail())),
+            ],
             tone="success",
             service_name="status",
         )
@@ -761,12 +773,14 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
             return
         current_version = await ctx.footer.get_version()
         current_global = await ctx.footer.get_global_phrase()
+        current_thumbnail = await ctx.footer.get_global_thumbnail()
         await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["footer", "template_global_show"],
             entries=[
                 ("Version", _format_override_value(current_version, missing="No custom override (default brand version in use)")),
                 ("Phrase", _format_override_value(current_global, missing="No custom override (default footer phrase in use)")),
+                ("Thumbnail", _format_override_value(current_thumbnail, missing="No custom override (default footer thumbnail in use)")),
             ],
             service_name="status",
         )
@@ -780,6 +794,7 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
             return
         await ctx.footer.set_version(None)
         await ctx.footer.set_global_phrase(None)
+        await ctx.footer.set_global_thumbnail(None)
         await _send_admin_response(
             interaction,
             ctx,
@@ -789,11 +804,12 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
         )
 
     @footer_group.command(name="template_service_set", description="Set a service-specific footer template.")
-    @app_commands.describe(service="Service name.", phrase="Service-specific footer phrase.")
+    @app_commands.describe(service="Service name.", phrase="Optional service-specific footer phrase.", thumbnail="Optional footer thumbnail: Discord custom emoji or http/https image URL.")
     async def footer_template_service_set_command(
         interaction: discord.Interaction,
         service: str,
-        phrase: str,
+        phrase: str | None = None,
+        thumbnail: str | None = None,
     ) -> None:
         if not await check_permission(interaction, "admin.footer.template_service_set", ctx):
             return
@@ -804,8 +820,28 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
         if service_name is None:
             await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_service_set"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
             return
-        await ctx.footer.set_service_phrase(service_name, _clean_opt(phrase))
-        await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_service_set"], entries=[("Service", service_name), ("Status", "updated")], tone="success", service_name="status")
+        if phrase is None and thumbnail is None:
+            await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_service_set"], entries=[("Reason", "No changes provided")], tone="warning", service_name="status")
+            return
+        if phrase is not None:
+            await ctx.footer.set_service_phrase(service_name, _clean_opt(phrase))
+        if thumbnail is not None:
+            try:
+                await ctx.footer.set_service_thumbnail(service_name, _clean_opt(thumbnail))
+            except InvalidFooterThumbnailError as exc:
+                await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_service_set"], entries=[("Reason", str(exc))], tone="error", service_name="status")
+                return
+        service_thumbnail = (await ctx.footer.get_service_thumbnails()).get(service_name)
+        service_phrase = (await ctx.footer.get_service_phrases()).get(service_name)
+        await _send_legacy(
+            interaction,
+            ctx,
+            top_level="admin",
+            path_parts=["footer", "template_service_set"],
+            entries=[("Service", service_name), ("Status", "updated"), ("Phrase", _format_value(service_phrase)), ("Thumbnail", _format_value(service_thumbnail))],
+            tone="success",
+            service_name="status",
+        )
 
     @footer_group.command(name="template_service_show", description="Show a service-specific footer template.")
     @app_commands.describe(service="Service name.")
@@ -820,12 +856,14 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
             await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_service_show"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
             return
         phrase = (await ctx.footer.get_service_phrases()).get(service_name)
+        thumbnail_value = (await ctx.footer.get_service_thumbnails()).get(service_name)
         await _send_legacy(interaction, ctx,
             top_level="admin",
             path_parts=["footer", "template_service_show"],
             entries=[
                 ("Service", service_name),
                 ("Phrase", _format_override_value(phrase, missing="No custom override (service uses default footer behavior)")),
+                ("Thumbnail", _format_override_value(thumbnail_value, missing="No custom override (service uses default footer thumbnail behavior)")),
             ],
             service_name="status",
         )
@@ -843,6 +881,7 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
             await _send_legacy(interaction, ctx, top_level="admin", path_parts=["footer", "template_service_reset"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
             return
         await ctx.footer.set_service_phrase(service_name, None)
+        await ctx.footer.set_service_thumbnail(service_name, None)
         await _send_admin_response(
             interaction,
             ctx,

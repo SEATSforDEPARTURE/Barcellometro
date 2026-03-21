@@ -100,6 +100,8 @@ Tutti i parametri devono essere opzionali salvo quando strettamente necessari pe
 - `set` accetta scope e valori.
 - `show`, `list` e `status` devono esporre parametri coerenti con il tipo di risorsa mostrata.
 
+Per i comandi di configurazione template/override, `set` deve inoltre supportare **update parziali**: se più campi sono modificabili nello stesso scope, il comando deve poter aggiornare solo i campi passati senza sovrascrivere implicitamente gli altri. Un rifiuto esplicito tipo `No changes provided` è corretto solo quando non viene passato alcun valore utile.
+
 ### 5.3 Coerenza semantica
 
 - un parametro di targeting (`user`, `role`, `channel`, `schedule_id`, `scope`, ecc.) serve a selezionare la risorsa o il contesto;
