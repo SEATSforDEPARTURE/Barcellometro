@@ -19,10 +19,10 @@ def test_command_validator_tracks_expected_exceptions() -> None:
     assert "domanda" in result.exceptions
     assert "riassunto.oggi" in result.exceptions
     assert any(command.path == "campagne.prompt.schedule_add" for command in result.commands)
-    assert any(command.path == "greetings.backfill.on" for command in result.commands)
-    assert any(command.path == "greetings.backfill.off" for command in result.commands)
-    assert any(command.path == "greetings.backfill.status" for command in result.commands)
-    assert any(command.path == "greetings.backfill.run" for command in result.commands)
+    assert any(command.path == "greetings.backfill.on" and command.description == "Enable greetings timeline backfill." for command in result.commands)
+    assert any(command.path == "greetings.backfill.off" and command.description == "Disable greetings timeline backfill." for command in result.commands)
+    assert any(command.path == "greetings.backfill.status" and command.description == "Show greetings timeline backfill status." for command in result.commands)
+    assert any(command.path == "greetings.backfill.run" and command.description == "Run greetings timeline backfill now." for command in result.commands)
     assert all(command.path not in {"greetings.template_set", "greetings.template_show", "greetings.template_reset"} for command in result.commands)
     assert "preview" not in {
         command.path.split(".")[-1]
@@ -53,3 +53,24 @@ def test_command_validator_has_no_legacy_tracking_fields() -> None:
     result = validate_command_tree()
 
     assert all(issue.code != "legacy_root" for issue in result.warnings)
+
+
+def test_command_validator_tracks_exact_greetings_topology() -> None:
+    result = validate_command_tree()
+
+    greetings_paths = {command.path for command in result.commands if command.root == "greetings"}
+    assert greetings_paths == {
+        "greetings.backfill.on",
+        "greetings.backfill.off",
+        "greetings.backfill.status",
+        "greetings.backfill.run",
+        "greetings.notify_reset",
+        "greetings.notify_set",
+        "greetings.notify_show",
+        "greetings.off",
+        "greetings.on",
+        "greetings.status",
+        "greetings.user_card_reset",
+        "greetings.user_card_set",
+        "greetings.user_card_show",
+    }

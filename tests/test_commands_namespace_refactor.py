@@ -20,6 +20,17 @@ def test_mod_greetings_and_inactivity_register_independently() -> None:
     assert 'register_moderazione_utenti(mod_group, ctx)' in source
 
 
+def test_greetings_namespace_stays_visual_top_level_without_legacy_template_branch() -> None:
+    source = Path("app/plugins/commands_modular/greetings.py").read_text()
+
+    assert 'visual_top_level="greetings"' in source
+    assert 'app_commands.Group(name="backfill"' in source
+    assert '@backfill_group.command(name="run"' in source
+    assert 'template_set' not in source
+    assert 'template_show' not in source
+    assert 'template_reset' not in source
+
+
 def test_admin_group_is_the_registered_root_namespace() -> None:
     source = Path("app/plugins/commands.py").read_text()
 
