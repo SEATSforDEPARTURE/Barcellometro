@@ -11,6 +11,7 @@ from typing import Any, Literal
 import discord
 
 from app.plugins.commands_modular.time_windows import format_italian_ts, format_rolling_window_label, parse_italian_datetime
+from app.services.author import attach_author_meta
 from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, chunk_embeds_for_message_batches, is_valid_embed, normalize_embeds_for_discord
 from app.shared.discord.footer_pipeline import finalize_embeds
@@ -762,6 +763,10 @@ async def build_command_embeds(
                 embed,
                 service_name=resolved_footer_service_name,
                 used_local_processing=True,
+            )
+            attach_author_meta(
+                embed,
+                service_name=resolved_footer_service_name,
             )
         embeds.append(embed)
     return embeds

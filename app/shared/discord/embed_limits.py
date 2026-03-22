@@ -5,6 +5,7 @@ import re
 
 import discord
 
+from app.services.author import copy_author_meta
 from app.services.footer import copy_footer_meta
 
 logger = logging.getLogger(__name__)
@@ -278,6 +279,7 @@ def _clone_embed_shell(source: discord.Embed, *, title: str | None = None) -> di
         )
     )
     copy_footer_meta(source, new_embed)
+    copy_author_meta(source, new_embed)
     return new_embed
 
 
@@ -297,6 +299,7 @@ def _build_embed_shell(
         )
     )
     copy_footer_meta(source, new_embed)
+    copy_author_meta(source, new_embed)
     return new_embed
 
 

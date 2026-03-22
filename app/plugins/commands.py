@@ -32,6 +32,7 @@ from app.plugins.commands_modular import (
 )
 from app.plugins.commands_modular.registration import add_group_once
 from app.shared.discord.command_embeds import send_standard_response
+from app.shared.discord.author_pipeline import install_author_auto_finalize
 from app.shared.discord.footer_pipeline import install_footer_auto_finalize
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,8 @@ def setup(registry: ServiceRegistry) -> None:
     ctx = CommandContext.from_registry(registry)
     if ctx.footer is not None:
         install_footer_auto_finalize(ctx.footer)
+    if ctx.author is not None:
+        install_author_auto_finalize(ctx.author)
     bot = ctx.bot
     config = ctx.config
     guild_id = int(config.guild_id or 0)

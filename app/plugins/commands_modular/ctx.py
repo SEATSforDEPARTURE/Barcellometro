@@ -12,6 +12,7 @@ from app.services.barcello_calibration_service import BarcelloCalibrationService
 from app.services.entitlements import EntitlementsService
 from app.services.ingest import IngestService
 from app.services.content_summary_service import SummaryService
+from app.services.author import AuthorService
 from app.services.footer import FooterService
 
 
@@ -43,6 +44,7 @@ class CommandContext:
     aura_eligibility: Optional[Any] = None
     aura_rolling: Optional[Any] = None
     footer: Optional[FooterService] = None
+    author: Optional[AuthorService] = None
     member_flow_notifications: Optional[Any] = None
     greetings_backfill: Optional[Any] = None
 
@@ -79,6 +81,7 @@ class CommandContext:
         aura_rolling = registry.get("aura_rolling") if registry.has("aura_rolling") else None
         ingest: IngestService = registry.get("ingest")
         footer = registry.get("footer") if registry.has("footer") else None
+        author = registry.get("author") if registry.has("author") else None
         member_flow_notifications = registry.get("member_flow_notifications") if registry.has("member_flow_notifications") else None
         greetings_backfill = registry.get("greetings_backfill") if registry.has("greetings_backfill") else None
         config = registry.get("config")
@@ -109,6 +112,7 @@ class CommandContext:
             aura_eligibility=aura_eligibility,
             aura_rolling=aura_rolling,
             footer=footer,
+            author=author,
             member_flow_notifications=member_flow_notifications,
             greetings_backfill=greetings_backfill,
             timezone=timezone,

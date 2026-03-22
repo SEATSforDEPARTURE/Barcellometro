@@ -182,6 +182,31 @@ L'ordine di precedenza finale per l'icona del footer è:
 
 La frase legacy `Dati elaborati` + ` in loco` è abolita in tutto il progetto, così come la coda `e fallback` + ` locale`: non devono più comparire in codice, test, documentazione, configurazioni versionate, override locali o footer renderizzati. Questo vale anche per eventuali campi config come `footer`, `fallback_footer` o template equivalenti. Per output non-AI non si mostra alcuna frase tecnica finale; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare. Il flag `used_local_processing` resta metadata interno e non aggiunge testo visibile al footer.
 
+## Author centralizzato
+
+La sezione `author` degli embed ha ora un servizio dedicato separato dal footer (`app/services/author.py`) e segue un contratto distinto:
+
+- `author.enabled` abilita/disabilita il rendering centralizzato della sezione author;
+- `author.version`, `author.global_phrase`, `author.global_thumbnail` definiscono il template globale;
+- `author.service_phrase.<service>` e `author.service_thumbnail.<service>` definiscono override per singolo servizio;
+- il fallback puro non usa brand/versione Barcellometro: rende sempre `emoji servizio + nome servizio` e non usa thumbnail di default;
+- la `version` author ha semantica sobria: viene appesa solo quando esiste una `phrase` globale o di servizio, quindi il fallback puro resta leggibile (`🗒️ Riassunto`, non `🗒️ Riassunto · dev`).
+
+Ordine di precedenza author:
+
+1. override di servizio (`phrase` / `thumbnail`);
+2. template globale;
+3. fallback semantico `emoji + nome servizio`;
+4. nessuna thumbnail se non configurata.
+
+Il namespace `/embed author` replica il modello amministrativo del footer con i comandi:
+
+- `/embed author on|off|status`;
+- `/embed author template_global_set|show|reset`;
+- `/embed author template_service_set|show|reset`.
+
+Lo status author usa una vista multipagina navigabile parallela a quella del footer, ma mostra solo dati author: stato, template globale, regola versione, author effettivo e thumbnail effettiva per servizio.
+
 ## `/embed footer status` amministrativo
 
 Lo status del footer usa una vista amministrativa compatta e navigabile: la prima pagina mostra una overview sintetica, mentre le pagine successive sono raggruppate per famiglie di servizi (`Standard services`, `Editorial campaigns`, `Prompt campaigns`, `Timer campaigns`, più eventuali gruppi coerenti aggiuntivi). La navigazione avviene sempre sullo stesso messaggio tramite bottoni `INIZIO`, `INDIETRO` e `AVANTI`, senza inviare raffiche di embed scollegati.
