@@ -6,8 +6,9 @@ from typing import Iterable
 import discord
 
 from app.shared.discord.embed_limits import RETRY_MAX_EMBED_CHARS, normalize_embeds_for_discord
-from app.services.author import copy_author_meta
+from app.services.author import AuthorService, copy_author_meta
 from app.services.footer import FooterService, copy_footer_meta
+from app.shared.discord.author_pipeline import _needs_author_finalize, finalize_embeds_author
 from app.shared.discord.footer_pipeline import _needs_footer_finalize, finalize_embeds
 
 logger = logging.getLogger(__name__)
@@ -53,14 +54,16 @@ async def _prepare_embeds_for_send(
     embeds: list[discord.Embed],
     *,
     footer_service: FooterService | None,
+    author_service: AuthorService | None = None,
     default_service_name: str,
 ) -> list[discord.Embed]:
-    if footer_service is None or not embeds:
+    if not embeds:
         return embeds
-    needs_finalize = any(_needs_footer_finalize(embed) for embed in embeds)
-    if not needs_finalize:
-        return embeds
-    return await finalize_embeds(embeds, footer_service, default_service_name=default_service_name)
+    if any(_needs_author_finalize(embed) for embed in embeds):
+        embeds = await finalize_embeds_author(embeds, author_service, default_service_name=default_service_name)
+    if any(_needs_footer_finalize(embed) for embed in embeds):
+        embeds = await finalize_embeds(embeds, footer_service, default_service_name=default_service_name)
+    return embeds
 
 
 async def safe_followup_send(
@@ -72,6 +75,7 @@ async def safe_followup_send(
     view: discord.ui.View | None = None,
     ephemeral: bool = True,
     footer_service: FooterService | None = None,
+    author_service: AuthorService | None = None,
     default_service_name: str = "unknown",
 ) -> None:
     embed_list = list(embeds) if embeds is not None else []
@@ -79,6 +83,7 @@ async def safe_followup_send(
     embed_list = await _prepare_embeds_for_send(
         embed_list,
         footer_service=footer_service,
+        author_service=author_service,
         default_service_name=default_service_name,
     )
     try:
@@ -102,11 +107,13 @@ async def safe_followup_send(
             status_embeds = await _prepare_embeds_for_send(
                 status_embeds,
                 footer_service=footer_service,
+                author_service=author_service,
                 default_service_name=default_service_name,
             )
             detail_embeds = await _prepare_embeds_for_send(
                 detail_embeds,
                 footer_service=footer_service,
+                author_service=author_service,
                 default_service_name=default_service_name,
             )
             await interaction.followup.send(
@@ -133,6 +140,7 @@ async def send_dm_or_followup(
     view: discord.ui.View | None = None,
     ephemeral_fallback: bool = True,
     footer_service: FooterService | None = None,
+    author_service: AuthorService | None = None,
     default_service_name: str = "unknown",
 ) -> bool:
     embed_list = list(embeds) if embeds is not None else []
@@ -140,6 +148,7 @@ async def send_dm_or_followup(
     embed_list = await _prepare_embeds_for_send(
         embed_list,
         footer_service=footer_service,
+        author_service=author_service,
         default_service_name=default_service_name,
     )
     try:
@@ -157,6 +166,7 @@ async def send_dm_or_followup(
             view=view,
             ephemeral=ephemeral_fallback,
             footer_service=footer_service,
+            author_service=author_service,
             default_service_name=default_service_name,
         )
         return False
@@ -171,11 +181,13 @@ async def send_dm_or_followup(
             status_embeds = await _prepare_embeds_for_send(
                 status_embeds,
                 footer_service=footer_service,
+                author_service=author_service,
                 default_service_name=default_service_name,
             )
             detail_embeds = await _prepare_embeds_for_send(
                 detail_embeds,
                 footer_service=footer_service,
+                author_service=author_service,
                 default_service_name=default_service_name,
             )
             try:
@@ -192,6 +204,7 @@ async def send_dm_or_followup(
                     view=view,
                     ephemeral=ephemeral_fallback,
                     footer_service=footer_service,
+                    author_service=author_service,
                     default_service_name=default_service_name,
                 )
                 return False
@@ -203,6 +216,7 @@ async def send_dm_or_followup(
             view=view,
             ephemeral=ephemeral_fallback,
             footer_service=footer_service,
+            author_service=author_service,
             default_service_name=default_service_name,
         )
         return False
