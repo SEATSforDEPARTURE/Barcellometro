@@ -6,18 +6,18 @@ from typing import Any
 
 import discord
 
-from app.services.author import AuthorService, attach_author_meta, get_author_meta, render_author_name
+from app.services.author import AuthorMeta, AuthorService, get_author_meta, render_author_name
 from app.services.footer import get_footer_meta
 
 logger = logging.getLogger(__name__)
 
 
-def _needs_author_metadata(embed: discord.Embed) -> bool:
+def _needs_author_finalize(embed: discord.Embed) -> bool:
     has_meta_before = get_author_meta(embed) is not None
     author_name_before = getattr(embed.author, "name", None)
     needs_finalize = has_meta_before or not author_name_before
     logger.debug(
-        "author metadata: has_meta_before=%s author_name_before=%r needs_finalize=%s",
+        "author finalize: has_meta_before=%s author_name_before=%r needs_finalize=%s",
         has_meta_before,
         author_name_before,
         needs_finalize,
@@ -25,7 +25,7 @@ def _needs_author_metadata(embed: discord.Embed) -> bool:
     return needs_finalize
 
 
-async def apply_author_metadata(
+async def finalize_embed_author(
     embed: discord.Embed,
     author_service: AuthorService | None,
     *,
@@ -34,15 +34,18 @@ async def apply_author_metadata(
     meta = get_author_meta(embed)
     footer_meta = get_footer_meta(embed)
     author_name_before = getattr(embed.author, "name", None)
-    if meta is None and footer_meta is not None:
-        attach_author_meta(embed, service_name=footer_meta.service_name)
-        meta = get_author_meta(embed)
     if meta is None and author_name_before:
+        logger.debug("author finalize: skipped_preserving_explicit_author=true")
+        return embed
+    if meta is None:
+        service_name = getattr(footer_meta, "service_name", None) or default_service_name
+        meta = AuthorMeta(service_name=service_name, preserve_existing=True)
+    if meta.skip:
+        logger.debug("author finalize: skipped_due_to_meta_skip=true service=%s", meta.service_name)
         return embed
     if author_service is None:
-        service_name = getattr(meta, "service_name", None) or getattr(footer_meta, "service_name", None) or default_service_name
         if not getattr(embed.author, "name", None):
-            embed.set_author(name=render_author_name(service_name=service_name))
+            embed.set_author(name=render_author_name(service_name=meta.service_name))
         return embed
     try:
         if not await author_service.is_enabled():
@@ -54,9 +57,29 @@ async def apply_author_metadata(
         else:
             logger.warning("Author finalize failed: %s", exc)
         if not getattr(embed.author, "name", None):
-            service_name = getattr(meta, "service_name", None) or getattr(footer_meta, "service_name", None) or default_service_name
-            embed.set_author(name=render_author_name(service_name=service_name))
+            embed.set_author(name=render_author_name(service_name=meta.service_name))
         return embed
+
+
+async def finalize_embeds_author(
+    embeds: Iterable[discord.Embed] | None,
+    author_service: AuthorService | None,
+    *,
+    default_service_name: str = "unknown",
+) -> list[discord.Embed]:
+    embed_list = list(embeds or [])
+    for embed in embed_list:
+        await finalize_embed_author(embed, author_service, default_service_name=default_service_name)
+    return embed_list
+
+
+async def apply_author_metadata(
+    embed: discord.Embed,
+    author_service: AuthorService | None,
+    *,
+    default_service_name: str = "unknown",
+) -> discord.Embed:
+    return await finalize_embed_author(embed, author_service, default_service_name=default_service_name)
 
 
 async def apply_author_metadata_to_embeds(
@@ -65,10 +88,7 @@ async def apply_author_metadata_to_embeds(
     *,
     default_service_name: str = "unknown",
 ) -> list[discord.Embed]:
-    embed_list = list(embeds or [])
-    for embed in embed_list:
-        await apply_author_metadata(embed, author_service, default_service_name=default_service_name)
-    return embed_list
+    return await finalize_embeds_author(embeds, author_service, default_service_name=default_service_name)
 
 
 
@@ -79,12 +99,12 @@ def install_author_auto_finalize(author_service: AuthorService) -> None:
     async def _finalize(kwargs: dict[str, Any]) -> None:
         embed = kwargs.get("embed")
         embeds = kwargs.get("embeds")
-        if embed is not None and _needs_author_metadata(embed):
-            await apply_author_metadata(embed, author_service)
+        if embed is not None and _needs_author_finalize(embed):
+            await finalize_embed_author(embed, author_service)
         if embeds is not None:
-            embeds_to_finalize = [candidate for candidate in embeds if _needs_author_metadata(candidate)]
+            embeds_to_finalize = [candidate for candidate in embeds if _needs_author_finalize(candidate)]
             if embeds_to_finalize:
-                await apply_author_metadata_to_embeds(embeds_to_finalize, author_service)
+                await finalize_embeds_author(embeds_to_finalize, author_service)
 
     orig_interaction_send = discord.InteractionResponse.send_message
 

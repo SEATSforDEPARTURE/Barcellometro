@@ -114,6 +114,9 @@ _SERVICE_AUTHOR_LABELS: dict[str, str] = {
 class AuthorMeta:
     service_name: str
     author_icon_url: str | None = None
+    minimal: bool = False
+    skip: bool = False
+    preserve_existing: bool = False
 
 
 @dataclass(slots=True)
@@ -226,6 +229,9 @@ def attach_author_meta(
     *,
     service_name: str,
     author_icon_url: str | None = None,
+    minimal: bool = False,
+    skip: bool = False,
+    preserve_existing: bool = False,
 ) -> discord.Embed:
     if embed is None:
         raise ValueError("attach_author_meta requires a discord.Embed instance, got None")
@@ -234,6 +240,9 @@ def attach_author_meta(
         AuthorMeta(
             service_name=_clean(service_name) or "unknown",
             author_icon_url=_clean(author_icon_url) or None,
+            minimal=bool(minimal),
+            skip=bool(skip),
+            preserve_existing=bool(preserve_existing),
         ),
     )
     return embed
@@ -245,10 +254,20 @@ def attach_author_meta_to_all(
     *,
     service_name: str,
     author_icon_url: str | None = None,
+    minimal: bool = False,
+    skip: bool = False,
+    preserve_existing: bool = False,
 ) -> list[discord.Embed]:
     embed_list = list(embeds or [])
     for embed in embed_list:
-        attach_author_meta(embed, service_name=service_name, author_icon_url=author_icon_url)
+        attach_author_meta(
+            embed,
+            service_name=service_name,
+            author_icon_url=author_icon_url,
+            minimal=minimal,
+            skip=skip,
+            preserve_existing=preserve_existing,
+        )
     return embed_list
 
 
@@ -284,7 +303,14 @@ def copy_author_meta(source: discord.Embed, target: discord.Embed) -> discord.Em
     meta = get_author_meta(source)
     if meta is None:
         return target
-    return attach_author_meta(target, service_name=meta.service_name, author_icon_url=meta.author_icon_url)
+    return attach_author_meta(
+        target,
+        service_name=meta.service_name,
+        author_icon_url=meta.author_icon_url,
+        minimal=meta.minimal,
+        skip=meta.skip,
+        preserve_existing=meta.preserve_existing,
+    )
 
 
 class AuthorService:
@@ -492,27 +518,39 @@ class AuthorService:
             return service_thumbnails[service_name]
         return await self.get_global_thumbnail()
 
-    async def render_author(self, *, service_name: str) -> tuple[str, str | None, str]:
+    async def render_author(
+        self,
+        *,
+        service_name: str,
+        explicit_icon_url: str | None = None,
+        minimal: bool = False,
+    ) -> tuple[str, str | None, str]:
+        icon_url = await self._resolve_thumbnail(service_name, explicit_icon_url=explicit_icon_url)
+        if minimal:
+            return render_author_name(service_name=service_name), icon_url, "fallback"
         phrase, phrase_origin = await self._resolve_phrase(service_name)
         version = await self.get_version()
-        icon_url = await self._resolve_thumbnail(service_name)
         return render_author_name(service_name=service_name, phrase=phrase, version=version), icon_url, phrase_origin
 
     async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
-        had_runtime_meta = get_author_meta(embed) is not None
         author_name_before = getattr(embed.author, "name", None)
         meta = pop_author_meta(embed)
         if meta is None:
             footer_meta = get_footer_meta(embed)
             service_name = footer_meta.service_name if footer_meta is not None else _clean(default_service_name) or "unknown"
-            meta = AuthorMeta(service_name=service_name)
-        if author_name_before and not had_runtime_meta and meta.author_icon_url is None:
+            meta = AuthorMeta(service_name=service_name, preserve_existing=True)
+        if meta.skip:
+            return embed
+        if author_name_before and meta.preserve_existing:
             return embed
         persistable = _is_persistable_service_name(meta.service_name)
         if persistable:
             await self.register_known_service(meta.service_name, source="runtime")
-        author_name, icon_url, _ = await self.render_author(service_name=meta.service_name)
-        resolved_icon_url = await self._resolve_thumbnail(meta.service_name, explicit_icon_url=meta.author_icon_url or icon_url)
+        author_name, resolved_icon_url, _ = await self.render_author(
+            service_name=meta.service_name,
+            explicit_icon_url=meta.author_icon_url,
+            minimal=meta.minimal,
+        )
         embed.set_author(name=author_name, icon_url=resolved_icon_url)
         if persistable:
             try:

@@ -6,11 +6,14 @@ from app.services.author import (
     AuthorService,
     InvalidAuthorThumbnailError,
     attach_author_meta,
+    attach_author_meta_to_all,
     copy_author_meta,
     get_author_meta,
     normalize_author_thumbnail,
 )
-from app.shared.discord.author_pipeline import apply_author_metadata_to_embeds
+from app.services.footer import FooterService, attach_footer_meta
+from app.shared.discord.author_pipeline import finalize_embed_author, finalize_embeds_author
+from app.shared.discord.delivery import _prepare_embeds_for_send
 from app.shared.discord.embed_limits import normalize_embeds_for_discord
 
 
@@ -51,13 +54,35 @@ def _build_author_service() -> tuple[AuthorService, _FakeDatabase]:
 def test_author_meta_roundtrip_and_copy() -> None:
     source = discord.Embed(title="source")
     target = discord.Embed(title="target")
-    attach_author_meta(source, service_name="riassunto")
+    attach_author_meta(source, service_name="riassunto", minimal=True, preserve_existing=True)
 
     copy_author_meta(source, target)
 
     meta = get_author_meta(target)
     assert meta is not None
     assert meta.service_name == "riassunto"
+    assert meta.minimal is True
+    assert meta.preserve_existing is True
+
+
+
+def test_attach_author_meta_to_all_applies_consistent_meta() -> None:
+    embeds = [discord.Embed(title=f"page {idx}") for idx in range(1, 4)]
+
+    out = attach_author_meta_to_all(
+        embeds,
+        service_name="riassunto",
+        author_icon_url="https://example.com/author.png",
+        minimal=True,
+    )
+
+    assert out == embeds
+    for embed in embeds:
+        meta = get_author_meta(embed)
+        assert meta is not None
+        assert meta.service_name == "riassunto"
+        assert meta.author_icon_url == "https://example.com/author.png"
+        assert meta.minimal is True
 
 
 
@@ -114,6 +139,68 @@ def test_author_service_service_override_beats_global_template() -> None:
 
 
 
+def test_author_service_can_be_disabled_without_applying_author() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_author_meta(embed, service_name="riassunto")
+        service, _ = _build_author_service()
+        await service.set_enabled(False)
+
+        await finalize_embed_author(embed, service, default_service_name="riassunto")
+
+        assert embed.author.name is None
+
+    asyncio.run(_run())
+
+
+
+def test_author_service_preserves_hardcoded_author_when_only_footer_meta_exists() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        embed.set_author(name="🚪 INGRESSI & USCITE")
+        attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)
+        service, _ = _build_author_service()
+        await service.set_global_phrase("Centro embed")
+
+        await finalize_embed_author(embed, service, default_service_name="member_flow_notifications")
+
+        assert embed.author.name == "🚪 INGRESSI & USCITE"
+
+    asyncio.run(_run())
+
+
+
+def test_author_service_skip_meta_leaves_embed_without_author() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_author_meta(embed, service_name="riassunto", skip=True)
+        service, _ = _build_author_service()
+        await service.set_global_phrase("Centro embed")
+
+        await finalize_embed_author(embed, service, default_service_name="riassunto")
+
+        assert embed.author.name is None
+
+    asyncio.run(_run())
+
+
+
+def test_author_service_minimal_meta_uses_service_fallback_name() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_author_meta(embed, service_name="riassunto", minimal=True)
+        service, _ = _build_author_service()
+        await service.set_version("2026.03")
+        await service.set_global_phrase("Centro embed")
+
+        await finalize_embed_author(embed, service, default_service_name="riassunto")
+
+        assert embed.author.name == "🗒️ Riassunto"
+
+    asyncio.run(_run())
+
+
+
 def test_author_pipeline_finalize_split_embeds_keeps_author_meta() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="Split me")
@@ -125,11 +212,56 @@ def test_author_pipeline_finalize_split_embeds_keeps_author_meta() -> None:
         assert len(normalized) >= 2
 
         service, _ = _build_author_service()
-        await apply_author_metadata_to_embeds(normalized, service, default_service_name="riassunto")
+        await finalize_embeds_author(normalized, service, default_service_name="riassunto")
 
         author_names = [item.author.name for item in normalized]
         assert len(set(author_names)) == 1
         assert author_names[0] == "🗒️ Riassunto"
+
+    asyncio.run(_run())
+
+
+
+def test_prepare_embeds_for_send_applies_author_and_footer_together_on_all_pages() -> None:
+    async def _run() -> None:
+        embeds = [discord.Embed(title="Page 1"), discord.Embed(title="Page 2")]
+        for embed in embeds:
+            attach_author_meta(embed, service_name="riassunto")
+            attach_footer_meta(embed, service_name="riassunto", contributors=["gpt-4o-mini"], used_local_processing=False)
+        author_service, _ = _build_author_service()
+        footer_service = FooterService(_FakeDatabase())
+
+        prepared = await _prepare_embeds_for_send(
+            embeds,
+            footer_service=footer_service,
+            author_service=author_service,
+            default_service_name="riassunto",
+        )
+
+        assert [embed.author.name for embed in prepared] == ["🗒️ Riassunto", "🗒️ Riassunto"]
+        assert all((embed.footer.text or "").startswith("Barcellometro") for embed in prepared)
+
+    asyncio.run(_run())
+
+
+
+def test_author_pipeline_service_and_global_thumbnail_precedence_and_fallback() -> None:
+    async def _run() -> None:
+        global_embed = discord.Embed(title="global")
+        attach_author_meta(global_embed, service_name="status")
+        service_embed = discord.Embed(title="service")
+        attach_author_meta(service_embed, service_name="riassunto")
+        fallback_embed = discord.Embed(title="fallback")
+        attach_author_meta(fallback_embed, service_name="qna")
+        service, _ = _build_author_service()
+        await service.set_global_thumbnail("https://example.com/global.png")
+        await service.set_service_thumbnail("riassunto", "https://example.com/service.png")
+
+        await finalize_embeds_author([global_embed, service_embed, fallback_embed], service, default_service_name="status")
+
+        assert global_embed.author.icon_url == "https://example.com/global.png"
+        assert service_embed.author.icon_url == "https://example.com/service.png"
+        assert fallback_embed.author.icon_url == "https://example.com/global.png"
 
     asyncio.run(_run())
 

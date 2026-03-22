@@ -14,6 +14,7 @@ from app.plugins.commands_modular.time_windows import format_italian_ts, format_
 from app.services.author import attach_author_meta
 from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, chunk_embeds_for_message_batches, is_valid_embed, normalize_embeds_for_discord
+from app.shared.discord.author_pipeline import finalize_embeds_author
 from app.shared.discord.footer_pipeline import finalize_embeds
 
 logger = logging.getLogger(__name__)
@@ -802,12 +803,16 @@ async def send_command_embeds(
     embed_list = list(embeds)
     if not embed_list:
         return
+    if any(not getattr(embed.author, "name", None) for embed in embed_list):
+        await finalize_embeds_author(embed_list, None)
     if any(not getattr(embed.footer, "text", None) for embed in embed_list):
         await finalize_embeds(embed_list, None)
     invalid_indexes = [idx for idx, embed in enumerate(embed_list, start=1) if not is_valid_embed(embed, max_chars=MAX_EMBED_CHARS)]
     if invalid_indexes:
         logger.warning("send_command_embeds_normalizing_invalid_embeds indexes=%s", invalid_indexes)
         embed_list = normalize_embeds_for_discord(embed_list, max_chars=MAX_EMBED_CHARS)
+        if any(not getattr(embed.author, "name", None) for embed in embed_list):
+            await finalize_embeds_author(embed_list, None)
         if any(not getattr(embed.footer, "text", None) for embed in embed_list):
             await finalize_embeds(embed_list, None)
     batches = chunk_embeds_for_message_batches(embed_list, max_total_chars=MAX_EMBED_CHARS)
