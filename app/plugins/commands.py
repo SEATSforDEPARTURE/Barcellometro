@@ -11,6 +11,7 @@ from app.plugins.commands_modular import (
     CommandContext,
     register_admin,
     register_ask,
+    register_embed,
     register_audio_notes,
     register_attivita,
     register_greetings,
@@ -59,6 +60,7 @@ def setup(registry: ServiceRegistry) -> None:
     qna_group = app_commands.Group(name="qna", description="QnA controls")
     insights_group = app_commands.Group(name="insights", description="Insights controls")
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Voice ingest")
+    embed_group = app_commands.Group(name="embed", description="Embed controls")
     privacy_group = app_commands.Group(name="privacy", description="Voice privacy controls")
     riassunto_group = app_commands.Group(name="riassunto", description="Summaries")
     aura_group = app_commands.Group(name="aura", description="Aura reports")
@@ -76,6 +78,7 @@ def setup(registry: ServiceRegistry) -> None:
     add_group_once(admin_group, voice_ingest_group, logger)
 
     register_admin(admin_group, ctx)
+    register_embed(embed_group, ctx)
     register_roles(commandguard_group, ctx)
     register_stt(stt_group, ctx)
     register_translate(translate_group, ctx)
@@ -122,6 +125,7 @@ def setup(registry: ServiceRegistry) -> None:
         resocontocanale_group,
         resocontoserver_group,
         privacy_group,
+        embed_group,
         frasi_group,
     ]
 

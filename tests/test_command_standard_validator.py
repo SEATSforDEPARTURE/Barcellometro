@@ -83,6 +83,24 @@ def test_command_validator_uses_admin_as_canonical_root() -> None:
     assert set(command.root for command in result.commands if command.root == "admin")
 
 
+def test_command_validator_tracks_embed_footer_topology() -> None:
+    result = validate_command_tree()
+
+    embed_paths = {command.path for command in result.commands if command.root == "embed"}
+    assert embed_paths == {
+        "embed.footer.on",
+        "embed.footer.off",
+        "embed.footer.status",
+        "embed.footer.template_global_set",
+        "embed.footer.template_global_show",
+        "embed.footer.template_global_reset",
+        "embed.footer.template_service_set",
+        "embed.footer.template_service_show",
+        "embed.footer.template_service_reset",
+    }
+    assert all(not command.path.startswith("admin.footer.") for command in result.commands)
+
+
 def test_command_validator_tracks_top_level_legacy_barcello() -> None:
     result = validate_command_tree()
 

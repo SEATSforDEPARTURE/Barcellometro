@@ -157,7 +157,7 @@ La configurazione del footer separa in modo esplicito la **frase** dalla **thumb
 
 - `footer.global_phrase` e `footer.service_phrase.<service>` controllano solo il testo;
 - `footer.global_thumbnail` e `footer.service_thumbnail.<service>` controllano solo l'icona del footer;
-- i comandi admin `/admin footer template_global_set` e `/admin footer template_service_set` accettano un parametro opzionale `thumbnail`.
+- i comandi embed `/embed footer template_global_set` e `/embed footer template_service_set` accettano un parametro opzionale `thumbnail`.
 
 Il parametro `thumbnail` supporta soltanto:
 
