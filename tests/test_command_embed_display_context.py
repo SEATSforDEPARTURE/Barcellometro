@@ -520,3 +520,33 @@ def test_finalize_embed_without_footer_service_keeps_contributor_segment() -> No
     assert embed.footer.text.startswith("Barcellometro ")
     assert embed.footer.text != "Barcellometro"
     assert embed.footer.text.endswith("Dati elaborati con llama3.2")
+
+
+def test_build_command_embed_uses_embed_namespace_title_for_footer_show() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="embed",
+            subcommand_path="footer template_global_show",
+            sections=[],
+            footer_service=None,
+        )
+    )
+
+    assert embed.title == "📦 EMBED"
+    assert embed.description.startswith("**ℹ️ FOOTER TEMPLATE_GLOBAL_SHOW**")
+
+
+def test_build_command_embed_uses_service_name_in_embed_footer_subtitle_without_body_duplication() -> None:
+    embed = asyncio.run(
+        build_command_embed(
+            top_level="embed",
+            subcommand_path="footer template_service_show",
+            subtitle_args=["riassunto"],
+            lines=[("phrase", "Servizio"), ("thumbnail", "https://example.com/service.png")],
+            footer_service=None,
+        )
+    )
+
+    assert embed.title == "📦 EMBED"
+    assert embed.description.startswith("**ℹ️ FOOTER TEMPLATE_SERVICE_SHOW RIASSUNTO**")
+    assert "• Service:" not in (embed.description or "")

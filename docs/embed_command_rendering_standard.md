@@ -186,6 +186,10 @@ Lo status del footer usa una vista amministrativa compatta e navigabile: la prim
 
 I blocchi per servizio devono restare leggibili: footer effettivo, sorgente effettiva (`service` / `global` / `runtime` / `fallback`), conteggio varianti e sintesi compatta delle varianti; i dettagli tecnici grezzi (`label`, alias duplicati, dump piatti di `key` / `origin` / `updated`) non devono dominare la UI.
 
+Tutto il namespace `/embed` segue la stessa grammatica visuale: titolo fisso `📦 EMBED`, sottotitolo in description con il path funzionale (`FOOTER STATUS`, `FOOTER TEMPLATE_GLOBAL_SHOW`, `FOOTER TEMPLATE_SERVICE_SET <service>`, ecc.), sezioni compatte uppercase con emoji coerenti e nessuna paginazione nel titolo. Anche i comandi `show`, `set`, `reset`, `on` e `off` devono passare dal builder standard condiviso invece di usare renderer legacy o titoli narrativi separati.
+
+Per `/embed footer status` la riga pagina (`Pagina x/y`) appartiene alla description amministrativa della pagina corrente e non al footer Discord renderizzato manualmente. Il footer visibile resta sempre responsabilità della pipeline centralizzata.
+
 ## Quali input entrano nel sottotitolo
 
 Entrano nel sottotitolo gli input che cambiano l'identità semantica della richiesta, per esempio:

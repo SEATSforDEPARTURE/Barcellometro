@@ -143,11 +143,16 @@ def test_admin_namespace_no_longer_registers_footer_commands(import_fresh) -> No
     )
 
 
+def _section_payload(kwargs: dict, index: int = 0):
+    section = kwargs["sections"][index]
+    return section.title, section.lines
+
+
 def test_global_template_show_after_reset_reports_no_custom_override(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
-        send_legacy = AsyncMock()
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_global_phrase("Frase custom")
@@ -160,13 +165,19 @@ def test_global_template_show_after_reset_reports_no_custom_override(embed_modul
         command = _find_command(footer_group, "template_global_show")
         await command.callback(_Interaction(command))
 
-        kwargs = send_legacy.await_args.kwargs
-        assert kwargs["path_parts"] == ["footer", "template_global_show"]
-        assert kwargs["entries"] == [
-            ("Version", "No custom override (default brand version in use)"),
-            ("Phrase", "No custom override (default footer phrase in use)"),
-            ("Thumbnail", "No custom override (default footer thumbnail in use)"),
-        ]
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs["top_level"] == "embed"
+        assert kwargs["subcommand_path"] == "footer template_global_show"
+        assert kwargs["lines"] is None
+        assert kwargs["kind"] == "info"
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Version", "No custom override (default brand version in use)"),
+                ("Phrase", "No custom override (default footer phrase in use)"),
+                ("Thumbnail", "No custom override (default footer thumbnail in use)"),
+            ],
+        )
 
     asyncio.run(_run())
 
@@ -174,8 +185,8 @@ def test_global_template_show_after_reset_reports_no_custom_override(embed_modul
 def test_service_template_show_after_reset_reports_no_custom_override(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
-        send_legacy = AsyncMock()
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_service_phrase("riassunto", "Frase servizio")
@@ -186,13 +197,16 @@ def test_service_template_show_after_reset_reports_no_custom_override(embed_modu
         command = _find_command(footer_group, "template_service_show")
         await command.callback(_Interaction(command), "riassunto")
 
-        kwargs = send_legacy.await_args.kwargs
-        assert kwargs["path_parts"] == ["footer", "template_service_show"]
-        assert kwargs["entries"] == [
-            ("Service", "riassunto"),
-            ("Phrase", "No custom override (service uses default footer behavior)"),
-            ("Thumbnail", "No custom override (service uses default footer thumbnail behavior)"),
-        ]
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs["subcommand_path"] == "footer template_service_show"
+        assert kwargs["subtitle_args"] == ["riassunto"]
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Phrase", "No custom override (service uses default footer behavior)"),
+                ("Thumbnail", "No custom override (service uses default footer thumbnail behavior)"),
+            ],
+        )
 
     asyncio.run(_run())
 
@@ -201,9 +215,7 @@ def test_reset_commands_return_standard_success_embed(embed_module, monkeypatch:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_standard = AsyncMock()
-        send_legacy = AsyncMock()
         monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_version("2.0")
@@ -223,22 +235,25 @@ def test_reset_commands_return_standard_success_embed(embed_module, monkeypatch:
         assert first == {
             "top_level": "embed",
             "subcommand_path": "footer template_global_reset",
+            "subtitle_args": None,
             "lines": [("result", "reset")],
             "sections": None,
             "kind": "success",
             "footer_service": ctx.footer,
+            "footer_service_name": "status",
             "ephemeral": True,
         }
         assert second == {
             "top_level": "embed",
             "subcommand_path": "footer template_service_reset",
-            "lines": [("service", "riassunto"), ("result", "reset")],
+            "subtitle_args": ["riassunto"],
+            "lines": [("result", "reset")],
             "sections": None,
             "kind": "success",
             "footer_service": ctx.footer,
+            "footer_service_name": "status",
             "ephemeral": True,
         }
-        send_legacy.assert_not_awaited()
         assert await ctx.footer.get_version() is None
         assert await ctx.footer.get_global_phrase() is None
         assert await ctx.footer.get_global_thumbnail() is None
@@ -251,8 +266,8 @@ def test_reset_commands_return_standard_success_embed(embed_module, monkeypatch:
 def test_template_global_set_saves_version_phrase_and_thumbnail(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
-        send_legacy = AsyncMock()
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         command = _find_command(footer_group, "template_global_set")
@@ -263,13 +278,17 @@ def test_template_global_set_saves_version_phrase_and_thumbnail(embed_module, mo
             thumbnail="<:melon:1475962151502876695>",
         )
 
-        kwargs = send_legacy.await_args.kwargs
-        assert kwargs["entries"] == [
-            ("Status", "updated"),
-            ("Version", "2.4"),
-            ("Phrase", "Footer globale"),
-            ("Thumbnail", "https://cdn.discordapp.com/emojis/1475962151502876695.png"),
-        ]
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs["subcommand_path"] == "footer template_global_set"
+        assert kwargs["lines"] == [("result", "updated")]
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Version", "2.4"),
+                ("Phrase", "Footer globale"),
+                ("Thumbnail", "https://cdn.discordapp.com/emojis/1475962151502876695.png"),
+            ],
+        )
         assert await ctx.footer.get_version() == "2.4"
         assert await ctx.footer.get_global_phrase() == "Footer globale"
         assert await ctx.footer.get_global_thumbnail() == "https://cdn.discordapp.com/emojis/1475962151502876695.png"
@@ -280,8 +299,8 @@ def test_template_global_set_saves_version_phrase_and_thumbnail(embed_module, mo
 def test_template_global_set_updates_only_thumbnail(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
-        send_legacy = AsyncMock()
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_version("2.4")
@@ -290,13 +309,15 @@ def test_template_global_set_updates_only_thumbnail(embed_module, monkeypatch: p
         command = _find_command(footer_group, "template_global_set")
         await command.callback(_Interaction(command), thumbnail="https://example.com/new-thumb.png")
 
-        kwargs = send_legacy.await_args.kwargs
-        assert kwargs["entries"] == [
-            ("Status", "updated"),
-            ("Version", "2.4"),
-            ("Phrase", "Footer globale"),
-            ("Thumbnail", "https://example.com/new-thumb.png"),
-        ]
+        kwargs = send_standard.await_args.kwargs
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Version", "2.4"),
+                ("Phrase", "Footer globale"),
+                ("Thumbnail", "https://example.com/new-thumb.png"),
+            ],
+        )
         assert await ctx.footer.get_version() == "2.4"
         assert await ctx.footer.get_global_phrase() == "Footer globale"
         assert await ctx.footer.get_global_thumbnail() == "https://example.com/new-thumb.png"
@@ -307,20 +328,23 @@ def test_template_global_set_updates_only_thumbnail(embed_module, monkeypatch: p
 def test_template_service_set_accepts_thumbnail_without_phrase(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
-        send_legacy = AsyncMock()
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         command = _find_command(footer_group, "template_service_set")
         await command.callback(_Interaction(command), "riassunto", thumbnail="<a:pulse:1475962151502876696>")
 
-        kwargs = send_legacy.await_args.kwargs
-        assert kwargs["entries"] == [
-            ("Service", "riassunto"),
-            ("Status", "updated"),
-            ("Phrase", "(not set)"),
-            ("Thumbnail", "https://cdn.discordapp.com/emojis/1475962151502876696.gif"),
-        ]
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs["subtitle_args"] == ["riassunto"]
+        assert kwargs["lines"] == [("result", "updated")]
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Phrase", "(not set)"),
+                ("Thumbnail", "https://cdn.discordapp.com/emojis/1475962151502876696.gif"),
+            ],
+        )
         assert (await ctx.footer.get_service_phrases()).get("riassunto") is None
         assert (await ctx.footer.get_service_thumbnails()).get("riassunto") == "https://cdn.discordapp.com/emojis/1475962151502876696.gif"
 
@@ -330,8 +354,8 @@ def test_template_service_set_accepts_thumbnail_without_phrase(embed_module, mon
 def test_template_global_show_displays_thumbnail_field(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
-        send_legacy = AsyncMock()
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_version("9.9")
@@ -341,12 +365,15 @@ def test_template_global_show_displays_thumbnail_field(embed_module, monkeypatch
         command = _find_command(footer_group, "template_global_show")
         await command.callback(_Interaction(command))
 
-        kwargs = send_legacy.await_args.kwargs
-        assert kwargs["entries"] == [
-            ("Version", "9.9"),
-            ("Phrase", "Globale"),
-            ("Thumbnail", "https://example.com/global.png"),
-        ]
+        kwargs = send_standard.await_args.kwargs
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Version", "9.9"),
+                ("Phrase", "Globale"),
+                ("Thumbnail", "https://example.com/global.png"),
+            ],
+        )
 
     asyncio.run(_run())
 
@@ -354,8 +381,8 @@ def test_template_global_show_displays_thumbnail_field(embed_module, monkeypatch
 def test_template_service_show_displays_thumbnail_field(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
-        send_legacy = AsyncMock()
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_service_phrase("riassunto", "Servizio")
@@ -364,12 +391,15 @@ def test_template_service_show_displays_thumbnail_field(embed_module, monkeypatc
         command = _find_command(footer_group, "template_service_show")
         await command.callback(_Interaction(command), "riassunto")
 
-        kwargs = send_legacy.await_args.kwargs
-        assert kwargs["entries"] == [
-            ("Service", "riassunto"),
-            ("Phrase", "Servizio"),
-            ("Thumbnail", "https://example.com/service.png"),
-        ]
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs["subtitle_args"] == ["riassunto"]
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Phrase", "Servizio"),
+                ("Thumbnail", "https://example.com/service.png"),
+            ],
+        )
 
     asyncio.run(_run())
 
@@ -377,28 +407,29 @@ def test_template_service_show_displays_thumbnail_field(embed_module, monkeypatc
 def test_template_admin_set_invalid_thumbnail_returns_standard_error(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
-        send_legacy = AsyncMock()
-        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
 
         embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         global_command = _find_command(footer_group, "template_global_set")
         await global_command.callback(_Interaction(global_command), thumbnail="bad-value")
 
-        global_kwargs = send_legacy.await_args.kwargs
-        assert global_kwargs["path_parts"] == ["footer", "template_global_set"]
-        assert global_kwargs["entries"] == [("Reason", "Thumbnail must be a Discord custom emoji or an http/https image URL")]
-        assert global_kwargs["tone"] == "error"
+        global_kwargs = send_standard.await_args.kwargs
+        assert global_kwargs["subcommand_path"] == "footer template_global_set"
+        assert global_kwargs["lines"] == [("reason", "Thumbnail must be a Discord custom emoji or an http/https image URL")]
+        assert global_kwargs["kind"] == "error"
         assert await ctx.footer.get_global_thumbnail() is None
 
-        send_legacy.reset_mock()
+        send_standard.reset_mock()
 
         service_command = _find_command(footer_group, "template_service_set")
         await service_command.callback(_Interaction(service_command), "riassunto", thumbnail="bad-value")
 
-        service_kwargs = send_legacy.await_args.kwargs
-        assert service_kwargs["path_parts"] == ["footer", "template_service_set"]
-        assert service_kwargs["entries"] == [("Reason", "Thumbnail must be a Discord custom emoji or an http/https image URL")]
-        assert service_kwargs["tone"] == "error"
+        service_kwargs = send_standard.await_args.kwargs
+        assert service_kwargs["subcommand_path"] == "footer template_service_set"
+        assert service_kwargs["subtitle_args"] == ["riassunto"]
+        assert service_kwargs["lines"] == [("reason", "Thumbnail must be a Discord custom emoji or an http/https image URL")]
+        assert service_kwargs["kind"] == "error"
         assert (await ctx.footer.get_service_thumbnails()).get("riassunto") is None
 
     asyncio.run(_run())
