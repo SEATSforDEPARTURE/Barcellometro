@@ -4,8 +4,15 @@ from dataclasses import dataclass
 
 import discord
 
-from app.services.author import AuthorService, AuthorStatusServiceEntry, AuthorStatusSnapshot, human_author_service_name
-from app.shared.discord.author_pipeline import finalize_embeds as finalize_author_embeds
+from app.services.author import (
+    AuthorService,
+    AuthorStatusServiceEntry,
+    AuthorStatusSnapshot,
+    attach_author_meta,
+    human_author_service_name,
+)
+from app.services.footer import attach_footer_meta
+from app.shared.discord.author_pipeline import apply_author_metadata_to_embeds
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, normalize_embeds_for_discord
 from app.shared.discord.footer_pipeline import finalize_embeds as finalize_footer_embeds
 
@@ -114,11 +121,13 @@ async def build_author_status_embeds(
         embed = discord.Embed(title=page.title, description=page.description, color=0x3498DB)
         for field in page.fields:
             embed.add_field(name=field.name, value=field.value, inline=False)
+        attach_footer_meta(embed, service_name="status")
+        attach_author_meta(embed, service_name="status")
         embeds.append(embed)
     await finalize_footer_embeds(embeds, footer_service, default_service_name="status")
-    await finalize_author_embeds(embeds, author_service, default_service_name="status")
+    await apply_author_metadata_to_embeds(embeds, author_service, default_service_name="status")
     normalized = normalize_embeds_for_discord(embeds, max_chars=MAX_EMBED_CHARS)
     if normalized is not embeds:
         await finalize_footer_embeds(normalized, footer_service, default_service_name="status")
-        await finalize_author_embeds(normalized, author_service, default_service_name="status")
+        await apply_author_metadata_to_embeds(normalized, author_service, default_service_name="status")
     return normalized

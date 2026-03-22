@@ -43,8 +43,9 @@ def setup(registry: ServiceRegistry) -> None:
     ctx = CommandContext.from_registry(registry)
     if ctx.footer is not None:
         install_footer_auto_finalize(ctx.footer)
-    if ctx.author is not None:
-        install_author_auto_finalize(ctx.author)
+    author_service = getattr(ctx, "author", None)
+    if author_service is not None:
+        install_author_auto_finalize(author_service)
     bot = ctx.bot
     config = ctx.config
     guild_id = int(config.guild_id or 0)
