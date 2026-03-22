@@ -6,6 +6,7 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.shared.discord.command_embeds import CommandEmbedSection, send_legacy_standard_response, send_standard_response
+from app.shared.discord.embed_status_helpers import _chunk_status_blocks, _service_section
 from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile, ServiceFooterVariant, _is_persistable_service_name
 
 
@@ -81,72 +82,6 @@ def _format_variant_block(service_name: str, variant: ServiceFooterVariant, phra
 
 def _format_service_header(service_name: str) -> str:
     return f"**{service_name}**\nlabel: {_human_service_name(service_name)}\ntechnical alias: `{service_name}`"
-
-
-def _service_section(service_name: str) -> int:
-    if service_name in {"campagne_notizie", "campagne_meteo", "campagne_oroscopo"}:
-        return 1
-    if service_name == "campagne_prompt":
-        return 2
-    if service_name == "campagne_timer":
-        return 3
-    return 0
-
-
-def _split_long_text(text: str, max_len: int = 1900) -> list[str]:
-    clean_text = text.strip()
-    if not clean_text:
-        return []
-    if len(clean_text) <= max_len:
-        return [clean_text]
-
-    parts: list[str] = []
-    for line in clean_text.split("\n"):
-        if len(line) <= max_len:
-            parts.append(line)
-            continue
-        for idx in range(0, len(line), max_len):
-            parts.append(line[idx : idx + max_len])
-
-    chunks: list[str] = []
-    current = ""
-    for part in parts:
-        candidate = f"{current}\n{part}" if current else part
-        if len(candidate) <= max_len:
-            current = candidate
-            continue
-        if current:
-            chunks.append(current)
-        current = part
-    if current:
-        chunks.append(current)
-    return [chunk for chunk in chunks if chunk]
-
-
-def _chunk_status_blocks(blocks: list[str], max_len: int = 1900) -> list[str]:
-    chunks: list[str] = []
-    current = ""
-
-    for raw_block in blocks:
-        block = raw_block.strip()
-        if not block:
-            continue
-        if len(block) > max_len:
-            split_blocks = _split_long_text(block, max_len=max_len)
-        else:
-            split_blocks = [block]
-
-        for split_block in split_blocks:
-            candidate = f"{current}\n\n{split_block}" if current else split_block
-            if len(candidate) <= max_len:
-                current = candidate
-                continue
-            if current:
-                chunks.append(current)
-            current = split_block
-    if current:
-        chunks.append(current)
-    return [chunk for chunk in chunks if chunk]
 
 
 async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
