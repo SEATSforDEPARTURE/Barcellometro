@@ -115,6 +115,172 @@ def test_resoconto_manual_paths_are_restored_at_top_level_and_kept_under_aura() 
     assert {"oggi", "ieri", "ultimi", "range"}.issubset({cmd.name for cmd in server_aura.commands})
 
 
+@pytest.mark.parametrize(
+    ("command_name", "args"),
+    [
+        ("oggi", ()),
+        ("ieri", ()),
+        ("ultimi", (3, discord.app_commands.Choice(name="ore", value="ore"))),
+        ("range", ("01/03/2026 00:00", "02/03/2026 00:00")),
+    ],
+)
+def test_resocontocanale_top_level_callbacks_route_to_full_summary_helper(command_name: str, args: tuple[object, ...]) -> None:
+    async def _run() -> None:
+        ctx = SimpleNamespace(
+            timezone=ZoneInfo("Europe/Rome"),
+            config=SimpleNamespace(),
+            footer=None,
+            channel_summary=SimpleNamespace(),
+            daily_activity_report=SimpleNamespace(),
+            entitlements=SimpleNamespace(),
+            database=SimpleNamespace(),
+        )
+        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
+        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        old_full = resoconto_module._run_channel_summary_window
+        old_aura = resoconto_module._run_channel_aura_window
+        resoconto_module._run_channel_summary_window = AsyncMock()
+        resoconto_module._run_channel_aura_window = AsyncMock()
+        try:
+            register_resoconto(channel_group, server_group, ctx)
+            callback = _get_command_callback(channel_group, command_name)
+            interaction = _FakeInteraction(qualified_name=f"resocontocanale {command_name}")
+            await callback(interaction, *args)
+        finally:
+            resoconto_module._run_channel_summary_window = old_full
+            resoconto_module._run_channel_aura_window = old_aura
+
+        resoconto_module._run_channel_summary_window.assert_awaited_once()
+        resoconto_module._run_channel_aura_window.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("command_name", "args"),
+    [
+        ("oggi", ()),
+        ("ieri", ()),
+        ("ultimi", (3, discord.app_commands.Choice(name="ore", value="ore"))),
+        ("range", ("01/03/2026 00:00", "02/03/2026 00:00")),
+    ],
+)
+def test_resocontocanale_aura_subcommands_route_to_aura_helper(command_name: str, args: tuple[object, ...]) -> None:
+    async def _run() -> None:
+        ctx = SimpleNamespace(
+            timezone=ZoneInfo("Europe/Rome"),
+            config=SimpleNamespace(),
+            footer=None,
+            channel_summary=SimpleNamespace(),
+            daily_activity_report=SimpleNamespace(),
+            entitlements=SimpleNamespace(),
+            database=SimpleNamespace(),
+        )
+        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
+        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        old_full = resoconto_module._run_channel_summary_window
+        old_aura = resoconto_module._run_channel_aura_window
+        resoconto_module._run_channel_summary_window = AsyncMock()
+        resoconto_module._run_channel_aura_window = AsyncMock()
+        try:
+            register_resoconto(channel_group, server_group, ctx)
+            aura_group = _get_subgroup(channel_group, "aura")
+            callback = _get_command_callback(aura_group, command_name)
+            interaction = _FakeInteraction(qualified_name=f"resocontocanale aura {command_name}")
+            await callback(interaction, *args)
+        finally:
+            resoconto_module._run_channel_summary_window = old_full
+            resoconto_module._run_channel_aura_window = old_aura
+
+        resoconto_module._run_channel_aura_window.assert_awaited_once()
+        resoconto_module._run_channel_summary_window.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("command_name", "args"),
+    [
+        ("oggi", ()),
+        ("ieri", ()),
+        ("ultimi", (3, discord.app_commands.Choice(name="ore", value="ore"))),
+        ("range", ("01/03/2026 00:00", "02/03/2026 00:00")),
+    ],
+)
+def test_resocontoserver_top_level_callbacks_route_to_full_summary_helper(command_name: str, args: tuple[object, ...]) -> None:
+    async def _run() -> None:
+        ctx = SimpleNamespace(
+            timezone=ZoneInfo("Europe/Rome"),
+            config=SimpleNamespace(),
+            footer=None,
+            channel_summary=SimpleNamespace(),
+            daily_activity_report=SimpleNamespace(),
+            entitlements=SimpleNamespace(),
+            database=SimpleNamespace(),
+        )
+        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
+        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        old_full = resoconto_module._run_server_summary_window
+        old_aura = resoconto_module._run_server_aura_window
+        resoconto_module._run_server_summary_window = AsyncMock()
+        resoconto_module._run_server_aura_window = AsyncMock()
+        try:
+            register_resoconto(channel_group, server_group, ctx)
+            callback = _get_command_callback(server_group, command_name)
+            interaction = _FakeInteraction(qualified_name=f"resocontoserver {command_name}")
+            await callback(interaction, *args)
+        finally:
+            resoconto_module._run_server_summary_window = old_full
+            resoconto_module._run_server_aura_window = old_aura
+
+        resoconto_module._run_server_summary_window.assert_awaited_once()
+        resoconto_module._run_server_aura_window.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("command_name", "args"),
+    [
+        ("oggi", ()),
+        ("ieri", ()),
+        ("ultimi", (3, discord.app_commands.Choice(name="ore", value="ore"))),
+        ("range", ("01/03/2026 00:00", "02/03/2026 00:00")),
+    ],
+)
+def test_resocontoserver_aura_subcommands_route_to_aura_helper(command_name: str, args: tuple[object, ...]) -> None:
+    async def _run() -> None:
+        ctx = SimpleNamespace(
+            timezone=ZoneInfo("Europe/Rome"),
+            config=SimpleNamespace(),
+            footer=None,
+            channel_summary=SimpleNamespace(),
+            daily_activity_report=SimpleNamespace(),
+            entitlements=SimpleNamespace(),
+            database=SimpleNamespace(),
+        )
+        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
+        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        old_full = resoconto_module._run_server_summary_window
+        old_aura = resoconto_module._run_server_aura_window
+        resoconto_module._run_server_summary_window = AsyncMock()
+        resoconto_module._run_server_aura_window = AsyncMock()
+        try:
+            register_resoconto(channel_group, server_group, ctx)
+            aura_group = _get_subgroup(server_group, "aura")
+            callback = _get_command_callback(aura_group, command_name)
+            interaction = _FakeInteraction(qualified_name=f"resocontoserver aura {command_name}")
+            await callback(interaction, *args)
+        finally:
+            resoconto_module._run_server_summary_window = old_full
+            resoconto_module._run_server_aura_window = old_aura
+
+        resoconto_module._run_server_aura_window.assert_awaited_once()
+        resoconto_module._run_server_summary_window.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
 def test_resoconto_status_uses_standard_embed() -> None:
     async def _run() -> None:
         db = SimpleNamespace(
