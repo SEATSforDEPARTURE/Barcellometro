@@ -8,6 +8,7 @@ import discord
 import pytest
 from discord import app_commands
 
+from app.services.author import AuthorService
 from app.services.footer import FooterService
 
 
@@ -78,9 +79,11 @@ def embed_module(import_fresh):
 def _register_embed_with_footer(embed_module):
     database = _FooterDatabase()
     footer = FooterService(database)
+    author = AuthorService(database)
     ctx = SimpleNamespace(
         database=database,
         footer=footer,
+        author=author,
         ai=None,
         guard=None,
         timezone=None,
@@ -115,10 +118,23 @@ def _register_embed_with_footer(embed_module):
 
 def test_embed_footer_registers_under_top_level_embed_only(embed_module) -> None:
     embed_group, footer_group, _ = _register_embed_with_footer(embed_module)
+    author_group = next(cmd for cmd in embed_group.commands if isinstance(cmd, discord.app_commands.Group) and cmd.name == "author")
 
     assert embed_group.name == "embed"
+    assert {group.name for group in embed_group.commands if isinstance(group, discord.app_commands.Group)} == {"footer", "author"}
     assert footer_group.name == "footer"
     assert {command.name for command in footer_group.commands} == {
+        "on",
+        "off",
+        "status",
+        "template_global_set",
+        "template_global_show",
+        "template_global_reset",
+        "template_service_set",
+        "template_service_show",
+        "template_service_reset",
+    }
+    assert {command.name for command in author_group.commands} == {
         "on",
         "off",
         "status",
@@ -431,5 +447,70 @@ def test_template_admin_set_invalid_thumbnail_returns_standard_error(embed_modul
         assert service_kwargs["lines"] == [("reason", "Thumbnail must be a Discord custom emoji or an http/https image URL")]
         assert service_kwargs["kind"] == "error"
         assert (await ctx.footer.get_service_thumbnails()).get("riassunto") is None
+
+    asyncio.run(_run())
+
+
+def test_author_global_template_show_after_reset_reports_no_custom_override(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
+
+        embed_group, _footer_group, ctx = _register_embed_with_footer(embed_module)
+        author_group = next(cmd for cmd in embed_group.commands if isinstance(cmd, discord.app_commands.Group) and cmd.name == "author")
+        await ctx.author.set_global_phrase("Linea author")
+        await ctx.author.set_global_phrase(None)
+        await ctx.author.set_version("v3")
+        await ctx.author.set_version(None)
+        await ctx.author.set_global_thumbnail("https://example.com/author.png")
+        await ctx.author.set_global_thumbnail(None)
+
+        command = _find_command(author_group, "template_global_show")
+        await command.callback(_Interaction(command))
+
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs["subcommand_path"] == "author template_global_show"
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Version", "No custom override (version is ignored without an author phrase)"),
+                ("Phrase", "No custom override (services use semantic fallback author)"),
+                ("Thumbnail", "No custom override (default author has no thumbnail)"),
+                ("Preview", "📊 Status"),
+            ],
+        )
+
+    asyncio.run(_run())
+
+
+
+def test_author_service_template_show_after_reset_reports_fallback_preview(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
+
+        embed_group, _footer_group, ctx = _register_embed_with_footer(embed_module)
+        author_group = next(cmd for cmd in embed_group.commands if isinstance(cmd, discord.app_commands.Group) and cmd.name == "author")
+        await ctx.author.set_service_phrase("riassunto", "Linea riassunto")
+        await ctx.author.set_service_phrase("riassunto", None)
+        await ctx.author.set_service_thumbnail("riassunto", "https://example.com/riassunto.png")
+        await ctx.author.set_service_thumbnail("riassunto", None)
+
+        command = _find_command(author_group, "template_service_show")
+        await command.callback(_Interaction(command), "riassunto")
+
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs["subcommand_path"] == "author template_service_show"
+        assert kwargs["subtitle_args"] == ["riassunto"]
+        assert _section_payload(kwargs) == (
+            "Template",
+            [
+                ("Phrase", "No custom override (service uses global/fallback author phrase)"),
+                ("Thumbnail", "No custom override (service uses global/no thumbnail fallback)"),
+                ("Preview", "🗒️ Riassunto"),
+            ],
+        )
 
     asyncio.run(_run())

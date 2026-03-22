@@ -6,6 +6,7 @@ from typing import Iterable
 import discord
 
 from app.shared.discord.embed_limits import RETRY_MAX_EMBED_CHARS, normalize_embeds_for_discord
+from app.services.author import copy_author_meta
 from app.services.footer import FooterService, copy_footer_meta
 from app.shared.discord.footer_pipeline import _needs_footer_finalize, finalize_embeds
 
@@ -43,6 +44,7 @@ def _clone_embeds_for_retry(embeds: Iterable[discord.Embed] | None) -> list[disc
     for embed in embeds or []:
         clone = discord.Embed.from_dict(embed.to_dict())
         copy_footer_meta(embed, clone)
+        copy_author_meta(embed, clone)
         clones.append(clone)
     return clones
 

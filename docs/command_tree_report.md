@@ -2,7 +2,7 @@
 
 Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.
 
-- Commands discovered: **269**
+- Commands discovered: **278**
 - Errors: **0**
 - Warnings: **50**
 
@@ -140,6 +140,15 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `embed` | `footer` | `template_service_reset` | Reset a service-specific footer template. | `app/plugins/commands_modular/embed.py:384` |
 | `embed` | `footer` | `template_service_set` | Set a service-specific footer template. | `app/plugins/commands_modular/embed.py:317` |
 | `embed` | `footer` | `template_service_show` | Show a service-specific footer template. | `app/plugins/commands_modular/embed.py:357` |
+| `embed` | `author` | `off` | Disable author rendering. | `app/plugins/commands_modular/embed.py` |
+| `embed` | `author` | `on` | Enable author rendering. | `app/plugins/commands_modular/embed.py` |
+| `embed` | `author` | `status` | Show author status and effective service templates. | `app/plugins/commands_modular/embed.py` |
+| `embed` | `author` | `template_global_reset` | Reset the global author template. | `app/plugins/commands_modular/embed.py` |
+| `embed` | `author` | `template_global_set` | Set the global author template. | `app/plugins/commands_modular/embed.py` |
+| `embed` | `author` | `template_global_show` | Show the global author template. | `app/plugins/commands_modular/embed.py` |
+| `embed` | `author` | `template_service_reset` | Reset a service-specific author template. | `app/plugins/commands_modular/embed.py` |
+| `embed` | `author` | `template_service_set` | Set a service-specific author template. | `app/plugins/commands_modular/embed.py` |
+| `embed` | `author` | `template_service_show` | Show a service-specific author template. | `app/plugins/commands_modular/embed.py` |
 | `frasi` | `—` | `entry_add` | Add a phrase trigger entry | `app/plugins/commands_modular/triggers.py:304` |
 | `frasi` | `—` | `entry_edit` | Edit a phrase trigger entry | `app/plugins/commands_modular/triggers.py:413` |
 | `frasi` | `—` | `entry_list` | List phrase trigger entries | `app/plugins/commands_modular/triggers.py:359` |

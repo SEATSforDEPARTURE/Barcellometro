@@ -49,6 +49,9 @@ def main() -> None:
         footer_service = registry.get("footer") if registry.has("footer") else None
         if footer_service is not None:
             await footer_service.sync_known_services_on_startup()
+        author_service = registry.get("author") if registry.has("author") else None
+        if author_service is not None:
+            await author_service.sync_known_services_on_startup()
         if os.getenv("ENTITLEMENTS_CONFIG_RELOAD", "").lower() in {"1", "true", "yes", "y"}:
             asyncio.create_task(config_overrides.watch_for_changes())
         if instance_mode == "main":
