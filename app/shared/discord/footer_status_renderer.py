@@ -12,6 +12,7 @@ from app.shared.discord.embed_limits import (
     DISCORD_MAX_FIELD_NAME,
     DISCORD_MAX_FIELD_VALUE,
     DISCORD_MAX_FIELDS,
+    DISCORD_MAX_FOOTER_TEXT,
     MAX_EMBED_CHARS,
     _estimate_embed_size,
     normalize_embeds_for_discord,
@@ -21,10 +22,10 @@ from app.shared.discord.footer_pipeline import finalize_embeds
 logger = logging.getLogger(__name__)
 
 _CATEGORY_TITLES: dict[int, str] = {
-    0: "Standard services",
-    1: "Editorial campaigns",
-    2: "Prompt campaigns",
-    3: "Timer campaigns",
+    0: "STANDARD",
+    1: "EDITORIAL",
+    2: "PROMPT",
+    3: "TIMER",
 }
 _PAGE_EMBED_MAX = 5000
 _MAX_FOOTER_PREVIEW = 220
@@ -195,7 +196,7 @@ def _variant_difference_lines(entry: FooterStatusServiceEntry, primary_footer: s
     lines: list[str] = []
     for (mode, contributors, footer_preview), keys in sorted(groups.items(), key=lambda item: (item[0][0], item[0][1], item[0][2])):
         contributor_part = f" · {contributors}" if contributors != "—" else ""
-        lines.append(f"Δ {mode} [{_compact_join(keys, limit=3)}]{contributor_part} → `{footer_preview}`")
+        lines.append(f"Diff: {mode} [{_compact_join(keys, limit=3)}]{contributor_part} → `{footer_preview}`")
         if len(lines) >= 2:
             break
     return lines
@@ -232,20 +233,21 @@ def build_service_status_field(entry: FooterStatusServiceEntry, snapshot: Footer
         meta_parts.append(f"agg. {updated}")
 
     lines = [
-        f"**Footer:** `{_clip(effective_footer, _MAX_FOOTER_PREVIEW)}`",
-        f"**Sorgente:** **{source}** · varianti **{len(entry.persisted_variants)}** · profilo **{profile_kind}**",
-        f"**Varianti:** {variant_summary}",
+        f"• Footer: `{_clip(effective_footer, _MAX_FOOTER_PREVIEW)}`",
+        f"• Sorgente: **{source}** · Varianti: **{len(entry.persisted_variants)}** · Profilo: **{profile_kind}**",
+        f"• Modalità: {variant_summary}",
     ]
 
     contributors = _contributors_summary(entry)
     if contributors is not None:
         label = "Profilo runtime" if profile and profile.contributors and not entry.persisted_variants else "Contributor"
-        lines.append(f"**{label}:** {contributors}")
+        lines.append(f"• {label}: {contributors}")
 
-    lines.extend(_variant_difference_lines(entry, effective_footer))
+    for delta_line in _variant_difference_lines(entry, effective_footer):
+        lines.append(f"• {delta_line}")
 
     if meta_parts:
-        lines.append(f"**Meta:** {_clip(' · '.join(meta_parts), 220)}")
+        lines.append(f"• Meta: {_clip(' · '.join(meta_parts), 220)}")
 
     value = "\n".join(lines)
     return FooterStatusField(
@@ -255,56 +257,53 @@ def build_service_status_field(entry: FooterStatusServiceEntry, snapshot: Footer
 
 
 def _overview_description(snapshot: FooterStatusSnapshot) -> str:
-    service_override_count = sum(1 for entry in snapshot.services if _has_service_override(entry))
-    source_counts = Counter(effective_config_source(entry, snapshot) for entry in snapshot.services)
-
+    _ = snapshot
     lines = [
-        "Pannello amministrativo compatto del footer embed.",
+        "**ℹ️ FOOTER STATUS**",
         "",
-        f"• Stato footer: **{'ON' if snapshot.enabled else 'OFF'}**",
-        f"• Template globale effettivo: **{_clip(snapshot.global_phrase, 140)}**",
-        f"• Thumbnail globale: **{'Sì' if snapshot.global_thumbnail else 'No'}**",
-        f"• Servizi noti: **{len(snapshot.services)}**",
-        f"• Override dedicati: **{service_override_count}**",
-        f"• Uso globale: **{source_counts.get('global', 0)}**",
-        f"• Uso runtime: **{source_counts.get('runtime', 0)}**",
-        f"• Fallback puro: **{source_counts.get('fallback', 0)}**",
+        "Pannello footer embed.",
+        "➡️ Navigazione con **INIZIO / INDIETRO / AVANTI**.",
     ]
     return _clip("\n".join(lines), DISCORD_MAX_EMBED_DESCRIPTION)
 
 
 def _overview_fields(snapshot: FooterStatusSnapshot) -> list[FooterStatusField]:
     service_override_count = sum(1 for entry in snapshot.services if _has_service_override(entry))
-    group_breakdown = []
+    source_counts = Counter(effective_config_source(entry, snapshot) for entry in snapshot.services)
+
+    status_lines = [
+        f"• Footer: **{'ON' if snapshot.enabled else 'OFF'}**",
+        f"• Template: **{_clip(snapshot.global_phrase, 120)}**",
+        f"• Thumbnail: **{'sì' if snapshot.global_thumbnail else 'no'}**",
+    ]
+
+    service_lines = [
+        f"• Totali: **{len(snapshot.services)}**",
+        f"• Override: **{service_override_count}**",
+        f"• Global: **{source_counts.get('global', 0)}**",
+        f"• Runtime: **{source_counts.get('runtime', 0)}**",
+        f"• Fallback: **{source_counts.get('fallback', 0)}**",
+    ]
+
+    group_lines: list[str] = []
     for category, title in _CATEGORY_TITLES.items():
         entries = [entry for entry in snapshot.services if entry.category == category]
         if not entries:
             continue
-        override_count = sum(1 for entry in entries if _has_service_override(entry))
-        persisted_count = sum(1 for entry in entries if entry.persisted_variants)
-        group_breakdown.append(f"• {title}: **{len(entries)}** servizi · override **{override_count}** · varianti persistite **{persisted_count}**")
+        variant_total = sum(len(entry.persisted_variants) for entry in entries)
+        group_lines.append(f"• {title.title()}: **{len(entries)}** servizi ({variant_total} varianti)")
 
-    source_counts = Counter(effective_config_source(entry, snapshot) for entry in snapshot.services)
+    config_lines = [
+        f"• Template globale: **{'attivo' if _has_global_template(snapshot) else 'assente'}**",
+        f"• Sorgenti note: **{sum(1 for entry in snapshot.services if entry.known_sources)}**",
+        f"• Runtime persistito: **{sum(1 for entry in snapshot.services if _has_runtime_data(entry))}**",
+    ]
+
     return [
-        FooterStatusField(
-            name="Breakdown gruppi",
-            value="\n".join(group_breakdown) or "Nessun gruppo disponibile.",
-        ),
-        FooterStatusField(
-            name="Distribuzione configurazione",
-            value="\n".join(
-                [
-                    f"• Service override: **{service_override_count}**",
-                    f"• Global template: **{source_counts.get('global', 0)}**",
-                    f"• Runtime profile: **{source_counts.get('runtime', 0)}**",
-                    f"• Fallback profile: **{source_counts.get('fallback', 0)}**",
-                ]
-            ),
-        ),
-        FooterStatusField(
-            name="Navigazione",
-            value="Usa i bottoni **INIZIO**, **INDIETRO** e **AVANTI** per passare dalla panoramica ai gruppi di servizi senza generare nuovi messaggi.",
-        ),
+        FooterStatusField(name="ℹ️ STATO", value="\n".join(status_lines)),
+        FooterStatusField(name="📊 SERVIZI", value="\n".join(service_lines)),
+        FooterStatusField(name="📂 GRUPPI", value="\n".join(group_lines) or "• Nessun gruppo disponibile."),
+        FooterStatusField(name="⚙️ CONFIGURAZIONE", value="\n".join(config_lines)),
     ]
 
 
@@ -313,15 +312,17 @@ def _build_group_description(title: str, entries: list[FooterStatusServiceEntry]
     runtime_count = sum(1 for entry in entries if effective_config_source(entry, snapshot) == "runtime")
     return "\n".join(
         [
-            f"Vista compatta del gruppo **{title}**.",
-            f"Servizi nel gruppo: **{len(entries)}** · override dedicati **{override_count}** · uso runtime **{runtime_count}**",
+            f"**📂 GRUPPI · {title}**",
+            "",
+            f"• Servizi: **{len(entries)}** · Override: **{override_count}** · Runtime: **{runtime_count}**",
         ]
     )
 
 
 def _build_embed_for_page(page: FooterStatusPage, *, page_index: int, total_pages: int) -> discord.Embed:
+    _ = (page_index, total_pages)
     embed = discord.Embed(
-        title=_clip(f"Footer status · {page.title} ({page_index}/{total_pages})", 256),
+        title="📦 EMBED",
         description=_clip(page.description, DISCORD_MAX_EMBED_DESCRIPTION),
         color=discord.Color.blurple(),
     )
@@ -364,7 +365,7 @@ def _paginate_group(title: str, description: str, fields: list[FooterStatusField
 def build_footer_status_pages(snapshot: FooterStatusSnapshot) -> list[FooterStatusPage]:
     pages = [
         FooterStatusPage(
-            title="Overview",
+            title="ℹ️ FOOTER STATUS",
             description=_overview_description(snapshot),
             fields=_overview_fields(snapshot),
         )
@@ -376,12 +377,12 @@ def build_footer_status_pages(snapshot: FooterStatusSnapshot) -> list[FooterStat
             continue
         fields = [build_service_status_field(entry, snapshot) for entry in entries]
         description = _build_group_description(title, entries, snapshot)
-        pages.extend(_paginate_group(title, description, fields))
+        pages.extend(_paginate_group(f"📂 GRUPPI · {title}", description, fields))
 
     uncategorized_entries = [entry for entry in snapshot.services if entry.category not in _CATEGORY_TITLES]
     if uncategorized_entries:
         fields = [build_service_status_field(entry, snapshot) for entry in uncategorized_entries]
-        pages.extend(_paginate_group("Other services", "Servizi aggiuntivi rilevati nel renderer.", fields))
+        pages.extend(_paginate_group("📂 GRUPPI · OTHER", "**📂 GRUPPI · OTHER**\n\n• Servizi aggiuntivi rilevati nel renderer.", fields))
 
     return pages
 
@@ -395,6 +396,11 @@ async def build_footer_status_embeds(
     total_pages = len(pages)
     embeds = [_build_embed_for_page(page, page_index=index, total_pages=total_pages) for index, page in enumerate(pages, start=1)]
     await finalize_embeds(embeds, footer_service, default_service_name="status")
+    for index, embed in enumerate(embeds, start=1):
+        footer_text = (getattr(embed.footer, "text", None) or "").strip()
+        page_text = f"Pagina {index}/{total_pages}"
+        combined = page_text if not footer_text else f"{footer_text} • {page_text}"
+        embed.set_footer(text=_clip(combined, DISCORD_MAX_FOOTER_TEXT), icon_url=getattr(embed.footer, "icon_url", None))
     normalized = normalize_embeds_for_discord(embeds, max_chars=MAX_EMBED_CHARS)
     if len(normalized) != len(embeds):
         logger.warning("footer_status_renderer_normalized_embeds before=%s after=%s", len(embeds), len(normalized))

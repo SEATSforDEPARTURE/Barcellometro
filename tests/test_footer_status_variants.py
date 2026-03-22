@@ -127,13 +127,17 @@ def test_footer_status_overview_page_is_always_present_and_readable() -> None:
         pages = build_footer_status_pages(snapshot)
         overview = pages[0]
 
-        assert overview.title == "Overview"
-        assert "Stato footer" in overview.description
-        assert "Template globale effettivo" in overview.description
-        assert "Thumbnail globale" in overview.description
-        assert any(field.name == "Breakdown gruppi" for field in overview.fields)
-        assert any(field.name == "Navigazione" for field in overview.fields)
-        assert "INIZIO" in next(field.value for field in overview.fields if field.name == "Navigazione")
+        assert overview.title == "ℹ️ FOOTER STATUS"
+        assert "Pannello footer embed" in overview.description
+        assert "INIZIO / INDIETRO / AVANTI" in overview.description
+        assert [field.name for field in overview.fields] == [
+            "ℹ️ STATO",
+            "📊 SERVIZI",
+            "📂 GRUPPI",
+            "⚙️ CONFIGURAZIONE",
+        ]
+        assert all("• " in field.value for field in overview.fields)
+        assert "Navigazione" not in "\n".join(field.name for field in overview.fields)
 
     asyncio.run(_run())
 
@@ -164,12 +168,12 @@ def test_footer_status_service_blocks_are_compact_and_variant_aware() -> None:
         field = build_service_status_field(entry, snapshot)
 
         assert field.name == "Riassunto"
-        assert "**Footer:**" in field.value
-        assert "**Sorgente:** **service**" in field.value
-        assert "varianti **2**" in field.value
+        assert "• Footer:" in field.value
+        assert "• Sorgente: **service**" in field.value
+        assert "Varianti: **2**" in field.value
         assert "local (1): riassunto|local|llama3.2" in field.value
         assert "remote (1): riassunto|remote|gpt-4o-mini" in field.value
-        assert "Δ remote" in field.value
+        assert "• Diff: remote" in field.value
         assert "technical alias" not in field.value.lower()
         assert "label:" not in field.value.lower()
         assert "key:" not in field.value.lower()
@@ -196,11 +200,11 @@ def test_footer_status_groups_campaign_pages() -> None:
         pages = build_footer_status_pages(snapshot)
         page_titles = [page.title for page in pages]
 
-        assert "Overview" in page_titles
-        assert "Standard services" in page_titles
-        assert "Editorial campaigns" in page_titles
-        assert "Prompt campaigns" in page_titles
-        assert "Timer campaigns" in page_titles
+        assert "ℹ️ FOOTER STATUS" in page_titles
+        assert "📂 GRUPPI · STANDARD" in page_titles
+        assert "📂 GRUPPI · EDITORIAL" in page_titles
+        assert "📂 GRUPPI · PROMPT" in page_titles
+        assert "📂 GRUPPI · TIMER" in page_titles
 
     asyncio.run(_run())
 
@@ -221,8 +225,11 @@ def test_footer_status_builds_multiple_pages_when_services_are_many() -> None:
         embeds = await build_footer_status_embeds(await footer.build_status_snapshot(), footer_service=footer)
 
         assert len(embeds) > 2
-        assert embeds[0].title and "Overview" in embeds[0].title
-        assert any(embed.title and "Standard services" in embed.title for embed in embeds[1:])
+        assert embeds[0].title == "📦 EMBED"
+        assert embeds[0].description and "FOOTER STATUS" in embeds[0].description
+        assert any(embed.description and "📂 GRUPPI · STANDARD" in embed.description for embed in embeds[1:])
+        assert all("(1/" not in (embed.title or "") for embed in embeds)
+        assert all("Pagina " in (embed.footer.text or "") for embed in embeds)
 
     asyncio.run(_run())
 
