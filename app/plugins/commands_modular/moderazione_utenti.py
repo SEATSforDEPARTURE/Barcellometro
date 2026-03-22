@@ -46,8 +46,9 @@ async def _send_lines(
         lines=[("entries", len(lines))],
         sections=sections,
         footer_service=ctx.footer,
+        author_service=ctx.author,
     )
-    await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=[txt])
+    await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=[txt], footer_service=ctx.footer, author_service=ctx.author, default_service_name="moderazione")
 
 
 def _render_departure_action_label(action_type: str) -> str:

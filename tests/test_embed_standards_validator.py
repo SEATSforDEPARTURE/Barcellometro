@@ -51,6 +51,15 @@ def test_command_embed_helpers_do_not_default_to_minimal_or_attach_local_footer_
     assert "attach_minimal_footer(" not in source
 
 
+
+
+def test_command_embed_helpers_do_not_finalize_with_null_services() -> None:
+    source = Path("app/shared/discord/command_embeds.py").read_text(encoding="utf-8")
+
+    assert "finalize_embeds_author(embed_list, None" not in source
+    assert "finalize_embeds(embed_list, None" not in source
+    assert "if footer_service is None:" not in source
+
 def test_greetings_layout_docs_and_renderer_reflect_final_visual_contract() -> None:
     member_flow_source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
     docs_source = Path("docs/embed_command_rendering_standard.md").read_text(encoding="utf-8")

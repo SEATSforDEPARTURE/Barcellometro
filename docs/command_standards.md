@@ -100,6 +100,8 @@ Regole obbligatorie:
 
 Questa regola non contraddice i command standards esistenti: `footer` e `author` restano domini amministrativi che usano le stesse action canoniche `on/off/status`, `template_*_set/show/reset` e la stessa semantica generale di override.
 
+Per i toggle globali vale una semantica forte: `author off` deve sopprimere qualsiasi author visibile negli embed standard del progetto e `footer off` deve sopprimere qualsiasi footer visibile negli embed standard del progetto, non solo evitare nuove aggiunte.
+
 ## 5. Regole sui parametri
 
 ### 5.1 Regola generale

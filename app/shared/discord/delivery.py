@@ -59,9 +59,11 @@ async def _prepare_embeds_for_send(
 ) -> list[discord.Embed]:
     if not embeds:
         return embeds
-    if any(_needs_author_finalize(embed) for embed in embeds):
+    author_enabled = await author_service.is_enabled() if author_service is not None else None
+    footer_enabled = await footer_service.is_enabled() if footer_service is not None else None
+    if any(_needs_author_finalize(embed, global_enabled=author_enabled) for embed in embeds):
         embeds = await finalize_embeds_author(embeds, author_service, default_service_name=default_service_name)
-    if any(_needs_footer_finalize(embed) for embed in embeds):
+    if any(_needs_footer_finalize(embed, global_enabled=footer_enabled) for embed in embeds):
         embeds = await finalize_embeds(embeds, footer_service, default_service_name=default_service_name)
     return embeds
 

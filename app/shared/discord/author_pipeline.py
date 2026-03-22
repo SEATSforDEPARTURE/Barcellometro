@@ -12,14 +12,15 @@ from app.services.footer import get_footer_meta
 logger = logging.getLogger(__name__)
 
 
-def _needs_author_finalize(embed: discord.Embed) -> bool:
+def _needs_author_finalize(embed: discord.Embed, *, global_enabled: bool | None = None) -> bool:
     has_meta_before = get_author_meta(embed) is not None
     author_name_before = getattr(embed.author, "name", None)
-    needs_finalize = has_meta_before or not author_name_before
+    needs_finalize = has_meta_before or not author_name_before or (global_enabled is False and bool(author_name_before))
     logger.debug(
-        "author finalize: has_meta_before=%s author_name_before=%r needs_finalize=%s",
+        "author finalize: has_meta_before=%s author_name_before=%r global_enabled=%s needs_finalize=%s",
         has_meta_before,
         author_name_before,
+        global_enabled,
         needs_finalize,
     )
     return needs_finalize
@@ -34,9 +35,7 @@ async def finalize_embed_author(
     meta = get_author_meta(embed)
     footer_meta = get_footer_meta(embed)
     author_name_before = getattr(embed.author, "name", None)
-    if meta is None and author_name_before:
-        logger.debug("author finalize: skipped_preserving_explicit_author=true")
-        return embed
+    has_explicit_author_before = meta is None and bool(author_name_before)
     if meta is None:
         service_name = getattr(footer_meta, "service_name", None) or default_service_name
         meta = AuthorMeta(service_name=service_name, preserve_existing=True)
@@ -48,7 +47,13 @@ async def finalize_embed_author(
             embed.set_author(name=render_author_name(service_name=meta.service_name))
         return embed
     try:
-        if not await author_service.is_enabled():
+        enabled = await author_service.is_enabled()
+        if has_explicit_author_before:
+            if not enabled:
+                embed.remove_author()
+            return embed
+        if not enabled:
+            embed.remove_author()
             return embed
         return await author_service.apply(embed, default_service_name=default_service_name)
     except Exception as exc:  # noqa: BLE001
@@ -99,10 +104,11 @@ def install_author_auto_finalize(author_service: AuthorService) -> None:
     async def _finalize(kwargs: dict[str, Any]) -> None:
         embed = kwargs.get("embed")
         embeds = kwargs.get("embeds")
-        if embed is not None and _needs_author_finalize(embed):
+        global_enabled = await author_service.is_enabled()
+        if embed is not None and _needs_author_finalize(embed, global_enabled=global_enabled):
             await finalize_embed_author(embed, author_service)
         if embeds is not None:
-            embeds_to_finalize = [candidate for candidate in embeds if _needs_author_finalize(candidate)]
+            embeds_to_finalize = [candidate for candidate in embeds if _needs_author_finalize(candidate, global_enabled=global_enabled)]
             if embeds_to_finalize:
                 await finalize_embeds_author(embeds_to_finalize, author_service)
 
@@ -111,6 +117,12 @@ def install_author_auto_finalize(author_service: AuthorService) -> None:
     async def patched_interaction_send(self: discord.InteractionResponse, *args: Any, **kwargs: Any):
         await _finalize(kwargs)
         return await orig_interaction_send(self, *args, **kwargs)
+
+    orig_interaction_edit = discord.InteractionResponse.edit_message
+
+    async def patched_interaction_edit(self: discord.InteractionResponse, *args: Any, **kwargs: Any):
+        await _finalize(kwargs)
+        return await orig_interaction_edit(self, *args, **kwargs)
 
     orig_followup_send = discord.Webhook.send
 
@@ -137,6 +149,7 @@ def install_author_auto_finalize(author_service: AuthorService) -> None:
         return await orig_channel_send(self, *args, **kwargs)
 
     discord.InteractionResponse.send_message = patched_interaction_send
+    discord.InteractionResponse.edit_message = patched_interaction_edit
     discord.Webhook.send = patched_followup_send
     discord.Message.reply = patched_message_reply
     discord.Message.edit = patched_message_edit

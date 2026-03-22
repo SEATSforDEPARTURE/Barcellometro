@@ -11,14 +11,15 @@ from app.services.footer import FooterService, get_footer_meta, render_footer_te
 logger = logging.getLogger(__name__)
 
 
-def _needs_footer_finalize(embed: discord.Embed) -> bool:
+def _needs_footer_finalize(embed: discord.Embed, *, global_enabled: bool | None = None) -> bool:
     has_meta_before = get_footer_meta(embed) is not None
     footer_text_before = getattr(embed.footer, "text", None)
-    needs_finalize = has_meta_before or not footer_text_before
+    needs_finalize = has_meta_before or not footer_text_before or (global_enabled is False and bool(footer_text_before))
     logger.debug(
-        "footer finalize: has_meta_before=%s footer_text_before=%r needs_finalize=%s",
+        "footer finalize: has_meta_before=%s footer_text_before=%r global_enabled=%s needs_finalize=%s",
         has_meta_before,
         footer_text_before,
+        global_enabled,
         needs_finalize,
     )
     return needs_finalize
@@ -38,9 +39,6 @@ async def finalize_embed(
         has_meta_before,
         footer_text_before,
     )
-    if not has_meta_before and footer_text_before:
-        logger.debug("footer finalize: skipped_rewrite_for_already_finalized_embed=true")
-        return embed
     if footer_service is None:
         contributors = getattr(meta, "contributors", ())
         text, _ = render_footer_text(version=None, phrase=None, contributors=contributors)
@@ -48,7 +46,13 @@ async def finalize_embed(
             embed.set_footer(text=text)
         return embed
     try:
-        if not await footer_service.is_enabled():
+        enabled = await footer_service.is_enabled()
+        if meta is None and footer_text_before:
+            if not enabled:
+                embed.remove_footer()
+            return embed
+        if not enabled:
+            embed.remove_footer()
             return embed
         return await footer_service.apply(embed, default_service_name=default_service_name)
     except Exception as exc:  # noqa: BLE001
@@ -85,11 +89,12 @@ def install_footer_auto_finalize(footer_service: FooterService) -> None:
     async def _finalize(kwargs: dict[str, Any]) -> None:
         embed = kwargs.get("embed")
         embeds = kwargs.get("embeds")
+        global_enabled = await footer_service.is_enabled()
         if embed is not None:
-            if _needs_footer_finalize(embed):
+            if _needs_footer_finalize(embed, global_enabled=global_enabled):
                 await finalize_embed(embed, footer_service)
         if embeds is not None:
-            embeds_to_finalize = [candidate for candidate in embeds if _needs_footer_finalize(candidate)]
+            embeds_to_finalize = [candidate for candidate in embeds if _needs_footer_finalize(candidate, global_enabled=global_enabled)]
             if embeds_to_finalize:
                 await finalize_embeds(embeds_to_finalize, footer_service)
 
@@ -97,6 +102,12 @@ def install_footer_auto_finalize(footer_service: FooterService) -> None:
     async def patched_interaction_send(self: discord.InteractionResponse, *args: Any, **kwargs: Any):
         await _finalize(kwargs)
         return await orig_interaction_send(self, *args, **kwargs)
+
+    orig_interaction_edit = discord.InteractionResponse.edit_message
+
+    async def patched_interaction_edit(self: discord.InteractionResponse, *args: Any, **kwargs: Any):
+        await _finalize(kwargs)
+        return await orig_interaction_edit(self, *args, **kwargs)
 
     orig_followup_send = discord.Webhook.send
     async def patched_followup_send(self: discord.Webhook, *args: Any, **kwargs: Any):
@@ -119,6 +130,7 @@ def install_footer_auto_finalize(footer_service: FooterService) -> None:
         return await orig_channel_send(self, *args, **kwargs)
 
     discord.InteractionResponse.send_message = patched_interaction_send
+    discord.InteractionResponse.edit_message = patched_interaction_edit
     discord.Webhook.send = patched_followup_send
     discord.Message.reply = patched_message_reply
     discord.Message.edit = patched_message_edit

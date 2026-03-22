@@ -33,6 +33,7 @@ async def _send_embed_response(
         sections=sections,
         kind=kind,
         footer_service=ctx.footer,
+        author_service=ctx.author,
         footer_service_name="status",
         ephemeral=True,
     )
@@ -448,7 +449,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             )
             return
         view = FooterStatusPaginationView(embeds)
-        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view)
+        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=ctx.author, default_service_name="status")
 
     author_group = app_commands.Group(name="author", description="Author controls")
     embed_group.add_command(author_group)
@@ -658,4 +659,4 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "No author data available")], kind="warning")
             return
         view = AuthorStatusPaginationView(embeds)
-        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view)
+        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=ctx.author, default_service_name="status")
