@@ -10,7 +10,7 @@ from app.services.author import (
     get_author_meta,
     normalize_author_thumbnail,
 )
-from app.shared.discord.author_pipeline import finalize_embeds
+from app.shared.discord.author_pipeline import apply_author_metadata_to_embeds
 from app.shared.discord.embed_limits import normalize_embeds_for_discord
 
 
@@ -125,7 +125,7 @@ def test_author_pipeline_finalize_split_embeds_keeps_author_meta() -> None:
         assert len(normalized) >= 2
 
         service, _ = _build_author_service()
-        await finalize_embeds(normalized, service, default_service_name="riassunto")
+        await apply_author_metadata_to_embeds(normalized, service, default_service_name="riassunto")
 
         author_names = [item.author.name for item in normalized]
         assert len(set(author_names)) == 1

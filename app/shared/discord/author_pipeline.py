@@ -12,12 +12,12 @@ from app.services.footer import get_footer_meta
 logger = logging.getLogger(__name__)
 
 
-def _needs_author_finalize(embed: discord.Embed) -> bool:
+def _needs_author_metadata(embed: discord.Embed) -> bool:
     has_meta_before = get_author_meta(embed) is not None
     author_name_before = getattr(embed.author, "name", None)
     needs_finalize = has_meta_before or not author_name_before
     logger.debug(
-        "author finalize: has_meta_before=%s author_name_before=%r needs_finalize=%s",
+        "author metadata: has_meta_before=%s author_name_before=%r needs_finalize=%s",
         has_meta_before,
         author_name_before,
         needs_finalize,
@@ -25,7 +25,7 @@ def _needs_author_finalize(embed: discord.Embed) -> bool:
     return needs_finalize
 
 
-async def finalize_embed(
+async def apply_author_metadata(
     embed: discord.Embed,
     author_service: AuthorService | None,
     *,
@@ -59,7 +59,7 @@ async def finalize_embed(
         return embed
 
 
-async def finalize_embeds(
+async def apply_author_metadata_to_embeds(
     embeds: Iterable[discord.Embed] | None,
     author_service: AuthorService | None,
     *,
@@ -67,7 +67,7 @@ async def finalize_embeds(
 ) -> list[discord.Embed]:
     embed_list = list(embeds or [])
     for embed in embed_list:
-        await finalize_embed(embed, author_service, default_service_name=default_service_name)
+        await apply_author_metadata(embed, author_service, default_service_name=default_service_name)
     return embed_list
 
 
@@ -79,12 +79,12 @@ def install_author_auto_finalize(author_service: AuthorService) -> None:
     async def _finalize(kwargs: dict[str, Any]) -> None:
         embed = kwargs.get("embed")
         embeds = kwargs.get("embeds")
-        if embed is not None and _needs_author_finalize(embed):
-            await finalize_embed(embed, author_service)
+        if embed is not None and _needs_author_metadata(embed):
+            await apply_author_metadata(embed, author_service)
         if embeds is not None:
-            embeds_to_finalize = [candidate for candidate in embeds if _needs_author_finalize(candidate)]
+            embeds_to_finalize = [candidate for candidate in embeds if _needs_author_metadata(candidate)]
             if embeds_to_finalize:
-                await finalize_embeds(embeds_to_finalize, author_service)
+                await apply_author_metadata_to_embeds(embeds_to_finalize, author_service)
 
     orig_interaction_send = discord.InteractionResponse.send_message
 
