@@ -793,21 +793,29 @@ async def send_command_embeds(
         return
     if any(not getattr(embed.footer, "text", None) for embed in embed_list):
         await finalize_embeds(embed_list, None)
-    first = embed_list[0]
-    extras = embed_list[1:]
+    batches = [embed_list[idx : idx + 10] for idx in range(0, len(embed_list), 10)]
+    first_batch = batches[0]
     kwargs: dict[str, Any] = {
         "content": content,
-        "embed": first,
         "ephemeral": ephemeral,
     }
+    if len(first_batch) == 1:
+        kwargs["embed"] = first_batch[0]
+    else:
+        kwargs["embeds"] = first_batch
     if files:
         kwargs["files"] = files
     if interaction.response.is_done():
         await interaction.followup.send(**kwargs)
     else:
         await interaction.response.send_message(**kwargs)
-    for extra in extras:
-        await interaction.followup.send(embed=extra, ephemeral=ephemeral)
+    for batch in batches[1:]:
+        followup_kwargs: dict[str, Any] = {"ephemeral": ephemeral}
+        if len(batch) == 1:
+            followup_kwargs["embed"] = batch[0]
+        else:
+            followup_kwargs["embeds"] = batch
+        await interaction.followup.send(**followup_kwargs)
 
 
 async def send_standard_response(
