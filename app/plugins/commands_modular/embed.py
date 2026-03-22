@@ -14,6 +14,10 @@ from app.services.author import InvalidAuthorThumbnailError, render_author_name
 from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
 
 
+def _author_service(ctx: CommandContext):
+    return getattr(ctx, "author", None)
+
+
 async def _send_embed_response(
     interaction: discord.Interaction,
     ctx: CommandContext,
@@ -33,7 +37,7 @@ async def _send_embed_response(
         sections=sections,
         kind=kind,
         footer_service=ctx.footer,
-        author_service=ctx.author,
+        author_service=_author_service(ctx),
         footer_service_name="status",
         ephemeral=True,
     )
@@ -449,7 +453,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             )
             return
         view = FooterStatusPaginationView(embeds)
-        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=ctx.author, default_service_name="status")
+        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), default_service_name="status")
 
     author_group = app_commands.Group(name="author", description="Author controls")
     embed_group.add_command(author_group)
@@ -458,20 +462,20 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
     async def author_on_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "admin.author.on", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author on", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        await ctx.author.set_enabled(True)
+        await _author_service(ctx).set_enabled(True)
         await _send_embed_response(interaction, ctx, subcommand_path="author on", lines=[("result", "enabled")], kind="success")
 
     @author_group.command(name="off", description="Disable author rendering.")
     async def author_off_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "admin.author.off", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author off", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        await ctx.author.set_enabled(False)
+        await _author_service(ctx).set_enabled(False)
         await _send_embed_response(interaction, ctx, subcommand_path="author off", lines=[("result", "disabled")], kind="success")
 
     @author_group.command(name="template_global_set", description="Set the global author template.")
@@ -484,26 +488,26 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
     ) -> None:
         if not await check_permission(interaction, "admin.author.template_global_set", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_global_set", lines=[("reason", "Author service is unavailable")], kind="error")
             return
         if version is None and phrase is None and thumbnail is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_global_set", lines=[("reason", "No changes provided")], sections=_next_step_section("/embed author template_global_show"), kind="warning")
             return
         if version is not None:
-            await ctx.author.set_version(_clean_opt(version))
+            await _author_service(ctx).set_version(_clean_opt(version))
         if phrase is not None:
-            await ctx.author.set_global_phrase(_clean_opt(phrase))
+            await _author_service(ctx).set_global_phrase(_clean_opt(phrase))
         if thumbnail is not None:
             try:
-                await ctx.author.set_global_thumbnail(_clean_opt(thumbnail))
+                await _author_service(ctx).set_global_thumbnail(_clean_opt(thumbnail))
             except InvalidAuthorThumbnailError as exc:
                 await _send_embed_response(interaction, ctx, subcommand_path="author template_global_set", lines=[("reason", str(exc))], kind="error")
                 return
         preview = render_author_name(
             service_name="status",
-            phrase=await ctx.author.get_global_phrase(),
-            version=await ctx.author.get_version(),
+            phrase=await _author_service(ctx).get_global_phrase(),
+            version=await _author_service(ctx).get_version(),
         )
         await _send_embed_response(
             interaction,
@@ -511,9 +515,9 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             subcommand_path="author template_global_set",
             lines=[("result", "updated")],
             sections=_template_section(
-                ("Version", _format_value(await ctx.author.get_version())),
-                ("Phrase", _format_value(await ctx.author.get_global_phrase())),
-                ("Thumbnail", _format_value(await ctx.author.get_global_thumbnail())),
+                ("Version", _format_value(await _author_service(ctx).get_version())),
+                ("Phrase", _format_value(await _author_service(ctx).get_global_phrase())),
+                ("Thumbnail", _format_value(await _author_service(ctx).get_global_thumbnail())),
                 ("Preview", preview),
             ),
             kind="success",
@@ -523,12 +527,12 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
     async def author_template_global_show_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "admin.author.template_global_show", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_global_show", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        current_version = await ctx.author.get_version()
-        current_global = await ctx.author.get_global_phrase()
-        current_thumbnail = await ctx.author.get_global_thumbnail()
+        current_version = await _author_service(ctx).get_version()
+        current_global = await _author_service(ctx).get_global_phrase()
+        current_thumbnail = await _author_service(ctx).get_global_thumbnail()
         preview = render_author_name(service_name="status", phrase=current_global, version=current_version)
         await _send_embed_response(
             interaction,
@@ -546,12 +550,12 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
     async def author_template_global_reset_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "admin.author.template_global_reset", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_global_reset", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        await ctx.author.set_version(None)
-        await ctx.author.set_global_phrase(None)
-        await ctx.author.set_global_thumbnail(None)
+        await _author_service(ctx).set_version(None)
+        await _author_service(ctx).set_global_phrase(None)
+        await _author_service(ctx).set_global_thumbnail(None)
         await _send_embed_response(interaction, ctx, subcommand_path="author template_global_reset", lines=[("result", "reset")], kind="success")
 
     @author_group.command(name="template_service_set", description="Set a service-specific author template.")
@@ -564,7 +568,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
     ) -> None:
         if not await check_permission(interaction, "admin.author.template_service_set", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", lines=[("reason", "Author service is unavailable")], kind="error")
             return
         service_name = _clean_opt(service)
@@ -575,15 +579,15 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", subtitle_args=[service_name], lines=[("reason", "No changes provided")], kind="warning")
             return
         if phrase is not None:
-            await ctx.author.set_service_phrase(service_name, _clean_opt(phrase))
+            await _author_service(ctx).set_service_phrase(service_name, _clean_opt(phrase))
         if thumbnail is not None:
             try:
-                await ctx.author.set_service_thumbnail(service_name, _clean_opt(thumbnail))
+                await _author_service(ctx).set_service_thumbnail(service_name, _clean_opt(thumbnail))
             except InvalidAuthorThumbnailError as exc:
                 await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", subtitle_args=[service_name], lines=[("reason", str(exc))], kind="error")
                 return
-        service_thumbnail = (await ctx.author.get_service_thumbnails()).get(service_name)
-        service_phrase = (await ctx.author.get_service_phrases()).get(service_name)
+        service_thumbnail = (await _author_service(ctx).get_service_thumbnails()).get(service_name)
+        service_phrase = (await _author_service(ctx).get_service_phrases()).get(service_name)
         await _send_embed_response(
             interaction,
             ctx,
@@ -593,7 +597,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             sections=_template_section(
                 ("Phrase", _format_value(service_phrase)),
                 ("Thumbnail", _format_value(service_thumbnail)),
-                ("Preview", render_author_name(service_name=service_name, phrase=service_phrase or await ctx.author.get_global_phrase(), version=await ctx.author.get_version())),
+                ("Preview", render_author_name(service_name=service_name, phrase=service_phrase or await _author_service(ctx).get_global_phrase(), version=await _author_service(ctx).get_version())),
             ),
             kind="success",
         )
@@ -603,17 +607,17 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
     async def author_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.author.template_service_show", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_show", lines=[("reason", "Author service is unavailable")], kind="error")
             return
         service_name = _clean_opt(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
             return
-        phrase = (await ctx.author.get_service_phrases()).get(service_name)
-        thumbnail_value = (await ctx.author.get_service_thumbnails()).get(service_name)
-        global_phrase = await ctx.author.get_global_phrase()
-        version = await ctx.author.get_version()
+        phrase = (await _author_service(ctx).get_service_phrases()).get(service_name)
+        thumbnail_value = (await _author_service(ctx).get_service_thumbnails()).get(service_name)
+        global_phrase = await _author_service(ctx).get_global_phrase()
+        version = await _author_service(ctx).get_version()
         await _send_embed_response(
             interaction,
             ctx,
@@ -631,32 +635,32 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
     async def author_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.author.template_service_reset", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", lines=[("reason", "Author service is unavailable")], kind="error")
             return
         service_name = _clean_opt(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
             return
-        await ctx.author.set_service_phrase(service_name, None)
-        await ctx.author.set_service_thumbnail(service_name, None)
+        await _author_service(ctx).set_service_phrase(service_name, None)
+        await _author_service(ctx).set_service_thumbnail(service_name, None)
         await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", subtitle_args=[service_name], lines=[("result", "reset")], kind="success")
 
     @author_group.command(name="status", description="Show author status and effective service templates.")
     async def author_status_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "admin.author.status", ctx):
             return
-        if ctx.author is None:
+        if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        known_services = await ctx.author.get_known_services()
+        known_services = await _author_service(ctx).get_known_services()
         if not known_services:
             await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "No known author services")], kind="warning")
             return
-        snapshot = await ctx.author.build_status_snapshot()
-        embeds = await build_author_status_embeds(snapshot, footer_service=ctx.footer, author_service=ctx.author)
+        snapshot = await _author_service(ctx).build_status_snapshot()
+        embeds = await build_author_status_embeds(snapshot, footer_service=ctx.footer, author_service=getattr(ctx, "author", None))
         if not embeds:
             await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "No author data available")], kind="warning")
             return
         view = AuthorStatusPaginationView(embeds)
-        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=ctx.author, default_service_name="status")
+        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), default_service_name="status")

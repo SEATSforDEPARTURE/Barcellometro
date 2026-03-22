@@ -16,6 +16,7 @@ from app.plugins.commands_modular import resoconto as resoconto_module
 from app.plugins.commands_modular import riassunto as riassunto_module
 from app.plugins.commands_modular.resoconto import register_resoconto
 from app.plugins.commands_modular.riassunto import register_riassunto
+from app.shared.discord.command_embeds import send_standard_response
 
 
 class _FakeResponse:
@@ -96,6 +97,52 @@ def _assert_standard_footer(footer_text: str | None, *, contributors: str | None
         assert contributors in footer_text
 
 
+
+
+
+def test_send_standard_response_without_footer_service_keeps_standard_footer() -> None:
+    async def _run() -> None:
+        interaction = _FakeInteraction(qualified_name="status ping")
+
+        await send_standard_response(
+            interaction,
+            top_level="status",
+            subcommand_path="status ping",
+            lines=[("result", "ok")],
+            footer_service=None,
+        )
+
+        kwargs = interaction.response.send_message.await_args.kwargs
+        assert "embed" in kwargs
+        _assert_standard_footer(kwargs["embed"].footer.text)
+
+    asyncio.run(_run())
+
+
+def test_send_standard_response_with_disabled_footer_service_suppresses_footer() -> None:
+    class _DisabledFooterService:
+        async def is_enabled(self) -> bool:
+            return False
+
+        async def apply(self, embed, *, default_service_name: str = "unknown"):
+            raise AssertionError("apply should not be called when the footer service is disabled")
+
+    async def _run() -> None:
+        interaction = _FakeInteraction(qualified_name="status ping")
+
+        await send_standard_response(
+            interaction,
+            top_level="status",
+            subcommand_path="status ping",
+            lines=[("result", "ok")],
+            footer_service=_DisabledFooterService(),
+        )
+
+        kwargs = interaction.response.send_message.await_args.kwargs
+        assert "embed" in kwargs
+        assert kwargs["embed"].footer.text is None
+
+    asyncio.run(_run())
 
 def test_resoconto_manual_paths_are_restored_at_top_level_and_kept_under_aura() -> None:
     ctx = SimpleNamespace(timezone=ZoneInfo("Europe/Rome"), config=SimpleNamespace(), footer=None)
