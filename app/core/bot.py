@@ -120,6 +120,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     if instance_mode not in {"main", "worker"}:
         logger.warning("Unknown INSTANCE_MODE=%s; defaulting to main.", config.instance_mode)
         instance_mode = "main"
+    footer_service = FooterService(database_service)
+
     if instance_mode == "main":
         status_service = StatusService(database_service)
         retention_service = RetentionService(database_service, config.default_retention_days)
@@ -153,8 +155,13 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         member_flow_notifications = MemberFlowNotificationsService(database_service, bot, barcello_service=barcello_service)
         greetings_backfill = GreetingsBackfillService(database_service)
         inactive_members_moderation = InactiveMembersModerationService(database_service, bot, member_flow_notifications=member_flow_notifications)
-        daily_activity_report = DailyActivityReportService(database_service, bot, activity_insights, inactive_members_moderation=inactive_members_moderation)
-    footer_service = FooterService(database_service)
+        daily_activity_report = DailyActivityReportService(
+            database_service,
+            bot,
+            activity_insights,
+            inactive_members_moderation=inactive_members_moderation,
+            footer_service=footer_service,
+        )
 
     registry.register("config", config)
     registry.register("bot", bot)

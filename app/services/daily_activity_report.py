@@ -18,8 +18,10 @@ from app.renderers.activity_report_renderer import build_daily_activity_details_
 from app.plugins.commands_modular.time_windows import infer_rolling_window_request
 from app.services.activity_insights import ActivityInsightsService
 from app.services.database import DatabaseService
+from app.services.footer import FooterService
 from app.services.daily_activity_sorting import sort_channels_like_discord, sort_inactive_entries
 from app.shared.discord.component_notices import send_standard_component_notice
+from app.services.discord_embed_utils import extract_persistable_footer_context, hydrate_persisted_embed_with_footer
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -115,7 +117,21 @@ class DailyReportPaginationView(discord.ui.View):
         self._current_index = target_index
         self._total_pages = len(embeds_payload)
         self._sync_button_states()
-        embed = discord.Embed.from_dict(embeds_payload[target_index])
+        persisted_entry = embeds_payload[target_index]
+        if isinstance(persisted_entry, dict) and isinstance(persisted_entry.get("embed"), dict):
+            embed_payload = persisted_entry.get("embed") or {}
+            footer_context = persisted_entry.get("footer") if isinstance(persisted_entry.get("footer"), dict) else {}
+        else:
+            embed_payload = persisted_entry if isinstance(persisted_entry, dict) else {}
+            footer_context = {"service_name": "daily_activity_report", "used_local_processing": True}
+        embed = discord.Embed.from_dict(embed_payload)
+        await hydrate_persisted_embed_with_footer(
+            embed,
+            footer_context=footer_context,
+            footer_service=self._report_service.footer_service,
+            default_service_name="daily_activity_report",
+            finalize=True,
+        )
         await self._report_service.persist_pagination_current_index(message_id=str(message.id), current_index=target_index)
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -142,12 +158,14 @@ class DailyActivityReportService:
         bot: discord.Client,
         activity_service: ActivityInsightsService,
         inactive_members_moderation: Any | None = None,
+        footer_service: FooterService | None = None,
     ) -> None:
         self._database = database
         self._bot = bot
         self._activity = activity_service
         self._task: asyncio.Task[None] | None = None
         self._inactive_moderation = inactive_members_moderation
+        self._footer = footer_service
         self._persistent_view_registered = False
 
     def _ensure_persistent_view_registered(self) -> None:
@@ -162,6 +180,10 @@ class DailyActivityReportService:
             logger.info("daily activity report scheduler running in server_summary_schedule-only mode")
             self._task = asyncio.create_task(self._loop())
 
+    @property
+    def footer_service(self) -> FooterService | None:
+        return self._footer
+
     async def persist_pagination_record(
         self,
         *,
@@ -172,7 +194,13 @@ class DailyActivityReportService:
         metadata: dict[str, Any] | None = None,
         current_index: int = 0,
     ) -> None:
-        embeds_payload = [embed.to_dict() for embed in embeds]
+        embeds_payload = [
+            {
+                "embed": embed.to_dict(),
+                "footer": extract_persistable_footer_context(embed),
+            }
+            for embed in embeds
+        ]
         await self._database.upsert_daily_report_pagination_state(
             message_id=message_id,
             channel_id=channel_id,

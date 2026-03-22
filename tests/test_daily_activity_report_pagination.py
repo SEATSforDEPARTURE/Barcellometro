@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+
+import discord
 
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = SimpleNamespace(Row=dict)
@@ -12,51 +15,88 @@ if "aiosqlite" not in sys.modules:
 if "httpx" not in sys.modules:
     sys.modules["httpx"] = SimpleNamespace()
 
-if "discord" not in sys.modules:
-    discord_stub = types.ModuleType("discord")
+from app.services.daily_activity_report import (
+    DailyActivityReportService,
+    DailyReportPaginationView,
+    build_combined_activity_inactive_txt,
+)
+from app.services.footer import FooterService, attach_footer_meta, get_footer_meta
 
-    class _Embed:
-        def __init__(self, title: str | None = None, color: int | None = None, description: str | None = None):
-            self.title = title
-            self.color = color
-            self.description = description
 
-        def to_dict(self):
-            return {"title": self.title, "description": self.description, "color": self.color}
+class _FakePaginationDatabase:
+    def __init__(self) -> None:
+        self.settings: dict[str, str] = {}
+        self.pagination_state: dict[str, dict[str, object]] = {}
 
-        @classmethod
-        def from_dict(cls, data):
-            return cls(title=data.get("title"), description=data.get("description"), color=data.get("color"))
+    async def get_setting(self, key: str) -> str | None:
+        return self.settings.get(key)
 
-    class _File:
-        def __init__(self, fp, filename: str):
-            self.fp = fp
-            self.filename = filename
+    async def set_setting(self, key: str, value: str) -> None:
+        self.settings[key] = value
 
-    class _View:
-        def __init__(self, timeout: float | None = None):
-            self.timeout = timeout
-            self.children = []
+    async def delete_setting(self, key: str) -> None:
+        self.settings.pop(key, None)
 
-    class _Button:
-        def __init__(self):
-            self.disabled = False
+    async def execute(self, _query: str, _params: tuple[str, ...]) -> None:
+        return None
 
-    def _button(*args, **kwargs):
-        def deco(fn):
-            return fn
+    async def fetchall(self, query: str, params: tuple[str, ...]):
+        prefix = str(params[0]).replace('%', '') if params else ''
+        if 'FROM settings' not in query:
+            return []
+        return [
+            {'key': key, 'value': value}
+            for key, value in sorted(self.settings.items())
+            if not prefix or key.startswith(prefix)
+        ]
 
-        return deco
+    async def upsert_daily_report_pagination_state(
+        self,
+        *,
+        message_id: str,
+        channel_id: str,
+        guild_id: str,
+        report_type: str,
+        embeds_json: str,
+        metadata_json: str,
+        current_index: int,
+    ) -> None:
+        self.pagination_state[message_id] = {
+            'message_id': message_id,
+            'channel_id': channel_id,
+            'guild_id': guild_id,
+            'report_type': report_type,
+            'embeds_json': embeds_json,
+            'metadata_json': metadata_json,
+            'current_index': current_index,
+        }
 
-    discord_stub.Embed = _Embed
-    discord_stub.File = _File
-    discord_stub.Message = object
-    discord_stub.Interaction = object
-    discord_stub.ButtonStyle = types.SimpleNamespace(primary=1, secondary=2)
-    discord_stub.ui = types.SimpleNamespace(View=_View, Button=_Button, button=_button)
-    sys.modules["discord"] = discord_stub
+    async def get_daily_report_pagination_state(self, *, message_id: str):
+        return self.pagination_state.get(message_id)
 
-from app.services.daily_activity_report import build_combined_activity_inactive_txt
+    async def update_daily_report_pagination_current_index(self, *, message_id: str, current_index: int) -> None:
+        if message_id in self.pagination_state:
+            self.pagination_state[message_id]['current_index'] = current_index
+
+
+class _FakeBot:
+    def __init__(self) -> None:
+        self.views: list[object] = []
+
+    def add_view(self, view: object) -> None:
+        self.views.append(view)
+
+
+def _build_service() -> tuple[DailyActivityReportService, _FakePaginationDatabase, FooterService]:
+    database = _FakePaginationDatabase()
+    footer_service = FooterService(database)
+    service = DailyActivityReportService(
+        database,
+        _FakeBot(),
+        activity_service=object(),
+        footer_service=footer_service,
+    )
+    return service, database, footer_service
 
 
 def test_combined_txt_single_attachment_payload_has_visible_sections() -> None:
@@ -84,8 +124,96 @@ def test_combined_txt_supports_single_section_without_extra_files() -> None:
     assert isinstance(file.fp, io.BytesIO)
 
 
+def test_daily_report_persisted_pagination_stores_footer_context_per_embed() -> None:
+    async def _run() -> None:
+        service, _, _ = _build_service()
+        activity_embed = discord.Embed(title="Pagina attività", description="Contenuto attività")
+        inactive_embed = discord.Embed(title="Pagina inattivi", description="Contenuto inattivi")
+        attach_footer_meta(activity_embed, service_name="daily_activity_report", used_local_processing=True)
+        attach_footer_meta(inactive_embed, service_name="inactivity_moderation", contributors=["gpt-4o-mini"], used_local_processing=False)
+
+        await service.persist_pagination_record(
+            message_id="42",
+            channel_id="7",
+            guild_id="9",
+            embeds=[activity_embed, inactive_embed],
+            metadata={"has_activity": True, "has_inactive": True},
+            current_index=0,
+        )
+        record = await service.load_pagination_record(message_id="42")
+
+        assert record is not None
+        first = record["embeds"][0]
+        second = record["embeds"][1]
+        assert first["embed"]["title"] == "Pagina attività"
+        assert second["embed"]["description"] == "Contenuto inattivi"
+        assert first["footer"]["service_name"] == "daily_activity_report"
+        assert second["footer"]["service_name"] == "inactivity_moderation"
+        assert second["footer"]["contributors"] == ["gpt-4o-mini"]
+
+    asyncio.run(_run())
+
+
+def test_daily_report_navigation_rehydrates_footer_meta_before_edit() -> None:
+    async def _run() -> None:
+        service, database, footer_service = _build_service()
+        await footer_service.set_version("9.9")
+        await footer_service.set_global_phrase("Pipeline footer centralizzata")
+        await footer_service.set_service_phrase("inactivity_moderation", "Moderazione inattivi")
+
+        activity_embed = discord.Embed(title="Pagina attività", description="Contenuto attività")
+        inactive_embed = discord.Embed(title="Pagina inattivi", description="Contenuto inattivi")
+        attach_footer_meta(activity_embed, service_name="daily_activity_report", used_local_processing=True)
+        attach_footer_meta(inactive_embed, service_name="inactivity_moderation", contributors=["gpt-4o-mini"], used_local_processing=False)
+
+        await service.persist_pagination_record(
+            message_id="100",
+            channel_id="7",
+            guild_id="9",
+            embeds=[activity_embed, inactive_embed],
+            metadata={"has_activity": True, "has_inactive": True},
+            current_index=0,
+        )
+
+        captured: dict[str, object] = {}
+
+        class _Response:
+            async def edit_message(self, *, embed: discord.Embed, view: object) -> None:
+                captured["embed"] = embed
+                captured["view"] = view
+
+        interaction = SimpleNamespace(
+            message=SimpleNamespace(id=100),
+            response=_Response(),
+        )
+
+        view = DailyReportPaginationView(service, current_index=0, total_pages=2)
+        await view._navigate(interaction, action="next")
+
+        edited_embed = captured["embed"]
+        assert isinstance(edited_embed, discord.Embed)
+        assert edited_embed.title == "Pagina inattivi"
+        assert edited_embed.description == "Contenuto inattivi"
+        assert database.pagination_state["100"]["current_index"] == 1
+
+        assert get_footer_meta(edited_embed) is None
+        assert edited_embed.footer.text == (
+            "Barcellometro 9.9 · Moderazione inattivi · Dati elaborati con gpt-4o-mini"
+        )
+
+    asyncio.run(_run())
+
+
+def test_daily_report_source_uses_footer_hydration_helper_without_manual_footer_bypass() -> None:
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
+
+    assert "hydrate_persisted_embed_with_footer(" in report_source
+    assert "extract_persistable_footer_context(" in report_source
+    assert ".set_footer(" not in report_source
+
+
 def test_daily_report_view_buttons_order_timeout_and_custom_ids_are_present() -> None:
-    report_source = Path("app/services/daily_activity_report.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
 
     start_idx = report_source.index('label="⏮️ INIZIO"')
     prev_idx = report_source.index('label="⬅️ INDIETRO"')
@@ -99,7 +227,7 @@ def test_daily_report_view_buttons_order_timeout_and_custom_ids_are_present() ->
 
 
 def test_daily_report_view_button_states_sync_logic_is_present() -> None:
-    report_source = Path("app/services/daily_activity_report.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
 
     assert "def _sync_button_states(self) -> None:" in report_source
     assert "is_first = self._current_index <= 0" in report_source
@@ -110,7 +238,7 @@ def test_daily_report_view_button_states_sync_logic_is_present() -> None:
 
 
 def test_daily_report_view_sync_is_called_at_init_and_after_navigation() -> None:
-    report_source = Path("app/services/daily_activity_report.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
 
     assert "self._sync_button_states()" in report_source
     assert "self._current_index = target_index" in report_source
@@ -118,7 +246,7 @@ def test_daily_report_view_sync_is_called_at_init_and_after_navigation() -> None
 
 
 def test_daily_report_uses_single_file_send_and_never_two_txt_attachments() -> None:
-    report_source = Path("app/services/daily_activity_report.py").read_text()
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
 
     assert "build_combined_activity_inactive_txt(" in report_source
     assert "channel.send(embed=report_embeds[0], view=view, file=txt_file)" in report_source
@@ -126,7 +254,7 @@ def test_daily_report_uses_single_file_send_and_never_two_txt_attachments() -> N
 
 
 def test_daily_report_pagination_persistence_db_methods_are_present() -> None:
-    database_source = Path("app/services/database.py").read_text()
+    database_source = Path("app/services/database.py").read_text(encoding="utf-8")
 
     assert "CREATE TABLE IF NOT EXISTS daily_report_pagination_state" in database_source
     assert "async def upsert_daily_report_pagination_state(" in database_source
@@ -135,8 +263,8 @@ def test_daily_report_pagination_persistence_db_methods_are_present() -> None:
 
 
 def test_inactive_embed_builder_and_single_send_flow_are_present() -> None:
-    inactive_source = Path("app/services/inactive_members_moderation.py").read_text()
-    report_source = Path("app/services/daily_activity_report.py").read_text()
+    inactive_source = Path("app/services/inactive_members_moderation.py").read_text(encoding="utf-8")
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
 
     assert "async def build_serverwide_inactive_embeds(" in inactive_source
     assert "-> tuple[list[discord.Embed], discord.File | None, InactivityActionsView | None]" in inactive_source

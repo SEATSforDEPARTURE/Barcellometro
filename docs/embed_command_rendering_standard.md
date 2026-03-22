@@ -118,6 +118,8 @@ Di conseguenza, i renderer locali non devono usare `embed.set_footer(...)` con s
 
 Per `/riassunto` questo requisito copre esplicitamente il path runtime completo di consegna: build dettagli, normalize/sanitize, `apply_standard_report_style(...)`, `finalize_embeds(...)`, `send_dm_or_followup(...)` ed eventuale fallback DM negato → followup ephemeral. Se `summary.ai_status.used_ai_output == True` e `used_display_model` è presente, tutte le pagine finali devono mantenere la terza parte `Dati elaborati con <used_display_model>` senza perderla durante split, retry o fallback.
 
+Gli embed persistiti e poi ricostruiti con `discord.Embed.from_dict(...)` devono sempre essere reidratati nel footer contract centralizzato prima di qualsiasi `edit_message(...)`, `send_message(...)` o `followup.send(...)`: non basta conservare il footer già renderizzato, vanno riattaccati metadata/footer context e, se necessario, rifinalizzata la pipeline standard.
+
 Semantica dei contributor/provider:
 
 - i comandi puramente informativi o configurativi (`status`, `show`, `list`, `set`, `reset`, relative action composte di configurazione, admin locale, ecc.) **non** mostrano mai la terza parte se non usano davvero strumenti esterni per elaborare dati;

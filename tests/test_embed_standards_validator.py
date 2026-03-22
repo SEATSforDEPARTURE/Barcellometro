@@ -1,9 +1,15 @@
 from pathlib import Path
+import ast
 import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from validate_embed_standards import validate_embed_standards
+from validate_embed_standards import (
+    REPO_ROOT,
+    ValidationReport,
+    _check_persisted_embed_hydration,
+    validate_embed_standards,
+)
 
 
 def test_embed_standards_validator_has_no_errors() -> None:
@@ -69,3 +75,33 @@ def test_greetings_layout_docs_and_renderer_reflect_final_visual_contract() -> N
 
     assert "label evento nel titolo dell'embed" in greetings_json
     assert "titolo dell'embed" in greetings_json
+
+
+def test_validator_flags_from_dict_embed_sent_without_footer_hydration() -> None:
+    source = '''
+async def broken(interaction, payload):
+    embed = discord.Embed.from_dict(payload)
+    await interaction.response.edit_message(embed=embed)
+'''
+    tree = ast.parse(source)
+    report = ValidationReport()
+
+    _check_persisted_embed_hydration(tree, REPO_ROOT / "app" / "example_broken.py", report)
+
+    assert len(report.errors) == 1
+    assert report.errors[0].rule == "persisted_embed_requires_footer_hydration"
+
+
+def test_validator_allows_from_dict_embed_when_hydrated_through_canonical_helper() -> None:
+    source = '''
+async def safe(interaction, payload):
+    embed = discord.Embed.from_dict(payload)
+    await hydrate_persisted_embed_with_footer(embed, footer_context={"service_name": "daily_activity_report"})
+    await interaction.response.edit_message(embed=embed)
+'''
+    tree = ast.parse(source)
+    report = ValidationReport()
+
+    _check_persisted_embed_hydration(tree, REPO_ROOT / "app" / "example_safe.py", report)
+
+    assert report.errors == []
