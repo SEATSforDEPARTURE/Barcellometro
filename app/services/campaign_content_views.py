@@ -4,7 +4,40 @@ from typing import Any
 
 import discord
 
+from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
 from app.shared.discord.component_notices import send_standard_component_notice
+
+
+def _fallback_campaign_footer_context(service: Any, *, service_type: str, metadata: dict[str, Any] | None) -> dict[str, Any]:
+    resolved_service_name = None
+    if hasattr(service, "_campaign_footer_service_name"):
+        resolved_service_name = service._campaign_footer_service_name(service_type)  # type: ignore[attr-defined]
+    if not resolved_service_name:
+        resolved_service_name = {
+            "NEWS": "campagne_notizie",
+            "WEATHER": "campagne_meteo",
+            "HOROSCOPE": "campagne_oroscopo",
+        }.get(str(service_type or "").upper(), "campagne_notizie")
+
+    contributors: list[str] = []
+    if hasattr(service, "_campaign_footer_contributors"):
+        contributors = list(service._campaign_footer_contributors(metadata))  # type: ignore[attr-defined]
+    elif isinstance(metadata, dict):
+        seen: set[str] = set()
+        for source in metadata.get("used_sources") or metadata.get("configured_sources") or []:
+            token = str(source or "").strip()
+            if token and token not in seen:
+                contributors.append(token)
+                seen.add(token)
+        model = str(metadata.get("used_model") or metadata.get("ai_model_used") or "").strip()
+        if model and model not in {"unknown"} and model not in seen:
+            contributors.append(model)
+
+    return {
+        "service_name": resolved_service_name,
+        "contributors": contributors,
+        "used_local_processing": not contributors,
+    }
 
 
 class PageJumpButton(discord.ui.Button["BaseCampaignNavigatorView"]):
@@ -66,13 +99,23 @@ class BaseCampaignNavigatorView(discord.ui.View):
         self._sync_controls()
         embed_payload = self._embeds[self._current_index]
         if hasattr(self._service, "_hydrate_stored_campaign_embed"):
-            embed = self._service._hydrate_stored_campaign_embed(  # type: ignore[attr-defined]
+            embed = await self._service._hydrate_stored_campaign_embed(  # type: ignore[attr-defined]
                 service_type=self._service_type,
                 embed_payload=embed_payload,
                 metadata=self._metadata,
             )
         else:
             embed = discord.Embed.from_dict(embed_payload)
+            footer_context = _fallback_campaign_footer_context(
+                self._service,
+                service_type=self._service_type,
+                metadata=self._metadata,
+            )
+            await hydrate_persisted_embed_with_footer(
+                embed,
+                footer_context=footer_context,
+                default_service_name=str(footer_context.get("service_name") or "campagne_notizie"),
+            )
         await interaction.response.edit_message(embed=embed, view=self)
 
 

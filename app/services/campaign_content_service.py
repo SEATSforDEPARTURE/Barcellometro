@@ -27,6 +27,7 @@ from app.services.campaign_content_views import BaseCampaignNavigatorView, Persi
 from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.footer import attach_footer_meta_to_all
+from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
 from app.shared.discord.component_notices import send_standard_component_notice
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import calculate_next_run_after_send
@@ -363,7 +364,7 @@ class CampaignContentService:
             current_index=index,
             timeout=600,
         )
-        embed = self._hydrate_stored_campaign_embed(
+        embed = await self._hydrate_stored_campaign_embed(
             service_type=service_type,
             embed_payload=embeds[index],
             metadata=metadata if isinstance(metadata, dict) else None,
@@ -385,7 +386,7 @@ class CampaignContentService:
         metadata = record.get("metadata", {})
         page_map = metadata.get("page_map") if isinstance(metadata, dict) else []
         view = PersistentCampaignLauncherView(self, service_type=record.get("service_type") or "NEWS", total_pages=len(embeds), page_map=page_map if isinstance(page_map, list) else [])
-        embed = self._hydrate_stored_campaign_embed(
+        embed = await self._hydrate_stored_campaign_embed(
             service_type=str(record.get("service_type") or "NEWS"),
             embed_payload=embeds[index],
             metadata=metadata if isinstance(metadata, dict) else None,
@@ -457,7 +458,7 @@ class CampaignContentService:
             contributors.append(model)
         return contributors
 
-    def _hydrate_stored_campaign_embed(
+    async def _hydrate_stored_campaign_embed(
         self,
         *,
         service_type: str,
@@ -466,11 +467,14 @@ class CampaignContentService:
     ) -> discord.Embed:
         embed = discord.Embed.from_dict(embed_payload if isinstance(embed_payload, dict) else {})
         contributors = self._campaign_footer_contributors(metadata)
-        attach_footer_meta(
+        await hydrate_persisted_embed_with_footer(
             embed,
-            service_name=self._campaign_footer_service_name(service_type),
-            contributors=contributors,
-            used_local_processing=not contributors,
+            footer_context={
+                "service_name": self._campaign_footer_service_name(service_type),
+                "contributors": contributors,
+                "used_local_processing": not contributors,
+            },
+            default_service_name=self._campaign_footer_service_name(service_type),
         )
         return embed
 

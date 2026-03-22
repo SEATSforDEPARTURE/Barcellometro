@@ -19,6 +19,7 @@ from app.services.footer import (
     normalize_footer_thumbnail,
 )
 from app.shared.discord.embed_limits import normalize_embeds_for_discord
+from app.services.discord_embed_utils import extract_persistable_footer_context, hydrate_persisted_embed_with_footer
 from app.shared.discord.embed_limits import _clone_embed_shell
 from app.shared.discord.footer_pipeline import finalize_embeds
 
@@ -102,6 +103,32 @@ def test_clone_embed_shell_keeps_footer_meta_without_copying_rendered_footer_tex
     assert meta.contributors == ["gpt-4o-mini"]
     assert getattr(cloned.footer, "text", None) in (None, "")
 
+
+
+def test_hydrate_persisted_embed_with_footer_reapplies_metadata_after_from_dict() -> None:
+    async def _run() -> None:
+        source = discord.Embed(title="persisted", description="payload")
+        attach_footer_meta(source, service_name="daily_activity_report", contributors=["gpt-4o-mini"], used_local_processing=False)
+        persisted = source.to_dict()
+        footer_context = extract_persistable_footer_context(source)
+        reloaded = discord.Embed.from_dict(persisted)
+
+        await hydrate_persisted_embed_with_footer(
+            reloaded,
+            footer_context=footer_context,
+            footer_service=None,
+            default_service_name="daily_activity_report",
+            finalize=False,
+        )
+
+        meta = get_footer_meta(reloaded)
+        assert meta is not None
+        assert meta.service_name == "daily_activity_report"
+        assert meta.contributors == ["gpt-4o-mini"]
+        assert reloaded.title == "persisted"
+        assert reloaded.description == "payload"
+
+    asyncio.run(_run())
 
 def test_footer_service_apply_sets_footer_text() -> None:
     async def _run() -> None:

@@ -31,6 +31,8 @@ FOOTER_ATTACHMENT_HELPERS = {
     "attach_minimal_footer",
     "copy_footer_meta",
     "build_report_cover_embed",
+    "hydrate_persisted_embed_with_footer",
+    "hydrate_persisted_embeds_with_footer",
     "apply_standard_report_style",
     "_apply_campaign_footer",
 }
@@ -51,6 +53,8 @@ CANONICAL_HELPER_FUNCTIONS = STANDARD_COMMAND_HELPERS | {
     "attach_footer_meta_to_all",
     "attach_minimal_footer",
     "copy_footer_meta",
+    "hydrate_persisted_embed_with_footer",
+    "hydrate_persisted_embeds_with_footer",
     "finalize_embed",
     "finalize_embeds",
 }
@@ -254,6 +258,79 @@ def _check_manual_set_footer_calls(tree: ast.AST, path: Path, report: Validation
             node.lineno,
             "Manual embed.set_footer(...) bypasses the centralized footer contract; use footer metadata/helpers instead.",
         )
+
+_RISKY_PERSISTED_EMBED_TARGETS = {
+    ("interaction", "response", "edit_message"),
+    ("interaction", "response", "send_message"),
+    ("interaction", "followup", "send"),
+}
+
+
+def _is_discord_embed_from_dict_call(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Call) and _attribute_chain(node.func) == ("discord", "Embed", "from_dict")
+
+
+def _collect_from_dict_embed_names(node: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Assign) and _is_discord_embed_from_dict_call(child.value):
+            for target in child.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name) and _is_discord_embed_from_dict_call(child.value):
+            names.add(child.target.id)
+    return names
+
+
+def _expr_contains_from_dict_embed(node: ast.AST | None, embed_names: set[str]) -> bool:
+    if node is None:
+        return False
+    if _is_discord_embed_from_dict_call(node):
+        return True
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id in embed_names:
+            return True
+        if _is_discord_embed_from_dict_call(child):
+            return True
+    return False
+
+
+def _check_persisted_embed_hydration(tree: ast.AST, file_path: Path, report: ValidationReport) -> None:
+    file_rel = file_path.relative_to(REPO_ROOT)
+    if file_rel.as_posix() in CANONICAL_HELPER_FILES:
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        embed_names = _collect_from_dict_embed_names(node)
+        if not embed_names and not any(_is_discord_embed_from_dict_call(child.value) for child in ast.walk(node) if isinstance(child, ast.Expr) and isinstance(child.value, ast.Call)):
+            continue
+        if _function_contains_call_names(node, {
+            "hydrate_persisted_embed_with_footer",
+            "hydrate_persisted_embeds_with_footer",
+            "attach_footer_meta",
+            "attach_footer_meta_to_all",
+            "finalize_embed",
+            "finalize_embeds",
+        }):
+            continue
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            chain = _attribute_chain(child.func)
+            if chain not in _RISKY_PERSISTED_EMBED_TARGETS:
+                continue
+            risky_value = _keyword_value(child, "embed") or _keyword_value(child, "embeds")
+            if not _expr_contains_from_dict_embed(risky_value, embed_names):
+                continue
+            report.add(
+                "persisted_embed_requires_footer_hydration",
+                file_rel,
+                child.lineno,
+                "Embeds rebuilt via discord.Embed.from_dict(...) must be rehydrated through the footer contract before edit/send.",
+            )
+
+
 
 
 def _literal_int(node: ast.AST | None) -> int | None:
@@ -880,6 +957,7 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _check_manual_subtitle_concatenation(tree, path, report)
         _check_legacy_footer_service_wiring(tree, path, report)
         _check_manual_set_footer_calls(tree, path, report)
+        _check_persisted_embed_hydration(tree, path, report)
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)
