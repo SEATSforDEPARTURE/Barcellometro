@@ -24,7 +24,7 @@ if "httpx" not in sys.modules:
     httpx_stub.AsyncClient = _AsyncClient
     sys.modules["httpx"] = httpx_stub
 
-from app.plugins.commands_modular.admin import _chunk_status_blocks, _service_section, _split_long_text
+from app.shared.discord.embed_status_helpers import _chunk_status_blocks, _service_section, _split_long_text
 
 
 def test_footer_status_groups_campaign_sections_separately() -> None:
@@ -37,7 +37,7 @@ def test_footer_status_groups_campaign_sections_separately() -> None:
 
 
 def test_footer_status_source_uses_variants_and_excludes_legacy_campagne() -> None:
-    source = Path("app/plugins/commands_modular/admin.py").read_text()
+    source = Path("app/plugins/commands_modular/embed.py").read_text()
     assert "get_all_service_footer_variants" in source
     assert "Editorial campaigns" in source
     assert "Prompt campaigns" in source
