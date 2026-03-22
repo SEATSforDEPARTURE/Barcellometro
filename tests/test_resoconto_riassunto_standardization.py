@@ -137,10 +137,12 @@ def test_resocontocanale_top_level_callbacks_route_to_full_summary_helper(comman
         )
         channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
         server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        full_mock = AsyncMock()
+        aura_mock = AsyncMock()
         old_full = resoconto_module._run_channel_summary_window
         old_aura = resoconto_module._run_channel_aura_window
-        resoconto_module._run_channel_summary_window = AsyncMock()
-        resoconto_module._run_channel_aura_window = AsyncMock()
+        resoconto_module._run_channel_summary_window = full_mock
+        resoconto_module._run_channel_aura_window = aura_mock
         try:
             register_resoconto(channel_group, server_group, ctx)
             callback = _get_command_callback(channel_group, command_name)
@@ -150,8 +152,8 @@ def test_resocontocanale_top_level_callbacks_route_to_full_summary_helper(comman
             resoconto_module._run_channel_summary_window = old_full
             resoconto_module._run_channel_aura_window = old_aura
 
-        resoconto_module._run_channel_summary_window.assert_awaited_once()
-        resoconto_module._run_channel_aura_window.assert_not_awaited()
+        full_mock.assert_awaited_once()
+        aura_mock.assert_not_awaited()
 
     asyncio.run(_run())
 
@@ -178,10 +180,12 @@ def test_resocontocanale_aura_subcommands_route_to_aura_helper(command_name: str
         )
         channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
         server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        full_mock = AsyncMock()
+        aura_mock = AsyncMock()
         old_full = resoconto_module._run_channel_summary_window
         old_aura = resoconto_module._run_channel_aura_window
-        resoconto_module._run_channel_summary_window = AsyncMock()
-        resoconto_module._run_channel_aura_window = AsyncMock()
+        resoconto_module._run_channel_summary_window = full_mock
+        resoconto_module._run_channel_aura_window = aura_mock
         try:
             register_resoconto(channel_group, server_group, ctx)
             aura_group = _get_subgroup(channel_group, "aura")
@@ -192,8 +196,8 @@ def test_resocontocanale_aura_subcommands_route_to_aura_helper(command_name: str
             resoconto_module._run_channel_summary_window = old_full
             resoconto_module._run_channel_aura_window = old_aura
 
-        resoconto_module._run_channel_aura_window.assert_awaited_once()
-        resoconto_module._run_channel_summary_window.assert_not_awaited()
+        aura_mock.assert_awaited_once()
+        full_mock.assert_not_awaited()
 
     asyncio.run(_run())
 
@@ -220,10 +224,12 @@ def test_resocontoserver_top_level_callbacks_route_to_full_summary_helper(comman
         )
         channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
         server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        full_mock = AsyncMock()
+        aura_mock = AsyncMock()
         old_full = resoconto_module._run_server_summary_window
         old_aura = resoconto_module._run_server_aura_window
-        resoconto_module._run_server_summary_window = AsyncMock()
-        resoconto_module._run_server_aura_window = AsyncMock()
+        resoconto_module._run_server_summary_window = full_mock
+        resoconto_module._run_server_aura_window = aura_mock
         try:
             register_resoconto(channel_group, server_group, ctx)
             callback = _get_command_callback(server_group, command_name)
@@ -233,8 +239,8 @@ def test_resocontoserver_top_level_callbacks_route_to_full_summary_helper(comman
             resoconto_module._run_server_summary_window = old_full
             resoconto_module._run_server_aura_window = old_aura
 
-        resoconto_module._run_server_summary_window.assert_awaited_once()
-        resoconto_module._run_server_aura_window.assert_not_awaited()
+        full_mock.assert_awaited_once()
+        aura_mock.assert_not_awaited()
 
     asyncio.run(_run())
 
@@ -261,10 +267,12 @@ def test_resocontoserver_aura_subcommands_route_to_aura_helper(command_name: str
         )
         channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
         server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        full_mock = AsyncMock()
+        aura_mock = AsyncMock()
         old_full = resoconto_module._run_server_summary_window
         old_aura = resoconto_module._run_server_aura_window
-        resoconto_module._run_server_summary_window = AsyncMock()
-        resoconto_module._run_server_aura_window = AsyncMock()
+        resoconto_module._run_server_summary_window = full_mock
+        resoconto_module._run_server_aura_window = aura_mock
         try:
             register_resoconto(channel_group, server_group, ctx)
             aura_group = _get_subgroup(server_group, "aura")
@@ -275,8 +283,8 @@ def test_resocontoserver_aura_subcommands_route_to_aura_helper(command_name: str
             resoconto_module._run_server_summary_window = old_full
             resoconto_module._run_server_aura_window = old_aura
 
-        resoconto_module._run_server_aura_window.assert_awaited_once()
-        resoconto_module._run_server_summary_window.assert_not_awaited()
+        aura_mock.assert_awaited_once()
+        full_mock.assert_not_awaited()
 
     asyncio.run(_run())
 
