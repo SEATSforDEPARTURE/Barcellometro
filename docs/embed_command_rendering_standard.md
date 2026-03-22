@@ -180,6 +180,12 @@ L'ordine di precedenza finale per l'icona del footer è:
 
 La frase legacy `Dati elaborati` + ` in loco` è abolita in tutto il progetto, così come la coda `e fallback` + ` locale`: non devono più comparire in codice, test, documentazione, configurazioni versionate, override locali o footer renderizzati. Questo vale anche per eventuali campi config come `footer`, `fallback_footer` o template equivalenti. Per output non-AI non si mostra alcuna frase tecnica finale; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare. Il flag `used_local_processing` resta metadata interno e non aggiunge testo visibile al footer.
 
+## `/embed footer status` amministrativo
+
+Lo status del footer usa una vista amministrativa compatta e navigabile: la prima pagina mostra una overview sintetica, mentre le pagine successive sono raggruppate per famiglie di servizi (`Standard services`, `Editorial campaigns`, `Prompt campaigns`, `Timer campaigns`, più eventuali gruppi coerenti aggiuntivi). La navigazione avviene sempre sullo stesso messaggio tramite bottoni `INIZIO`, `INDIETRO` e `AVANTI`, senza inviare raffiche di embed scollegati.
+
+I blocchi per servizio devono restare leggibili: footer effettivo, sorgente effettiva (`service` / `global` / `runtime` / `fallback`), conteggio varianti e sintesi compatta delle varianti; i dettagli tecnici grezzi (`label`, alias duplicati, dump piatti di `key` / `origin` / `updated`) non devono dominare la UI.
+
 ## Quali input entrano nel sottotitolo
 
 Entrano nel sottotitolo gli input che cambiano l'identità semantica della richiesta, per esempio:

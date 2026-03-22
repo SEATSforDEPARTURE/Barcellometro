@@ -131,6 +131,8 @@ class FooterStatusServiceEntry:
     phrase: str | None
     phrase_origin: str
     persisted_variants: list[ServiceFooterVariant]
+    service_phrase_override: bool = False
+    service_thumbnail_override: bool = False
     persisted_profile: ServiceFooterProfile | None = None
     inferred_profile: ServiceFooterProfile | None = None
     rendered_footer: str | None = None
@@ -140,6 +142,7 @@ class FooterStatusServiceEntry:
 class FooterStatusSnapshot:
     enabled: bool
     global_phrase: str | None
+    global_thumbnail: str | None
     services: list[FooterStatusServiceEntry]
 
 
@@ -720,7 +723,9 @@ class FooterService:
     ) -> FooterStatusSnapshot:
         enabled = await self.is_enabled()
         global_phrase = await self.get_global_phrase()
+        global_thumbnail = await self.get_global_thumbnail()
         service_phrases = await self.get_service_phrases()
+        service_thumbnails = await self.get_service_thumbnails()
         known_services = await self.get_known_services()
         service_sources = await self.get_known_service_sources()
         all_persisted_variants = await self.get_all_persisted_service_footer_variants()
@@ -766,6 +771,8 @@ class FooterService:
                     phrase=phrase,
                     phrase_origin=phrase_origin,
                     persisted_variants=persisted_variants,
+                    service_phrase_override=service_name in service_phrases,
+                    service_thumbnail_override=service_name in service_thumbnails,
                     persisted_profile=persisted_profile,
                     inferred_profile=inferred_profile,
                     rendered_footer=rendered_footer,
@@ -775,6 +782,7 @@ class FooterService:
         return FooterStatusSnapshot(
             enabled=enabled,
             global_phrase=global_phrase,
+            global_thumbnail=global_thumbnail,
             services=entries,
         )
 

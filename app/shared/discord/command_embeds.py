@@ -791,6 +791,7 @@ async def send_command_embeds(
     ephemeral: bool = True,
     content: str | None = None,
     files: list[discord.File] | None = None,
+    view: discord.ui.View | None = None,
 ) -> None:
     embed_list = list(embeds)
     if not embed_list:
@@ -815,6 +816,8 @@ async def send_command_embeds(
         kwargs["embeds"] = first_batch
     if files:
         kwargs["files"] = files
+    if view is not None:
+        kwargs["view"] = view
     if interaction.response.is_done():
         await interaction.followup.send(**kwargs)
     else:
