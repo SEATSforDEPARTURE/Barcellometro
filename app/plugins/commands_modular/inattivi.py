@@ -150,7 +150,6 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
             sections=sections,
             kind=kind,
             footer_service=ctx.footer,
-            author_service=ctx.author,
             files=files,
         )
 
@@ -167,9 +166,8 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
             lines=[("entries", len(lines))],
             sections=[CommandEmbedSection(title=title, lines=lines or ["No results."])],
             footer_service=ctx.footer,
-            author_service=ctx.author,
         )
-        await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=[txt_file], footer_service=ctx.footer, author_service=ctx.author, default_service_name="inattivi")
+        await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=[txt_file], footer_service=ctx.footer, author_service=getattr(ctx, "author", None), default_service_name="inattivi")
 
     @inactivity_group.command(name="on", description="Enable inactivity moderation.")
     async def inactivity_on(interaction: discord.Interaction) -> None:
