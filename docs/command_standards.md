@@ -87,6 +87,19 @@ La scelta tra famiglie di action segue questa regola:
 
 Questa distinzione vale anche per action composte come `config_*`, `template_*`, `entry_*`, `schedule_*` e simili.
 
+### 4.1 Namespace amministrativi canonici
+
+I namespace amministrativi fanno parte del contratto utente e vanno documentati come tali.
+
+Regole obbligatorie:
+
+- `/embed footer ...` è il namespace canonico per amministrare il dominio footer centralizzato;
+- `/embed author ...` è il namespace canonico per amministrare il dominio author centralizzato;
+- `/admin footer ...` **non** deve essere presentato come standard corrente, comando canonico o namespace raccomandato;
+- eventuali riferimenti a percorsi legacy o wrapper interni devono essere descritti solo come compatibilità tecnica e mai come superficie utente preferita.
+
+Questa regola non contraddice i command standards esistenti: `footer` e `author` restano domini amministrativi che usano le stesse action canoniche `on/off/status`, `template_*_set/show/reset` e la stessa semantica generale di override.
+
 ## 5. Regole sui parametri
 
 ### 5.1 Regola generale
@@ -109,15 +122,26 @@ Per i comandi di configurazione template/override, `set` deve inoltre supportare
 - `list` e `status` non devono richiedere valori di configurazione quando stanno solo osservando lo stato;
 - `reset` non deve diventare un alias implicito di `set default`.
 
+### 5.4 Domini centralizzati `footer` e `author`
+
+Per il namespace `/embed` valgono anche queste regole specifiche:
+
+- `footer` e `author` sono domini distinti ma centralizzati;
+- `footer` controlla brand/versione/frase/contributor tecnici del footer renderizzato;
+- `author` controlla intestazione visuale del servizio nell'embed;
+- `thumbnail` author e `thumbnail` footer sono configurazioni separate e non devono essere dedotte una dall'altra;
+- i comandi `template_global_set` e `template_service_set` possono aggiornare in modo parziale i campi del proprio dominio (`phrase`, `thumbnail`, altri metadata previsti) senza resettare implicitamente quelli non passati;
+- `reset` deve sempre riportare al fallback del dominio, non a un valore arbitrario persistito o a un ultimo valore memoizzato fuori contratto.
+
 ## 6. Output standard
 
 Tutti i comandi devono usare il rendering standard centralizzato del progetto.
 
 Regole obbligatorie:
 
-- usare il rendering standard centralizzato per response, embed e footer;
+- usare il rendering standard centralizzato per response, embed, footer e author quando previsti dal dominio;
 - usare gli embed standard dove previsti dalle linee guida del progetto;
-- applicare sempre il footer centrale obbligatorio;
+- applicare sempre la pipeline centrale obbligatoria del dominio coinvolto;
 - evitare output raw non standard salvo eccezioni esplicitamente documentate.
 
 Per i dettagli operativi del rendering si applica `docs/embed_command_rendering_standard.md`.
@@ -133,7 +157,25 @@ Regole obbligatorie:
 - il database non deve duplicare inutilmente i default già determinabili dal dominio;
 - `reset` deve normalmente tradursi nella rimozione dell'override persistito, non nella scrittura ridondante del valore di default.
 
-## 7.1 Canonical timeline per GREETINGS / INGRESSI & USCITE
+### 7.1 Override e fallback per domini centralizzati
+
+Per `footer` e `author` la cascata standard di risoluzione è:
+
+1. override di servizio;
+2. configurazione globale del dominio;
+3. fallback del dominio.
+
+Regole obbligatorie:
+
+- la precedenza `servizio > globale > fallback` deve valere per il testo e per la thumbnail del dominio, salvo override runtime espliciti del renderer già documentati nel contratto del dominio;
+- il fallback del footer appartiene al dominio footer centralizzato;
+- il fallback author appartiene al dominio author centralizzato e deve restare `emoji servizio + nome servizio` quando non esistono override o template globali;
+- un `reset` di servizio rimuove l'override di servizio e lascia riespandere il globale o il fallback;
+- un `reset` globale rimuove il template globale e lascia riespandere il fallback del dominio.
+
+Se un renderer imposta un author custom per ragioni forti di dominio, questa scelta deve essere documentata come eccezione esplicita al flusso standard e non può ridefinire silenziosamente la gerarchia generale di precedenza.
+
+## 7.2 Canonical timeline per GREETINGS / INGRESSI & USCITE
 
 Per il dominio GREETINGS la persistenza segue una separazione normativa esplicita:
 
@@ -158,12 +200,14 @@ Regole obbligatorie:
 Sono consentite eccezioni mirate quando la semantica resta chiara e coerente, in particolare:
 
 - reset di stato runtime;
-- reset di record target-specifici.
+- reset di record target-specifici;
+- renderer con author custom imposto per forte ragione di dominio già documentata.
 
 Anche in questi casi:
 
 - `reset` deve continuare a significare ripristino del comportamento standard per quel target;
-- `remove` deve continuare a significare eliminazione di un'entità distinta.
+- `remove` deve continuare a significare eliminazione di un'entità distinta;
+- le eccezioni di rendering non devono far decadere la regola generale di precedenza né trasformare `/admin footer` in namespace canonico.
 
 ## 9. Criteri editoriali per la documentazione
 
@@ -172,4 +216,5 @@ Chi aggiorna la documentazione dei comandi deve rispettare queste regole:
 - usare soltanto il vocabolario canonico definito qui;
 - non introdurre action speculative o sinonimi non adottati dal repository;
 - descrivere le action composte come estensioni di quelle canoniche, non come verbi nuovi;
-- allineare eventuali esempi, tabelle e classificazioni al comportamento reale del progetto.
+- allineare eventuali esempi, tabelle e classificazioni al comportamento reale del progetto;
+- per i domini `footer` e `author`, usare `/embed ...` come riferimento canonico e trattare eventuali residui admin solo come dettaglio storico o tecnico quando indispensabile.
