@@ -9,7 +9,16 @@ from app.services.footer import copy_footer_meta
 
 logger = logging.getLogger(__name__)
 
-MAX_EMBED_CHARS: int = 5800
+DISCORD_MAX_EMBED_TOTAL_CHARS: int = 6000
+DISCORD_MAX_EMBED_TITLE: int = 256
+DISCORD_MAX_EMBED_DESCRIPTION: int = 4096
+DISCORD_MAX_FIELD_NAME: int = 256
+DISCORD_MAX_FIELD_VALUE: int = 1024
+DISCORD_MAX_FIELDS: int = 25
+DISCORD_MAX_FOOTER_TEXT: int = 2048
+DISCORD_MAX_AUTHOR_NAME: int = 256
+DISCORD_MAX_EMBEDS_PER_MESSAGE: int = 10
+MAX_EMBED_CHARS: int = 5600
 RETRY_MAX_EMBED_CHARS: int = 5200
 _MASKED_LINK_TOKEN_PATTERN = r"\*\*\[[^\]]+\]\([^)]+\)\*\*|\[[^\]]+\]\([^)]+\)"
 _MASKED_LINK_RE = re.compile(rf"(?:{_MASKED_LINK_TOKEN_PATTERN})")
@@ -224,10 +233,51 @@ def _clone_embed_shell(source: discord.Embed, *, title: str | None = None) -> di
     new_embed = discord.Embed(
         title=title if title is not None else source.title,
         description=source.description,
+        url=source.url,
         color=source.color,
     )
     if source.author:
-        new_embed.set_author(name=source.author.name or "")
+        new_embed.set_author(
+            name=source.author.name or "",
+            url=source.author.url,
+            icon_url=source.author.icon_url,
+        )
+    if source.thumbnail and source.thumbnail.url:
+        new_embed.set_thumbnail(url=source.thumbnail.url)
+    if source.image and source.image.url:
+        new_embed.set_image(url=source.image.url)
+    copy_footer_meta(source, new_embed)
+    return new_embed
+
+
+def _build_embed_shell(
+    source: discord.Embed,
+    *,
+    title: str | None,
+    description: str | None = None,
+    preserve_rendered_footer: bool = False,
+) -> discord.Embed:
+    new_embed = discord.Embed(
+        title=title,
+        description=description,
+        url=source.url,
+        color=source.color,
+    )
+    if source.author and source.author.name:
+        new_embed.set_author(
+            name=_truncate_text(source.author.name, DISCORD_MAX_AUTHOR_NAME),
+            url=source.author.url,
+            icon_url=source.author.icon_url,
+        )
+    if source.thumbnail and source.thumbnail.url:
+        new_embed.set_thumbnail(url=source.thumbnail.url)
+    if source.image and source.image.url:
+        new_embed.set_image(url=source.image.url)
+    if preserve_rendered_footer and source.footer and source.footer.text:
+        new_embed.set_footer(
+            text=_truncate_text(source.footer.text, DISCORD_MAX_FOOTER_TEXT),
+            icon_url=source.footer.icon_url,
+        )
     copy_footer_meta(source, new_embed)
     return new_embed
 
@@ -243,6 +293,115 @@ def _estimate_embed_size(embed: discord.Embed) -> int:
 
 def estimate_embeds_total_size(embeds: list[discord.Embed]) -> int:
     return sum(_estimate_embed_size(embed) for embed in embeds)
+
+
+def is_valid_embed(
+    embed: discord.Embed,
+    *,
+    max_chars: int | None = None,
+) -> bool:
+    if max_chars is None:
+        max_chars = MAX_EMBED_CHARS
+    if len(embed.title or "") > DISCORD_MAX_EMBED_TITLE:
+        return False
+    if len(embed.description or "") > DISCORD_MAX_EMBED_DESCRIPTION:
+        return False
+    if len(embed.fields) > DISCORD_MAX_FIELDS:
+        return False
+    if len(embed.footer.text or "") > DISCORD_MAX_FOOTER_TEXT:
+        return False
+    if len(embed.author.name or "") > DISCORD_MAX_AUTHOR_NAME:
+        return False
+    for field in embed.fields:
+        if len(field.name or "") > DISCORD_MAX_FIELD_NAME:
+            return False
+        if len(field.value or "") > DISCORD_MAX_FIELD_VALUE:
+            return False
+    return _estimate_embed_size(embed) <= max_chars
+
+
+def _split_description_chunks(description: str | None, *, limit: int = DISCORD_MAX_EMBED_DESCRIPTION) -> list[str]:
+    text = str(description or "").strip()
+    if not text:
+        return []
+    return split_markdown_lines_into_field_values(
+        text.splitlines() or [text],
+        limit=limit,
+        continuation_prefix="",
+    )
+
+
+def _truncate_field_name(name: str | None, *, continuation: bool = False) -> str:
+    suffix = " (cont.)" if continuation else ""
+    budget = DISCORD_MAX_FIELD_NAME - len(suffix)
+    truncated = _truncate_text(str(name or ""), budget) or "…"
+    return f"{truncated}{suffix}"
+
+
+def _sanitize_textual_limits(embed: discord.Embed) -> discord.Embed:
+    clone = _build_embed_shell(
+        embed,
+        title=_truncate_text(embed.title, DISCORD_MAX_EMBED_TITLE) or None,
+        description=_truncate_text(embed.description, DISCORD_MAX_EMBED_DESCRIPTION) or None,
+        preserve_rendered_footer=True,
+    )
+    for field in embed.fields[:DISCORD_MAX_FIELDS]:
+        clone.add_field(
+            name=_truncate_text(field.name, DISCORD_MAX_FIELD_NAME) or "…",
+            value=_truncate_text(field.value, DISCORD_MAX_FIELD_VALUE) or "…",
+            inline=field.inline,
+        )
+    return clone
+
+
+def _normalize_single_embed(
+    embed: discord.Embed,
+    *,
+    max_chars: int,
+    preserve_rendered_footer: bool = False,
+) -> list[discord.Embed]:
+    safe_title = _truncate_text(embed.title, DISCORD_MAX_EMBED_TITLE) or None
+    description_chunks = _split_description_chunks(embed.description, limit=DISCORD_MAX_EMBED_DESCRIPTION)
+    shell = _build_embed_shell(embed, title=safe_title, description=None, preserve_rendered_footer=preserve_rendered_footer)
+    shell_size = _estimate_embed_size(shell)
+    description_budget = max(1, min(DISCORD_MAX_EMBED_DESCRIPTION, max_chars - shell_size))
+    if description_budget < DISCORD_MAX_EMBED_DESCRIPTION and embed.description:
+        description_chunks = _split_description_chunks(embed.description, limit=description_budget)
+
+    output: list[discord.Embed] = []
+    current = _build_embed_shell(embed, title=safe_title, description=None, preserve_rendered_footer=preserve_rendered_footer)
+    if len(description_chunks) > 1:
+        for chunk in description_chunks[:-1]:
+            output.append(
+                _build_embed_shell(
+                    embed,
+                    title=safe_title,
+                    description=chunk,
+                    preserve_rendered_footer=preserve_rendered_footer,
+                )
+            )
+        current.description = description_chunks[-1]
+    elif description_chunks:
+        current.description = description_chunks[0]
+
+    for field in embed.fields:
+        field_chunks = _split_field_chunks(field.value or "", DISCORD_MAX_FIELD_VALUE)
+        for idx, chunk in enumerate(field_chunks):
+            field_name = _truncate_field_name(field.name, continuation=idx > 0)
+            candidate = discord.Embed.from_dict(current.to_dict())
+            copy_footer_meta(current, candidate)
+            candidate.add_field(name=field_name, value=_truncate_text(chunk, DISCORD_MAX_FIELD_VALUE), inline=field.inline)
+            if len(candidate.fields) > DISCORD_MAX_FIELDS or _estimate_embed_size(candidate) > max_chars:
+                if current.description or current.fields or not output:
+                    output.append(current)
+                current = _build_embed_shell(embed, title=safe_title, description=None, preserve_rendered_footer=preserve_rendered_footer)
+                current.add_field(name=field_name, value=_truncate_text(chunk, DISCORD_MAX_FIELD_VALUE), inline=field.inline)
+            else:
+                current = candidate
+
+    if current.description or current.fields or not output:
+        output.append(current)
+    return [_sanitize_textual_limits(item) if not is_valid_embed(item, max_chars=max_chars) else item for item in output]
 
 
 def _split_embed_fields(embed: discord.Embed, *, max_chars: int) -> list[discord.Embed]:
@@ -273,7 +432,16 @@ def _split_embed_fields(embed: discord.Embed, *, max_chars: int) -> list[discord
 def _ensure_embed_limits(embeds: list[discord.Embed], *, max_chars: int) -> list[discord.Embed]:
     output: list[discord.Embed] = []
     for embed in embeds:
-        output.extend(_split_embed_fields(embed, max_chars=max_chars))
+        preserve_rendered_footer = bool(getattr(embed.footer, "text", None))
+        normalized = _normalize_single_embed(
+            embed,
+            max_chars=max_chars,
+            preserve_rendered_footer=preserve_rendered_footer,
+        )
+        if any(not is_valid_embed(item, max_chars=max_chars) for item in normalized):
+            output.extend(_split_embed_fields(embed, max_chars=max_chars))
+            continue
+        output.extend(normalized)
     return output
 
 
@@ -285,6 +453,31 @@ def normalize_embeds_for_discord(
     if max_chars is None:
         max_chars = MAX_EMBED_CHARS
     normalized = _ensure_embed_limits(embeds, max_chars=max_chars)
-    if any(_estimate_embed_size(embed) >= 6000 for embed in normalized):
+    if any(_estimate_embed_size(embed) >= DISCORD_MAX_EMBED_TOTAL_CHARS for embed in normalized):
         normalized = _ensure_embed_limits(normalized, max_chars=min(max_chars, 5600))
     return normalized
+
+
+def chunk_embeds_for_message_batches(
+    embeds: list[discord.Embed],
+    *,
+    max_embeds: int = DISCORD_MAX_EMBEDS_PER_MESSAGE,
+    max_total_chars: int = MAX_EMBED_CHARS,
+) -> list[list[discord.Embed]]:
+    batches: list[list[discord.Embed]] = []
+    current: list[discord.Embed] = []
+    current_total = 0
+    for embed in embeds:
+        embed_size = _estimate_embed_size(embed)
+        should_split = bool(current) and (
+            len(current) >= max_embeds or current_total + embed_size > max_total_chars
+        )
+        if should_split:
+            batches.append(current)
+            current = []
+            current_total = 0
+        current.append(embed)
+        current_total += embed_size
+    if current:
+        batches.append(current)
+    return batches

@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 import json
+import logging
 import re
 from typing import Any, Literal
 
@@ -11,7 +12,10 @@ import discord
 
 from app.plugins.commands_modular.time_windows import format_italian_ts, format_rolling_window_label, parse_italian_datetime
 from app.services.footer import FooterService, attach_footer_meta
+from app.shared.discord.embed_limits import MAX_EMBED_CHARS, chunk_embeds_for_message_batches, is_valid_embed, normalize_embeds_for_discord
 from app.shared.discord.footer_pipeline import finalize_embeds
+
+logger = logging.getLogger(__name__)
 
 CommandKind = Literal["info", "success", "warning", "error"]
 FooterMode = Literal["minimal", "meta", "none"]
@@ -793,7 +797,13 @@ async def send_command_embeds(
         return
     if any(not getattr(embed.footer, "text", None) for embed in embed_list):
         await finalize_embeds(embed_list, None)
-    batches = [embed_list[idx : idx + 10] for idx in range(0, len(embed_list), 10)]
+    invalid_indexes = [idx for idx, embed in enumerate(embed_list, start=1) if not is_valid_embed(embed, max_chars=MAX_EMBED_CHARS)]
+    if invalid_indexes:
+        logger.warning("send_command_embeds_normalizing_invalid_embeds indexes=%s", invalid_indexes)
+        embed_list = normalize_embeds_for_discord(embed_list, max_chars=MAX_EMBED_CHARS)
+        if any(not getattr(embed.footer, "text", None) for embed in embed_list):
+            await finalize_embeds(embed_list, None)
+    batches = chunk_embeds_for_message_batches(embed_list, max_total_chars=MAX_EMBED_CHARS)
     first_batch = batches[0]
     kwargs: dict[str, Any] = {
         "content": content,
