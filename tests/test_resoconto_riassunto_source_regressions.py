@@ -19,6 +19,24 @@ def test_resoconto_restores_top_level_manual_commands() -> None:
         assert pattern in source
 
 
+def test_resoconto_aura_subcommands_do_not_call_decorated_command_objects() -> None:
+    source = Path("app/plugins/commands_modular/resoconto.py").read_text()
+
+    forbidden = [
+        "await canale_oggi(",
+        "await canale_ieri(",
+        "await canale_ultimi(",
+        "await canale_range(",
+        "await server_oggi(",
+        "await server_ieri(",
+        "await server_ultimi(",
+        "await server_range(",
+    ]
+
+    for pattern in forbidden:
+        assert pattern not in source
+
+
 def test_critical_modules_use_standard_response_renderer() -> None:
     targets = {
         "app/plugins/commands_modular/resoconto.py": [
