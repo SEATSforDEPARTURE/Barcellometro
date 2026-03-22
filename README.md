@@ -101,6 +101,22 @@ finestra configurata in modo idempotente.
 - `/admin status` → stato generale bot/DB.
 - `/admin status service:<nome>` → stato servizio/plugin.
 
+### Rendering embed centralizzato
+- `/embed footer on|off|status` → amministrazione canonica del dominio footer.
+- `/embed footer template_global_set|show|reset` → template globale footer.
+- `/embed footer template_service_set|show|reset service:<nome>` → override footer per servizio.
+- `/embed author on|off|status` → amministrazione canonica del dominio author.
+- `/embed author template_global_set|show|reset` → template globale author.
+- `/embed author template_service_set|show|reset service:<nome>` → override author per servizio.
+
+Regole operative:
+- `footer` e `author` sono domini distinti ma centralizzati;
+- il footer controlla brand/versione/frase/contributor tecnici;
+- l'author controlla l'intestazione visuale del servizio;
+- la precedenza documentale e runtime è `override servizio > globale > fallback`;
+- il fallback author per servizio è `emoji servizio + nome servizio`;
+- gli status `/embed ... status` usano vista multipagina quando l'elenco servizi è lungo.
+
 ### AI centrale
 - `/barcello [user1] [user2] [minuti]` → report user-facing del barcello inviato in DM con conferma standardizzata nel canale.
 - `/admin ai on` → abilita il servizio AI.

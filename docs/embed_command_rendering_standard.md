@@ -17,7 +17,7 @@ Tutti gli embed prodotti dai percorsi standardizzati (`send_standard_response`, 
 - Il sottotitolo usa sempre l’icona semantica ufficiale del tipo embed, non icone locali di sezione.
 - Il body non deve ripetere come primo marker la stessa icona già usata nel sottotitolo.
 - Il body non deve mai riusare la stessa icona del sottotitolo nelle sezioni: se una sezione la erediterebbe o la riceve esplicitamente, il builder centralizzato la sostituisce con un fallback semantico o neutro non ridondante.
-- Footer, colori e metadata devono passare dalla pipeline centralizzata.
+- Footer, author, colori e metadata devono passare dalla pipeline centralizzata.
 
 ## Standard ufficiale tipo embed → icona / colore
 
@@ -100,6 +100,20 @@ In pratica:
 - Se una riga body arriva con la stessa emoji del sottotitolo (per esempio `✅` in un embed `success`), il builder la ripulisce centralmente per evitare duplicazioni visive.
 - Le intestazioni di sezione passano tutte dalla stessa deduplica centrale: le emoji specializzate già sensate restano intatte se diverse dal sottotitolo, ma non è mai consentito un header sezione con la stessa faccina del sottotitolo.
 
+## Pipeline centralizzata `/embed`: footer + author
+
+Il namespace canonico per l'amministrazione del rendering embed è `/embed`, non `/admin`.
+
+Regole obbligatorie:
+
+- `/embed footer ...` è il comando standard corrente per il dominio footer;
+- `/embed author ...` è il comando standard corrente per il dominio author;
+- `footer` e `author` sono due domini distinti ma centralizzati e condividono la stessa pipeline finale di rendering;
+- il footer controlla brand/versione/frase/contributor tecnici;
+- l'author controlla l'intestazione visuale del servizio;
+- le thumbnail di footer e author sono indipendenti e non devono essere derivate una dall'altra;
+- i renderer standardizzati devono passare metadata sufficienti a entrambe le pipeline e lasciare la decisione finale ai servizi centrali del dominio.
+
 ## Footer centralizzato
 
 Non esiste più un output finale `minimal`: tutti gli embed standardizzati devono passare dalla stessa pipeline footer comune e includere, quando disponibili, tutti i segmenti nell’ordine:
@@ -180,6 +194,18 @@ L'ordine di precedenza finale per l'icona del footer è:
 3. thumbnail globale configurata;
 4. nessuna icona (`None`).
 
+La precedenza standard del dominio footer per i valori amministrabili è:
+
+1. override di servizio;
+2. template globale;
+3. fallback del dominio footer.
+
+Regole di reset footer:
+
+- `template_service_reset` rimuove l'override di servizio e fa riespandere template globale oppure fallback footer;
+- `template_global_reset` rimuove il template globale e lascia solo il fallback del dominio per i servizi senza override;
+- il reset del footer non deve materializzare nel database un valore arbitrario persistito come falso default.
+
 La frase legacy `Dati elaborati` + ` in loco` è abolita in tutto il progetto, così come la coda `e fallback` + ` locale`: non devono più comparire in codice, test, documentazione, configurazioni versionate, override locali o footer renderizzati. Questo vale anche per eventuali campi config come `footer`, `fallback_footer` o template equivalenti. Per output non-AI non si mostra alcuna frase tecnica finale; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare. Il flag `used_local_processing` resta metadata interno e non aggiunge testo visibile al footer.
 
 ## Author centralizzato
@@ -199,6 +225,16 @@ Ordine di precedenza author:
 3. fallback semantico `emoji + nome servizio`;
 4. nessuna thumbnail se non configurata.
 
+Questo equivale alla regola normativa generale `override servizio > globale > fallback`. Se un renderer imposta un author custom per una ragione forte di dominio, quell'override runtime deve essere esplicitamente documentato e prevale solo per quel renderer; non ridefinisce il contratto standard per gli altri servizi.
+
+Regole di fallback e reset:
+
+- il fallback author per servizio è sempre `emoji del servizio + nome servizio`;
+- la thumbnail author del fallback è separata dal footer e resta assente se non esiste un template del dominio;
+- `template_service_reset` rimuove l'override di servizio e fa riespandere template globale oppure fallback author;
+- `template_global_reset` rimuove il template globale e fa riespandere il fallback author per tutti i servizi che non hanno override locale;
+- il reset non deve mai riesumare un valore arbitrario persistito fuori contratto.
+
 Il namespace `/embed author` replica il modello amministrativo del footer con i comandi:
 
 - `/embed author on|off|status`;
@@ -207,15 +243,21 @@ Il namespace `/embed author` replica il modello amministrativo del footer con i 
 
 Lo status author usa una vista multipagina navigabile parallela a quella del footer, ma mostra solo dati author: stato, template globale, regola versione, author effettivo e thumbnail effettiva per servizio.
 
-## `/embed footer status` amministrativo
+## Status amministrativo multipagina per `/embed footer` e `/embed author`
 
 Lo status del footer usa una vista amministrativa compatta e navigabile: la prima pagina mostra una overview sintetica, mentre le pagine successive sono raggruppate per famiglie di servizi (`Standard services`, `Editorial campaigns`, `Prompt campaigns`, `Timer campaigns`, più eventuali gruppi coerenti aggiuntivi). La navigazione avviene sempre sullo stesso messaggio tramite bottoni `INIZIO`, `INDIETRO` e `AVANTI`, senza inviare raffiche di embed scollegati.
 
-I blocchi per servizio devono restare leggibili: footer effettivo, sorgente effettiva (`service` / `global` / `runtime` / `fallback`), conteggio varianti e sintesi compatta delle varianti; i dettagli tecnici grezzi (`label`, alias duplicati, dump piatti di `key` / `origin` / `updated`) non devono dominare la UI.
+Lo status author segue la stessa regola multipagina quando la lista dei servizi è lunga: overview nella prima pagina, pagine successive per gruppi coerenti di servizi e nessuna esplosione di una lista lunga in un unico embed.
 
-Tutto il namespace `/embed` segue la stessa grammatica visuale: titolo fisso `📦 EMBED`, sottotitolo in description con il path funzionale (`FOOTER STATUS`, `FOOTER TEMPLATE_GLOBAL_SHOW`, `FOOTER TEMPLATE_SERVICE_SET <service>`, ecc.), sezioni compatte uppercase con emoji coerenti e nessuna paginazione nel titolo. Anche i comandi `show`, `set`, `reset`, `on` e `off` devono passare dal builder standard condiviso invece di usare renderer legacy o titoli narrativi separati.
+Regole obbligatorie per gli status:
 
-Per `/embed footer status` la riga pagina (`Pagina x/y`) appartiene alla description amministrativa della pagina corrente e non al footer Discord renderizzato manualmente. Il footer visibile resta sempre responsabilità della pipeline centralizzata.
+- la paginazione di status è parte del contratto amministrativo del namespace `/embed`;
+- la riga pagina (`Pagina x/y`) appartiene alla description amministrativa della pagina corrente e non al footer Discord renderizzato manualmente;
+- ogni pagina deve mostrare il valore effettivo del dominio e la sua sorgente di precedenza (`service`, `global`, `fallback`, più eventuali override runtime già documentati);
+- i blocchi per servizio devono restare leggibili: footer o author effettivo, thumbnail effettiva, sorgente effettiva, conteggio varianti e sintesi compatta;
+- i dettagli tecnici grezzi (`label`, alias duplicati, dump piatti di `key` / `origin` / `updated`) non devono dominare la UI.
+
+Tutto il namespace `/embed` segue la stessa grammatica visuale: titolo fisso `📦 EMBED`, sottotitolo in description con il path funzionale (`FOOTER STATUS`, `AUTHOR STATUS`, `FOOTER TEMPLATE_GLOBAL_SHOW`, `AUTHOR TEMPLATE_SERVICE_SET <service>`, ecc.), sezioni compatte uppercase con emoji coerenti e nessuna paginazione nel titolo. Anche i comandi `show`, `set`, `reset`, `on` e `off` devono passare dal builder standard condiviso invece di usare renderer legacy o titoli narrativi separati.
 
 ## Quali input entrano nel sottotitolo
 

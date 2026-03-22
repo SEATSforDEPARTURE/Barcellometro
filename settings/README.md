@@ -44,6 +44,9 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - `ENTITLEMENTS_CONFIG_PATH` deve puntare a `settings/entitlements.json` se vuoi usare override locali.
 - I servizi Aura, Trigger e Greetings leggono i runtime file in `settings/*.json` e, quando previsto, fanno fallback automatico al corrispondente `settings/*.example.json`.
 - Per evitare path duplicati nel codice Python, i riferimenti centralizzati stanno in `app/core/config_paths.py`.
+- Il namespace canonico per la configurazione di rendering centralizzata è `/embed`, non `/admin footer`: footer e author sono domini distinti ma centralizzati e seguono la precedenza `override servizio > globale > fallback`.
+- Il fallback author per servizio resta sempre `emoji servizio + nome servizio`; il reset deve tornare a questo fallback di dominio quando non esistono override o template globali.
+- Le thumbnail author e footer sono separate: override o template del footer non devono fungere da fallback implicito per l'author, e viceversa.
 - Gli override locali non devono reintrodurre wording legacy nei footer o nei template: `Dati elaborati` + ` in loco` ed `e fallback` + ` locale` sono aboliti in tutto il progetto.
 - Se un file runtime come `settings/barcello_trigger.json` contiene campi come `footer`, `fallback_footer` o simili, per output non-AI non va salvata alcuna frase tecnica finale equivalente; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare.
 
