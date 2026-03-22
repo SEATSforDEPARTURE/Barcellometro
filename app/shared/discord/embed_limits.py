@@ -229,23 +229,54 @@ def _split_field_chunks(value: str, max_len: int = 1024) -> list[str]:
     return split_markdown_lines_into_field_values(value.splitlines() or [value], max_len)
 
 
+def _build_embed_dict(
+    source: discord.Embed,
+    *,
+    title: str | None,
+    description: str | None,
+    preserve_rendered_footer: bool,
+) -> dict[str, object]:
+    data = source.to_dict()
+    if title is None:
+        data.pop("title", None)
+    else:
+        data["title"] = title
+    if description is None:
+        data.pop("description", None)
+    else:
+        data["description"] = description
+    data.pop("fields", None)
+
+    author = data.get("author")
+    if isinstance(author, dict):
+        author_name = _truncate_text(str(author.get("name") or ""), DISCORD_MAX_AUTHOR_NAME)
+        if author_name:
+            author["name"] = author_name
+        else:
+            data.pop("author", None)
+
+    footer = data.get("footer")
+    if isinstance(footer, dict):
+        footer_text = _truncate_text(str(footer.get("text") or ""), DISCORD_MAX_FOOTER_TEXT)
+        if preserve_rendered_footer and footer_text:
+            footer["text"] = footer_text
+        else:
+            data.pop("footer", None)
+    elif not preserve_rendered_footer:
+        data.pop("footer", None)
+
+    return data
+
+
 def _clone_embed_shell(source: discord.Embed, *, title: str | None = None) -> discord.Embed:
-    new_embed = discord.Embed(
-        title=title if title is not None else source.title,
-        description=source.description,
-        url=source.url,
-        color=source.color,
-    )
-    if source.author:
-        new_embed.set_author(
-            name=source.author.name or "",
-            url=source.author.url,
-            icon_url=source.author.icon_url,
+    new_embed = discord.Embed.from_dict(
+        _build_embed_dict(
+            source,
+            title=title if title is not None else source.title,
+            description=source.description,
+            preserve_rendered_footer=False,
         )
-    if source.thumbnail and source.thumbnail.url:
-        new_embed.set_thumbnail(url=source.thumbnail.url)
-    if source.image and source.image.url:
-        new_embed.set_image(url=source.image.url)
+    )
     copy_footer_meta(source, new_embed)
     return new_embed
 
@@ -257,38 +288,41 @@ def _build_embed_shell(
     description: str | None = None,
     preserve_rendered_footer: bool = False,
 ) -> discord.Embed:
-    new_embed = discord.Embed(
-        title=title,
-        description=description,
-        url=source.url,
-        color=source.color,
+    new_embed = discord.Embed.from_dict(
+        _build_embed_dict(
+            source,
+            title=title,
+            description=description,
+            preserve_rendered_footer=preserve_rendered_footer,
+        )
     )
-    if source.author and source.author.name:
-        new_embed.set_author(
-            name=_truncate_text(source.author.name, DISCORD_MAX_AUTHOR_NAME),
-            url=source.author.url,
-            icon_url=source.author.icon_url,
-        )
-    if source.thumbnail and source.thumbnail.url:
-        new_embed.set_thumbnail(url=source.thumbnail.url)
-    if source.image and source.image.url:
-        new_embed.set_image(url=source.image.url)
-    if preserve_rendered_footer and source.footer and source.footer.text:
-        new_embed.set_footer(
-            text=_truncate_text(source.footer.text, DISCORD_MAX_FOOTER_TEXT),
-            icon_url=source.footer.icon_url,
-        )
     copy_footer_meta(source, new_embed)
     return new_embed
 
 
-def _estimate_embed_size(embed: discord.Embed) -> int:
+def estimate_footer_size(text: str | None, icon_url: str | None = None) -> int:
+    return len(text or "")
+
+
+def estimate_author_size(name: str | None, icon_url: str | None = None, url: str | None = None) -> int:
+    return len(name or "")
+
+
+def estimate_embed_total_size(embed: discord.Embed) -> int:
     total = len(embed.title or "") + len(embed.description or "")
     for field in embed.fields:
         total += len(field.name or "") + len(field.value or "")
-    total += len(embed.footer.text or "") if embed.footer else 0
-    total += len(embed.author.name or "") if embed.author else 0
+    total += estimate_footer_size(embed.footer.text if embed.footer else None, embed.footer.icon_url if embed.footer else None)
+    total += estimate_author_size(
+        embed.author.name if embed.author else None,
+        embed.author.icon_url if embed.author else None,
+        embed.author.url if embed.author else None,
+    )
     return total
+
+
+def _estimate_embed_size(embed: discord.Embed) -> int:
+    return estimate_embed_total_size(embed)
 
 
 def estimate_embeds_total_size(embeds: list[discord.Embed]) -> int:
