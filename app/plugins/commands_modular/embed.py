@@ -6,6 +6,7 @@ from discord import app_commands
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.shared.discord.command_embeds import CommandEmbedSection, send_command_embeds, send_legacy_standard_response, send_standard_response
+from app.shared.discord.footer_status_pagination import FooterStatusPaginationView
 from app.shared.discord.footer_status_renderer import build_footer_status_embeds
 from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
 
@@ -317,8 +318,9 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             return
 
         snapshot = await ctx.footer.build_status_snapshot(inferred_profile_resolver=lambda service_name: _infer_service_profile(service_name, ctx))
-        embeds = await build_footer_status_embeds(snapshot)
+        embeds = await build_footer_status_embeds(snapshot, footer_service=ctx.footer)
         if not embeds:
             await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "status"], entries=[("Reason", "No footer data available")], tone="warning", service_name="status")
             return
-        await send_command_embeds(interaction, embeds=embeds, ephemeral=True)
+        view = FooterStatusPaginationView(embeds)
+        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view)

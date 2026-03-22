@@ -133,7 +133,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `domanda` | `—` | `domanda` | Fai una domanda al Q&A | `app/plugins/commands_modular/ask.py:60` |
 | `embed` | `footer` | `off` | Disable footer rendering. | `app/plugins/commands_modular/embed.py:215` |
 | `embed` | `footer` | `on` | Enable footer rendering. | `app/plugins/commands_modular/embed.py:205` |
-| `embed` | `footer` | `status` | Show footer status and rendered variants. | `app/plugins/commands_modular/embed.py:405` |
+| `embed` | `footer` | `status` | Show footer status as an interactive admin overview with grouped pages. | `app/plugins/commands_modular/embed.py` |
 | `embed` | `footer` | `template_global_reset` | Reset the global footer template. | `app/plugins/commands_modular/embed.py:298` |
 | `embed` | `footer` | `template_global_set` | Set the global footer template. | `app/plugins/commands_modular/embed.py:226` |
 | `embed` | `footer` | `template_global_show` | Show the global footer template. | `app/plugins/commands_modular/embed.py:275` |
