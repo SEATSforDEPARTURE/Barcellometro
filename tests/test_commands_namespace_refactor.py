@@ -53,6 +53,14 @@ def test_barcello_restores_top_level_registration_alongside_admin_group() -> Non
     assert 'tree.add_command(barcello_command, guild=guild)' in barcello_source
 
 
+def test_command_tree_report_lists_embed_author_and_footer_under_top_level_embed() -> None:
+    report = Path("docs/command_tree_report.md").read_text()
+
+    assert "| `embed` | `footer` | `status` |" in report
+    assert "| `embed` | `author` | `status` |" in report
+    assert "| `admin` | `footer` |" not in report
+
+
 def test_campaign_and_trigger_outputs_use_visual_top_levels() -> None:
     triggers_source = Path("app/plugins/commands_modular/triggers.py").read_text()
     messaggi_source = Path("app/plugins/commands_modular/messaggi.py").read_text()
