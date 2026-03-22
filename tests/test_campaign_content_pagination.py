@@ -1,8 +1,17 @@
 import asyncio
+import sys
+import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import discord
+
+if "openai" not in sys.modules:
+    sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
+
+from app.services.campaign_content_service import CampaignContentService
 from app.services.campaign_content_views import BaseCampaignNavigatorView, PersistentCampaignLauncherView
+from app.shared.discord.footer_pipeline import finalize_embed
 
 
 class _FakeService:
@@ -188,5 +197,54 @@ def test_horoscope_ephemeral_click_edits_same_message() -> None:
         await view.children[1].callback(interaction)
         interaction.response.edit_message.assert_awaited_once()
         interaction.response.send_message.assert_not_called()
+
+    asyncio.run(_run())
+
+
+class _FooterDb:
+    def __init__(self) -> None:
+        self.settings: dict[str, str] = {}
+
+    async def get_setting(self, key: str) -> str | None:
+        return self.settings.get(key)
+
+    async def set_setting(self, key: str, value: str) -> None:
+        self.settings[key] = value
+
+    async def delete_setting(self, key: str) -> None:
+        self.settings.pop(key, None)
+
+    async def execute(self, _query: str, _params: tuple[str, ...] = ()) -> None:
+        return None
+
+    async def fetchall(self, query: str, params: tuple[str, ...] = ()):  # noqa: ANN202
+        prefix = str(params[0]).replace('%', '') if params else ''
+        if 'FROM settings' not in query:
+            return []
+        return [
+            {'key': key, 'value': value}
+            for key, value in sorted(self.settings.items())
+            if not prefix or key.startswith(prefix)
+        ]
+
+
+def test_campaign_rehydration_removes_persisted_footer_when_global_toggle_is_off() -> None:
+    async def _run() -> None:
+        service = CampaignContentService(database=_FooterDb(), bot=SimpleNamespace(), ai_service=None)
+        await service._footer.set_enabled(False)
+        payload = {
+            'title': 'Cronaca',
+            'description': 'Replay campagna',
+            'footer': {'text': 'Footer persistito da sopprimere'},
+        }
+
+        embed = await service._hydrate_stored_campaign_embed(
+            service_type='NEWS',
+            embed_payload=payload,
+            metadata={'used_sources': ['ansa']},
+        )
+        await finalize_embed(embed, service._footer, default_service_name='campagne_notizie')
+
+        assert embed.footer.text is None
 
     asyncio.run(_run())

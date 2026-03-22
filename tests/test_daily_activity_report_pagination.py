@@ -204,6 +204,46 @@ def test_daily_report_navigation_rehydrates_footer_meta_before_edit() -> None:
     asyncio.run(_run())
 
 
+
+
+def test_daily_report_navigation_removes_persisted_footer_when_service_disabled() -> None:
+    async def _run() -> None:
+        service, database, footer_service = _build_service()
+        await footer_service.set_enabled(False)
+
+        embed = discord.Embed(title="Pagina inattivi", description="Contenuto inattivi")
+        embed.set_footer(text="Footer persistito da sopprimere")
+
+        await service.persist_pagination_record(
+            message_id="101",
+            channel_id="7",
+            guild_id="9",
+            embeds=[embed],
+            metadata={"has_activity": False, "has_inactive": True},
+            current_index=0,
+        )
+
+        captured: dict[str, object] = {}
+
+        class _Response:
+            async def edit_message(self, *, embed: discord.Embed, view: object) -> None:
+                captured["embed"] = embed
+                captured["view"] = view
+
+        interaction = SimpleNamespace(
+            message=SimpleNamespace(id=101),
+            response=_Response(),
+        )
+
+        view = DailyReportPaginationView(service, current_index=0, total_pages=1)
+        await view._navigate(interaction, action="next")
+
+        edited_embed = captured["embed"]
+        assert isinstance(edited_embed, discord.Embed)
+        assert edited_embed.footer.text is None
+
+    asyncio.run(_run())
+
 def test_daily_report_source_uses_footer_hydration_helper_without_manual_footer_bypass() -> None:
     report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
 

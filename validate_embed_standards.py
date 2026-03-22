@@ -759,18 +759,18 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
             break
 
 
-    command_footer_fallback_snippets = (
-        "from app.shared.discord.footer_pipeline import finalize_embeds",
+    forbidden_command_fallback_snippets = (
+        "finalize_embeds_author(embed_list, None",
+        "finalize_embeds(embed_list, None",
         "if footer_service is None:",
-        "await finalize_embeds(embeds, footer_service, default_service_name=resolved_footer_service_name)",
     )
-    for snippet in command_footer_fallback_snippets:
-        if snippet not in command_source:
+    for snippet in forbidden_command_fallback_snippets:
+        if snippet in command_source:
             report.add(
                 "canonical_footer_fallback_delivery",
                 command_embeds_path.relative_to(REPO_ROOT),
                 1,
-                f"Standard command embeds must finalize the shared footer contract even when footer_service is None; missing snippet: {snippet!r}.",
+                f"Standard command embeds must not finalize author/footer through null-service fallbacks; forbidden snippet found: {snippet!r}.",
             )
             break
 

@@ -243,6 +243,12 @@ Il namespace `/embed author` replica il modello amministrativo del footer con i 
 
 Lo status author usa una vista multipagina navigabile parallela a quella del footer, ma mostra solo dati author: stato, template globale, regola versione, author effettivo e thumbnail effettiva per servizio.
 
+Semantica forte dei toggle globali:
+
+- `/embed author off` non significa solo “non aggiungere nuovi author”: significa sopprimere/rimuovere qualsiasi author visibile dagli embed standard del progetto, anche se l'author era già presente, clonato o reidratato da payload persistiti.
+- `/embed footer off` non significa solo “non aggiungere nuovi footer”: significa sopprimere/rimuovere qualsiasi footer visibile dagli embed standard del progetto, anche se il footer era già presente, clonato o reidratato da payload persistiti.
+- quando i toggle sono `off`, la finalize pipeline centralizzata deve comunque ricevere anche gli embed già valorizzati, proprio per poter sopprimere il render preesistente.
+
 ## Status amministrativo multipagina per `/embed footer` e `/embed author`
 
 Lo status del footer usa una vista amministrativa compatta e navigabile: la prima pagina mostra una overview sintetica, mentre le pagine successive sono raggruppate per famiglie di servizi (`Standard services`, `Editorial campaigns`, `Prompt campaigns`, `Timer campaigns`, più eventuali gruppi coerenti aggiuntivi). La navigazione avviene sempre sullo stesso messaggio tramite bottoni `INIZIO`, `INDIETRO` e `AVANTI`, senza inviare raffiche di embed scollegati.

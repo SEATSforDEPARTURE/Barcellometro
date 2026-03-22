@@ -11,7 +11,7 @@ from typing import Any, Literal
 import discord
 
 from app.plugins.commands_modular.time_windows import format_italian_ts, format_rolling_window_label, parse_italian_datetime
-from app.services.author import attach_author_meta
+from app.services.author import AuthorService, attach_author_meta
 from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, chunk_embeds_for_message_batches, is_valid_embed, normalize_embeds_for_discord
 from app.shared.discord.author_pipeline import finalize_embeds_author
@@ -799,22 +799,25 @@ async def send_command_embeds(
     content: str | None = None,
     files: list[discord.File] | None = None,
     view: discord.ui.View | None = None,
+    footer_service: FooterService | None = None,
+    author_service: AuthorService | None = None,
+    default_service_name: str = "status",
 ) -> None:
     embed_list = list(embeds)
     if not embed_list:
         return
-    if any(not getattr(embed.author, "name", None) for embed in embed_list):
-        await finalize_embeds_author(embed_list, None)
-    if any(not getattr(embed.footer, "text", None) for embed in embed_list):
-        await finalize_embeds(embed_list, None)
+    if author_service is not None:
+        await finalize_embeds_author(embed_list, author_service, default_service_name=default_service_name)
+    if footer_service is not None:
+        await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
     invalid_indexes = [idx for idx, embed in enumerate(embed_list, start=1) if not is_valid_embed(embed, max_chars=MAX_EMBED_CHARS)]
     if invalid_indexes:
         logger.warning("send_command_embeds_normalizing_invalid_embeds indexes=%s", invalid_indexes)
         embed_list = normalize_embeds_for_discord(embed_list, max_chars=MAX_EMBED_CHARS)
-        if any(not getattr(embed.author, "name", None) for embed in embed_list):
-            await finalize_embeds_author(embed_list, None)
-        if any(not getattr(embed.footer, "text", None) for embed in embed_list):
-            await finalize_embeds(embed_list, None)
+        if author_service is not None:
+            await finalize_embeds_author(embed_list, author_service, default_service_name=default_service_name)
+        if footer_service is not None:
+            await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
     batches = chunk_embeds_for_message_batches(embed_list, max_total_chars=MAX_EMBED_CHARS)
     first_batch = batches[0]
     kwargs: dict[str, Any] = {
@@ -854,6 +857,7 @@ async def send_standard_response(
     sections: Sequence[CommandEmbedSection | dict[str, Any]] | None = None,
     kind: CommandKind = "info",
     footer_service: FooterService | None = None,
+    author_service: AuthorService | None = None,
     ephemeral: bool = True,
     files: list[discord.File] | None = None,
     footer_mode: FooterMode = "meta",
@@ -887,9 +891,19 @@ async def send_standard_response(
         visual_top_level=visual_top_level,
         top_level=top_level,
     )
-    if footer_service is None:
+    if author_service is not None:
+        await finalize_embeds_author(embeds, author_service, default_service_name=resolved_footer_service_name)
+    if footer_service is not None:
         await finalize_embeds(embeds, footer_service, default_service_name=resolved_footer_service_name)
-    await send_command_embeds(interaction, embeds=embeds, ephemeral=ephemeral, files=files)
+    await send_command_embeds(
+        interaction,
+        embeds=embeds,
+        ephemeral=ephemeral,
+        files=files,
+        footer_service=footer_service,
+        author_service=author_service,
+        default_service_name=resolved_footer_service_name,
+    )
 
 
 _LEGACY_TOP_LEVEL_EMOJIS: dict[str, str] = {
@@ -949,6 +963,7 @@ async def send_legacy_standard_response(
     sections: Sequence[tuple[str, Sequence[tuple[str, object]]]] | None = None,
     service_name: str = "status",
     footer_service: FooterService | None = None,
+    author_service: AuthorService | None = None,
     ephemeral: bool = True,
 ) -> None:
     normalized_path = [part.strip().lower() for part in path_parts if part and part.strip()]
@@ -974,6 +989,7 @@ async def send_legacy_standard_response(
         compact_lines=True,
         line_formatter=_legacy_format_bullet,
         footer_service=footer_service,
+        author_service=author_service,
         footer_mode="meta",
         footer_service_name=service_name,
         top_level_emoji=_LEGACY_TOP_LEVEL_EMOJIS.get(top_level.strip().lower(), "🧭"),
