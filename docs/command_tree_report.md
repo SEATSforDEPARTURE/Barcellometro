@@ -10,21 +10,21 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 
 | Root | Subgroup | Action | Description | Source |
 | --- | --- | --- | --- | --- |
-| `admin` | `ai` | `fallback_set` | Set the AI fallback model for a task. | `app/plugins/commands_modular/admin.py:598` |
-| `admin` | `ai` | `fallback_show` | Show configured AI fallback models. | `app/plugins/commands_modular/admin.py:627` |
-| `admin` | `ai` | `model_set` | Set the AI model for a task. | `app/plugins/commands_modular/admin.py:555` |
-| `admin` | `ai` | `model_show` | Show configured AI models. | `app/plugins/commands_modular/admin.py:584` |
-| `admin` | `ai` | `off` | Disable the AI service. | `app/plugins/commands_modular/admin.py:545` |
-| `admin` | `ai` | `on` | Enable the AI service. | `app/plugins/commands_modular/admin.py:538` |
-| `admin` | `ai` | `run` | Run an AI test prompt. | `app/plugins/commands_modular/admin.py:672` |
-| `admin` | `ai` | `status` | Show AI service status. | `app/plugins/commands_modular/admin.py:638` |
-| `admin` | `backfill` | `config_reset` | Reset backfill configuration to defaults. | `app/plugins/commands_modular/admin.py:500` |
-| `admin` | `backfill` | `config_set` | Update backfill configuration. | `app/plugins/commands_modular/admin.py:457` |
-| `admin` | `backfill` | `config_show` | Show backfill configuration. | `app/plugins/commands_modular/admin.py:489` |
-| `admin` | `backfill` | `off` | Disable backfill. | `app/plugins/commands_modular/admin.py:436` |
-| `admin` | `backfill` | `on` | Enable backfill. | `app/plugins/commands_modular/admin.py:429` |
-| `admin` | `backfill` | `run` | Run backfill now. | `app/plugins/commands_modular/admin.py:514` |
-| `admin` | `backfill` | `status` | Show backfill status. | `app/plugins/commands_modular/admin.py:443` |
+| `admin` | `ai` | `fallback_set` | Set the AI fallback model for a task. | `app/plugins/commands_modular/admin.py:424` |
+| `admin` | `ai` | `fallback_show` | Show configured AI fallback models. | `app/plugins/commands_modular/admin.py:453` |
+| `admin` | `ai` | `model_set` | Set the AI model for a task. | `app/plugins/commands_modular/admin.py:381` |
+| `admin` | `ai` | `model_show` | Show configured AI models. | `app/plugins/commands_modular/admin.py:410` |
+| `admin` | `ai` | `off` | Disable the AI service. | `app/plugins/commands_modular/admin.py:371` |
+| `admin` | `ai` | `on` | Enable the AI service. | `app/plugins/commands_modular/admin.py:364` |
+| `admin` | `ai` | `run` | Run an AI test prompt. | `app/plugins/commands_modular/admin.py:498` |
+| `admin` | `ai` | `status` | Show AI service status. | `app/plugins/commands_modular/admin.py:464` |
+| `admin` | `backfill` | `config_reset` | Reset backfill configuration to defaults. | `app/plugins/commands_modular/admin.py:326` |
+| `admin` | `backfill` | `config_set` | Update backfill configuration. | `app/plugins/commands_modular/admin.py:283` |
+| `admin` | `backfill` | `config_show` | Show backfill configuration. | `app/plugins/commands_modular/admin.py:315` |
+| `admin` | `backfill` | `off` | Disable backfill. | `app/plugins/commands_modular/admin.py:262` |
+| `admin` | `backfill` | `on` | Enable backfill. | `app/plugins/commands_modular/admin.py:255` |
+| `admin` | `backfill` | `run` | Run backfill now. | `app/plugins/commands_modular/admin.py:340` |
+| `admin` | `backfill` | `status` | Show backfill status. | `app/plugins/commands_modular/admin.py:269` |
 | `admin` | `barcello` | `calibrate` | Recalculate Barcello calibration weights. | `app/plugins/commands_modular/barcello.py:257` |
 | `admin` | `barcello` | `mood_reset` | Reset the Barcello mood for this channel. | `app/plugins/commands_modular/barcello.py:246` |
 | `admin` | `barcello` | `mood_set` | Set the Barcello mood for this channel. | `app/plugins/commands_modular/barcello.py:213` |
@@ -33,24 +33,15 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `admin` | `barcello` | `on` | Enable the Barcello trigger for this channel. | `app/plugins/commands_modular/barcello.py:200` |
 | `admin` | `barcello` | `run` | Run the Barcello analysis. | `app/plugins/commands_modular/barcello.py:1716` |
 | `admin` | `barcello` | `status` | Show Barcello trigger status for this channel. | `app/plugins/commands_modular/barcello.py:208` |
-| `admin` | `events` | `off` | Disable event collection for this channel. | `app/plugins/commands_modular/admin.py:332` |
-| `admin` | `events` | `on` | Enable event collection for this channel. | `app/plugins/commands_modular/admin.py:326` |
-| `admin` | `events` | `status` | Show event collection status for this channel. | `app/plugins/commands_modular/admin.py:338` |
-| `admin` | `footer` | `off` | Disable footer rendering. | `app/plugins/commands_modular/admin.py:712` |
-| `admin` | `footer` | `on` | Enable footer rendering. | `app/plugins/commands_modular/admin.py:702` |
-| `admin` | `footer` | `status` | Show footer status and rendered variants. | `app/plugins/commands_modular/admin.py:894` |
-| `admin` | `footer` | `template_global_reset` | Reset the global footer template. | `app/plugins/commands_modular/admin.py:789` |
-| `admin` | `footer` | `template_global_set` | Set the global footer template. | `app/plugins/commands_modular/admin.py:723` |
-| `admin` | `footer` | `template_global_show` | Show the global footer template. | `app/plugins/commands_modular/admin.py:768` |
-| `admin` | `footer` | `template_service_reset` | Reset a service-specific footer template. | `app/plugins/commands_modular/admin.py:873` |
-| `admin` | `footer` | `template_service_set` | Set a service-specific footer template. | `app/plugins/commands_modular/admin.py:808` |
-| `admin` | `footer` | `template_service_show` | Show a service-specific footer template. | `app/plugins/commands_modular/admin.py:848` |
-| `admin` | `retention` | `config_reset` | Reset retention configuration to defaults. | `app/plugins/commands_modular/admin.py:415` |
-| `admin` | `retention` | `config_set` | Update retention configuration. | `app/plugins/commands_modular/admin.py:372` |
-| `admin` | `retention` | `config_show` | Show retention configuration. | `app/plugins/commands_modular/admin.py:404` |
-| `admin` | `retention` | `off` | Disable the retention task. | `app/plugins/commands_modular/admin.py:351` |
-| `admin` | `retention` | `on` | Enable the retention task. | `app/plugins/commands_modular/admin.py:344` |
-| `admin` | `retention` | `status` | Show retention status. | `app/plugins/commands_modular/admin.py:358` |
+| `admin` | `events` | `off` | Disable event collection for this channel. | `app/plugins/commands_modular/admin.py:158` |
+| `admin` | `events` | `on` | Enable event collection for this channel. | `app/plugins/commands_modular/admin.py:152` |
+| `admin` | `events` | `status` | Show event collection status for this channel. | `app/plugins/commands_modular/admin.py:164` |
+| `admin` | `retention` | `config_reset` | Reset retention configuration to defaults. | `app/plugins/commands_modular/admin.py:241` |
+| `admin` | `retention` | `config_set` | Update retention configuration. | `app/plugins/commands_modular/admin.py:198` |
+| `admin` | `retention` | `config_show` | Show retention configuration. | `app/plugins/commands_modular/admin.py:230` |
+| `admin` | `retention` | `off` | Disable the retention task. | `app/plugins/commands_modular/admin.py:177` |
+| `admin` | `retention` | `on` | Enable the retention task. | `app/plugins/commands_modular/admin.py:170` |
+| `admin` | `retention` | `status` | Show retention status. | `app/plugins/commands_modular/admin.py:184` |
 | `admin` | `—` | `status` | Show the Barcellometro status. | `app/plugins/commands_modular/status.py:18` |
 | `attivita` | `—` | `ieri` | Report attività di ieri (DM staff) | `app/plugins/commands_modular/attivita.py:610` |
 | `attivita` | `—` | `oggi` | Report attività di oggi (DM staff) | `app/plugins/commands_modular/attivita.py:605` |
@@ -140,6 +131,15 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `commandguard` | `—` | `user_reset` | Reset all policies for a user. | `app/plugins/commands_modular/roles.py:194` |
 | `commandguard` | `—` | `user_show` | Show user policies. | `app/plugins/commands_modular/roles.py:171` |
 | `domanda` | `—` | `domanda` | Fai una domanda al Q&A | `app/plugins/commands_modular/ask.py:60` |
+| `embed` | `footer` | `off` | Disable footer rendering. | `app/plugins/commands_modular/embed.py:215` |
+| `embed` | `footer` | `on` | Enable footer rendering. | `app/plugins/commands_modular/embed.py:205` |
+| `embed` | `footer` | `status` | Show footer status and rendered variants. | `app/plugins/commands_modular/embed.py:405` |
+| `embed` | `footer` | `template_global_reset` | Reset the global footer template. | `app/plugins/commands_modular/embed.py:298` |
+| `embed` | `footer` | `template_global_set` | Set the global footer template. | `app/plugins/commands_modular/embed.py:226` |
+| `embed` | `footer` | `template_global_show` | Show the global footer template. | `app/plugins/commands_modular/embed.py:275` |
+| `embed` | `footer` | `template_service_reset` | Reset a service-specific footer template. | `app/plugins/commands_modular/embed.py:384` |
+| `embed` | `footer` | `template_service_set` | Set a service-specific footer template. | `app/plugins/commands_modular/embed.py:317` |
+| `embed` | `footer` | `template_service_show` | Show a service-specific footer template. | `app/plugins/commands_modular/embed.py:357` |
 | `frasi` | `—` | `entry_add` | Add a phrase trigger entry | `app/plugins/commands_modular/triggers.py:304` |
 | `frasi` | `—` | `entry_edit` | Edit a phrase trigger entry | `app/plugins/commands_modular/triggers.py:413` |
 | `frasi` | `—` | `entry_list` | List phrase trigger entries | `app/plugins/commands_modular/triggers.py:359` |
@@ -214,15 +214,15 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `insights` | `—` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1026` |
 | `insights` | `—` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:1004` |
 | `insights` | `—` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1014` |
-| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:211` |
-| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:241` |
-| `mod` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:332` |
-| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:362` |
-| `mod` | `users` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:169` |
-| `mod` | `users` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:199` |
-| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:276` |
-| `mod` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:323` |
-| `mod` | `users` | `unban` | Revoke an active ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:250` |
+| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:214` |
+| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:244` |
+| `mod` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:355` |
+| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:385` |
+| `mod` | `users` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:172` |
+| `mod` | `users` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:202` |
+| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:299` |
+| `mod` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:346` |
+| `mod` | `users` | `unban` | Revoke an active ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:253` |
 | `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:90` |
 | `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:68` |
 | `privacy` | `—` | `status` | Show the current voice privacy status. | `app/plugins/commands_modular/privacy.py:113` |
@@ -303,8 +303,8 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING missing_param_description** — `resocontoserver.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:934`)
 - **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:914`)
 - **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:914`)
-- **WARNING required_param** — `admin.ai.fallback_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:601`)
-- **WARNING required_param** — `admin.ai.model_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:558`)
+- **WARNING required_param** — `admin.ai.fallback_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:427`)
+- **WARNING required_param** — `admin.ai.model_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:384`)
 - **WARNING required_param** — `admin.barcello.mood_set`: Parameter 'value' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/barcello.py:213`)
 - **WARNING required_param** — `campagne.cap.config_set`: Parameter 'daily_limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:588`)
 - **WARNING required_param** — `campagne.prompt.schedule_show`: Parameter 'id_or_name' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:731`)

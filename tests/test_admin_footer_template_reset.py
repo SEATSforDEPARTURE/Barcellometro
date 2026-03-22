@@ -71,11 +71,11 @@ def _find_command(group: discord.app_commands.Group, *names: str):
 
 
 @pytest.fixture
-def admin_module(import_fresh):
-    return import_fresh("app.plugins.commands_modular.admin")
+def embed_module(import_fresh):
+    return import_fresh("app.plugins.commands_modular.embed")
 
 
-def _register_admin_with_footer(admin_module):
+def _register_embed_with_footer(embed_module):
     database = _FooterDatabase()
     footer = FooterService(database)
     ctx = SimpleNamespace(
@@ -107,19 +107,49 @@ def _register_admin_with_footer(admin_module):
         aura_rolling=None,
         member_flow_notifications=None,
     )
+    embed_group = app_commands.Group(name="embed", description="embed")
+    embed_module.register_embed(embed_group, ctx)
+    footer_group = next(cmd for cmd in embed_group.commands if isinstance(cmd, discord.app_commands.Group) and cmd.name == "footer")
+    return embed_group, footer_group, ctx
+
+
+def test_embed_footer_registers_under_top_level_embed_only(embed_module) -> None:
+    embed_group, footer_group, _ = _register_embed_with_footer(embed_module)
+
+    assert embed_group.name == "embed"
+    assert footer_group.name == "footer"
+    assert {command.name for command in footer_group.commands} == {
+        "on",
+        "off",
+        "status",
+        "template_global_set",
+        "template_global_show",
+        "template_global_reset",
+        "template_service_set",
+        "template_service_show",
+        "template_service_reset",
+    }
+
+
+def test_admin_namespace_no_longer_registers_footer_commands(import_fresh) -> None:
+    admin_module = import_fresh("app.plugins.commands_modular.admin")
     admin_group = app_commands.Group(name="admin", description="admin")
+    ctx = SimpleNamespace(database=SimpleNamespace(), footer=None, ai=None)
     admin_module.register_admin(admin_group, ctx)
-    footer_group = next(cmd for cmd in admin_group.commands if isinstance(cmd, discord.app_commands.Group) and cmd.name == "footer")
-    return footer_group, ctx
+
+    assert all(
+        not (isinstance(command, discord.app_commands.Group) and command.name == "footer")
+        for command in admin_group.commands
+    )
 
 
-def test_global_template_show_after_reset_reports_no_custom_override(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_global_template_show_after_reset_reports_no_custom_override(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_global_phrase("Frase custom")
         await ctx.footer.set_global_phrase(None)
         await ctx.footer.set_version("dev11")
@@ -141,13 +171,13 @@ def test_global_template_show_after_reset_reports_no_custom_override(admin_modul
     asyncio.run(_run())
 
 
-def test_service_template_show_after_reset_reports_no_custom_override(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_template_show_after_reset_reports_no_custom_override(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_service_phrase("riassunto", "Frase servizio")
         await ctx.footer.set_service_phrase("riassunto", None)
         await ctx.footer.set_service_thumbnail("riassunto", "https://example.com/service.png")
@@ -167,15 +197,15 @@ def test_service_template_show_after_reset_reports_no_custom_override(admin_modu
     asyncio.run(_run())
 
 
-def test_reset_commands_return_standard_success_embed(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reset_commands_return_standard_success_embed(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_standard = AsyncMock()
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_standard_response", send_standard)
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_version("2.0")
         await ctx.footer.set_global_phrase("Frase custom")
         await ctx.footer.set_global_thumbnail("https://example.com/global.png")
@@ -191,7 +221,7 @@ def test_reset_commands_return_standard_success_embed(admin_module, monkeypatch:
         first = send_standard.await_args_list[0].kwargs
         second = send_standard.await_args_list[1].kwargs
         assert first == {
-            "top_level": "admin",
+            "top_level": "embed",
             "subcommand_path": "footer template_global_reset",
             "lines": [("result", "reset")],
             "sections": None,
@@ -200,7 +230,7 @@ def test_reset_commands_return_standard_success_embed(admin_module, monkeypatch:
             "ephemeral": True,
         }
         assert second == {
-            "top_level": "admin",
+            "top_level": "embed",
             "subcommand_path": "footer template_service_reset",
             "lines": [("service", "riassunto"), ("result", "reset")],
             "sections": None,
@@ -218,13 +248,13 @@ def test_reset_commands_return_standard_success_embed(admin_module, monkeypatch:
     asyncio.run(_run())
 
 
-def test_template_global_set_saves_version_phrase_and_thumbnail(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_template_global_set_saves_version_phrase_and_thumbnail(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         command = _find_command(footer_group, "template_global_set")
         await command.callback(
             _Interaction(command),
@@ -247,13 +277,13 @@ def test_template_global_set_saves_version_phrase_and_thumbnail(admin_module, mo
     asyncio.run(_run())
 
 
-def test_template_global_set_updates_only_thumbnail(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_template_global_set_updates_only_thumbnail(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_version("2.4")
         await ctx.footer.set_global_phrase("Footer globale")
 
@@ -274,13 +304,13 @@ def test_template_global_set_updates_only_thumbnail(admin_module, monkeypatch: p
     asyncio.run(_run())
 
 
-def test_template_service_set_accepts_thumbnail_without_phrase(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_template_service_set_accepts_thumbnail_without_phrase(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         command = _find_command(footer_group, "template_service_set")
         await command.callback(_Interaction(command), "riassunto", thumbnail="<a:pulse:1475962151502876696>")
 
@@ -297,13 +327,13 @@ def test_template_service_set_accepts_thumbnail_without_phrase(admin_module, mon
     asyncio.run(_run())
 
 
-def test_template_global_show_displays_thumbnail_field(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_template_global_show_displays_thumbnail_field(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_version("9.9")
         await ctx.footer.set_global_phrase("Globale")
         await ctx.footer.set_global_thumbnail("https://example.com/global.png")
@@ -321,13 +351,13 @@ def test_template_global_show_displays_thumbnail_field(admin_module, monkeypatch
     asyncio.run(_run())
 
 
-def test_template_service_show_displays_thumbnail_field(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_template_service_show_displays_thumbnail_field(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         await ctx.footer.set_service_phrase("riassunto", "Servizio")
         await ctx.footer.set_service_thumbnail("riassunto", "https://example.com/service.png")
 
@@ -344,13 +374,13 @@ def test_template_service_show_displays_thumbnail_field(admin_module, monkeypatc
     asyncio.run(_run())
 
 
-def test_template_admin_set_invalid_thumbnail_returns_standard_error(admin_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_template_admin_set_invalid_thumbnail_returns_standard_error(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        monkeypatch.setattr(admin_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
         send_legacy = AsyncMock()
-        monkeypatch.setattr(admin_module, "send_legacy_standard_response", send_legacy)
+        monkeypatch.setattr(embed_module, "send_legacy_standard_response", send_legacy)
 
-        footer_group, ctx = _register_admin_with_footer(admin_module)
+        embed_group, footer_group, ctx = _register_embed_with_footer(embed_module)
         global_command = _find_command(footer_group, "template_global_set")
         await global_command.callback(_Interaction(global_command), thumbnail="bad-value")
 
