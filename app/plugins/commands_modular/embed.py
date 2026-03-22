@@ -5,14 +5,10 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.shared.discord.command_embeds import CommandEmbedSection, send_command_embeds, send_legacy_standard_response, send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, send_command_embeds, send_standard_response
 from app.shared.discord.footer_status_pagination import FooterStatusPaginationView
 from app.shared.discord.footer_status_renderer import build_footer_status_embeds
 from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
-
-
-async def _send_legacy(interaction: discord.Interaction, ctx: CommandContext, **kwargs) -> None:
-    await send_legacy_standard_response(interaction, footer_service=ctx.footer, **kwargs)
 
 
 async def _send_embed_response(
@@ -20,6 +16,7 @@ async def _send_embed_response(
     ctx: CommandContext,
     *,
     subcommand_path: str,
+    subtitle_args: list[object] | None = None,
     lines: list[tuple[str, object]] | None = None,
     sections: list[CommandEmbedSection] | None = None,
     kind: str = "info",
@@ -28,12 +25,25 @@ async def _send_embed_response(
         interaction,
         top_level="embed",
         subcommand_path=subcommand_path,
+        subtitle_args=subtitle_args,
         lines=lines,
         sections=sections,
         kind=kind,
         footer_service=ctx.footer,
+        footer_service_name="status",
         ephemeral=True,
     )
+
+
+def _template_section(*entries: tuple[str, object]) -> list[CommandEmbedSection]:
+    rendered = [(label, value) for label, value in entries if value is not None]
+    if not rendered:
+        return []
+    return [CommandEmbedSection(title="Template", lines=rendered)]
+
+
+def _next_step_section(command: str) -> list[CommandEmbedSection]:
+    return [CommandEmbedSection(title="Next Step", lines=[("Command", command)])]
 
 
 def _clean_opt(value: str | None) -> str | None:
@@ -108,20 +118,44 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if not await check_permission(interaction, "admin.footer.on", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "on"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer on",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
             return
         await ctx.footer.set_enabled(True)
-        await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "on"], entries=[("Status", "enabled")], tone="success", service_name="status")
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="footer on",
+            lines=[("result", "enabled")],
+            kind="success",
+        )
 
     @footer_group.command(name="off", description="Disable footer rendering.")
     async def footer_off_command(interaction: discord.Interaction) -> None:
         if not await check_permission(interaction, "admin.footer.off", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "off"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer off",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
             return
         await ctx.footer.set_enabled(False)
-        await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "off"], entries=[("Status", "disabled")], tone="success", service_name="status")
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="footer off",
+            lines=[("result", "disabled")],
+            kind="success",
+        )
 
     @footer_group.command(name="template_global_set", description="Set the global footer template.")
     @app_commands.describe(version="Optional footer brand version.", phrase="Optional global footer phrase.", thumbnail="Optional footer thumbnail: Discord custom emoji or http/https image URL.")
@@ -134,18 +168,22 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if not await check_permission(interaction, "admin.footer.template_global_set", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_global_set"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
-            return
-        if version is None and phrase is None and thumbnail is None:
-            await _send_legacy(
+            await _send_embed_response(
                 interaction,
                 ctx,
-                top_level="embed",
-                path_parts=["footer", "template_global_set"],
-                entries=[("Reason", "No changes provided")],
-                tone="warning",
-                sections=[("Next Step", [("Command", "/embed footer template_global_show")])],
-                service_name="status",
+                subcommand_path="footer template_global_set",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
+            return
+        if version is None and phrase is None and thumbnail is None:
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_global_set",
+                lines=[("reason", "No changes provided")],
+                sections=_next_step_section("/embed footer template_global_show"),
+                kind="warning",
             )
             return
         if version is not None:
@@ -156,21 +194,25 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             try:
                 await ctx.footer.set_global_thumbnail(_clean_opt(thumbnail))
             except InvalidFooterThumbnailError as exc:
-                await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_global_set"], entries=[("Reason", str(exc))], tone="error", service_name="status")
+                await _send_embed_response(
+                    interaction,
+                    ctx,
+                    subcommand_path="footer template_global_set",
+                    lines=[("reason", str(exc))],
+                    kind="error",
+                )
                 return
-        await _send_legacy(
+        await _send_embed_response(
             interaction,
             ctx,
-            top_level="embed",
-            path_parts=["footer", "template_global_set"],
-            entries=[
-                ("Status", "updated"),
+            subcommand_path="footer template_global_set",
+            lines=[("result", "updated")],
+            sections=_template_section(
                 ("Version", _format_value(await ctx.footer.get_version())),
                 ("Phrase", _format_value(await ctx.footer.get_global_phrase())),
                 ("Thumbnail", _format_value(await ctx.footer.get_global_thumbnail())),
-            ],
-            tone="success",
-            service_name="status",
+            ),
+            kind="success",
         )
 
     @footer_group.command(name="template_global_show", description="Show the global footer template.")
@@ -178,22 +220,26 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if not await check_permission(interaction, "admin.footer.template_global_show", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_global_show"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_global_show",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
             return
         current_version = await ctx.footer.get_version()
         current_global = await ctx.footer.get_global_phrase()
         current_thumbnail = await ctx.footer.get_global_thumbnail()
-        await _send_legacy(
+        await _send_embed_response(
             interaction,
             ctx,
-            top_level="embed",
-            path_parts=["footer", "template_global_show"],
-            entries=[
+            subcommand_path="footer template_global_show",
+            sections=_template_section(
                 ("Version", _format_override_value(current_version, missing="No custom override (default brand version in use)")),
                 ("Phrase", _format_override_value(current_global, missing="No custom override (default footer phrase in use)")),
                 ("Thumbnail", _format_override_value(current_thumbnail, missing="No custom override (default footer thumbnail in use)")),
-            ],
-            service_name="status",
+            ),
         )
 
     @footer_group.command(name="template_global_reset", description="Reset the global footer template.")
@@ -201,7 +247,13 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if not await check_permission(interaction, "admin.footer.template_global_reset", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_global_reset"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_global_reset",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
             return
         await ctx.footer.set_version(None)
         await ctx.footer.set_global_phrase(None)
@@ -225,14 +277,33 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if not await check_permission(interaction, "admin.footer.template_service_set", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_service_set"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_service_set",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
             return
         service_name = _clean_opt(service)
         if service_name is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_service_set"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_service_set",
+                lines=[("reason", "Provide a valid service name")],
+                kind="error",
+            )
             return
         if phrase is None and thumbnail is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_service_set"], entries=[("Reason", "No changes provided")], tone="warning", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_service_set",
+                subtitle_args=[service_name],
+                lines=[("reason", "No changes provided")],
+                kind="warning",
+            )
             return
         if phrase is not None:
             await ctx.footer.set_service_phrase(service_name, _clean_opt(phrase))
@@ -240,18 +311,28 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             try:
                 await ctx.footer.set_service_thumbnail(service_name, _clean_opt(thumbnail))
             except InvalidFooterThumbnailError as exc:
-                await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_service_set"], entries=[("Reason", str(exc))], tone="error", service_name="status")
+                await _send_embed_response(
+                    interaction,
+                    ctx,
+                    subcommand_path="footer template_service_set",
+                    subtitle_args=[service_name],
+                    lines=[("reason", str(exc))],
+                    kind="error",
+                )
                 return
         service_thumbnail = (await ctx.footer.get_service_thumbnails()).get(service_name)
         service_phrase = (await ctx.footer.get_service_phrases()).get(service_name)
-        await _send_legacy(
+        await _send_embed_response(
             interaction,
             ctx,
-            top_level="embed",
-            path_parts=["footer", "template_service_set"],
-            entries=[("Service", service_name), ("Status", "updated"), ("Phrase", _format_value(service_phrase)), ("Thumbnail", _format_value(service_thumbnail))],
-            tone="success",
-            service_name="status",
+            subcommand_path="footer template_service_set",
+            subtitle_args=[service_name],
+            lines=[("result", "updated")],
+            sections=_template_section(
+                ("Phrase", _format_value(service_phrase)),
+                ("Thumbnail", _format_value(service_thumbnail)),
+            ),
+            kind="success",
         )
 
     @footer_group.command(name="template_service_show", description="Show a service-specific footer template.")
@@ -260,25 +341,35 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if not await check_permission(interaction, "admin.footer.template_service_show", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_service_show"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_service_show",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
             return
         service_name = _clean_opt(service)
         if service_name is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_service_show"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_service_show",
+                lines=[("reason", "Provide a valid service name")],
+                kind="error",
+            )
             return
         phrase = (await ctx.footer.get_service_phrases()).get(service_name)
         thumbnail_value = (await ctx.footer.get_service_thumbnails()).get(service_name)
-        await _send_legacy(
+        await _send_embed_response(
             interaction,
             ctx,
-            top_level="embed",
-            path_parts=["footer", "template_service_show"],
-            entries=[
-                ("Service", service_name),
+            subcommand_path="footer template_service_show",
+            subtitle_args=[service_name],
+            sections=_template_section(
                 ("Phrase", _format_override_value(phrase, missing="No custom override (service uses default footer behavior)")),
                 ("Thumbnail", _format_override_value(thumbnail_value, missing="No custom override (service uses default footer thumbnail behavior)")),
-            ],
-            service_name="status",
+            ),
         )
 
     @footer_group.command(name="template_service_reset", description="Reset a service-specific footer template.")
@@ -287,11 +378,23 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if not await check_permission(interaction, "admin.footer.template_service_reset", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_service_reset"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_service_reset",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
             return
         service_name = _clean_opt(service)
         if service_name is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "template_service_reset"], entries=[("Reason", "Provide a valid service name")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer template_service_reset",
+                lines=[("reason", "Provide a valid service name")],
+                kind="error",
+            )
             return
         await ctx.footer.set_service_phrase(service_name, None)
         await ctx.footer.set_service_thumbnail(service_name, None)
@@ -299,7 +402,8 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             interaction,
             ctx,
             subcommand_path="footer template_service_reset",
-            lines=[("service", service_name), ("result", "reset")],
+            subtitle_args=[service_name],
+            lines=[("result", "reset")],
             kind="success",
         )
 
@@ -308,19 +412,37 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if not await check_permission(interaction, "admin.footer.status", ctx):
             return
         if ctx.footer is None:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "status"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer status",
+                lines=[("reason", "Footer service is unavailable")],
+                kind="error",
+            )
             return
 
         known_services = await ctx.footer.get_known_services()
 
         if not known_services:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "status"], entries=[("Reason", "No known footer services")], tone="warning", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer status",
+                lines=[("reason", "No known footer services")],
+                kind="warning",
+            )
             return
 
         snapshot = await ctx.footer.build_status_snapshot(inferred_profile_resolver=lambda service_name: _infer_service_profile(service_name, ctx))
         embeds = await build_footer_status_embeds(snapshot, footer_service=ctx.footer)
         if not embeds:
-            await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "status"], entries=[("Reason", "No footer data available")], tone="warning", service_name="status")
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="footer status",
+                lines=[("reason", "No footer data available")],
+                kind="warning",
+            )
             return
         view = FooterStatusPaginationView(embeds)
         await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view)

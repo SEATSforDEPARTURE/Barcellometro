@@ -70,6 +70,7 @@ TOP_LEVEL_EMOJIS: dict[str, str] = {
     "inattivi": "🛠️",
     "commandguard": "👥",
     "footer": "🧾",
+    "embed": "📦",
     "ask": "❓",
     "domanda": "❓",
 }
