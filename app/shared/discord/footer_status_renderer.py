@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 
 import discord
 
 from app.services.footer import FooterStatusServiceEntry, FooterStatusSnapshot, ServiceFooterProfile, ServiceFooterVariant
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, format_bullet
+from app.shared.discord.embed_limits import MAX_EMBED_CHARS, normalize_embeds_for_discord
 from app.shared.discord.embed_status_helpers import _chunk_status_blocks
+
+logger = logging.getLogger(__name__)
+_DEFAULT_PAGE_BODY_MAX = 3200
 
 _CATEGORY_TITLES: dict[int, str] = {
     0: "Standard services",
@@ -99,7 +104,7 @@ def _format_persisted_service_block(entry: FooterStatusServiceEntry) -> str:
     return f"{header}\n\n" + "\n\n".join(_format_variant_block(variant) for variant in entry.persisted_variants)
 
 
-def build_footer_status_pages(snapshot: FooterStatusSnapshot, *, max_len: int = 1900) -> list[FooterStatusPage]:
+def build_footer_status_pages(snapshot: FooterStatusSnapshot, *, max_len: int = _DEFAULT_PAGE_BODY_MAX) -> list[FooterStatusPage]:
     persisted_entries = [entry for entry in snapshot.services if entry.persisted_variants]
     inferred_entries = [entry for entry in snapshot.services if not entry.persisted_variants]
 
@@ -128,7 +133,10 @@ def build_footer_status_pages(snapshot: FooterStatusSnapshot, *, max_len: int = 
 
     for category, title in _CATEGORY_TITLES.items():
         category_blocks = [_format_persisted_service_block(entry) for entry in persisted_entries if entry.category == category]
-        for chunk in _chunk_status_blocks(category_blocks, max_len=max_len):
+        chunks = _chunk_status_blocks(category_blocks, max_len=max_len)
+        if len(chunks) > 1:
+            logger.info("footer_status_renderer_split_category title=%s services=%s pages=%s", title, len(category_blocks), len(chunks))
+        for chunk in chunks:
             pages.append(
                 FooterStatusPage(
                     title=title,
@@ -139,7 +147,10 @@ def build_footer_status_pages(snapshot: FooterStatusSnapshot, *, max_len: int = 
 
     if inferred_entries:
         inferred_blocks = [_format_non_persisted_block(entry) for entry in inferred_entries]
-        for chunk in _chunk_status_blocks(inferred_blocks, max_len=max_len):
+        chunks = _chunk_status_blocks(inferred_blocks, max_len=max_len)
+        if len(chunks) > 1:
+            logger.info("footer_status_renderer_split_inferred services=%s pages=%s", len(inferred_entries), len(chunks))
+        for chunk in chunks:
             pages.append(
                 FooterStatusPage(
                     title="Services without persisted variants",
@@ -172,4 +183,11 @@ async def build_footer_status_embeds(snapshot: FooterStatusSnapshot) -> list[dis
                 line_formatter=_footer_status_line_formatter,
             )
         )
-    return embeds
+    normalized = normalize_embeds_for_discord(embeds, max_chars=MAX_EMBED_CHARS)
+    if len(normalized) != len(embeds):
+        logger.warning(
+            "footer_status_renderer_normalized_embeds before=%s after=%s",
+            len(embeds),
+            len(normalized),
+        )
+    return normalized
