@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 
 import discord
 
@@ -123,6 +123,26 @@ class ServiceFooterVariant:
     origins: set[str] | None = None
 
 
+@dataclass(slots=True)
+class FooterStatusServiceEntry:
+    service_name: str
+    category: int
+    known_sources: list[str]
+    phrase: str | None
+    phrase_origin: str
+    persisted_variants: list[ServiceFooterVariant]
+    persisted_profile: ServiceFooterProfile | None = None
+    inferred_profile: ServiceFooterProfile | None = None
+    rendered_footer: str | None = None
+
+
+@dataclass(slots=True)
+class FooterStatusSnapshot:
+    enabled: bool
+    global_phrase: str | None
+    services: list[FooterStatusServiceEntry]
+
+
 _EMBED_META: dict[int, tuple[discord.Embed, FooterMeta]] = {}
 _MINIMAL_FOOTERS: dict[int, tuple[discord.Embed, str, str | None]] = {}
 
@@ -216,6 +236,17 @@ def _normalize_optional_thumbnail(value: str | None) -> str | None:
 def _is_persistable_service_name(name: str | None) -> bool:
     service = _clean(name)
     return bool(service and service not in {"unknown", "default", "fallback"})
+
+
+def footer_service_category(service_name: str) -> int:
+    service = _clean(service_name)
+    if service in {"campagne_notizie", "campagne_meteo", "campagne_oroscopo"}:
+        return 1
+    if service == "campagne_prompt":
+        return 2
+    if service == "campagne_timer":
+        return 3
+    return 0
 
 
 def _normalize_service_name_from_stem(stem: str) -> str | None:
@@ -594,18 +625,7 @@ class FooterService:
             return {}
         if service in self._service_variants:
             return self._service_variants[service]
-        raw = await self._database.get_setting(f"{FOOTER_VARIANTS_PREFIX}{service}")
-        parsed_variants: dict[str, ServiceFooterVariant] = {}
-        if raw:
-            try:
-                payload = json.loads(raw)
-                if isinstance(payload, list):
-                    for item in payload:
-                        variant = self._parse_variant(service, item)
-                        if variant is not None:
-                            parsed_variants[variant.variant_key] = variant
-            except json.JSONDecodeError:
-                logger.warning("invalid JSON in %s%s", FOOTER_VARIANTS_PREFIX, service)
+        parsed_variants = await self.get_persisted_service_footer_variants(service)
         if not parsed_variants:
             profile = await self.get_service_footer_profile(service)
             if profile is not None:
@@ -626,9 +646,32 @@ class FooterService:
         self._service_variants[service] = parsed_variants
         return parsed_variants
 
+    async def get_persisted_service_footer_variants(self, service_name: str) -> dict[str, ServiceFooterVariant]:
+        service = _clean(service_name)
+        if not _is_persistable_service_name(service):
+            return {}
+        raw = await self._database.get_setting(f"{FOOTER_VARIANTS_PREFIX}{service}")
+        parsed_variants: dict[str, ServiceFooterVariant] = {}
+        if not raw:
+            return parsed_variants
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, list):
+                for item in payload:
+                    variant = self._parse_variant(service, item)
+                    if variant is not None:
+                        parsed_variants[variant.variant_key] = variant
+        except json.JSONDecodeError:
+            logger.warning("invalid JSON in %s%s", FOOTER_VARIANTS_PREFIX, service)
+        return parsed_variants
+
     async def get_all_service_footer_variants(self) -> dict[str, dict[str, ServiceFooterVariant]]:
         await self.get_known_services()
         return {service: await self.get_service_footer_variants(service) for service in self._known_services}
+
+    async def get_all_persisted_service_footer_variants(self) -> dict[str, dict[str, ServiceFooterVariant]]:
+        await self.get_known_services()
+        return {service: await self.get_persisted_service_footer_variants(service) for service in self._known_services}
 
     async def get_service_footer_profile(self, service_name: str) -> ServiceFooterProfile | None:
         service = _clean(service_name)
@@ -658,6 +701,82 @@ class FooterService:
             if profile is not None:
                 profiles[service] = profile
         return profiles
+
+    def build_fallback_footer_profile(self, service_name: str) -> ServiceFooterProfile:
+        service = _clean(service_name) or "unknown"
+        return ServiceFooterProfile(
+            service_name=service,
+            contributors=[],
+            used_local_processing=True,
+            last_rendered_footer=None,
+            updated_at=None,
+            origins={"fallback"},
+        )
+
+    async def build_status_snapshot(
+        self,
+        *,
+        inferred_profile_resolver: Callable[[str], Awaitable[ServiceFooterProfile | None]] | None = None,
+    ) -> FooterStatusSnapshot:
+        enabled = await self.is_enabled()
+        global_phrase = await self.get_global_phrase()
+        service_phrases = await self.get_service_phrases()
+        known_services = await self.get_known_services()
+        service_sources = await self.get_known_service_sources()
+        all_persisted_variants = await self.get_all_persisted_service_footer_variants()
+        profile_map = await self.get_service_footer_profiles()
+
+        entries: list[FooterStatusServiceEntry] = []
+        services = sorted(set(known_services), key=lambda name: (footer_service_category(name), name))
+        for service_name in services:
+            if not _is_persistable_service_name(service_name):
+                continue
+            persisted_variants_map = all_persisted_variants.get(service_name, {})
+            persisted_variants = sorted(persisted_variants_map.values(), key=lambda item: item.variant_key)
+            persisted_profile = profile_map.get(service_name)
+            inferred_profile: ServiceFooterProfile | None = None
+            rendered_footer: str | None = None
+
+            if not persisted_variants:
+                inferred_profile = None
+                if persisted_profile is None and inferred_profile_resolver is not None:
+                    inferred_profile = await inferred_profile_resolver(service_name)
+                resolved_profile = persisted_profile or inferred_profile or self.build_fallback_footer_profile(service_name)
+                rendered_footer, _ = await self.render_footer(
+                    service_name=service_name,
+                    contributors=resolved_profile.contributors,
+                    used_local_processing=resolved_profile.used_local_processing,
+                )
+
+            if service_name in service_phrases:
+                phrase = service_phrases[service_name]
+                phrase_origin = "service"
+            elif global_phrase:
+                phrase = global_phrase
+                phrase_origin = "global"
+            else:
+                phrase = None
+                phrase_origin = "default"
+
+            entries.append(
+                FooterStatusServiceEntry(
+                    service_name=service_name,
+                    category=footer_service_category(service_name),
+                    known_sources=service_sources.get(service_name, []),
+                    phrase=phrase,
+                    phrase_origin=phrase_origin,
+                    persisted_variants=persisted_variants,
+                    persisted_profile=persisted_profile,
+                    inferred_profile=inferred_profile,
+                    rendered_footer=rendered_footer,
+                )
+            )
+
+        return FooterStatusSnapshot(
+            enabled=enabled,
+            global_phrase=global_phrase,
+            services=entries,
+        )
 
     async def _resolve_footer_phrase(self, service_name: str) -> str | None:
         global_phrase = await self.get_global_phrase()

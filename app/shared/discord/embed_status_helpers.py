@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.footer import footer_service_category
+
 CAMPAIGN_EDITORIAL_SERVICES = {
     "campagne_notizie",
     "campagne_meteo",
@@ -10,13 +12,7 @@ CAMPAIGN_TIMER_SERVICE = "campagne_timer"
 
 
 def _service_section(service_name: str) -> int:
-    if service_name in CAMPAIGN_EDITORIAL_SERVICES:
-        return 1
-    if service_name == CAMPAIGN_PROMPT_SERVICE:
-        return 2
-    if service_name == CAMPAIGN_TIMER_SERVICE:
-        return 3
-    return 0
+    return footer_service_category(service_name)
 
 
 def _split_long_text(text: str, max_len: int = 1900) -> list[str]:

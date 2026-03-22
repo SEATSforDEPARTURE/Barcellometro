@@ -5,9 +5,9 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.shared.discord.command_embeds import CommandEmbedSection, send_legacy_standard_response, send_standard_response
-from app.shared.discord.embed_status_helpers import _chunk_status_blocks, _service_section
-from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile, ServiceFooterVariant, _is_persistable_service_name
+from app.shared.discord.command_embeds import CommandEmbedSection, send_command_embeds, send_legacy_standard_response, send_standard_response
+from app.shared.discord.footer_status_renderer import build_footer_status_embeds
+from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
 
 
 async def _send_legacy(interaction: discord.Interaction, ctx: CommandContext, **kwargs) -> None:
@@ -48,40 +48,6 @@ def _format_value(value: str | None) -> str:
 
 def _format_override_value(value: str | None, *, missing: str) -> str:
     return value if value else missing
-
-
-def _human_service_name(service_name: str) -> str:
-    labels = {
-        "campagne_notizie": "campagne_notizie",
-        "campagne_meteo": "campagne_meteo",
-        "campagne_oroscopo": "campagne_oroscopo",
-        "campagne_prompt": "campagne_prompt",
-        "campagne_timer": "campagne_timer",
-    }
-    return labels.get(service_name, service_name.replace("_", " ").title())
-
-
-def _format_contributors(contributors: list[str]) -> str:
-    return " + ".join(contributors) if contributors else "(none)"
-
-
-def _format_variant_block(service_name: str, variant: ServiceFooterVariant, phrase: str) -> str:
-    mode = "local" if variant.used_local_processing else "remote"
-    footer_text = variant.last_rendered_footer or "(footer not rendered yet)"
-    origins = ",".join(sorted(variant.origins or [])) or "(n/a)"
-    updated = variant.updated_at or "(n/a)"
-    return (
-        f"variant: {mode} | {_format_contributors(variant.contributors)}\n"
-        f"→ {footer_text}\n"
-        f"phrase: {phrase}\n"
-        f"origin: {origins}\n"
-        f"updated: {updated}\n"
-        f"key: {variant.variant_key}"
-    )
-
-
-def _format_service_header(service_name: str) -> str:
-    return f"**{service_name}**\nlabel: {_human_service_name(service_name)}\ntechnical alias: `{service_name}`"
 
 
 async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
@@ -344,80 +310,15 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "status"], entries=[("Reason", "Footer service is unavailable")], tone="error", service_name="status")
             return
 
-        enabled = await ctx.footer.is_enabled()
-        service_phrases = await ctx.footer.get_service_phrases()
-        global_phrase = await ctx.footer.get_global_phrase()
         known_services = await ctx.footer.get_known_services()
-        service_sources = await ctx.footer.get_known_service_sources()
-        all_variants = await ctx.footer.get_all_service_footer_variants()
-        profile_map = await ctx.footer.get_service_footer_profiles()
 
         if not known_services:
             await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "status"], entries=[("Reason", "No known footer services")], tone="warning", service_name="status")
             return
 
-        services = sorted(set(known_services), key=lambda name: (_service_section(name), name))
-        sections: dict[str, list[str]] = {
-            "Standard services": [],
-            "Editorial campaigns": [],
-            "Prompt campaigns": [],
-            "Timer campaigns": [],
-        }
-        minimal_services: list[str] = []
-
-        for service_name in services:
-            if not _is_persistable_service_name(service_name):
-                continue
-            variants = all_variants.get(service_name, {})
-            if not variants:
-                profile = profile_map.get(service_name)
-                if profile is None:
-                    profile = await _infer_service_profile(service_name, ctx)
-                footer_text, _ = await ctx.footer.render_footer(
-                    service_name=service_name,
-                    contributors=profile.contributors,
-                    used_local_processing=profile.used_local_processing,
-                )
-                phrase = service_phrases.get(service_name) or global_phrase or "(none)"
-                origins = sorted(set(service_sources.get(service_name, [])) | set(profile.origins or set()))
-                minimal_services.append(
-                    f"**{service_name}**\n"
-                    f"label: {_human_service_name(service_name)}\n"
-                    f"technical alias: `{service_name}`\n"
-                    f"→ {footer_text}\n"
-                    f"phrase: {phrase}\n"
-                    f"origin: {','.join(origins) if origins else '(n/a)'}"
-                )
-                continue
-
-            variant_blocks: list[str] = []
-            for variant in sorted(variants.values(), key=lambda item: item.variant_key):
-                phrase = service_phrases.get(service_name) or global_phrase or "(none)"
-                variant_blocks.append(_format_variant_block(service_name, variant, phrase))
-
-            service_block = f"{_format_service_header(service_name)}\n\n" + "\n\n".join(variant_blocks)
-            section_idx = _service_section(service_name)
-            if section_idx == 1:
-                sections["Editorial campaigns"].append(service_block)
-            elif section_idx == 2:
-                sections["Prompt campaigns"].append(service_block)
-            elif section_idx == 3:
-                sections["Timer campaigns"].append(service_block)
-            else:
-                sections["Standard services"].append(service_block)
-
-        lines: list[str] = [f"Footer rendering: {'on' if enabled else 'off'}"]
-        for title in ["Standard services", "Editorial campaigns", "Prompt campaigns", "Timer campaigns"]:
-            blocks = sections[title]
-            if blocks:
-                lines.append(f"__{title}__\n" + "\n\n".join(blocks))
-        if minimal_services:
-            lines.append("__Services without persisted footer variants__\n" + "\n\n".join(minimal_services))
-
-        chunks = _chunk_status_blocks(lines, max_len=1900)
-        if not chunks:
+        snapshot = await ctx.footer.build_status_snapshot(inferred_profile_resolver=lambda service_name: _infer_service_profile(service_name, ctx))
+        embeds = await build_footer_status_embeds(snapshot)
+        if not embeds:
             await _send_legacy(interaction, ctx, top_level="embed", path_parts=["footer", "status"], entries=[("Reason", "No footer data available")], tone="warning", service_name="status")
             return
-
-        sections_payload = [CommandEmbedSection(title="Details", lines=[("status", chunk)]) for chunk in chunks]
-        await _send_embed_response(interaction, ctx, subcommand_path="footer status", lines=[("footer_rendering", "on" if enabled else "off")], sections=sections_payload)
+        await send_command_embeds(interaction, embeds=embeds, ephemeral=True)
