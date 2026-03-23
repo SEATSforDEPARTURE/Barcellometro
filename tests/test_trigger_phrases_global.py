@@ -366,7 +366,7 @@ def test_db_global_phrase_state_and_color_column() -> None:
     asyncio.run(_run())
 
 
-def test_register_triggers_keeps_frasi_top_level() -> None:
+def test_register_triggers_returns_phrases_subgroup_under_triggers() -> None:
     from discord import app_commands
 
     group = app_commands.Group(name="admin", description="x")
@@ -381,7 +381,7 @@ def test_register_triggers_keeps_frasi_top_level() -> None:
 
     names = [command.name for command in group.commands]
     assert "frasi" not in names
-    assert frasi_group.name == "frasi"
+    assert frasi_group.name == "phrases"
 
 
 def test_db_trigger_phrase_columns_backcompat_and_serialization() -> None:
@@ -968,4 +968,4 @@ def test_register_triggers_permission_candidates_use_admin_only(monkeypatch: pyt
     )
     asyncio.run(prompt_show.callback(interaction, "5"))
 
-    assert seen == ["admin.campagne.prompt.schedule_show"]
+    assert seen == ["admin.campaigns.prompt.schedule_show"]

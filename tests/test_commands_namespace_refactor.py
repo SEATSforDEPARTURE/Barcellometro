@@ -95,8 +95,8 @@ def test_campaigns_and_triggers_modules_emit_canonical_top_levels_with_localized
     campaigns_source = Path("app/plugins/commands_modular/messaggi.py").read_text()
     roles_source = Path("app/plugins/commands_modular/roles.py").read_text()
 
-    assert 'top_level=triggers_root if subcommand_path.split()[0] == triggers_root else subcommand_path.split()[0]' in triggers_source
-    assert 'visual_top_level=subcommand_path.split()[0] if subcommand_path.strip() else triggers_root' in triggers_source
+    assert 'resolved_top_level, resolved_subcommand_path, resolved_visual_top_level = _canonicalize_command_path(subcommand_path)' in triggers_source
+    assert 'visual_top_level=resolved_visual_top_level' in triggers_source
     assert 'def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "campaigns", visual_top_level: str = "campaigns")' in campaigns_source
     assert 'top_level="commandguard"' in roles_source
     assert 'visual_top_level="commandguard"' in roles_source

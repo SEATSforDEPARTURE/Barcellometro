@@ -1,13 +1,74 @@
 from __future__ import annotations
 
+import re
+
 import discord
 
 from app.shared.discord.command_embeds import send_standard_response
 from app.plugins.commands_modular.ctx import CommandContext
 
 
+_ROOT_ALIASES: dict[str, tuple[str, ...]] = {
+    "campagne": ("campaigns",),
+    "frasi": ("triggers", "phrases"),
+    "roles": ("commandguard",),
+    "resocontocanale": ("channelsummary",),
+    "resocontoserver": ("serversummary",),
+}
+_TRIGGER_SUBGROUPS = {"phrases", "qna", "insights", "barcello"}
+_TRIGGER_PHRASE_ACTIONS = {
+    "on",
+    "off",
+    "status",
+    "entry_add",
+    "entry_remove",
+    "entry_list",
+    "entry_show",
+    "entry_edit",
+    "template_milestone_set",
+    "template_milestone_show",
+    "template_milestone_reset",
+    "template_global_set",
+    "template_global_show",
+    "template_global_reset",
+    "template_user_set",
+    "template_user_show",
+    "template_user_reset",
+}
+
+
+def _normalize_path_segments(command_name: str) -> list[str]:
+    cleaned = re.sub(r"\s+", "", str(command_name or "").strip().lower())
+    return [segment for segment in cleaned.split(".") if segment]
+
+
 def canonical_permission_key(command_name: str) -> str:
-    return str(command_name or "").strip().lower()
+    parts = _normalize_path_segments(command_name)
+    if not parts:
+        return ""
+
+    prefix: list[str] = []
+    body = parts
+    if body[0] == "admin":
+        prefix = [body[0]]
+        body = body[1:]
+
+    if not body:
+        return ".".join(prefix)
+
+    head, *tail = body
+    normalized_body = [*_ROOT_ALIASES.get(head, (head,)), *tail]
+
+    if (
+        normalized_body
+        and normalized_body[0] == "triggers"
+        and len(normalized_body) >= 2
+        and normalized_body[1] not in _TRIGGER_SUBGROUPS
+        and normalized_body[1] in _TRIGGER_PHRASE_ACTIONS
+    ):
+        normalized_body = [normalized_body[0], "phrases", *normalized_body[1:]]
+
+    return ".".join([*prefix, *normalized_body])
 
 
 async def check_permission(
