@@ -26,7 +26,7 @@ def test_commands_setup_declares_canonical_english_roots() -> None:
     ]:
         assert f'app_commands.Group(name="{root}"' in source
 
-    for legacy_root in ["admin", "mod", "campagne", "frasi", "roles"]:
+    for legacy_root in ["admin", "mod", "campagne", "frasi", "roles", "insights"]:
         assert f'app_commands.Group(name="{legacy_root}"' not in source
 
 
@@ -44,6 +44,7 @@ def test_commands_setup_registers_canonical_namespaces_with_matching_top_levels(
     assert 'register_greetings(greetings_group, ctx, top_level="greetings", visual_top_level="greetings")' in source
     assert 'register_moderazione_utenti(users_group, ctx, top_level="users", visual_top_level="users")' in source
     assert 'register_resoconto(channelsummary_group, serversummary_group, ctx, channel_root="channelsummary", server_root="serversummary")' in source
+    assert 'register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")' in source
 
 
 def test_commands_setup_keeps_only_explicit_italian_alias_roots() -> None:
@@ -103,7 +104,7 @@ def test_campaigns_and_triggers_modules_emit_canonical_top_levels_with_localized
 
     assert 'resolved_top_level, resolved_subcommand_path, resolved_visual_top_level = _canonicalize_command_path(subcommand_path)' in triggers_source
     assert 'visual_top_level=resolved_visual_top_level' in triggers_source
-    assert 'def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "campaigns", visual_top_level: str = "campaigns")' in campaigns_source
+    assert 'def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "campaigns", visual_top_level: str = "campaigns")' in campaigns_source
     assert 'top_level="commandguard"' in roles_source
     assert 'visual_top_level="commandguard"' in roles_source
     assert 'visual_top_level="roles"' not in roles_source

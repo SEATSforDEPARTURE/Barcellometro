@@ -95,9 +95,8 @@ def test_triggers_guard_uses_canonical_admin_permission_keys(triggers_module, mo
     triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
     campaigns_group = discord.app_commands.Group(name="campaigns", description="campaigns")
     qna_group = discord.app_commands.Group(name="qna", description="qna")
-    insights_group = discord.app_commands.Group(name="insights", description="insights")
     ctx = SimpleNamespace(database=_TriggerDb(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
-    frasi_group = triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, insights_group, ctx, triggers_root="triggers")
+    frasi_group = triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")
 
     entry_list = _find_command(frasi_group, "entry_list")
     asyncio.run(entry_list.callback(_Interaction(entry_list)))
@@ -140,6 +139,9 @@ def test_permission_helpers_keep_only_canonical_keys(import_fresh) -> None:
     assert permissions_module.canonical_permission_key("admin.audionotes.config_show") == "audio.clips.limits_show"
     assert permissions_module.canonical_permission_key("admin.stt.config_reset") == "audio.clips.stt_reset"
     assert permissions_module.canonical_permission_key("admin.translate.config_set") == "audio.clips.translate_set"
+    assert permissions_module.canonical_permission_key("admin.campaigns.quiet.config_set") == "admin.campaigns.quiet.range_set"
+    assert permissions_module.canonical_permission_key("admin.campagne.cap.config_show") == "admin.campaigns.cap.limits_show"
+    assert permissions_module.canonical_permission_key("admin.insights.template_show") == "admin.campaigns.insights.template_show"
     assert permissions_module.canonical_permission_key("admin.barcello.mood_set") == "status.mood_set"
 
 
@@ -213,9 +215,8 @@ def test_qna_bonus_show_passes_user_as_subtitle_arg(triggers_module, monkeypatch
     triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
     campaigns_group = discord.app_commands.Group(name="campaigns", description="campaigns")
     qna_group = discord.app_commands.Group(name="qna", description="qna")
-    insights_group = discord.app_commands.Group(name="insights", description="insights")
     ctx = SimpleNamespace(database=_Db(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
-    triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, insights_group, ctx, triggers_root="triggers")
+    triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")
 
     cmd = _find_command(qna_group, "bonus_show")
     interaction = _Interaction(cmd)

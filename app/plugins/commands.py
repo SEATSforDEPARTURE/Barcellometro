@@ -83,11 +83,8 @@ def setup(registry: ServiceRegistry) -> None:
 
     clips_group = app_commands.Group(name="clips", description="Audio clip controls")
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Voice ingest")
-    insights_group = app_commands.Group(name="insights", description="Insights controls")
-
     add_group_once(audio_group, clips_group, logger)
     add_group_once(audio_group, voice_ingest_group, logger)
-    add_group_once(ai_group, insights_group, logger)
 
     register_status(status_group, ctx)
     register_database(database_group, ctx)
@@ -119,7 +116,7 @@ def setup(registry: ServiceRegistry) -> None:
         channel_root="resocontocanale",
         server_root="resocontoserver",
     )
-    register_triggers(triggers_group, campaigns_group, qna_group, insights_group, ctx, triggers_root="triggers")
+    register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")
     register_ask(bot.tree, guild_obj, ctx, command_name="domanda", root_top_level="qna", visual_top_level="domanda")
 
     logger.info(

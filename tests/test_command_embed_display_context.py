@@ -34,14 +34,14 @@ def test_normalize_display_context_qna_limits_with_parameter() -> None:
     assert "QNA" not in context.visual_subtitle
 
 
-def test_normalize_display_context_campagne_prompt_status() -> None:
+def test_normalize_display_context_campaigns_prompt_status() -> None:
     context = normalize_display_command_context(
         top_level="admin",
-        subcommand_path="campagne prompt status",
-        visual_top_level="campagne",
+        subcommand_path="campaigns prompt status",
+        visual_top_level="campaigns",
     )
 
-    assert context.visual_title == "CAMPAGNE"
+    assert context.visual_title == "CAMPAIGNS"
     assert context.visual_subtitle == "PROMPT STATUS"
 
 

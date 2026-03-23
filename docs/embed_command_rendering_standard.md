@@ -35,7 +35,7 @@ Questo mapping è centralizzato in `app/shared/discord/command_embeds.py` e vale
 ### Prima
 
 - `/frasi template_global_show` renderizzato come titolo `ADMIN` e sottotitolo `FRASI TEMPLATE_GLOBAL_SHOW`.
-- `/campagne prompt status` renderizzato come titolo `ADMIN` e sottotitolo `CAMPAGNE PROMPT STATUS`.
+- `/campaigns prompt status` renderizzato come titolo `ADMIN` e sottotitolo `CAMPAIGNS PROMPT STATUS`.
 - `/qna limits_show parameter:base` renderizzato con duplicazione del top-level nel sottotitolo.
 
 ### Dopo
@@ -73,8 +73,8 @@ Questo mapping è centralizzato in `app/shared/discord/command_embeds.py` e vale
 - `/riassunto range da:20/03/2026 10:15 a:21/03/2026 11:45`
   - titolo: `🗒️ RIASSUNTO`
   - sottotitolo: `ℹ️ DAL 20/03 10:15 AL 21/03 11:45`
-- `/campagne prompt status`
-  - titolo: `📣 CAMPAGNE`
+- `/campaigns prompt status`
+  - titolo: `📣 CAMPAIGNS`
   - sottotitolo: `ℹ️ PROMPT STATUS`
 - `/moderazione users tempban_list`
   - titolo: `🛠️ MODERAZIONE`

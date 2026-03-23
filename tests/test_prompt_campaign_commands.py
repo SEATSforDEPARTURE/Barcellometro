@@ -31,21 +31,19 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
         group = discord.app_commands.Group(name="admin", description="x")
-        campagne = discord.app_commands.Group(name="campagne", description="x")
+        campaigns = discord.app_commands.Group(name="campaigns", description="x")
         qna = discord.app_commands.Group(name="qna", description="x")
-        insights = discord.app_commands.Group(name="insights", description="x")
-
         old_permission = triggers_module.check_permission
         triggers_module.check_permission = AsyncMock(return_value=True)
         try:
-            register_triggers(group, campagne, qna, insights, ctx)
-            prompt_group = _get_subgroup(campagne, "prompt")
+            register_triggers(group, campaigns, qna, ctx)
+            prompt_group = _get_subgroup(campaigns, "prompt")
             callback = _get_command_callback(prompt_group, "schedule_add")
             interaction = SimpleNamespace(
                 guild_id=1,
                 channel_id=2,
                 user=SimpleNamespace(id=999),
-                command=SimpleNamespace(qualified_name="campagne prompt schedule_add"),
+                command=SimpleNamespace(qualified_name="campaigns prompt schedule_add"),
                 data={"name": "schedule_add"},
                 response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
             )
@@ -100,20 +98,18 @@ def test_prompt_list_shows_one_shot_label() -> None:
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
         group = discord.app_commands.Group(name="admin", description="x")
-        campagne = discord.app_commands.Group(name="campagne", description="x")
+        campaigns = discord.app_commands.Group(name="campaigns", description="x")
         qna = discord.app_commands.Group(name="qna", description="x")
-        insights = discord.app_commands.Group(name="insights", description="x")
-
         old_permission = triggers_module.check_permission
         triggers_module.check_permission = AsyncMock(return_value=True)
         try:
-            register_triggers(group, campagne, qna, insights, ctx)
-            prompt_group = _get_subgroup(campagne, "prompt")
+            register_triggers(group, campaigns, qna, ctx)
+            prompt_group = _get_subgroup(campaigns, "prompt")
             callback = _get_command_callback(prompt_group, "schedule_list")
             interaction = SimpleNamespace(
                 guild_id=1,
                 channel_id=2,
-                command=SimpleNamespace(qualified_name="campagne prompt schedule_list"),
+                command=SimpleNamespace(qualified_name="campaigns prompt schedule_list"),
                 data={"name": "schedule_list"},
                 response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
             )
@@ -152,20 +148,18 @@ def test_prompt_show_resolves_schedule_by_name() -> None:
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
         group = discord.app_commands.Group(name="admin", description="x")
-        campagne = discord.app_commands.Group(name="campagne", description="x")
+        campaigns = discord.app_commands.Group(name="campaigns", description="x")
         qna = discord.app_commands.Group(name="qna", description="x")
-        insights = discord.app_commands.Group(name="insights", description="x")
-
         old_permission = triggers_module.check_permission
         triggers_module.check_permission = AsyncMock(return_value=True)
         try:
-            register_triggers(group, campagne, qna, insights, ctx)
-            prompt_group = _get_subgroup(campagne, "prompt")
+            register_triggers(group, campaigns, qna, ctx)
+            prompt_group = _get_subgroup(campaigns, "prompt")
             callback = _get_command_callback(prompt_group, "schedule_show")
             interaction = SimpleNamespace(
                 guild_id=1,
                 channel_id=2,
-                command=SimpleNamespace(qualified_name="campagne prompt schedule_show"),
+                command=SimpleNamespace(qualified_name="campaigns prompt schedule_show"),
                 data={"name": "schedule_show"},
                 response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
             )
@@ -195,20 +189,18 @@ def test_prompt_show_rejects_ambiguous_schedule_name() -> None:
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=ZoneInfo("Europe/Rome"), footer=None)
 
         group = discord.app_commands.Group(name="admin", description="x")
-        campagne = discord.app_commands.Group(name="campagne", description="x")
+        campaigns = discord.app_commands.Group(name="campaigns", description="x")
         qna = discord.app_commands.Group(name="qna", description="x")
-        insights = discord.app_commands.Group(name="insights", description="x")
-
         old_permission = triggers_module.check_permission
         triggers_module.check_permission = AsyncMock(return_value=True)
         try:
-            register_triggers(group, campagne, qna, insights, ctx)
-            prompt_group = _get_subgroup(campagne, "prompt")
+            register_triggers(group, campaigns, qna, ctx)
+            prompt_group = _get_subgroup(campaigns, "prompt")
             callback = _get_command_callback(prompt_group, "schedule_show")
             interaction = SimpleNamespace(
                 guild_id=1,
                 channel_id=2,
-                command=SimpleNamespace(qualified_name="campagne prompt schedule_show"),
+                command=SimpleNamespace(qualified_name="campaigns prompt schedule_show"),
                 data={"name": "schedule_show"},
                 response=SimpleNamespace(send_message=AsyncMock(), is_done=lambda: False),
             )

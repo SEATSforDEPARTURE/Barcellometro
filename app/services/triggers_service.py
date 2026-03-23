@@ -1752,8 +1752,8 @@ class TriggerEngineService:
             if channel and isinstance(channel, discord.abc.Messageable):
                 embed = await build_command_embed(
                     top_level="triggers",
-                    subcommand_path="insights post",
-                    visual_top_level="insights",
+                    subcommand_path="campaigns insights post",
+                    visual_top_level="campaigns",
                     lines=[("dettaglio", text)],
                     footer_service=self._footer,
                 )
