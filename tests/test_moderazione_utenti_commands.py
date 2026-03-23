@@ -18,7 +18,7 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
 
     assert "register_moderazione_utenti" in source
     assert 'app_commands.Group(name="greetings"' in source
-    assert "register_greetings(greetings_group, ctx)" in source
+    assert 'register_greetings(greetings_group, ctx, top_level="greetings", visual_top_level="greetings")' in source
     assert 'name="users"' in modular
     assert 'description="Moderation actions for users"' in modular
     assert 'app_commands.Group(name="backfill"' in greetings
@@ -85,11 +85,7 @@ def test_legacy_mod_channel_namespace_is_removed() -> None:
         "| `greetings` | `backfill` | `run` | Run greetings timeline backfill now. |"
         in docs_source
     )
-    assert (
-        "| `mod` | `users` | `unban` | Revoke an active ban for a user. |"
-        in docs_source
-    )
-
+    
 
 def test_legacy_moderation_namespace_commands_are_removed() -> None:
     source = Path("app/plugins/commands_modular/moderazione_utenti.py").read_text()
@@ -200,6 +196,8 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
         assert notify_kwargs["metadata"]["source"] == "moderazione_utenti"
         send_standard_response.assert_awaited_once()
         response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["top_level"] == "users"
+        assert response_kwargs["visual_top_level"] == "users"
         assert response_kwargs["subcommand_path"] == "moderazione users unban"
         assert response_kwargs["kind"] == "success"
         assert ("result", "ban revocato") in response_kwargs["lines"]
@@ -266,6 +264,8 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
         assert notify_kwargs["metadata"]["discord_unban_result"] == "discord_ban_missing"
         send_standard_response.assert_awaited_once()
         response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["top_level"] == "users"
+        assert response_kwargs["visual_top_level"] == "users"
         assert response_kwargs["subcommand_path"] == "moderazione users unban"
         assert response_kwargs["kind"] == "success"
         assert ("result", "nessun ban attivo trovato su Discord") in response_kwargs["lines"]

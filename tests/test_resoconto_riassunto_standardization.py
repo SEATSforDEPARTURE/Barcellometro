@@ -146,8 +146,8 @@ def test_send_standard_response_with_disabled_footer_service_suppresses_footer()
 
 def test_resoconto_manual_paths_are_restored_at_top_level_and_kept_under_aura() -> None:
     ctx = SimpleNamespace(timezone=ZoneInfo("Europe/Rome"), config=SimpleNamespace(), footer=None)
-    channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
-    server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+    channel_group = discord.app_commands.Group(name="channelsummary", description="x")
+    server_group = discord.app_commands.Group(name="serversummary", description="x")
 
     register_resoconto(channel_group, server_group, ctx)
 
@@ -182,8 +182,8 @@ def test_resocontocanale_top_level_callbacks_route_to_full_summary_helper(comman
             entitlements=SimpleNamespace(),
             database=SimpleNamespace(),
         )
-        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
-        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        channel_group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
         full_mock = AsyncMock()
         aura_mock = AsyncMock()
         old_full = resoconto_module._run_channel_summary_window
@@ -193,7 +193,7 @@ def test_resocontocanale_top_level_callbacks_route_to_full_summary_helper(comman
         try:
             register_resoconto(channel_group, server_group, ctx)
             callback = _get_command_callback(channel_group, command_name)
-            interaction = _FakeInteraction(qualified_name=f"resocontocanale {command_name}")
+            interaction = _FakeInteraction(qualified_name=f"channelsummary {command_name}")
             await callback(interaction, *args)
         finally:
             resoconto_module._run_channel_summary_window = old_full
@@ -225,8 +225,8 @@ def test_resocontocanale_aura_subcommands_route_to_aura_helper(command_name: str
             entitlements=SimpleNamespace(),
             database=SimpleNamespace(),
         )
-        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
-        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        channel_group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
         full_mock = AsyncMock()
         aura_mock = AsyncMock()
         old_full = resoconto_module._run_channel_summary_window
@@ -237,7 +237,7 @@ def test_resocontocanale_aura_subcommands_route_to_aura_helper(command_name: str
             register_resoconto(channel_group, server_group, ctx)
             aura_group = _get_subgroup(channel_group, "aura")
             callback = _get_command_callback(aura_group, command_name)
-            interaction = _FakeInteraction(qualified_name=f"resocontocanale aura {command_name}")
+            interaction = _FakeInteraction(qualified_name=f"channelsummary aura {command_name}")
             await callback(interaction, *args)
         finally:
             resoconto_module._run_channel_summary_window = old_full
@@ -269,8 +269,8 @@ def test_resocontoserver_top_level_callbacks_route_to_full_summary_helper(comman
             entitlements=SimpleNamespace(),
             database=SimpleNamespace(),
         )
-        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
-        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        channel_group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
         full_mock = AsyncMock()
         aura_mock = AsyncMock()
         old_full = resoconto_module._run_server_summary_window
@@ -280,7 +280,7 @@ def test_resocontoserver_top_level_callbacks_route_to_full_summary_helper(comman
         try:
             register_resoconto(channel_group, server_group, ctx)
             callback = _get_command_callback(server_group, command_name)
-            interaction = _FakeInteraction(qualified_name=f"resocontoserver {command_name}")
+            interaction = _FakeInteraction(qualified_name=f"serversummary {command_name}")
             await callback(interaction, *args)
         finally:
             resoconto_module._run_server_summary_window = old_full
@@ -312,8 +312,8 @@ def test_resocontoserver_aura_subcommands_route_to_aura_helper(command_name: str
             entitlements=SimpleNamespace(),
             database=SimpleNamespace(),
         )
-        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
-        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        channel_group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
         full_mock = AsyncMock()
         aura_mock = AsyncMock()
         old_full = resoconto_module._run_server_summary_window
@@ -324,7 +324,7 @@ def test_resocontoserver_aura_subcommands_route_to_aura_helper(command_name: str
             register_resoconto(channel_group, server_group, ctx)
             aura_group = _get_subgroup(server_group, "aura")
             callback = _get_command_callback(aura_group, command_name)
-            interaction = _FakeInteraction(qualified_name=f"resocontoserver aura {command_name}")
+            interaction = _FakeInteraction(qualified_name=f"serversummary aura {command_name}")
             await callback(interaction, *args)
         finally:
             resoconto_module._run_server_summary_window = old_full
@@ -351,14 +351,14 @@ def test_resoconto_status_uses_standard_embed() -> None:
             daily_activity_report=object(),
             entitlements=SimpleNamespace(),
         )
-        group = discord.app_commands.Group(name="resocontocanale", description="x")
-        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
         old_permission = resoconto_module.check_permission
         resoconto_module.check_permission = AsyncMock(return_value=True)
         try:
             register_resoconto(group, server_group, ctx)
             callback = _get_command_callback(group, "status")
-            interaction = _FakeInteraction(qualified_name="resocontocanale status")
+            interaction = _FakeInteraction(qualified_name="channelsummary status")
             await callback(interaction)
         finally:
             resoconto_module.check_permission = old_permission
@@ -388,23 +388,23 @@ def test_resocontoserver_status_uses_real_command_title() -> None:
             daily_activity_report=object(),
             entitlements=SimpleNamespace(),
         )
-        channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
-        server_group = discord.app_commands.Group(name="resocontoserver", description="x")
+        channel_group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
         old_permission = resoconto_module.check_permission
         resoconto_module.check_permission = AsyncMock(return_value=True)
         try:
             register_resoconto(channel_group, server_group, ctx)
             callback = _get_command_callback(server_group, "status")
-            interaction = _FakeInteraction(qualified_name="resocontoserver status")
+            interaction = _FakeInteraction(qualified_name="serversummary status")
             await callback(interaction)
         finally:
             resoconto_module.check_permission = old_permission
 
         kwargs = interaction.response.send_message.await_args.kwargs
         embed = kwargs["embed"]
-        assert embed.title == "📓 RESOCONTOSERVER"
+        assert embed.title == "📓 SERVERSUMMARY"
         assert embed.description.startswith("**ℹ️ STATUS**")
-        assert "RESOCONTO" not in (embed.title or "").replace("RESOCONTOSERVER", "")
+        assert "RESOCONTO" not in (embed.title or "").replace("SERVERSUMMARY", "")
 
     asyncio.run(_run())
 
@@ -449,7 +449,6 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
 
     monkeypatch.setattr(commands_module, "CommandContext", SimpleNamespace(from_registry=lambda registry: ctx))
     monkeypatch.setattr(commands_module, "install_footer_auto_finalize", lambda footer: None)
-    monkeypatch.setattr(commands_module, "register_admin", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_roles", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_stt", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_translate", lambda *args, **kwargs: None)

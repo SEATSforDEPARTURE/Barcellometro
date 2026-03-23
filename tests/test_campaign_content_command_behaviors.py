@@ -130,9 +130,9 @@ def test_custom_run_reports_not_found_when_campaign_missing(messaggi_module) -> 
 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
-            top_level="admin",
+            top_level="campaigns",
             subcommand_path="campagne custom run",
-            visual_top_level="campagne",
+            visual_top_level="campaigns",
             subtitle_args=[99],
             lines=[("warning", "Custom schedule not found.")],
             sections=None,
@@ -159,9 +159,9 @@ def test_weather_run_dispatches_editorial_service(messaggi_module) -> None:
 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
-            top_level="admin",
+            top_level="campaigns",
             subcommand_path="campagne weather run",
-            visual_top_level="campagne",
+            visual_top_level="campaigns",
             subtitle_args=None,
             lines=[("channel", "<#10>"), ("result", "running")],
             sections=None,
@@ -216,9 +216,9 @@ def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module
 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
-            top_level="admin",
+            top_level="campaigns",
             subcommand_path="campagne custom run",
-            visual_top_level="campagne",
+            visual_top_level="campaigns",
             subtitle_args=[11],
             lines=[("schedule_id", 11), ("result", "running")],
             sections=None,
@@ -254,9 +254,9 @@ def test_custom_run_checks_permission_candidates_in_order(messaggi_module) -> No
         ]
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
-            top_level="admin",
+            top_level="campaigns",
             subcommand_path="campagne custom run",
-            visual_top_level="campagne",
+            visual_top_level="campaigns",
             subtitle_args=[12],
             lines=[("schedule_id", 12), ("result", "running")],
             sections=None,
