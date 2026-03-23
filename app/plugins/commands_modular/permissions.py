@@ -40,7 +40,7 @@ async def check_permission(
     visual_top_level = qualified_name.split()[0] if qualified_name else None
     await send_standard_response(
         interaction,
-        top_level="admin",
+        top_level=visual_top_level or "status",
         subcommand_path=subcommand_path,
         visual_top_level=visual_top_level,
         lines=[("reason", message)],

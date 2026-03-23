@@ -133,7 +133,7 @@ def _format_service_config_row(row: dict[str, object]) -> str:
     )
 
 
-def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "campaigns", visual_top_level: str = "campaigns") -> None:
     quiet_group = app_commands.Group(name="quiet", description="Quiet hours controls")
     cap_group = app_commands.Group(name="cap", description="Daily cap controls")
     custom_group = app_commands.Group(name="custom", description="Custom campaign schedules")
@@ -168,9 +168,9 @@ def register_messaggi(campagne_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=top_level,
             subcommand_path=subcommand_path,
-            visual_top_level="campagne",
+            visual_top_level=visual_top_level,
             subtitle_args=subtitle_args,
             lines=lines,
             sections=sections,

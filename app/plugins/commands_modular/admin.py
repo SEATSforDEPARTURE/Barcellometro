@@ -524,3 +524,160 @@ def register_admin(admin_group: app_commands.Group, ctx: CommandContext) -> None
             service_name="status",
         )
 
+
+
+def register_database(database_group: app_commands.Group, ctx: CommandContext) -> None:
+    register_admin(database_group, ctx)
+
+
+def register_ai(ai_group: app_commands.Group, ctx: CommandContext) -> None:
+    ai_task_choices = [
+        app_commands.Choice(name="summary", value="summary"),
+        app_commands.Choice(name="server_summary", value="server_summary"),
+        app_commands.Choice(name="audio_summary", value="audio_summary"),
+        app_commands.Choice(name="qa", value="qa"),
+        app_commands.Choice(name="analysis", value="analysis"),
+        app_commands.Choice(name="transcription", value="transcription"),
+        app_commands.Choice(name="translation", value="translation"),
+        app_commands.Choice(name="campaign_editorial", value="campaign_editorial"),
+        app_commands.Choice(name="campaign_prompt", value="campaign_prompt"),
+    ]
+    toggle_choices = [app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")]
+
+    async def _autocomplete_ai_model(
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        selected_task = getattr(interaction.namespace, "task", None)
+        task_value = selected_task.value if isinstance(selected_task, app_commands.Choice) else selected_task
+        return await build_model_autocomplete_choices(task_value, current)
+
+    def _is_valid_provider_model(value: str) -> bool:
+        return ":" in value and bool(value.split(":", 1)[0].strip()) and bool(value.split(":", 1)[1].strip())
+
+    async def _send_ai_map(
+        interaction: discord.Interaction,
+        *,
+        title: str,
+        values: dict[str, str],
+        task: str | None,
+    ) -> None:
+        header = "ai model_show" if "primary" in title.lower() else "ai fallback_show"
+        if task is not None:
+            await _send_legacy(
+                interaction,
+                ctx,
+                top_level="ai",
+                path_parts=["model_show" if "primary" in title.lower() else "fallback_show"],
+                entries=[("Task", task), ("Model", values.get(task) or "(not set)")],
+                service_name="status",
+            )
+            return
+        await _send_legacy(
+            interaction,
+            ctx,
+            top_level="ai",
+            path_parts=[header.split()[1]],
+            entries=[("Configured Tasks", len(values))],
+            sections=[("Models", [(item_task, item_model) for item_task, item_model in sorted(values.items())])],
+            service_name="status",
+        )
+
+    @ai_group.command(name="on", description="Enable the AI service.")
+    async def ai_on_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.ai.on", ctx):
+            return
+        await ctx.ai.set_enabled(True)
+        await _send_legacy(interaction, ctx, top_level="ai", path_parts=["on"], entries=[("Status", "enabled")], tone="success", service_name="status")
+
+    @ai_group.command(name="off", description="Disable the AI service.")
+    async def ai_off_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.ai.off", ctx):
+            return
+        await ctx.ai.set_enabled(False)
+        await _send_legacy(interaction, ctx, top_level="ai", path_parts=["off"], entries=[("Status", "disabled")], tone="success", service_name="status")
+
+    @ai_group.command(name="model_set", description="Set the AI model for a task.")
+    @app_commands.describe(task="AI task.", model="Select or search for a provider:model value.")
+    @app_commands.choices(task=ai_task_choices)
+    @app_commands.autocomplete(model=_autocomplete_ai_model)
+    async def ai_model_set_command(interaction: discord.Interaction, task: app_commands.Choice[str], model: str) -> None:
+        if not await check_permission(interaction, "admin.ai.model_set", ctx):
+            return
+        if not _is_valid_provider_model(model):
+            await _send_legacy(interaction, ctx, top_level="ai", path_parts=["model_set"], entries=[("Reason", "Invalid provider:model format")], tone="error", sections=[("Example", [("Model", "openai:gpt-4o-mini")])], service_name="status")
+            return
+        await ctx.ai.set_model(task.value, model)
+        await _send_legacy(interaction, ctx, top_level="ai", path_parts=["model_set"], entries=[("Task", task.value), ("Model", model), ("Scope", "primary")], tone="success", service_name="status")
+
+    @ai_group.command(name="model_show", description="Show configured AI models.")
+    @app_commands.describe(task="Optional AI task.")
+    @app_commands.choices(task=ai_task_choices)
+    async def ai_model_show_command(interaction: discord.Interaction, task: app_commands.Choice[str] | None = None) -> None:
+        if not await check_permission(interaction, "admin.ai.model_show", ctx):
+            return
+        status = ctx.ai.status()
+        models = status.get("models", {}) if isinstance(status, dict) else {}
+        await _send_ai_map(interaction, title="AI primary models", values=models if isinstance(models, dict) else {}, task=task.value if task else None)
+
+    @ai_group.command(name="fallback_set", description="Set the AI fallback model for a task.")
+    @app_commands.describe(task="AI task.", model="Select or search for a provider:model value.")
+    @app_commands.choices(task=ai_task_choices)
+    @app_commands.autocomplete(model=_autocomplete_ai_model)
+    async def ai_fallback_set_command(interaction: discord.Interaction, task: app_commands.Choice[str], model: str) -> None:
+        if not await check_permission(interaction, "admin.ai.fallback_set", ctx):
+            return
+        if not _is_valid_provider_model(model):
+            await _send_legacy(interaction, ctx, top_level="ai", path_parts=["fallback_set"], entries=[("Reason", "Invalid provider:model format")], tone="error", sections=[("Example", [("Model", "openai:gpt-4o-mini")])], service_name="status")
+            return
+        await ctx.ai.set_fallback_model(task.value, model)
+        await _send_legacy(interaction, ctx, top_level="ai", path_parts=["fallback_set"], entries=[("Task", task.value), ("Model", model), ("Scope", "fallback")], tone="success", service_name="status")
+
+    @ai_group.command(name="fallback_show", description="Show configured AI fallback models.")
+    @app_commands.describe(task="Optional AI task.")
+    @app_commands.choices(task=ai_task_choices)
+    async def ai_fallback_show_command(interaction: discord.Interaction, task: app_commands.Choice[str] | None = None) -> None:
+        if not await check_permission(interaction, "admin.ai.fallback_show", ctx):
+            return
+        status = ctx.ai.status()
+        models = status.get("fallback_models", {}) if isinstance(status, dict) else {}
+        await _send_ai_map(interaction, title="AI fallback models", values=models if isinstance(models, dict) else {}, task=task.value if task else None)
+
+    @ai_group.command(name="status", description="Show AI service status.")
+    async def ai_status_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.ai.status", ctx):
+            return
+        status = ctx.ai.status()
+        metrics = status.get("metrics", {}) if isinstance(status, dict) else {}
+        models = status.get("models", {}) if isinstance(status, dict) else {}
+        fallback_models = status.get("fallback_models", {}) if isinstance(status, dict) else {}
+        last_test_state = metrics.get("last_test_ok")
+        test_outcome = "(n/a)" if last_test_state is None else ("ok" if last_test_state else "failed")
+        await _send_legacy(
+            interaction,
+            ctx,
+            top_level="ai",
+            path_parts=["status"],
+            entries=[("Service", status.get("state") or "unknown")],
+            sections=[
+                ("Primary", [(task_name, model_name) for task_name, model_name in sorted(models.items())] if isinstance(models, dict) else []),
+                ("Fallback", [(task_name, model_name) for task_name, model_name in sorted(fallback_models.items())] if isinstance(fallback_models, dict) else []),
+                ("Last Usage", [("Task", metrics.get("last_used_task") or "(n/a)"), ("Model", metrics.get("last_used_model") or "(n/a)")]),
+                ("Last Run", [("Task", metrics.get("last_test_task") or "(n/a)"), ("Model", metrics.get("last_test_model") or "(n/a)"), ("Result", test_outcome), ("Error", _truncate_embed_text(str(metrics.get("last_test_error"))) if metrics.get("last_test_error") else "(n/a)")]),
+            ],
+            service_name="status",
+        )
+
+    @ai_group.command(name="run", description="Run an AI test prompt.")
+    @app_commands.describe(task="AI task.", prompt="Prompt text.", web="Enable or disable web search.")
+    @app_commands.choices(task=ai_task_choices, web=toggle_choices)
+    async def ai_run_command(interaction: discord.Interaction, task: app_commands.Choice[str], prompt: str, web: app_commands.Choice[str] | None = None) -> None:
+        if not await check_permission(interaction, "admin.ai.run", ctx):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        web_value = (web.value if web is not None else "off") == "on"
+        result = await ctx.ai.run_test(task.value, prompt, use_web=web_value)
+        sections = [("Output", [("Result", _truncate_embed_text(result.get("output"), limit=900))])]
+        if result.get("error"):
+            sections.append(("Error", [("Message", _truncate_embed_text(str(result.get("error")), limit=900))]))
+        await _send_legacy(interaction, ctx, top_level="ai", path_parts=["run"], entries=[("Task", result.get("task") or task.value), ("Model", result.get("model") or "(n/a)"), ("Web", web_value), ("Result", "ok" if result.get("ok") else "failed")], tone="success" if result.get("ok") else "error", sections=sections, service_name="status")

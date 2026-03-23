@@ -43,7 +43,7 @@ async def _stt_config_lines(ctx: CommandContext) -> list[str]:
     ]
 
 
-def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_stt(stt_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "audio") -> None:
     @stt_group.command(name="config_set", description="Update the STT configuration.")
     @app_commands.describe(
         backend="STT backend.",
@@ -76,7 +76,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
         if all(value is None for value in (backend, model, compute, beam, language)):
             await send_standard_response(
                 interaction,
-                top_level="admin",
+                top_level=root_top_level,
                 subcommand_path="stt config_set",
                 lines=[("error", "No changes provided. Use /admin stt config_show to inspect the current configuration.")],
                 kind="error",
@@ -97,7 +97,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
 
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=root_top_level,
             subcommand_path="stt config_set",
             lines=[("result", "updated")],
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
@@ -115,7 +115,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
             return
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=root_top_level,
             subcommand_path="stt config_show",
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
             footer_service=ctx.footer,
@@ -139,7 +139,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext) -> None:
             await reset_setting(ctx, key)
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=root_top_level,
             subcommand_path="stt config_reset",
             lines=[("result", "reset")],
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],

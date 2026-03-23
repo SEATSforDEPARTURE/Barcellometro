@@ -117,7 +117,7 @@ def _render_template_preview(template: str) -> str:
         return f"[Template render error: {exc}]\n{template}"
 
 
-def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "inactivity", visual_top_level: str = "inactivity") -> None:
     autokick_group = app_commands.Group(name="autokick", description="Automatic inactivity enforcement")
     grace_group = app_commands.Group(name="grace", description="Grace period settings")
     tempban_group = app_commands.Group(name="tempban", description="Temporary ban settings")
@@ -143,9 +143,9 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=top_level,
             subcommand_path=subcommand_path,
-            visual_top_level="inattivi",
+            visual_top_level=visual_top_level,
             lines=lines,
             sections=sections,
             kind=kind,
@@ -160,9 +160,9 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext)
             filename=f"{txt_prefix}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.txt",
         )
         embeds = await build_command_embeds(
-            top_level="admin",
+            top_level=top_level,
             subcommand_path=subcommand_path,
-            visual_top_level="inattivi",
+            visual_top_level=visual_top_level,
             lines=[("entries", len(lines))],
             sections=[CommandEmbedSection(title=title, lines=lines or ["No results."])],
             footer_service=ctx.footer,

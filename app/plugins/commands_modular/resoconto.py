@@ -244,6 +244,9 @@ def register_resoconto(
     resocontocanale_group: app_commands.Group,
     resocontoserver_group: app_commands.Group,
     ctx: CommandContext,
+    *,
+    channel_root: str = "channelsummary",
+    server_root: str = "serversummary",
 ) -> None:
     def _normalize_message(message: str) -> str:
         return str(message or "").lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile."
@@ -271,9 +274,9 @@ def register_resoconto(
         ephemeral: bool = True,
     ) -> None:
         visual_top_level = {
-            "canale": "resocontocanale",
-            "server": "resocontoserver",
-        }.get(scope, "resoconto")
+            "canale": channel_root,
+            "server": server_root,
+        }.get(scope, channel_root)
         await send_standard_response(
             interaction,
             top_level=visual_top_level,

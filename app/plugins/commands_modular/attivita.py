@@ -370,7 +370,7 @@ def _format_interactions(interactions: dict[int, dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
-def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "attivita") -> None:
     async def _send_standard(
         interaction: discord.Interaction,
         *,
@@ -383,9 +383,9 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext) -
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=top_level,
             subcommand_path=subcommand_path,
-            visual_top_level="attivita",
+            visual_top_level=root_top_level,
             subtitle_args=subtitle_args,
             lines=lines,
             sections=sections,

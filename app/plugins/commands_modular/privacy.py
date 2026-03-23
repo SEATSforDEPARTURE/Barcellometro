@@ -14,7 +14,7 @@ from app.plugins.commands_modular.voice_ingest import voice_ingest_key
 from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
 
 
-def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "privacy", visual_top_level: str = "privacy") -> None:
     async def resolve_voice_channel(interaction: discord.Interaction, voice_channel: discord.VoiceChannel | None) -> discord.VoiceChannel | None:
         if voice_channel is not None:
             return voice_channel
@@ -61,7 +61,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         )
 
     async def _send_privacy_error(interaction: discord.Interaction, subcommand: str, message: str) -> None:
-        await send_standard_response(interaction, top_level="admin", subcommand_path=f"privacy {subcommand}", visual_top_level="privacy", lines=[("error", message)], kind="error", footer_service=ctx.footer)
+        await send_standard_response(interaction, top_level=top_level, subcommand_path=f"privacy {subcommand}", visual_top_level=visual_top_level, lines=[("error", message)], kind="error", footer_service=ctx.footer)
 
     @privacy_group.command(name="on", description="Enable voice privacy.")
     @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
@@ -83,7 +83,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         await emit_privacy_event(interaction, "voice.privacy_on", resolved_voice, bot_ids)
         if ctx.voice_ingest and ctx.bot.user and ctx.bot.user.id in bot_ids:
             await ctx.voice_ingest.leave()
-        await send_standard_response(interaction, top_level="admin", subcommand_path="privacy on", visual_top_level="privacy", lines=[("voice_channel", resolved_voice.name), ("affected_bots", len(bot_ids)), ("privacy", "enabled")], kind="success", footer_service=ctx.footer)
+        await send_standard_response(interaction, top_level=top_level, subcommand_path="privacy on", visual_top_level=visual_top_level, lines=[("voice_channel", resolved_voice.name), ("affected_bots", len(bot_ids)), ("privacy", "enabled")], kind="success", footer_service=ctx.footer)
 
     @privacy_group.command(name="off", description="Disable voice privacy.")
     @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
@@ -106,7 +106,7 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
         non_bot_members = [member for member in resolved_voice.members if not member.bot]
         if ctx.voice_ingest and ctx.bot.user and ctx.bot.user.id in bot_ids and non_bot_members:
             await ctx.voice_ingest.join(resolved_voice)
-        await send_standard_response(interaction, top_level="admin", subcommand_path="privacy off", visual_top_level="privacy", lines=[("voice_channel", resolved_voice.name), ("affected_bots", len(bot_ids)), ("privacy", "disabled")], kind="success", footer_service=ctx.footer)
+        await send_standard_response(interaction, top_level=top_level, subcommand_path="privacy off", visual_top_level=visual_top_level, lines=[("voice_channel", resolved_voice.name), ("affected_bots", len(bot_ids)), ("privacy", "disabled")], kind="success", footer_service=ctx.footer)
 
     @privacy_group.command(name="status", description="Show the current voice privacy status.")
     @app_commands.describe(voice_channel="Optional voice channel. Defaults to your current voice channel.")
@@ -144,4 +144,4 @@ def register_privacy(privacy_group: app_commands.Group, ctx: CommandContext) -> 
             lines.insert(1, ("privacy", "ON" if True in privacy_values else "OFF"))
         else:
             lines.insert(1, ("privacy", "MIXED"))
-        await send_standard_response(interaction, top_level="admin", subcommand_path="privacy status", visual_top_level="privacy", lines=lines, sections=sections, footer_service=ctx.footer)
+        await send_standard_response(interaction, top_level=top_level, subcommand_path="privacy status", visual_top_level=visual_top_level, lines=lines, sections=sections, footer_service=ctx.footer)

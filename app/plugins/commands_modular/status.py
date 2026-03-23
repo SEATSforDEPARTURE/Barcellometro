@@ -12,8 +12,8 @@ async def _send_legacy(interaction: discord.Interaction, ctx: CommandContext, **
     await send_legacy_standard_response(interaction, footer_service=ctx.footer, **kwargs)
 
 
-def register_status(admin_group: app_commands.Group, ctx: CommandContext) -> None:
-    @admin_group.command(name="status", description="Show the Barcellometro status.")
+def register_status(parent: app_commands.Group | app_commands.CommandTree, guild: discord.abc.Snowflake | None, ctx: CommandContext) -> None:
+    @parent.command(name="status", description="Show the Barcellometro status.", guild=guild)
     @app_commands.describe(service="Optional service or plugin name.")
     async def admin_status_command(interaction: discord.Interaction, service: str | None = None) -> None:
         if not await check_permission(interaction, "admin.status", ctx):
@@ -21,7 +21,7 @@ def register_status(admin_group: app_commands.Group, ctx: CommandContext) -> Non
         if service:
             status = ctx.status.component_status(service)
             await _send_legacy(interaction, ctx,
-                top_level="admin",
+                top_level="status",
                 path_parts=["status", service],
                 entries=[
                     ("Service", service),
@@ -35,7 +35,7 @@ def register_status(admin_group: app_commands.Group, ctx: CommandContext) -> Non
             return
         general = await ctx.status.general_status()
         await _send_legacy(interaction, ctx,
-            top_level="admin",
+            top_level="status",
             path_parts=["status"],
             entries=[
                 ("Bot", "online"),

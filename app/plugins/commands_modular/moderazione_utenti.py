@@ -40,9 +40,9 @@ async def _send_lines(
     )
     sections = [CommandEmbedSection(title=title, lines=lines or ["No results."])]
     embeds = await build_command_embeds(
-        top_level="admin",
+        top_level=top_level,
         subcommand_path=subcommand_path,
-        visual_top_level="moderazione",
+        visual_top_level=visual_top_level,
         lines=[("entries", len(lines))],
         sections=sections,
         footer_service=ctx.footer,
@@ -58,7 +58,7 @@ def _render_departure_action_label(action_type: str) -> str:
     return labels.get(action_type, action_type)
 
 
-def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "users", visual_top_level: str = "users") -> None:
     users_group = app_commands.Group(name="users", description="Moderation actions for users")
     mod_group.add_command(users_group)
     greetings_copy_service = GreetingsCopyService(ctx.database, barcello_service=getattr(ctx, "barcello_service", None))
@@ -78,9 +78,9 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=top_level,
             subcommand_path=subcommand_path,
-            visual_top_level="moderazione",
+            visual_top_level=visual_top_level,
             subtitle_args=subtitle_args,
             lines=lines,
             sections=sections,

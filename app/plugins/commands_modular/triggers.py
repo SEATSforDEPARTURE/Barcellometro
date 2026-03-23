@@ -23,13 +23,15 @@ logger = logging.getLogger(__name__)
 
 
 def register_triggers(
-    admin_group: app_commands.Group,
+    triggers_group: app_commands.Group,
     campagne_group: app_commands.Group,
     qna_group: app_commands.Group,
     insights_group: app_commands.Group,
     ctx: CommandContext,
+    *,
+    triggers_root: str = "triggers",
 ) -> app_commands.Group:
-    frasi_group = app_commands.Group(name="frasi", description="Phrase trigger controls")
+    frasi_group = triggers_group
     prompt_group = app_commands.Group(name="prompt", description="Prompt campaign schedules")
 
     add_group_once(campagne_group, prompt_group, logger)
@@ -177,9 +179,9 @@ def register_triggers(
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=triggers_root if subcommand_path.split()[0] == triggers_root else subcommand_path.split()[0],
             subcommand_path=subcommand_path,
-            visual_top_level=subcommand_path.split()[0] if subcommand_path.strip() else None,
+            visual_top_level=subcommand_path.split()[0] if subcommand_path.strip() else triggers_root,
             subtitle_args=subtitle_args,
             relevant_parameters=relevant_parameters,
             lines=lines,

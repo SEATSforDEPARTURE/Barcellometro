@@ -22,7 +22,7 @@ async def _translate_config_lines(ctx: CommandContext) -> list[str]:
     ]
 
 
-def register_translate(translate_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_translate(translate_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "audio") -> None:
     @translate_group.command(name="config_set", description="Update the translation configuration.")
     @app_commands.describe(
         backend="Translation backend.",
@@ -43,7 +43,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
         if backend is None and target is None:
             await send_standard_response(
                 interaction,
-                top_level="admin",
+                top_level=root_top_level,
                 subcommand_path="translate config_set",
                 lines=[("error", "No changes provided. Use /admin translate config_show to inspect the current configuration.")],
                 kind="error",
@@ -56,7 +56,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             await set_setting(ctx, "translate.target_lang", target.value)
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=root_top_level,
             subcommand_path="translate config_set",
             lines=[("result", "updated")],
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
@@ -74,7 +74,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             return
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=root_top_level,
             subcommand_path="translate config_show",
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
             footer_service=ctx.footer,
@@ -92,7 +92,7 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext)
             await reset_setting(ctx, key)
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=root_top_level,
             subcommand_path="translate config_reset",
             lines=[("result", "reset")],
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],

@@ -53,9 +53,9 @@ async def _send_roles_response(
 ) -> None:
     await send_standard_response(
         interaction,
-        top_level="admin",
+        top_level="commandguard",
         subcommand_path=subcommand_path,
-        visual_top_level="roles",
+        visual_top_level="commandguard",
         subtitle_args=subtitle_args,
         lines=lines,
         sections=sections,
@@ -74,7 +74,7 @@ async def _check_policy_values(interaction: discord.Interaction, ctx: CommandCon
     return True
 
 
-def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "commandguard", visual_top_level: str = "commandguard") -> None:
     @commandguard_group.command(name="role_add", description="Add a role command policy.")
     @app_commands.describe(role="Target role.", command="Command path.", usage_limit="Optional daily usage limit.", cooldown_seconds="Optional cooldown in seconds.")
     async def role_add_command(interaction: discord.Interaction, role: discord.Role, command: str, usage_limit: int | None = None, cooldown_seconds: int | None = None) -> None:

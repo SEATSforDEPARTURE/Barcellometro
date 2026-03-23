@@ -19,7 +19,7 @@ async def _ensure_cfg(ctx: CommandContext, guild_id: str) -> dict[str, Any]:
     return dict(cfg) if cfg else {}
 
 
-def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "greetings", visual_top_level: str = "greetings") -> None:
     backfill_group = app_commands.Group(name="backfill", description="Greetings timeline backfill controls")
     greetings_group.add_command(backfill_group)
 
@@ -41,9 +41,9 @@ def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext)
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level="admin",
+            top_level=top_level,
             subcommand_path=subcommand_path,
-            visual_top_level="greetings",
+            visual_top_level=visual_top_level,
             subtitle_args=subtitle_args,
             lines=lines,
             sections=sections,

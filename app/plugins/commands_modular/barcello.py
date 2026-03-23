@@ -36,6 +36,8 @@ def register_barcello(
     tree: app_commands.CommandTree,
     guild: discord.abc.Snowflake | None,
     ctx: CommandContext,
+    *,
+    root_top_level: str = "barcello",
 ) -> None:
     response_format_supported: bool | None = None
     barcello_group = app_commands.Group(name="barcello", description="Barcello controls")
@@ -70,8 +72,8 @@ def register_barcello(
         text = str(message or "").strip()
         await send_standard_response(
             interaction,
-            top_level="barcello",
-            subcommand_path=command_path or _command_path(interaction, fallback="barcello"),
+            top_level=root_top_level,
+            subcommand_path=command_path or _command_path(interaction, fallback=root_top_level),
             lines=[("dettaglio", _normalize_message(text))],
             kind=_kind_from_message(text),
             footer_service=ctx.footer,
@@ -94,7 +96,7 @@ def register_barcello(
         if sent:
             await send_standard_response(
                 interaction,
-                top_level="barcello",
+                top_level=root_top_level,
                 subcommand_path=command_path,
                 lines=[("result", "Ti ho inviato un DM")],
                 kind="success",
@@ -103,7 +105,7 @@ def register_barcello(
             return
         await send_standard_response(
             interaction,
-            top_level="barcello",
+            top_level=root_top_level,
             subcommand_path=command_path,
             lines=[("warning", blocked_message or "Non riesco a inviarti DM. Ti mostro il report qui in privato.")],
             kind="warning",
@@ -265,7 +267,7 @@ def register_barcello(
             message = f"Calibration not updated. Samples: {result.get('samples')}. {result.get('summary')}"
         await send_standard_response(
             interaction,
-            top_level="barcello",
+            top_level=root_top_level,
             subcommand_path="admin barcello calibrate",
             lines=[("samples", result.get("samples")), ("summary", result.get("summary"))],
             kind="success" if result.get("updated") else "warning",
@@ -1700,7 +1702,7 @@ def register_barcello(
             logger.exception("barcello: unexpected error")
             await send_standard_response(
                 interaction,
-                top_level="barcello",
+                top_level=root_top_level,
                 subcommand_path=command_path,
                 lines=[("error", "Errore temporaneo, riprova.")],
                 kind="error",

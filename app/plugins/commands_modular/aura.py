@@ -32,7 +32,7 @@ from app.shared.discord.report_embeds import apply_standard_report_style, send_r
 logger = logging.getLogger(__name__)
 
 
-def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_aura(aura_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "aurasummary") -> None:
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
         text = str(message or "").strip()
         kind = "info"
@@ -44,8 +44,8 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
             kind = "error"
         await send_standard_response(
             interaction,
-            top_level="aura",
-            subcommand_path=str(getattr(getattr(interaction, "command", None), "qualified_name", "") or "aura"),
+            top_level=root_top_level,
+            subcommand_path=str(getattr(getattr(interaction, "command", None), "qualified_name", "") or root_top_level),
             lines=[("dettaglio", text.lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile.")],
             kind=kind,
             footer_service=ctx.footer,
@@ -298,7 +298,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext) -> None:
         if not eligibility.eligible:
             await send_standard_response(
                 interaction,
-                top_level="aura",
+                top_level=root_top_level,
                 subcommand_path="aura",
                 lines=[("eligibility", eligibility.reason), ("periodo", f"{start_dt.strftime('%d/%m %H:%M')} → {end_dt.strftime('%d/%m %H:%M')}"), ("nota", "Per attivarla: aumenta i messaggi nel periodo.")],
                 kind="warning",

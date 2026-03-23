@@ -9,20 +9,21 @@ from discord.errors import NotFound
 from app.core.service_registry import ServiceRegistry
 from app.plugins.commands_modular import (
     CommandContext,
-    register_admin,
+    register_ai,
     register_ask,
-    register_embed,
-    register_audio_notes,
     register_attivita,
-    register_greetings,
     register_aura,
+    register_audio_notes,
     register_barcello,
+    register_database,
+    register_embed,
+    register_greetings,
     register_inattivi,
     register_messaggi,
     register_moderazione_utenti,
     register_privacy,
-    register_riassunto,
     register_resoconto,
+    register_riassunto,
     register_roles,
     register_status,
     register_stt,
@@ -31,8 +32,8 @@ from app.plugins.commands_modular import (
     register_voice_ingest,
 )
 from app.plugins.commands_modular.registration import add_group_once
-from app.shared.discord.command_embeds import send_standard_response
 from app.shared.discord.author_pipeline import install_author_auto_finalize
+from app.shared.discord.command_embeds import send_standard_response
 from app.shared.discord.footer_pipeline import install_footer_auto_finalize
 
 logger = logging.getLogger(__name__)
@@ -55,82 +56,105 @@ def setup(registry: ServiceRegistry) -> None:
     if not use_guild:
         logger.warning("GUILD_ID missing/invalid; registering GLOBAL commands")
 
-    admin_group = app_commands.Group(name="admin", description="Barcellometro control commands")
+    database_group = app_commands.Group(name="database", description="Database and ingestion controls")
+    ai_group = app_commands.Group(name="ai", description="AI controls")
     commandguard_group = app_commands.Group(name="commandguard", description="Command guard policies")
-    stt_group = app_commands.Group(name="stt", description="Speech-to-text configuration")
-    translate_group = app_commands.Group(name="translate", description="Translation configuration")
-    audionotes_group = app_commands.Group(name="audionotes", description="Audio notes controls")
-    campagne_group = app_commands.Group(name="campagne", description="Campaign controls")
+    audio_group = app_commands.Group(name="audio", description="Audio controls")
+    campaigns_group = app_commands.Group(name="campaigns", description="Campaign controls")
     qna_group = app_commands.Group(name="qna", description="QnA controls")
-    insights_group = app_commands.Group(name="insights", description="Insights controls")
-    voice_ingest_group = app_commands.Group(name="voice_ingest", description="Voice ingest")
+    triggers_group = app_commands.Group(name="triggers", description="Trigger controls")
     embed_group = app_commands.Group(name="embed", description="Embed controls")
     privacy_group = app_commands.Group(name="privacy", description="Voice privacy controls")
-    riassunto_group = app_commands.Group(name="riassunto", description="Summaries")
-    aura_group = app_commands.Group(name="aura", description="Aura reports")
-    attivita_group = app_commands.Group(name="attivita", description="User activity commands")
-    mod_group = app_commands.Group(name="mod", description="Moderation controls")
+    users_group = app_commands.Group(name="users", description="User management controls")
     greetings_group = app_commands.Group(name="greetings", description="Greetings controls")
     inactivity_group = app_commands.Group(name="inactivity", description="Inactive member moderation")
-    resocontocanale_group = app_commands.Group(name="resocontocanale", description="Channel summary schedules")
-    resocontoserver_group = app_commands.Group(name="resocontoserver", description="Server summary schedules")
+    channelsummary_group = app_commands.Group(name="channelsummary", description="Channel summary schedules")
+    serversummary_group = app_commands.Group(name="serversummary", description="Server summary schedules")
+    dmsummary_group = app_commands.Group(name="dmsummary", description="Direct message summaries")
+    aurasummary_group = app_commands.Group(name="aurasummary", description="Aura summaries")
+    barcellosummary_group = app_commands.Group(name="barcellosummary", description="Barcello summaries")
 
-    add_group_once(admin_group, commandguard_group, logger)
-    add_group_once(admin_group, stt_group, logger)
-    add_group_once(admin_group, translate_group, logger)
-    add_group_once(admin_group, audionotes_group, logger)
-    add_group_once(admin_group, voice_ingest_group, logger)
+    riassunto_alias_group = app_commands.Group(name="riassunto", description="Riassunti")
+    aura_alias_group = app_commands.Group(name="aura", description="Aura reports")
+    resocontocanale_alias_group = app_commands.Group(name="resocontocanale", description="Channel summary schedules")
+    resocontoserver_alias_group = app_commands.Group(name="resocontoserver", description="Server summary schedules")
+    attivita_group = app_commands.Group(name="attivita", description="User activity commands")
 
-    register_admin(admin_group, ctx)
+    stt_group = app_commands.Group(name="stt", description="Speech-to-text configuration")
+    translate_group = app_commands.Group(name="translate", description="Translation configuration")
+    voice_ingest_group = app_commands.Group(name="voice_ingest", description="Voice ingest")
+    insights_group = app_commands.Group(name="insights", description="Insights controls")
+
+    add_group_once(audio_group, stt_group, logger)
+    add_group_once(audio_group, translate_group, logger)
+    add_group_once(audio_group, voice_ingest_group, logger)
+    add_group_once(ai_group, insights_group, logger)
+
+    register_database(database_group, ctx)
+    register_ai(ai_group, ctx)
     register_embed(embed_group, ctx)
-    register_roles(commandguard_group, ctx)
-    register_stt(stt_group, ctx)
-    register_translate(translate_group, ctx)
-    register_audio_notes(audionotes_group, ctx)
-    register_messaggi(campagne_group, ctx)
-    register_voice_ingest(voice_ingest_group, ctx)
-    register_privacy(privacy_group, ctx)
-    register_status(admin_group, ctx)
-    register_barcello(admin_group, bot.tree, guild_obj, ctx)
-    register_riassunto(riassunto_group, ctx)
-    register_aura(aura_group, ctx)
-    register_attivita(attivita_group, ctx)
+    register_roles(commandguard_group, ctx, top_level="commandguard", visual_top_level="commandguard")
+    register_stt(stt_group, ctx, root_top_level="audio")
+    register_translate(translate_group, ctx, root_top_level="audio")
+    register_audio_notes(audio_group, ctx, root_top_level="audio")
+    register_messaggi(campaigns_group, ctx, top_level="campaigns", visual_top_level="campaigns")
+    register_voice_ingest(voice_ingest_group, ctx, root_top_level="audio")
+    register_privacy(privacy_group, ctx, top_level="privacy", visual_top_level="privacy")
+    register_status(bot.tree, guild_obj, ctx)
+    register_barcello(barcellosummary_group, bot.tree, guild_obj, ctx, root_top_level="barcellosummary")
+    register_riassunto(dmsummary_group, ctx, root_top_level="dmsummary")
+    register_riassunto(riassunto_alias_group, ctx, root_top_level="riassunto")
+    register_aura(aurasummary_group, ctx, root_top_level="aurasummary")
+    register_aura(aura_alias_group, ctx, root_top_level="aura")
+    register_attivita(attivita_group, ctx, root_top_level="attivita")
 
-    register_inattivi(inactivity_group, ctx)
-    register_greetings(greetings_group, ctx)
-    register_moderazione_utenti(mod_group, ctx)
+    register_inattivi(inactivity_group, ctx, top_level="inactivity", visual_top_level="inactivity")
+    register_greetings(greetings_group, ctx, top_level="greetings", visual_top_level="greetings")
+    register_moderazione_utenti(users_group, ctx, top_level="users", visual_top_level="users")
 
-    register_resoconto(resocontocanale_group, resocontoserver_group, ctx)
-    frasi_group = register_triggers(admin_group, campagne_group, qna_group, insights_group, ctx)
+    register_resoconto(channelsummary_group, serversummary_group, ctx, channel_root="channelsummary", server_root="serversummary")
+    register_resoconto(
+        resocontocanale_alias_group,
+        resocontoserver_alias_group,
+        ctx,
+        channel_root="resocontocanale",
+        server_root="resocontoserver",
+    )
+    register_triggers(triggers_group, campaigns_group, qna_group, insights_group, ctx, triggers_root="triggers")
+    register_ask(bot.tree, guild_obj, ctx, command_name="domanda", root_top_level="qna", visual_top_level="domanda")
 
     logger.info(
-        "Group children summary admin=%d campagne=%d qna=%d insights=%d",
-        len(admin_group.commands),
-        len(campagne_group.commands),
+        "Group children summary database=%d campaigns=%d qna=%d triggers=%d ai=%d",
+        len(database_group.commands),
+        len(campaigns_group.commands),
         len(qna_group.commands),
-        len(insights_group.commands),
+        len(triggers_group.commands),
+        len(ai_group.commands),
     )
-    register_ask(bot.tree, guild_obj, ctx)
-    scope_label = "guild" if guild_obj else "global"
-    top_level = bot.tree.get_commands(guild=guild_obj) if guild_obj else bot.tree.get_commands()
-    logger.info("Registered commands scope=%s top_level=%s", scope_label, [c.qualified_name for c in top_level])
 
     root_commands: list[app_commands.Command | app_commands.Group] = [
-        admin_group,
+        database_group,
+        ai_group,
+        commandguard_group,
+        audio_group,
+        campaigns_group,
         qna_group,
-        insights_group,
-        campagne_group,
-        riassunto_group,
-        aura_group,
-        attivita_group,
-        mod_group,
+        triggers_group,
+        embed_group,
+        privacy_group,
+        users_group,
         greetings_group,
         inactivity_group,
-        resocontocanale_group,
-        resocontoserver_group,
-        privacy_group,
-        embed_group,
-        frasi_group,
+        channelsummary_group,
+        serversummary_group,
+        dmsummary_group,
+        aurasummary_group,
+        barcellosummary_group,
+        riassunto_alias_group,
+        aura_alias_group,
+        resocontocanale_alias_group,
+        resocontoserver_alias_group,
+        attivita_group,
     ]
 
     def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
@@ -139,11 +163,12 @@ def setup(registry: ServiceRegistry) -> None:
         else:
             bot.tree.add_command(command)
 
-    def register_root_commands() -> None:
-        for command in root_commands:
-            add_tree_command(command)
+    for command in root_commands:
+        add_tree_command(command)
 
-    register_root_commands()
+    scope_label = "guild" if guild_obj else "global"
+    top_level = bot.tree.get_commands(guild=guild_obj) if guild_obj else bot.tree.get_commands()
+    logger.info("Registered commands scope=%s top_level=%s", scope_label, [c.qualified_name for c in top_level])
 
     @bot.tree.error
     async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:

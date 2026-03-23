@@ -362,7 +362,7 @@ def _summary_footer_inputs(ai_status: dict[str, Any]) -> tuple[list[str], bool]:
     return contributors, (not used_ai_output)
 
 
-def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext) -> None:
+def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "dmsummary") -> None:
     def _kind_from_message(message: str) -> str:
         text = str(message or "").strip()
         if text.startswith("✅"):
@@ -381,12 +381,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext)
         if qualified_name:
             return qualified_name
         command_name = str((getattr(interaction, "data", None) or {}).get("name") or "").strip()
-        return f"riassunto {command_name}".strip() or "riassunto info"
+        return f"{root_top_level} {command_name}".strip() or f"{root_top_level} info"
 
     async def send_ephemeral(interaction: discord.Interaction, message: str, *, subtitle_args: list[object] | None = None) -> None:
         await send_standard_response(
             interaction,
-            top_level="riassunto",
+            top_level=root_top_level,
             subcommand_path=_command_path(interaction),
             subtitle_args=subtitle_args,
             lines=[("dettaglio", _normalize_message(message))],
