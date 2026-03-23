@@ -55,7 +55,7 @@ def test_commands_setup_keeps_only_explicit_italian_alias_roots() -> None:
     assert 'resocontocanale_alias_group = app_commands.Group(name="resocontocanale"' in source
     assert 'resocontoserver_alias_group = app_commands.Group(name="resocontoserver"' in source
     assert 'attivita_group = app_commands.Group(name="attivita"' in source
-    assert 'register_ask(bot.tree, guild_obj, ctx, command_name="domanda", root_top_level="qna", visual_top_level="domanda")' in source
+    assert 'register_ask(bot.tree, guild_obj, ctx, command_name="domanda", root_top_level="qna", visual_top_level="qna")' in source
     assert 'domanda_group = app_commands.Group(' not in source
 
 
