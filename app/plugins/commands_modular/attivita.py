@@ -383,7 +383,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext, *
     ) -> None:
         await send_standard_response(
             interaction,
-            top_level=top_level,
+            top_level=root_top_level,
             subcommand_path=subcommand_path,
             visual_top_level=root_top_level,
             subtitle_args=subtitle_args,

@@ -128,6 +128,12 @@ class GroupDef:
 
 
 @dataclass(slots=True)
+class GroupAlias:
+    target: str
+    line: int
+
+
+@dataclass(slots=True)
 class PendingCommand:
     group_var: str | None
     name: str
@@ -250,15 +256,20 @@ def _parse_register_functions() -> dict[str, dict[str, Any]]:
                 continue
             params = [arg.arg for arg in node.args.args]
             groups: dict[str, GroupDef] = {}
+            group_aliases: dict[str, GroupAlias] = {}
             parents: dict[str, str] = {}
             commands: list[PendingCommand] = []
 
             for inner in ast.walk(node):
-                if isinstance(inner, ast.Assign) and len(inner.targets) == 1 and isinstance(inner.targets[0], ast.Name) and _is_app_commands_group_call(inner.value):
-                    group_name = _literal_str(_call_keyword(inner.value, "name"))
-                    group_description = _literal_str(_call_keyword(inner.value, "description"))
-                    if group_name:
-                        groups[inner.targets[0].id] = GroupDef(name=group_name, description=group_description, line=inner.lineno)
+                if isinstance(inner, ast.Assign) and len(inner.targets) == 1 and isinstance(inner.targets[0], ast.Name):
+                    target_name = inner.targets[0].id
+                    if _is_app_commands_group_call(inner.value):
+                        group_name = _literal_str(_call_keyword(inner.value, "name"))
+                        group_description = _literal_str(_call_keyword(inner.value, "description"))
+                        if group_name:
+                            groups[target_name] = GroupDef(name=group_name, description=group_description, line=inner.lineno)
+                    elif isinstance(inner.value, ast.Name):
+                        group_aliases[target_name] = GroupAlias(target=inner.value.id, line=inner.lineno)
                 elif isinstance(inner, ast.Expr) and isinstance(inner.value, ast.Call):
                     call = inner.value
                     if isinstance(call.func, ast.Attribute) and call.func.attr == "add_command" and isinstance(call.func.value, ast.Name) and call.args:
@@ -288,6 +299,7 @@ def _parse_register_functions() -> dict[str, dict[str, Any]]:
             parsed[node.name] = {
                 "params": params,
                 "groups": groups,
+                "group_aliases": group_aliases,
                 "parents": parents,
                 "commands": commands,
             }
@@ -327,19 +339,30 @@ def _resolve_group_path(
     root_mapping: dict[str, str | None],
     local_groups: dict[str, GroupDef],
     parents: dict[str, str],
+    group_aliases: dict[str, GroupAlias],
+    *,
+    _seen: set[str] | None = None,
 ) -> list[str]:
     if group_var is None:
         return []
+    seen = set() if _seen is None else _seen
+    if group_var in seen:
+        return []
+    seen.add(group_var)
+    alias = group_aliases.get(group_var)
+    if alias is not None:
+        return _resolve_group_path(alias.target, root_mapping, local_groups, parents, group_aliases, _seen=seen)
     if group_var in root_mapping:
         root_name = root_mapping[group_var]
         return [] if root_name is None else [root_name]
     if group_var not in local_groups:
-        raise KeyError(f"Unknown group variable: {group_var}")
+        default_roots = sorted({value for value in root_mapping.values() if value is not None})
+        return [default_roots[0]] if len(default_roots) == 1 else []
     parent = parents.get(group_var)
     if parent:
-        prefix = _resolve_group_path(parent, root_mapping, local_groups, parents)
+        prefix = _resolve_group_path(parent, root_mapping, local_groups, parents, group_aliases, _seen=seen)
     else:
-        default_roots = [value for value in root_mapping.values() if value is not None]
+        default_roots = sorted({value for value in root_mapping.values() if value is not None})
         prefix = [default_roots[0]] if len(default_roots) == 1 else []
     return [*prefix, local_groups[group_var].name]
 
@@ -372,7 +395,16 @@ def _build_command_records() -> ValidationResult:
         if root_mapping is None:
             continue
         for pending in parsed["commands"]:
-            segments = [*_resolve_group_path(pending.group_var, root_mapping, parsed["groups"], parsed["parents"]), pending.name]
+            segments = [
+                *_resolve_group_path(
+                    pending.group_var,
+                    root_mapping,
+                    parsed["groups"],
+                    parsed["parents"],
+                    parsed["group_aliases"],
+                ),
+                pending.name,
+            ]
             if not segments:
                 continue
             path = ".".join(segments)
