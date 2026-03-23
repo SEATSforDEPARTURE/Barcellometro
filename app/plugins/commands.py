@@ -81,13 +81,11 @@ def setup(registry: ServiceRegistry) -> None:
     resocontoserver_alias_group = app_commands.Group(name="resocontoserver", description="Server summary schedules")
     attivita_group = app_commands.Group(name="attivita", description="User activity commands")
 
-    stt_group = app_commands.Group(name="stt", description="Speech-to-text configuration")
-    translate_group = app_commands.Group(name="translate", description="Translation configuration")
+    clips_group = app_commands.Group(name="clips", description="Audio clip controls")
     voice_ingest_group = app_commands.Group(name="voice_ingest", description="Voice ingest")
     insights_group = app_commands.Group(name="insights", description="Insights controls")
 
-    add_group_once(audio_group, stt_group, logger)
-    add_group_once(audio_group, translate_group, logger)
+    add_group_once(audio_group, clips_group, logger)
     add_group_once(audio_group, voice_ingest_group, logger)
     add_group_once(ai_group, insights_group, logger)
 
@@ -96,9 +94,9 @@ def setup(registry: ServiceRegistry) -> None:
     register_ai(ai_group, ctx)
     register_embed(embed_group, ctx)
     register_roles(commandguard_group, ctx, top_level="commandguard", visual_top_level="commandguard")
-    register_stt(stt_group, ctx, root_top_level="audio")
-    register_translate(translate_group, ctx, root_top_level="audio")
-    register_audio_notes(audio_group, ctx, root_top_level="audio")
+    register_stt(clips_group, ctx, root_top_level="audio")
+    register_translate(clips_group, ctx, root_top_level="audio")
+    register_audio_notes(audio_group, ctx, root_top_level="audio", clips_group=clips_group)
     register_messaggi(campaigns_group, ctx, top_level="campaigns", visual_top_level="campaigns")
     register_voice_ingest(voice_ingest_group, ctx, root_top_level="audio")
     register_privacy(privacy_group, ctx, top_level="privacy", visual_top_level="privacy")

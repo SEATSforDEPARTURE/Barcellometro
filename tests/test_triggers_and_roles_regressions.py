@@ -137,6 +137,9 @@ def test_permission_helpers_keep_only_canonical_keys(import_fresh) -> None:
     assert permissions_module.canonical_permission_key("admin.retention.config_show") == "database.retention.limits_show"
     assert permissions_module.canonical_permission_key("admin.backfill.config_reset") == "database.backfill.limits_reset"
     assert permissions_module.canonical_permission_key("admin.ai.model_show") == "ai.model_show"
+    assert permissions_module.canonical_permission_key("admin.audionotes.config_show") == "audio.clips.limits_show"
+    assert permissions_module.canonical_permission_key("admin.stt.config_reset") == "audio.clips.stt_reset"
+    assert permissions_module.canonical_permission_key("admin.translate.config_set") == "audio.clips.translate_set"
     assert permissions_module.canonical_permission_key("admin.barcello.mood_set") == "status.mood_set"
 
 

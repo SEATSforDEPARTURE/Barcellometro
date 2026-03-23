@@ -24,12 +24,12 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `attivita` | `—` | `oggi` | Report attività di oggi (DM staff) | `app/plugins/commands_modular/attivita.py:605` |
 | `attivita` | `—` | `range` | Report attività per range custom | `app/plugins/commands_modular/attivita.py:638` |
 | `attivita` | `—` | `ultimi` | Report attività ultimi N periodi | `app/plugins/commands_modular/attivita.py:623` |
-| `audio` | `—` | `config_reset` | Reset the audio notes configuration to defaults. | `app/plugins/commands_modular/audio_notes.py:164` |
-| `audio` | `—` | `config_set` | Update the audio notes configuration. | `app/plugins/commands_modular/audio_notes.py:83` |
-| `audio` | `—` | `config_show` | Show the audio notes configuration. | `app/plugins/commands_modular/audio_notes.py:146` |
-| `audio` | `—` | `off` | Disable audio notes. | `app/plugins/commands_modular/audio_notes.py:43` |
-| `audio` | `—` | `on` | Enable audio notes. | `app/plugins/commands_modular/audio_notes.py:30` |
-| `audio` | `—` | `status` | Show the audio notes status. | `app/plugins/commands_modular/audio_notes.py:56` |
+| `audio` | `—` | `limits_reset` | Reset the audio clip limits to domain defaults. | `app/plugins/commands_modular/audio_notes.py:192` |
+| `audio` | `—` | `limits_set` | Update the audio clip limits. | `app/plugins/commands_modular/audio_notes.py:117` |
+| `audio` | `—` | `limits_show` | Show the audio clip limits. | `app/plugins/commands_modular/audio_notes.py:179` |
+| `audio` | `—` | `off` | Disable audio notes. | `app/plugins/commands_modular/audio_notes.py:76` |
+| `audio` | `—` | `on` | Enable audio notes. | `app/plugins/commands_modular/audio_notes.py:61` |
+| `audio` | `—` | `status` | Show the audio status. | `app/plugins/commands_modular/audio_notes.py:91` |
 | `aura` | `—` | `ieri` | Aura di ieri | `app/plugins/commands_modular/aura.py:457` |
 | `aura` | `—` | `oggi` | Aura di oggi | `app/plugins/commands_modular/aura.py:452` |
 | `aura` | `—` | `range` | Aura per intervallo | `app/plugins/commands_modular/aura.py:463` |
@@ -97,6 +97,12 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `campaigns` | `weather` | `schedule_remove` | Remove a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1066` |
 | `campaigns` | `weather` | `schedule_show` | Show a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1061` |
 | `campaigns` | `weather` | `status` | Show weather campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:997` |
+| `clips` | `—` | `stt_reset` | Reset the clip STT configuration to domain defaults. | `app/plugins/commands_modular/stt.py:120` |
+| `clips` | `—` | `stt_set` | Update the clip STT configuration. | `app/plugins/commands_modular/stt.py:62` |
+| `clips` | `—` | `stt_show` | Show the clip STT configuration. | `app/plugins/commands_modular/stt.py:107` |
+| `clips` | `—` | `translate_reset` | Reset the clip translation configuration to domain defaults. | `app/plugins/commands_modular/translate.py:79` |
+| `clips` | `—` | `translate_set` | Update the clip translation configuration. | `app/plugins/commands_modular/translate.py:32` |
+| `clips` | `—` | `translate_show` | Show the clip translation configuration. | `app/plugins/commands_modular/translate.py:66` |
 | `commandguard` | `—` | `role_add` | Add a role command policy. | `app/plugins/commands_modular/roles.py:80` |
 | `commandguard` | `—` | `role_edit` | Edit a role command policy. | `app/plugins/commands_modular/roles.py:91` |
 | `commandguard` | `—` | `role_list` | List all role policies. | `app/plugins/commands_modular/roles.py:122` |
@@ -252,12 +258,6 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `status` | `—` | `mood_set` | Set the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:143` |
 | `status` | `—` | `mood_show` | Show the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:197` |
 | `status` | `—` | `show` | Show the Barcellometro status. | `app/plugins/commands_modular/status.py:101` |
-| `stt` | `—` | `config_reset` | Reset the STT configuration to defaults. | `app/plugins/commands_modular/stt.py:125` |
-| `stt` | `—` | `config_set` | Update the STT configuration. | `app/plugins/commands_modular/stt.py:62` |
-| `stt` | `—` | `config_show` | Show the STT configuration. | `app/plugins/commands_modular/stt.py:109` |
-| `translate` | `—` | `config_reset` | Reset the translation configuration to defaults. | `app/plugins/commands_modular/translate.py:84` |
-| `translate` | `—` | `config_set` | Update the translation configuration. | `app/plugins/commands_modular/translate.py:32` |
-| `translate` | `—` | `config_show` | Show the translation configuration. | `app/plugins/commands_modular/translate.py:68` |
 | `triggers` | `phrases` | `entry_add` | Add a phrase trigger entry | `app/plugins/commands_modular/triggers.py:322` |
 | `triggers` | `phrases` | `entry_edit` | Edit a phrase trigger entry | `app/plugins/commands_modular/triggers.py:431` |
 | `triggers` | `phrases` | `entry_list` | List phrase trigger entries | `app/plugins/commands_modular/triggers.py:377` |

@@ -467,7 +467,7 @@ def test_build_command_embed_config_embed_includes_global_phrase() -> None:
         await footer_service.set_global_phrase('Footer globale')
         embed = await build_command_embed(
             top_level='admin',
-            subcommand_path='audionotes config_show',
+            subcommand_path='audio clips limits_show',
             footer_service=footer_service,
             footer_service_name='audio_notes',
             lines=[('Queue Max', 50)],

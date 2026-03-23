@@ -44,7 +44,7 @@ async def _stt_config_lines(ctx: CommandContext) -> list[str]:
 
 
 def register_stt(stt_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "audio") -> None:
-    @stt_group.command(name="config_set", description="Update the STT configuration.")
+    @stt_group.command(name="stt_set", description="Update the clip STT configuration.")
     @app_commands.describe(
         backend="STT backend.",
         model="Local STT model.",
@@ -59,7 +59,7 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext, *, root_top
         beam=BEAM_CHOICES,
         language=LANGUAGE_CHOICES,
     )
-    async def stt_config_set_command(
+    async def stt_set_command(
         interaction: discord.Interaction,
         backend: app_commands.Choice[str] | None = None,
         model: app_commands.Choice[str] | None = None,
@@ -67,18 +67,15 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext, *, root_top
         beam: app_commands.Choice[str] | None = None,
         language: app_commands.Choice[str] | None = None,
     ) -> None:
-        if not await check_permission(
-            interaction,
-            "admin.stt.config_set",
-            ctx,
-        ):
+        if not await check_permission(interaction, "audio.clips.stt_set", ctx):
             return
         if all(value is None for value in (backend, model, compute, beam, language)):
             await send_standard_response(
                 interaction,
                 top_level=root_top_level,
-                subcommand_path="stt config_set",
-                lines=[("error", "No changes provided. Use /admin stt config_show to inspect the current configuration.")],
+                subcommand_path="audio clips stt_set",
+                visual_top_level="audio",
+                lines=[("error", "No changes provided. Use /audio clips stt_show to inspect the current configuration.")],
                 kind="error",
                 footer_service=ctx.footer,
             )
@@ -98,36 +95,30 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext, *, root_top
         await send_standard_response(
             interaction,
             top_level=root_top_level,
-            subcommand_path="stt config_set",
+            subcommand_path="audio clips stt_set",
+            visual_top_level="audio",
             lines=[("result", "updated")],
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
             kind="success",
             footer_service=ctx.footer,
         )
 
-    @stt_group.command(name="config_show", description="Show the STT configuration.")
-    async def stt_config_show_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(
-            interaction,
-            "admin.stt.config_show",
-            ctx,
-        ):
+    @stt_group.command(name="stt_show", description="Show the clip STT configuration.")
+    async def stt_show_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "audio.clips.stt_show", ctx):
             return
         await send_standard_response(
             interaction,
             top_level=root_top_level,
-            subcommand_path="stt config_show",
+            subcommand_path="audio clips stt_show",
+            visual_top_level="audio",
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
             footer_service=ctx.footer,
         )
 
-    @stt_group.command(name="config_reset", description="Reset the STT configuration to defaults.")
-    async def stt_config_reset_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(
-            interaction,
-            "admin.stt.config_reset",
-            ctx,
-        ):
+    @stt_group.command(name="stt_reset", description="Reset the clip STT configuration to domain defaults.")
+    async def stt_reset_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "audio.clips.stt_reset", ctx):
             return
         for key in (
             "stt.backend",
@@ -140,7 +131,8 @@ def register_stt(stt_group: app_commands.Group, ctx: CommandContext, *, root_top
         await send_standard_response(
             interaction,
             top_level=root_top_level,
-            subcommand_path="stt config_reset",
+            subcommand_path="audio clips stt_reset",
+            visual_top_level="audio",
             lines=[("result", "reset")],
             sections=[{"title": "Configuration", "lines": await _stt_config_lines(ctx)}],
             kind="success",

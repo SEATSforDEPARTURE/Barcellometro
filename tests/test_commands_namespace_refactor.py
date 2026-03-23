@@ -34,6 +34,10 @@ def test_commands_setup_registers_canonical_namespaces_with_matching_top_levels(
     source = Path("app/plugins/commands.py").read_text()
 
     assert 'register_roles(commandguard_group, ctx, top_level="commandguard", visual_top_level="commandguard")' in source
+    assert 'clips_group = app_commands.Group(name="clips", description="Audio clip controls")' in source
+    assert 'register_stt(clips_group, ctx, root_top_level="audio")' in source
+    assert 'register_translate(clips_group, ctx, root_top_level="audio")' in source
+    assert 'register_audio_notes(audio_group, ctx, root_top_level="audio", clips_group=clips_group)' in source
     assert 'register_messaggi(campaigns_group, ctx, top_level="campaigns", visual_top_level="campaigns")' in source
     assert 'register_privacy(privacy_group, ctx, top_level="privacy", visual_top_level="privacy")' in source
     assert 'register_inattivi(inactivity_group, ctx, top_level="inactivity", visual_top_level="inactivity")' in source

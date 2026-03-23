@@ -126,21 +126,21 @@ Regole operative:
 - `/admin barcello calibrate` → calibra i pesi del motore barcello (mod).
 
 ### STT
-- `/admin stt config_set backend:local|ai`
-- `/admin stt config_set model:small|medium|large-v3`
-- `/admin stt config_set compute:int8|int8_float16|float16`
-- `/admin stt config_set beam:1|3|5`
-- `/admin stt config_set language:it|auto`
+- `/audio clips stt_set backend:local|ai`
+- `/audio clips stt_set model:small|medium|large-v3`
+- `/audio clips stt_set compute:int8|int8_float16|float16`
+- `/audio clips stt_set beam:1|3|5`
+- `/audio clips stt_set language:it|auto`
 
 ### Translate
-- `/admin translate config_set backend:local|ai`
-- `/admin translate config_set target:it`
+- `/audio clips translate_set backend:local|ai`
+- `/audio clips translate_set target:it`
 
 ### Audio notes
-- `/admin audionotes on`
-- `/admin audionotes off`
-- `/admin audionotes status`
-- `/admin audionotes config_set max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
+- `/audio on`
+- `/audio off`
+- `/audio status`
+- `/audio clips limits_set max_mb:<n> max_duration_s:<n> discord_max_chars:<n> queue_max:<n>`
 
 Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa viene usato il binario fornito da `imageio-ffmpeg`).
 
