@@ -151,6 +151,39 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/privacy off [voice_channel]`
 - `/privacy status [voice_channel]`
 
+### Users / moderation
+- `/users kick user:<utente> [reason:<testo>]`
+- `/users kick_list`
+- `/users ban user:<utente> [reason:<testo>]`
+- `/users ban_list`
+- `/users tempban user:<utente> duration:<durata> [reason:<testo>]`
+- `/users tempban_list`
+- `/users grace user:<utente> duration:<durata> [reason:<testo>]`
+- `/users grace_list`
+- `/users unban user:<utente> [reason:<testo>]` → comando compatibile non canonico mantenuto per riallineamento audit/backfill.
+- Alias top-level: `/kick`, `/ban`, `/tempban`, `/grace` → alias reali dei corrispondenti `/users ...`.
+
+### Greetings / inactivity
+- `/greetings on [channel]`
+- `/greetings off`
+- `/greetings status`
+- `/greetings notify_set channel:<canale>`
+- `/greetings notify_show`
+- `/greetings notify_reset`
+- `/greetings user_card on|off|status`
+- `template_set/show/reset` non esistono più nel contratto `greetings`; l'editorialità resta demandata alla source of truth `settings/greetings_trigger.json`.
+- `/inactivity on|off|status`
+- `/inactivity autokick on|off|status`
+- `/inactivity grace on|off|status|limits_set|limits_show|limits_reset`
+- `/inactivity tempban on|off|status|limits_set|limits_show|limits_reset`
+- `/inactivity dms template_reminder_set|template_reminder_show|template_reminder_reset`
+- `/inactivity dms cooldown_set|cooldown_show|cooldown_reset`
+- `/inactivity dms invite_set|invite_show|invite_reset`
+- `/inactivity policy default_set|default_show|default_reset`
+- `/inactivity policy role_set|role_show|role_reset`
+- `/inactivity policy exceptions_add|exceptions_remove|exceptions_show|exceptions_list`
+- `/inactivity run`
+
 ### Campagne community
 - `/campagne on` → abilita invii automatici nel canale corrente.
 - `/campagne off` → disabilita nel canale corrente.

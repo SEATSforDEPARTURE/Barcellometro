@@ -16,7 +16,7 @@ from app.shared.discord.command_embeds import CommandEmbedSection, build_command
 
 logger = logging.getLogger(__name__)
 
-PERM = "mod"
+PERM = "users"
 
 
 def _normalize_optional_reason(value: str | None) -> str | None:
@@ -28,6 +28,8 @@ async def _send_lines(
     interaction: discord.Interaction,
     ctx: CommandContext,
     *,
+    top_level: str,
+    visual_top_level: str,
     subcommand_path: str,
     title: str,
     lines: list[str],
@@ -47,7 +49,15 @@ async def _send_lines(
         sections=sections,
         footer_service=ctx.footer,
     )
-    await send_command_embeds(interaction, embeds=embeds, ephemeral=True, files=[txt], footer_service=ctx.footer, author_service=getattr(ctx, "author", None), default_service_name="moderazione")
+    await send_command_embeds(
+        interaction,
+        embeds=embeds,
+        ephemeral=True,
+        files=[txt],
+        footer_service=ctx.footer,
+        author_service=getattr(ctx, "author", None),
+        default_service_name="users",
+    )
 
 
 def _render_departure_action_label(action_type: str) -> str:
@@ -58,9 +68,14 @@ def _render_departure_action_label(action_type: str) -> str:
     return labels.get(action_type, action_type)
 
 
-def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "users", visual_top_level: str = "users") -> None:
-    users_group = app_commands.Group(name="users", description="Moderation actions for users")
-    mod_group.add_command(users_group)
+def register_moderazione_utenti(
+    users_group: app_commands.Group,
+    ctx: CommandContext,
+    *,
+    top_level: str = "users",
+    visual_top_level: str = "users",
+    alias_commands: list[app_commands.Command] | None = None,
+) -> None:
     greetings_copy_service = GreetingsCopyService(ctx.database, barcello_service=getattr(ctx, "barcello_service", None))
 
     async def _ensure(interaction: discord.Interaction) -> bool:
@@ -167,9 +182,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             return
         forget(str(guild.id), str(user.id))
 
-    @users_group.command(name="kick", description="Remove a user from the server.")
-    @app_commands.describe(user="Member to kick.", reason="Optional reason override.")
-    async def mod_users_kick(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
+    async def _kick_impl(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
         explicit_reason = _normalize_optional_reason(reason)
@@ -192,14 +205,13 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         )
         await _send(
             interaction,
-            subcommand_path="moderazione users kick",
+            subcommand_path="users kick",
             subtitle_args=[user],
             lines=[("user", user.mention), ("result", "allontanato"), ("reason", resolved_reason)],
             kind="success",
         )
 
-    @users_group.command(name="kick_list", description="List recent user removals.")
-    async def mod_users_kick_list(interaction: discord.Interaction) -> None:
+    async def _kick_list_impl(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_recent_kicked_users(str(interaction.guild_id))
@@ -207,11 +219,18 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             f"• <@{row['user_id']}> · {_render_departure_action_label(str(row['action_type'] or 'kick'))} · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}"
             for row in rows
         ]
-        await _send_lines(interaction, ctx, subcommand_path="moderazione users kick_list", title="Recent allontanamenti", lines=lines, prefix="mod_users_kick_list")
+        await _send_lines(
+            interaction,
+            ctx,
+            top_level=top_level,
+            visual_top_level=visual_top_level,
+            subcommand_path="users kick_list",
+            title="Recent allontanamenti",
+            lines=lines,
+            prefix="users_kick_list",
+        )
 
-    @users_group.command(name="ban", description="Ban a user permanently.")
-    @app_commands.describe(user="Member to ban.", reason="Optional reason override.")
-    async def mod_users_ban(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
+    async def _ban_impl(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
         explicit_reason = _normalize_optional_reason(reason)
@@ -234,23 +253,29 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         )
         await _send(
             interaction,
-            subcommand_path="moderazione users ban",
+            subcommand_path="users ban",
             subtitle_args=[user],
             lines=[("user", user.mention), ("result", "banned"), ("reason", resolved_reason)],
             kind="success",
         )
 
-    @users_group.command(name="ban_list", description="List active permanent bans.")
-    async def mod_users_ban_list(interaction: discord.Interaction) -> None:
+    async def _ban_list_impl(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_active_bans(str(interaction.guild_id))
         lines = [f"• <@{row['user_id']}> · ban · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
-        await _send_lines(interaction, ctx, subcommand_path="moderazione users ban_list", title="Active permanent bans", lines=lines, prefix="mod_users_ban_list")
+        await _send_lines(
+            interaction,
+            ctx,
+            top_level=top_level,
+            visual_top_level=visual_top_level,
+            subcommand_path="users ban_list",
+            title="Active permanent bans",
+            lines=lines,
+            prefix="users_ban_list",
+        )
 
-    @users_group.command(name="unban", description="Revoke an active ban for a user.")
-    @app_commands.describe(user="User to unban.", reason="Optional reason override.")
-    async def mod_users_unban(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+    async def _unban_impl(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
         explicit_reason = _normalize_optional_reason(reason)
@@ -263,7 +288,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
                 raise
             discord_unban_result = "discord_ban_missing"
             logger.info(
-                "mod users unban: discord ban already missing guild=%s user=%s",
+                "users unban: discord ban already missing guild=%s user=%s",
                 interaction.guild.id,
                 user.id,
             )
@@ -288,15 +313,13 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             ])
         await _send(
             interaction,
-            subcommand_path="moderazione users unban",
+            subcommand_path="users unban",
             subtitle_args=[user],
             lines=response_lines,
             kind="success",
         )
 
-    @users_group.command(name="tempban", description="Ban a user temporarily.")
-    @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
-    async def mod_users_tempban(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
+    async def _tempban_impl(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
         duration_seconds = parse_duration_input(duration)
@@ -331,7 +354,7 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
         )
         await _send(
             interaction,
-            subcommand_path="moderazione users tempban",
+            subcommand_path="users tempban",
             subtitle_args=[user, format_duration_human(duration_seconds)],
             lines=[
                 ("user", user.mention),
@@ -342,21 +365,26 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             kind="success",
         )
 
-    @users_group.command(name="tempban_list", description="List active temporary bans.")
-    async def mod_users_tempban_list(interaction: discord.Interaction) -> None:
+    async def _tempban_list_impl(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_active_tempbans(str(interaction.guild_id))
         lines = [f"• <@{row['user_id']}> · {row['action_type'] or 'tempban'} · expires {str(row['expires_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
-        await _send_lines(interaction, ctx, subcommand_path="moderazione users tempban_list", title="Active temporary bans", lines=lines, prefix="mod_users_tempban_list")
+        await _send_lines(
+            interaction,
+            ctx,
+            top_level=top_level,
+            visual_top_level=visual_top_level,
+            subcommand_path="users tempban_list",
+            title="Active temporary bans",
+            lines=lines,
+            prefix="users_tempban_list",
+        )
 
-    @users_group.command(name="grace", description="Assign a manual grace period to a user.")
-    @app_commands.describe(user="Member that receives the grace period.", duration="Optional duration like 7d or 12h.", reason="Optional reason override.")
-    async def mod_users_grace(interaction: discord.Interaction, user: discord.Member, duration: str | None = None, reason: str | None = None) -> None:
+    async def _grace_impl(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
-        cfg = await ctx.database.get_inactivity_config(str(interaction.guild.id)) or {}
-        duration_seconds = parse_duration_input(duration) if duration else int(cfg.get("grace_days_after_reminder", 7)) * 86400
+        duration_seconds = parse_duration_input(duration)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
         await ctx.database.extend_user_grace(str(interaction.guild.id), str(user.id), datetime.now(timezone.utc).isoformat())
         explicit_reason = _normalize_optional_reason(reason)
@@ -368,23 +396,105 @@ def register_moderazione_utenti(mod_group: app_commands.Group, ctx: CommandConte
             duration_seconds=duration_seconds,
             expires_at=expires_at,
         )
-        await _notify_action(guild=interaction.guild, user=user, action_type="grace", reason=resolved_reason, greetings_reason=explicit_reason, moderator=interaction.user, duration_seconds=duration_seconds, expires_at=expires_at)
+        await _notify_action(
+            guild=interaction.guild,
+            user=user,
+            action_type="grace",
+            reason=resolved_reason,
+            greetings_reason=explicit_reason,
+            moderator=interaction.user,
+            duration_seconds=duration_seconds,
+            expires_at=expires_at,
+        )
         await _send(
             interaction,
-            subcommand_path="moderazione users grace",
+            subcommand_path="users grace",
             subtitle_args=[user],
             lines=[
                 ("user", user.mention),
+                ("duration", format_duration_human(duration_seconds)),
                 ("protected_until", expires_at.strftime("%d/%m/%Y %H:%M UTC")),
                 ("reason", resolved_reason),
             ],
             kind="success",
         )
 
-    @users_group.command(name="grace_list", description="List active grace periods.")
-    async def mod_users_grace_list(interaction: discord.Interaction) -> None:
+    async def _grace_list_impl(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_active_grace_users(str(interaction.guild_id))
         lines = [f"• <@{row['user_id']}> · {row['action_type']} · expires {str(row['expires_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
-        await _send_lines(interaction, ctx, subcommand_path="moderazione users grace_list", title="Active grace periods", lines=lines, prefix="mod_users_grace_list")
+        await _send_lines(
+            interaction,
+            ctx,
+            top_level=top_level,
+            visual_top_level=visual_top_level,
+            subcommand_path="users grace_list",
+            title="Active grace periods",
+            lines=lines,
+            prefix="users_grace_list",
+        )
+
+    @users_group.command(name="kick", description="Remove a user from the server.")
+    @app_commands.describe(user="Member to kick.", reason="Optional reason override.")
+    async def users_kick(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
+        await _kick_impl(interaction, user, reason)
+
+    @users_group.command(name="kick_list", description="List recent user removals.")
+    async def users_kick_list(interaction: discord.Interaction) -> None:
+        await _kick_list_impl(interaction)
+
+    @users_group.command(name="ban", description="Ban a user permanently.")
+    @app_commands.describe(user="Member to ban.", reason="Optional reason override.")
+    async def users_ban(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
+        await _ban_impl(interaction, user, reason)
+
+    @users_group.command(name="ban_list", description="List active permanent bans.")
+    async def users_ban_list(interaction: discord.Interaction) -> None:
+        await _ban_list_impl(interaction)
+
+    @users_group.command(name="unban", description="Revoke an active ban for a user.")
+    @app_commands.describe(user="User to unban.", reason="Optional reason override.")
+    async def users_unban(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+        await _unban_impl(interaction, user, reason)
+
+    @users_group.command(name="tempban", description="Ban a user temporarily.")
+    @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
+    async def users_tempban(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
+        await _tempban_impl(interaction, user, duration, reason)
+
+    @users_group.command(name="tempban_list", description="List active temporary bans.")
+    async def users_tempban_list(interaction: discord.Interaction) -> None:
+        await _tempban_list_impl(interaction)
+
+    @users_group.command(name="grace", description="Assign a manual grace period to a user.")
+    @app_commands.describe(user="Member that receives the grace period.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
+    async def users_grace(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
+        await _grace_impl(interaction, user, duration, reason)
+
+    @users_group.command(name="grace_list", description="List active grace periods.")
+    async def users_grace_list(interaction: discord.Interaction) -> None:
+        await _grace_list_impl(interaction)
+
+    if alias_commands is not None:
+        @app_commands.command(name="kick", description="Alias of /users kick.")
+        @app_commands.describe(user="Member to kick.", reason="Optional reason override.")
+        async def kick_alias(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
+            await _kick_impl(interaction, user, reason)
+
+        @app_commands.command(name="ban", description="Alias of /users ban.")
+        @app_commands.describe(user="Member to ban.", reason="Optional reason override.")
+        async def ban_alias(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
+            await _ban_impl(interaction, user, reason)
+
+        @app_commands.command(name="tempban", description="Alias of /users tempban.")
+        @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
+        async def tempban_alias(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
+            await _tempban_impl(interaction, user, duration, reason)
+
+        @app_commands.command(name="grace", description="Alias of /users grace.")
+        @app_commands.describe(user="Member that receives the grace period.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
+        async def grace_alias(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
+            await _grace_impl(interaction, user, duration, reason)
+
+        alias_commands.extend([kick_alias, ban_alias, tempban_alias, grace_alias])

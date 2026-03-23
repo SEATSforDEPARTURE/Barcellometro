@@ -42,7 +42,7 @@ def test_commands_setup_registers_canonical_namespaces_with_matching_top_levels(
     assert 'register_privacy(privacy_group, ctx, top_level="privacy", visual_top_level="privacy")' in source
     assert 'register_inattivi(inactivity_group, ctx, top_level="inactivity", visual_top_level="inactivity")' in source
     assert 'register_greetings(greetings_group, ctx, top_level="greetings", visual_top_level="greetings")' in source
-    assert 'register_moderazione_utenti(users_group, ctx, top_level="users", visual_top_level="users")' in source
+    assert 'register_moderazione_utenti(users_group, ctx, top_level="users", visual_top_level="users", alias_commands=user_alias_commands)' in source
     assert 'register_resoconto(channelsummary_group, serversummary_group, ctx, channel_root="channelsummary", server_root="serversummary")' in source
     assert 'register_barcello(' in source
     assert 'trigger_top_level="triggers"' in source

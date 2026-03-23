@@ -55,23 +55,23 @@ def test_normalize_display_context_admin_command_keeps_admin_title() -> None:
     assert context.visual_subtitle == "RETENTION ON"
 
 
-def test_build_command_embed_uses_visual_top_level_for_moderazione() -> None:
+def test_build_command_embed_uses_users_visual_top_level() -> None:
     async def _get_version() -> None:
         return None
 
     embed = asyncio.run(
         build_command_embed(
             top_level="admin",
-            subcommand_path="moderazione users tempban_list",
-            visual_top_level="moderazione",
+            subcommand_path="users tempban_list",
+            visual_top_level="users",
             footer_service=SimpleNamespace(get_version=_get_version),
         )
     )
 
-    assert embed.title == "🛠️ MODERAZIONE"
-    assert embed.description.startswith("**ℹ️ USERS TEMPBAN_LIST**")
+    assert embed.title == "🛠️ USERS"
+    assert embed.description.startswith("**ℹ️ TEMPBAN_LIST**")
     assert get_footer_meta(embed) is not None
-    assert get_footer_meta(embed).service_name == "status"
+    assert get_footer_meta(embed).service_name == "users"
 
 
 def test_build_command_embed_finalize_keeps_only_brand_without_configured_phrase() -> None:

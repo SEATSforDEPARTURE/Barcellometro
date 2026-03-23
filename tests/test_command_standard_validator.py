@@ -27,7 +27,7 @@ def test_command_validator_tracks_expected_alias_exceptions() -> None:
     assert expected.issubset(result.exceptions)
     assert any(command.path == "campaigns.prompt.schedule_add" for command in result.commands)
     assert any(command.path == "commandguard.role_list" for command in result.commands)
-    assert any(command.path == "users.users.kick" for command in result.commands)
+    assert any(command.path == "users.kick" for command in result.commands)
     assert all(not command.path.startswith("admin.") for command in result.commands)
 
 
@@ -74,7 +74,7 @@ def test_command_validator_tracks_expected_canonical_namespaces() -> None:
         "greetings.backfill.run",
         "ai.model_reset",
         "inactivity.run",
-        "users.users.unban",
+        "users.unban",
     }.issubset(command_paths)
 
 
@@ -95,9 +95,9 @@ def test_command_validator_tracks_exact_greetings_topology() -> None:
         "greetings.off",
         "greetings.on",
         "greetings.status",
-        "greetings.user_card_reset",
-        "greetings.user_card_set",
-        "greetings.user_card_show",
+        "greetings.user_card.off",
+        "greetings.user_card.on",
+        "greetings.user_card.status",
     }
 
 
