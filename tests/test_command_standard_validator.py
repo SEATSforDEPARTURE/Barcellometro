@@ -62,14 +62,17 @@ def test_command_validator_tracks_expected_canonical_namespaces() -> None:
 
     command_paths = {command.path for command in result.commands}
     assert {
-        "status",
+        "status.show",
         "campaigns.custom.run",
         "campaigns.prompt.schedule_show",
         "commandguard.role_list",
         "qna.bonus_show",
         "triggers.phrases.entry_list",
         "privacy.status",
+        "database.backfill.run",
+        "database.retention.limits_show",
         "greetings.backfill.run",
+        "ai.model_reset",
         "inactivity.run",
         "users.users.unban",
     }.issubset(command_paths)

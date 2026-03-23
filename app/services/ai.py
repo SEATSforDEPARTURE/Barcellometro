@@ -85,6 +85,11 @@ class AiService:
         self._metrics["last_updated_ts"] = asyncio.get_running_loop().time()
         await self._database.set_setting(f"ai_model.{task}", model)
 
+    async def reset_model(self, task: str) -> None:
+        self._model_map.pop(task, None)
+        self._metrics["last_updated_ts"] = asyncio.get_running_loop().time()
+        await self._database.delete_setting(f"ai_model.{task}")
+
     def get_fallback_model(self, task: str) -> Optional[str]:
         return self._fallback_model_map.get(task)
 
@@ -92,6 +97,11 @@ class AiService:
         self._fallback_model_map[task] = model
         self._metrics["last_updated_ts"] = asyncio.get_running_loop().time()
         await self._database.set_setting(f"ai_fallback_model.{task}", model)
+
+    async def reset_fallback_model(self, task: str) -> None:
+        self._fallback_model_map.pop(task, None)
+        self._metrics["last_updated_ts"] = asyncio.get_running_loop().time()
+        await self._database.delete_setting(f"ai_fallback_model.{task}")
 
     def client(self) -> Optional[AsyncOpenAI]:
         return self._client

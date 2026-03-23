@@ -132,6 +132,12 @@ def test_permission_helpers_keep_only_canonical_keys(import_fresh) -> None:
 
     assert permissions_module.canonical_permission_key("admin.frasi.entry_list") == "admin.triggers.phrases.entry_list"
     assert permissions_module.canonical_permission_key(" Admin.Frasi.Entry_List ") == "admin.triggers.phrases.entry_list"
+    assert permissions_module.canonical_permission_key("admin.status") == "status"
+    assert permissions_module.canonical_permission_key("admin.events.on") == "database.events.on"
+    assert permissions_module.canonical_permission_key("admin.retention.config_show") == "database.retention.limits_show"
+    assert permissions_module.canonical_permission_key("admin.backfill.config_reset") == "database.backfill.limits_reset"
+    assert permissions_module.canonical_permission_key("admin.ai.model_show") == "ai.model_show"
+    assert permissions_module.canonical_permission_key("admin.barcello.mood_set") == "status.mood_set"
 
 
 def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest.MonkeyPatch) -> None:

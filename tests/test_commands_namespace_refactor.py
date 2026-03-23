@@ -5,6 +5,7 @@ def test_commands_setup_declares_canonical_english_roots() -> None:
     source = Path("app/plugins/commands.py").read_text()
 
     for root in [
+        "status",
         "database",
         "ai",
         "commandguard",
@@ -57,6 +58,7 @@ def test_command_setup_root_order_matches_the_new_contract() -> None:
     source = Path("app/plugins/commands.py").read_text()
 
     expected_order = [
+        'status_group,',
         'database_group,',
         'ai_group,',
         'commandguard_group,',

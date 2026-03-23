@@ -2,7 +2,7 @@
 
 Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.
 
-- Commands discovered: **278**
+- Commands discovered: **276**
 - Errors: **0**
 - Warnings: **50**
 
@@ -10,114 +10,93 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 
 | Root | Subgroup | Action | Description | Source |
 | --- | --- | --- | --- | --- |
-| `admin` | `ai` | `fallback_set` | Set the AI fallback model for a task. | `app/plugins/commands_modular/admin.py:424` |
-| `admin` | `ai` | `fallback_show` | Show configured AI fallback models. | `app/plugins/commands_modular/admin.py:453` |
-| `admin` | `ai` | `model_set` | Set the AI model for a task. | `app/plugins/commands_modular/admin.py:381` |
-| `admin` | `ai` | `model_show` | Show configured AI models. | `app/plugins/commands_modular/admin.py:410` |
-| `admin` | `ai` | `off` | Disable the AI service. | `app/plugins/commands_modular/admin.py:371` |
-| `admin` | `ai` | `on` | Enable the AI service. | `app/plugins/commands_modular/admin.py:364` |
-| `admin` | `ai` | `run` | Run an AI test prompt. | `app/plugins/commands_modular/admin.py:498` |
-| `admin` | `ai` | `status` | Show AI service status. | `app/plugins/commands_modular/admin.py:464` |
-| `admin` | `backfill` | `config_reset` | Reset backfill configuration to defaults. | `app/plugins/commands_modular/admin.py:326` |
-| `admin` | `backfill` | `config_set` | Update backfill configuration. | `app/plugins/commands_modular/admin.py:283` |
-| `admin` | `backfill` | `config_show` | Show backfill configuration. | `app/plugins/commands_modular/admin.py:315` |
-| `admin` | `backfill` | `off` | Disable backfill. | `app/plugins/commands_modular/admin.py:262` |
-| `admin` | `backfill` | `on` | Enable backfill. | `app/plugins/commands_modular/admin.py:255` |
-| `admin` | `backfill` | `run` | Run backfill now. | `app/plugins/commands_modular/admin.py:340` |
-| `admin` | `backfill` | `status` | Show backfill status. | `app/plugins/commands_modular/admin.py:269` |
-| `admin` | `barcello` | `calibrate` | Recalculate Barcello calibration weights. | `app/plugins/commands_modular/barcello.py:257` |
-| `admin` | `barcello` | `mood_reset` | Reset the Barcello mood for this channel. | `app/plugins/commands_modular/barcello.py:246` |
-| `admin` | `barcello` | `mood_set` | Set the Barcello mood for this channel. | `app/plugins/commands_modular/barcello.py:213` |
-| `admin` | `barcello` | `mood_show` | Show the Barcello mood for this channel. | `app/plugins/commands_modular/barcello.py:242` |
-| `admin` | `barcello` | `off` | Disable the Barcello trigger for this channel. | `app/plugins/commands_modular/barcello.py:204` |
-| `admin` | `barcello` | `on` | Enable the Barcello trigger for this channel. | `app/plugins/commands_modular/barcello.py:200` |
-| `admin` | `barcello` | `run` | Run the Barcello analysis. | `app/plugins/commands_modular/barcello.py:1716` |
-| `admin` | `barcello` | `status` | Show Barcello trigger status for this channel. | `app/plugins/commands_modular/barcello.py:208` |
-| `admin` | `events` | `off` | Disable event collection for this channel. | `app/plugins/commands_modular/admin.py:158` |
-| `admin` | `events` | `on` | Enable event collection for this channel. | `app/plugins/commands_modular/admin.py:152` |
-| `admin` | `events` | `status` | Show event collection status for this channel. | `app/plugins/commands_modular/admin.py:164` |
-| `admin` | `retention` | `config_reset` | Reset retention configuration to defaults. | `app/plugins/commands_modular/admin.py:241` |
-| `admin` | `retention` | `config_set` | Update retention configuration. | `app/plugins/commands_modular/admin.py:198` |
-| `admin` | `retention` | `config_show` | Show retention configuration. | `app/plugins/commands_modular/admin.py:230` |
-| `admin` | `retention` | `off` | Disable the retention task. | `app/plugins/commands_modular/admin.py:177` |
-| `admin` | `retention` | `on` | Enable the retention task. | `app/plugins/commands_modular/admin.py:170` |
-| `admin` | `retention` | `status` | Show retention status. | `app/plugins/commands_modular/admin.py:184` |
-| `admin` | `—` | `status` | Show the Barcellometro status. | `app/plugins/commands_modular/status.py:18` |
+| `ai` | `—` | `fallback_reset` | Reset the AI fallback model override for a task. | `app/plugins/commands_modular/admin.py:485` |
+| `ai` | `—` | `fallback_set` | Set the AI fallback model for a task. | `app/plugins/commands_modular/admin.py:463` |
+| `ai` | `—` | `fallback_show` | Show configured AI fallback models. | `app/plugins/commands_modular/admin.py:475` |
+| `ai` | `—` | `model_reset` | Reset the AI model override for a task. | `app/plugins/commands_modular/admin.py:453` |
+| `ai` | `—` | `model_set` | Set the AI model for a task. | `app/plugins/commands_modular/admin.py:431` |
+| `ai` | `—` | `model_show` | Show configured AI models. | `app/plugins/commands_modular/admin.py:443` |
+| `ai` | `—` | `off` | Disable the AI service. | `app/plugins/commands_modular/admin.py:396` |
+| `ai` | `—` | `on` | Enable the AI service. | `app/plugins/commands_modular/admin.py:389` |
+| `ai` | `—` | `run` | Run an AI test prompt. | `app/plugins/commands_modular/admin.py:494` |
+| `ai` | `—` | `status` | Show AI service status. | `app/plugins/commands_modular/admin.py:403` |
 | `attivita` | `—` | `ieri` | Report attività di ieri (DM staff) | `app/plugins/commands_modular/attivita.py:610` |
 | `attivita` | `—` | `oggi` | Report attività di oggi (DM staff) | `app/plugins/commands_modular/attivita.py:605` |
 | `attivita` | `—` | `range` | Report attività per range custom | `app/plugins/commands_modular/attivita.py:638` |
 | `attivita` | `—` | `ultimi` | Report attività ultimi N periodi | `app/plugins/commands_modular/attivita.py:623` |
-| `audionotes` | `—` | `config_reset` | Reset the audio notes configuration to defaults. | `app/plugins/commands_modular/audio_notes.py:164` |
-| `audionotes` | `—` | `config_set` | Update the audio notes configuration. | `app/plugins/commands_modular/audio_notes.py:83` |
-| `audionotes` | `—` | `config_show` | Show the audio notes configuration. | `app/plugins/commands_modular/audio_notes.py:146` |
-| `audionotes` | `—` | `off` | Disable audio notes. | `app/plugins/commands_modular/audio_notes.py:43` |
-| `audionotes` | `—` | `on` | Enable audio notes. | `app/plugins/commands_modular/audio_notes.py:30` |
-| `audionotes` | `—` | `status` | Show the audio notes status. | `app/plugins/commands_modular/audio_notes.py:56` |
+| `audio` | `—` | `config_reset` | Reset the audio notes configuration to defaults. | `app/plugins/commands_modular/audio_notes.py:164` |
+| `audio` | `—` | `config_set` | Update the audio notes configuration. | `app/plugins/commands_modular/audio_notes.py:83` |
+| `audio` | `—` | `config_show` | Show the audio notes configuration. | `app/plugins/commands_modular/audio_notes.py:146` |
+| `audio` | `—` | `off` | Disable audio notes. | `app/plugins/commands_modular/audio_notes.py:43` |
+| `audio` | `—` | `on` | Enable audio notes. | `app/plugins/commands_modular/audio_notes.py:30` |
+| `audio` | `—` | `status` | Show the audio notes status. | `app/plugins/commands_modular/audio_notes.py:56` |
 | `aura` | `—` | `ieri` | Aura di ieri | `app/plugins/commands_modular/aura.py:457` |
 | `aura` | `—` | `oggi` | Aura di oggi | `app/plugins/commands_modular/aura.py:452` |
 | `aura` | `—` | `range` | Aura per intervallo | `app/plugins/commands_modular/aura.py:463` |
 | `aura` | `—` | `ultimi` | Aura ultimi N periodi | `app/plugins/commands_modular/aura.py:435` |
-| `barcello` | `—` | `barcello` | Mostra lo stato del barcello (in DM) | `app/plugins/commands_modular/barcello.py:1738` |
-| `campagne` | `cap` | `config_reset` | Reset the daily cap configuration | `app/plugins/commands_modular/messaggi.py:605` |
-| `campagne` | `cap` | `config_set` | Set the daily cap configuration | `app/plugins/commands_modular/messaggi.py:588` |
-| `campagne` | `cap` | `config_show` | Show the daily cap configuration | `app/plugins/commands_modular/messaggi.py:598` |
-| `campagne` | `cap` | `off` | Disable the daily cap | `app/plugins/commands_modular/messaggi.py:572` |
-| `campagne` | `cap` | `on` | Enable the daily cap | `app/plugins/commands_modular/messaggi.py:565` |
-| `campagne` | `cap` | `status` | Show the daily cap status | `app/plugins/commands_modular/messaggi.py:579` |
-| `campagne` | `custom` | `off` | Disable custom campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:616` |
-| `campagne` | `custom` | `on` | Enable custom campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:612` |
-| `campagne` | `custom` | `run` | Run a custom campaign schedule now | `app/plugins/commands_modular/messaggi.py:752` |
-| `campagne` | `custom` | `schedule_add` | Add a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:639` |
-| `campagne` | `custom` | `schedule_edit` | Edit a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:793` |
-| `campagne` | `custom` | `schedule_list` | List custom campaign schedules | `app/plugins/commands_modular/messaggi.py:709` |
-| `campagne` | `custom` | `schedule_remove` | Remove a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:737` |
-| `campagne` | `custom` | `schedule_show` | Show a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:723` |
-| `campagne` | `custom` | `status` | Show custom campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:620` |
-| `campagne` | `horoscope` | `off` | Disable horoscope campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:1082` |
-| `campagne` | `horoscope` | `on` | Enable horoscope campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:1078` |
-| `campagne` | `horoscope` | `run` | Run the horoscope campaign immediately | `app/plugins/commands_modular/messaggi.py:1163` |
-| `campagne` | `horoscope` | `schedule_add` | Add a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1097` |
-| `campagne` | `horoscope` | `schedule_edit` | Edit a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1126` |
-| `campagne` | `horoscope` | `schedule_list` | List horoscope campaign schedules | `app/plugins/commands_modular/messaggi.py:1159` |
-| `campagne` | `horoscope` | `schedule_remove` | Remove a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1155` |
-| `campagne` | `horoscope` | `schedule_show` | Show a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1150` |
-| `campagne` | `horoscope` | `status` | Show horoscope campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:1086` |
-| `campagne` | `news` | `off` | Disable news campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:905` |
-| `campagne` | `news` | `on` | Enable news campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:901` |
-| `campagne` | `news` | `run` | Run the news campaign immediately | `app/plugins/commands_modular/messaggi.py:985` |
-| `campagne` | `news` | `schedule_add` | Add a news campaign schedule | `app/plugins/commands_modular/messaggi.py:921` |
-| `campagne` | `news` | `schedule_edit` | Edit a news campaign schedule | `app/plugins/commands_modular/messaggi.py:950` |
-| `campagne` | `news` | `schedule_list` | List news campaign schedules | `app/plugins/commands_modular/messaggi.py:981` |
-| `campagne` | `news` | `schedule_remove` | Remove a news campaign schedule | `app/plugins/commands_modular/messaggi.py:977` |
-| `campagne` | `news` | `schedule_show` | Show a news campaign schedule | `app/plugins/commands_modular/messaggi.py:972` |
-| `campagne` | `news` | `status` | Show news campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:909` |
-| `campagne` | `—` | `off` | Disable campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:493` |
-| `campagne` | `—` | `on` | Enable campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:482` |
-| `campagne` | `prompt` | `off` | Disable prompt campaigns in the current channel | `app/plugins/commands_modular/triggers.py:627` |
-| `campagne` | `prompt` | `on` | Enable prompt campaigns in the current channel | `app/plugins/commands_modular/triggers.py:615` |
-| `campagne` | `prompt` | `run` | Run a prompt campaign schedule now | `app/plugins/commands_modular/triggers.py:760` |
-| `campagne` | `prompt` | `schedule_add` | Add a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:658` |
-| `campagne` | `prompt` | `schedule_edit` | Edit a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:804` |
-| `campagne` | `prompt` | `schedule_list` | List prompt campaign schedules | `app/plugins/commands_modular/triggers.py:717` |
-| `campagne` | `prompt` | `schedule_remove` | Remove a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:745` |
-| `campagne` | `prompt` | `schedule_show` | Show a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:731` |
-| `campagne` | `prompt` | `status` | Show prompt campaign status for the current channel | `app/plugins/commands_modular/triggers.py:639` |
-| `campagne` | `quiet` | `config_reset` | Reset quiet hours configuration | `app/plugins/commands_modular/messaggi.py:557` |
-| `campagne` | `quiet` | `config_set` | Set quiet hours configuration | `app/plugins/commands_modular/messaggi.py:541` |
-| `campagne` | `quiet` | `config_show` | Show quiet hours configuration | `app/plugins/commands_modular/messaggi.py:549` |
-| `campagne` | `quiet` | `off` | Disable quiet hours | `app/plugins/commands_modular/messaggi.py:524` |
-| `campagne` | `quiet` | `on` | Enable quiet hours | `app/plugins/commands_modular/messaggi.py:517` |
-| `campagne` | `quiet` | `status` | Show quiet hours status | `app/plugins/commands_modular/messaggi.py:531` |
-| `campagne` | `—` | `status` | Show campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:504` |
-| `campagne` | `weather` | `off` | Disable weather campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:993` |
-| `campagne` | `weather` | `on` | Enable weather campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:989` |
-| `campagne` | `weather` | `run` | Run the weather campaign immediately | `app/plugins/commands_modular/messaggi.py:1074` |
-| `campagne` | `weather` | `schedule_add` | Add a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1008` |
-| `campagne` | `weather` | `schedule_edit` | Edit a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1037` |
-| `campagne` | `weather` | `schedule_list` | List weather campaign schedules | `app/plugins/commands_modular/messaggi.py:1070` |
-| `campagne` | `weather` | `schedule_remove` | Remove a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1066` |
-| `campagne` | `weather` | `schedule_show` | Show a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1061` |
-| `campagne` | `weather` | `status` | Show weather campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:997` |
+| `barcello` | `—` | `barcello` | Mostra lo stato del barcello (in DM) | `app/plugins/commands_modular/barcello.py:1622` |
+| `barcellosummary` | `barcello` | `calibrate` | Recalculate Barcello calibration weights. | `app/plugins/commands_modular/barcello.py:141` |
+| `barcellosummary` | `barcello` | `run` | Run the Barcello analysis. | `app/plugins/commands_modular/barcello.py:1600` |
+| `campaigns` | `cap` | `config_reset` | Reset the daily cap configuration | `app/plugins/commands_modular/messaggi.py:605` |
+| `campaigns` | `cap` | `config_set` | Set the daily cap configuration | `app/plugins/commands_modular/messaggi.py:588` |
+| `campaigns` | `cap` | `config_show` | Show the daily cap configuration | `app/plugins/commands_modular/messaggi.py:598` |
+| `campaigns` | `cap` | `off` | Disable the daily cap | `app/plugins/commands_modular/messaggi.py:572` |
+| `campaigns` | `cap` | `on` | Enable the daily cap | `app/plugins/commands_modular/messaggi.py:565` |
+| `campaigns` | `cap` | `status` | Show the daily cap status | `app/plugins/commands_modular/messaggi.py:579` |
+| `campaigns` | `custom` | `off` | Disable custom campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:616` |
+| `campaigns` | `custom` | `on` | Enable custom campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:612` |
+| `campaigns` | `custom` | `run` | Run a custom campaign schedule now | `app/plugins/commands_modular/messaggi.py:752` |
+| `campaigns` | `custom` | `schedule_add` | Add a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:639` |
+| `campaigns` | `custom` | `schedule_edit` | Edit a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:793` |
+| `campaigns` | `custom` | `schedule_list` | List custom campaign schedules | `app/plugins/commands_modular/messaggi.py:709` |
+| `campaigns` | `custom` | `schedule_remove` | Remove a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:737` |
+| `campaigns` | `custom` | `schedule_show` | Show a custom campaign schedule | `app/plugins/commands_modular/messaggi.py:723` |
+| `campaigns` | `custom` | `status` | Show custom campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:620` |
+| `campaigns` | `horoscope` | `off` | Disable horoscope campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:1082` |
+| `campaigns` | `horoscope` | `on` | Enable horoscope campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:1078` |
+| `campaigns` | `horoscope` | `run` | Run the horoscope campaign immediately | `app/plugins/commands_modular/messaggi.py:1163` |
+| `campaigns` | `horoscope` | `schedule_add` | Add a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1097` |
+| `campaigns` | `horoscope` | `schedule_edit` | Edit a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1126` |
+| `campaigns` | `horoscope` | `schedule_list` | List horoscope campaign schedules | `app/plugins/commands_modular/messaggi.py:1159` |
+| `campaigns` | `horoscope` | `schedule_remove` | Remove a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1155` |
+| `campaigns` | `horoscope` | `schedule_show` | Show a horoscope campaign schedule | `app/plugins/commands_modular/messaggi.py:1150` |
+| `campaigns` | `horoscope` | `status` | Show horoscope campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:1086` |
+| `campaigns` | `news` | `off` | Disable news campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:905` |
+| `campaigns` | `news` | `on` | Enable news campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:901` |
+| `campaigns` | `news` | `run` | Run the news campaign immediately | `app/plugins/commands_modular/messaggi.py:985` |
+| `campaigns` | `news` | `schedule_add` | Add a news campaign schedule | `app/plugins/commands_modular/messaggi.py:921` |
+| `campaigns` | `news` | `schedule_edit` | Edit a news campaign schedule | `app/plugins/commands_modular/messaggi.py:950` |
+| `campaigns` | `news` | `schedule_list` | List news campaign schedules | `app/plugins/commands_modular/messaggi.py:981` |
+| `campaigns` | `news` | `schedule_remove` | Remove a news campaign schedule | `app/plugins/commands_modular/messaggi.py:977` |
+| `campaigns` | `news` | `schedule_show` | Show a news campaign schedule | `app/plugins/commands_modular/messaggi.py:972` |
+| `campaigns` | `news` | `status` | Show news campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:909` |
+| `campaigns` | `—` | `off` | Disable campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:493` |
+| `campaigns` | `—` | `on` | Enable campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:482` |
+| `campaigns` | `prompt` | `off` | Disable prompt campaigns in the current channel | `app/plugins/commands_modular/triggers.py:645` |
+| `campaigns` | `prompt` | `on` | Enable prompt campaigns in the current channel | `app/plugins/commands_modular/triggers.py:633` |
+| `campaigns` | `prompt` | `run` | Run a prompt campaign schedule now | `app/plugins/commands_modular/triggers.py:778` |
+| `campaigns` | `prompt` | `schedule_add` | Add a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:676` |
+| `campaigns` | `prompt` | `schedule_edit` | Edit a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:822` |
+| `campaigns` | `prompt` | `schedule_list` | List prompt campaign schedules | `app/plugins/commands_modular/triggers.py:735` |
+| `campaigns` | `prompt` | `schedule_remove` | Remove a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:763` |
+| `campaigns` | `prompt` | `schedule_show` | Show a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:749` |
+| `campaigns` | `prompt` | `status` | Show prompt campaign status for the current channel | `app/plugins/commands_modular/triggers.py:657` |
+| `campaigns` | `quiet` | `config_reset` | Reset quiet hours configuration | `app/plugins/commands_modular/messaggi.py:557` |
+| `campaigns` | `quiet` | `config_set` | Set quiet hours configuration | `app/plugins/commands_modular/messaggi.py:541` |
+| `campaigns` | `quiet` | `config_show` | Show quiet hours configuration | `app/plugins/commands_modular/messaggi.py:549` |
+| `campaigns` | `quiet` | `off` | Disable quiet hours | `app/plugins/commands_modular/messaggi.py:524` |
+| `campaigns` | `quiet` | `on` | Enable quiet hours | `app/plugins/commands_modular/messaggi.py:517` |
+| `campaigns` | `quiet` | `status` | Show quiet hours status | `app/plugins/commands_modular/messaggi.py:531` |
+| `campaigns` | `—` | `status` | Show campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:504` |
+| `campaigns` | `weather` | `off` | Disable weather campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:993` |
+| `campaigns` | `weather` | `on` | Enable weather campaigns in the current channel | `app/plugins/commands_modular/messaggi.py:989` |
+| `campaigns` | `weather` | `run` | Run the weather campaign immediately | `app/plugins/commands_modular/messaggi.py:1074` |
+| `campaigns` | `weather` | `schedule_add` | Add a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1008` |
+| `campaigns` | `weather` | `schedule_edit` | Edit a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1037` |
+| `campaigns` | `weather` | `schedule_list` | List weather campaign schedules | `app/plugins/commands_modular/messaggi.py:1070` |
+| `campaigns` | `weather` | `schedule_remove` | Remove a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1066` |
+| `campaigns` | `weather` | `schedule_show` | Show a weather campaign schedule | `app/plugins/commands_modular/messaggi.py:1061` |
+| `campaigns` | `weather` | `status` | Show weather campaign status for the current channel | `app/plugins/commands_modular/messaggi.py:997` |
 | `commandguard` | `—` | `role_add` | Add a role command policy. | `app/plugins/commands_modular/roles.py:80` |
 | `commandguard` | `—` | `role_edit` | Edit a role command policy. | `app/plugins/commands_modular/roles.py:91` |
 | `commandguard` | `—` | `role_list` | List all role policies. | `app/plugins/commands_modular/roles.py:122` |
@@ -130,42 +109,40 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `commandguard` | `—` | `user_remove` | Remove a user command policy. | `app/plugins/commands_modular/roles.py:163` |
 | `commandguard` | `—` | `user_reset` | Reset all policies for a user. | `app/plugins/commands_modular/roles.py:194` |
 | `commandguard` | `—` | `user_show` | Show user policies. | `app/plugins/commands_modular/roles.py:171` |
-| `domanda` | `—` | `domanda` | Fai una domanda al Q&A | `app/plugins/commands_modular/ask.py:60` |
-| `embed` | `author` | `off` | Disable author rendering. | `app/plugins/commands_modular/embed.py:467` |
-| `embed` | `author` | `on` | Enable author rendering. | `app/plugins/commands_modular/embed.py:457` |
-| `embed` | `author` | `status` | Show author status and effective service templates. | `app/plugins/commands_modular/embed.py:645` |
-| `embed` | `author` | `template_global_reset` | Reset the global author template. | `app/plugins/commands_modular/embed.py:545` |
-| `embed` | `author` | `template_global_set` | Set the global author template. | `app/plugins/commands_modular/embed.py:478` |
-| `embed` | `author` | `template_global_show` | Show the global author template. | `app/plugins/commands_modular/embed.py:522` |
-| `embed` | `author` | `template_service_reset` | Reset a service-specific author template. | `app/plugins/commands_modular/embed.py:630` |
-| `embed` | `author` | `template_service_set` | Set a service-specific author template. | `app/plugins/commands_modular/embed.py:558` |
-| `embed` | `author` | `template_service_show` | Show a service-specific author template. | `app/plugins/commands_modular/embed.py:602` |
-| `embed` | `footer` | `off` | Disable footer rendering. | `app/plugins/commands_modular/embed.py:142` |
-| `embed` | `footer` | `on` | Enable footer rendering. | `app/plugins/commands_modular/embed.py:120` |
-| `embed` | `footer` | `status` | Show footer status and rendered variants. | `app/plugins/commands_modular/embed.py:414` |
-| `embed` | `footer` | `template_global_reset` | Reset the global footer template. | `app/plugins/commands_modular/embed.py:249` |
-| `embed` | `footer` | `template_global_set` | Set the global footer template. | `app/plugins/commands_modular/embed.py:165` |
-| `embed` | `footer` | `template_global_show` | Show the global footer template. | `app/plugins/commands_modular/embed.py:222` |
-| `embed` | `footer` | `template_service_reset` | Reset a service-specific footer template. | `app/plugins/commands_modular/embed.py:380` |
-| `embed` | `footer` | `template_service_set` | Set a service-specific footer template. | `app/plugins/commands_modular/embed.py:274` |
-| `embed` | `footer` | `template_service_show` | Show a service-specific footer template. | `app/plugins/commands_modular/embed.py:343` |
-| `frasi` | `—` | `entry_add` | Add a phrase trigger entry | `app/plugins/commands_modular/triggers.py:304` |
-| `frasi` | `—` | `entry_edit` | Edit a phrase trigger entry | `app/plugins/commands_modular/triggers.py:413` |
-| `frasi` | `—` | `entry_list` | List phrase trigger entries | `app/plugins/commands_modular/triggers.py:359` |
-| `frasi` | `—` | `entry_remove` | Remove a phrase trigger entry | `app/plugins/commands_modular/triggers.py:346` |
-| `frasi` | `—` | `entry_show` | Show a phrase trigger entry | `app/plugins/commands_modular/triggers.py:372` |
-| `frasi` | `—` | `off` | Disable phrase triggers | `app/plugins/commands_modular/triggers.py:288` |
-| `frasi` | `—` | `on` | Enable phrase triggers | `app/plugins/commands_modular/triggers.py:284` |
-| `frasi` | `—` | `status` | Show phrase trigger status | `app/plugins/commands_modular/triggers.py:292` |
-| `frasi` | `—` | `template_global_reset` | Reset the global phrase template | `app/plugins/commands_modular/triggers.py:556` |
-| `frasi` | `—` | `template_global_set` | Set the global phrase template | `app/plugins/commands_modular/triggers.py:529` |
-| `frasi` | `—` | `template_global_show` | Show the global phrase template | `app/plugins/commands_modular/triggers.py:543` |
-| `frasi` | `—` | `template_milestone_reset` | Reset all milestone templates | `app/plugins/commands_modular/triggers.py:516` |
-| `frasi` | `—` | `template_milestone_set` | Create or update a milestone template | `app/plugins/commands_modular/triggers.py:486` |
-| `frasi` | `—` | `template_milestone_show` | Show milestone templates | `app/plugins/commands_modular/triggers.py:503` |
-| `frasi` | `—` | `template_user_reset` | Reset a user-specific phrase template | `app/plugins/commands_modular/triggers.py:604` |
-| `frasi` | `—` | `template_user_set` | Set a user-specific phrase template | `app/plugins/commands_modular/triggers.py:574` |
-| `frasi` | `—` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:591` |
+| `database` | `backfill` | `limits_reset` | Reset backfill limits to defaults. | `app/plugins/commands_modular/admin.py:343` |
+| `database` | `backfill` | `limits_set` | Update backfill limits. | `app/plugins/commands_modular/admin.py:292` |
+| `database` | `backfill` | `limits_show` | Show backfill limits. | `app/plugins/commands_modular/admin.py:330` |
+| `database` | `backfill` | `off` | Disable backfill. | `app/plugins/commands_modular/admin.py:269` |
+| `database` | `backfill` | `on` | Enable backfill. | `app/plugins/commands_modular/admin.py:262` |
+| `database` | `backfill` | `run` | Run backfill now. | `app/plugins/commands_modular/admin.py:359` |
+| `database` | `backfill` | `status` | Show backfill status. | `app/plugins/commands_modular/admin.py:276` |
+| `database` | `events` | `off` | Disable event collection for this channel. | `app/plugins/commands_modular/admin.py:153` |
+| `database` | `events` | `on` | Enable event collection for this channel. | `app/plugins/commands_modular/admin.py:147` |
+| `database` | `events` | `status` | Show event collection status for this channel. | `app/plugins/commands_modular/admin.py:159` |
+| `database` | `retention` | `limits_reset` | Reset retention limits to defaults. | `app/plugins/commands_modular/admin.py:246` |
+| `database` | `retention` | `limits_set` | Update retention limits. | `app/plugins/commands_modular/admin.py:195` |
+| `database` | `retention` | `limits_show` | Show retention limits. | `app/plugins/commands_modular/admin.py:233` |
+| `database` | `retention` | `off` | Disable the retention task. | `app/plugins/commands_modular/admin.py:172` |
+| `database` | `retention` | `on` | Enable the retention task. | `app/plugins/commands_modular/admin.py:165` |
+| `database` | `retention` | `status` | Show retention status. | `app/plugins/commands_modular/admin.py:179` |
+| `embed` | `author` | `off` | Disable author rendering. | `app/plugins/commands_modular/embed.py:472` |
+| `embed` | `author` | `on` | Enable author rendering. | `app/plugins/commands_modular/embed.py:462` |
+| `embed` | `author` | `status` | Show author status and effective service templates. | `app/plugins/commands_modular/embed.py:650` |
+| `embed` | `author` | `template_global_reset` | Reset the global author template. | `app/plugins/commands_modular/embed.py:550` |
+| `embed` | `author` | `template_global_set` | Set the global author template. | `app/plugins/commands_modular/embed.py:483` |
+| `embed` | `author` | `template_global_show` | Show the global author template. | `app/plugins/commands_modular/embed.py:527` |
+| `embed` | `author` | `template_service_reset` | Reset a service-specific author template. | `app/plugins/commands_modular/embed.py:635` |
+| `embed` | `author` | `template_service_set` | Set a service-specific author template. | `app/plugins/commands_modular/embed.py:563` |
+| `embed` | `author` | `template_service_show` | Show a service-specific author template. | `app/plugins/commands_modular/embed.py:607` |
+| `embed` | `footer` | `off` | Disable footer rendering. | `app/plugins/commands_modular/embed.py:147` |
+| `embed` | `footer` | `on` | Enable footer rendering. | `app/plugins/commands_modular/embed.py:125` |
+| `embed` | `footer` | `status` | Show footer status and rendered variants. | `app/plugins/commands_modular/embed.py:419` |
+| `embed` | `footer` | `template_global_reset` | Reset the global footer template. | `app/plugins/commands_modular/embed.py:254` |
+| `embed` | `footer` | `template_global_set` | Set the global footer template. | `app/plugins/commands_modular/embed.py:170` |
+| `embed` | `footer` | `template_global_show` | Show the global footer template. | `app/plugins/commands_modular/embed.py:227` |
+| `embed` | `footer` | `template_service_reset` | Reset a service-specific footer template. | `app/plugins/commands_modular/embed.py:385` |
+| `embed` | `footer` | `template_service_set` | Set a service-specific footer template. | `app/plugins/commands_modular/embed.py:279` |
+| `embed` | `footer` | `template_service_show` | Show a service-specific footer template. | `app/plugins/commands_modular/embed.py:348` |
 | `greetings` | `backfill` | `off` | Disable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:102` |
 | `greetings` | `backfill` | `on` | Enable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:91` |
 | `greetings` | `backfill` | `run` | Run greetings timeline backfill now. | `app/plugins/commands_modular/greetings.py:119` |
@@ -217,112 +194,128 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `inactivity` | `tempban` | `off` | Disable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:296` |
 | `inactivity` | `tempban` | `on` | Enable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:287` |
 | `inactivity` | `tempban` | `status` | Show the inactivity tempban status. | `app/plugins/commands_modular/inattivi.py:303` |
-| `insights` | `—` | `off` | Disable insights in the current channel | `app/plugins/commands_modular/triggers.py:986` |
-| `insights` | `—` | `on` | Enable insights in the current channel | `app/plugins/commands_modular/triggers.py:982` |
-| `insights` | `—` | `status` | Show insights status for the current channel | `app/plugins/commands_modular/triggers.py:990` |
-| `insights` | `—` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1026` |
-| `insights` | `—` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:1004` |
-| `insights` | `—` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1014` |
-| `mod` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:214` |
-| `mod` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:244` |
-| `mod` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:355` |
-| `mod` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:385` |
-| `mod` | `users` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:172` |
-| `mod` | `users` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:202` |
-| `mod` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:299` |
-| `mod` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:346` |
-| `mod` | `users` | `unban` | Revoke an active ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:253` |
+| `insights` | `—` | `off` | Disable insights in the current channel | `app/plugins/commands_modular/triggers.py:1004` |
+| `insights` | `—` | `on` | Enable insights in the current channel | `app/plugins/commands_modular/triggers.py:1000` |
+| `insights` | `—` | `status` | Show insights status for the current channel | `app/plugins/commands_modular/triggers.py:1008` |
+| `insights` | `—` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1044` |
+| `insights` | `—` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:1022` |
+| `insights` | `—` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1032` |
 | `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:90` |
 | `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:68` |
 | `privacy` | `—` | `status` | Show the current voice privacy status. | `app/plugins/commands_modular/privacy.py:113` |
-| `qna` | `—` | `bonus_reset` | Reset a user's QnA bonus | `app/plugins/commands_modular/triggers.py:972` |
-| `qna` | `—` | `bonus_set` | Set a QnA bonus for a user | `app/plugins/commands_modular/triggers.py:941` |
-| `qna` | `—` | `bonus_show` | Show a user's QnA bonus | `app/plugins/commands_modular/triggers.py:961` |
-| `qna` | `—` | `limits_reset` | Reset QnA daily limits to defaults | `app/plugins/commands_modular/triggers.py:931` |
-| `qna` | `—` | `limits_set` | Set a QnA daily limit | `app/plugins/commands_modular/triggers.py:910` |
-| `qna` | `—` | `limits_show` | Show QnA daily limits | `app/plugins/commands_modular/triggers.py:886` |
-| `qna` | `—` | `off` | Disable QnA in the current channel | `app/plugins/commands_modular/triggers.py:876` |
-| `qna` | `—` | `on` | Enable QnA in the current channel | `app/plugins/commands_modular/triggers.py:872` |
-| `qna` | `—` | `status` | Show QnA status for the current channel | `app/plugins/commands_modular/triggers.py:880` |
-| `resocontocanale` | `aura` | `ieri` | Show manual channel aura details for yesterday. | `app/plugins/commands_modular/resoconto.py:771` |
-| `resocontocanale` | `aura` | `oggi` | Show manual channel aura details for today. | `app/plugins/commands_modular/resoconto.py:747` |
-| `resocontocanale` | `aura` | `range` | Show manual channel aura details for a range. | `app/plugins/commands_modular/resoconto.py:847` |
-| `resocontocanale` | `aura` | `ultimi` | Show manual channel aura details for the last window. | `app/plugins/commands_modular/resoconto.py:815` |
-| `resocontocanale` | `—` | `ieri` | Show manual channel summary for yesterday. | `app/plugins/commands_modular/resoconto.py:759` |
-| `resocontocanale` | `—` | `off` | Disable automatic channel summaries for the current channel. | `app/plugins/commands_modular/resoconto.py:525` |
-| `resocontocanale` | `—` | `oggi` | Show manual channel summary for today. | `app/plugins/commands_modular/resoconto.py:735` |
-| `resocontocanale` | `—` | `on` | Enable automatic channel summaries for the current channel. | `app/plugins/commands_modular/resoconto.py:509` |
-| `resocontocanale` | `—` | `range` | Show manual channel summary for a range. | `app/plugins/commands_modular/resoconto.py:831` |
-| `resocontocanale` | `—` | `schedule_add` | Add a channel summary schedule. | `app/plugins/commands_modular/resoconto.py:584` |
-| `resocontocanale` | `—` | `schedule_edit` | Edit a channel summary schedule. | `app/plugins/commands_modular/resoconto.py:612` |
-| `resocontocanale` | `—` | `schedule_list` | List channel summary schedules for the current channel. | `app/plugins/commands_modular/resoconto.py:713` |
-| `resocontocanale` | `—` | `schedule_remove` | Remove a channel summary schedule. | `app/plugins/commands_modular/resoconto.py:666` |
-| `resocontocanale` | `—` | `schedule_show` | Show one channel summary schedule. | `app/plugins/commands_modular/resoconto.py:690` |
-| `resocontocanale` | `—` | `status` | Show the channel summary schedule status. | `app/plugins/commands_modular/resoconto.py:541` |
-| `resocontocanale` | `—` | `ultimi` | Show manual channel summary for the last window. | `app/plugins/commands_modular/resoconto.py:791` |
-| `resocontoserver` | `aura` | `ieri` | Show manual server aura details for yesterday. | `app/plugins/commands_modular/resoconto.py:1112` |
-| `resocontoserver` | `aura` | `oggi` | Show manual server aura details for today. | `app/plugins/commands_modular/resoconto.py:1089` |
-| `resocontoserver` | `aura` | `range` | Show manual server aura details for a range. | `app/plugins/commands_modular/resoconto.py:1186` |
-| `resocontoserver` | `aura` | `ultimi` | Show manual server aura details for the last window. | `app/plugins/commands_modular/resoconto.py:1155` |
-| `resocontoserver` | `—` | `ieri` | Show manual server summary for yesterday. | `app/plugins/commands_modular/resoconto.py:1100` |
-| `resocontoserver` | `—` | `off` | Disable automatic server summaries. | `app/plugins/commands_modular/resoconto.py:880` |
-| `resocontoserver` | `—` | `oggi` | Show manual server summary for today. | `app/plugins/commands_modular/resoconto.py:1077` |
-| `resocontoserver` | `—` | `on` | Enable automatic server summaries. | `app/plugins/commands_modular/resoconto.py:863` |
-| `resocontoserver` | `—` | `range` | Show manual server summary for a range. | `app/plugins/commands_modular/resoconto.py:1170` |
-| `resocontoserver` | `—` | `schedule_add` | Add a server summary schedule. | `app/plugins/commands_modular/resoconto.py:939` |
-| `resocontoserver` | `—` | `schedule_edit` | Edit a server summary schedule. | `app/plugins/commands_modular/resoconto.py:967` |
-| `resocontoserver` | `—` | `schedule_list` | List server summary schedules. | `app/plugins/commands_modular/resoconto.py:1055` |
-| `resocontoserver` | `—` | `schedule_remove` | Remove a server summary schedule. | `app/plugins/commands_modular/resoconto.py:1016` |
-| `resocontoserver` | `—` | `schedule_show` | Show one server summary schedule. | `app/plugins/commands_modular/resoconto.py:1036` |
-| `resocontoserver` | `—` | `status` | Show the server summary schedule status. | `app/plugins/commands_modular/resoconto.py:896` |
-| `resocontoserver` | `—` | `ultimi` | Show manual server summary for the last window. | `app/plugins/commands_modular/resoconto.py:1131` |
+| `qna` | `—` | `bonus_reset` | Reset a user's QnA bonus | `app/plugins/commands_modular/triggers.py:990` |
+| `qna` | `—` | `bonus_set` | Set a QnA bonus for a user | `app/plugins/commands_modular/triggers.py:959` |
+| `qna` | `—` | `bonus_show` | Show a user's QnA bonus | `app/plugins/commands_modular/triggers.py:979` |
+| `qna` | `—` | `limits_reset` | Reset QnA daily limits to defaults | `app/plugins/commands_modular/triggers.py:949` |
+| `qna` | `—` | `limits_set` | Set a QnA daily limit | `app/plugins/commands_modular/triggers.py:928` |
+| `qna` | `—` | `limits_show` | Show QnA daily limits | `app/plugins/commands_modular/triggers.py:904` |
+| `qna` | `—` | `off` | Disable QnA in the current channel | `app/plugins/commands_modular/triggers.py:894` |
+| `qna` | `—` | `on` | Enable QnA in the current channel | `app/plugins/commands_modular/triggers.py:890` |
+| `qna` | `—` | `status` | Show QnA status for the current channel | `app/plugins/commands_modular/triggers.py:898` |
+| `resocontocanale` | `aura` | `ieri` | Show manual channel aura details for yesterday. | `app/plugins/commands_modular/resoconto.py:781` |
+| `resocontocanale` | `aura` | `oggi` | Show manual channel aura details for today. | `app/plugins/commands_modular/resoconto.py:757` |
+| `resocontocanale` | `aura` | `range` | Show manual channel aura details for a range. | `app/plugins/commands_modular/resoconto.py:857` |
+| `resocontocanale` | `aura` | `ultimi` | Show manual channel aura details for the last window. | `app/plugins/commands_modular/resoconto.py:825` |
+| `resocontocanale` | `—` | `ieri` | Show manual channel summary for yesterday. | `app/plugins/commands_modular/resoconto.py:769` |
+| `resocontocanale` | `—` | `off` | Disable automatic channel summaries for the current channel. | `app/plugins/commands_modular/resoconto.py:535` |
+| `resocontocanale` | `—` | `oggi` | Show manual channel summary for today. | `app/plugins/commands_modular/resoconto.py:745` |
+| `resocontocanale` | `—` | `on` | Enable automatic channel summaries for the current channel. | `app/plugins/commands_modular/resoconto.py:519` |
+| `resocontocanale` | `—` | `range` | Show manual channel summary for a range. | `app/plugins/commands_modular/resoconto.py:841` |
+| `resocontocanale` | `—` | `schedule_add` | Add a channel summary schedule. | `app/plugins/commands_modular/resoconto.py:594` |
+| `resocontocanale` | `—` | `schedule_edit` | Edit a channel summary schedule. | `app/plugins/commands_modular/resoconto.py:622` |
+| `resocontocanale` | `—` | `schedule_list` | List channel summary schedules for the current channel. | `app/plugins/commands_modular/resoconto.py:723` |
+| `resocontocanale` | `—` | `schedule_remove` | Remove a channel summary schedule. | `app/plugins/commands_modular/resoconto.py:676` |
+| `resocontocanale` | `—` | `schedule_show` | Show one channel summary schedule. | `app/plugins/commands_modular/resoconto.py:700` |
+| `resocontocanale` | `—` | `status` | Show the channel summary schedule status. | `app/plugins/commands_modular/resoconto.py:551` |
+| `resocontocanale` | `—` | `ultimi` | Show manual channel summary for the last window. | `app/plugins/commands_modular/resoconto.py:801` |
+| `resocontoserver` | `aura` | `ieri` | Show manual server aura details for yesterday. | `app/plugins/commands_modular/resoconto.py:1122` |
+| `resocontoserver` | `aura` | `oggi` | Show manual server aura details for today. | `app/plugins/commands_modular/resoconto.py:1099` |
+| `resocontoserver` | `aura` | `range` | Show manual server aura details for a range. | `app/plugins/commands_modular/resoconto.py:1196` |
+| `resocontoserver` | `aura` | `ultimi` | Show manual server aura details for the last window. | `app/plugins/commands_modular/resoconto.py:1165` |
+| `resocontoserver` | `—` | `ieri` | Show manual server summary for yesterday. | `app/plugins/commands_modular/resoconto.py:1110` |
+| `resocontoserver` | `—` | `off` | Disable automatic server summaries. | `app/plugins/commands_modular/resoconto.py:890` |
+| `resocontoserver` | `—` | `oggi` | Show manual server summary for today. | `app/plugins/commands_modular/resoconto.py:1087` |
+| `resocontoserver` | `—` | `on` | Enable automatic server summaries. | `app/plugins/commands_modular/resoconto.py:873` |
+| `resocontoserver` | `—` | `range` | Show manual server summary for a range. | `app/plugins/commands_modular/resoconto.py:1180` |
+| `resocontoserver` | `—` | `schedule_add` | Add a server summary schedule. | `app/plugins/commands_modular/resoconto.py:949` |
+| `resocontoserver` | `—` | `schedule_edit` | Edit a server summary schedule. | `app/plugins/commands_modular/resoconto.py:977` |
+| `resocontoserver` | `—` | `schedule_list` | List server summary schedules. | `app/plugins/commands_modular/resoconto.py:1065` |
+| `resocontoserver` | `—` | `schedule_remove` | Remove a server summary schedule. | `app/plugins/commands_modular/resoconto.py:1026` |
+| `resocontoserver` | `—` | `schedule_show` | Show one server summary schedule. | `app/plugins/commands_modular/resoconto.py:1046` |
+| `resocontoserver` | `—` | `status` | Show the server summary schedule status. | `app/plugins/commands_modular/resoconto.py:906` |
+| `resocontoserver` | `—` | `ultimi` | Show manual server summary for the last window. | `app/plugins/commands_modular/resoconto.py:1141` |
 | `riassunto` | `—` | `ieri` | Riassunto della giornata di ieri | `app/plugins/commands_modular/riassunto.py:2161` |
 | `riassunto` | `—` | `oggi` | Riassunto della giornata di oggi | `app/plugins/commands_modular/riassunto.py:2156` |
 | `riassunto` | `—` | `range` | Riassunto per intervallo | `app/plugins/commands_modular/riassunto.py:2167` |
 | `riassunto` | `—` | `ultimi` | Riassunto ultimi N periodi | `app/plugins/commands_modular/riassunto.py:2136` |
+| `status` | `—` | `mood_reset` | Reset the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:203` |
+| `status` | `—` | `mood_set` | Set the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:143` |
+| `status` | `—` | `mood_show` | Show the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:197` |
+| `status` | `—` | `show` | Show the Barcellometro status. | `app/plugins/commands_modular/status.py:101` |
 | `stt` | `—` | `config_reset` | Reset the STT configuration to defaults. | `app/plugins/commands_modular/stt.py:125` |
 | `stt` | `—` | `config_set` | Update the STT configuration. | `app/plugins/commands_modular/stt.py:62` |
 | `stt` | `—` | `config_show` | Show the STT configuration. | `app/plugins/commands_modular/stt.py:109` |
 | `translate` | `—` | `config_reset` | Reset the translation configuration to defaults. | `app/plugins/commands_modular/translate.py:84` |
 | `translate` | `—` | `config_set` | Update the translation configuration. | `app/plugins/commands_modular/translate.py:32` |
 | `translate` | `—` | `config_show` | Show the translation configuration. | `app/plugins/commands_modular/translate.py:68` |
+| `triggers` | `phrases` | `entry_add` | Add a phrase trigger entry | `app/plugins/commands_modular/triggers.py:322` |
+| `triggers` | `phrases` | `entry_edit` | Edit a phrase trigger entry | `app/plugins/commands_modular/triggers.py:431` |
+| `triggers` | `phrases` | `entry_list` | List phrase trigger entries | `app/plugins/commands_modular/triggers.py:377` |
+| `triggers` | `phrases` | `entry_remove` | Remove a phrase trigger entry | `app/plugins/commands_modular/triggers.py:364` |
+| `triggers` | `phrases` | `entry_show` | Show a phrase trigger entry | `app/plugins/commands_modular/triggers.py:390` |
+| `triggers` | `phrases` | `off` | Disable phrase triggers | `app/plugins/commands_modular/triggers.py:306` |
+| `triggers` | `phrases` | `on` | Enable phrase triggers | `app/plugins/commands_modular/triggers.py:302` |
+| `triggers` | `phrases` | `status` | Show phrase trigger status | `app/plugins/commands_modular/triggers.py:310` |
+| `triggers` | `phrases` | `template_global_reset` | Reset the global phrase template | `app/plugins/commands_modular/triggers.py:574` |
+| `triggers` | `phrases` | `template_global_set` | Set the global phrase template | `app/plugins/commands_modular/triggers.py:547` |
+| `triggers` | `phrases` | `template_global_show` | Show the global phrase template | `app/plugins/commands_modular/triggers.py:561` |
+| `triggers` | `phrases` | `template_milestone_reset` | Reset all milestone templates | `app/plugins/commands_modular/triggers.py:534` |
+| `triggers` | `phrases` | `template_milestone_set` | Create or update a milestone template | `app/plugins/commands_modular/triggers.py:504` |
+| `triggers` | `phrases` | `template_milestone_show` | Show milestone templates | `app/plugins/commands_modular/triggers.py:521` |
+| `triggers` | `phrases` | `template_user_reset` | Reset a user-specific phrase template | `app/plugins/commands_modular/triggers.py:622` |
+| `triggers` | `phrases` | `template_user_set` | Set a user-specific phrase template | `app/plugins/commands_modular/triggers.py:592` |
+| `triggers` | `phrases` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:609` |
+| `users` | `users` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:214` |
+| `users` | `users` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:244` |
+| `users` | `users` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:355` |
+| `users` | `users` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:385` |
+| `users` | `users` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:172` |
+| `users` | `users` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:202` |
+| `users` | `users` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:299` |
+| `users` | `users` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:346` |
+| `users` | `users` | `unban` | Revoke an active ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:253` |
 | `voice_ingest` | `—` | `join` | Join a voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:23` |
 | `voice_ingest` | `—` | `leave` | Leave the current voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:47` |
 
 ## Issues
 
-- **WARNING localized_param_description** — `barcello`: Parameter 'user1' description looks non-English. (`app/plugins/commands_modular/barcello.py:1740`)
-- **WARNING localized_param_description** — `barcello`: Parameter 'user2' description looks non-English. (`app/plugins/commands_modular/barcello.py:1741`)
+- **WARNING localized_param_description** — `barcello`: Parameter 'user1' description looks non-English. (`app/plugins/commands_modular/barcello.py:1624`)
+- **WARNING localized_param_description** — `barcello`: Parameter 'user2' description looks non-English. (`app/plugins/commands_modular/barcello.py:1625`)
 - **WARNING missing_param_description** — `aura.ieri`: Parameter 'utente' is missing a description. (`app/plugins/commands_modular/aura.py:457`)
 - **WARNING missing_param_description** — `aura.oggi`: Parameter 'utente' is missing a description. (`app/plugins/commands_modular/aura.py:452`)
 - **WARNING missing_param_description** — `inactivity.dms.template_reminder_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/inattivi.py:335`)
-- **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:847`)
-- **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:847`)
-- **WARNING missing_param_description** — `resocontocanale.aura.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:815`)
-- **WARNING missing_param_description** — `resocontocanale.aura.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:815`)
-- **WARNING missing_param_description** — `resocontocanale.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:831`)
-- **WARNING missing_param_description** — `resocontocanale.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:831`)
-- **WARNING missing_param_description** — `resocontocanale.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:791`)
-- **WARNING missing_param_description** — `resocontocanale.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:791`)
-- **WARNING missing_param_description** — `resocontoserver.aura.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:1186`)
-- **WARNING missing_param_description** — `resocontoserver.aura.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:1186`)
-- **WARNING missing_param_description** — `resocontoserver.aura.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1155`)
-- **WARNING missing_param_description** — `resocontoserver.aura.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1155`)
-- **WARNING missing_param_description** — `resocontoserver.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:1170`)
-- **WARNING missing_param_description** — `resocontoserver.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:1170`)
-- **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1131`)
-- **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1131`)
-- **WARNING required_param** — `admin.ai.fallback_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:427`)
-- **WARNING required_param** — `admin.ai.model_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:384`)
-- **WARNING required_param** — `admin.barcello.mood_set`: Parameter 'value' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/barcello.py:213`)
-- **WARNING required_param** — `campagne.cap.config_set`: Parameter 'daily_limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:588`)
-- **WARNING required_param** — `campagne.prompt.schedule_show`: Parameter 'id_or_name' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:731`)
-- **WARNING required_param** — `campagne.quiet.config_set`: Parameter 'start' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:541`)
-- **WARNING required_param** — `campagne.quiet.config_set`: Parameter 'end' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:541`)
-- **WARNING required_param** — `frasi.template_global_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:529`)
-- **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'threshold' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:486`)
-- **WARNING required_param** — `frasi.template_milestone_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:486`)
-- **WARNING required_param** — `frasi.template_user_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:574`)
+- **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:857`)
+- **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:857`)
+- **WARNING missing_param_description** — `resocontocanale.aura.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:825`)
+- **WARNING missing_param_description** — `resocontocanale.aura.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:825`)
+- **WARNING missing_param_description** — `resocontocanale.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:841`)
+- **WARNING missing_param_description** — `resocontocanale.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:841`)
+- **WARNING missing_param_description** — `resocontocanale.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:801`)
+- **WARNING missing_param_description** — `resocontocanale.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:801`)
+- **WARNING missing_param_description** — `resocontoserver.aura.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:1196`)
+- **WARNING missing_param_description** — `resocontoserver.aura.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:1196`)
+- **WARNING missing_param_description** — `resocontoserver.aura.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1165`)
+- **WARNING missing_param_description** — `resocontoserver.aura.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1165`)
+- **WARNING missing_param_description** — `resocontoserver.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:1180`)
+- **WARNING missing_param_description** — `resocontoserver.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:1180`)
+- **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1141`)
+- **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1141`)
+- **WARNING required_param** — `ai.fallback_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:463`)
+- **WARNING required_param** — `ai.model_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:431`)
+- **WARNING required_param** — `campaigns.cap.config_set`: Parameter 'daily_limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:588`)
+- **WARNING required_param** — `campaigns.prompt.schedule_show`: Parameter 'id_or_name' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:749`)
+- **WARNING required_param** — `campaigns.quiet.config_set`: Parameter 'start' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:541`)
+- **WARNING required_param** — `campaigns.quiet.config_set`: Parameter 'end' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:541`)
 - **WARNING required_param** — `greetings.user_card_set`: Parameter 'enabled' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/greetings.py:214`)
 - **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:364`)
 - **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:389`)
@@ -337,10 +330,15 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:465`)
 - **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:466`)
 - **WARNING required_param** — `inactivity.tempban.config_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:312`)
-- **WARNING required_param** — `insights.template_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:1004`)
-- **WARNING required_param** — `qna.bonus_set`: Parameter 'amount' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:941`)
-- **WARNING required_param** — `qna.limits_set`: Parameter 'tier' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:910`)
-- **WARNING required_param** — `qna.limits_set`: Parameter 'limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:910`)
+- **WARNING required_param** — `insights.template_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:1022`)
+- **WARNING required_param** — `qna.bonus_set`: Parameter 'amount' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:959`)
+- **WARNING required_param** — `qna.limits_set`: Parameter 'tier' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:928`)
+- **WARNING required_param** — `qna.limits_set`: Parameter 'limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:928`)
+- **WARNING required_param** — `status.mood_set`: Parameter 'value' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/status.py:143`)
+- **WARNING required_param** — `triggers.phrases.template_global_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:547`)
+- **WARNING required_param** — `triggers.phrases.template_milestone_set`: Parameter 'threshold' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:504`)
+- **WARNING required_param** — `triggers.phrases.template_milestone_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:504`)
+- **WARNING required_param** — `triggers.phrases.template_user_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:592`)
 
 ## Localized exceptions
 
@@ -353,24 +351,6 @@ The following commands remain intentionally localized and are excluded from the 
 - `aura.oggi`
 - `aura.range`
 - `aura.ultimi`
-- `domanda`
-- `frasi.entry_add`
-- `frasi.entry_edit`
-- `frasi.entry_list`
-- `frasi.entry_remove`
-- `frasi.entry_show`
-- `frasi.off`
-- `frasi.on`
-- `frasi.status`
-- `frasi.template_global_reset`
-- `frasi.template_global_set`
-- `frasi.template_global_show`
-- `frasi.template_milestone_reset`
-- `frasi.template_milestone_set`
-- `frasi.template_milestone_show`
-- `frasi.template_user_reset`
-- `frasi.template_user_set`
-- `frasi.template_user_show`
 - `resocontocanale.aura.ieri`
 - `resocontocanale.aura.oggi`
 - `resocontocanale.aura.range`
