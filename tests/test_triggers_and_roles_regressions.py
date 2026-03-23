@@ -114,24 +114,24 @@ def test_triggers_guard_uses_canonical_admin_permission_keys(triggers_module, mo
     asyncio.run(prompt_show.callback(_Interaction(prompt_show), "5"))
 
     assert seen == [
-        "admin.triggers.entry_list",
-        "admin.triggers.template_global_show",
+        "admin.triggers.phrases.entry_list",
+        "admin.triggers.phrases.template_global_show",
         "admin.campaigns.prompt.schedule_show",
     ]
-    assert sent[0]["subcommand_path"] == "frasi entry_list"
-    assert sent[1]["subcommand_path"] == "frasi template_global_show"
-    assert sent[2]["subcommand_path"] == "campagne prompt schedule_show"
-    assert [payload["top_level"] for payload in sent] == ["frasi", "frasi", "campagne"]
-    assert sent[0]["visual_top_level"] == "frasi"
-    assert sent[1]["visual_top_level"] == "frasi"
-    assert sent[2]["visual_top_level"] == "campagne"
+    assert sent[0]["subcommand_path"] == "triggers phrases entry_list"
+    assert sent[1]["subcommand_path"] == "triggers phrases template_global_show"
+    assert sent[2]["subcommand_path"] == "campaigns prompt schedule_show"
+    assert [payload["top_level"] for payload in sent] == ["triggers", "triggers", "campaigns"]
+    assert sent[0]["visual_top_level"] == "triggers"
+    assert sent[1]["visual_top_level"] == "triggers"
+    assert sent[2]["visual_top_level"] == "campaigns"
 
 
 def test_permission_helpers_keep_only_canonical_keys(import_fresh) -> None:
     permissions_module = import_fresh("app.plugins.commands_modular.permissions")
 
-    assert permissions_module.canonical_permission_key("admin.frasi.entry_list") == "admin.frasi.entry_list"
-    assert permissions_module.canonical_permission_key(" Admin.Frasi.Entry_List ") == "admin.frasi.entry_list"
+    assert permissions_module.canonical_permission_key("admin.frasi.entry_list") == "admin.triggers.phrases.entry_list"
+    assert permissions_module.canonical_permission_key(" Admin.Frasi.Entry_List ") == "admin.triggers.phrases.entry_list"
 
 
 def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest.MonkeyPatch) -> None:

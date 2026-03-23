@@ -13,7 +13,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.registration import add_group_once
 from app.plugins.commands_modular.ctx import CommandContext
-from app.plugins.commands_modular.permissions import check_permission
+from app.plugins.commands_modular.permissions import canonical_permission_key, check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime
 from app.config.file_loader import load_json_file
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
@@ -31,9 +31,10 @@ def register_triggers(
     *,
     triggers_root: str = "triggers",
 ) -> app_commands.Group:
-    frasi_group = triggers_group
+    phrases_group = app_commands.Group(name="phrases", description="Phrase trigger controls")
     prompt_group = app_commands.Group(name="prompt", description="Prompt campaign schedules")
 
+    add_group_once(triggers_group, phrases_group, logger)
     add_group_once(campagne_group, prompt_group, logger)
 
     def _normalize_embed_color(raw: str | None) -> str | None:
@@ -146,23 +147,37 @@ def register_triggers(
         app_commands.Choice(name="regex", value="REGEX"),
     ]
 
+    def _canonicalize_command_path(raw_path: str) -> tuple[str, str, str]:
+        parts = [part for part in str(raw_path or "").strip().split() if part]
+        if not parts:
+            return triggers_root, triggers_root, triggers_root
+
+        if parts[0] == "admin":
+            parts = parts[1:]
+        if not parts:
+            return triggers_root, triggers_root, triggers_root
+
+        if parts[0] == "frasi":
+            parts = [triggers_root, "phrases", *parts[1:]]
+        elif parts[0] == "campagne":
+            parts = ["campaigns", *parts[1:]]
+        elif parts[0] == "prompt":
+            parts = ["campaigns", "prompt", *parts[1:]]
+        elif parts[0] == "phrases":
+            parts = [triggers_root, *parts]
+
+        canonical_path = " ".join(parts)
+        return parts[0], canonical_path, parts[0]
+
     def _command_permission_key(interaction: discord.Interaction) -> str:
         command = getattr(interaction, "command", None)
         qualified_name = str(getattr(command, "qualified_name", "") or "").strip().lower()
         if not qualified_name:
             return "admin.unknown"
 
-        parts = [part for part in qualified_name.split() if part]
-        if parts and parts[0] == "admin":
-            parts = parts[1:]
-        if not parts:
-            return "admin.unknown"
-
-        canonical_parts = parts[:]
-        if canonical_parts[0] == "prompt":
-            canonical_parts.insert(0, "campagne")
-
-        return f"admin.{'.'.join(canonical_parts)}"
+        _, canonical_path, _ = _canonicalize_command_path(qualified_name)
+        dotted_path = canonical_path.replace(" ", ".")
+        return canonical_permission_key(f"admin.{dotted_path}")
 
     async def _guard(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, _command_permission_key(interaction), ctx)
@@ -177,11 +192,12 @@ def register_triggers(
         sections: list[CommandEmbedSection] | None = None,
         kind: CommandKind = "info",
     ) -> None:
+        resolved_top_level, resolved_subcommand_path, resolved_visual_top_level = _canonicalize_command_path(subcommand_path)
         await send_standard_response(
             interaction,
-            top_level=triggers_root if subcommand_path.split()[0] == triggers_root else subcommand_path.split()[0],
-            subcommand_path=subcommand_path,
-            visual_top_level=subcommand_path.split()[0] if subcommand_path.strip() else triggers_root,
+            top_level=resolved_top_level,
+            subcommand_path=resolved_subcommand_path,
+            visual_top_level=resolved_visual_top_level,
             subtitle_args=subtitle_args,
             relevant_parameters=relevant_parameters,
             lines=lines,
@@ -282,19 +298,19 @@ def register_triggers(
         except ValueError:
             return str(raw_ts)
 
-    @frasi_group.command(name="on", description="Enable phrase triggers")
+    @phrases_group.command(name="on", description="Enable phrase triggers")
     async def frasi_on(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "frasi", "on")
 
-    @frasi_group.command(name="off", description="Disable phrase triggers")
+    @phrases_group.command(name="off", description="Disable phrase triggers")
     async def frasi_off(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "frasi", "off")
 
-    @frasi_group.command(name="status", description="Show phrase trigger status")
+    @phrases_group.command(name="status", description="Show phrase trigger status")
     async def frasi_status(interaction: discord.Interaction) -> None:
         await _set_toggle(interaction, "frasi", "status")
 
-    @frasi_group.command(name="entry_add", description="Add a phrase trigger entry")
+    @phrases_group.command(name="entry_add", description="Add a phrase trigger entry")
     @app_commands.describe(
         phrase="Trigger phrase",
         match_mode="Phrase match mode",
@@ -343,7 +359,7 @@ def register_triggers(
         )
         await _send(interaction, subcommand_path="frasi entry_add", lines=[("phrase", phrase), ("channel", f"<#{channel_id}>"), ("result", "added")], kind="success")
 
-    @frasi_group.command(name="entry_remove", description="Remove a phrase trigger entry")
+    @phrases_group.command(name="entry_remove", description="Remove a phrase trigger entry")
     @app_commands.describe(id="Phrase entry ID")
     async def frasi_entry_remove(interaction: discord.Interaction, id: int) -> None:
         scope = await _require_channel(interaction)
@@ -357,7 +373,7 @@ def register_triggers(
         await ctx.database.remove_trigger_phrase_by_id(guild_id, id)
         await _send(interaction, subcommand_path="frasi entry_remove", lines=[("entry_id", id), ("result", "removed")], kind="success")
 
-    @frasi_group.command(name="entry_list", description="List phrase trigger entries")
+    @phrases_group.command(name="entry_list", description="List phrase trigger entries")
     async def frasi_entry_list(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -369,7 +385,7 @@ def register_triggers(
             return
         await _send(interaction, subcommand_path="frasi entry_list", lines=[("entries", len(rows))], sections=[CommandEmbedSection(title="Entries", lines=[_format_phrase_row(row) for row in rows])])
 
-    @frasi_group.command(name="entry_show", description="Show a phrase trigger entry")
+    @phrases_group.command(name="entry_show", description="Show a phrase trigger entry")
     @app_commands.describe(id="Phrase entry ID")
     async def frasi_entry_show(interaction: discord.Interaction, id: int) -> None:
         scope = await _require_channel(interaction)
@@ -398,7 +414,7 @@ def register_triggers(
             ],
         )
 
-    @frasi_group.command(name="entry_edit", description="Edit a phrase trigger entry")
+    @phrases_group.command(name="entry_edit", description="Edit a phrase trigger entry")
     @app_commands.describe(
         id="Phrase entry ID",
         phrase="Updated trigger phrase",
@@ -483,7 +499,7 @@ def register_triggers(
         row_after = await ctx.database.get_trigger_phrase_by_id(guild_id, id)
         await _send(interaction, subcommand_path="frasi entry_edit", lines=[("entry_id", id), ("result", "updated")], sections=[CommandEmbedSection(title="Details", lines=[_format_phrase_row(row_after)])], kind="success")
 
-    @frasi_group.command(name="template_milestone_set", description="Create or update a milestone template")
+    @phrases_group.command(name="template_milestone_set", description="Create or update a milestone template")
     @app_commands.describe(threshold="Milestone threshold", text="Milestone template text")
     async def frasi_template_milestone_set(interaction: discord.Interaction, threshold: int, text: str) -> None:
         scope = await _require_channel(interaction)
@@ -501,7 +517,7 @@ def register_triggers(
         await ctx.database.set_trigger_phrase_global_milestone(guild_id, threshold, cleaned_text)
         await _send(interaction, subcommand_path="frasi template_milestone_set", lines=[("threshold", threshold), ("result", "saved")], sections=[CommandEmbedSection(title="Template", lines=[cleaned_text])], kind="success")
 
-    @frasi_group.command(name="template_milestone_show", description="Show milestone templates")
+    @phrases_group.command(name="template_milestone_show", description="Show milestone templates")
     async def frasi_template_milestone_show(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -514,7 +530,7 @@ def register_triggers(
             return
         await _send(interaction, subcommand_path="frasi template_milestone_show", lines=[("status", "enabled" if enabled else "disabled"), ("templates", len(milestones))], sections=[CommandEmbedSection(title="Templates", lines=[f"{int(m['threshold_count'])} -> {str(m['template_text'])}" for m in milestones])])
 
-    @frasi_group.command(name="template_milestone_reset", description="Reset all milestone templates")
+    @phrases_group.command(name="template_milestone_reset", description="Reset all milestone templates")
     async def frasi_template_milestone_reset(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -526,7 +542,7 @@ def register_triggers(
         await ctx.database.set_trigger_phrase_global_milestones_enabled(guild_id, False)
         await _send(interaction, subcommand_path="frasi template_milestone_reset", lines=[("templates", len(milestones)), ("result", "reset")], kind="success")
 
-    @frasi_group.command(name="template_global_set", description="Set the global phrase template")
+    @phrases_group.command(name="template_global_set", description="Set the global phrase template")
     @app_commands.describe(text="Template text")
     async def frasi_template_global_set(interaction: discord.Interaction, text: str) -> None:
         scope = await _require_channel(interaction)
@@ -541,7 +557,7 @@ def register_triggers(
         await ctx.database.set_trigger_state_global(guild_id, "frasi", normalized)
         await _send(interaction, subcommand_path="frasi template_global_set", lines=[("result", "updated")], sections=[CommandEmbedSection(title="Template", lines=[text])], kind="success")
 
-    @frasi_group.command(name="template_global_show", description="Show the global phrase template")
+    @phrases_group.command(name="template_global_show", description="Show the global phrase template")
     async def frasi_template_global_show(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -554,7 +570,7 @@ def register_triggers(
         first_template = templates.get("FIRST") or "-"
         await _send(interaction, subcommand_path="frasi template_global_show", sections=[CommandEmbedSection(title="Templates", lines=[("default", default_template), ("first", first_template)])])
 
-    @frasi_group.command(name="template_global_reset", description="Reset the global phrase template")
+    @phrases_group.command(name="template_global_reset", description="Reset the global phrase template")
     async def frasi_template_global_reset(interaction: discord.Interaction) -> None:
         scope = await _require_channel(interaction)
         if scope is None:
@@ -571,7 +587,7 @@ def register_triggers(
         await ctx.database.set_trigger_state_global(guild_id, "frasi", normalized)
         await _send(interaction, subcommand_path="frasi template_global_reset", lines=[("result", "reset")], kind="success")
 
-    @frasi_group.command(name="template_user_set", description="Set a user-specific phrase template")
+    @phrases_group.command(name="template_user_set", description="Set a user-specific phrase template")
     @app_commands.describe(user="Target user", text="Template text")
     async def frasi_template_user_set(interaction: discord.Interaction, user: discord.Member, text: str) -> None:
         scope = await _require_channel(interaction)
@@ -588,7 +604,7 @@ def register_triggers(
         await ctx.database.upsert_trigger_phrase_global_user_custom_text(guild_id, str(user.id), cleaned_text)
         await _send(interaction, subcommand_path="frasi template_user_set", subtitle_args=[user], lines=[("user", user.mention), ("result", "updated")], sections=[CommandEmbedSection(title="Template", lines=[cleaned_text])], kind="success")
 
-    @frasi_group.command(name="template_user_show", description="Show a user-specific phrase template")
+    @phrases_group.command(name="template_user_show", description="Show a user-specific phrase template")
     @app_commands.describe(user="Target user")
     async def frasi_template_user_show(interaction: discord.Interaction, user: discord.Member) -> None:
         scope = await _require_channel(interaction)
@@ -601,7 +617,7 @@ def register_triggers(
             return
         await _send(interaction, subcommand_path="frasi template_user_show", subtitle_args=[user], lines=[("user", user.mention)], sections=[CommandEmbedSection(title="Template", lines=[text])])
 
-    @frasi_group.command(name="template_user_reset", description="Reset a user-specific phrase template")
+    @phrases_group.command(name="template_user_reset", description="Reset a user-specific phrase template")
     @app_commands.describe(user="Target user")
     async def frasi_template_user_reset(interaction: discord.Interaction, user: discord.Member) -> None:
         scope = await _require_channel(interaction)
@@ -1031,4 +1047,4 @@ def register_triggers(
         await ctx.database.set_setting("community_insights.config", "{}")
         await _send(interaction, subcommand_path="insights template_reset", lines=[("result", "reset")], kind="success")
 
-    return frasi_group
+    return phrases_group

@@ -67,7 +67,7 @@ def test_command_validator_tracks_expected_canonical_namespaces() -> None:
         "campaigns.prompt.schedule_show",
         "commandguard.role_list",
         "qna.bonus_show",
-        "triggers.entry_list",
+        "triggers.phrases.entry_list",
         "privacy.status",
         "greetings.backfill.run",
         "inactivity.run",

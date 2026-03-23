@@ -10,15 +10,15 @@ from app.shared.discord.command_embeds import build_command_embed, normalize_dis
 from app.shared.discord.footer_pipeline import finalize_embed
 
 
-def test_normalize_display_context_frasi_template_global_show() -> None:
+def test_normalize_display_context_triggers_phrases_template_global_show() -> None:
     context = normalize_display_command_context(
         top_level="admin",
-        subcommand_path="frasi template_global_show",
-        visual_top_level="frasi",
+        subcommand_path="triggers phrases template_global_show",
+        visual_top_level="triggers",
     )
 
-    assert context.visual_title == "FRASI"
-    assert context.visual_subtitle == "TEMPLATE_GLOBAL_SHOW"
+    assert context.visual_title == "TRIGGERS"
+    assert context.visual_subtitle == "PHRASES TEMPLATE_GLOBAL_SHOW"
 
 
 def test_normalize_display_context_qna_limits_with_parameter() -> None:
@@ -289,16 +289,16 @@ def test_build_command_embed_skips_long_unreadable_subtitle_input() -> None:
     embed = asyncio.run(
         build_command_embed(
             top_level="admin",
-            visual_top_level="frasi",
-            subcommand_path="frasi template_user_set",
+            visual_top_level="triggers",
+            subcommand_path="triggers phrases template_user_set",
             subtitle_args=["x" * 120],
             lines=[("user", "Mario"), ("text", "x" * 120)],
             footer_service=None,
         )
     )
 
-    assert embed.title == "💬 FRASI"
-    assert embed.description.startswith("**ℹ️ TEMPLATE_USER_SET**")
+    assert embed.title == "⚡ TRIGGERS"
+    assert embed.description.startswith("**ℹ️ PHRASES TEMPLATE_USER_SET**")
     assert "X" * 120 not in (embed.description or "")
 
 

@@ -61,7 +61,7 @@ LOCALIZED_COMMAND_EXCEPTIONS = {
     "resocontoserver.aura.ultimi",
     "resocontoserver.aura.range",
 }
-LOCALIZED_ROOT_EXCEPTIONS = {"riassunto", "attivita", "resocontocanale", "resocontoserver", "frasi"}
+LOCALIZED_ROOT_EXCEPTIONS = {"riassunto", "attivita", "resocontocanale", "resocontoserver"}
 CONFIG_TARGET_NAMES = {
     "channel",
     "id",
