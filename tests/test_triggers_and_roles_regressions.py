@@ -92,12 +92,12 @@ def test_triggers_guard_uses_canonical_admin_permission_keys(triggers_module, mo
     monkeypatch.setattr(triggers_module, "check_permission", _check_permission)
     monkeypatch.setattr(triggers_module, "send_standard_response", _send_standard_response)
 
-    admin_group = discord.app_commands.Group(name="admin", description="admin")
-    campagne_group = discord.app_commands.Group(name="campagne", description="campagne")
+    triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+    campaigns_group = discord.app_commands.Group(name="campaigns", description="campaigns")
     qna_group = discord.app_commands.Group(name="qna", description="qna")
     insights_group = discord.app_commands.Group(name="insights", description="insights")
     ctx = SimpleNamespace(database=_TriggerDb(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
-    frasi_group = triggers_module.register_triggers(admin_group, campagne_group, qna_group, insights_group, ctx)
+    frasi_group = triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, insights_group, ctx, triggers_root="triggers")
 
     entry_list = _find_command(frasi_group, "entry_list")
     asyncio.run(entry_list.callback(_Interaction(entry_list)))
@@ -105,7 +105,7 @@ def test_triggers_guard_uses_canonical_admin_permission_keys(triggers_module, mo
     template_show = _find_command(frasi_group, "template_global_show")
     asyncio.run(template_show.callback(_Interaction(template_show)))
 
-    prompt_show = _find_command(campagne_group, "prompt", "schedule_show")
+    prompt_show = _find_command(campaigns_group, "prompt", "schedule_show")
 
     async def _get_message_campaign(self, guild_id, id):
         return None
@@ -114,14 +114,14 @@ def test_triggers_guard_uses_canonical_admin_permission_keys(triggers_module, mo
     asyncio.run(prompt_show.callback(_Interaction(prompt_show), "5"))
 
     assert seen == [
-        "admin.frasi.entry_list",
-        "admin.frasi.template_global_show",
-        "admin.campagne.prompt.schedule_show",
+        "admin.triggers.entry_list",
+        "admin.triggers.template_global_show",
+        "admin.campaigns.prompt.schedule_show",
     ]
     assert sent[0]["subcommand_path"] == "frasi entry_list"
     assert sent[1]["subcommand_path"] == "frasi template_global_show"
     assert sent[2]["subcommand_path"] == "campagne prompt schedule_show"
-    assert all(payload["top_level"] == "admin" for payload in sent)
+    assert [payload["top_level"] for payload in sent] == ["frasi", "frasi", "campagne"]
     assert sent[0]["visual_top_level"] == "frasi"
     assert sent[1]["visual_top_level"] == "frasi"
     assert sent[2]["visual_top_level"] == "campagne"
@@ -159,8 +159,8 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     monkeypatch.setattr(roles_module, "check_permission", _check_permission)
     monkeypatch.setattr(roles_module, "send_standard_response", _send_standard_response)
 
-    group = discord.app_commands.Group(name="roles", description="roles")
-    roles_module.register_roles(group, SimpleNamespace(database=_Db(), footer=None))
+    group = discord.app_commands.Group(name="commandguard", description="commandguard")
+    roles_module.register_roles(group, SimpleNamespace(database=_Db(), footer=None), top_level="commandguard", visual_top_level="commandguard")
 
     role_list = _find_command(group, "role_list")
     asyncio.run(role_list.callback(_Interaction(role_list)))
@@ -168,8 +168,10 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     asyncio.run(user_list.callback(_Interaction(user_list)))
 
     role_lines = sent[0]["sections"][0].lines
-    assert sent[0]["visual_top_level"] == "roles"
-    assert sent[1]["visual_top_level"] == "roles"
+    assert sent[0]["top_level"] == "commandguard"
+    assert sent[1]["top_level"] == "commandguard"
+    assert sent[0]["visual_top_level"] == "commandguard"
+    assert sent[1]["visual_top_level"] == "commandguard"
     assert role_lines[0][0] == "<@&123> (Moderatori)"
     assert role_lines[1][0] == "Deleted role (ID: 999)"
     assert "command=admin.test" in role_lines[0][1]
@@ -199,12 +201,12 @@ def test_qna_bonus_show_passes_user_as_subtitle_arg(triggers_module, monkeypatch
     monkeypatch.setattr(triggers_module, "check_permission", _check_permission)
     monkeypatch.setattr(triggers_module, "send_standard_response", _send_standard_response)
 
-    admin_group = discord.app_commands.Group(name="admin", description="admin")
-    campagne_group = discord.app_commands.Group(name="campagne", description="campagne")
+    triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+    campaigns_group = discord.app_commands.Group(name="campaigns", description="campaigns")
     qna_group = discord.app_commands.Group(name="qna", description="qna")
     insights_group = discord.app_commands.Group(name="insights", description="insights")
     ctx = SimpleNamespace(database=_Db(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
-    triggers_module.register_triggers(admin_group, campagne_group, qna_group, insights_group, ctx)
+    triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, insights_group, ctx, triggers_root="triggers")
 
     cmd = _find_command(qna_group, "bonus_show")
     interaction = _Interaction(cmd)

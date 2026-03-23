@@ -13,74 +13,22 @@ def test_command_validator_has_no_errors() -> None:
     assert result.errors == []
 
 
-def test_command_validator_tracks_expected_exceptions() -> None:
+def test_command_validator_tracks_expected_alias_exceptions() -> None:
     result = validate_command_tree()
 
-    assert "domanda" in result.exceptions
-    assert "riassunto.oggi" in result.exceptions
-    assert any(
-        command.path == "campagne.prompt.schedule_add" for command in result.commands
-    )
-    assert any(
-        command.path == "greetings.backfill.on"
-        and command.description == "Enable greetings timeline backfill."
-        for command in result.commands
-    )
-    assert any(
-        command.path == "greetings.backfill.off"
-        and command.description == "Disable greetings timeline backfill."
-        for command in result.commands
-    )
-    assert any(
-        command.path == "greetings.backfill.status"
-        and command.description == "Show greetings timeline backfill status."
-        for command in result.commands
-    )
-    assert any(
-        command.path == "greetings.backfill.run"
-        and command.description == "Run greetings timeline backfill now."
-        for command in result.commands
-    )
-    assert all(
-        command.path
-        not in {
-            "greetings.template_set",
-            "greetings.template_show",
-            "greetings.template_reset",
-        }
-        for command in result.commands
-    )
-    assert "preview" not in {
-        command.path.split(".")[-1]
-        for command in result.commands
-        if command.path.startswith("greetings.")
+    expected = {
+        "riassunto.oggi",
+        "riassunto.ieri",
+        "riassunto.ultimi",
+        "riassunto.range",
+        "resocontocanale.oggi",
+        "resocontoserver.oggi",
     }
-    assert any(
-        command.path == "mod.users.kick"
-        and command.description == "Remove a user from the server."
-        for command in result.commands
-    )
-    assert any(
-        command.path == "mod.users.kick_list"
-        and command.description == "List recent user removals."
-        for command in result.commands
-    )
-    assert any(
-        command.path == "mod.users.unban"
-        and command.description == "Revoke an active ban for a user."
-        for command in result.commands
-    )
-
-
-def test_command_validator_uses_admin_as_canonical_root() -> None:
-    result = validate_command_tree()
-
-    admin_paths = [
-        command.path for command in result.commands if command.root == "admin"
-    ]
-    assert admin_paths
-    assert "admin.status" in admin_paths
-    assert set(command.root for command in result.commands if command.root == "admin")
+    assert expected.issubset(result.exceptions)
+    assert any(command.path == "campaigns.prompt.schedule_add" for command in result.commands)
+    assert any(command.path == "commandguard.role_list" for command in result.commands)
+    assert any(command.path == "users.users.kick" for command in result.commands)
+    assert all(not command.path.startswith("admin.") for command in result.commands)
 
 
 def test_command_validator_tracks_embed_namespace_topology() -> None:
@@ -107,20 +55,24 @@ def test_command_validator_tracks_embed_namespace_topology() -> None:
         "embed.author.template_service_show",
         "embed.author.template_service_reset",
     }
-    assert all(not command.path.startswith("admin.footer.") for command in result.commands)
 
 
-def test_command_validator_tracks_top_level_legacy_barcello() -> None:
+def test_command_validator_tracks_expected_canonical_namespaces() -> None:
     result = validate_command_tree()
 
-    assert any(command.path == "barcello" for command in result.commands)
-    assert any(command.path == "admin.barcello.run" for command in result.commands)
-
-
-def test_command_validator_has_no_legacy_tracking_fields() -> None:
-    result = validate_command_tree()
-
-    assert all(issue.code != "legacy_root" for issue in result.warnings)
+    command_paths = {command.path for command in result.commands}
+    assert {
+        "status",
+        "campaigns.custom.run",
+        "campaigns.prompt.schedule_show",
+        "commandguard.role_list",
+        "qna.bonus_show",
+        "triggers.entry_list",
+        "privacy.status",
+        "greetings.backfill.run",
+        "inactivity.run",
+        "users.users.unban",
+    }.issubset(command_paths)
 
 
 def test_command_validator_tracks_exact_greetings_topology() -> None:
@@ -144,3 +96,9 @@ def test_command_validator_tracks_exact_greetings_topology() -> None:
         "greetings.user_card_set",
         "greetings.user_card_show",
     }
+
+
+def test_command_validator_has_no_legacy_tracking_fields() -> None:
+    result = validate_command_tree()
+
+    assert all(issue.code != "legacy_root" for issue in result.warnings)
