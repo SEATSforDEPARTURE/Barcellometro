@@ -74,6 +74,29 @@ CONFIG_TARGET_NAMES = {
     "utente",
     "voice_channel",
 }
+GROUP_VARIABLE_BRIDGES = {
+    "admin_group": "admin",
+    "attivita_group": "attivita",
+    "audionotes_group": "audionotes",
+    "aura_group": "aura",
+    "campagne_group": "campagne",
+    "commandguard_group": "commandguard",
+    "embed_group": "embed",
+    "frasi_group": "frasi",
+    "greetings_group": "greetings",
+    "inactivity_group": "inactivity",
+    "insights_group": "insights",
+    "mod_group": "mod",
+    "privacy_group": "privacy",
+    "prompt_group": "prompt",
+    "qna_group": "qna",
+    "resocontocanale_group": "resocontocanale",
+    "resocontoserver_group": "resocontoserver",
+    "riassunto_group": "riassunto",
+    "stt_group": "stt",
+    "translate_group": "translate",
+    "voice_ingest_group": "voice_ingest",
+}
 
 @dataclass(slots=True)
 class ParameterRecord:
@@ -125,6 +148,15 @@ class GroupDef:
     name: str
     description: str | None
     line: int
+
+
+@dataclass(slots=True)
+class RegisterDefinition:
+    params: list[str]
+    groups: dict[str, GroupDef]
+    parents: dict[str, str]
+    aliases: dict[str, str]
+    commands: list["PendingCommand"]
 
 
 @dataclass(slots=True)
@@ -219,8 +251,8 @@ def _extract_params(node: ast.AsyncFunctionDef | ast.FunctionDef, descriptions: 
     return params
 
 
-def _parse_register_functions() -> dict[str, dict[str, Any]]:
-    parsed: dict[str, dict[str, Any]] = {}
+def _parse_register_functions() -> dict[str, RegisterDefinition]:
+    parsed: dict[str, RegisterDefinition] = {}
 
     def iter_register_module_paths() -> list[Path]:
         paths = {path for path in MODULAR_DIR.glob("*.py")}
@@ -251,6 +283,7 @@ def _parse_register_functions() -> dict[str, dict[str, Any]]:
             params = [arg.arg for arg in node.args.args]
             groups: dict[str, GroupDef] = {}
             parents: dict[str, str] = {}
+            aliases: dict[str, str] = {}
             commands: list[PendingCommand] = []
 
             for inner in ast.walk(node):
@@ -259,6 +292,8 @@ def _parse_register_functions() -> dict[str, dict[str, Any]]:
                     group_description = _literal_str(_call_keyword(inner.value, "description"))
                     if group_name:
                         groups[inner.targets[0].id] = GroupDef(name=group_name, description=group_description, line=inner.lineno)
+                elif isinstance(inner, ast.Assign) and len(inner.targets) == 1 and isinstance(inner.targets[0], ast.Name) and isinstance(inner.value, ast.Name):
+                    aliases[inner.targets[0].id] = inner.value.id
                 elif isinstance(inner, ast.Expr) and isinstance(inner.value, ast.Call):
                     call = inner.value
                     if isinstance(call.func, ast.Attribute) and call.func.attr == "add_command" and isinstance(call.func.value, ast.Name) and call.args:
@@ -285,16 +320,17 @@ def _parse_register_functions() -> dict[str, dict[str, Any]]:
                             file_path=str(path.relative_to(REPO_ROOT)),
                         )
                     )
-            parsed[node.name] = {
-                "params": params,
-                "groups": groups,
-                "parents": parents,
-                "commands": commands,
-            }
+            parsed[node.name] = RegisterDefinition(
+                params=params,
+                groups=groups,
+                parents=parents,
+                aliases=aliases,
+                commands=commands,
+            )
     return parsed
 
 
-def _parse_root_group_mapping(register_defs: dict[str, dict[str, Any]]) -> dict[str, dict[str, str | None]]:
+def _parse_root_group_mapping(register_defs: dict[str, RegisterDefinition]) -> dict[str, dict[str, str | None]]:
     tree = ast.parse(COMMANDS_FILE.read_text(), filename=str(COMMANDS_FILE))
     root_groups: dict[str, str] = {}
     register_mappings: dict[str, dict[str, str | None]] = {}
@@ -309,12 +345,12 @@ def _parse_root_group_mapping(register_defs: dict[str, dict[str, Any]]) -> dict[
         func_name = node.func.id
         if func_name not in register_defs:
             continue
-        params = register_defs[func_name]["params"]
+        params = register_defs[func_name].params
         mapping: dict[str, str | None] = {}
         for param_name, arg in zip(params, node.args):
             root_name: str | None = None
             if isinstance(arg, ast.Name):
-                root_name = root_groups.get(arg.id)
+                root_name = root_groups.get(arg.id, GROUP_VARIABLE_BRIDGES.get(arg.id))
             elif isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name) and arg.value.id == "bot" and arg.attr == "tree":
                 root_name = None
             mapping[param_name] = root_name
@@ -322,22 +358,34 @@ def _parse_root_group_mapping(register_defs: dict[str, dict[str, Any]]) -> dict[
     return register_mappings
 
 
+def _resolve_group_alias(group_var: str, aliases: dict[str, str]) -> str:
+    current = group_var
+    seen = {current}
+    while current in aliases and aliases[current] not in seen:
+        current = aliases[current]
+        seen.add(current)
+    return current
+
+
 def _resolve_group_path(
     group_var: str | None,
     root_mapping: dict[str, str | None],
     local_groups: dict[str, GroupDef],
     parents: dict[str, str],
+    aliases: dict[str, str],
 ) -> list[str]:
     if group_var is None:
         return []
+    group_var = _resolve_group_alias(group_var, aliases)
     if group_var in root_mapping:
         root_name = root_mapping[group_var]
         return [] if root_name is None else [root_name]
     if group_var not in local_groups:
-        raise KeyError(f"Unknown group variable: {group_var}")
+        bridged_name = GROUP_VARIABLE_BRIDGES.get(group_var)
+        return [bridged_name] if bridged_name else []
     parent = parents.get(group_var)
     if parent:
-        prefix = _resolve_group_path(parent, root_mapping, local_groups, parents)
+        prefix = _resolve_group_path(parent, root_mapping, local_groups, parents, aliases)
     else:
         default_roots = [value for value in root_mapping.values() if value is not None]
         prefix = [default_roots[0]] if len(default_roots) == 1 else []
@@ -371,8 +419,8 @@ def _build_command_records() -> ValidationResult:
         root_mapping = root_mappings.get(register_name)
         if root_mapping is None:
             continue
-        for pending in parsed["commands"]:
-            segments = [*_resolve_group_path(pending.group_var, root_mapping, parsed["groups"], parsed["parents"]), pending.name]
+        for pending in parsed.commands:
+            segments = [*_resolve_group_path(pending.group_var, root_mapping, parsed.groups, parsed.parents, parsed.aliases), pending.name]
             if not segments:
                 continue
             path = ".".join(segments)
