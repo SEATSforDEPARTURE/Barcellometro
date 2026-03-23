@@ -142,6 +142,8 @@ def test_permission_helpers_keep_only_canonical_keys(import_fresh) -> None:
     assert permissions_module.canonical_permission_key("admin.campaigns.quiet.config_set") == "admin.campaigns.quiet.range_set"
     assert permissions_module.canonical_permission_key("admin.campagne.cap.config_show") == "admin.campaigns.cap.limits_show"
     assert permissions_module.canonical_permission_key("admin.insights.template_show") == "admin.campaigns.insights.template_show"
+    assert permissions_module.canonical_permission_key("admin.barcello.run") == "admin.triggers.barcello.run"
+    assert permissions_module.canonical_permission_key("admin.barcello.calibrate") == "admin.triggers.barcello.calibrate"
     assert permissions_module.canonical_permission_key("admin.barcello.mood_set") == "status.mood_set"
 
 
