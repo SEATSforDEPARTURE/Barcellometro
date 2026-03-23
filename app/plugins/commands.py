@@ -56,6 +56,7 @@ def setup(registry: ServiceRegistry) -> None:
     if not use_guild:
         logger.warning("GUILD_ID missing/invalid; registering GLOBAL commands")
 
+    status_group = app_commands.Group(name="status", description="Status controls")
     database_group = app_commands.Group(name="database", description="Database and ingestion controls")
     ai_group = app_commands.Group(name="ai", description="AI controls")
     commandguard_group = app_commands.Group(name="commandguard", description="Command guard policies")
@@ -90,6 +91,7 @@ def setup(registry: ServiceRegistry) -> None:
     add_group_once(audio_group, voice_ingest_group, logger)
     add_group_once(ai_group, insights_group, logger)
 
+    register_status(status_group, ctx)
     register_database(database_group, ctx)
     register_ai(ai_group, ctx)
     register_embed(embed_group, ctx)
@@ -100,7 +102,6 @@ def setup(registry: ServiceRegistry) -> None:
     register_messaggi(campaigns_group, ctx, top_level="campaigns", visual_top_level="campaigns")
     register_voice_ingest(voice_ingest_group, ctx, root_top_level="audio")
     register_privacy(privacy_group, ctx, top_level="privacy", visual_top_level="privacy")
-    register_status(bot.tree, guild_obj, ctx)
     register_barcello(barcellosummary_group, bot.tree, guild_obj, ctx, root_top_level="barcellosummary")
     register_riassunto(dmsummary_group, ctx, root_top_level="dmsummary")
     register_riassunto(riassunto_alias_group, ctx, root_top_level="riassunto")
@@ -133,6 +134,7 @@ def setup(registry: ServiceRegistry) -> None:
     )
 
     root_commands: list[app_commands.Command | app_commands.Group] = [
+        status_group,
         database_group,
         ai_group,
         commandguard_group,

@@ -15,9 +15,7 @@ COMMANDS_MODULAR_INIT = COMMANDS_ROOT / "commands_modular" / "__init__.py"
 MODULAR_DIR = COMMANDS_ROOT / "commands_modular"
 DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / "command_tree_report.md"
 
-CANONICAL_ADMIN_ROOT = "admin"
 BANNED_SEGMENTS = {"delete", "clear", "create", "update", "stats", "get", "toggle"}
-ENGLISH_ALLOWED_SHORT = {"admin", "ai", "dm", "dms", "qna", "stt"}
 ITALIAN_MARKERS = {
     "attivita",
     "calibra",

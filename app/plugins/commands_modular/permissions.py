@@ -16,6 +16,17 @@ _ROOT_ALIASES: dict[str, tuple[str, ...]] = {
     "resocontoserver": ("serversummary",),
 }
 _TRIGGER_SUBGROUPS = {"phrases", "qna", "insights", "barcello"}
+_LEGACY_ADMIN_ALIASES: dict[tuple[str, ...], tuple[str, ...]] = {
+    ("status",): ("status",),
+    ("events",): ("database", "events"),
+    ("retention",): ("database", "retention"),
+    ("backfill",): ("database", "backfill"),
+    ("ai",): ("ai",),
+    ("barcello", "mood_set"): ("status", "mood_set"),
+    ("barcello", "mood_show"): ("status", "mood_show"),
+    ("barcello", "mood_reset"): ("status", "mood_reset"),
+}
+
 _TRIGGER_PHRASE_ACTIONS = {
     "on",
     "off",
@@ -50,8 +61,19 @@ def canonical_permission_key(command_name: str) -> str:
     prefix: list[str] = []
     body = parts
     if body[0] == "admin":
-        prefix = [body[0]]
         body = body[1:]
+        if not body:
+            return ""
+        alias_key = tuple(body[:2]) if tuple(body[:2]) in _LEGACY_ADMIN_ALIASES else tuple(body[:1])
+        alias = _LEGACY_ADMIN_ALIASES.get(alias_key)
+        if alias is not None:
+            body = [*alias, *body[len(alias_key):]]
+        else:
+            prefix = ["admin"]
+
+    if len(body) >= 3 and body[0] == "database" and body[1] in {"retention", "backfill"}:
+        config_aliases = {"config_set": "limits_set", "config_show": "limits_show", "config_reset": "limits_reset"}
+        body[2] = config_aliases.get(body[2], body[2])
 
     if not body:
         return ".".join(prefix)

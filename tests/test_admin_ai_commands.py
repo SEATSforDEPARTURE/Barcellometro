@@ -9,18 +9,21 @@ def test_ai_model_choices_include_campaign_and_audio_tasks() -> None:
     assert 'app_commands.Choice(name="translation", value="translation")' in source
 
 
-def test_ai_commands_are_registered_under_ai_group_namespace() -> None:
+def test_ai_commands_are_registered_under_canonical_ai_namespace() -> None:
     source = Path("app/plugins/commands_modular/admin.py").read_text()
-    assert 'ai_group = app_commands.Group(name="ai", description="AI service controls")' in source
-    assert 'admin_group.add_command(ai_group)' in source
+    assert 'def register_ai(ai_group: app_commands.Group, ctx: CommandContext) -> None:' in source
     assert '@ai_group.command(name="on"' in source
     assert '@ai_group.command(name="off"' in source
+    assert '@ai_group.command(name="status"' in source
     assert '@ai_group.command(name="model_set"' in source
     assert '@ai_group.command(name="model_show"' in source
+    assert '@ai_group.command(name="model_reset"' in source
     assert '@ai_group.command(name="fallback_set"' in source
     assert '@ai_group.command(name="fallback_show"' in source
-    assert '@ai_group.command(name="status"' in source
+    assert '@ai_group.command(name="fallback_reset"' in source
     assert '@ai_group.command(name="run"' in source
+    assert 'check_permission(interaction, "ai.model_set", ctx)' in source
+    assert 'check_permission(interaction, "admin.ai.model_set", ctx)' not in source
 
 
 def test_legacy_ai_command_names_are_removed() -> None:
