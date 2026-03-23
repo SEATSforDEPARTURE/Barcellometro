@@ -117,7 +117,7 @@ def setup(registry: ServiceRegistry) -> None:
         server_root="resocontoserver",
     )
     register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")
-    register_ask(bot.tree, guild_obj, ctx, command_name="domanda", root_top_level="qna", visual_top_level="domanda")
+    register_ask(bot.tree, guild_obj, ctx, command_name="domanda", root_top_level="qna", visual_top_level="qna")
 
     logger.info(
         "Group children summary database=%d campaigns=%d qna=%d triggers=%d ai=%d",

@@ -61,8 +61,9 @@ def test_handle_ask_like_stato_canale(ask_module, monkeypatch: pytest.MonkeyPatc
 
         trigger_engine.route_qna.assert_not_called()
         kwargs = send_standard_response.await_args.kwargs
-        assert kwargs["subcommand_path"] == "domanda stato"
-        assert kwargs["visual_top_level"] == "domanda"
+        assert kwargs["top_level"] == "qna"
+        assert kwargs["subcommand_path"] == "qna status"
+        assert kwargs["visual_top_level"] == "qna"
         assert ("tier", "role1") in kwargs["lines"]
         assert ("rimanenti_oggi", 1) in kwargs["lines"]
 
@@ -86,8 +87,9 @@ def test_handle_ask_like_stato_generale(ask_module, monkeypatch: pytest.MonkeyPa
 
         trigger_engine.route_qna.assert_not_called()
         kwargs = send_standard_response.await_args.kwargs
-        assert kwargs["subcommand_path"] == "domanda stato"
-        assert kwargs["visual_top_level"] == "domanda"
+        assert kwargs["top_level"] == "qna"
+        assert kwargs["subcommand_path"] == "qna status"
+        assert kwargs["visual_top_level"] == "qna"
         assert ("tier", "role2") in kwargs["lines"]
 
     asyncio.run(_run())

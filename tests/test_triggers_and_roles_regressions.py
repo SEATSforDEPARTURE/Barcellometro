@@ -195,6 +195,110 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     assert "command=admin.other" in user_lines[1][1]
 
 
+def test_qna_limits_set_uses_canonical_setting_key(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _check_permission(*args, **kwargs):
+        return True
+
+    sent = []
+    writes = []
+
+    async def _send_standard_response(interaction, **kwargs):
+        sent.append(kwargs)
+
+    class _Db(_TriggerDb):
+        async def get_setting(self, key: str):
+            assert key == "qna.daily_limits"
+            return '{"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}'
+
+        async def set_setting(self, key: str, value: str):
+            writes.append((key, value))
+
+    monkeypatch.setattr(triggers_module, "check_permission", _check_permission)
+    monkeypatch.setattr(triggers_module, "send_standard_response", _send_standard_response)
+
+    triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+    campaigns_group = discord.app_commands.Group(name="campaigns", description="campaigns")
+    qna_group = discord.app_commands.Group(name="qna", description="qna")
+    ctx = SimpleNamespace(database=_Db(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
+    triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")
+
+    cmd = _find_command(qna_group, "limits_set")
+    interaction = _Interaction(cmd)
+    tier = discord.app_commands.Choice(name="role2", value="role2")
+    asyncio.run(cmd.callback(interaction, tier, 8))
+
+    assert writes == [("qna.daily_limits", '{"base": 0, "role1": 1, "role2": 8, "role3": 3, "mod": 999}')]
+    assert sent[0]["subcommand_path"] == "qna limits_set"
+    assert sent[0]["subtitle_args"] == [tier]
+
+
+def test_qna_limits_show_falls_back_to_canonical_defaults(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _check_permission(*args, **kwargs):
+        return True
+
+    sent = []
+
+    async def _send_standard_response(interaction, **kwargs):
+        sent.append(kwargs)
+
+    class _Db(_TriggerDb):
+        async def get_setting(self, key: str):
+            assert key == "qna.daily_limits"
+            return 'not-json'
+
+    monkeypatch.setattr(triggers_module, "check_permission", _check_permission)
+    monkeypatch.setattr(triggers_module, "send_standard_response", _send_standard_response)
+
+    triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+    campaigns_group = discord.app_commands.Group(name="campaigns", description="campaigns")
+    qna_group = discord.app_commands.Group(name="qna", description="qna")
+    ctx = SimpleNamespace(database=_Db(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
+    triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")
+
+    cmd = _find_command(qna_group, "limits_show")
+    interaction = _Interaction(cmd)
+    tier = discord.app_commands.Choice(name="mod", value="mod")
+    asyncio.run(cmd.callback(interaction, tier))
+
+    assert sent[0]["subcommand_path"] == "qna limits_show"
+    assert sent[0]["subtitle_args"] == [tier]
+    assert ("tier", "mod") in sent[0]["lines"]
+    assert ("limit", 999) in sent[0]["lines"]
+
+
+def test_qna_bonus_reset_uses_canonical_bonus_domain(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _check_permission(*args, **kwargs):
+        return True
+
+    sent = []
+    cleared = []
+
+    async def _send_standard_response(interaction, **kwargs):
+        sent.append(kwargs)
+
+    class _Db(_TriggerDb):
+        async def clear_qna_bonus(self, guild_id: str, user_id: str):
+            cleared.append((guild_id, user_id))
+
+    monkeypatch.setattr(triggers_module, "check_permission", _check_permission)
+    monkeypatch.setattr(triggers_module, "send_standard_response", _send_standard_response)
+
+    triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+    campaigns_group = discord.app_commands.Group(name="campaigns", description="campaigns")
+    qna_group = discord.app_commands.Group(name="qna", description="qna")
+    ctx = SimpleNamespace(database=_Db(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
+    triggers_module.register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")
+
+    cmd = _find_command(qna_group, "bonus_reset")
+    interaction = _Interaction(cmd)
+    user = interaction.guild.get_member(789)
+    asyncio.run(cmd.callback(interaction, user))
+
+    assert cleared == [("1", "789")]
+    assert sent[0]["subcommand_path"] == "qna bonus_reset"
+    assert sent[0]["subtitle_args"] == [user]
+
+
 def test_qna_bonus_show_passes_user_as_subtitle_arg(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _check_permission(*args, **kwargs):
         return True

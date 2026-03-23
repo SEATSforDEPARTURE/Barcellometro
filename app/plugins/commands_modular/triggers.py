@@ -143,6 +143,9 @@ def register_triggers(
         app_commands.Choice(name="mod", value="mod"),
     ]
 
+    QNA_LIMITS_SETTING_KEY = "qna.daily_limits"
+    QNA_DEFAULT_DAILY_LIMITS = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
+
     MATCH_MODE_CHOICES = [
         app_commands.Choice(name="contains", value="CONTAINS"),
         app_commands.Choice(name="regex", value="REGEX"),
@@ -908,18 +911,17 @@ def register_triggers(
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        raw = await ctx.database.get_setting("qna.daily_limits")
-        defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
+        raw = await ctx.database.get_setting(QNA_LIMITS_SETTING_KEY)
         if not raw:
-            data = defaults
+            data = dict(QNA_DEFAULT_DAILY_LIMITS)
         else:
             try:
                 parsed = json.loads(raw)
             except json.JSONDecodeError:
-                parsed = defaults
-            data = parsed if isinstance(parsed, dict) else defaults
+                parsed = dict(QNA_DEFAULT_DAILY_LIMITS)
+            data = dict(parsed) if isinstance(parsed, dict) else dict(QNA_DEFAULT_DAILY_LIMITS)
         if tier is not None:
-            value = int(data.get(tier.value, defaults[tier.value]))
+            value = int(data.get(tier.value, QNA_DEFAULT_DAILY_LIMITS[tier.value]))
             await _send(interaction, subcommand_path="qna limits_show", subtitle_args=[tier], lines=[("tier", tier.value), ("limit", value)])
             return
         pretty = json.dumps(data, ensure_ascii=False, indent=2)
@@ -935,8 +937,8 @@ def register_triggers(
         if limit < 0 or limit > 999:
             await _send(interaction, subcommand_path="qna limits_set", lines=[("error", "limit must be between 0 and 999.")], kind="error")
             return
-        raw = await ctx.database.get_setting("qna.daily_limits")
-        data = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
+        raw = await ctx.database.get_setting(QNA_LIMITS_SETTING_KEY)
+        data = dict(QNA_DEFAULT_DAILY_LIMITS)
         if raw:
             try:
                 parsed = json.loads(raw)
@@ -945,7 +947,7 @@ def register_triggers(
             if isinstance(parsed, dict):
                 data.update(parsed)
         data[tier.value] = int(limit)
-        await ctx.database.set_setting("qna.daily_limits", json.dumps(data, ensure_ascii=False))
+        await ctx.database.set_setting(QNA_LIMITS_SETTING_KEY, json.dumps(data, ensure_ascii=False))
         await _send(interaction, subcommand_path="qna limits_set", subtitle_args=[tier], lines=[("tier", tier.value), ("limit", limit), ("result", "updated")], kind="success")
 
     @qna_group.command(name="limits_reset", description="Reset QnA daily limits to defaults")
@@ -953,8 +955,8 @@ def register_triggers(
         scope = await _require_channel(interaction)
         if scope is None:
             return
-        defaults = {"base": 0, "role1": 1, "role2": 2, "role3": 3, "mod": 999}
-        await ctx.database.set_setting("qna.daily_limits", json.dumps(defaults, ensure_ascii=False))
+        defaults = dict(QNA_DEFAULT_DAILY_LIMITS)
+        await ctx.database.set_setting(QNA_LIMITS_SETTING_KEY, json.dumps(defaults, ensure_ascii=False))
         await _send(interaction, subcommand_path="qna limits_reset", lines=[("result", "reset")], sections=[CommandEmbedSection(title="Defaults", lines=[json.dumps(defaults, ensure_ascii=False, indent=2)])], kind="success")
 
     @qna_group.command(name="bonus_set", description="Set a QnA bonus for a user")
