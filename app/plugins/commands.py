@@ -97,7 +97,14 @@ def setup(registry: ServiceRegistry) -> None:
     register_messaggi(campaigns_group, ctx, top_level="campaigns", visual_top_level="campaigns")
     register_voice_ingest(voice_ingest_group, ctx, root_top_level="audio")
     register_privacy(privacy_group, ctx, top_level="privacy", visual_top_level="privacy")
-    register_barcello(barcellosummary_group, bot.tree, guild_obj, ctx, root_top_level="barcellosummary")
+    register_barcello(
+        triggers_group,
+        bot.tree,
+        guild_obj,
+        ctx,
+        root_top_level="barcellosummary",
+        trigger_top_level="triggers",
+    )
     register_riassunto(dmsummary_group, ctx, root_top_level="dmsummary")
     register_riassunto(riassunto_alias_group, ctx, root_top_level="riassunto")
     register_aura(aurasummary_group, ctx, root_top_level="aurasummary")

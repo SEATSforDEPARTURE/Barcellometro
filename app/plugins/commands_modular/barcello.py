@@ -32,16 +32,17 @@ logger = logging.getLogger(__name__)
 
 
 def register_barcello(
-    admin_group: app_commands.Group,
+    triggers_group: app_commands.Group,
     tree: app_commands.CommandTree,
     guild: discord.abc.Snowflake | None,
     ctx: CommandContext,
     *,
     root_top_level: str = "barcello",
+    trigger_top_level: str = "triggers",
 ) -> None:
     response_format_supported: bool | None = None
-    barcello_group = app_commands.Group(name="barcello", description="Barcello controls")
-    add_group_once(admin_group, barcello_group, logger)
+    trigger_barcello_group = app_commands.Group(name="barcello", description="Barcello trigger controls")
+    add_group_once(triggers_group, trigger_barcello_group, logger)
 
     def _kind_from_message(message: str) -> str:
         text = str(message or "").strip()
@@ -68,12 +69,13 @@ def register_barcello(
         message: str,
         *,
         command_path: str | None = None,
+        top_level: str | None = None,
     ) -> None:
         text = str(message or "").strip()
         await send_standard_response(
             interaction,
-            top_level=root_top_level,
-            subcommand_path=command_path or _command_path(interaction, fallback=root_top_level),
+            top_level=top_level or root_top_level,
+            subcommand_path=command_path or _command_path(interaction, fallback=top_level or root_top_level),
             lines=[("dettaglio", _normalize_message(text))],
             kind=_kind_from_message(text),
             footer_service=ctx.footer,
@@ -123,7 +125,7 @@ def register_barcello(
         return [public_embed, details_embed]
 
     async def _set_toggle(interaction: discord.Interaction, action: str) -> None:
-        if not await check_permission(interaction, f"admin.barcello.{action}", ctx):
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.{action}", ctx):
             return
         scope = await _require_channel_scope(interaction)
         if scope is None:
@@ -131,15 +133,37 @@ def register_barcello(
         guild_id, channel_id = scope
         if action == "status":
             enabled = await ctx.database.get_trigger_enabled(guild_id, channel_id, "barcello")
-            await send_ephemeral(interaction, f"Barcello trigger is {'on' if enabled else 'off'} for this channel.")
+            await send_ephemeral(
+                interaction,
+                f"Barcello trigger is {'on' if enabled else 'off'} for this channel.",
+                command_path=f"{trigger_top_level} barcello status",
+                top_level=trigger_top_level,
+            )
             return
         enabled = action == "on"
         await ctx.database.set_trigger_enabled(guild_id, channel_id, "barcello", enabled)
-        await send_ephemeral(interaction, f"Barcello trigger {'enabled' if enabled else 'disabled'} for this channel.")
+        await send_ephemeral(
+            interaction,
+            f"Barcello trigger {'enabled' if enabled else 'disabled'} for this channel.",
+            command_path=f"{trigger_top_level} barcello {action}",
+            top_level=trigger_top_level,
+        )
 
-    @barcello_group.command(name="calibrate", description="Recalculate Barcello calibration weights.")
+    @trigger_barcello_group.command(name="on", description="Enable Barcello triggers in the current channel.")
+    async def barcello_on_command(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "on")
+
+    @trigger_barcello_group.command(name="off", description="Disable Barcello triggers in the current channel.")
+    async def barcello_off_command(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "off")
+
+    @trigger_barcello_group.command(name="status", description="Show Barcello trigger status for the current channel.")
+    async def barcello_status_command(interaction: discord.Interaction) -> None:
+        await _set_toggle(interaction, "status")
+
+    @trigger_barcello_group.command(name="calibrate", description="Recalculate Barcello calibration weights.")
     async def barcello_calibrate_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(interaction, "admin.barcello.calibrate", ctx):
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.calibrate", ctx):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         result = await ctx.barcello_calibration_service.run_calibration(days=14, min_samples=20)
@@ -149,8 +173,8 @@ def register_barcello(
             message = f"Calibration not updated. Samples: {result.get('samples')}. {result.get('summary')}"
         await send_standard_response(
             interaction,
-            top_level=root_top_level,
-            subcommand_path="admin barcello calibrate",
+            top_level=trigger_top_level,
+            subcommand_path=f"{trigger_top_level} barcello calibrate",
             lines=[("samples", result.get("samples")), ("summary", result.get("summary"))],
             kind="success" if result.get("updated") else "warning",
             footer_service=ctx.footer,
@@ -1591,7 +1615,7 @@ def register_barcello(
                 footer_service=ctx.footer,
             )
 
-    @barcello_group.command(name="run", description="Run the Barcello analysis.")
+    @trigger_barcello_group.command(name="run", description="Run the Barcello analysis.")
     @app_commands.describe(
         user1="Optional first user.",
         user2="Optional second user.",
@@ -1608,8 +1632,8 @@ def register_barcello(
             user1=user1,
             user2=user2,
             window_minutes=window_minutes,
-            permission_name="admin.barcello.run",
-            command_path="admin barcello run",
+            permission_name=f"admin.{trigger_top_level}.barcello.run",
+            command_path=f"{trigger_top_level} barcello run",
         )
 
     @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
@@ -1642,6 +1666,7 @@ def register_barcello(
         logger.info("Registered /barcello scope=global")
 
     logger.info(
-        "Registered /admin barcello subcommands=%s",
-        [command.name for command in barcello_group.commands],
+        "Registered /%s barcello subcommands=%s",
+        trigger_top_level,
+        [command.name for command in trigger_barcello_group.commands],
     )

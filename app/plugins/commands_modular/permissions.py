@@ -122,6 +122,9 @@ def canonical_permission_key(command_name: str) -> str:
         limits_aliases = {"config_set": "limits_set", "config_show": "limits_show", "config_reset": "limits_reset"}
         body[2] = limits_aliases.get(body[2], body[2])
 
+    if len(body) >= 2 and body[0] == "barcello" and body[1] in {"on", "off", "status", "run", "calibrate"}:
+        body = ["triggers", "barcello", *body[1:]]
+
     body = _canonicalize_audio_segments(body)
 
     if not body:

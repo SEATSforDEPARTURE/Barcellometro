@@ -44,6 +44,8 @@ def test_commands_setup_registers_canonical_namespaces_with_matching_top_levels(
     assert 'register_greetings(greetings_group, ctx, top_level="greetings", visual_top_level="greetings")' in source
     assert 'register_moderazione_utenti(users_group, ctx, top_level="users", visual_top_level="users")' in source
     assert 'register_resoconto(channelsummary_group, serversummary_group, ctx, channel_root="channelsummary", server_root="serversummary")' in source
+    assert 'register_barcello(' in source
+    assert 'trigger_top_level="triggers"' in source
     assert 'register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")' in source
 
 
