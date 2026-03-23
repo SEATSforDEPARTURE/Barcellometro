@@ -8,33 +8,37 @@ def test_editorial_commands_are_under_servizi_subgroup() -> None:
     assert 'weather_group = app_commands.Group(name="weather", description="Weather campaign controls")' in source
     assert 'horoscope_group = app_commands.Group(name="horoscope", description="Horoscope campaign controls")' in source
     assert "for group in (quiet_group, cap_group, custom_group, news_group, weather_group, horoscope_group):" in source
-    assert "add_group_once(campagne_group, group, logger)" in source
+    assert "add_group_once(campaigns_group, group, logger)" in source
 
 
-def test_editorial_commands_are_not_direct_children_of_campagne() -> None:
+def test_editorial_commands_are_not_direct_children_of_campaigns() -> None:
     source = Path("app/plugins/commands_modular/messaggi.py").read_text()
 
     forbidden = [
-        '@campagne_group.command(name="news"',
-        '@campagne_group.command(name="weather"',
-        '@campagne_group.command(name="horoscope"',
-        '@campagne_group.command(name="schedule_add"',
-        '@campagne_group.command(name="run"',
+        '@campaigns_group.command(name="news"',
+        '@campaigns_group.command(name="weather"',
+        '@campaigns_group.command(name="horoscope"',
+        '@campaigns_group.command(name="schedule_add"',
+        '@campaigns_group.command(name="run"',
     ]
     for pattern in forbidden:
         assert pattern not in source
 
 
-def test_existing_campagne_commands_and_prompt_group_are_kept() -> None:
+def test_existing_campaigns_commands_and_prompt_and_insights_groups_are_kept() -> None:
     messaggi_source = Path("app/plugins/commands_modular/messaggi.py").read_text()
     triggers_source = Path("app/plugins/commands_modular/triggers.py").read_text()
 
     for cmd in ["on", "off", "status"]:
-        assert f'@campagne_group.command(name="{cmd}"' in messaggi_source
+        assert f'@campaigns_group.command(name="{cmd}"' in messaggi_source
     for cmd in ["on", "off", "status", "schedule_add", "schedule_list", "schedule_show", "schedule_remove", "run", "schedule_edit"]:
         assert f'@custom_group.command(name="{cmd}"' in messaggi_source
 
-    assert 'add_group_once(campagne_group, prompt_group, logger)' in triggers_source
+    assert 'add_group_once(campaigns_group, prompt_group, logger)' in triggers_source
+    assert 'add_group_once(campaigns_group, insights_group, logger)' in triggers_source
+
+    for cmd in ["on", "off", "status", "template_set", "template_show", "template_reset"]:
+        assert f'@insights_group.command(name="{cmd}"' in triggers_source
 
     for group_name in ["news", "weather", "horoscope"]:
         for cmd in ["on", "off", "status", "schedule_add", "schedule_edit", "schedule_remove", "schedule_show", "schedule_list", "run"]:

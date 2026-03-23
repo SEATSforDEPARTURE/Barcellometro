@@ -10,6 +10,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 
 _ROOT_ALIASES: dict[str, tuple[str, ...]] = {
     "campagne": ("campaigns",),
+    "insights": ("campaigns", "insights"),
     "frasi": ("triggers", "phrases"),
     "roles": ("commandguard",),
     "resocontocanale": ("channelsummary",),
@@ -112,6 +113,14 @@ def canonical_permission_key(command_name: str) -> str:
     if len(body) >= 3 and body[0] == "database" and body[1] in {"retention", "backfill"}:
         config_aliases = {"config_set": "limits_set", "config_show": "limits_show", "config_reset": "limits_reset"}
         body[2] = config_aliases.get(body[2], body[2])
+
+    if len(body) >= 3 and body[0] in {"campaigns", "campagne"} and body[1] == "quiet":
+        range_aliases = {"config_set": "range_set", "config_show": "range_show", "config_reset": "range_reset"}
+        body[2] = range_aliases.get(body[2], body[2])
+
+    if len(body) >= 3 and body[0] in {"campaigns", "campagne"} and body[1] == "cap":
+        limits_aliases = {"config_set": "limits_set", "config_show": "limits_show", "config_reset": "limits_reset"}
+        body[2] = limits_aliases.get(body[2], body[2])
 
     body = _canonicalize_audio_segments(body)
 

@@ -31,7 +31,7 @@ Le sole action standard supportate e documentate sono:
 
 ### 1.1 Action composte
 
-Nel repository esistono anche action composte costruite sullo stesso vocabolario canonico, per esempio `config_set`, `config_show`, `config_reset`, `schedule_add`, `schedule_edit`, `schedule_remove`, `schedule_list`, `template_global_set`.
+Nel repository esistono anche action composte costruite sullo stesso vocabolario canonico, per esempio `config_set`, `config_show`, `config_reset`, `range_set`, `range_show`, `range_reset`, `limits_set`, `limits_show`, `limits_reset`, `schedule_add`, `schedule_edit`, `schedule_remove`, `schedule_list`, `template_global_set`.
 
 Regola normativa:
 

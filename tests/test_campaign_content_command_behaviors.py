@@ -121,7 +121,7 @@ def test_custom_run_reports_not_found_when_campaign_missing(messaggi_module) -> 
         scheduler = _FakeScheduler()
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
 
-        group = discord.app_commands.Group(name="campagne", description="x")
+        group = discord.app_commands.Group(name="campaigns", description="x")
         messaggi_module.register_messaggi(group, ctx)
         custom_group = _get_subgroup(group, "custom")
         callback = _get_command_callback(custom_group, "run")
@@ -131,7 +131,7 @@ def test_custom_run_reports_not_found_when_campaign_missing(messaggi_module) -> 
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
             top_level="campaigns",
-            subcommand_path="campagne custom run",
+            subcommand_path="campaigns custom run",
             visual_top_level="campaigns",
             subtitle_args=[99],
             lines=[("warning", "Custom schedule not found.")],
@@ -150,7 +150,7 @@ def test_weather_run_dispatches_editorial_service(messaggi_module) -> None:
         scheduler = _FakeScheduler()
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
 
-        group = discord.app_commands.Group(name="campagne", description="x")
+        group = discord.app_commands.Group(name="campaigns", description="x")
         messaggi_module.register_messaggi(group, ctx)
         weather_group = _get_subgroup(group, "weather")
         callback = _get_command_callback(weather_group, "run")
@@ -160,7 +160,7 @@ def test_weather_run_dispatches_editorial_service(messaggi_module) -> None:
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
             top_level="campaigns",
-            subcommand_path="campagne weather run",
+            subcommand_path="campaigns weather run",
             visual_top_level="campaigns",
             subtitle_args=None,
             lines=[("channel", "<#10>"), ("result", "running")],
@@ -186,7 +186,7 @@ def test_service_runs_dispatch_by_service_type(messaggi_module) -> None:
             db.service_campaign = {"id": 3, "service_type": service_type}
             scheduler = _FakeScheduler()
             ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
-            group = discord.app_commands.Group(name="campagne", description="x")
+            group = discord.app_commands.Group(name="campaigns", description="x")
 
             messaggi_module.send_standard_response.reset_mock()
             messaggi_module.register_messaggi(group, ctx)
@@ -206,7 +206,7 @@ def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module
         db.message_campaign = {"id": 11, "type": "CUSTOM", "text": "hello", "mood_mode": "AUTO"}
         scheduler = _FakeScheduler()
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
-        group = discord.app_commands.Group(name="campagne", description="x")
+        group = discord.app_commands.Group(name="campaigns", description="x")
 
         messaggi_module.register_messaggi(group, ctx)
         custom_group = _get_subgroup(group, "custom")
@@ -217,7 +217,7 @@ def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
             top_level="campaigns",
-            subcommand_path="campagne custom run",
+            subcommand_path="campaigns custom run",
             visual_top_level="campaigns",
             subtitle_args=[11],
             lines=[("schedule_id", 11), ("result", "running")],
@@ -237,7 +237,7 @@ def test_custom_run_checks_permission_candidates_in_order(messaggi_module) -> No
         db.message_campaign = {"id": 12, "type": "CUSTOM", "text": "hello", "mood_mode": "AUTO"}
         scheduler = _FakeScheduler()
         ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
-        group = discord.app_commands.Group(name="campagne", description="x")
+        group = discord.app_commands.Group(name="campaigns", description="x")
 
         messaggi_module.check_permission.reset_mock()
         messaggi_module.check_permission.side_effect = [False, True]
@@ -249,13 +249,13 @@ def test_custom_run_checks_permission_candidates_in_order(messaggi_module) -> No
         await callback(interaction, id=12)
 
         assert [call.args[1] for call in messaggi_module.check_permission.await_args_list] == [
-            "campagne.custom.run",
-            "campagne.custom.entry_run",
+            "campaigns.custom.run",
+            "campaigns.custom.entry_run",
         ]
         messaggi_module.send_standard_response.assert_awaited_once_with(
             interaction,
             top_level="campaigns",
-            subcommand_path="campagne custom run",
+            subcommand_path="campaigns custom run",
             visual_top_level="campaigns",
             subtitle_args=[12],
             lines=[("schedule_id", 12), ("result", "running")],

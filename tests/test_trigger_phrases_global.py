@@ -377,7 +377,7 @@ def test_register_triggers_returns_phrases_subgroup_under_triggers() -> None:
         message_scheduler=None,
         trigger_engine=None,
     )
-    frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
+    frasi_group = register_triggers(group, app_commands.Group(name="campaigns", description="x"), app_commands.Group(name="qna", description="x"), ctx)
 
     names = [command.name for command in group.commands]
     assert "frasi" not in names
@@ -537,7 +537,7 @@ def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
         )
         old_permission = trigger_commands_module.check_permission
         trigger_commands_module.check_permission = AsyncMock(return_value=True)
-        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campaigns", description="x"), app_commands.Group(name="qna", description="x"), ctx)
         add_cmd = next(c for c in frasi_group.commands if c.name == "entry_add")
         list_cmd = next(c for c in frasi_group.commands if c.name == "entry_list")
 
@@ -601,7 +601,7 @@ def test_frasi_edit_updates_in_place_and_preserves_stats() -> None:
         )
         old_permission = trigger_commands_module.check_permission
         trigger_commands_module.check_permission = AsyncMock(return_value=True)
-        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campaigns", description="x"), app_commands.Group(name="qna", description="x"), ctx)
         edit_cmd = next(c for c in frasi_group.commands if c.name == "entry_edit")
 
         response = Mock()
@@ -669,7 +669,7 @@ def test_frasi_edit_reset_fields_and_missing_id() -> None:
         )
         old_permission = trigger_commands_module.check_permission
         trigger_commands_module.check_permission = AsyncMock(return_value=True)
-        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campaigns", description="x"), app_commands.Group(name="qna", description="x"), ctx)
         edit_cmd = next(c for c in frasi_group.commands if c.name == "entry_edit")
 
         response = Mock()
@@ -874,7 +874,7 @@ def test_frasi_milestone_commands() -> None:
         )
         old_permission = trigger_commands_module.check_permission
         trigger_commands_module.check_permission = AsyncMock(return_value=True)
-        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campaigns", description="x"), app_commands.Group(name="qna", description="x"), ctx)
         set_cmd = next(c for c in frasi_group.commands if c.name == "template_milestone_set")
         list_cmd = next(c for c in frasi_group.commands if c.name == "template_milestone_show")
         remove_cmd = next(c for c in frasi_group.commands if c.name == "template_milestone_reset")
@@ -921,7 +921,7 @@ def test_template_set_user_command_is_not_registered() -> None:
             trigger_engine=Mock(),
             footer=None,
         )
-        frasi_group = register_triggers(group, app_commands.Group(name="campagne", description="x"), app_commands.Group(name="qna", description="x"), app_commands.Group(name="insights", description="x"), ctx)
+        frasi_group = register_triggers(group, app_commands.Group(name="campaigns", description="x"), app_commands.Group(name="qna", description="x"), ctx)
         names = {command.name for command in frasi_group.commands}
         assert "template_set_user" not in names
         await db.close()
@@ -946,13 +946,12 @@ def test_register_triggers_permission_candidates_use_admin_only(monkeypatch: pyt
             return []
 
     admin_group = app_commands.Group(name="admin", description="x")
-    campagne_group = app_commands.Group(name="campagne", description="x")
+    campaigns_group = app_commands.Group(name="campaigns", description="x")
     qna_group = app_commands.Group(name="qna", description="x")
-    insights_group = app_commands.Group(name="insights", description="x")
     ctx = SimpleNamespace(database=_Db(), footer=None, guard=None, timezone=None, message_scheduler=None, trigger_engine=None)
 
-    register_triggers(admin_group, campagne_group, qna_group, insights_group, ctx)
-    prompt_group = next(cmd for cmd in campagne_group.commands if isinstance(cmd, app_commands.Group) and cmd.name == "prompt")
+    register_triggers(admin_group, campaigns_group, qna_group, ctx)
+    prompt_group = next(cmd for cmd in campaigns_group.commands if isinstance(cmd, app_commands.Group) and cmd.name == "prompt")
     prompt_show = next(cmd for cmd in prompt_group.commands if cmd.name == "schedule_show")
 
     async def _get_message_campaign(self, guild_id, id):

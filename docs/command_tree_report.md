@@ -37,9 +37,9 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `barcello` | `—` | `barcello` | Mostra lo stato del barcello (in DM) | `app/plugins/commands_modular/barcello.py:1622` |
 | `barcellosummary` | `barcello` | `calibrate` | Recalculate Barcello calibration weights. | `app/plugins/commands_modular/barcello.py:141` |
 | `barcellosummary` | `barcello` | `run` | Run the Barcello analysis. | `app/plugins/commands_modular/barcello.py:1600` |
-| `campaigns` | `cap` | `config_reset` | Reset the daily cap configuration | `app/plugins/commands_modular/messaggi.py:605` |
-| `campaigns` | `cap` | `config_set` | Set the daily cap configuration | `app/plugins/commands_modular/messaggi.py:588` |
-| `campaigns` | `cap` | `config_show` | Show the daily cap configuration | `app/plugins/commands_modular/messaggi.py:598` |
+| `campaigns` | `cap` | `limits_reset` | Reset the daily cap limit | `app/plugins/commands_modular/messaggi.py:604` |
+| `campaigns` | `cap` | `limits_set` | Set the daily cap limit | `app/plugins/commands_modular/messaggi.py:586` |
+| `campaigns` | `cap` | `limits_show` | Show the daily cap limit | `app/plugins/commands_modular/messaggi.py:597` |
 | `campaigns` | `cap` | `off` | Disable the daily cap | `app/plugins/commands_modular/messaggi.py:572` |
 | `campaigns` | `cap` | `on` | Enable the daily cap | `app/plugins/commands_modular/messaggi.py:565` |
 | `campaigns` | `cap` | `status` | Show the daily cap status | `app/plugins/commands_modular/messaggi.py:579` |
@@ -81,9 +81,9 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `campaigns` | `prompt` | `schedule_remove` | Remove a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:763` |
 | `campaigns` | `prompt` | `schedule_show` | Show a prompt campaign schedule | `app/plugins/commands_modular/triggers.py:749` |
 | `campaigns` | `prompt` | `status` | Show prompt campaign status for the current channel | `app/plugins/commands_modular/triggers.py:657` |
-| `campaigns` | `quiet` | `config_reset` | Reset quiet hours configuration | `app/plugins/commands_modular/messaggi.py:557` |
-| `campaigns` | `quiet` | `config_set` | Set quiet hours configuration | `app/plugins/commands_modular/messaggi.py:541` |
-| `campaigns` | `quiet` | `config_show` | Show quiet hours configuration | `app/plugins/commands_modular/messaggi.py:549` |
+| `campaigns` | `quiet` | `range_reset` | Reset the quiet-hours start/end range | `app/plugins/commands_modular/messaggi.py:556` |
+| `campaigns` | `quiet` | `range_set` | Set the quiet-hours start/end range | `app/plugins/commands_modular/messaggi.py:539` |
+| `campaigns` | `quiet` | `range_show` | Show the quiet-hours start/end range | `app/plugins/commands_modular/messaggi.py:548` |
 | `campaigns` | `quiet` | `off` | Disable quiet hours | `app/plugins/commands_modular/messaggi.py:524` |
 | `campaigns` | `quiet` | `on` | Enable quiet hours | `app/plugins/commands_modular/messaggi.py:517` |
 | `campaigns` | `quiet` | `status` | Show quiet hours status | `app/plugins/commands_modular/messaggi.py:531` |
@@ -200,12 +200,12 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `inactivity` | `tempban` | `off` | Disable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:296` |
 | `inactivity` | `tempban` | `on` | Enable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:287` |
 | `inactivity` | `tempban` | `status` | Show the inactivity tempban status. | `app/plugins/commands_modular/inattivi.py:303` |
-| `insights` | `—` | `off` | Disable insights in the current channel | `app/plugins/commands_modular/triggers.py:1004` |
-| `insights` | `—` | `on` | Enable insights in the current channel | `app/plugins/commands_modular/triggers.py:1000` |
-| `insights` | `—` | `status` | Show insights status for the current channel | `app/plugins/commands_modular/triggers.py:1008` |
-| `insights` | `—` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1044` |
-| `insights` | `—` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:1022` |
-| `insights` | `—` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1032` |
+| `campaigns` | `insights` | `off` | Disable insights in the current channel | `app/plugins/commands_modular/triggers.py:1006` |
+| `campaigns` | `insights` | `on` | Enable insights in the current channel | `app/plugins/commands_modular/triggers.py:1002` |
+| `campaigns` | `insights` | `status` | Show insights status for the current channel | `app/plugins/commands_modular/triggers.py:1010` |
+| `campaigns` | `insights` | `template_reset` | Reset the insights template to defaults | `app/plugins/commands_modular/triggers.py:1046` |
+| `campaigns` | `insights` | `template_set` | Set the insights template | `app/plugins/commands_modular/triggers.py:1023` |
+| `campaigns` | `insights` | `template_show` | Show the insights template | `app/plugins/commands_modular/triggers.py:1034` |
 | `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:90` |
 | `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:68` |
 | `privacy` | `—` | `status` | Show the current voice privacy status. | `app/plugins/commands_modular/privacy.py:113` |
@@ -312,10 +312,10 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1141`)
 - **WARNING required_param** — `ai.fallback_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:463`)
 - **WARNING required_param** — `ai.model_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:431`)
-- **WARNING required_param** — `campaigns.cap.config_set`: Parameter 'daily_limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:588`)
+- **WARNING required_param** — `campaigns.cap.limits_set`: Parameter 'daily_limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:586`)
 - **WARNING required_param** — `campaigns.prompt.schedule_show`: Parameter 'id_or_name' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:749`)
-- **WARNING required_param** — `campaigns.quiet.config_set`: Parameter 'start' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:541`)
-- **WARNING required_param** — `campaigns.quiet.config_set`: Parameter 'end' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:541`)
+- **WARNING required_param** — `campaigns.quiet.range_set`: Parameter 'start' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:539`)
+- **WARNING required_param** — `campaigns.quiet.range_set`: Parameter 'end' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:539`)
 - **WARNING required_param** — `greetings.user_card_set`: Parameter 'enabled' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/greetings.py:214`)
 - **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:364`)
 - **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:389`)
