@@ -174,14 +174,14 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.set_inactivity_enabled(str(interaction.guild_id), True)
-        await _send(interaction, subcommand_path="inattivi on", lines=[("result", "enabled")], kind="success")
+        await _send(interaction, subcommand_path="inactivity on", lines=[("result", "enabled")], kind="success")
 
     @inactivity_group.command(name="off", description="Disable inactivity moderation.")
     async def inactivity_off(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.set_inactivity_enabled(str(interaction.guild_id), False)
-        await _send(interaction, subcommand_path="inattivi off", lines=[("result", "disabled")], kind="success")
+        await _send(interaction, subcommand_path="inactivity off", lines=[("result", "disabled")], kind="success")
 
     @inactivity_group.command(name="status", description="Show the inactivity moderation status.")
     async def inactivity_status(interaction: discord.Interaction) -> None:
@@ -202,7 +202,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         ]
         await _send(
             interaction,
-            subcommand_path="inattivi status",
+            subcommand_path="inactivity status",
             lines=[
                 ("enabled", _bool_label(cfg.get("enabled"))),
                 ("autokick", _bool_label(cfg.get("auto_enabled"))),
@@ -220,21 +220,21 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.set_inactivity_auto_enabled(str(interaction.guild_id), True)
-        await _send(interaction, subcommand_path="inattivi autokick on", lines=[("result", "enabled")], kind="success")
+        await _send(interaction, subcommand_path="inactivity autokick on", lines=[("result", "enabled")], kind="success")
 
     @autokick_group.command(name="off", description="Disable automatic inactivity actions.")
     async def inactivity_autokick_off(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.set_inactivity_auto_enabled(str(interaction.guild_id), False)
-        await _send(interaction, subcommand_path="inattivi autokick off", lines=[("result", "disabled")], kind="success")
+        await _send(interaction, subcommand_path="inactivity autokick off", lines=[("result", "disabled")], kind="success")
 
     @autokick_group.command(name="status", description="Show the automatic inactivity action status.")
     async def inactivity_autokick_status(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
-        await _send(interaction, subcommand_path="inattivi autokick status", lines=[("autokick", _bool_label(cfg.get("auto_enabled")))])
+        await _send(interaction, subcommand_path="inactivity autokick status", lines=[("autokick", _bool_label(cfg.get("auto_enabled")))])
 
     @grace_group.command(name="on", description="Enable the inactivity grace period.")
     async def inactivity_grace_on(interaction: discord.Interaction) -> None:
@@ -243,14 +243,14 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         days = int(cfg.get("grace_days_after_reminder", 0) or 0) or DEFAULT_GRACE_DAYS
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), grace_days_after_reminder=days)
-        await _send(interaction, subcommand_path="inattivi grace on", lines=[("grace", "enabled"), ("days", days)], kind="success")
+        await _send(interaction, subcommand_path="inactivity grace on", lines=[("grace", "enabled"), ("days", days)], kind="success")
 
     @grace_group.command(name="off", description="Disable the inactivity grace period.")
     async def inactivity_grace_off(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), grace_days_after_reminder=0)
-        await _send(interaction, subcommand_path="inattivi grace off", lines=[("grace", "disabled")], kind="success")
+        await _send(interaction, subcommand_path="inactivity grace off", lines=[("grace", "disabled")], kind="success")
 
     @grace_group.command(name="status", description="Show the inactivity grace period status.")
     async def inactivity_grace_status(interaction: discord.Interaction) -> None:
@@ -258,30 +258,30 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         days = int(cfg.get("grace_days_after_reminder", DEFAULT_GRACE_DAYS) or 0)
-        await _send(interaction, subcommand_path="inattivi grace status", lines=[("grace", _status_label_from_days(days)), ("days", days)])
+        await _send(interaction, subcommand_path="inactivity grace status", lines=[("grace", _status_label_from_days(days)), ("days", days)])
 
-    @grace_group.command(name="config_set", description="Set the inactivity grace period configuration.")
+    @grace_group.command(name="limits_set", description="Set the inactivity grace period limits.")
     @app_commands.describe(days="Number of grace days before enforcement.")
-    async def inactivity_grace_config_set(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365]) -> None:
+    async def inactivity_grace_limits_set(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365]) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), grace_days_after_reminder=int(days))
-        await _send(interaction, subcommand_path="inattivi grace config_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="inactivity grace limits_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
 
-    @grace_group.command(name="config_show", description="Show the inactivity grace period configuration.")
-    async def inactivity_grace_config_show(interaction: discord.Interaction) -> None:
+    @grace_group.command(name="limits_show", description="Show the inactivity grace period limits.")
+    async def inactivity_grace_limits_show(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         days = int(cfg.get("grace_days_after_reminder", DEFAULT_GRACE_DAYS) or 0)
-        await _send(interaction, subcommand_path="inattivi grace config_show", lines=[("days", days)])
+        await _send(interaction, subcommand_path="inactivity grace limits_show", lines=[("days", days)])
 
-    @grace_group.command(name="config_reset", description="Reset the inactivity grace period configuration.")
-    async def inactivity_grace_config_reset(interaction: discord.Interaction) -> None:
+    @grace_group.command(name="limits_reset", description="Reset the inactivity grace period limits.")
+    async def inactivity_grace_limits_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), grace_days_after_reminder=DEFAULT_GRACE_DAYS)
-        await _send(interaction, subcommand_path="inattivi grace config_reset", lines=[("days", DEFAULT_GRACE_DAYS), ("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="inactivity grace limits_reset", lines=[("days", DEFAULT_GRACE_DAYS), ("result", "reset")], kind="success")
 
     @tempban_group.command(name="on", description="Enable temporary bans after inactivity kicks.")
     async def inactivity_tempban_on(interaction: discord.Interaction) -> None:
@@ -290,14 +290,14 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         days = int(cfg.get("ban_days", 0) or 0) or DEFAULT_TEMPBAN_DAYS
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), ban_days=days)
-        await _send(interaction, subcommand_path="inattivi tempban on", lines=[("tempban", "enabled"), ("days", days)], kind="success")
+        await _send(interaction, subcommand_path="inactivity tempban on", lines=[("tempban", "enabled"), ("days", days)], kind="success")
 
     @tempban_group.command(name="off", description="Disable temporary bans after inactivity kicks.")
     async def inactivity_tempban_off(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), ban_days=0)
-        await _send(interaction, subcommand_path="inattivi tempban off", lines=[("tempban", "disabled")], kind="success")
+        await _send(interaction, subcommand_path="inactivity tempban off", lines=[("tempban", "disabled")], kind="success")
 
     @tempban_group.command(name="status", description="Show the inactivity tempban status.")
     async def inactivity_tempban_status(interaction: discord.Interaction) -> None:
@@ -305,30 +305,30 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         days = int(cfg.get("ban_days", DEFAULT_TEMPBAN_DAYS) or 0)
-        await _send(interaction, subcommand_path="inattivi tempban status", lines=[("tempban", _status_label_from_days(days)), ("days", days)])
+        await _send(interaction, subcommand_path="inactivity tempban status", lines=[("tempban", _status_label_from_days(days)), ("days", days)])
 
-    @tempban_group.command(name="config_set", description="Set the inactivity tempban configuration.")
+    @tempban_group.command(name="limits_set", description="Set the inactivity tempban limits.")
     @app_commands.describe(days="Number of temporary ban days after an inactivity kick.")
-    async def inactivity_tempban_config_set(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365]) -> None:
+    async def inactivity_tempban_limits_set(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365]) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), ban_days=int(days))
-        await _send(interaction, subcommand_path="inattivi tempban config_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="inactivity tempban limits_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
 
-    @tempban_group.command(name="config_show", description="Show the inactivity tempban configuration.")
-    async def inactivity_tempban_config_show(interaction: discord.Interaction) -> None:
+    @tempban_group.command(name="limits_show", description="Show the inactivity tempban limits.")
+    async def inactivity_tempban_limits_show(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         days = int(cfg.get("ban_days", DEFAULT_TEMPBAN_DAYS) or 0)
-        await _send(interaction, subcommand_path="inattivi tempban config_show", lines=[("days", days)])
+        await _send(interaction, subcommand_path="inactivity tempban limits_show", lines=[("days", days)])
 
-    @tempban_group.command(name="config_reset", description="Reset the inactivity tempban configuration.")
-    async def inactivity_tempban_config_reset(interaction: discord.Interaction) -> None:
+    @tempban_group.command(name="limits_reset", description="Reset the inactivity tempban limits.")
+    async def inactivity_tempban_limits_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), ban_days=DEFAULT_TEMPBAN_DAYS)
-        await _send(interaction, subcommand_path="inattivi tempban config_reset", lines=[("days", DEFAULT_TEMPBAN_DAYS), ("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="inactivity tempban limits_reset", lines=[("days", DEFAULT_TEMPBAN_DAYS), ("result", "reset")], kind="success")
 
     @dms_group.command(name="template_reminder_set", description="Set the reminder DM template.")
     @app_commands.describe(text=TEMPLATE_HELP)
@@ -336,7 +336,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_reminder_template=text)
-        await _send(interaction, subcommand_path="inattivi dms template_reminder_set", lines=[("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="inactivity dms template_reminder_set", lines=[("result", "updated")], kind="success")
 
     @dms_group.command(name="template_reminder_show", description="Show the reminder DM template.")
     async def inactivity_dms_template_reminder_show(interaction: discord.Interaction) -> None:
@@ -347,7 +347,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         preview = _render_template_preview(template) if template else "No custom template configured."
         await _send(
             interaction,
-            subcommand_path="inattivi dms template_reminder_show",
+            subcommand_path="inactivity dms template_reminder_show",
             lines=[("template", template or "not set")],
             sections=[CommandEmbedSection(title="Preview", lines=[preview])],
         )
@@ -357,7 +357,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_reminder_template=None)
-        await _send(interaction, subcommand_path="inattivi dms template_reminder_reset", lines=[("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="inactivity dms template_reminder_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="cooldown_set", description="Set the reminder DM cooldown.")
     @app_commands.describe(days="Number of days between reminder DMs.")
@@ -365,14 +365,14 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), reminder_cooldown_days=int(days))
-        await _send(interaction, subcommand_path="inattivi dms cooldown_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="inactivity dms cooldown_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
 
     @dms_group.command(name="cooldown_show", description="Show the reminder DM cooldown.")
     async def inactivity_dms_cooldown_show(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
-        await _send(interaction, subcommand_path="inattivi dms cooldown_show", lines=[("days", int(cfg.get("reminder_cooldown_days", DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS))])
+        await _send(interaction, subcommand_path="inactivity dms cooldown_show", lines=[("days", int(cfg.get("reminder_cooldown_days", DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS))])
 
     @dms_group.command(name="cooldown_reset", description="Reset the reminder DM cooldown.")
     async def inactivity_dms_cooldown_reset(interaction: discord.Interaction) -> None:
@@ -382,7 +382,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             str(interaction.guild_id),
             reminder_cooldown_days=DEFAULT_REMINDER_COOLDOWN_DAYS,
         )
-        await _send(interaction, subcommand_path="inattivi dms cooldown_reset", lines=[("days", DEFAULT_REMINDER_COOLDOWN_DAYS), ("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="inactivity dms cooldown_reset", lines=[("days", DEFAULT_REMINDER_COOLDOWN_DAYS), ("result", "reset")], kind="success")
 
     @dms_group.command(name="invite_set", description="Set the invite link used in inactivity DMs.")
     @app_commands.describe(url="Invite URL sent to inactive members.")
@@ -390,21 +390,21 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), invite_url=url)
-        await _send(interaction, subcommand_path="inattivi dms invite_set", lines=[("invite_url", url), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="inactivity dms invite_set", lines=[("invite_url", url), ("result", "updated")], kind="success")
 
     @dms_group.command(name="invite_show", description="Show the invite link used in inactivity DMs.")
     async def inactivity_dms_invite_show(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
-        await _send(interaction, subcommand_path="inattivi dms invite_show", lines=[("invite_url", cfg.get("invite_url") or "not set")])
+        await _send(interaction, subcommand_path="inactivity dms invite_show", lines=[("invite_url", cfg.get("invite_url") or "not set")])
 
     @dms_group.command(name="invite_reset", description="Reset the invite link used in inactivity DMs.")
     async def inactivity_dms_invite_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), invite_url=None)
-        await _send(interaction, subcommand_path="inattivi dms invite_reset", lines=[("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="inactivity dms invite_reset", lines=[("result", "reset")], kind="success")
 
     @policy_group.command(name="default_set", description="Set the default inactivity policy.")
     @app_commands.describe(
@@ -427,10 +427,10 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         try:
             payload = _policy_payload(inactive_days, window_days, min_messages, mode, min_account_age_days)
         except ValueError as exc:
-            await _send(interaction, subcommand_path="inattivi policy default_set", lines=[("error", str(exc))], kind="error")
+            await _send(interaction, subcommand_path="inactivity policy default_set", lines=[("error", str(exc))], kind="error")
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), default_policy_json=payload)
-        await _send(interaction, subcommand_path="inattivi policy default_set", lines=[("policy", _policy_summary(_policy_dict(payload))), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="inactivity policy default_set", lines=[("policy", _policy_summary(_policy_dict(payload))), ("result", "updated")], kind="success")
 
     @policy_group.command(name="default_show", description="Show the default inactivity policy.")
     async def inactivity_policy_default_show(interaction: discord.Interaction) -> None:
@@ -438,14 +438,14 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         policy = _policy_dict(str(cfg.get("default_policy_json") or ""))
-        await _send(interaction, subcommand_path="inattivi policy default_show", lines=[("policy", _policy_summary(policy))])
+        await _send(interaction, subcommand_path="inactivity policy default_show", lines=[("policy", _policy_summary(policy))])
 
     @policy_group.command(name="default_reset", description="Reset the default inactivity policy.")
     async def inactivity_policy_default_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), default_policy_json=DEFAULT_POLICY_JSON)
-        await _send(interaction, subcommand_path="inattivi policy default_reset", lines=[("policy", _policy_summary(_policy_dict(DEFAULT_POLICY_JSON))), ("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="inactivity policy default_reset", lines=[("policy", _policy_summary(_policy_dict(DEFAULT_POLICY_JSON))), ("result", "reset")], kind="success")
 
     @policy_group.command(name="role_set", description="Set an inactivity policy for a role.")
     @app_commands.describe(
@@ -472,10 +472,10 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         try:
             payload = _policy_payload(inactive_days, window_days, min_messages, mode, min_account_age_days)
         except ValueError as exc:
-            await _send(interaction, subcommand_path="inattivi policy role_set", lines=[("error", str(exc))], kind="error")
+            await _send(interaction, subcommand_path="inactivity policy role_set", lines=[("error", str(exc))], kind="error")
             return
         await ctx.database.upsert_inactivity_role_policy(str(interaction.guild_id), str(role.id), payload, int(priority))
-        await _send(interaction, subcommand_path="inattivi policy role_set", lines=[("role", role.mention), ("priority", int(priority)), ("policy", _policy_summary(_policy_dict(payload))), ("result", "updated")], kind="success")
+        await _send(interaction, subcommand_path="inactivity policy role_set", lines=[("role", role.mention), ("priority", int(priority)), ("policy", _policy_summary(_policy_dict(payload))), ("result", "updated")], kind="success")
 
     @policy_group.command(name="role_show", description="Show an inactivity policy for a role.")
     @app_commands.describe(role="Role to inspect.")
@@ -486,9 +486,9 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         for row in rows:
             if str(row["role_id"]) == str(role.id):
                 policy = _policy_dict(str(row["policy_json"] or ""))
-                await _send(interaction, subcommand_path="inattivi policy role_show", lines=[("role", role.mention), ("priority", int(row["priority"])), ("policy", _policy_summary(policy))])
+                await _send(interaction, subcommand_path="inactivity policy role_show", lines=[("role", role.mention), ("priority", int(row["priority"])), ("policy", _policy_summary(policy))])
                 return
-        await _send(interaction, subcommand_path="inattivi policy role_show", lines=[("warning", "No inactivity role policy found.")], kind="warning")
+        await _send(interaction, subcommand_path="inactivity policy role_show", lines=[("warning", "No inactivity role policy found.")], kind="warning")
 
     @policy_group.command(name="role_reset", description="Reset an inactivity policy for a role.")
     @app_commands.describe(role="Role to reset.")
@@ -496,7 +496,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         await ctx.database.delete_inactivity_role_policy(str(interaction.guild_id), str(role.id))
-        await _send(interaction, subcommand_path="inattivi policy role_reset", lines=[("role", role.mention), ("result", "reset")], kind="success")
+        await _send(interaction, subcommand_path="inactivity policy role_reset", lines=[("role", role.mention), ("result", "reset")], kind="success")
 
     @policy_group.command(name="exceptions_add", description="Add a role to the inactivity exception list.")
     @app_commands.describe(role="Role to exclude from inactivity moderation.")
@@ -510,7 +510,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             str(interaction.guild_id),
             excluded_role_ids_json=json.dumps(sorted(current)),
         )
-        await _send(interaction, subcommand_path="inattivi policy exceptions_add", lines=[("role", role.mention), ("result", "added")], kind="success")
+        await _send(interaction, subcommand_path="inactivity policy exceptions_add", lines=[("role", role.mention), ("result", "added")], kind="success")
 
     @policy_group.command(name="exceptions_remove", description="Remove a role from the inactivity exception list.")
     @app_commands.describe(role="Role to remove from inactivity exceptions.")
@@ -524,7 +524,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             str(interaction.guild_id),
             excluded_role_ids_json=json.dumps(sorted(current)),
         )
-        await _send(interaction, subcommand_path="inattivi policy exceptions_remove", lines=[("role", role.mention), ("result", "removed")], kind="success")
+        await _send(interaction, subcommand_path="inactivity policy exceptions_remove", lines=[("role", role.mention), ("result", "removed")], kind="success")
 
     @policy_group.command(name="exceptions_show", description="Show whether a role is excluded from inactivity moderation.")
     @app_commands.describe(role="Role to inspect.")
@@ -534,7 +534,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         current = set(_role_exception_ids(cfg))
         status = "yes" if str(role.id) in current else "no"
-        await _send(interaction, subcommand_path="inattivi policy exceptions_show", lines=[("role", role.mention), ("excluded", status)])
+        await _send(interaction, subcommand_path="inactivity policy exceptions_show", lines=[("role", role.mention), ("excluded", status)])
 
     @policy_group.command(name="exceptions_list", description="List all inactivity exception roles.")
     async def inactivity_policy_exceptions_list(interaction: discord.Interaction) -> None:
@@ -545,7 +545,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         lines = [f"• {mention}" for mention in _role_mentions(interaction.guild, role_ids)]
         await _send_lines_with_txt(
             interaction,
-            subcommand_path="inattivi policy exceptions_list",
+            subcommand_path="inactivity policy exceptions_list",
             title="Inactivity exception roles",
             lines=lines,
             txt_prefix="inactivity_exceptions",
@@ -556,7 +556,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         if ctx.inactive_members_moderation is None:
-            await _send(interaction, subcommand_path="inattivi run", lines=[("error", "Inactivity moderation service is not available.")], kind="error")
+            await _send(interaction, subcommand_path="inactivity run", lines=[("error", "Inactivity moderation service is not available.")], kind="error")
             return
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
@@ -564,4 +564,4 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             str(interaction.guild_id),
             str(interaction.channel_id),
         )
-        await _send(interaction, subcommand_path="inattivi run", lines=[("result", "completed")], kind="success")
+        await _send(interaction, subcommand_path="inactivity run", lines=[("result", "completed")], kind="success")

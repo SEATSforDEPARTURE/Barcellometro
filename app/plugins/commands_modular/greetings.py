@@ -7,9 +7,9 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.shared.discord.command_embeds import send_standard_response
+from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
 
-PERM = "mod"
+PERM = "greetings"
 
 
 async def _ensure_cfg(ctx: CommandContext, guild_id: str) -> dict[str, Any]:
@@ -21,7 +21,9 @@ async def _ensure_cfg(ctx: CommandContext, guild_id: str) -> dict[str, Any]:
 
 def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "greetings", visual_top_level: str = "greetings") -> None:
     backfill_group = app_commands.Group(name="backfill", description="Greetings timeline backfill controls")
+    user_card_group = app_commands.Group(name="user_card", description="Greetings notification user card controls")
     greetings_group.add_command(backfill_group)
+    greetings_group.add_command(user_card_group)
 
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, PERM, ctx)
@@ -61,6 +63,7 @@ def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext,
                 ("enabled", "on" if bool(notify_channel_id) else "off"),
                 ("notify_channel", f"<#{notify_channel_id}>" if notify_channel_id else "not set"),
                 ("user_card", "on" if bool(int(cfg.get("notify_card_enabled") or 0)) else "off"),
+                ("template", "not supported"),
             ],
         )
 
@@ -209,25 +212,24 @@ def register_greetings(greetings_group: app_commands.Group, ctx: CommandContext,
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), notify_channel_id=None)
         await _send(interaction, subcommand_path="greetings notify_reset", lines=[("result", "reset")], kind="success", footer_service=ctx.footer)
 
-    @greetings_group.command(name="user_card_set", description="Set whether greetings notifications include the user card.")
-    @app_commands.describe(enabled="Whether the greetings notification user card is enabled.")
-    async def greetings_user_card_set(interaction: discord.Interaction, enabled: bool) -> None:
+    @user_card_group.command(name="on", description="Enable the greetings notification user card.")
+    async def greetings_user_card_on(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.set_notify_card_enabled(str(interaction.guild_id), enabled)
-        await _send(interaction, subcommand_path="greetings user_card_set", lines=[("user_card", "enabled" if enabled else "disabled")], kind="success", footer_service=ctx.footer)
+        await ctx.database.set_notify_card_enabled(str(interaction.guild_id), True)
+        await _send(interaction, subcommand_path="greetings user_card on", lines=[("user_card", "on")], kind="success", footer_service=ctx.footer)
 
-    @greetings_group.command(name="user_card_show", description="Show whether the greetings notification user card is enabled.")
-    async def greetings_user_card_show(interaction: discord.Interaction) -> None:
+    @user_card_group.command(name="off", description="Disable the greetings notification user card.")
+    async def greetings_user_card_off(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.set_notify_card_enabled(str(interaction.guild_id), False)
+        await _send(interaction, subcommand_path="greetings user_card off", lines=[("user_card", "off")], kind="success", footer_service=ctx.footer)
+
+    @user_card_group.command(name="status", description="Show whether the greetings notification user card is enabled.")
+    async def greetings_user_card_status(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
         enabled = bool(int(cfg.get("notify_card_enabled") or 0))
-        await _send(interaction, subcommand_path="greetings user_card_show", lines=[("user_card", "on" if enabled else "off")], footer_service=ctx.footer)
-
-    @greetings_group.command(name="user_card_reset", description="Reset the greetings notification user card setting.")
-    async def greetings_user_card_reset(interaction: discord.Interaction) -> None:
-        if not await _ensure(interaction) or interaction.guild_id is None:
-            return
-        await ctx.database.set_notify_card_enabled(str(interaction.guild_id), False)
-        await _send(interaction, subcommand_path="greetings user_card_reset", lines=[("result", "reset")], kind="success", footer_service=ctx.footer)
+        await _send(interaction, subcommand_path="greetings user_card status", lines=[("user_card", "on" if enabled else "off")], footer_service=ctx.footer)

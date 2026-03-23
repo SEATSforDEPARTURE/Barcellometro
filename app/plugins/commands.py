@@ -113,7 +113,8 @@ def setup(registry: ServiceRegistry) -> None:
 
     register_inattivi(inactivity_group, ctx, top_level="inactivity", visual_top_level="inactivity")
     register_greetings(greetings_group, ctx, top_level="greetings", visual_top_level="greetings")
-    register_moderazione_utenti(users_group, ctx, top_level="users", visual_top_level="users")
+    user_alias_commands: list[app_commands.Command] = []
+    register_moderazione_utenti(users_group, ctx, top_level="users", visual_top_level="users", alias_commands=user_alias_commands)
 
     register_resoconto(channelsummary_group, serversummary_group, ctx, channel_root="channelsummary", server_root="serversummary")
     register_resoconto(
@@ -147,6 +148,7 @@ def setup(registry: ServiceRegistry) -> None:
         embed_group,
         privacy_group,
         users_group,
+        *user_alias_commands,
         greetings_group,
         inactivity_group,
         channelsummary_group,

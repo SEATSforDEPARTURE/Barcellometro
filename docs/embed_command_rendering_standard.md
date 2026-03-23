@@ -76,9 +76,9 @@ Questo mapping è centralizzato in `app/shared/discord/command_embeds.py` e vale
 - `/campaigns prompt status`
   - titolo: `📣 CAMPAIGNS`
   - sottotitolo: `ℹ️ PROMPT STATUS`
-- `/moderazione users tempban_list`
-  - titolo: `🛠️ MODERAZIONE`
-  - sottotitolo: `ℹ️ USERS TEMPBAN_LIST`
+- `/users tempban_list`
+  - titolo: `🛠️ USERS`
+  - sottotitolo: `ℹ️ TEMPBAN_LIST`
 - `/admin retention on`
   - titolo: `🫛 ADMIN`
   - sottotitolo: `ℹ️ RETENTION ON`

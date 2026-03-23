@@ -19,8 +19,7 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert "register_moderazione_utenti" in source
     assert 'app_commands.Group(name="greetings"' in source
     assert 'register_greetings(greetings_group, ctx, top_level="greetings", visual_top_level="greetings")' in source
-    assert 'name="users"' in modular
-    assert 'description="Moderation actions for users"' in modular
+    assert 'register_moderazione_utenti(' in modular
     assert 'app_commands.Group(name="backfill"' in greetings
     assert '@backfill_group.command(name="on"' in greetings
     assert '@backfill_group.command(name="off"' in greetings
@@ -35,9 +34,10 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert '@greetings_group.command(name="template_set"' not in greetings
     assert '@greetings_group.command(name="template_show"' not in greetings
     assert '@greetings_group.command(name="template_reset"' not in greetings
-    assert '@greetings_group.command(name="user_card_set"' in greetings
-    assert '@greetings_group.command(name="user_card_show"' in greetings
-    assert '@greetings_group.command(name="user_card_reset"' in greetings
+    assert 'app_commands.Group(name="user_card"' in greetings
+    assert '@user_card_group.command(name="on"' in greetings
+    assert '@user_card_group.command(name="off"' in greetings
+    assert '@user_card_group.command(name="status"' in greetings
     assert '@greetings_group.command(name="preview"' not in greetings
     assert '@users_group.command(name="kick"' in modular
     assert '@users_group.command(name="kick_list"' in modular
@@ -109,6 +109,19 @@ def test_legacy_inactivity_commands_are_removed_from_namespace() -> None:
     assert 'name="role_del"' not in source
 
 
+def test_users_alias_commands_are_registered_as_top_level_aliases() -> None:
+    source = Path("app/plugins/commands.py").read_text()
+    group = discord.app_commands.Group(name="users", description="x")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None)
+    aliases: list[discord.app_commands.Command] = []
+
+    register_moderazione_utenti(group, ctx, alias_commands=aliases)
+
+    assert 'user_alias_commands: list[app_commands.Command] = []' in source
+    assert '*user_alias_commands,' in source
+    assert [command.name for command in aliases] == ["kick", "ban", "tempban", "grace"]
+
+
 def test_greetings_tree_has_no_preview_command() -> None:
     group = discord.app_commands.Group(name="greetings", description="x")
     ctx = SimpleNamespace(database=Mock(), footer=None)
@@ -118,17 +131,17 @@ def test_greetings_tree_has_no_preview_command() -> None:
     names = {command.name for command in group.commands}
     assert names == {
         "backfill",
+        "user_card",
         "on",
         "off",
         "status",
         "notify_set",
         "notify_show",
         "notify_reset",
-        "user_card_set",
-        "user_card_show",
-        "user_card_reset",
     }
     assert "preview" not in names
+    user_card = next(command for command in group.commands if isinstance(command, discord.app_commands.Group) and command.name == "user_card")
+    assert {command.name for command in user_card.commands} == {"on", "off", "status"}
 
 
 def _find_command(group: discord.app_commands.Group, *names: str):
@@ -168,9 +181,9 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
             member_flow_notifications=member_flow_notifications,
             barcello_service=None,
         )
-        mod_group = discord.app_commands.Group(name="mod", description="mod")
-        register_moderazione_utenti(mod_group, ctx)
-        command = _find_command(mod_group, "users", "unban")
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "unban")
 
         guild = SimpleNamespace(id=1, unban=AsyncMock())
         target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
@@ -179,7 +192,7 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
             guild=guild,
             guild_id=1,
             user=moderator,
-            command=SimpleNamespace(qualified_name="mod users unban"),
+            command=SimpleNamespace(qualified_name="users unban"),
         )
 
         await command.callback(interaction, target_user)
@@ -198,7 +211,7 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
         response_kwargs = send_standard_response.await_args.kwargs
         assert response_kwargs["top_level"] == "users"
         assert response_kwargs["visual_top_level"] == "users"
-        assert response_kwargs["subcommand_path"] == "moderazione users unban"
+        assert response_kwargs["subcommand_path"] == "users unban"
         assert response_kwargs["kind"] == "success"
         assert ("result", "ban revocato") in response_kwargs["lines"]
 
@@ -231,9 +244,9 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
             member_flow_notifications=member_flow_notifications,
             barcello_service=None,
         )
-        mod_group = discord.app_commands.Group(name="mod", description="mod")
-        register_moderazione_utenti(mod_group, ctx)
-        command = _find_command(mod_group, "users", "unban")
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "unban")
 
         not_found = discord.NotFound(
             Mock(status=404, reason="Not Found"),
@@ -246,7 +259,7 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
             guild=guild,
             guild_id=1,
             user=moderator,
-            command=SimpleNamespace(qualified_name="mod users unban"),
+            command=SimpleNamespace(qualified_name="users unban"),
         )
 
         with caplog.at_level("INFO"):
@@ -266,7 +279,7 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
         response_kwargs = send_standard_response.await_args.kwargs
         assert response_kwargs["top_level"] == "users"
         assert response_kwargs["visual_top_level"] == "users"
-        assert response_kwargs["subcommand_path"] == "moderazione users unban"
+        assert response_kwargs["subcommand_path"] == "users unban"
         assert response_kwargs["kind"] == "success"
         assert ("result", "nessun ban attivo trovato su Discord") in response_kwargs["lines"]
         assert ("sync", "stati locali riallineati") in response_kwargs["lines"]
