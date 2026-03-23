@@ -14,6 +14,7 @@ _ROOT_ALIASES: dict[str, tuple[str, ...]] = {
     "roles": ("commandguard",),
     "resocontocanale": ("channelsummary",),
     "resocontoserver": ("serversummary",),
+    "audionotes": ("audio",),
 }
 _TRIGGER_SUBGROUPS = {"phrases", "qna", "insights", "barcello"}
 _LEGACY_ADMIN_ALIASES: dict[tuple[str, ...], tuple[str, ...]] = {
@@ -22,10 +23,47 @@ _LEGACY_ADMIN_ALIASES: dict[tuple[str, ...], tuple[str, ...]] = {
     ("retention",): ("database", "retention"),
     ("backfill",): ("database", "backfill"),
     ("ai",): ("ai",),
+    ("audionotes",): ("audionotes",),
+    ("stt",): ("stt",),
+    ("translate",): ("translate",),
     ("barcello", "mood_set"): ("status", "mood_set"),
     ("barcello", "mood_show"): ("status", "mood_show"),
     ("barcello", "mood_reset"): ("status", "mood_reset"),
 }
+
+
+
+def _canonicalize_audio_segments(body: list[str]) -> list[str]:
+    if not body:
+        return body
+    if body[0] == "audionotes":
+        body = ["audio", *body[1:]]
+    if body[0] == "stt":
+        action = body[1] if len(body) >= 2 else ""
+        mapping = {
+            "config_set": "stt_set",
+            "config_show": "stt_show",
+            "config_reset": "stt_reset",
+        }
+        return ["audio", "clips", mapping.get(action, action), *body[2:]]
+    if body[0] == "translate":
+        action = body[1] if len(body) >= 2 else ""
+        mapping = {
+            "config_set": "translate_set",
+            "config_show": "translate_show",
+            "config_reset": "translate_reset",
+        }
+        return ["audio", "clips", mapping.get(action, action), *body[2:]]
+    if body[0] == "audio" and len(body) >= 2:
+        mapping = {
+            "config_set": ["clips", "limits_set"],
+            "config_show": ["clips", "limits_show"],
+            "config_reset": ["clips", "limits_reset"],
+        }
+        replacement = mapping.get(body[1])
+        if replacement is not None:
+            return ["audio", *replacement, *body[2:]]
+    return body
 
 _TRIGGER_PHRASE_ACTIONS = {
     "on",
@@ -74,6 +112,8 @@ def canonical_permission_key(command_name: str) -> str:
     if len(body) >= 3 and body[0] == "database" and body[1] in {"retention", "backfill"}:
         config_aliases = {"config_set": "limits_set", "config_show": "limits_show", "config_reset": "limits_reset"}
         body[2] = config_aliases.get(body[2], body[2])
+
+    body = _canonicalize_audio_segments(body)
 
     if not body:
         return ".".join(prefix)

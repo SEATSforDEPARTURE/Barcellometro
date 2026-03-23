@@ -23,29 +23,26 @@ async def _translate_config_lines(ctx: CommandContext) -> list[str]:
 
 
 def register_translate(translate_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "audio") -> None:
-    @translate_group.command(name="config_set", description="Update the translation configuration.")
+    @translate_group.command(name="translate_set", description="Update the clip translation configuration.")
     @app_commands.describe(
         backend="Translation backend.",
         target="Default target language.",
     )
     @app_commands.choices(backend=BACKEND_CHOICES, target=TARGET_CHOICES)
-    async def translate_config_set_command(
+    async def translate_set_command(
         interaction: discord.Interaction,
         backend: app_commands.Choice[str] | None = None,
         target: app_commands.Choice[str] | None = None,
     ) -> None:
-        if not await check_permission(
-            interaction,
-            "admin.translate.config_set",
-            ctx,
-        ):
+        if not await check_permission(interaction, "audio.clips.translate_set", ctx):
             return
         if backend is None and target is None:
             await send_standard_response(
                 interaction,
                 top_level=root_top_level,
-                subcommand_path="translate config_set",
-                lines=[("error", "No changes provided. Use /admin translate config_show to inspect the current configuration.")],
+                subcommand_path="audio clips translate_set",
+                visual_top_level="audio",
+                lines=[("error", "No changes provided. Use /audio clips translate_show to inspect the current configuration.")],
                 kind="error",
                 footer_service=ctx.footer,
             )
@@ -57,43 +54,38 @@ def register_translate(translate_group: app_commands.Group, ctx: CommandContext,
         await send_standard_response(
             interaction,
             top_level=root_top_level,
-            subcommand_path="translate config_set",
+            subcommand_path="audio clips translate_set",
+            visual_top_level="audio",
             lines=[("result", "updated")],
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
             kind="success",
             footer_service=ctx.footer,
         )
 
-    @translate_group.command(name="config_show", description="Show the translation configuration.")
-    async def translate_config_show_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(
-            interaction,
-            "admin.translate.config_show",
-            ctx,
-        ):
+    @translate_group.command(name="translate_show", description="Show the clip translation configuration.")
+    async def translate_show_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "audio.clips.translate_show", ctx):
             return
         await send_standard_response(
             interaction,
             top_level=root_top_level,
-            subcommand_path="translate config_show",
+            subcommand_path="audio clips translate_show",
+            visual_top_level="audio",
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
             footer_service=ctx.footer,
         )
 
-    @translate_group.command(name="config_reset", description="Reset the translation configuration to defaults.")
-    async def translate_config_reset_command(interaction: discord.Interaction) -> None:
-        if not await check_permission(
-            interaction,
-            "admin.translate.config_reset",
-            ctx,
-        ):
+    @translate_group.command(name="translate_reset", description="Reset the clip translation configuration to domain defaults.")
+    async def translate_reset_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "audio.clips.translate_reset", ctx):
             return
         for key in ("translate.backend", "translate.target_lang"):
             await reset_setting(ctx, key)
         await send_standard_response(
             interaction,
             top_level=root_top_level,
-            subcommand_path="translate config_reset",
+            subcommand_path="audio clips translate_reset",
+            visual_top_level="audio",
             lines=[("result", "reset")],
             sections=[{"title": "Configuration", "lines": await _translate_config_lines(ctx)}],
             kind="success",
