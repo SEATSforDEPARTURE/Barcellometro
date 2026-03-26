@@ -52,16 +52,22 @@ def build_user_activity_embeds(
         title=format_standard_title(f"STATO ATTIVITÀ “{display_name}”", emoji="🗣️"),
         color=_color_for_label(activity_label),
     )
-    overview.description = (
-        f"🕒 **{period_label}**\n\n"
-        f"{activity_emoji} **ATTIVITÀ {activity_label}**\n"
-        f"*{overview_description}*\n\n"
-        f"🫀 **PUNTI ATTIVITÀ**\n"
-        f"{_bar(score, activity_emoji)} **({score}/100)**\n"
-        f"*{trend_text}*\n\n"
-        f"📈 **TREND**\n"
-        f"• 📨 {trend_text}"
+    overview.description = format_standard_description(
+        "Snapshot sintetico dell'attività utente nel periodo selezionato.",
+        italic=False,
     )
+    overview.add_field(name=format_standard_field_name("Periodo", emoji="🕒"), value=period_label, inline=False)
+    overview.add_field(
+        name=format_standard_field_name("Stato attività", emoji=activity_emoji),
+        value=f"**ATTIVITÀ {activity_label}**\n{overview_description}",
+        inline=False,
+    )
+    overview.add_field(
+        name=format_standard_field_name("Punti attività", emoji="🫀"),
+        value=f"{_bar(score, activity_emoji)} **({score}/100)**",
+        inline=False,
+    )
+    overview.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=f"• 📨 {trend_text}", inline=False)
     attach_footer_meta(overview, service_name="user_activity", used_local_processing=True)
     attach_author_meta(overview, service_name="user_activity", canonical_top_level_command="serversummary")
     attach_embed_images_meta(overview, service_name="user_activity")

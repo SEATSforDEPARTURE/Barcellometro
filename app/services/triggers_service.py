@@ -31,7 +31,7 @@ from app.services.qna_session_store import QnaSession, QnaSessionStore
 from app.services.qna_sessions_repo import QnaSessionsRepo
 from app.services.qna_query_engine import QnaAnswerResult, QnaQueryEngine
 from app.shared.safety.pii import contains_pii
-from app.shared.discord.embed_body import format_standard_title
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -944,21 +944,24 @@ class TriggerEngineService:
             mod_mention = f"<@&{mod_role_id}>" if mod_role_id else ""
             mod_block_text = self._render_with_placeholders(mod_template, {"mod_mention": mod_mention}) if mod_template else mod_mention
 
-        message_text = self._build_barcello_status_embed_description(
-            main_msg=main_msg,
-            old_score=prev_score,
-            new_score=score,
-            state_count_today=state_count_today,
-            last_in_state_human=last_in_state_human,
-            new=stored_color,
-            mod_block_text=mod_block_text,
-        )
         if should_notify:
             embed = discord.Embed(
                 title=format_standard_title("AGGIORNAMENTO BARCELLO", emoji="🫛"),
-                description=message_text,
+                description="Aggiornamento automatico dello stato Barcello.",
                 color=self._barcello_embed_color(stable_color),
             )
+            if main_msg:
+                embed.add_field(name=format_standard_field_name("Aggiornamento", emoji="📣"), value=main_msg[:1024], inline=False)
+            if mod_block_text and stored_color in {"ROSSO", "NERO"}:
+                embed.add_field(name=format_standard_field_name("Moderazione", emoji="🛡️"), value=mod_block_text[:1024], inline=False)
+            salute_value = f"{score}/100" if prev_score is None else f"{prev_score}→{score}/100"
+            embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
+            if state_count_today >= 2 and last_in_state_human:
+                embed.add_field(
+                    name=format_standard_field_name("Andamento di oggi", emoji="📊"),
+                    value=f"{state_count_today}ª volta in stato {stored_color}.\nUltima: {last_in_state_human} fa.",
+                    inline=False,
+                )
             attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and main_msg:
@@ -2251,22 +2254,25 @@ class TriggerEngineService:
         is_followup: bool = False,
     ) -> discord.Embed:
         cleaned_answer = self._strip_leading_answer_label(answer_text)
-        if is_followup:
-            description = f"👇 **Risposta:**\n{cleaned_answer}"
-        else:
-            question_text = (question or "").strip()
-            description = (
-                f"👋 **{asker_name} chiede:**\n"
-                f"{question_text}\n\n"
-                f"👇 **Risposta:**\n{cleaned_answer}"
-            )
-        description = self._truncate_embed_description(description)
+        description = "Risposta generata dal servizio Q&A."
         title = format_standard_title("DOMANDA", emoji="❓") if response_origin == "error" else format_standard_title("BOTTA & RISPOSTA", emoji="❓")
         embed = build_report_cover_embed(
             title=title,
             description=description,
             color=0x9B59B6 if response_origin != "error" else 0xED4245,
             service_name="qna",
+        )
+        if not is_followup:
+            question_text = (question or "").strip() or "—"
+            embed.add_field(
+                name=format_standard_field_name(f"{asker_name} chiede", emoji="👋"),
+                value=question_text[:1024],
+                inline=False,
+            )
+        embed.add_field(
+            name=format_standard_field_name("Risposta", emoji="👇"),
+            value=(cleaned_answer or "—")[:1024],
+            inline=False,
         )
         attach_footer_meta(
             embed,

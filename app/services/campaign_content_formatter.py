@@ -222,11 +222,16 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     overview = discord.Embed(title=format_standard_title(f"{title} • Inizio"), color=color)
     tone = _time_of_day_label(_overview_now(payload))
     if highlights:
-        overview.description = (
-            f"🐹 Edizione di **{tone}**: il Barcellometro è in conduzione e la redazione oggi gira come una ruota da corsa.\n"
-            "Ecco i titoli che stanno facendo squittire il notiziario:\n\n"
-            + "\n".join(highlights)
-            + "\n\nPer l'approfondimento categoria per categoria, clicca i pulsanti qui sotto."
+        overview.description = f"🐹 Edizione di **{tone}**: il Barcellometro è in conduzione e la redazione oggi gira come una ruota da corsa."
+        overview.add_field(
+            name=format_standard_field_name("Titoli in evidenza", emoji="🗞️"),
+            value="\n".join(highlights),
+            inline=False,
+        )
+        overview.add_field(
+            name=format_standard_field_name("Navigazione", emoji="👇"),
+            value="Per l'approfondimento categoria per categoria, clicca i pulsanti qui sotto.",
+            inline=False,
         )
     else:
         overview.description = (
@@ -246,7 +251,9 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             lines.append(summary or "Aggiornamento in arrivo.")
             lines.append(f"`Fonte: {sanitize_plain_text(item.get('source', 'n/d'))[:80]}` • [Apri link]({item.get('link', 'https://example.com')})")
             lines.append("")
-        embed.description = "\n".join(lines)[:3900] or f"Nessuna notizia valida per {emoji} {display}."
+        embed.description = f"Rassegna {emoji} {display}: approfondimento per categoria."
+        page_value = "\n".join(lines)[:1024] if lines else f"Nessuna notizia valida per {emoji} {display}."
+        embed.add_field(name=format_standard_field_name("Notizie", emoji=emoji), value=page_value, inline=False)
         embeds.append(embed)
     return _apply_campaign_footer(embeds, service_name="campagne_notizie")
 
@@ -320,7 +327,12 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         )
     embeds: list[discord.Embed] = []
     for page_title, description, comment in pages:
-        e = discord.Embed(title=format_standard_title(f"{title} • {page_title}"), description=description[:3900], color=color)
+        e = discord.Embed(
+            title=format_standard_title(f"{title} • {page_title}"),
+            description="Dettaglio meteo sintetico dell'area selezionata.",
+            color=color,
+        )
+        e.add_field(name=format_standard_field_name("Situazione", emoji="🧾"), value=description[:1024], inline=False)
         e.add_field(name=format_standard_field_name("Commento"), value=comment[:1024], inline=False)
         embeds.append(e)
     return _apply_campaign_footer(embeds, service_name="campagne_meteo")

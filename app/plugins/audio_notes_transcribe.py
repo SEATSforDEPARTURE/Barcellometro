@@ -17,13 +17,15 @@ import imageio_ffmpeg
 from app.core.service_registry import ServiceRegistry
 from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 
 logger = logging.getLogger(__name__)
 
 _AUDIO_EXTENSIONS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".webm"}
-_AUDIO_NOTE_TITLE = "🗣️ NOTE AUDIO"
+_AUDIO_NOTE_TITLE = format_standard_title("NOTE AUDIO", emoji="🗣️")
 _AUDIO_NOTE_COLOR = discord.Color(0xFFFFFF)
 _DISCORD_EMBED_DESCRIPTION_MAX = 4096
+_DISCORD_FIELD_MAX = 1024
 
 
 def _now_iso() -> str:
@@ -98,6 +100,41 @@ def _build_audio_note_output(*, transcript_text: str, detected_lang: str, transl
     if summary_text:
         output_parts.extend(["", "⏲️ **Riassunto:**", summary_text])
     return "\n".join(output_parts).strip()
+
+
+def _build_audio_note_sections(*, transcript_text: str, detected_lang: str, translation_text: str | None, summary_text: str | None) -> list[tuple[str, str, str | None]]:
+    sections: list[tuple[str, str, str | None]] = [("Trascrizione", "✍️", transcript_text)]
+    if detected_lang != "it" and translation_text:
+        sections.append(("Traduzione", "🇮🇹", translation_text))
+    if summary_text:
+        sections.append(("Riassunto", "⏲️", summary_text))
+    return sections
+
+
+def _build_audio_note_embeds_from_sections(
+    sections: list[tuple[str, str, str | None]],
+    *,
+    contributors: list[str] | None = None,
+    used_local_processing: bool = True,
+) -> list[discord.Embed]:
+    embeds: list[discord.Embed] = []
+    for idx, (title, emoji, content) in enumerate(sections, start=1):
+        chunks = _split_embed_descriptions((content or "—").strip() or "—", _DISCORD_FIELD_MAX)
+        for cidx, chunk in enumerate(chunks, start=1):
+            embed = _build_audio_note_embed(
+                "Trascrizione audio elaborata. Contenuti completi nelle sezioni in field.",
+                contributors=contributors,
+                used_local_processing=used_local_processing,
+            )
+            suffix = f" ({cidx}/{len(chunks)})" if len(chunks) > 1 else ""
+            prefix = f"Sezione {idx}/{len(sections)} — " if len(sections) > 1 else ""
+            embed.add_field(
+                name=format_standard_field_name(f"{prefix}{title}{suffix}".strip(), emoji=emoji),
+                value=chunk or "—",
+                inline=False,
+            )
+            embeds.append(embed)
+    return embeds or [_build_audio_note_embed("Trascrizione audio elaborata.", contributors=contributors, used_local_processing=used_local_processing)]
 
 
 def _sanitize_transcript_for_summary(text: str) -> str:
@@ -363,9 +400,7 @@ def setup(registry: ServiceRegistry) -> None:
     async def _process_job(message: discord.Message, attachment: discord.Attachment, reply: discord.Message) -> None:
         max_mb = int(await _get_setting("audio_notes.max_mb", os.getenv("AUDIO_NOTES_MAX_MB", "25")))
         max_duration = int(await _get_setting("audio_notes.max_duration_s", os.getenv("AUDIO_NOTES_MAX_DURATION_S", "180")))
-        max_chars = int(await _get_setting("audio_notes.discord_max_chars", os.getenv("AUDIO_NOTES_DISCORD_MAX_CHARS", "1900")))
         chars_summary_raw = await _get_setting("audio_notes.chars_summary", "")
-        embed_max_chars = max(1, min(max_chars, _DISCORD_EMBED_DESCRIPTION_MAX))
         chars_summary_limit = _parse_chars_summary_limit(chars_summary_raw)
 
         size_mb = attachment.size / (1024 * 1024)
@@ -453,13 +488,6 @@ def setup(registry: ServiceRegistry) -> None:
                 bool(translation_text),
             )
 
-            full_output = _build_audio_note_output(
-                transcript_text=original_transcript_text,
-                detected_lang=detected_lang,
-                translation_text=translation_text,
-                summary_text=summary_text,
-            )
-
             contributors, used_local_processing = _build_audio_footer_contributors(
                 stt_backend_used=stt_used,
                 stt_model=transcript.model,
@@ -469,11 +497,20 @@ def setup(registry: ServiceRegistry) -> None:
                 summary_model=summary_model if summary_text else None,
             )
 
-            chunks = _split_embed_descriptions(full_output, embed_max_chars)
-            await reply.edit(content=None, embed=_build_audio_note_embed(chunks[0], contributors=contributors, used_local_processing=used_local_processing))
-            for idx, chunk in enumerate(chunks[1:], start=2):
-                part_description = f"**Parte {idx}/{len(chunks)}**\n\n{chunk}"
-                await message.reply(embed=_build_audio_note_embed(part_description, contributors=contributors, used_local_processing=used_local_processing))
+            sections = _build_audio_note_sections(
+                transcript_text=original_transcript_text,
+                detected_lang=detected_lang,
+                translation_text=translation_text,
+                summary_text=summary_text,
+            )
+            embeds = _build_audio_note_embeds_from_sections(
+                sections,
+                contributors=contributors,
+                used_local_processing=used_local_processing,
+            )
+            await reply.edit(content=None, embed=embeds[0])
+            for embed in embeds[1:]:
+                await message.reply(embed=embed)
 
             meta: dict[str, Any] = {
                 "discord_message_id": str(message.id),

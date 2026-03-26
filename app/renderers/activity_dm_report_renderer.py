@@ -329,11 +329,19 @@ def build_activity_dm_embeds(
 ) -> list[discord.Embed]:
     s = details.score
     status = discord.Embed(title=format_standard_title(f"STATO ATTIVITÀ “#{channel_name}”", emoji="🗣️"), color=_color_for_label(s.label))
-    status.description = (
-        f"🕒 **{label_periodo}**\n\n{s.emoji} **ATTIVITÀ {s.label}**\n"
-        f"*Ritmo del canale valutato su volume, persone attive e continuità.*\n\n"
-        f"🫀 **PUNTI ATTIVITÀ**\n{_bar(s.score, s.emoji)} **({s.score}/100)**\n*{s.trend_text}*"
+    status.description = "Snapshot sintetico dell'attività canale nel periodo selezionato."
+    status.add_field(name=format_standard_field_name("Periodo", emoji="🕒"), value=label_periodo, inline=False)
+    status.add_field(
+        name=format_standard_field_name("Stato attività", emoji=s.emoji),
+        value=f"**ATTIVITÀ {s.label}**\nRitmo del canale valutato su volume, persone attive e continuità.",
+        inline=False,
     )
+    status.add_field(
+        name=format_standard_field_name("Punti attività", emoji="🫀"),
+        value=f"{_bar(s.score, s.emoji)} **({s.score}/100)**",
+        inline=False,
+    )
+    status.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=s.trend_text or "n/d", inline=False)
     attach_footer_meta(status, service_name="activity_dm", used_local_processing=True)
     attach_author_meta(status, service_name="activity_dm", canonical_top_level_command="dmsummary")
     attach_embed_images_meta(status, service_name="activity_dm")

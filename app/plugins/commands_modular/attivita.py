@@ -185,17 +185,15 @@ def _build_user_activity_embeds_safe(
     bar = f"{emoji * filled}{'⚪' * (10 - filled)}"
 
     embed1 = discord.Embed(title=format_standard_title(f"STATO ATTIVITÀ “{display_name}”", emoji="🗣️"), color=color_map.get(label, 0x95A5A6))
-    embed1.description = _truncate(
-        (
-            f"🕒 **{period_label}**\n\n"
-            f"{emoji} **ATTIVITÀ {label}**\n"
-            "*Ritmo dell'utente valutato su volume, continuità e presenza nei canali.*\n\n"
-            f"🫀 **PUNTI ATTIVITÀ**\n{bar} {b(f'({score}/100)')}\n"
-            f"*{trend_text}*\n\n"
-            f"📈 **TREND**\n• 📨 {trend_text}"
-        ),
-        4000,
+    embed1.description = _truncate("Snapshot sintetico dell'attività utente nel periodo selezionato.", 4000)
+    add_field_safe(embed1, name=format_standard_field_name("Periodo", emoji="🕒"), value=period_label)
+    add_field_safe(
+        embed1,
+        name=format_standard_field_name("Stato attività", emoji=emoji),
+        value=f"**ATTIVITÀ {label}**\nRitmo dell'utente valutato su volume, continuità e presenza nei canali.",
     )
+    add_field_safe(embed1, name=format_standard_field_name("Punti attività", emoji="🫀"), value=f"{bar} {b(f'({score}/100)')}")
+    add_field_safe(embed1, name=format_standard_field_name("Trend", emoji="📈"), value=f"• 📨 {trend_text}")
     attach_footer_meta(embed1, service_name="attivita", used_local_processing=True)
 
     embed2 = discord.Embed(title=format_standard_title("DETTAGLI ATTIVITÀ — Staff", emoji="📄"), color=discord.Color.dark_grey())

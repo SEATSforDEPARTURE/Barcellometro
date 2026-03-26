@@ -119,14 +119,23 @@ def build_daily_activity_embeds(
     overview = discord.Embed(
         title=format_standard_title(f"RESOCONTO SERVER “{guild_name}”", emoji="🗣️"),
         color=_color_for_emoji(emoji),
-        description=(
-            f"Periodo: {window_header}\n\n"
-            f"Stato: {emoji} **ATTIVITÀ {label}**\n"
-            "*Ritmo del server valutato su volume, persone attive e continuità.*\n\n"
-            f"🫀 **PUNTI ATTIVITÀ SERVER**\n{_bar(score, emoji)} **({score}/100)**\n\n"
-            "🫀 **PUNTI ATTIVITÀ CANALI**\n"
-            f"{_truncate_overview_channels(channel_score_lines)}"
-        ),
+        description=format_standard_description("Quadro generale dell'attività server nel periodo richiesto.", italic=False),
+    )
+    overview.add_field(name=format_standard_field_name("Periodo", emoji="🕒"), value=_truncate_field(window_header), inline=False)
+    overview.add_field(
+        name=format_standard_field_name("Stato attività", emoji=emoji),
+        value=_truncate_field(f"**ATTIVITÀ {label}**\nRitmo del server valutato su volume, persone attive e continuità."),
+        inline=False,
+    )
+    overview.add_field(
+        name=format_standard_field_name("Punti attività server", emoji="🫀"),
+        value=_truncate_field(f"{_bar(score, emoji)} **({score}/100)**"),
+        inline=False,
+    )
+    overview.add_field(
+        name=format_standard_field_name("Punti attività canali", emoji="🫀"),
+        value=_truncate_field(_truncate_overview_channels(channel_score_lines)),
+        inline=False,
     )
     overview.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=_truncate_field(trend), inline=False)
     overview.add_field(
@@ -169,11 +178,17 @@ def build_daily_activity_embeds(
         embed = discord.Embed(
             title=format_standard_title(f"DETTAGLI ATTIVITÀ “#{getattr(dc, 'name', 'sconosciuto')}”", emoji="📄"),
             color=_color_for_emoji(s.emoji),
-            description=(
-                f"Stato: {s.emoji} **ATTIVITÀ {s.label}**\n"
-                "*Ritmo del canale valutato su volume, persone attive e continuità.*\n\n"
-                f"🫀 **PUNTI ATTIVITÀ**\n{_bar(s.score, s.emoji)} **({s.score}/100)**"
-            ),
+            description=format_standard_description("Dettagli operativi del canale per la finestra analizzata.", italic=False),
+        )
+        embed.add_field(
+            name=format_standard_field_name("Stato attività", emoji=s.emoji),
+            value=_truncate_field(f"**ATTIVITÀ {s.label}**\nRitmo del canale valutato su volume, persone attive e continuità."),
+            inline=False,
+        )
+        embed.add_field(
+            name=format_standard_field_name("Punti attività", emoji="🫀"),
+            value=_truncate_field(f"{_bar(s.score, s.emoji)} **({s.score}/100)**"),
+            inline=False,
         )
         embed.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=_truncate_field(s.trend_text or "n/d"), inline=False)
         embed.add_field(name=format_standard_field_name("Statistiche canale", emoji="📌"), value=_truncate_field("\n".join(stats_lines)), inline=False)
