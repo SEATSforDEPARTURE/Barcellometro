@@ -8,6 +8,7 @@ import discord
 from app.services.author import attach_author_meta, attach_author_meta_to_all
 from app.services.embed_images import attach_embed_images_meta, attach_embed_images_meta_to_all
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 
 from app.services.activity_insights import ChannelActivityDetails, UserActivityEntry
 
@@ -18,6 +19,7 @@ FIELD_NAME_MAX = 256
 CHUNK_SUFFIX = "… (vedi .txt)"
 MAX_FIELDS_PER_EMBED = 25
 ZWSP = "​"
+DETAIL_TITLE = format_standard_title("DETTAGLI ATTIVITÀ — Staff", emoji="📄")
 
 
 def _display_name_for_id(*, guild: discord.Guild, user_id: int) -> str:
@@ -214,11 +216,11 @@ def _apply_limit(items: list[UserActivityEntry]) -> tuple[list[UserActivityEntry
 def _ensure_field(embeds: list[discord.Embed], title_base: str, value: str) -> None:
     safe_value = value if len(value) <= FIELD_VALUE_MAX else _truncate_line(value, FIELD_VALUE_MAX, CHUNK_SUFFIX)
     if len(embeds[-1].fields) >= MAX_FIELDS_PER_EMBED:
-        idx = len([e for e in embeds if e.title.startswith("📄 DETTAGLI ATTIVITÀ — Staff")]) + 1
-        new_embed = discord.Embed(title=f"📄 DETTAGLI ATTIVITÀ — Staff ({idx}/?)", color=discord.Color.dark_grey())
+        idx = len([e for e in embeds if e.title.startswith(format_standard_title("DETTAGLI ATTIVITÀ — Staff", emoji="📄"))]) + 1
+        new_embed = discord.Embed(title=format_standard_title(f"DETTAGLI ATTIVITÀ — Staff ({idx}/?)", emoji="📄"), color=discord.Color.dark_grey())
         attach_footer_meta(new_embed, service_name="activity_dm", used_local_processing=True)
         embeds.append(new_embed)
-    embeds[-1].add_field(name=title_base[:FIELD_NAME_MAX], value=safe_value, inline=False)
+    embeds[-1].add_field(name=format_standard_field_name(title_base)[:FIELD_NAME_MAX], value=safe_value, inline=False)
 
 
 def _add_chunked_field(
@@ -262,11 +264,11 @@ def _add_block_field(
 
 
 def _finalize_detail_titles(embeds: list[discord.Embed]) -> None:
-    detail = [e for e in embeds if e.title.startswith("📄 DETTAGLI ATTIVITÀ — Staff")]
+    detail = [e for e in embeds if e.title.startswith(format_standard_title("DETTAGLI ATTIVITÀ — Staff", emoji="📄"))]
     if not detail:
         return
     for emb in detail:
-        emb.title = "📄 DETTAGLI ATTIVITÀ — Staff"
+        emb.title = DETAIL_TITLE
 
 
 def build_activity_details_txt(
@@ -326,7 +328,7 @@ def build_activity_dm_embeds(
     reference_ts: str,
 ) -> list[discord.Embed]:
     s = details.score
-    status = discord.Embed(title=f"🗣️ STATO ATTIVITÀ “#{channel_name}”", color=_color_for_label(s.label))
+    status = discord.Embed(title=format_standard_title(f"STATO ATTIVITÀ “#{channel_name}”", emoji="🗣️"), color=_color_for_label(s.label))
     status.description = (
         f"🕒 **{label_periodo}**\n\n{s.emoji} **ATTIVITÀ {s.label}**\n"
         f"*Ritmo del canale valutato su volume, persone attive e continuità.*\n\n"
@@ -336,7 +338,7 @@ def build_activity_dm_embeds(
     attach_author_meta(status, service_name="activity_dm", canonical_top_level_command="dmsummary")
     attach_embed_images_meta(status, service_name="activity_dm")
 
-    detail = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
+    detail = discord.Embed(title=DETAIL_TITLE, color=discord.Color.dark_grey())
     attach_footer_meta(detail, service_name="activity_dm", used_local_processing=True)
     attach_author_meta(detail, service_name="activity_dm", canonical_top_level_command="dmsummary")
     attach_embed_images_meta(detail, service_name="activity_dm")

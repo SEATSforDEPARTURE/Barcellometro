@@ -7,6 +7,7 @@ from typing import Any
 
 import discord
 from app.services.footer import attach_footer_meta_to_all
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 
 DEFAULT_COLOR = 0x2F3136
 
@@ -218,7 +219,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         if len(highlights) >= 3:
             break
 
-    overview = discord.Embed(title=f"{title} • Inizio", color=color)
+    overview = discord.Embed(title=format_standard_title(f"{title} • Inizio", uppercase=False), color=color)
     tone = _time_of_day_label(_overview_now(payload))
     if highlights:
         overview.description = (
@@ -320,7 +321,7 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
     embeds: list[discord.Embed] = []
     for page_title, description, comment in pages:
         e = discord.Embed(title=f"{title} • {page_title}", description=description[:3900], color=color)
-        e.add_field(name="Commento", value=comment[:1024], inline=False)
+        e.add_field(name=format_standard_field_name("Commento"), value=comment[:1024], inline=False)
         embeds.append(e)
     return _apply_campaign_footer(embeds, service_name="campagne_meteo")
 
@@ -365,12 +366,12 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
     for sign in SIGN_ORDER:
         data = signs.get(sign, {})
         e = discord.Embed(title=f"{title} • {sign}", color=color)
-        e.add_field(name="❤️ Amore", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("love") or "Cuore in fase di analisi")), limit=280)[:1024], inline=False)
-        e.add_field(name="💼 Lavoro / Studio", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("work") or "Organizzati per priorità")), limit=280)[:1024], inline=False)
-        e.add_field(name="💰 Soldi", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("money") or "Gestione prudente")), limit=240)[:1024], inline=False)
-        e.add_field(name="⚡ Energia", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("energy") or "Energia variabile")), limit=220)[:1024], inline=False)
-        e.add_field(name="🔥 Con chi barcellerai oggi", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("friction") or "Con chi ti mette fretta")), limit=220)[:1024], inline=False)
-        e.add_field(name="🐹 Consiglio cricetoso", value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("advice") or "Piccoli passi, grandi risultati")), limit=220)[:1024], inline=False)
+        e.add_field(name=format_standard_field_name("Amore", emoji="❤️"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("love") or "Cuore in fase di analisi")), limit=280)[:1024], inline=False)
+        e.add_field(name=format_standard_field_name("Lavoro / Studio", emoji="💼"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("work") or "Organizzati per priorità")), limit=280)[:1024], inline=False)
+        e.add_field(name=format_standard_field_name("Soldi", emoji="💰"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("money") or "Gestione prudente")), limit=240)[:1024], inline=False)
+        e.add_field(name=format_standard_field_name("Energia", emoji="⚡"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("energy") or "Energia variabile")), limit=220)[:1024], inline=False)
+        e.add_field(name=format_standard_field_name("Con chi barcellerai oggi", emoji="🔥"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("friction") or "Con chi ti mette fretta")), limit=220)[:1024], inline=False)
+        e.add_field(name=format_standard_field_name("Consiglio cricetoso", emoji="🐹"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("advice") or "Piccoli passi, grandi risultati")), limit=220)[:1024], inline=False)
         embeds.append(e)
     return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")
 
@@ -390,5 +391,5 @@ def build_fallback_embed(config: dict[str, Any], sources: list[str], *, service_
         description="Oggi il servizio non è riuscito a raccogliere contenuti affidabili.",
         color=color,
     )
-    embed.add_field(name="Fonti tentate", value="\n".join(sources) or "n/d", inline=False)
+    embed.add_field(name=format_standard_field_name("Fonti tentate"), value="\n".join(sources) or "n/d", inline=False)
     return _apply_campaign_footer([embed], service_name=service_name)

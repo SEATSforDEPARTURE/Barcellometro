@@ -954,7 +954,7 @@ class TriggerEngineService:
         )
         if should_notify:
             embed = discord.Embed(
-                title="🫛 AGGIORNAMENTO BARCELLO",
+                title=format_standard_title("AGGIORNAMENTO BARCELLO", emoji="🫛"),
                 description=message_text,
                 color=self._barcello_embed_color(stable_color),
             )
@@ -1236,7 +1236,7 @@ class TriggerEngineService:
 
         color = self._discord_color_from_phrase(phrase)
         embed = discord.Embed(
-            title="💬 FRASI ICONICHE",
+            title=format_standard_title("FRASI ICONICHE", emoji="💬"),
             description=rendered_text,
             color=color,
         )

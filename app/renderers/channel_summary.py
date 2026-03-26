@@ -16,6 +16,7 @@ from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 from app.services.content_summary_service import SummaryItem, SummaryResult
 from app.domain.reporting.trend import render_trend_value
 from app.plugins.commands_modular.time_windows import format_rolling_window_label, infer_rolling_window_request
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MAX_FIELD_VALUE = 1024
@@ -143,11 +144,18 @@ def _split_field_value(text: str, limit: int = MAX_FIELD_VALUE) -> list[str]:
     return chunks or [" "]
 
 
+def _standard_field_name(name: str) -> str:
+    raw = str(name or "").strip()
+    for emoji in ("🏷️", "📌", "💬", "🔁", "👥", "🧭", "🍀", "🫀", "📈"):
+        if raw.startswith(f"{emoji} "):
+            return format_standard_field_name(raw[len(emoji)+1:].strip(), emoji=emoji)
+    return format_standard_field_name(raw)
+
 def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, color: int) -> None:
     for idx, chunk in enumerate(_split_field_value(value, MAX_FIELD_VALUE)):
-        field_name = name if idx == 0 else f"{name} (cont.)"
+        field_name = _standard_field_name(name if idx == 0 else f"{name} (cont.)")
         if len(pages[-1].fields) >= MAX_FIELDS_PER_EMBED:
-            pages.append(discord.Embed(title="🗒️ DETTAGLI", color=color))
+            pages.append(discord.Embed(title=format_standard_title("DETTAGLI", emoji="🗒️"), color=color))
         pages[-1].add_field(name=field_name[:256], value=chunk[:MAX_FIELD_VALUE], inline=False)
 
 
@@ -208,20 +216,20 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
-    description = f"{window_header}\n\n**{emoji} ALLERTA {alert_label}**\n{barcello_line}"
+    description = f"Periodo {window_header}\n\nStato: **{emoji} ALLERTA {alert_label}**\n{barcello_line}"
     if len(description) > MAX_EMBED_DESCRIPTION:
         description = description[: MAX_EMBED_DESCRIPTION - 1] + "…"
 
-    status_embed = discord.Embed(title=f"📓 RESOCONTO CANALE — #{channel_name}", description=description, color=embed_color)
-    status_embed.add_field(name="🫀 PUNTI SALUTE", value=f"{_render_health_bar(barcello_status.score, emoji)} ({barcello_status.score}/100)", inline=False)
+    status_embed = discord.Embed(title=format_standard_title(f"RESOCONTO CANALE — #{channel_name}", emoji="📓"), description=format_standard_description(description, italic=False), color=embed_color)
+    status_embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=f"{_render_health_bar(barcello_status.score, emoji)} ({barcello_status.score}/100)", inline=False)
     trend_text = trend_value or render_trend_value(barcello_status.trend)
     if trend_text:
-        status_embed.add_field(name="📈 TREND", value=trend_text, inline=False)
+        status_embed.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=trend_text, inline=False)
     attach_footer_meta(status_embed, service_name="channel_summary", used_local_processing=True)
     attach_author_meta(status_embed, service_name="channel_summary", canonical_top_level_command="channelsummary")
     attach_embed_images_meta(status_embed, service_name="channel_summary")
 
-    pages: list[discord.Embed] = [discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)]
+    pages: list[discord.Embed] = [discord.Embed(title=format_standard_title("DETTAGLI", emoji="🗒️"), color=0x95A5A6)]
     themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]
     _add_field_chunked(pages, name="🏷️ TEMI", value=", ".join(themes) if themes else "Nessun tema rilevato.", color=0x95A5A6)
 
@@ -260,7 +268,7 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
         _add_field_chunked(pages, name="🍀 PROVERBIO", value=proverbio.strip(), color=0x95A5A6)
 
     for embed in pages:
-        embed.title = "🗒️ DETTAGLI"
+        embed.title = format_standard_title("DETTAGLI", emoji="🗒️")
     attach_footer_meta_to_all(pages, service_name="channel_summary", used_local_processing=True)
     attach_author_meta_to_all(pages, service_name="channel_summary", canonical_top_level_command="channelsummary")
     attach_embed_images_meta_to_all(pages, service_name="channel_summary")
@@ -275,7 +283,7 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
 
 def build_channel_summary_insufficient_data_embed(*, channel_name: str, window_header: str) -> discord.Embed:
     embed = discord.Embed(
-        title=f"📓 RESOCONTO CANALE — #{channel_name}",
+        title=format_standard_title(f"RESOCONTO CANALE — #{channel_name}", emoji="📓"),
         description=f"{window_header}\n\n⚠️ Dati non sufficienti alla generazione del resoconto.",
         color=0x2F3136,
     )

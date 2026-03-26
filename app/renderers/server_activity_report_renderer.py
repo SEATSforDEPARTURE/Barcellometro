@@ -15,6 +15,7 @@ from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 from app.services.barcello_service import BarcelloResult
 from app.services.content_summary_service import SummaryItem, SummaryResult
 from app.domain.reporting.trend import render_trend_value
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 MAX_FIELD_VALUE = 1024
@@ -127,7 +128,7 @@ def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, col
         field_name = name if idx == 0 else f"{name} (cont.)"
         if len(pages[-1].fields) >= MAX_FIELDS_PER_EMBED:
             logger.info("daily_resoconto renderer new_page reason=max_fields")
-            pages.append(discord.Embed(title="🗒️ DETTAGLI", color=color))
+            pages.append(discord.Embed(title=format_standard_title("DETTAGLI", emoji="🗒️"), color=color))
         pages[-1].add_field(name=field_name[:256], value=chunk[:MAX_FIELD_VALUE], inline=False)
 
 
@@ -184,17 +185,17 @@ def build_daily_resoconto_embeds(
         logger.info("daily_resoconto renderer truncating_description original_len=%s", len(description))
         description = description[: MAX_EMBED_DESCRIPTION - 1] + "…"
 
-    status_embed = discord.Embed(title=f"📊 RESOCONTO GIORNALIERO — #{channel_name}", description=description, color=embed_color)
+    status_embed = discord.Embed(title=format_standard_title(f"RESOCONTO GIORNALIERO — #{channel_name}", emoji="📊"), description=format_standard_description(description, italic=False), color=embed_color)
     health_bar = _render_health_bar(barcello_status.score, emoji)
-    status_embed.add_field(name="🫀 PUNTI SALUTE", value=f"{health_bar} ({barcello_status.score}/100)", inline=False)
+    status_embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=f"{health_bar} ({barcello_status.score}/100)", inline=False)
     trend_text = trend_value or render_trend_value(barcello_status.trend)
     if trend_text:
-        status_embed.add_field(name="📈 TREND", value=trend_text, inline=False)
+        status_embed.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=trend_text, inline=False)
     attach_footer_meta(status_embed, service_name="daily_resoconto", used_local_processing=True)
     attach_author_meta(status_embed, service_name="daily_resoconto", canonical_top_level_command="serversummary")
     attach_embed_images_meta(status_embed, service_name="daily_resoconto")
 
-    pages: list[discord.Embed] = [discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)]
+    pages: list[discord.Embed] = [discord.Embed(title=format_standard_title("DETTAGLI", emoji="🗒️"), color=0x95A5A6)]
     themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]
     themes_value = ", ".join(themes) if themes else "Nessun tema rilevato."
     _add_field_chunked(pages, name="🏷️ TEMI", value=themes_value, color=0x95A5A6)
@@ -237,7 +238,7 @@ def build_daily_resoconto_embeds(
         _add_field_chunked(pages, name="🍀 PROVERBIO DEL GIORNO", value=proverbio_value, color=0x95A5A6)
 
     for embed in pages:
-        embed.title = "🗒️ DETTAGLI"
+        embed.title = format_standard_title("DETTAGLI", emoji="🗒️")
     attach_footer_meta_to_all(pages, service_name="daily_resoconto", used_local_processing=True)
     attach_author_meta_to_all(pages, service_name="daily_resoconto", canonical_top_level_command="serversummary")
     attach_embed_images_meta_to_all(pages, service_name="daily_resoconto")

@@ -21,6 +21,7 @@ from app.plugins.commands_modular.time_windows import (
 )
 from app.services.aura import aura_reason_to_human
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 from app.shared.discord.report_embeds import apply_standard_report_style
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ async def _run_channel_aura_window(
         channel_id=str(interaction.channel_id),
         start_local=window.start_dt,
         end_local=window.end_dt,
-        title="🗒️ DETTAGLI PUNTI AURA",
+        title=format_standard_title("DETTAGLI PUNTI AURA", emoji="🗒️"),
     )
     if embed is None:
         await send_resoconto_response(
@@ -215,9 +216,9 @@ async def _run_server_aura_window(
         f"• {channel_map.get(str(item['channel_id']), '#canale')}" for item in report["by_channel"][:5] if item.get("channel_id")
     ) or "• Nessun dato rilevante nel periodo."
 
-    embed = discord.Embed(title="🗒️ DETTAGLI PUNTI AURA", description=f"**🕒 {period_line}**", color=0x5865F2)
+    embed = discord.Embed(title=format_standard_title("DETTAGLI PUNTI AURA", emoji="🗒️"), description=format_standard_description(f"**🕒 {period_line}**", italic=False), color=0x5865F2)
     embed.add_field(
-        name="📈 PANORAMICA",
+        name=format_standard_field_name("Panoramica", emoji="📈"),
         value=(
             f"• Punti assegnati: +{int(report['totals']['positive'])}\n"
             f"• Punti rimossi: {int(report['totals']['negative'])}\n"
@@ -225,13 +226,13 @@ async def _run_server_aura_window(
         ),
         inline=False,
     )
-    embed.add_field(name="🏆 TOP AURA POSITIVA", value=top_pos, inline=False)
-    embed.add_field(name="📉 TOP AURA NEGATIVA", value=top_neg, inline=False)
-    embed.add_field(name="🧾 CAUSE PRINCIPALI", value=reasons, inline=False)
-    embed.add_field(name="🏷️ CANALI PIÙ COINVOLTI", value=channels, inline=False)
+    embed.add_field(name=format_standard_field_name("Top aura positiva", emoji="🏆"), value=top_pos, inline=False)
+    embed.add_field(name=format_standard_field_name("Top aura negativa", emoji="📉"), value=top_neg, inline=False)
+    embed.add_field(name=format_standard_field_name("Cause principali", emoji="🧾"), value=reasons, inline=False)
+    embed.add_field(name=format_standard_field_name("Canali più coinvolti", emoji="🏷️"), value=channels, inline=False)
     mission_stats = await ctx.database.fetch_aura_mission_stats(guild_id, start_ts, end_ts)
     embed.add_field(
-        name="📜 MISSIONI NEL PERIODO",
+        name=format_standard_field_name("Missioni nel periodo", emoji="📜"),
         value=(
             f"• Ricevute da {mission_stats['users_count']} utenti\n"
             f"• Completate: {mission_stats['completed_count']}\n"
