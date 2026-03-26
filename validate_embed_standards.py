@@ -274,7 +274,7 @@ def _check_hardcoded_embed_title_and_field_contract(
                     "embed_title_literal_standard",
                     rel,
                     node.lineno,
-                    "Hardcoded discord.Embed(title=...) must be 'emoji + __**UPPERCASE**__'.",
+                    "Hardcoded discord.Embed(title=...) must be '(emoji) __**UPPERCASE**__' (bold + underline + uppercase).",
                 )
 
         if isinstance(node.func, ast.Attribute) and node.func.attr == "add_field":
@@ -287,7 +287,7 @@ def _check_hardcoded_embed_title_and_field_contract(
                     "embed_field_name_literal_standard",
                     rel,
                     node.lineno,
-                    "Hardcoded embed.add_field(name=...) must be 'emoji + __**UPPERCASE**__'.",
+                    "Hardcoded embed.add_field(name=...) must be '(emoji) __**UPPERCASE**__' (bold + underline + uppercase).",
                 )
 
     if embed_ctor_count >= 3 and not helper_used:
@@ -1202,6 +1202,7 @@ def _print_report(report: ValidationReport) -> None:
     print("- Embed construction must include footer meta wiring.")
     print("- No duplicate generic embed helper systems are allowed.")
     print("- Technical namespaces must not leak into standard command embed titles.")
+    print("- Embed titles and field names must always be `(emoji) __**UPPERCASE**__`.")
     print()
 
     if not report.errors:

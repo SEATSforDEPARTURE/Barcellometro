@@ -17,6 +17,11 @@ def _truncate(value: str, max_len: int) -> str:
 
 
 def format_standard_title(text: str, *, emoji: str | None = None, uppercase: bool = True) -> str:
+    """Render canonical embed titles as `(emoji) __**UPPERCASE**__`.
+
+    Note: `uppercase` is kept for backward compatibility with legacy call sites,
+    but the definitive standard is always uppercase.
+    """
     base = (text or "").strip()
     rendered = base.upper()
     if emoji:
@@ -35,6 +40,7 @@ def format_standard_description(text: str, *, italic: bool = True, blank_line_be
 
 
 def format_standard_field_name(text: str, *, emoji: str | None = None) -> str:
+    """Render canonical embed field names as `(emoji) __**UPPERCASE**__`."""
     base = (text or "").strip()
     normalized = base.upper()
     if emoji:
@@ -54,6 +60,7 @@ class BodyFormatOptions:
 
 
 def apply_standard_body_helpers(embed: discord.Embed, *, options: BodyFormatOptions) -> discord.Embed:
+    """Apply canonical body formatting and prevent manual title/field drift."""
     if embed.title:
         embed.title = format_standard_title(embed.title, emoji=options.title_emoji, uppercase=options.title_uppercase)
     if embed.description:
