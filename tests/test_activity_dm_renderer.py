@@ -8,6 +8,7 @@ if "aiosqlite" not in sys.modules:
 
 from app.renderers.activity_dm_report_renderer import build_activity_details_txt, build_activity_dm_embeds
 from app.services.activity_insights import ActivityScore, ChannelActivityDetails, UserActivityEntry
+from app.shared.discord.embed_body import format_standard_field_name
 
 
 class _Member:
@@ -69,17 +70,21 @@ def test_dm_layout_limits_and_formatting() -> None:
     assert "**<@1000>**" in combined
     assert "(**100 msg**)" in combined
     names = "\n".join(field.name for e in embeds for field in e.fields)
-    assert "🏆 TOP 10 UTENTI PIÙ ATTIVI" in names
-    assert "💤 TOP 10 UTENTI INATTIVI" in names
+    assert format_standard_field_name("🏆 TOP 10 UTENTI PIÙ ATTIVI") in names
+    assert format_standard_field_name("💤 TOP 10 UTENTI INATTIVI") in names
     assert "🥇" in combined and "🥈" in combined and "🥉" in combined and "4️⃣" in combined
     assert "\n  🔥 Picco:" in combined
     assert "(**0 msg**)" in combined
     assert "🥀" in combined
     assert "[20/01" in combined and "](https://discord.com/channels/" in combined
-    active_field = next(field for e in embeds for field in e.fields if field.name == "🏆 TOP 10 UTENTI PIÙ ATTIVI")
+    active_field = next(
+        field for e in embeds for field in e.fields if field.name == format_standard_field_name("🏆 TOP 10 UTENTI PIÙ ATTIVI")
+    )
     assert active_field.value.startswith("\n")
     assert "<@" in active_field.value
-    inactive_field = next(field for e in embeds for field in e.fields if field.name == "💤 TOP 10 UTENTI INATTIVI")
+    inactive_field = next(
+        field for e in embeds for field in e.fields if field.name == format_standard_field_name("💤 TOP 10 UTENTI INATTIVI")
+    )
     assert inactive_field.value.startswith("\n")
     assert "<@" not in inactive_field.value
     for block in [b for b in active_field.value.split("\n\n") if b.strip() and not b.startswith("… + altri")]:
@@ -103,10 +108,10 @@ def test_section_titles_not_numbered_when_chunked() -> None:
     )
     embeds = build_activity_dm_embeds(_Guild(), "123", "456", "g", "range", details, reference_ts="2026-01-21T12:00:00+00:00")
     field_names = [f.name for e in embeds for f in e.fields]
-    assert "🏆 TOP 10 UTENTI PIÙ ATTIVI" in field_names
-    assert "💤 TOP 10 UTENTI INATTIVI" in field_names
+    assert format_standard_field_name("🏆 TOP 10 UTENTI PIÙ ATTIVI") in field_names
+    assert format_standard_field_name("💤 TOP 10 UTENTI INATTIVI") in field_names
     assert not any("(" in name for name in field_names)
-    assert "​" in field_names
+    assert format_standard_field_name("\u200b") in field_names
 
 
 def test_txt_is_numbered_and_shows_totals() -> None:

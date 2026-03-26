@@ -6,6 +6,7 @@ from app.services.campaign_content_formatter import (
     build_weather_embeds,
 )
 from app.services.footer import get_footer_meta
+from app.shared.discord.embed_body import format_standard_title
 
 
 def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
@@ -44,7 +45,7 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
         {"signs": {"Ariete": {"text": "Focus"}}},
     )
-    assert news[0].title == "📰 NOTIZIARIO CRICETOSO • Inizio"
+    assert news[0].title == format_standard_title("📰 NOTIZIARIO CRICETOSO • Inizio", uppercase=False)
     assert news[1].title == "📰 NOTIZIARIO CRICETOSO • Trash"
     assert news[2].title == "📰 NOTIZIARIO CRICETOSO • Viral"
     assert horoscope[0].title == "🔮 OROSCOPO DEL GIORNO • Inizio"

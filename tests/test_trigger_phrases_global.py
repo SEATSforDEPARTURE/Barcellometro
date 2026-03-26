@@ -31,6 +31,7 @@ from app.services.database import DatabaseService
 from app.services.ingest import EventEnvelope
 from app.services.triggers_service import TriggerEngineService
 import app.services.triggers_service as triggers_module
+from app.shared.discord.embed_body import format_standard_title
 
 
 class _FakeRepliedMessage:
@@ -187,7 +188,7 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
             await service._handle_phrases(envelope)
 
             embed = channel.target.replies[0]
-            assert embed.title == "💬 FRASI ICONICHE"
+            assert embed.title == format_standard_title("FRASI ICONICHE", emoji="💬")
             assert getattr(embed.footer, "text", None) in ("", None)
             assert embed.color.value == 0xFFAA00
 

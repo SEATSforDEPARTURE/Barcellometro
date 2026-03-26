@@ -9,6 +9,7 @@ import pytest
 
 from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_title
 from app.shared.discord.delivery import _prepare_embeds_for_send
 from tests._embed_test_utils import InteractionStub, find_command, register_embed_tree
 
@@ -87,7 +88,7 @@ def test_footer_status_command_supports_multipage_navigation(embed_module, monke
         assert len(view._embeds) > 1
         assert all('• Pagina: **' in (page.description or '') for page in view._embeds)
         assert all('Pagina ' not in (page.footer.text or '') for page in view._embeds)
-        assert all((page.title or '') == '📦 EMBED' for page in view._embeds)
+        assert all((page.title or '') == format_standard_title('EMBED', emoji='📦') for page in view._embeds)
         assert all((page.author.name or '').startswith('servizio EMBED · (Pag. ') for page in view._embeds)
         assert all('UNKNOWN' not in (page.author.name or '') for page in view._embeds)
 

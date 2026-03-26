@@ -8,6 +8,7 @@ if "aiosqlite" not in sys.modules:
 
 from app.renderers.activity_dm_report_renderer import build_activity_dm_embeds
 from app.services.activity_insights import ActivityScore, ChannelActivityDetails, UserActivityEntry
+from app.shared.discord.embed_body import format_standard_field_name
 
 
 class _Member:
@@ -70,7 +71,12 @@ def test_active_mentions_and_inactive_plain_names() -> None:
     embeds = build_activity_dm_embeds(_Guild(), "111", "222", "canale", "Oggi", details, reference_ts="2026-01-21T12:00:00+00:00")
     text = "\n".join(field.value for embed in embeds for field in embed.fields)
     assert "**<@1>**" in text
-    inactive_field = next(field for embed in embeds for field in embed.fields if field.name == "💤 TOP 10 UTENTI INATTIVI")
+    inactive_field = next(
+        field
+        for embed in embeds
+        for field in embed.fields
+        if field.name == format_standard_field_name("💤 TOP 10 UTENTI INATTIVI")
+    )
     assert "<@" not in inactive_field.value
     assert "Global Due" in inactive_field.value
     assert "Cached Tre" in inactive_field.value

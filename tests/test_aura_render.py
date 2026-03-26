@@ -1,5 +1,21 @@
 from app.services.aura_archetypes import build_dynamic_archetype_reason
 from app.renderers.aura_renderer import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_character_analysis_lines, _build_profile_traits_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
+
+
+def _field_value_by_plain_name(embed, plain_name: str) -> str:
+    return next(
+        field.value
+        for field in embed.fields
+        if field.name in {
+            format_standard_field_name(plain_name),
+            format_standard_field_name(plain_name, emoji="🏆"),
+            format_standard_field_name(plain_name, emoji="🕹️"),
+            format_standard_field_name(plain_name, emoji="📈"),
+            format_standard_field_name(plain_name, emoji="📜"),
+            format_standard_field_name(plain_name, emoji="✨"),
+        }
+    )
 
 
 def _payload() -> AuraRenderPayload:
@@ -342,13 +358,12 @@ def test_channel_aura_embed_top10_format_and_sections() -> None:
         )
     )
 
-    fields = {f.name: f.value for f in embed.fields}
-    assert "🏆 CLASSIFICA" in fields
-    assert "**+1046 P.A.**" in fields["🏆 CLASSIFICA"]
-    assert "<@42>" in fields["🏆 CLASSIFICA"]
-    assert "🕹️ MOTIVAZIONI" in fields
-    assert "😇 Punti assegnati:" in fields["🕹️ MOTIVAZIONI"]
-    assert "😈 Punti revocati:" in fields["🕹️ MOTIVAZIONI"]
+    classifica = _field_value_by_plain_name(embed, "Classifica")
+    motivazioni = _field_value_by_plain_name(embed, "Motivazioni")
+    assert "**+1046 P.A.**" in classifica
+    assert "<@42>" in classifica
+    assert "😇 Punti assegnati:" in motivazioni
+    assert "😈 Punti revocati:" in motivazioni
 
 
 def test_channel_aura_advice_is_deterministic() -> None:
@@ -401,22 +416,22 @@ def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
 
     names = [f.name for f in embed.fields]
     assert _estimate_embed_size(embed) <= MAX_EMBED_CHARS
-    assert any(name.startswith("📈 PANORAMICA") for name in names)
-    pano_text = "\n".join(field.value for field in embed.fields if field.name.startswith("📈 PANORAMICA"))
+    assert format_standard_field_name("Panoramica", emoji="📈") in names
+    pano_text = "\n".join(field.value for field in embed.fields if field.name == format_standard_field_name("Panoramica", emoji="📈"))
     assert "Punti assegnati: **+5000**" in pano_text
     assert "Punti rimossi: **1200**" in pano_text
     assert "Utenti coinvolti: **44**" in pano_text
-    assert any(name.startswith("🏆 CLASSIFICA") for name in names)
-    assert any(name.startswith("🕹️ MOTIVAZIONI") for name in names)
-    assert any(name.startswith("📜 MISSIONI") for name in names)
-    assert any(name.startswith("✨ I CONSIGLI DEL BARCELLOMETRO") for name in names)
+    assert format_standard_field_name("Classifica", emoji="🏆") in names
+    assert format_standard_field_name("Motivazioni", emoji="🕹️") in names
+    assert format_standard_field_name("Missioni", emoji="📜") in names
+    assert format_standard_field_name("I consigli del barcellometro", emoji="✨") in names
 
-    top_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🏆 CLASSIFICA"))
+    top_text = "\n".join(field.value for field in embed.fields if field.name == format_standard_field_name("Classifica", emoji="🏆"))
     top_rows = [line for line in top_text.splitlines() if line.strip()]
     assert len(top_rows) == 10
     assert all("<@" in row and "**+" in row and "—" in row for row in top_rows)
 
-    punteggi_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🕹️ MOTIVAZIONI"))
+    punteggi_text = "\n".join(field.value for field in embed.fields if field.name == format_standard_field_name("Motivazioni", emoji="🕹️"))
     punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
     assert len(punteggi_rows) <= 7
     assert len(punteggi_rows) < len(top_rows) + 8
@@ -447,7 +462,7 @@ def test_channel_aura_embed_preserves_all_10_rank_positions_with_compact_comment
         )
     )
 
-    top_field = next(field.value for field in embed.fields if field.name == "🏆 CLASSIFICA")
+    top_field = _field_value_by_plain_name(embed, "Classifica")
     rows = [line for line in top_field.splitlines() if line.strip()]
     assert len(rows) == 10
     assert all("—" in row and len(row.split("—", 1)[1].strip()) > 0 for row in rows)
@@ -482,7 +497,7 @@ def test_channel_aura_embed_uses_final_title_and_footer_in_size_budget() -> None
         ),
     )
 
-    assert embed.title == "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)"
+    assert embed.title == format_standard_title("DETTAGLI PUNTI AURA (Pag 2/2)", emoji="🗒️")
     assert getattr(embed.footer, "text", None) in (None, "")
     assert _estimate_embed_size(embed) <= AURA_DETAILS_INTERNAL_BUDGET
 
@@ -507,10 +522,10 @@ def test_channel_aura_embed_compacts_punteggi_before_reducing_top10_rows() -> No
         )
     )
 
-    top_field = next(field.value for field in embed.fields if field.name == "🏆 CLASSIFICA")
+    top_field = _field_value_by_plain_name(embed, "Classifica")
     top_rows = [line for line in top_field.splitlines() if line.strip()]
     assert len(top_rows) == 10
 
-    punteggi_text = "\n".join(field.value for field in embed.fields if field.name.startswith("🕹️ MOTIVAZIONI"))
+    punteggi_text = "\n".join(field.value for field in embed.fields if field.name == format_standard_field_name("Motivazioni", emoji="🕹️"))
     punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
     assert len(punteggi_rows) <= 4
