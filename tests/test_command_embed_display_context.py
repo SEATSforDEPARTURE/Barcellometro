@@ -68,7 +68,7 @@ def test_build_command_embed_uses_users_visual_top_level() -> None:
         )
     )
 
-    assert embed.title == "🛠️ USERS"
+    assert embed.title == "🛠️ __**USERS**__"
     assert embed.description.startswith("**ℹ️ TEMPBAN_LIST**")
     assert get_footer_meta(embed) is not None
     assert get_footer_meta(embed).service_name == "users"
@@ -113,7 +113,7 @@ def test_build_command_embed_omits_top_level_duplication_for_parameterized_comma
         )
     )
 
-    assert embed.title == "❓ QNA"
+    assert embed.title == "❓ __**QNA**__"
     assert embed.description.startswith("**ℹ️ LIMITS_SHOW BASE**")
     assert "QNA LIMITS_SHOW BASE" not in (embed.description or "")
 
@@ -130,7 +130,7 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
         )
     )
 
-    assert embed.title == "❓ QNA"
+    assert embed.title == "❓ __**QNA**__"
     assert embed.description.startswith("**ℹ️ BONUS_SHOW MARIO ROSSI**")
     assert "<@123>" not in (embed.description or "")
 
@@ -174,7 +174,7 @@ def test_build_command_embed_formats_period_subtitle_for_riassunto_ultimi() -> N
         )
     )
 
-    assert embed.title == "🗒️ RIASSUNTO"
+    assert embed.title == "🗒️ __**RIASSUNTO**__"
     assert embed.description.startswith("**ℹ️ ULTIMA ORA**")
 
 
@@ -189,7 +189,7 @@ def test_build_command_embed_formats_period_subtitle_for_attivita_ultimi() -> No
         )
     )
 
-    assert embed.title == "📈 ATTIVITA"
+    assert embed.title == "📈 __**ATTIVITA**__"
     assert embed.description.startswith("**ℹ️ ULTIMO MINUTO**")
 
 
@@ -203,7 +203,7 @@ def test_build_command_embed_formats_range_subtitle_centrally() -> None:
         )
     )
 
-    assert embed.title == "🗒️ RIASSUNTO"
+    assert embed.title == "🗒️ __**RIASSUNTO**__"
     assert embed.description.startswith("**ℹ️ DAL 20/03 10:15 AL 21/03 11:45**")
 
 
@@ -216,7 +216,7 @@ def test_build_command_embed_uses_real_top_level_for_resocontocanale() -> None:
         )
     )
 
-    assert embed.title == "📓 RESOCONTOCANALE"
+    assert embed.title == "📓 __**RESOCONTOCANALE**__"
     assert embed.description.startswith("**ℹ️ STATUS**")
     assert "RESOCONTO STATUS" not in (embed.description or "")
 
@@ -297,7 +297,7 @@ def test_build_command_embed_skips_long_unreadable_subtitle_input() -> None:
         )
     )
 
-    assert embed.title == "⚡ TRIGGERS"
+    assert embed.title == "⚡ __**TRIGGERS**__"
     assert embed.description.startswith("**ℹ️ PHRASES TEMPLATE_USER_SET**")
     assert "X" * 120 not in (embed.description or "")
 
@@ -495,8 +495,7 @@ def test_finalize_embed_without_footer_service_sets_brand_version_footer() -> No
 
     assert embed.footer is not None
     assert embed.footer.text is not None
-    assert embed.footer.text.startswith("Barcellometro ")
-    assert embed.footer.text != "Barcellometro"
+    assert embed.footer.text == "Barcellometro"
     assert "Dati elaborati con" not in embed.footer.text
 
 
@@ -517,9 +516,7 @@ def test_finalize_embed_without_footer_service_keeps_contributor_segment() -> No
 
     assert embed.footer is not None
     assert embed.footer.text is not None
-    assert embed.footer.text.startswith("Barcellometro ")
-    assert embed.footer.text != "Barcellometro"
-    assert embed.footer.text.endswith("Dati elaborati con llama3.2")
+    assert embed.footer.text == "Barcellometro · Dati elaborati con llama3.2"
 
 
 def test_build_command_embed_uses_embed_namespace_title_for_footer_show() -> None:
@@ -532,7 +529,7 @@ def test_build_command_embed_uses_embed_namespace_title_for_footer_show() -> Non
         )
     )
 
-    assert embed.title == "📦 EMBED"
+    assert embed.title == "📦 __**EMBED**__"
     assert embed.description.startswith("**ℹ️ FOOTER TEMPLATE_GLOBAL_SHOW**")
 
 
@@ -547,6 +544,6 @@ def test_build_command_embed_uses_service_name_in_embed_footer_subtitle_without_
         )
     )
 
-    assert embed.title == "📦 EMBED"
+    assert embed.title == "📦 __**EMBED**__"
     assert embed.description.startswith("**ℹ️ FOOTER TEMPLATE_SERVICE_SHOW RIASSUNTO**")
     assert "• Service:" not in (embed.description or "")

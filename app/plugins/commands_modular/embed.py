@@ -246,9 +246,9 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             ctx,
             subcommand_path="footer template_global_show",
             sections=_template_section(
-                ("Version", _format_override_value(current_version, missing="No custom override (default brand version in use)")),
-                ("Phrase", _format_override_value(current_global, missing="No custom override (default footer phrase in use)")),
-                ("Thumbnail", _format_override_value(current_thumbnail, missing="No custom override (default footer thumbnail in use)")),
+                ("Version", _format_override_value(current_version, missing="(not set)")),
+                ("Phrase", _format_override_value(current_global, missing="(not set)")),
+                ("Thumbnail", _format_override_value(current_thumbnail, missing="(not set)")),
             ),
         )
 
@@ -377,8 +377,8 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             subcommand_path="footer template_service_show",
             subtitle_args=[service_name],
             sections=_template_section(
-                ("Phrase", _format_override_value(phrase, missing="No custom override (service uses default footer behavior)")),
-                ("Thumbnail", _format_override_value(thumbnail_value, missing="No custom override (service uses default footer thumbnail behavior)")),
+                ("Phrase", _format_override_value(phrase, missing="(not set)")),
+                ("Thumbnail", _format_override_value(thumbnail_value, missing="(not set)")),
             ),
         )
 
@@ -546,10 +546,10 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             ctx,
             subcommand_path="author template_global_show",
             sections=_template_section(
-                ("Version", _format_override_value(current_version, missing="No custom override (version is ignored without an author phrase)")),
-                ("Phrase", _format_override_value(current_global, missing="No custom override (services use semantic fallback author)")),
-                ("Thumbnail", _format_override_value(current_thumbnail, missing="No custom override (default author has no thumbnail)")),
-                ("URL", _format_override_value(current_url, missing="No custom override (default author has no URL)")),
+                ("Version", _format_override_value(current_version, missing="(not set)")),
+                ("Phrase", _format_override_value(current_global, missing="(not set)")),
+                ("Thumbnail", _format_override_value(current_thumbnail, missing="(not set)")),
+                ("URL", _format_override_value(current_url, missing="(not set)")),
                 ("Preview", preview),
             ),
         )
@@ -639,9 +639,9 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             subcommand_path="author template_service_show",
             subtitle_args=[service_name],
             sections=_template_section(
-                ("Phrase", _format_override_value(phrase, missing="No custom override (service uses global/fallback author phrase)")),
-                ("Thumbnail", _format_override_value(thumbnail_value, missing="No custom override (service uses global/no thumbnail fallback)")),
-                ("URL", _format_override_value(url_value, missing="No custom override (service uses global/no URL fallback)")),
+                ("Phrase", _format_override_value(phrase, missing="(not set)")),
+                ("Thumbnail", _format_override_value(thumbnail_value, missing="(not set)")),
+                ("URL", _format_override_value(url_value, missing="(not set)")),
                 ("Preview", render_author_name(service_name=service_name, phrase=phrase or global_phrase, version=version)),
             ),
         )
@@ -770,8 +770,8 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             ctx,
             subcommand_path="images template_global_show",
             sections=_template_section(
-                ("Image", _format_override_value(await ctx.embed_images.get_global_image(), missing="No custom override (no global image template)")),
-                ("Thumbnail", _format_override_value(await ctx.embed_images.get_global_thumbnail(), missing="No custom override (no global thumbnail template)")),
+                ("Image", _format_override_value(await ctx.embed_images.get_global_image(), missing="(not set)")),
+                ("Thumbnail", _format_override_value(await ctx.embed_images.get_global_thumbnail(), missing="(not set)")),
             ),
         )
 
@@ -841,8 +841,8 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             subcommand_path="images template_service_show",
             subtitle_args=[service_name],
             sections=_template_section(
-                ("Image", _format_override_value(service_image, missing="No custom override (service uses global/no image fallback)")),
-                ("Thumbnail", _format_override_value(service_thumbnail, missing="No custom override (service uses global/no thumbnail fallback)")),
+                ("Image", _format_override_value(service_image, missing="(not set)")),
+                ("Thumbnail", _format_override_value(service_thumbnail, missing="(not set)")),
             ),
         )
 

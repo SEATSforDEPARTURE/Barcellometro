@@ -23,6 +23,7 @@ def test_embed_footer_registers_under_top_level_embed_only(embed_module) -> None
     assert {group.name for group in bundle.embed_group.commands if isinstance(group, discord.app_commands.Group)} == {
         'footer',
         'author',
+        'images',
     }
     assert {command.name for command in bundle.footer_group.commands} == {
         'on',
@@ -109,9 +110,9 @@ def test_footer_template_global_set_show_and_reset_roundtrip(embed_module, monke
         assert section_payload(send_standard.await_args.kwargs) == (
             'Template',
             [
-                ('Version', 'No custom override (default brand version in use)'),
-                ('Phrase', 'No custom override (default footer phrase in use)'),
-                ('Thumbnail', 'No custom override (default footer thumbnail in use)'),
+                ('Version', '(not set)'),
+                ('Phrase', '(not set)'),
+                ('Thumbnail', '(not set)'),
             ],
         )
 
@@ -167,8 +168,8 @@ def test_footer_template_service_set_show_and_reset_roundtrip(embed_module, monk
         assert section_payload(send_standard.await_args.kwargs) == (
             'Template',
             [
-                ('Phrase', 'No custom override (service uses default footer behavior)'),
-                ('Thumbnail', 'No custom override (service uses default footer thumbnail behavior)'),
+                ('Phrase', '(not set)'),
+                ('Thumbnail', '(not set)'),
             ],
         )
 

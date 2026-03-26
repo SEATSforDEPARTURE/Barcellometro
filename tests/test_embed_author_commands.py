@@ -123,10 +123,10 @@ def test_author_template_global_set_show_reset_and_fallback_after_reset(embed_mo
         assert section_payload(send_standard.await_args.kwargs) == (
             'Template',
             [
-                ('Version', 'No custom override (version is ignored without an author phrase)'),
-                ('Phrase', 'No custom override (services use semantic fallback author)'),
-                ('Thumbnail', 'No custom override (default author has no thumbnail)'),
-                ('URL', 'No custom override (default author has no URL)'),
+                ('Version', '(not set)'),
+                ('Phrase', '(not set)'),
+                ('Thumbnail', '(not set)'),
+                ('URL', '(not set)'),
                 ('Preview', 'servizio STATUS'),
             ],
         )
@@ -199,9 +199,9 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
         assert section_payload(send_standard.await_args.kwargs) == (
             'Template',
             [
-                ('Phrase', 'No custom override (service uses global/fallback author phrase)'),
-                ('Thumbnail', 'No custom override (service uses global/no thumbnail fallback)'),
-                ('URL', 'No custom override (service uses global/no URL fallback)'),
+                ('Phrase', '(not set)'),
+                ('Thumbnail', '(not set)'),
+                ('URL', '(not set)'),
                 ('Preview', 'Centro embed · 2026.03'),
             ],
         )
