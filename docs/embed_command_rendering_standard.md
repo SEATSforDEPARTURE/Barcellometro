@@ -4,6 +4,53 @@
 
 Questa sezione è la **single source of truth** per la struttura visuale di tutti gli embed standardizzati del bot.
 
+## STANDARD DEFINITIVO (struttura embed standard)
+
+Ogni embed standard del progetto deve seguire **sempre** questa struttura, senza varianti locali:
+
+1. **AUTHOR**
+   - formato: `servizio NOME CANONICO INGLESE TOP-LEVEL`;
+   - se multipagina: `servizio NOME CANONICO INGLESE TOP-LEVEL · Pag. X/Y`.
+2. **TITLE EMBED**
+   - emoji iniziale obbligatoria;
+   - formato: `__**TITOLO**__`;
+   - testo sempre MAIUSCOLO.
+3. **DESCRIPTION EMBED**
+   - breve testo introduttivo;
+   - sempre in corsivo;
+   - senza emoji iniziale.
+4. **FIELD 1..N**
+   - per ogni sezione importante usare un vero field Discord;
+   - `field.name` = emoji + `__**TITOLO FIELD**__` (sempre MAIUSCOLO, grassetto, sottolineato);
+   - `field.value` = contenuto della sezione.
+5. **FOOTER**
+   - applicato solo tramite pipeline/footer service centralizzati.
+
+### Regole esplicite e non negoziabili
+
+- i titoli di sezione non devono stare in `description` come testo libero;
+- le sezioni importanti devono essere veri `fields`;
+- niente doppi standard visivi (no eccezioni locali non documentate);
+- tutti i servizi devono convergere su questa struttura unica.
+
+### Esempi ufficiali
+
+**CORRETTO**
+
+- titolo: `📓 __**RESOCONTO CANALE**__`
+- description: `*Sintesi operativa della finestra selezionata.*`
+- fields strutturali:
+  - `🏷️ __**TEMI**__`
+  - `📌 __**MOMENTI SALIENTI**__`
+  - `🏆 __**CLASSIFICA**__`
+  - `🎯 __**MISSIONI**__`
+  - `🧭 __**CONSIGLI**__`
+
+**NON CORRETTO**
+
+- sezioni in description come heading libero, per esempio `📈 **PANORAMICA**`;
+- sezioni in description come `👇 **Risposta:**` quando la sezione è strutturale.
+
 Struttura obbligatoria:
 
 1. **AUTHOR**

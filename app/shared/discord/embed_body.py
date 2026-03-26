@@ -33,6 +33,11 @@ def format_standard_title(text: str, *, emoji: str | None = None, uppercase: boo
 
 
 def format_standard_description(text: str, *, italic: bool = True, blank_line_before_fields: bool = False) -> str:
+    """Render the canonical intro-only embed description.
+
+    Definitive contract: description is a short italic introduction, never the
+    structural container for key sections (which must be Discord fields).
+    """
     base = (text or "").strip()
     rendered = f"*{base}*" if italic and base else base
     if blank_line_before_fields and rendered and not rendered.endswith("\n\n"):
@@ -66,7 +71,11 @@ class BodyFormatOptions:
 
 
 def apply_standard_body_helpers(embed: discord.Embed, *, options: BodyFormatOptions) -> discord.Embed:
-    """Apply canonical body formatting and prevent manual title/field drift."""
+    """Apply the definitive body contract.
+
+    Enforces: uppercase title/field names in canonical markdown format and a
+    short intro-only description. Structural sections belong to fields.
+    """
     if embed.title:
         embed.title = format_standard_title(embed.title, emoji=options.title_emoji, uppercase=options.title_uppercase)
     if embed.description:

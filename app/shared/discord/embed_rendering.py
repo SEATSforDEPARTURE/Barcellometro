@@ -13,6 +13,10 @@ from app.shared.discord.embed_images_pipeline import _needs_images_finalize, fin
 from app.shared.discord.footer_pipeline import _needs_footer_finalize, finalize_embed
 
 
+# Central rendering orchestrator for the definitive embed standard:
+# AUTHOR + TITLE + intro-only DESCRIPTION + structural FIELDS + FOOTER.
+# Services should not bypass this pipeline with local visual conventions.
+
 async def finalize_embed_rendering(
     embed: discord.Embed,
     *,
