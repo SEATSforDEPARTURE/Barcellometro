@@ -9,6 +9,8 @@ from validate_embed_standards import (
     ValidationReport,
     _check_manual_set_embed_images_calls,
     _check_persisted_embed_hydration,
+    _check_phase3_renderer_metadata_adoption,
+    _check_renderer_title_pagination_bypass,
     validate_embed_standards,
 )
 
@@ -130,3 +132,62 @@ def broken(embed):
 
     assert len(report.errors) == 1
     assert report.errors[0].rule == "manual_embed_images_bypass"
+
+
+def test_phase3_renderer_metadata_check_requires_author_and_images_helpers() -> None:
+    source = '''
+def build():
+    embed = discord.Embed(title="x")
+    attach_footer_meta(embed, service_name="daily_activity_report")
+    return [embed]
+'''
+    report = ValidationReport()
+    _check_phase3_renderer_metadata_adoption(
+        REPO_ROOT / "app" / "renderers" / "activity_report_renderer.py",
+        source,
+        report,
+    )
+    rules = {issue.rule for issue in report.errors}
+    assert "phase3_renderer_author_meta_required" in rules
+    assert "phase3_renderer_images_meta_required" in rules
+
+
+def test_phase3_renderer_metadata_check_allows_when_central_helpers_present() -> None:
+    source = '''
+def build():
+    embed = discord.Embed(title="x")
+    attach_footer_meta(embed, service_name="daily_activity_report")
+    attach_author_meta(embed, service_name="daily_activity_report")
+    attach_embed_images_meta(embed, service_name="daily_activity_report")
+    return [embed]
+'''
+    report = ValidationReport()
+    _check_phase3_renderer_metadata_adoption(
+        REPO_ROOT / "app" / "renderers" / "activity_report_renderer.py",
+        source,
+        report,
+    )
+    assert report.errors == []
+
+
+def test_renderer_title_pagination_check_flags_migrated_renderer_hardcoded_page_title() -> None:
+    tree = ast.parse('embed = discord.Embed(title="Dettagli (Pag 1/3)")')
+    report = ValidationReport()
+    _check_renderer_title_pagination_bypass(
+        REPO_ROOT / "app" / "renderers" / "detail_embeds.py",
+        tree,
+        report,
+    )
+    assert len(report.errors) == 1
+    assert report.errors[0].rule == "renderer_title_pagination_bypass"
+
+
+def test_renderer_title_pagination_check_allows_aura_exception() -> None:
+    tree = ast.parse('embed = discord.Embed(title="Dettagli (Pag 1/3)")')
+    report = ValidationReport()
+    _check_renderer_title_pagination_bypass(
+        REPO_ROOT / "app" / "renderers" / "aura_renderer.py",
+        tree,
+        report,
+    )
+    assert report.errors == []

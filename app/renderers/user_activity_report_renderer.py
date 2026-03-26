@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 
 import discord
 
+from app.services.author import attach_author_meta
+from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta
+
 
 
 def _bar(score: int, emoji: str) -> str:
@@ -59,6 +62,8 @@ def build_user_activity_embeds(
         f"• 📨 {trend_text}"
     )
     attach_footer_meta(overview, service_name="user_activity", used_local_processing=True)
+    attach_author_meta(overview, service_name="user_activity")
+    attach_embed_images_meta(overview, service_name="user_activity")
 
     details = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
     details.add_field(name="📊 STATISTICHE UTENTE", value="\n".join(stats_lines) if stats_lines else "—", inline=False)
@@ -68,6 +73,8 @@ def build_user_activity_embeds(
         inline=False,
     )
     attach_footer_meta(details, service_name="user_activity", used_local_processing=True)
+    attach_author_meta(details, service_name="user_activity")
+    attach_embed_images_meta(details, service_name="user_activity")
     return [overview, details]
 
 

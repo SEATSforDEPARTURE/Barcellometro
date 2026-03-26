@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.services.barcello_service import BarcelloResult
+from app.services.author import attach_author_meta, attach_author_meta_to_all
+from app.services.embed_images import attach_embed_images_meta, attach_embed_images_meta_to_all
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 from app.services.content_summary_service import SummaryItem, SummaryResult
 from app.domain.reporting.trend import render_trend_value
@@ -216,6 +218,8 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     if trend_text:
         status_embed.add_field(name="📈 TREND", value=trend_text, inline=False)
     attach_footer_meta(status_embed, service_name="channel_summary", used_local_processing=True)
+    attach_author_meta(status_embed, service_name="channel_summary")
+    attach_embed_images_meta(status_embed, service_name="channel_summary")
 
     pages: list[discord.Embed] = [discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)]
     themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]
@@ -255,12 +259,15 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     if proverbio.strip():
         _add_field_chunked(pages, name="🍀 PROVERBIO", value=proverbio.strip(), color=0x95A5A6)
 
-    total = len(pages) + (1 if aura_embed is not None else 0)
-    for idx, embed in enumerate(pages, start=1):
-        embed.title = f"🗒️ DETTAGLI (Pag {idx}/{total})"
+    for embed in pages:
+        embed.title = "🗒️ DETTAGLI"
     attach_footer_meta_to_all(pages, service_name="channel_summary", used_local_processing=True)
+    attach_author_meta_to_all(pages, service_name="channel_summary")
+    attach_embed_images_meta_to_all(pages, service_name="channel_summary")
 
     if aura_embed is not None:
+        attach_author_meta(aura_embed, service_name="channel_summary")
+        attach_embed_images_meta(aura_embed, service_name="channel_summary")
         return [status_embed, *pages, aura_embed]
 
     return [status_embed, *pages]
@@ -273,4 +280,6 @@ def build_channel_summary_insufficient_data_embed(*, channel_name: str, window_h
         color=0x2F3136,
     )
     attach_footer_meta(embed, service_name="channel_summary", used_local_processing=True)
+    attach_author_meta(embed, service_name="channel_summary")
+    attach_embed_images_meta(embed, service_name="channel_summary")
     return embed
