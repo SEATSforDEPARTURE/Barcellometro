@@ -1,5 +1,34 @@
 # Standard centralizzato per il rendering degli embed comando
 
+## CONTRATTO UFFICIALE UNICO (rendering embed cross-servizio)
+
+Questa sezione è la **single source of truth** per la struttura visuale di tutti gli embed standardizzati del bot.
+
+Struttura obbligatoria:
+
+1. **AUTHOR**
+   - formato base: `servizio NOME CANONICO INGLESE TOP-LEVEL`;
+   - formato multipagina: `servizio NOME CANONICO INGLESE TOP-LEVEL · Pag. X/Y`.
+2. **TITLE**
+   - formato: `(emoji) __**TITOLO**__`;
+   - sempre uppercase + bold + underline.
+3. **DESCRIPTION**
+   - solo introduzione narrativa breve della pagina;
+   - sempre in corsivo;
+   - non è il contenitore principale delle sezioni.
+4. **FIELD**
+   - ogni sezione importante deve essere un vero field Discord;
+   - `field.name` obbligatorio: `(emoji) __**TITOLO FIELD**__` (uppercase + bold + underline);
+   - `field.value`: contenuto della sezione.
+5. **FOOTER**
+   - centralizzato tramite pipeline/footer service già in standard.
+
+Regola fondamentale:
+
+- le sezioni importanti **non** devono essere costruite nella sola `description` con heading inline (es. `📈 **TREND**`, `🏆 **CLASSIFICA**`, `🎯 **MISSIONI**`, `👇 **Risposta:**`);
+- tali sezioni devono essere rese con `embed.add_field(...)`;
+- eccezioni sono ammesse solo se esplicitamente documentate nel renderer di dominio.
+
 Per il vocabolario canonico delle action e la loro semantica normativa si applica anche `docs/command_standards.md`.
 
 ## Regola obbligatoria

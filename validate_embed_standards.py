@@ -119,6 +119,7 @@ _CANONICAL_BODY_HELPERS = {
     "format_standard_field_name",
     "apply_standard_body_helpers",
     "format_standard_description",
+    "format_standard_section_value",
 }
 
 
@@ -393,6 +394,20 @@ def _check_body_helpers_adoption(path: Path, source: str, report: ValidationRepo
             rel,
             1,
             "Command embed builder must route title rendering through format_standard_title.",
+        )
+    if "embed.add_field(" not in source:
+        report.add(
+            "command_embed_fields_required",
+            rel,
+            1,
+            "Command embed builder must render important sections as real Discord fields (embed.add_field).",
+        )
+    if "format_standard_description(" not in source:
+        report.add(
+            "command_embed_description_intro_required",
+            rel,
+            1,
+            "Command embed builder must render description as a short canonical intro.",
         )
 
 

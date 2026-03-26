@@ -7,6 +7,7 @@ import discord
 DISCORD_TITLE_MAX = 256
 DISCORD_DESCRIPTION_MAX = 4096
 DISCORD_FIELD_NAME_MAX = 256
+DISCORD_FIELD_VALUE_MAX = 1024
 
 
 def _truncate(value: str, max_len: int) -> str:
@@ -50,11 +51,16 @@ def format_standard_field_name(text: str, *, emoji: str | None = None) -> str:
     return _truncate(rendered, DISCORD_FIELD_NAME_MAX)
 
 
+def format_standard_section_value(text: str) -> str:
+    """Render canonical field body text and enforce Discord field limits."""
+    return _truncate((text or "").strip() or "—", DISCORD_FIELD_VALUE_MAX)
+
+
 @dataclass(slots=True)
 class BodyFormatOptions:
     title_emoji: str | None = None
     title_uppercase: bool = True
-    description_italic: bool = False
+    description_italic: bool = True
     blank_line_before_fields: bool = False
     format_field_names: bool = False
 
