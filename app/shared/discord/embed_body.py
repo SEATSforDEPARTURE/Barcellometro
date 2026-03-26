@@ -18,7 +18,7 @@ def _truncate(value: str, max_len: int) -> str:
 
 def format_standard_title(text: str, *, emoji: str | None = None, uppercase: bool = True) -> str:
     base = (text or "").strip()
-    rendered = base.upper() if uppercase else base
+    rendered = base.upper()
     if emoji:
         rendered = f"{emoji} __**{rendered}**__"
     else:
@@ -36,10 +36,11 @@ def format_standard_description(text: str, *, italic: bool = True, blank_line_be
 
 def format_standard_field_name(text: str, *, emoji: str | None = None) -> str:
     base = (text or "").strip()
+    normalized = base.upper()
     if emoji:
-        rendered = f"{emoji} __**{base}**__"
+        rendered = f"{emoji} __**{normalized}**__"
     else:
-        rendered = f"__**{base}**__"
+        rendered = f"__**{normalized}**__"
     return _truncate(rendered, DISCORD_FIELD_NAME_MAX)
 
 

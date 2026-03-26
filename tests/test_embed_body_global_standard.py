@@ -67,6 +67,7 @@ def assert_standard_field_name(name: str | None) -> None:
     rendered = name.strip()
     inner = _extract_inner_standard_text(rendered, field=True)
     assert inner, f"Field name senza contenuto: {name!r}"
+    assert inner.upper() == inner, f"Field name non uppercase: {name!r}"
 
 
 def assert_standard_description(description: str | None, *, strict: bool, has_fields: bool = False) -> None:
