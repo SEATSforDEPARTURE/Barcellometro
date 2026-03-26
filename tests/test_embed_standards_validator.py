@@ -70,18 +70,19 @@ def test_greetings_layout_docs_and_renderer_reflect_final_visual_contract() -> N
     settings_readme = Path("settings/README.md").read_text(encoding="utf-8")
     greetings_json = Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8")
 
-    assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' in member_flow_source
+    assert "attach_author_meta(" in member_flow_source
+    assert 'canonical_top_level_command="greetings"' in member_flow_source
     assert "embed.set_thumbnail(url=avatar_url)" in member_flow_source
     assert 'embed.add_field(name="Evento"' not in member_flow_source
     assert "timestamp=created_at" not in member_flow_source
     assert "Oggi alle" not in member_flow_source
 
-    assert "il renderer live usa sempre author fisso `🚪 INGRESSI & USCITE`" in docs_source
+    assert "l'author live deve passare dalla pipeline standard" in docs_source
     assert "il titolo dell'embed coincide con la label evento (`event_label`)" in docs_source
     assert "non esiste più il field separato `Evento`" in docs_source
     assert "la thumbnail dell'embed deve usare l'avatar dell'utente quando disponibile" in docs_source
 
-    assert "author fisso `🚪 INGRESSI & USCITE`" in settings_readme
+    assert "author standard via metadata canonici" in settings_readme
     assert "titolo embed = label evento" in settings_readme
     assert "thumbnail = avatar utente" in settings_readme
     assert "nessun campo separato `Evento`" in settings_readme

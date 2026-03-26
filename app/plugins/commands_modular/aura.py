@@ -259,7 +259,16 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext, *, root_t
         mod_file: discord.File | None = None,
     ) -> None:
         dm = await interaction.user.create_dm()
-        await send_report_dm_chunks(dm, embeds=apply_standard_report_style(embeds, service_name="aura", cover_title=embeds[0].title or "✨ RESOCONTO AURA"), files=[mod_file] if mod_file is not None else None)
+        await send_report_dm_chunks(
+            dm,
+            embeds=apply_standard_report_style(
+                embeds,
+                service_name="aura",
+                canonical_top_level_command="aurasummary",
+                cover_title=embeds[0].title or "✨ RESOCONTO AURA",
+            ),
+            files=[mod_file] if mod_file is not None else None,
+        )
 
     async def _run(
         interaction: discord.Interaction,

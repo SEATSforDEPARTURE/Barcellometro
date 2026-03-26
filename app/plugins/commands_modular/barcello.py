@@ -118,6 +118,7 @@ def register_barcello(
         return apply_standard_report_style(
             [public_embed, details_embed],
             service_name="barcello",
+            canonical_top_level_command="barcellosummary",
             cover_title=public_embed.title or "❤️ REPORT BARCELLO",
         )
 

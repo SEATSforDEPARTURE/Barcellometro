@@ -248,7 +248,6 @@ _ALLOWED_MANUAL_SET_FOOTER_FILES = {
 _ALLOWED_MANUAL_SET_AUTHOR_FILES = {
     REPO_ROOT / "app" / "services" / "author.py",
     REPO_ROOT / "app" / "shared" / "discord" / "author_pipeline.py",
-    REPO_ROOT / "app" / "services" / "member_flow_notifications.py",
     REPO_ROOT / "app" / "plugins" / "commands_modular" / "riassunto.py",
 }
 
@@ -985,7 +984,8 @@ def _check_greetings_live_layout_contract(report: ValidationReport) -> None:
     member_flow_source = member_flow_path.read_text(encoding="utf-8")
     required_member_flow_snippets = (
         'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))',
-        'embed.set_author(name="🚪 INGRESSI & USCITE")',
+        "attach_author_meta(",
+        'canonical_top_level_command="greetings"',
         "embed.set_thumbnail(url=avatar_url)",
         'attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)',
     )
@@ -1016,13 +1016,13 @@ def _check_greetings_live_layout_contract(report: ValidationReport) -> None:
 
     docs_expectations = {
         REPO_ROOT / "docs" / "embed_command_rendering_standard.md": (
-            "il renderer live usa sempre author fisso `🚪 INGRESSI & USCITE`",
+            "l'author live deve passare dalla pipeline standard",
             "il titolo dell'embed coincide con la label evento (`event_label`)",
             "non esiste più il field separato `Evento`",
             "la thumbnail dell'embed deve usare l'avatar dell'utente quando disponibile",
         ),
         REPO_ROOT / "settings" / "README.md": (
-            "author fisso `🚪 INGRESSI & USCITE`",
+            "author standard via metadata canonici",
             "titolo embed = label evento",
             "thumbnail = avatar utente",
             "nessun campo separato `Evento`",

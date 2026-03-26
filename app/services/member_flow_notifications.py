@@ -8,6 +8,7 @@ from typing import Any
 
 import discord
 
+from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
 from app.services.greetings_copy_service import GreetingsCopyService
 
@@ -354,9 +355,13 @@ class MemberFlowNotificationsService:
             now=created_at,
         )
         embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))
-        # Layout canonico live: author fisso per il canale GREETINGS, titolo per
-        # la label evento e narrativa come contenuto principale dell'embed.
-        embed.set_author(name="🚪 INGRESSI & USCITE")
+        # Layout canonico live: titolo = label evento, narrativa = body e author
+        # derivato dal top-level canonico (non hardcoded).
+        attach_author_meta(
+            embed,
+            service_name="member_flow_notifications",
+            canonical_top_level_command="greetings",
+        )
         avatar_url = self._resolve_user_avatar_url(user)
         if avatar_url:
             embed.set_thumbnail(url=avatar_url)

@@ -93,6 +93,7 @@ _CANONICAL_TOP_LEVEL_ALIASES: dict[str, str] = {
 }
 
 _CANONICAL_TOP_LEVEL_LABELS: dict[str, str] = {
+    "activitysummary": "ACTIVITY SUMMARY",
     "channelsummary": "CHANNEL SUMMARY",
     "serversummary": "SERVER SUMMARY",
     "dmsummary": "DM SUMMARY",
