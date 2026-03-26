@@ -41,6 +41,7 @@ from app.shared.discord.embed_limits import (
     MAX_EMBED_CHARS,
     _estimate_embed_size,
 )
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 from app.shared.discord.embed_status_helpers import _chunk_status_blocks, _service_section, _split_long_text
 from app.shared.discord.footer_status_pagination import FooterStatusPaginationView
 from app.shared.discord.footer_status_renderer import build_footer_status_embeds, build_footer_status_pages, build_service_status_field
@@ -132,10 +133,10 @@ def test_footer_status_overview_page_is_always_present_and_readable() -> None:
         assert "Vista amministrativa del footer embed" in overview.description
         assert "INIZIO / INDIETRO / AVANTI" in overview.description
         assert [field.name for field in overview.fields] == [
-            "ℹ️ STATO",
-            "📊 SERVIZI",
-            "📂 FAMIGLIE",
-            "⚙️ CONFIGURAZIONE",
+            format_standard_field_name("Stato", emoji="ℹ️"),
+            format_standard_field_name("Servizi", emoji="📊"),
+            format_standard_field_name("Famiglie", emoji="📂"),
+            format_standard_field_name("Configurazione", emoji="⚙️"),
         ]
         assert all("• " in field.value for field in overview.fields)
         assert "Navigazione" not in "\n".join(field.name for field in overview.fields)
@@ -226,7 +227,7 @@ def test_footer_status_builds_multiple_pages_when_services_are_many() -> None:
         embeds = await build_footer_status_embeds(await footer.build_status_snapshot(), footer_service=footer)
 
         assert len(embeds) > 2
-        assert embeds[0].title == "📦 EMBED"
+        assert embeds[0].title == format_standard_title("EMBED", emoji="📦")
         assert embeds[0].description and "**ℹ️ FOOTER STATUS**" in embeds[0].description
         assert any(embed.description and "FOOTER STATUS · STANDARD SERVICES" in embed.description for embed in embeds[1:])
         assert all("(1/" not in (embed.title or "") for embed in embeds)

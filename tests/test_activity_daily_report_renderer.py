@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.shared.discord.embed_body import format_standard_field_name
+
 
 @pytest.fixture
 def renderer_module(import_fresh):
@@ -92,14 +94,17 @@ def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fie
     assert "🫀 **PUNTI ATTIVITÀ CANALI**" in (embeds[0].description or "")
     assert "🟢 **(72/100)** - #general" in (embeds[0].description or "")
     first_names = [f.name for f in embeds[0].fields]
-    assert "📈 TREND" in first_names
-    stats_server = next(f.value for f in embeds[0].fields if f.name == "📌 STATISTICHE SERVER")
+    assert format_standard_field_name("Trend", emoji="📈") in first_names
+    stats_server = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("Statistiche server", emoji="📌"))
     assert "Ora di silenzio generale" in stats_server
     assert "Utenti attivi: **3/12 (25%)**" in stats_server
-    channel_stats = next(f.value for f in embeds[1].fields if f.name == "📌 STATISTICHE CANALE")
+    channel_stats = next(f.value for f in embeds[1].fields if f.name == format_standard_field_name("Statistiche canale", emoji="📌"))
     assert "Ora di silenzio" in channel_stats
     assert "Utenti attivi: **2/10 (20%)**" in channel_stats
-    assert [f.name for f in embeds[1].fields][:2] == ["📈 TREND", "📌 STATISTICHE CANALE"]
+    assert [f.name for f in embeds[1].fields][:2] == [
+        format_standard_field_name("Trend", emoji="📈"),
+        format_standard_field_name("Statistiche canale", emoji="📌"),
+    ]
 
 
 def test_daily_renderer_txt_contains_required_headers_and_silence(renderer_module) -> None:

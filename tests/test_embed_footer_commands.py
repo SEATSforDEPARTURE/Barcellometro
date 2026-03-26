@@ -8,6 +8,7 @@ import discord
 import pytest
 from discord import app_commands
 
+from app.shared.discord.embed_body import format_standard_title
 from tests._embed_test_utils import InteractionStub, find_command, register_embed_tree, section_payload
 
 
@@ -246,8 +247,8 @@ def test_footer_status_command_uses_embed_namespace_and_interactive_view(embed_m
         kwargs = send_command_embeds.await_args.kwargs
         assert kwargs['ephemeral'] is True
         assert len(kwargs['embeds']) == 1
-        assert kwargs['embeds'][0].title == '📦 EMBED'
+        assert kwargs['embeds'][0].title == format_standard_title('EMBED', emoji='📦')
         assert isinstance(kwargs['view'], embed_module.FooterStatusPaginationView)
-        assert kwargs['view']._embeds[0].title == '📦 EMBED'
+        assert kwargs['view']._embeds[0].title == format_standard_title('EMBED', emoji='📦')
 
     asyncio.run(_run())

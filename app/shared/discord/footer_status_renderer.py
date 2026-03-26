@@ -19,6 +19,7 @@ from app.shared.discord.embed_limits import (
     normalize_embeds_for_discord,
 )
 from app.shared.discord.embed_rendering import finalize_embeds_rendering
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 
 logger = logging.getLogger(__name__)
 
