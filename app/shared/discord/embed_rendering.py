@@ -6,7 +6,10 @@ import discord
 
 from app.services.author import AuthorService
 from app.services.footer import FooterService
+from app.services.embed_images import EmbedImagesService
 from app.shared.discord.author_pipeline import _needs_author_finalize, finalize_embed_author
+from app.shared.discord.embed_body import BodyFormatOptions, apply_standard_body_helpers
+from app.shared.discord.embed_images_pipeline import _needs_images_finalize, finalize_embed_images
 from app.shared.discord.footer_pipeline import _needs_footer_finalize, finalize_embed
 
 
@@ -18,9 +21,14 @@ async def finalize_embed_rendering(
     default_service_name: str = "unknown",
     page_index: int | None = None,
     page_total: int | None = None,
+    embed_images_service: EmbedImagesService | None = None,
+    body_format_options: BodyFormatOptions | None = None,
 ) -> discord.Embed:
     author_enabled = await author_service.is_enabled() if author_service is not None else None
     footer_enabled = await footer_service.is_enabled() if footer_service is not None else None
+
+    if body_format_options is not None:
+        apply_standard_body_helpers(embed, options=body_format_options)
 
     if _needs_author_finalize(embed, global_enabled=author_enabled):
         await finalize_embed_author(
@@ -32,6 +40,9 @@ async def finalize_embed_rendering(
         )
     if _needs_footer_finalize(embed, global_enabled=footer_enabled):
         await finalize_embed(embed, footer_service, default_service_name=default_service_name)
+    images_enabled = await embed_images_service.is_enabled() if embed_images_service is not None else None
+    if _needs_images_finalize(embed, global_enabled=images_enabled):
+        await finalize_embed_images(embed, embed_images_service, default_service_name=default_service_name)
     return embed
 
 
@@ -41,6 +52,8 @@ async def finalize_embeds_rendering(
     footer_service: FooterService | None,
     author_service: AuthorService | None,
     default_service_name: str = "unknown",
+    embed_images_service: EmbedImagesService | None = None,
+    body_format_options: BodyFormatOptions | None = None,
 ) -> list[discord.Embed]:
     embed_list = list(embeds or [])
     total = len(embed_list)
@@ -52,5 +65,7 @@ async def finalize_embeds_rendering(
             default_service_name=default_service_name,
             page_index=idx if total > 1 else None,
             page_total=total if total > 1 else None,
+            embed_images_service=embed_images_service,
+            body_format_options=body_format_options,
         )
     return embed_list

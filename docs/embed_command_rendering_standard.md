@@ -344,3 +344,44 @@ Il feed GREETINGS / `🚪 INGRESSI & USCITE` segue inoltre un contratto visivo f
 - applica il suffix author centrale ` · (Pag. X/Y)` su liste;
 - è usato dai path di consegna standard (`command_embeds` e `delivery`) ed è compatibile con DM/canali/ephemeral/followup/edit message;
 - resta pronto alla fase successiva per integrazione `images` e helper body, senza migrazione massiva dei renderer in questa fase.
+
+## Fase 2 — dominio centralizzato `/embed images` + body helpers
+
+### `/embed images` (nuovo dominio ufficiale)
+Comandi amministrativi disponibili:
+- `/embed images on`
+- `/embed images off`
+- `/embed images status`
+- `/embed images template_global_set image thumbnail`
+- `/embed images template_global_show`
+- `/embed images template_global_reset`
+- `/embed images template_service_set service image thumbnail`
+- `/embed images template_service_show`
+- `/embed images template_service_reset`
+
+Precedenza ufficiale immagini:
+1. override runtime esplicito del renderer (tramite metadata centrali)
+2. template service
+3. template global
+4. fallback: nessuna immagine
+
+Note operative:
+- `image_url` e `thumbnail_url` sono indipendenti.
+- il toggle globale OFF è forte e rimuove sia image che thumbnail anche da embed ricostruiti da payload.
+- la pipeline è compatibile con embed singolo e multipagina tramite il layer centrale `finalize_embeds_rendering(...)`.
+
+### Standard body globale (mattoni centrali)
+Introdotti helper condivisi nel modulo `app/shared/discord/embed_body.py`:
+- `format_standard_title(...)` → `(emoji) __**TITOLO**__` (uppercase di default)
+- `format_standard_description(...)` → descrizione in corsivo, con riga vuota opzionale prima dei fields
+- `format_standard_field_name(...)` → `(emoji) __**Titolo field**__`
+- `apply_standard_body_helpers(...)` → applicazione orchestrata su title/description/fields
+
+Contratto:
+- questi helper definiscono lo standard globale.
+- sono ammesse eccezioni in renderer legacy o layout specializzati già documentati.
+- in questa fase non è prevista migrazione massiva: i renderer principali verranno portati allo standard in fase 3.
+
+### Metadata pipeline vs rendering finale
+- Metadata pipeline: i renderer possono allegare metadati (author/footer/images/body options) senza conoscere il rendering finale.
+- Rendering finale: il layer centrale applica le policy globali (author, footer, images, body) prima dell'invio Discord.

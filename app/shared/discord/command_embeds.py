@@ -13,6 +13,8 @@ import discord
 from app.plugins.commands_modular.time_windows import format_italian_ts, format_rolling_window_label, parse_italian_datetime
 from app.services.author import AuthorService, attach_author_meta
 from app.services.footer import FooterService, attach_footer_meta
+from app.services.embed_images import EmbedImagesService
+from app.shared.discord.embed_body import format_standard_title
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, chunk_embeds_for_message_batches, is_valid_embed, normalize_embeds_for_discord
 from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
@@ -699,7 +701,7 @@ async def build_command_embeds(
         top_level_emoji=top_level_emoji,
         subcommand_emoji=subcommand_emoji,
     )
-    title = f"{display_context.title_emoji} {display_context.visual_title}"
+    title = format_standard_title(display_context.visual_title, emoji=display_context.title_emoji, uppercase=True)
     raw_subtitle_parameters = [*(subtitle_args or ()), *(relevant_parameters or ())]
     blocks: list[str] = []
     header = f"**{display_context.subtitle_emoji} {display_context.visual_subtitle}**" if display_context.visual_subtitle else ""
@@ -821,6 +823,7 @@ async def send_command_embeds(
     footer_service: FooterService | None = None,
     author_service: AuthorService | None = None,
     default_service_name: str = "status",
+    embed_images_service: EmbedImagesService | None = None,
 ) -> None:
     embed_list = list(embeds)
     if not embed_list:
@@ -830,6 +833,7 @@ async def send_command_embeds(
         footer_service=footer_service,
         author_service=author_service,
         default_service_name=default_service_name,
+        embed_images_service=embed_images_service,
     )
     invalid_indexes = [idx for idx, embed in enumerate(embed_list, start=1) if not is_valid_embed(embed, max_chars=MAX_EMBED_CHARS)]
     if invalid_indexes:
@@ -840,6 +844,7 @@ async def send_command_embeds(
             footer_service=footer_service,
             author_service=author_service,
             default_service_name=default_service_name,
+            embed_images_service=embed_images_service,
         )
     batches = chunk_embeds_for_message_batches(embed_list, max_total_chars=MAX_EMBED_CHARS)
     first_batch = batches[0]
@@ -881,6 +886,7 @@ async def send_standard_response(
     kind: CommandKind = "info",
     footer_service: FooterService | None = None,
     author_service: AuthorService | None = None,
+    embed_images_service: EmbedImagesService | None = None,
     ephemeral: bool = True,
     files: list[discord.File] | None = None,
     footer_mode: FooterMode = "meta",
@@ -919,6 +925,7 @@ async def send_standard_response(
         footer_service=footer_service,
         author_service=author_service,
         default_service_name=resolved_footer_service_name,
+        embed_images_service=embed_images_service,
     )
     await send_command_embeds(
         interaction,
@@ -928,6 +935,7 @@ async def send_standard_response(
         footer_service=footer_service,
         author_service=author_service,
         default_service_name=resolved_footer_service_name,
+        embed_images_service=embed_images_service,
     )
 
 
@@ -990,6 +998,7 @@ async def send_legacy_standard_response(
     service_name: str = "status",
     footer_service: FooterService | None = None,
     author_service: AuthorService | None = None,
+    embed_images_service: EmbedImagesService | None = None,
     ephemeral: bool = True,
 ) -> None:
     normalized_path = [part.strip().lower() for part in path_parts if part and part.strip()]

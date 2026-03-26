@@ -34,6 +34,7 @@ from app.services.translate.argos import ArgosTranslateService
 from app.services.aura import AuraAggregationJob, AuraEligibilityService, AuraRollingStatsService, ArchetypeAnalyzerService
 from app.services.author import AuthorService
 from app.services.footer import FooterService
+from app.services.embed_images import EmbedImagesService
 from app.services.member_flow_notifications import MemberFlowNotificationsService
 from app.services.greetings_backfill_service import GreetingsBackfillService
 
@@ -123,6 +124,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         instance_mode = "main"
     footer_service = FooterService(database_service)
     author_service = AuthorService(database_service)
+    embed_images_service = EmbedImagesService(database_service)
 
     if instance_mode == "main":
         status_service = StatusService(database_service)
@@ -171,6 +173,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     registry.register("ingest", ingest_service)
     registry.register("footer", footer_service)
     registry.register("author", author_service)
+    registry.register("embed_images", embed_images_service)
     registry.register("stt.local", stt_local_service)
     if instance_mode == "main":
         registry.register("status", status_service)

@@ -252,6 +252,13 @@ _ALLOWED_MANUAL_SET_AUTHOR_FILES = {
     REPO_ROOT / "app" / "plugins" / "commands_modular" / "riassunto.py",
 }
 
+_ALLOWED_MANUAL_SET_IMAGE_FILES = {
+    REPO_ROOT / "app" / "services" / "embed_images.py",
+    REPO_ROOT / "app" / "shared" / "discord" / "embed_images_pipeline.py",
+    REPO_ROOT / "app" / "services" / "member_flow_notifications.py",
+    REPO_ROOT / "app" / "plugins" / "commands_modular" / "riassunto.py",
+}
+
 
 def _check_manual_set_footer_calls(tree: ast.AST, path: Path, report: ValidationReport) -> None:
     if path in _ALLOWED_MANUAL_SET_FOOTER_FILES or path.parts[:1] == ("tests",):
@@ -284,6 +291,36 @@ def _check_manual_set_author_calls(tree: ast.AST, path: Path, report: Validation
             path.relative_to(REPO_ROOT),
             node.lineno,
             "Manual embed.set_author(...) bypasses the centralized author contract; use author metadata/helpers instead.",
+        )
+
+
+def _check_manual_set_embed_images_calls(tree: ast.AST, path: Path, report: ValidationReport) -> None:
+    if path in _ALLOWED_MANUAL_SET_IMAGE_FILES or path.parts[:1] == ("tests",):
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        chain = _attribute_chain(node.func)
+        if chain is None or chain[-1] not in {"set_image", "set_thumbnail"}:
+            continue
+        report.add(
+            "manual_embed_images_bypass",
+            path.relative_to(REPO_ROOT),
+            node.lineno,
+            "Manual embed.set_image/set_thumbnail bypasses the centralized images contract; use embed image metadata/helpers instead.",
+        )
+
+
+def _check_body_helpers_adoption(path: Path, source: str, report: ValidationReport) -> None:
+    rel = path.relative_to(REPO_ROOT)
+    if rel.as_posix() != "app/shared/discord/command_embeds.py":
+        return
+    if "format_standard_title(" not in source:
+        report.add(
+            "body_helpers_required",
+            rel,
+            1,
+            "Command embed builder must route title rendering through format_standard_title.",
         )
 
 _RISKY_PERSISTED_EMBED_TARGETS = {
@@ -991,7 +1028,9 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _check_legacy_footer_service_wiring(tree, path, report)
         _check_manual_set_footer_calls(tree, path, report)
         _check_manual_set_author_calls(tree, path, report)
+        _check_manual_set_embed_images_calls(tree, path, report)
         _check_persisted_embed_hydration(tree, path, report)
+        _check_body_helpers_adoption(path, source, report)
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)
