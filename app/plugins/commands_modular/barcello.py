@@ -267,6 +267,12 @@ def register_barcello(
         return text
 
     def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
+        def _normalize_field_name(raw: str) -> str:
+            text = str(raw or "").strip()
+            if "__**" in text:
+                return text
+            return format_standard_field_name(text)
+
         chunks = _split_field_chunks(value, 1024)
         available = 25 - len(embed.fields)
         if available <= 0:
@@ -274,8 +280,7 @@ def register_barcello(
         if len(chunks) > available:
             chunks = chunks[:available]
         for idx, chunk in enumerate(chunks):
-            field_name = name if idx == 0 else f"{name} (cont.)"
-            embed.add_field(name=field_name, value=chunk, inline=False)
+            embed.add_field(name=_normalize_field_name(name if idx == 0 else f"{name} (cont.)"), value=chunk, inline=False)
 
     def _parse_hex_color(raw: str | None) -> int | None:
         if not raw:

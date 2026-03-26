@@ -2261,7 +2261,7 @@ class TriggerEngineService:
                 f"👇 **Risposta:**\n{cleaned_answer}"
             )
         description = self._truncate_embed_description(description)
-        title = "❓ DOMANDA" if response_origin == "error" else "❓ BOTTA & RISPOSTA"
+        title = format_standard_title("DOMANDA", emoji="❓") if response_origin == "error" else format_standard_title("BOTTA & RISPOSTA", emoji="❓")
         embed = build_report_cover_embed(
             title=title,
             description=description,

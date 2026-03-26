@@ -169,7 +169,7 @@ def test_footer_status_service_blocks_are_compact_and_variant_aware() -> None:
         entry = snapshot.services[0]
         field = build_service_status_field(entry, snapshot)
 
-        assert field.name == "🧾 RIASSUNTO"
+        assert field.name == "🧾 __**RIASSUNTO**__"
         assert "• Footer effettivo:" in field.value
         assert "• Sorgente: **service**" in field.value
         assert "Varianti: **2**" in field.value

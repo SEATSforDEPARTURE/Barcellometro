@@ -98,7 +98,7 @@ def test_add_field_safe_creates_continuation(attivita_module) -> None:
     embed = discord.Embed(title="t")
     attivita_module.add_field_safe(embed, name="N", value="\n".join(["x" * 300 for _ in range(10)]))
     assert len(embed.fields) >= 2
-    assert embed.fields[1].name.endswith("(cont.)")
+    assert "(CONT.)" in embed.fields[1].name
     assert all(len(f.value) <= 1024 for f in embed.fields)
 
 

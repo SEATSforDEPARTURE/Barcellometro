@@ -125,7 +125,7 @@ def _split_field_value(text: str, limit: int = MAX_FIELD_VALUE) -> list[str]:
 def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, color: int) -> None:
     chunks = _split_field_value(value, MAX_FIELD_VALUE)
     for idx, chunk in enumerate(chunks):
-        field_name = name if idx == 0 else f"{name} (cont.)"
+        field_name = format_standard_field_name(name if idx == 0 else f"{name} (cont.)")
         if len(pages[-1].fields) >= MAX_FIELDS_PER_EMBED:
             logger.info("daily_resoconto renderer new_page reason=max_fields")
             pages.append(discord.Embed(title=format_standard_title("DETTAGLI", emoji="🗒️"), color=color))

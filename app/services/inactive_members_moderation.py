@@ -16,7 +16,7 @@ import discord
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
-from app.shared.discord.embed_body import format_standard_title
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
@@ -111,7 +111,7 @@ class InactivityActionsView(discord.ui.View):
             if isinstance(child, discord.ui.Button):
                 child.disabled = True
         await interaction.response.edit_message(view=self)
-        embed = discord.Embed(title=format_standard_title("Annullato", emoji="❌", uppercase=False), description="Azione manuale inattivi annullata.", color=0x808080)
+        embed = discord.Embed(title=format_standard_title("Annullato", emoji="❌"), description="Azione manuale inattivi annullata.", color=0x808080)
         attach_footer_meta(embed, service_name="inactivity_moderation", used_local_processing=True)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -553,8 +553,8 @@ class InactiveMembersModerationService:
         if extra > 0:
             preview_lines.append(f"+ altri {extra}…")
         embed = discord.Embed(title=format_standard_title("GRACE SCADUTO (AUTO OFF)", emoji="⚠️"), colour=discord.Colour.orange())
-        safe_add_field(embed, name="Utenti scaduti", value=str(len(expired)), inline=True)
-        safe_add_field(embed, name="Dettaglio", value="\n".join(preview_lines) if preview_lines else "Nessun utente.", inline=False)
+        safe_add_field(embed, name=format_standard_field_name("Utenti scaduti"), value=str(len(expired)), inline=True)
+        safe_add_field(embed, name=format_standard_field_name("Dettaglio"), value="\n".join(preview_lines) if preview_lines else "Nessun utente.", inline=False)
         attach_footer_meta(embed, service_name="inactivity_moderation", used_local_processing=True)
 
         view = GraceExpiredActionsView(self, guild_id, [str(c.member.id) for c, _, _, _ in expired])
@@ -630,11 +630,11 @@ class InactiveMembersModerationService:
 
         embeds: list[discord.Embed] = []
         for i, chunk in enumerate(chunks, start=1):
-            embed = discord.Embed(title=f"✏️ INATTIVI (SERVER-WIDE) — Pag. {i}/{total_pages}", colour=discord.Colour.blue())
+            embed = discord.Embed(title=format_standard_title(f"INATTIVI (SERVER-WIDE) — PAG. {i}/{total_pages}", emoji="✏️"), colour=discord.Colour.blue())
             if i == 1:
-                safe_add_field(embed, name="Membri analizzati", value=str(considered), inline=True)
-                safe_add_field(embed, name="Inattivi trovati", value=str(len(inactive)), inline=True)
-                safe_add_field(embed, name="Stato reminder", value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
+                safe_add_field(embed, name=format_standard_field_name("Membri analizzati"), value=str(considered), inline=True)
+                safe_add_field(embed, name=format_standard_field_name("Inattivi trovati"), value=str(len(inactive)), inline=True)
+                safe_add_field(embed, name=format_standard_field_name("Stato reminder"), value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
             embed.description = chunk
             embeds.append(embed)
         attach_footer_meta_to_all(embeds, service_name="inactivity_moderation", used_local_processing=True)
@@ -935,7 +935,7 @@ class InactiveMembersModerationService:
         return self.build_action_embed("🤖 Auto inattivi completata", reminder_stats, kick_stats)
 
     def build_action_embed(self, title: str, stats: dict[str, Any], extra: dict[str, Any] | None = None) -> discord.Embed:
-        embed = discord.Embed(title=title, color=0x57F287)
+        embed = discord.Embed(title=format_standard_title(title), color=0x57F287)
         merged = dict(stats)
         if extra:
             for key, value in extra.items():

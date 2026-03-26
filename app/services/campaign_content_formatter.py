@@ -219,7 +219,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         if len(highlights) >= 3:
             break
 
-    overview = discord.Embed(title=format_standard_title(f"{title} • Inizio", uppercase=False), color=color)
+    overview = discord.Embed(title=format_standard_title(f"{title} • Inizio"), color=color)
     tone = _time_of_day_label(_overview_now(payload))
     if highlights:
         overview.description = (
@@ -237,7 +237,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     for category, items in categories.items():
         display = get_category_display_name(category)
         emoji = get_category_emoji(category)
-        embed = discord.Embed(title=f"{title} • {display}", color=color)
+        embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
         lines: list[str] = []
         for idx, item in enumerate(items[:5], start=1):
             summary = trim_sentence_block(item.get("summary", "Nessun riassunto disponibile"), limit=280)
@@ -320,7 +320,7 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         )
     embeds: list[discord.Embed] = []
     for page_title, description, comment in pages:
-        e = discord.Embed(title=f"{title} • {page_title}", description=description[:3900], color=color)
+        e = discord.Embed(title=format_standard_title(f"{title} • {page_title}"), description=description[:3900], color=color)
         e.add_field(name=format_standard_field_name("Commento"), value=comment[:1024], inline=False)
         embeds.append(e)
     return _apply_campaign_footer(embeds, service_name="campagne_meteo")
@@ -354,7 +354,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
     tone = _time_of_day_label(_overview_now(payload))
 
     embeds: list[discord.Embed] = []
-    overview = discord.Embed(title=f"{title} • Inizio", color=color)
+    overview = discord.Embed(title=format_standard_title(f"{title} • Inizio"), color=color)
     overview.description = (
         f"🐹 Speciale oroscopo di **{tone}**: il Barcellometro ha lucidato le sfere e acceso lo studio stellare.\n"
         f"Clima zodiacale generale: **{mood}**.\n"
@@ -365,7 +365,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
     embeds.append(overview)
     for sign in SIGN_ORDER:
         data = signs.get(sign, {})
-        e = discord.Embed(title=f"{title} • {sign}", color=color)
+        e = discord.Embed(title=format_standard_title(f"{title} • {sign}"), color=color)
         e.add_field(name=format_standard_field_name("Amore", emoji="❤️"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("love") or "Cuore in fase di analisi")), limit=280)[:1024], inline=False)
         e.add_field(name=format_standard_field_name("Lavoro / Studio", emoji="💼"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("work") or "Organizzati per priorità")), limit=280)[:1024], inline=False)
         e.add_field(name=format_standard_field_name("Soldi", emoji="💰"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("money") or "Gestione prudente")), limit=240)[:1024], inline=False)
@@ -387,7 +387,7 @@ def build_fallback_embed(config: dict[str, Any], sources: list[str], *, service_
     color = resolve_color(config.get("embed_color"))
     title = config.get("embed_title") or "Servizio campagne"
     embed = discord.Embed(
-        title=title,
+        title=format_standard_title(title),
         description="Oggi il servizio non è riuscito a raccogliere contenuti affidabili.",
         color=color,
     )
