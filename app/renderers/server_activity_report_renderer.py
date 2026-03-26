@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from app.services.author import attach_author_meta, attach_author_meta_to_all
+from app.services.embed_images import attach_embed_images_meta, attach_embed_images_meta_to_all
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 
 from app.services.barcello_service import BarcelloResult
@@ -189,6 +191,8 @@ def build_daily_resoconto_embeds(
     if trend_text:
         status_embed.add_field(name="📈 TREND", value=trend_text, inline=False)
     attach_footer_meta(status_embed, service_name="daily_resoconto", used_local_processing=True)
+    attach_author_meta(status_embed, service_name="daily_resoconto")
+    attach_embed_images_meta(status_embed, service_name="daily_resoconto")
 
     pages: list[discord.Embed] = [discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)]
     themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]
@@ -232,9 +236,10 @@ def build_daily_resoconto_embeds(
     if proverbio_value:
         _add_field_chunked(pages, name="🍀 PROVERBIO DEL GIORNO", value=proverbio_value, color=0x95A5A6)
 
-    total = len(pages)
-    for idx, embed in enumerate(pages, start=1):
-        embed.title = f"🗒️ DETTAGLI (Pag {idx}/{total})"
+    for embed in pages:
+        embed.title = "🗒️ DETTAGLI"
     attach_footer_meta_to_all(pages, service_name="daily_resoconto", used_local_processing=True)
+    attach_author_meta_to_all(pages, service_name="daily_resoconto")
+    attach_embed_images_meta_to_all(pages, service_name="daily_resoconto")
 
     return [status_embed, *pages]

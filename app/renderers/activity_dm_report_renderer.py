@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from app.services.author import attach_author_meta, attach_author_meta_to_all
+from app.services.embed_images import attach_embed_images_meta, attach_embed_images_meta_to_all
 from app.services.footer import attach_footer_meta
 
 from app.services.activity_insights import ChannelActivityDetails, UserActivityEntry
@@ -261,11 +263,10 @@ def _add_block_field(
 
 def _finalize_detail_titles(embeds: list[discord.Embed]) -> None:
     detail = [e for e in embeds if e.title.startswith("📄 DETTAGLI ATTIVITÀ — Staff")]
-    if len(detail) <= 1:
-        detail[0].title = "📄 DETTAGLI ATTIVITÀ — Staff"
+    if not detail:
         return
-    for idx, emb in enumerate(detail, start=1):
-        emb.title = f"📄 DETTAGLI ATTIVITÀ — Staff ({idx}/{len(detail)})"
+    for emb in detail:
+        emb.title = "📄 DETTAGLI ATTIVITÀ — Staff"
 
 
 def build_activity_details_txt(
@@ -332,9 +333,13 @@ def build_activity_dm_embeds(
         f"🫀 **PUNTI ATTIVITÀ**\n{_bar(s.score, s.emoji)} **({s.score}/100)**\n*{s.trend_text}*"
     )
     attach_footer_meta(status, service_name="activity_dm", used_local_processing=True)
+    attach_author_meta(status, service_name="activity_dm")
+    attach_embed_images_meta(status, service_name="activity_dm")
 
     detail = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
     attach_footer_meta(detail, service_name="activity_dm", used_local_processing=True)
+    attach_author_meta(detail, service_name="activity_dm")
+    attach_embed_images_meta(detail, service_name="activity_dm")
     embeds = [detail]
 
     _add_chunked_field(embeds, "📌 STATISTICHE CANALE", "\n".join(details.stats_lines or ["n/d"]))
@@ -369,4 +374,6 @@ def build_activity_dm_embeds(
 
     _add_chunked_field(embeds, "💡 CONSIGLI", "\n".join(f"• {line}" for line in details.advice_bullets) or "• Nessun consiglio")
     _finalize_detail_titles(embeds)
+    attach_author_meta_to_all(embeds, service_name="activity_dm")
+    attach_embed_images_meta_to_all(embeds, service_name="activity_dm")
     return [status, *embeds]

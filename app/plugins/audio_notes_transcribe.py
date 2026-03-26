@@ -69,7 +69,8 @@ def _split_embed_descriptions(text: str, max_chars: int = _DISCORD_EMBED_DESCRIP
 
 def _build_audio_note_embed(description: str, *, contributors: list[str] | None = None, used_local_processing: bool = True) -> discord.Embed:
     embed = discord.Embed(title=_AUDIO_NOTE_TITLE, description=description, color=_AUDIO_NOTE_COLOR)
-    return attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
+    attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
+    return embed
 
 
 def _parse_chars_summary_limit(raw_value: str | None) -> int:

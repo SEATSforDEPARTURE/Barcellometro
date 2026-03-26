@@ -6,6 +6,8 @@ from typing import Any
 import discord
 
 from app.renderers.channel_summary import format_window_header
+from app.services.author import attach_author_meta
+from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta
 
 ITALIAN_WEEKDAYS = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
@@ -140,6 +142,8 @@ def build_daily_activity_embeds(
     )
     overview.add_field(name="💡 CONSIGLI", value=_truncate_field("\n".join(f"• {x}" for x in advice[:4])), inline=False)
     attach_footer_meta(overview, service_name="daily_activity_report", used_local_processing=True)
+    attach_author_meta(overview, service_name="daily_activity_report")
+    attach_embed_images_meta(overview, service_name="daily_activity_report")
 
     embeds = [overview]
     for item in channel_payloads:
@@ -173,6 +177,8 @@ def build_daily_activity_embeds(
         embed.add_field(name="📈 TREND", value=_truncate_field(s.trend_text or "n/d"), inline=False)
         embed.add_field(name="📌 STATISTICHE CANALE", value=_truncate_field("\n".join(stats_lines)), inline=False)
         attach_footer_meta(embed, service_name="daily_activity_report", used_local_processing=True)
+        attach_author_meta(embed, service_name="daily_activity_report")
+        attach_embed_images_meta(embed, service_name="daily_activity_report")
         embeds.append(embed)
 
     return embeds

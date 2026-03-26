@@ -8,6 +8,8 @@ from typing import Any
 import discord
 
 from app.core.config_paths import AURA_ARCHETYPES_JSON, AURA_MISSIONS_JSON
+from app.services.author import attach_author_meta, attach_author_meta_to_all
+from app.services.embed_images import attach_embed_images_meta, attach_embed_images_meta_to_all
 from app.services.footer import attach_footer_meta
 
 from app.services.aura_archetypes import build_dynamic_archetype_reason
@@ -570,6 +572,8 @@ def _compose_channel_aura_embed(
     if footer_text:
         logger.debug("aura_footer_note_delegated_to_central_pipeline=%s", footer_text)
     attach_footer_meta(embed, service_name="aura", used_local_processing=True)
+    attach_author_meta(embed, service_name="aura")
+    attach_embed_images_meta(embed, service_name="aura")
     return embed
 
 
@@ -628,6 +632,8 @@ def build_aura_embeds(
         description=_build_main_aura_description(aura_payload=aura_payload),
     )
     attach_footer_meta(main, service_name="aura", used_local_processing=True)
+    attach_author_meta(main, service_name="aura")
+    attach_embed_images_meta(main, service_name="aura")
 
     details_sections: list[tuple[str, str]] = []
     profile_section: tuple[str, str] | None = None
@@ -672,13 +678,17 @@ def build_aura_embeds(
 
     for page_idx, chunk in enumerate(page_chunks, start=1):
         prefix = details_title_prefix.strip() if details_title_prefix else "🗒️ DETTAGLI AURA"
-        embed = discord.Embed(title=f"{prefix} — \"{tier_label}\" (Pag {page_idx}/{total_pages})", color=0x2F3136)
+        embed = discord.Embed(title=f"{prefix} — \"{tier_label}\"", color=0x2F3136)
         for name, value in chunk:
             for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
                 embed.add_field(name=name if part_idx == 0 else f"{name} (cont.)", value=piece, inline=False)
         attach_footer_meta(embed, service_name="aura", used_local_processing=True)
+        attach_author_meta(embed, service_name="aura")
+        attach_embed_images_meta(embed, service_name="aura")
         details.append(embed)
 
     embeds = [main, *details]
+    attach_author_meta_to_all(embeds, service_name="aura")
+    attach_embed_images_meta_to_all(embeds, service_name="aura")
     sanitized = _ensure_embed_limits(embeds, max_chars=MAX_EMBED_CHARS)
     return [emb for emb in sanitized if _estimate_embed_size(emb) <= MAX_EMBED_CHARS]

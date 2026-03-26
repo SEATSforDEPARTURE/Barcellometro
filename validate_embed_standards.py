@@ -323,6 +323,64 @@ def _check_body_helpers_adoption(path: Path, source: str, report: ValidationRepo
             "Command embed builder must route title rendering through format_standard_title.",
         )
 
+
+_PHASE3_MIGRATED_RENDERERS: dict[str, dict[str, object]] = {
+    "app/renderers/channel_summary.py": {"allow_title_pagination": False},
+    "app/renderers/detail_embeds.py": {"allow_title_pagination": False},
+    "app/renderers/activity_report_renderer.py": {"allow_title_pagination": False},
+    "app/renderers/activity_dm_report_renderer.py": {"allow_title_pagination": False},
+    "app/renderers/server_activity_report_renderer.py": {"allow_title_pagination": False},
+    "app/renderers/user_activity_report_renderer.py": {"allow_title_pagination": False},
+    "app/renderers/aura_renderer.py": {"allow_title_pagination": True},
+}
+
+
+def _check_phase3_renderer_metadata_adoption(path: Path, source: str, report: ValidationReport) -> None:
+    rel = path.relative_to(REPO_ROOT).as_posix()
+    if rel not in _PHASE3_MIGRATED_RENDERERS:
+        return
+
+    if "attach_author_meta(" not in source and "attach_author_meta_to_all(" not in source:
+        report.add(
+            "phase3_renderer_author_meta_required",
+            path.relative_to(REPO_ROOT),
+            1,
+            "Migrated renderer must attach author metadata through centralized author helpers.",
+        )
+    if "attach_embed_images_meta(" not in source and "attach_embed_images_meta_to_all(" not in source:
+        report.add(
+            "phase3_renderer_images_meta_required",
+            path.relative_to(REPO_ROOT),
+            1,
+            "Migrated renderer must attach embed images metadata through centralized images helpers.",
+        )
+    if "attach_footer_meta(" not in source and "attach_footer_meta_to_all(" not in source:
+        report.add(
+            "phase3_renderer_footer_meta_required",
+            path.relative_to(REPO_ROOT),
+            1,
+            "Migrated renderer must attach footer metadata through centralized footer helpers.",
+        )
+
+
+def _check_renderer_title_pagination_bypass(path: Path, tree: ast.AST, report: ValidationReport) -> None:
+    rel = path.relative_to(REPO_ROOT).as_posix()
+    cfg = _PHASE3_MIGRATED_RENDERERS.get(rel)
+    if cfg is None or bool(cfg.get("allow_title_pagination")):
+        return
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        if "(Pag " not in node.value and "(Pag." not in node.value:
+            continue
+        report.add(
+            "renderer_title_pagination_bypass",
+            path.relative_to(REPO_ROOT),
+            node.lineno,
+            "Pagination must not be hardcoded in embed titles for migrated renderers; rely on author pagination pipeline.",
+        )
+
 _RISKY_PERSISTED_EMBED_TARGETS = {
     ("interaction", "response", "edit_message"),
     ("interaction", "response", "send_message"),
@@ -1031,6 +1089,8 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _check_manual_set_embed_images_calls(tree, path, report)
         _check_persisted_embed_hydration(tree, path, report)
         _check_body_helpers_adoption(path, source, report)
+        _check_phase3_renderer_metadata_adoption(path, source, report)
+        _check_renderer_title_pagination_bypass(path, tree, report)
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)

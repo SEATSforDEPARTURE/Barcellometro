@@ -385,3 +385,37 @@ Contratto:
 ### Metadata pipeline vs rendering finale
 - Metadata pipeline: i renderer possono allegare metadati (author/footer/images/body options) senza conoscere il rendering finale.
 - Rendering finale: il layer centrale applica le policy globali (author, footer, images, body) prima dell'invio Discord.
+
+## Fase 3 — migrazione renderer principali + validator finale
+
+In questa fase i renderer principali sono stati riallineati alla pipeline centralizzata tramite **metadata helper** (senza reinventare sistemi locali):
+
+- `app/renderers/channel_summary.py`
+- `app/renderers/detail_embeds.py`
+- `app/renderers/activity_report_renderer.py`
+- `app/renderers/activity_dm_report_renderer.py`
+- `app/renderers/server_activity_report_renderer.py`
+- `app/renderers/user_activity_report_renderer.py`
+- `app/renderers/aura_renderer.py`
+
+### Regole normative operative
+1. **Author standard**: i renderer migrati devono allegare `attach_author_meta(...)` / `attach_author_meta_to_all(...)`.
+2. **Footer standard**: i renderer migrati devono allegare `attach_footer_meta(...)` / `attach_footer_meta_to_all(...)`.
+3. **Images standard**: i renderer migrati devono allegare `attach_embed_images_meta(...)` / `attach_embed_images_meta_to_all(...)`.
+4. **Paginazione**: per i renderer migrati la paginazione non va hardcodata nel titolo; la sorgente primaria è la author pipeline (`(Pag. X/Y)`).
+5. **Override/fallback**:
+   - override runtime esplicito metadata renderer;
+   - template service;
+   - template global;
+   - fallback di servizio (author/footer) o assenza immagini.
+6. **Toggle globali**: `embed author`, `embed footer`, `embed images` possono spegnere centralmente il rendering finale anche in presenza di metadata.
+
+### Eccezioni consentite (esplicite)
+- `aura_renderer.py` mantiene titolo pagina specifico per `build_channel_aura_embed(...)` (`🗒️ DETTAGLI PUNTI AURA (Pag 2/2)`) per retrocompatibilità UX e test di budget/chunking.
+- `audio_notes_transcribe.py` resta temporaneamente su footer metadata-only: i test unitari isolano il modulo con stub minimi di `footer`, quindi author/images metadata saranno riallineati in un pass dedicato di refactor test harness.
+
+### Validator finale (antiregressione)
+`validate_embed_standards.py` ora blocca in modo robusto:
+- bypass manuali `set_author/set_footer/set_image/set_thumbnail` fuori helper canonici;
+- renderer fase 3 senza metadata helper author/images/footer;
+- paginazione hardcoded nei titoli dei renderer migrati (eccetto eccezioni esplicite).

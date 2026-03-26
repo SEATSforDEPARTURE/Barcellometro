@@ -5,6 +5,8 @@ from typing import Any, Callable
 
 import discord
 
+from app.services.author import attach_author_meta, attach_author_meta_to_all
+from app.services.embed_images import attach_embed_images_meta, attach_embed_images_meta_to_all
 from app.services.footer import attach_footer_meta
 
 from app.renderers.channel_summary import _as_hashtag
@@ -200,6 +202,8 @@ def build_summary_detail_embeds(
             contributors=footer_contributors or [],
             used_local_processing=footer_used_local_processing,
         )
+        attach_author_meta(e, service_name="riassunto")
+        attach_embed_images_meta(e, service_name="riassunto")
         return e
 
     def chunk_sections(section_list: list[tuple[str, str, int]]) -> list[discord.Embed]:
@@ -251,8 +255,9 @@ def build_summary_detail_embeds(
             embeds.extend(chunk_sections(group_sections))
 
     embeds = _ensure_embed_limits(embeds, max_chars=MAX_EMBED_CHARS)
-    total = max(len(embeds), 1)
-    for idx, embed in enumerate(embeds, start=1):
-        base_title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label} (Pag {idx}/{total})"
+    for embed in embeds:
+        base_title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label}"
         embed.title = f"**{base_title}**" if dm_mode else base_title
+    attach_author_meta_to_all(embeds, service_name="riassunto")
+    attach_embed_images_meta_to_all(embeds, service_name="riassunto")
     return embeds
