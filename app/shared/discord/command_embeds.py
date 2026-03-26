@@ -11,7 +11,7 @@ from typing import Any, Literal
 import discord
 
 from app.plugins.commands_modular.time_windows import format_italian_ts, format_rolling_window_label, parse_italian_datetime
-from app.services.author import AuthorService, attach_author_meta
+from app.services.author import AuthorService, attach_author_meta, resolve_canonical_top_level_command
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.embed_images import EmbedImagesService
 from app.shared.discord.embed_body import format_standard_title
@@ -672,6 +672,18 @@ def _resolve_footer_service_name(
     return "status"
 
 
+def _resolve_author_canonical_top_level(
+    *,
+    visual_top_level: str | None,
+    top_level: str,
+    footer_service_name: str,
+) -> str:
+    return resolve_canonical_top_level_command(
+        canonical_top_level_command=_normalize_command_token(visual_top_level) or _normalize_command_token(top_level),
+        service_name=footer_service_name,
+    )
+
+
 async def build_command_embeds(
     *,
     top_level: str,
@@ -776,6 +788,11 @@ async def build_command_embeds(
         visual_top_level=visual_top_level or display_context.visual_top_level,
         top_level=top_level,
     )
+    resolved_author_canonical_top_level = _resolve_author_canonical_top_level(
+        visual_top_level=visual_top_level or display_context.visual_top_level,
+        top_level=top_level,
+        footer_service_name=resolved_footer_service_name,
+    )
     embeds: list[discord.Embed] = []
     color = get_semantic_color(kind)
     for chunk in chunks or [blocks[0]]:
@@ -789,6 +806,7 @@ async def build_command_embeds(
             attach_author_meta(
                 embed,
                 service_name=resolved_footer_service_name,
+                canonical_top_level_command=resolved_author_canonical_top_level,
             )
         embeds.append(embed)
     return embeds

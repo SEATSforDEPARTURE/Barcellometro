@@ -46,7 +46,14 @@ async def finalize_embed_author(
         return embed
     if author_service is None:
         if not getattr(embed.author, "name", None):
-            embed.set_author(name=render_author_name_with_page(service_name=meta.service_name, page_index=page_index, page_total=page_total))
+            embed.set_author(
+                name=render_author_name_with_page(
+                    service_name=meta.service_name,
+                    canonical_top_level_command=meta.canonical_top_level_command,
+                    page_index=page_index,
+                    page_total=page_total,
+                )
+            )
         return embed
     try:
         enabled = await author_service.is_enabled()
@@ -69,7 +76,14 @@ async def finalize_embed_author(
         else:
             logger.warning("Author finalize failed: %s", exc)
         if not getattr(embed.author, "name", None):
-            embed.set_author(name=render_author_name_with_page(service_name=meta.service_name, page_index=page_index, page_total=page_total))
+            embed.set_author(
+                name=render_author_name_with_page(
+                    service_name=meta.service_name,
+                    canonical_top_level_command=meta.canonical_top_level_command,
+                    page_index=page_index,
+                    page_total=page_total,
+                )
+            )
         return embed
 
 

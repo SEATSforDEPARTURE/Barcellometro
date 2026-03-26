@@ -66,39 +66,38 @@ _SERVICE_NAME_OVERRIDES: dict[str, str | None] = {
     "__init__": None,
 }
 
-_SERVICE_CANONICAL_TOP_LEVEL_LABELS: dict[str, str] = {
-    "riassunto": "SUMMARY",
-    "resoconto": "REPORT",
-    "audio_notes": "AUDIO NOTES",
-    "aura": "AURA",
-    "attivita": "ACTIVITY",
-    "barcello": "BARCELLO",
+_SERVICE_CANONICAL_TOP_LEVEL_FALLBACKS: dict[str, str] = {
+    "riassunto": "dmsummary",
+    "resoconto": "channelsummary",
+    "audio_notes": "audionotes",
+    "audio_notes_transcribe": "audionotes",
+    "channel_summary": "channelsummary",
+    "voice_ingest": "voiceingest",
+}
+
+_CANONICAL_TOP_LEVEL_ALIASES: dict[str, str] = {
+    "ask": "qna",
+    "domanda": "qna",
+    "resocontocanale": "channelsummary",
+    "resocontoserver": "serversummary",
+}
+
+_CANONICAL_TOP_LEVEL_LABELS: dict[str, str] = {
+    "channelsummary": "CHANNEL SUMMARY",
+    "serversummary": "SERVER SUMMARY",
+    "dmsummary": "DM SUMMARY",
+    "barcellosummary": "BARCELLO SUMMARY",
+    "audionotes": "AUDIO NOTES",
+    "commandguard": "COMMAND GUARD",
     "qna": "QNA",
-    "frasi": "QUOTES",
-    "campagne_notizie": "NEWS CAMPAIGNS",
-    "campagne_meteo": "WEATHER CAMPAIGNS",
-    "campagne_oroscopo": "HOROSCOPE CAMPAIGNS",
-    "campagne_prompt": "PROMPT CAMPAIGNS",
-    "campagne_timer": "TIMER CAMPAIGNS",
-    "status": "STATUS",
-    "privacy": "PRIVACY",
-    "voice_ingest": "VOICE INGEST",
-    "triggers": "TRIGGERS",
-    "message_scheduler": "MESSAGE SCHEDULER",
-    "daily_resoconto": "DAILY REPORT",
-    "daily_activity_report": "DAILY ACTIVITY REPORT",
-    "activity_dm": "ACTIVITY DM",
-    "user_activity": "USER ACTIVITY",
-    "channel_summary": "CHANNEL SUMMARY",
-    "inactivity_moderation": "INACTIVITY MODERATION",
-    "member_flow_notifications": "MEMBER FLOW",
-    "unknown": "UNKNOWN",
+    "embed": "EMBED",
 }
 
 
 @dataclass(slots=True)
 class AuthorMeta:
     service_name: str
+    canonical_top_level_command: str | None = None
     author_icon_url: str | None = None
     author_url: str | None = None
     minimal: bool = False
@@ -192,12 +191,47 @@ def _normalize_optional_thumbnail(value: str | None) -> str | None:
     return normalize_author_thumbnail(cleaned)
 
 
-def human_author_service_name(service_name: str) -> str:
-    service = _clean(service_name) or "unknown"
-    return _SERVICE_CANONICAL_TOP_LEVEL_LABELS.get(service, service.replace("_", " ").upper())
+def _normalize_canonical_top_level_command(value: str | None) -> str | None:
+    normalized = _clean(value).lower()
+    if not normalized:
+        return None
+    return _CANONICAL_TOP_LEVEL_ALIASES.get(normalized, normalized)
 
 
-def render_author_name(*, service_name: str, phrase: str | None = None, version: str | None = None) -> str:
+def resolve_canonical_top_level_command(
+    *,
+    canonical_top_level_command: str | None = None,
+    service_name: str | None = None,
+) -> str:
+    canonical = _normalize_canonical_top_level_command(canonical_top_level_command)
+    if canonical:
+        return canonical
+    normalized_service = _clean(service_name).lower()
+    if normalized_service in _SERVICE_CANONICAL_TOP_LEVEL_FALLBACKS:
+        mapped = _SERVICE_CANONICAL_TOP_LEVEL_FALLBACKS[normalized_service]
+        canonical_fallback = _normalize_canonical_top_level_command(mapped)
+        if canonical_fallback:
+            return canonical_fallback
+    return _normalize_canonical_top_level_command(normalized_service) or "unknown"
+
+
+def human_author_service_name(service_name: str, canonical_top_level_command: str | None = None) -> str:
+    canonical = resolve_canonical_top_level_command(
+        canonical_top_level_command=canonical_top_level_command,
+        service_name=service_name,
+    )
+    if canonical in _CANONICAL_TOP_LEVEL_LABELS:
+        return _CANONICAL_TOP_LEVEL_LABELS[canonical]
+    return canonical.replace("_", " ").upper()
+
+
+def render_author_name(
+    *,
+    service_name: str,
+    canonical_top_level_command: str | None = None,
+    phrase: str | None = None,
+    version: str | None = None,
+) -> str:
     clean_phrase = _clean(phrase)
     clean_version = _clean(version)
     if clean_phrase:
@@ -205,18 +239,26 @@ def render_author_name(*, service_name: str, phrase: str | None = None, version:
         if clean_version:
             parts.append(clean_version)
         return _truncate(AUTHOR_SEPARATOR.join(parts))
-    return _truncate(f"servizio {human_author_service_name(service_name)}")
+    return _truncate(
+        f"servizio {human_author_service_name(service_name=service_name, canonical_top_level_command=canonical_top_level_command)}"
+    )
 
 
 def render_author_name_with_page(
     *,
     service_name: str,
+    canonical_top_level_command: str | None = None,
     phrase: str | None = None,
     version: str | None = None,
     page_index: int | None = None,
     page_total: int | None = None,
 ) -> str:
-    base = render_author_name(service_name=service_name, phrase=phrase, version=version)
+    base = render_author_name(
+        service_name=service_name,
+        canonical_top_level_command=canonical_top_level_command,
+        phrase=phrase,
+        version=version,
+    )
     if page_index is not None and page_total is not None and page_total > 1:
         return _truncate(f"{base}{AUTHOR_SEPARATOR}(Pag. {page_index}/{page_total})")
     return base
@@ -227,6 +269,7 @@ def attach_author_meta(
     embed: discord.Embed,
     *,
     service_name: str,
+    canonical_top_level_command: str | None = None,
     author_icon_url: str | None = None,
     author_url: str | None = None,
     minimal: bool = False,
@@ -239,6 +282,7 @@ def attach_author_meta(
         embed,
         AuthorMeta(
             service_name=_clean(service_name) or "unknown",
+            canonical_top_level_command=_normalize_canonical_top_level_command(canonical_top_level_command),
             author_icon_url=_clean(author_icon_url) or None,
             author_url=_clean(author_url) or None,
             minimal=bool(minimal),
@@ -254,6 +298,7 @@ def attach_author_meta_to_all(
     embeds: Iterable[discord.Embed] | None,
     *,
     service_name: str,
+    canonical_top_level_command: str | None = None,
     author_icon_url: str | None = None,
     author_url: str | None = None,
     minimal: bool = False,
@@ -265,6 +310,7 @@ def attach_author_meta_to_all(
         attach_author_meta(
             embed,
             service_name=service_name,
+            canonical_top_level_command=canonical_top_level_command,
             author_icon_url=author_icon_url,
             author_url=author_url,
             minimal=minimal,
@@ -309,6 +355,7 @@ def copy_author_meta(source: discord.Embed, target: discord.Embed) -> discord.Em
     return attach_author_meta(
         target,
         service_name=meta.service_name,
+        canonical_top_level_command=meta.canonical_top_level_command,
         author_icon_url=meta.author_icon_url,
         author_url=meta.author_url,
         minimal=meta.minimal,
@@ -550,6 +597,7 @@ class AuthorService:
         self,
         *,
         service_name: str,
+        canonical_top_level_command: str | None = None,
         explicit_icon_url: str | None = None,
         explicit_url: str | None = None,
         minimal: bool = False,
@@ -559,12 +607,23 @@ class AuthorService:
         icon_url = await self._resolve_thumbnail(service_name, explicit_icon_url=explicit_icon_url)
         url = await self._resolve_url(service_name, explicit_url=explicit_url)
         if minimal:
-            return render_author_name_with_page(service_name=service_name, page_index=page_index, page_total=page_total), icon_url, url, "fallback"
+            return (
+                render_author_name_with_page(
+                    service_name=service_name,
+                    canonical_top_level_command=canonical_top_level_command,
+                    page_index=page_index,
+                    page_total=page_total,
+                ),
+                icon_url,
+                url,
+                "fallback",
+            )
         phrase, phrase_origin = await self._resolve_phrase(service_name)
         version = await self.get_version()
         return (
             render_author_name_with_page(
                 service_name=service_name,
+                canonical_top_level_command=canonical_top_level_command,
                 phrase=phrase,
                 version=version,
                 page_index=page_index,
@@ -598,6 +657,7 @@ class AuthorService:
             await self.register_known_service(meta.service_name, source="runtime")
         author_name, resolved_icon_url, resolved_url, _ = await self.render_author(
             service_name=meta.service_name,
+            canonical_top_level_command=meta.canonical_top_level_command,
             explicit_icon_url=meta.author_icon_url,
             explicit_url=meta.author_url,
             minimal=meta.minimal,

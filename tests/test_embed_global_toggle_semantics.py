@@ -189,6 +189,62 @@ def test_send_command_embeds_applies_author_and_footer_when_enabled() -> None:
     asyncio.run(_run())
 
 
+def test_send_command_embeds_uses_canonical_channelsummary_author_not_service_alias() -> None:
+    async def _run() -> None:
+        author_service, footer_service = _build_services()
+        interaction = _InteractionStub()
+        embeds = await build_command_embeds(
+            top_level='channelsummary',
+            subcommand_path='channelsummary schedule_list',
+            lines=[('result', 'ok')],
+            footer_mode='meta',
+            footer_service_name='resoconto',
+        )
+
+        await send_command_embeds(
+            interaction,
+            embeds=embeds,
+            ephemeral=True,
+            author_service=author_service,
+            footer_service=footer_service,
+            default_service_name='resoconto',
+        )
+
+        sent_embed = interaction.response.sent_messages[0]['embed']
+        assert isinstance(sent_embed, discord.Embed)
+        assert sent_embed.author.name == 'servizio CHANNEL SUMMARY'
+
+    asyncio.run(_run())
+
+
+def test_send_command_embeds_uses_canonical_serversummary_author_not_service_alias() -> None:
+    async def _run() -> None:
+        author_service, footer_service = _build_services()
+        interaction = _InteractionStub()
+        embeds = await build_command_embeds(
+            top_level='serversummary',
+            subcommand_path='serversummary schedule_list',
+            lines=[('result', 'ok')],
+            footer_mode='meta',
+            footer_service_name='resoconto',
+        )
+
+        await send_command_embeds(
+            interaction,
+            embeds=embeds,
+            ephemeral=True,
+            author_service=author_service,
+            footer_service=footer_service,
+            default_service_name='resoconto',
+        )
+
+        sent_embed = interaction.response.sent_messages[0]['embed']
+        assert isinstance(sent_embed, discord.Embed)
+        assert sent_embed.author.name == 'servizio SERVER SUMMARY'
+
+    asyncio.run(_run())
+
+
 def test_auto_finalize_suppresses_author_and_footer_for_send_edit_followup_and_channel(monkeypatch) -> None:
     async def _run() -> None:
         author_service, footer_service = _build_services()
