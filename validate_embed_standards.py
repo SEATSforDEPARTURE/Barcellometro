@@ -121,6 +121,20 @@ _CANONICAL_BODY_HELPERS = {
     "format_standard_description",
     "format_standard_section_value",
 }
+_DESCRIPTION_STRUCTURAL_HEADING_PATTERNS = (
+    re.compile(r"(?mi)^\s*[^\w\s]\s+\*\*[^\n*]{2,}\*\*\s*$"),
+    re.compile(r"(?mi)^\s*#{1,6}\s*[^\n#]{2,}\s*$"),
+)
+_DESCRIPTION_STRUCTURAL_SECTION_KEYWORDS = {
+    "TREND",
+    "CLASSIFICA",
+    "STATISTICHE",
+    "MOMENTI SALIENTI",
+    "RISPOSTA",
+    "MISSIONI",
+    "BREAKDOWN",
+    "TOP",
+}
 
 
 @dataclass(slots=True)
@@ -236,6 +250,39 @@ def _literal_str(node: ast.AST | None) -> str | None:
     return None
 
 
+def _literal_text_chunks(node: ast.AST | None) -> list[str]:
+    if node is None:
+        return []
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.JoinedStr):
+        chunks: list[str] = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                chunks.append(value.value)
+        return chunks
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [*_literal_text_chunks(node.left), *_literal_text_chunks(node.right)]
+    return []
+
+
+def _extract_suspicious_description_heading_lines(value: str) -> list[str]:
+    offenders: list[str] = []
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if any(pattern.search(line) for pattern in _DESCRIPTION_STRUCTURAL_HEADING_PATTERNS):
+            offenders.append(line)
+            continue
+        if "**" not in line:
+            continue
+        normalized = line.replace("*", "").replace("_", "").replace("`", "").replace(":", "").upper()
+        if any(keyword in normalized for keyword in _DESCRIPTION_STRUCTURAL_SECTION_KEYWORDS):
+            offenders.append(line)
+    return offenders
+
+
 def _is_standard_uppercase_heading(value: str) -> bool:
     match = _STANDARD_HEADING_RE.match(value.strip())
     if match is None:
@@ -263,32 +310,71 @@ def _check_hardcoded_embed_title_and_field_contract(
     embed_ctor_count = 0
     helper_used = _source_uses_canonical_body_helpers(source)
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        chain = _attribute_chain(node.func)
+        if isinstance(node, ast.Call):
+            chain = _attribute_chain(node.func)
 
-        if chain == ("discord", "Embed"):
-            embed_ctor_count += 1
-            title_text = _literal_str(_keyword_value(node, "title"))
-            if title_text is not None and not _is_standard_uppercase_heading(title_text):
+            if chain == ("discord", "Embed"):
+                embed_ctor_count += 1
+                title_text = _literal_str(_keyword_value(node, "title"))
+                if title_text is not None and not _is_standard_uppercase_heading(title_text):
+                    report.add(
+                        "embed_title_literal_standard",
+                        rel,
+                        node.lineno,
+                        "Hardcoded discord.Embed(title=...) must be '(emoji) __**UPPERCASE**__' (bold + underline + uppercase).",
+                    )
+                for description_chunk in _literal_text_chunks(_keyword_value(node, "description")):
+                    heading_lines = _extract_suspicious_description_heading_lines(description_chunk)
+                    if not heading_lines:
+                        continue
+                    report.add(
+                        "embed_description_structural_headings_forbidden",
+                        rel,
+                        node.lineno,
+                        "Description contains hardcoded structural section heading(s) "
+                        f"{heading_lines[:3]}; major sections must be rendered with embed.add_field(name=...).",
+                    )
+
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "add_field":
+                name_expr = _keyword_value(node, "name")
+                if name_expr is None and node.args:
+                    name_expr = node.args[0]
+                name_text = _literal_str(name_expr)
+                if name_text is not None and not _is_standard_uppercase_heading(name_text):
+                    report.add(
+                        "embed_field_name_literal_standard",
+                        rel,
+                        node.lineno,
+                        "Hardcoded embed.add_field(name=...) must be '(emoji) __**UPPERCASE**__' (bold + underline + uppercase).",
+                    )
+
+        if isinstance(node, ast.Assign):
+            targets = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if "description" not in targets:
+                continue
+            for description_chunk in _literal_text_chunks(node.value):
+                heading_lines = _extract_suspicious_description_heading_lines(description_chunk)
+                if not heading_lines:
+                    continue
                 report.add(
-                    "embed_title_literal_standard",
+                    "embed_description_structural_headings_forbidden",
                     rel,
                     node.lineno,
-                    "Hardcoded discord.Embed(title=...) must be '(emoji) __**UPPERCASE**__' (bold + underline + uppercase).",
+                    "description assignment contains hardcoded structural heading(s) "
+                    f"{heading_lines[:3]}; render sections as embed fields.",
                 )
 
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "add_field":
-            name_expr = _keyword_value(node, "name")
-            if name_expr is None and node.args:
-                name_expr = node.args[0]
-            name_text = _literal_str(name_expr)
-            if name_text is not None and not _is_standard_uppercase_heading(name_text):
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) and node.target.id == "description":
+            for description_chunk in _literal_text_chunks(node.value):
+                heading_lines = _extract_suspicious_description_heading_lines(description_chunk)
+                if not heading_lines:
+                    continue
                 report.add(
-                    "embed_field_name_literal_standard",
+                    "embed_description_structural_headings_forbidden",
                     rel,
                     node.lineno,
-                    "Hardcoded embed.add_field(name=...) must be '(emoji) __**UPPERCASE**__' (bold + underline + uppercase).",
+                    "description += ... contains hardcoded structural heading(s) "
+                    f"{heading_lines[:3]}; render sections as embed fields.",
                 )
 
     if embed_ctor_count >= 3 and not helper_used:

@@ -7,6 +7,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from validate_embed_standards import (
     REPO_ROOT,
     ValidationReport,
+    _check_hardcoded_embed_title_and_field_contract,
     _check_manual_set_embed_images_calls,
     _check_persisted_embed_hydration,
     _check_phase3_renderer_metadata_adoption,
@@ -19,6 +20,42 @@ def test_embed_standards_validator_has_no_errors() -> None:
     report = validate_embed_standards()
 
     assert report.errors == []
+
+
+def test_validator_flags_structural_headings_inside_description() -> None:
+    source = '''
+import discord
+description = "*Intro*"
+description += "\\n📈 **TREND**\\n- +2"
+embed = discord.Embed(title="✅ __**REPORT**__", description=description)
+'''
+    tree = ast.parse(source)
+    report = ValidationReport()
+    _check_hardcoded_embed_title_and_field_contract(
+        tree,
+        REPO_ROOT / "app" / "example_description_broken.py",
+        source,
+        report,
+    )
+    assert any(issue.rule == "embed_description_structural_headings_forbidden" for issue in report.errors)
+
+
+def test_validator_allows_description_with_non_structural_bold_text() -> None:
+    source = '''
+import discord
+description = "*Ottimo risultato*: trend in miglioramento."
+embed = discord.Embed(title="✅ __**REPORT**__", description=description)
+embed.add_field(name="📈 __**TREND**__", value="ok")
+'''
+    tree = ast.parse(source)
+    report = ValidationReport()
+    _check_hardcoded_embed_title_and_field_contract(
+        tree,
+        REPO_ROOT / "app" / "example_description_ok.py",
+        source,
+        report,
+    )
+    assert all(issue.rule != "embed_description_structural_headings_forbidden" for issue in report.errors)
 
 
 FORBIDDEN_FOOTER_PHRASES = (
