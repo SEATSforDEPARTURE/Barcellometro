@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -110,6 +111,14 @@ RUNTIME_SUBTITLE_PARAM_NAMES = {
     "priority",
     "da",
     "a",
+}
+
+_STANDARD_HEADING_RE = re.compile(r"^(?P<prefix>\S+)\s+__\*\*(?P<inner>.+)\*\*__$")
+_CANONICAL_BODY_HELPERS = {
+    "format_standard_title",
+    "format_standard_field_name",
+    "apply_standard_body_helpers",
+    "format_standard_description",
 }
 
 
@@ -224,6 +233,70 @@ def _literal_str(node: ast.AST | None) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     return None
+
+
+def _is_standard_uppercase_heading(value: str) -> bool:
+    match = _STANDARD_HEADING_RE.match(value.strip())
+    if match is None:
+        return False
+    inner = match.group("inner").strip()
+    if not inner or not any(ch.isalpha() for ch in inner):
+        return False
+    return inner.upper() == inner
+
+
+def _source_uses_canonical_body_helpers(source: str) -> bool:
+    return any(f"{helper}(" in source for helper in _CANONICAL_BODY_HELPERS)
+
+
+def _check_hardcoded_embed_title_and_field_contract(
+    tree: ast.AST,
+    path: Path,
+    source: str,
+    report: ValidationReport,
+) -> None:
+    rel = path.relative_to(REPO_ROOT)
+    if rel.parts[:1] == ("tests",):
+        return
+
+    embed_ctor_count = 0
+    helper_used = _source_uses_canonical_body_helpers(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        chain = _attribute_chain(node.func)
+
+        if chain == ("discord", "Embed"):
+            embed_ctor_count += 1
+            title_text = _literal_str(_keyword_value(node, "title"))
+            if title_text is not None and not _is_standard_uppercase_heading(title_text):
+                report.add(
+                    "embed_title_literal_standard",
+                    rel,
+                    node.lineno,
+                    "Hardcoded discord.Embed(title=...) must be 'emoji + __**UPPERCASE**__'.",
+                )
+
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "add_field":
+            name_expr = _keyword_value(node, "name")
+            if name_expr is None and node.args:
+                name_expr = node.args[0]
+            name_text = _literal_str(name_expr)
+            if name_text is not None and not _is_standard_uppercase_heading(name_text):
+                report.add(
+                    "embed_field_name_literal_standard",
+                    rel,
+                    node.lineno,
+                    "Hardcoded embed.add_field(name=...) must be 'emoji + __**UPPERCASE**__'.",
+                )
+
+    if embed_ctor_count >= 3 and not helper_used:
+        report.add(
+            "embed_body_helpers_required_for_embed_heavy_files",
+            rel,
+            1,
+            "File creates many discord.Embed instances and must use canonical body helpers to prevent title/field regressions.",
+        )
 
 
 def _check_legacy_footer_service_wiring(tree: ast.AST, path: Path, report: ValidationReport) -> None:
@@ -1112,6 +1185,7 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _check_body_helpers_uppercase_contract(path, source, report)
         _check_phase3_renderer_metadata_adoption(path, source, report)
         _check_renderer_title_pagination_bypass(path, tree, report)
+        _check_hardcoded_embed_title_and_field_contract(tree, path, source, report)
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:
             _CommandFunctionVisitor(path, report).visit(tree)

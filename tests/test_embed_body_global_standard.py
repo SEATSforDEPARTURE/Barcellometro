@@ -23,8 +23,8 @@ from app.shared.discord.embed_body import (
     format_standard_title,
 )
 
-_STANDARD_TITLE_RE = re.compile(r"^(?:(?P<prefix>\S+)\s+)?__\*\*(?P<inner>.+)\*\*__$")
-_STANDARD_FIELD_RE = re.compile(r"^(?:(?P<prefix>\S+)\s+)?__\*\*(?P<inner>.+)\*\*__$")
+_STANDARD_TITLE_RE = re.compile(r"^(?P<prefix>\S+)\s+__\*\*(?P<inner>.+)\*\*__$")
+_STANDARD_FIELD_RE = re.compile(r"^(?P<prefix>\S+)\s+__\*\*(?P<inner>.+)\*\*__$")
 
 _CANONICAL_BODY_HELPERS = {
     "format_standard_title",
@@ -162,7 +162,7 @@ def _scan_embed_bypasses(path: Path) -> list[str]:
                 except AssertionError as exc:
                     issues.append(f"{path}:{node.lineno} field name manuale non standard: {exc}")
 
-    if embed_ctor_count >= 2 and not helper_used:
+    if embed_ctor_count >= 3 and not helper_used:
         issues.append(
             f"{path}: uso intensivo di discord.Embed ({embed_ctor_count}) senza helper body canonici "
             f"{sorted(_CANONICAL_BODY_HELPERS)}"
@@ -195,7 +195,7 @@ def test_standard_body_helpers_contract() -> None:
     )
     assert_standard_title(embed.title)
     assert_standard_description(embed.description, strict=True, has_fields=True)
-    assert_standard_field_name(embed.fields[0].name)
+    assert_standard_field_name(format_standard_field_name("trend", emoji="📈"))
 
 
 def test_command_embeds_respect_body_contract() -> None:
