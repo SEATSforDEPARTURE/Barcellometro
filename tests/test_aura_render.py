@@ -61,13 +61,18 @@ def test_first_embed_format_period_no_percent_and_no_extra_text() -> None:
         ledger_lines=["👍 **+5 P.A.** test"],
     )
     main = embeds[0]
-    assert len(main.fields) == 0
-    assert "**🕒 Ultime 24 ore 01/01/2026 00:00 → 01/01/2026 23:59**" in (main.description or "")
-    assert "**✨ KARMA \"Barcellometro\"**" in (main.description or "")
-    assert "PUNTI AURA TOTALI: **120**" in (main.description or "")
-    assert "PUNTI AURA CANALE: **35**" in (main.description or "")
-    assert "😇 70%" not in (main.description or "")
-    assert "Questi punti" not in (main.description or "")
+    assert len(main.fields) >= 4
+    names = [f.name for f in main.fields]
+    assert any("PERIODO" in n for n in names)
+    assert any("KARMA" in n for n in names)
+    period_value = _field_value_by_plain_name(main, "PERIODO")
+    assert "Ultime 24 ore 01/01/2026 00:00 → 01/01/2026 23:59" in period_value
+    karma_value = _field_value_by_plain_name(main, 'KARMA "BARCELLOMETRO"')
+    assert "PUNTI AURA TOTALI: **120**" in karma_value
+    channel_karma_value = _field_value_by_plain_name(main, 'KARMA "GENERALE"')
+    assert "PUNTI AURA CANALE: **35**" in channel_karma_value
+    assert "😇 70%" not in karma_value
+    assert "Questi punti" not in karma_value
 def test_build_aura_embeds_mod_placeholder_for_metrics() -> None:
     embeds = build_aura_embeds(
         profile_name="mod",
@@ -269,6 +274,7 @@ def test_build_aura_embeds_profile_section_uses_new_title() -> None:
     )
     detail_text = "\n".join(field.name for emb in embeds[1:] for field in emb.fields)
     assert "PROFILO PERSONALE" in detail_text
+    assert all("PROFILO PERSONALE" not in (emb.description or "") for emb in embeds[1:])
 
 
 def test_build_aura_embeds_respects_profile_visibility_section() -> None:
