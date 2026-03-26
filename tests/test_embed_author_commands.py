@@ -127,7 +127,7 @@ def test_author_template_global_set_show_reset_and_fallback_after_reset(embed_mo
                 ('Phrase', '(not set)'),
                 ('Thumbnail', '(not set)'),
                 ('URL', '(not set)'),
-                ('Preview', 'servizio STATUS'),
+                ('Preview', 'servizio EMBED'),
             ],
         )
 

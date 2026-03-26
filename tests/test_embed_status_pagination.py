@@ -114,7 +114,15 @@ def test_author_status_command_supports_multipage_navigation(embed_module, monke
         assert isinstance(view, embed_module.AuthorStatusPaginationView)
         assert len(view._embeds) > 1
         assert all('• Pagina ' in (page.description or '') for page in view._embeds)
-        assert all((page.author.name or '').startswith('servizio STATUS') for page in view._embeds)
+        assert all((page.author.name or '').startswith('servizio EMBED') for page in view._embeds)
         assert all((page.footer.text or '').startswith('Barcellometro') for page in view._embeds)
 
     asyncio.run(_run())
+
+
+def test_author_canonical_labels_use_top_level_command_tokens() -> None:
+    from app.services.author import render_author_name
+
+    assert render_author_name(service_name='status') == 'servizio EMBED'
+    assert render_author_name(service_name='riassunto') == 'servizio DM SUMMARY'
+    assert render_author_name(service_name='aura') == 'servizio AURA SUMMARY'

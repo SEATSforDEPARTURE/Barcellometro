@@ -202,7 +202,7 @@ def build_summary_detail_embeds(
             contributors=footer_contributors or [],
             used_local_processing=footer_used_local_processing,
         )
-        attach_author_meta(e, service_name="riassunto")
+        attach_author_meta(e, service_name="riassunto", canonical_top_level_command="dmsummary")
         attach_embed_images_meta(e, service_name="riassunto")
         return e
 
@@ -258,6 +258,6 @@ def build_summary_detail_embeds(
     for embed in embeds:
         base_title = f"🗒️ DETTAGLI RIASSUNTO — {tier_label}"
         embed.title = f"**{base_title}**" if dm_mode else base_title
-    attach_author_meta_to_all(embeds, service_name="riassunto")
+    attach_author_meta_to_all(embeds, service_name="riassunto", canonical_top_level_command="dmsummary")
     attach_embed_images_meta_to_all(embeds, service_name="riassunto")
     return embeds

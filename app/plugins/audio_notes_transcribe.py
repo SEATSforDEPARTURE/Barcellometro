@@ -15,6 +15,7 @@ import discord
 import imageio_ffmpeg
 
 from app.core.service_registry import ServiceRegistry
+from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ def _split_embed_descriptions(text: str, max_chars: int = _DISCORD_EMBED_DESCRIP
 def _build_audio_note_embed(description: str, *, contributors: list[str] | None = None, used_local_processing: bool = True) -> discord.Embed:
     embed = discord.Embed(title=_AUDIO_NOTE_TITLE, description=description, color=_AUDIO_NOTE_COLOR)
     attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
+    attach_author_meta(embed, service_name="audio_notes", canonical_top_level_command="audionotes")
     return embed
 
 

@@ -333,12 +333,12 @@ def build_activity_dm_embeds(
         f"🫀 **PUNTI ATTIVITÀ**\n{_bar(s.score, s.emoji)} **({s.score}/100)**\n*{s.trend_text}*"
     )
     attach_footer_meta(status, service_name="activity_dm", used_local_processing=True)
-    attach_author_meta(status, service_name="activity_dm")
+    attach_author_meta(status, service_name="activity_dm", canonical_top_level_command="dmsummary")
     attach_embed_images_meta(status, service_name="activity_dm")
 
     detail = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
     attach_footer_meta(detail, service_name="activity_dm", used_local_processing=True)
-    attach_author_meta(detail, service_name="activity_dm")
+    attach_author_meta(detail, service_name="activity_dm", canonical_top_level_command="dmsummary")
     attach_embed_images_meta(detail, service_name="activity_dm")
     embeds = [detail]
 
@@ -374,6 +374,6 @@ def build_activity_dm_embeds(
 
     _add_chunked_field(embeds, "💡 CONSIGLI", "\n".join(f"• {line}" for line in details.advice_bullets) or "• Nessun consiglio")
     _finalize_detail_titles(embeds)
-    attach_author_meta_to_all(embeds, service_name="activity_dm")
+    attach_author_meta_to_all(embeds, service_name="activity_dm", canonical_top_level_command="dmsummary")
     attach_embed_images_meta_to_all(embeds, service_name="activity_dm")
     return [status, *embeds]
