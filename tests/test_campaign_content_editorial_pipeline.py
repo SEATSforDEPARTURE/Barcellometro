@@ -21,16 +21,23 @@ from app.services.campaign_content_service import CampaignContentService
 from app.services.database import DatabaseService
 
 
+def _normalize_standardized_title(title: str | None) -> str:
+    raw = (title or "").strip()
+    if raw.startswith("__**") and raw.endswith("**__"):
+        raw = raw[4:-4]
+    return " ".join(raw.split()).upper()
+
+
 def test_build_weather_embeds_page_order() -> None:
     embeds = build_weather_embeds(
         {"embed_title": "🌤️ METEO CRICETOSO"},
         {"regions": {"Nord": {"sampled_cities": []}, "Centro": {"sampled_cities": []}, "Sud e Isole": {"sampled_cities": []}}},
     )
-    titles = [e.title for e in embeds]
-    assert "Overview Italia" in (titles[0] or "")
-    assert "Nord" in (titles[1] or "")
-    assert "Centro" in (titles[2] or "")
-    assert "Sud e Isole" in (titles[3] or "")
+    titles = [_normalize_standardized_title(e.title) for e in embeds]
+    assert "OVERVIEW ITALIA" in titles[0]
+    assert "NORD" in titles[1]
+    assert "CENTRO" in titles[2]
+    assert "SUD E ISOLE" in titles[3]
 
 
 def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
@@ -44,9 +51,10 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     deduped = dedupe_news_items(payload["categories"]["cronaca"] + payload["categories"]["sport"] + payload["categories"]["tecnologia"])
     assert len(deduped) == 2
     embeds = build_news_embeds({"embed_title": "📰 NOTIZIARIO"}, payload)
-    assert "Inizio" in (embeds[0].title or "")
-    assert "Cronaca" in (embeds[1].title or "")
-    assert "Sport" in (embeds[2].title or "")
+    titles = [_normalize_standardized_title(e.title) for e in embeds]
+    assert "INIZIO" in titles[0]
+    assert "CRONACA" in titles[1]
+    assert "SPORT" in titles[2]
 
 
 def test_build_horoscope_embeds_strip_inner_headings() -> None:
@@ -67,7 +75,7 @@ def test_build_horoscope_embeds_strip_inner_headings() -> None:
     for s in ["Ariete","Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Pesci"]:
         payload["signs"][s] = {"love":"ok","work":"ok","money":"ok","energy":"ok","friction":"ok","advice":"ok","confidence":1}
     embeds = build_horoscope_embeds({"embed_title": "🔮 OROSCOPO CRICETOSO"}, payload)
-    acquario = next(e for e in embeds if (e.title or "").endswith("Acquario"))
+    acquario = next(e for e in embeds if "ACQUARIO" in _normalize_standardized_title(e.title))
     values = " ".join(f.value for f in acquario.fields)
     assert "Love Alert" not in values
     assert "Energia del genio" not in values
