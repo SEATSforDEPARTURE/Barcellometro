@@ -55,7 +55,8 @@ def build_service_status_field(entry: AuthorStatusServiceEntry) -> AuthorStatusF
         f"• Author effettivo: `{_clip(entry.rendered_author, 120)}`",
         f"• Sorgente: `{source}` · frase `{entry.phrase_origin}`",
         f"• Thumbnail: `{_clip(entry.rendered_thumbnail, 100)}`",
-        f"• Override: `phrase={entry.service_phrase_override}` · `thumbnail={entry.service_thumbnail_override}`",
+        f"• URL: `{_clip(entry.rendered_url, 100)}`",
+        f"• Override: `phrase={entry.service_phrase_override}` · `thumbnail={entry.service_thumbnail_override}` · `url={entry.service_url_override}`",
         f"• Runtime ultimo render: `{_clip(last_runtime, 120)}`",
         f"• Origini note: `{', '.join(entry.known_sources) if entry.known_sources else '—'}`",
     ]
@@ -70,7 +71,8 @@ def build_author_status_pages(snapshot: AuthorStatusSnapshot) -> list[AuthorStat
         f"• Versione author: `{_clip(snapshot.version, 80)}`",
         f"• Frase globale: `{_clip(snapshot.global_phrase, 120)}`",
         f"• Thumbnail globale: `{_clip(snapshot.global_thumbnail, 100)}`",
-        "• Regola versione: compare solo quando esiste una phrase globale o di servizio; il fallback puro resta `emoji + nome servizio`.",
+        f"• URL globale: `{_clip(snapshot.global_url, 100)}`",
+        "• Regola fallback: `servizio <NOME CANONICO INGLESE>`; le pagine multi-embed aggiungono `· (Pag. X/Y)`.",
     ]
     pages = [AuthorStatusPage(title="📦 EMBED", description="\n".join(overview_lines), fields=[])]
     grouped: dict[int, list[AuthorStatusServiceEntry]] = {}

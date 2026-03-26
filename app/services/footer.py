@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from urllib.parse import urlparse
 from dataclasses import dataclass
@@ -27,7 +26,6 @@ FOOTER_LAST_META_PREFIX = "footer.last_meta."
 FOOTER_VARIANTS_PREFIX = "footer.variants."
 FOOTER_SEPARATOR = " · "
 FOOTER_MAX_LEN = 2048
-FOOTER_FALLBACK_VERSION = str(os.getenv("BARCELLOMETRO_VERSION") or "").strip() or "dev"
 CUSTOM_EMOJI_RE = re.compile(r"<(?P<animated>a?):(?P<name>[A-Za-z0-9_]+):(?P<emoji_id>\d+)>")
 
 SUPPORTED_FOOTER_SERVICES: tuple[str, ...] = (
@@ -186,8 +184,10 @@ def render_footer_text(
     phrase: str | None = None,
     contributors: Iterable[str] | None = None,
 ) -> tuple[str, str | None]:
-    brand_version = _clean(version) or FOOTER_FALLBACK_VERSION
-    brand = f"Barcellometro {brand_version}"
+    clean_version = _clean(version)
+    brand = "Barcellometro"
+    if clean_version:
+        brand = f"{brand} {clean_version}"
     clean_phrase = _clean_footer_text(phrase) if phrase else ""
     contributors_deduped = _dedupe_footer_contributors(contributors)
     processing: str | None = None

@@ -94,7 +94,7 @@ def test_author_service_apply_uses_service_fallback_without_thumbnail() -> None:
 
         await service.apply(embed, default_service_name="fallback")
 
-        assert embed.author.name == "🗒️ Riassunto"
+        assert embed.author.name == "servizio SUMMARY"
         assert embed.author.icon_url is None
 
     asyncio.run(_run())
@@ -195,7 +195,7 @@ def test_author_service_minimal_meta_uses_service_fallback_name() -> None:
 
         await finalize_embed_author(embed, service, default_service_name="riassunto")
 
-        assert embed.author.name == "🗒️ Riassunto"
+        assert embed.author.name == "servizio SUMMARY"
 
     asyncio.run(_run())
 
@@ -215,8 +215,9 @@ def test_author_pipeline_finalize_split_embeds_keeps_author_meta() -> None:
         await finalize_embeds_author(normalized, service, default_service_name="riassunto")
 
         author_names = [item.author.name for item in normalized]
-        assert len(set(author_names)) == 1
-        assert author_names[0] == "🗒️ Riassunto"
+        assert len(author_names) >= 2
+        assert author_names[0] == f"servizio SUMMARY · (Pag. 1/{len(author_names)})"
+        assert author_names[-1] == f"servizio SUMMARY · (Pag. {len(author_names)}/{len(author_names)})"
 
     asyncio.run(_run())
 
@@ -238,7 +239,7 @@ def test_prepare_embeds_for_send_applies_author_and_footer_together_on_all_pages
             default_service_name="riassunto",
         )
 
-        assert [embed.author.name for embed in prepared] == ["🗒️ Riassunto", "🗒️ Riassunto"]
+        assert [embed.author.name for embed in prepared] == ["servizio SUMMARY · (Pag. 1/2)", "servizio SUMMARY · (Pag. 2/2)"]
         assert all((embed.footer.text or "").startswith("Barcellometro") for embed in prepared)
 
     asyncio.run(_run())
@@ -275,3 +276,21 @@ def test_normalize_author_thumbnail_supports_custom_emoji_and_rejects_invalid_va
         pass
     else:
         raise AssertionError("Expected InvalidAuthorThumbnailError")
+
+
+def test_author_service_supports_global_and_service_url() -> None:
+    async def _run() -> None:
+        global_embed = discord.Embed(title="global")
+        attach_author_meta(global_embed, service_name="status")
+        service_embed = discord.Embed(title="service")
+        attach_author_meta(service_embed, service_name="riassunto")
+        service, _ = _build_author_service()
+        await service.set_global_url("https://example.com/global")
+        await service.set_service_url("riassunto", "https://example.com/riassunto")
+
+        await finalize_embeds_author([global_embed, service_embed], service, default_service_name="status")
+
+        assert global_embed.author.url == "https://example.com/global"
+        assert service_embed.author.url == "https://example.com/riassunto"
+
+    asyncio.run(_run())

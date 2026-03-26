@@ -479,19 +479,20 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         await _send_embed_response(interaction, ctx, subcommand_path="author off", lines=[("result", "disabled")], kind="success")
 
     @author_group.command(name="template_global_set", description="Set the global author template.")
-    @app_commands.describe(version="Optional author template version suffix.", phrase="Optional global author phrase.", thumbnail="Optional author thumbnail: Discord custom emoji or http/https image URL.")
+    @app_commands.describe(version="Optional author template version suffix.", phrase="Optional global author phrase.", thumbnail="Optional author thumbnail: Discord custom emoji or http/https image URL.", url="Optional global author URL.")
     async def author_template_global_set_command(
         interaction: discord.Interaction,
         version: str | None = None,
         phrase: str | None = None,
         thumbnail: str | None = None,
+        url: str | None = None,
     ) -> None:
         if not await check_permission(interaction, "admin.author.template_global_set", ctx):
             return
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_global_set", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        if version is None and phrase is None and thumbnail is None:
+        if version is None and phrase is None and thumbnail is None and url is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_global_set", lines=[("reason", "No changes provided")], sections=_next_step_section("/embed author template_global_show"), kind="warning")
             return
         if version is not None:
@@ -504,6 +505,8 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             except InvalidAuthorThumbnailError as exc:
                 await _send_embed_response(interaction, ctx, subcommand_path="author template_global_set", lines=[("reason", str(exc))], kind="error")
                 return
+        if url is not None:
+            await _author_service(ctx).set_global_url(_clean_opt(url))
         preview = render_author_name(
             service_name="status",
             phrase=await _author_service(ctx).get_global_phrase(),
@@ -518,6 +521,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 ("Version", _format_value(await _author_service(ctx).get_version())),
                 ("Phrase", _format_value(await _author_service(ctx).get_global_phrase())),
                 ("Thumbnail", _format_value(await _author_service(ctx).get_global_thumbnail())),
+                ("URL", _format_value(await _author_service(ctx).get_global_url())),
                 ("Preview", preview),
             ),
             kind="success",
@@ -533,6 +537,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         current_version = await _author_service(ctx).get_version()
         current_global = await _author_service(ctx).get_global_phrase()
         current_thumbnail = await _author_service(ctx).get_global_thumbnail()
+        current_url = await _author_service(ctx).get_global_url()
         preview = render_author_name(service_name="status", phrase=current_global, version=current_version)
         await _send_embed_response(
             interaction,
@@ -542,6 +547,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 ("Version", _format_override_value(current_version, missing="No custom override (version is ignored without an author phrase)")),
                 ("Phrase", _format_override_value(current_global, missing="No custom override (services use semantic fallback author)")),
                 ("Thumbnail", _format_override_value(current_thumbnail, missing="No custom override (default author has no thumbnail)")),
+                ("URL", _format_override_value(current_url, missing="No custom override (default author has no URL)")),
                 ("Preview", preview),
             ),
         )
@@ -556,15 +562,17 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         await _author_service(ctx).set_version(None)
         await _author_service(ctx).set_global_phrase(None)
         await _author_service(ctx).set_global_thumbnail(None)
+        await _author_service(ctx).set_global_url(None)
         await _send_embed_response(interaction, ctx, subcommand_path="author template_global_reset", lines=[("result", "reset")], kind="success")
 
     @author_group.command(name="template_service_set", description="Set a service-specific author template.")
-    @app_commands.describe(service="Service name.", phrase="Optional service-specific author phrase.", thumbnail="Optional author thumbnail: Discord custom emoji or http/https image URL.")
+    @app_commands.describe(service="Service name.", phrase="Optional service-specific author phrase.", thumbnail="Optional author thumbnail: Discord custom emoji or http/https image URL.", url="Optional service-specific author URL.")
     async def author_template_service_set_command(
         interaction: discord.Interaction,
         service: str,
         phrase: str | None = None,
         thumbnail: str | None = None,
+        url: str | None = None,
     ) -> None:
         if not await check_permission(interaction, "admin.author.template_service_set", ctx):
             return
@@ -575,7 +583,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
             return
-        if phrase is None and thumbnail is None:
+        if phrase is None and thumbnail is None and url is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", subtitle_args=[service_name], lines=[("reason", "No changes provided")], kind="warning")
             return
         if phrase is not None:
@@ -586,8 +594,11 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             except InvalidAuthorThumbnailError as exc:
                 await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", subtitle_args=[service_name], lines=[("reason", str(exc))], kind="error")
                 return
+        if url is not None:
+            await _author_service(ctx).set_service_url(service_name, _clean_opt(url))
         service_thumbnail = (await _author_service(ctx).get_service_thumbnails()).get(service_name)
         service_phrase = (await _author_service(ctx).get_service_phrases()).get(service_name)
+        service_url = (await _author_service(ctx).get_service_urls()).get(service_name)
         await _send_embed_response(
             interaction,
             ctx,
@@ -597,6 +608,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             sections=_template_section(
                 ("Phrase", _format_value(service_phrase)),
                 ("Thumbnail", _format_value(service_thumbnail)),
+                ("URL", _format_value(service_url)),
                 ("Preview", render_author_name(service_name=service_name, phrase=service_phrase or await _author_service(ctx).get_global_phrase(), version=await _author_service(ctx).get_version())),
             ),
             kind="success",
@@ -616,6 +628,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             return
         phrase = (await _author_service(ctx).get_service_phrases()).get(service_name)
         thumbnail_value = (await _author_service(ctx).get_service_thumbnails()).get(service_name)
+        url_value = (await _author_service(ctx).get_service_urls()).get(service_name)
         global_phrase = await _author_service(ctx).get_global_phrase()
         version = await _author_service(ctx).get_version()
         await _send_embed_response(
@@ -626,6 +639,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             sections=_template_section(
                 ("Phrase", _format_override_value(phrase, missing="No custom override (service uses global/fallback author phrase)")),
                 ("Thumbnail", _format_override_value(thumbnail_value, missing="No custom override (service uses global/no thumbnail fallback)")),
+                ("URL", _format_override_value(url_value, missing="No custom override (service uses global/no URL fallback)")),
                 ("Preview", render_author_name(service_name=service_name, phrase=phrase or global_phrase, version=version)),
             ),
         )
@@ -644,6 +658,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             return
         await _author_service(ctx).set_service_phrase(service_name, None)
         await _author_service(ctx).set_service_thumbnail(service_name, None)
+        await _author_service(ctx).set_service_url(service_name, None)
         await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", subtitle_args=[service_name], lines=[("result", "reset")], kind="success")
 
     @author_group.command(name="status", description="Show author status and effective service templates.")

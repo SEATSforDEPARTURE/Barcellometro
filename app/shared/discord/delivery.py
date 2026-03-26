@@ -8,8 +8,7 @@ import discord
 from app.shared.discord.embed_limits import RETRY_MAX_EMBED_CHARS, normalize_embeds_for_discord
 from app.services.author import AuthorService, copy_author_meta
 from app.services.footer import FooterService, copy_footer_meta
-from app.shared.discord.author_pipeline import _needs_author_finalize, finalize_embeds_author
-from app.shared.discord.footer_pipeline import _needs_footer_finalize, finalize_embeds
+from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +58,12 @@ async def _prepare_embeds_for_send(
 ) -> list[discord.Embed]:
     if not embeds:
         return embeds
-    author_enabled = await author_service.is_enabled() if author_service is not None else None
-    footer_enabled = await footer_service.is_enabled() if footer_service is not None else None
-    if any(_needs_author_finalize(embed, global_enabled=author_enabled) for embed in embeds):
-        embeds = await finalize_embeds_author(embeds, author_service, default_service_name=default_service_name)
-    if any(_needs_footer_finalize(embed, global_enabled=footer_enabled) for embed in embeds):
-        embeds = await finalize_embeds(embeds, footer_service, default_service_name=default_service_name)
-    return embeds
+    return await finalize_embeds_rendering(
+        embeds,
+        footer_service=footer_service,
+        author_service=author_service,
+        default_service_name=default_service_name,
+    )
 
 
 async def safe_followup_send(

@@ -14,8 +14,7 @@ from app.plugins.commands_modular.time_windows import format_italian_ts, format_
 from app.services.author import AuthorService, attach_author_meta
 from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, chunk_embeds_for_message_batches, is_valid_embed, normalize_embeds_for_discord
-from app.shared.discord.author_pipeline import finalize_embeds_author
-from app.shared.discord.footer_pipeline import finalize_embeds
+from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
 logger = logging.getLogger(__name__)
 
@@ -826,14 +825,22 @@ async def send_command_embeds(
     embed_list = list(embeds)
     if not embed_list:
         return
-    await finalize_embeds_author(embed_list, author_service, default_service_name=default_service_name)
-    await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
+    await finalize_embeds_rendering(
+        embed_list,
+        footer_service=footer_service,
+        author_service=author_service,
+        default_service_name=default_service_name,
+    )
     invalid_indexes = [idx for idx, embed in enumerate(embed_list, start=1) if not is_valid_embed(embed, max_chars=MAX_EMBED_CHARS)]
     if invalid_indexes:
         logger.warning("send_command_embeds_normalizing_invalid_embeds indexes=%s", invalid_indexes)
         embed_list = normalize_embeds_for_discord(embed_list, max_chars=MAX_EMBED_CHARS)
-        await finalize_embeds_author(embed_list, author_service, default_service_name=default_service_name)
-        await finalize_embeds(embed_list, footer_service, default_service_name=default_service_name)
+        await finalize_embeds_rendering(
+            embed_list,
+            footer_service=footer_service,
+            author_service=author_service,
+            default_service_name=default_service_name,
+        )
     batches = chunk_embeds_for_message_batches(embed_list, max_total_chars=MAX_EMBED_CHARS)
     first_batch = batches[0]
     kwargs: dict[str, Any] = {
@@ -907,8 +914,12 @@ async def send_standard_response(
         visual_top_level=visual_top_level,
         top_level=top_level,
     )
-    await finalize_embeds_author(embeds, author_service, default_service_name=resolved_footer_service_name)
-    await finalize_embeds(embeds, footer_service, default_service_name=resolved_footer_service_name)
+    await finalize_embeds_rendering(
+        embeds,
+        footer_service=footer_service,
+        author_service=author_service,
+        default_service_name=resolved_footer_service_name,
+    )
     await send_command_embeds(
         interaction,
         embeds=embeds,

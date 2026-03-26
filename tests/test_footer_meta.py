@@ -145,6 +145,19 @@ def test_footer_service_apply_sets_footer_text() -> None:
     asyncio.run(_run())
 
 
+def test_footer_service_without_explicit_version_has_no_implicit_fallback() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_footer_meta(embed, service_name="barcello", contributors=[], used_local_processing=True)
+        service, _ = _build_footer_service()
+
+        await service.apply(embed, default_service_name="fallback")
+
+        assert embed.footer.text == "Barcellometro"
+
+    asyncio.run(_run())
+
+
 def test_footer_service_apply_ignores_legacy_minimal_text_and_uses_centralized_meta() -> None:
     async def _run() -> None:
         embed = discord.Embed(title="x")

@@ -18,8 +18,10 @@ AUTHOR_ENABLED_KEY = "author.enabled"
 AUTHOR_VERSION_KEY = "author.version"
 AUTHOR_GLOBAL_PHRASE_KEY = "author.global_phrase"
 AUTHOR_GLOBAL_THUMBNAIL_KEY = "author.global_thumbnail"
+AUTHOR_GLOBAL_URL_KEY = "author.global_url"
 AUTHOR_SERVICE_PHRASE_PREFIX = "author.service_phrase."
 AUTHOR_SERVICE_THUMBNAIL_PREFIX = "author.service_thumbnail."
+AUTHOR_SERVICE_URL_PREFIX = "author.service_url."
 AUTHOR_KNOWN_SERVICES_KEY = "author.known_services"
 AUTHOR_KNOWN_SERVICE_SOURCES_KEY = "author.known_service_sources"
 AUTHOR_LAST_META_PREFIX = "author.last_meta."
@@ -64,49 +66,33 @@ _SERVICE_NAME_OVERRIDES: dict[str, str | None] = {
     "__init__": None,
 }
 
-_SERVICE_AUTHOR_EMOJIS: dict[str, str] = {
-    "riassunto": "🗒️",
-    "resoconto": "📓",
-    "audio_notes": "🎙️",
-    "aura": "✨",
-    "attivita": "📈",
-    "barcello": "❤️",
-    "qna": "❓",
-    "frasi": "💬",
-    "campagne_notizie": "📰",
-    "campagne_meteo": "⛅",
-    "campagne_oroscopo": "♈",
-    "campagne_prompt": "🧠",
-    "campagne_timer": "⏱️",
-    "status": "📊",
-    "privacy": "🔒",
-    "voice_ingest": "🎧",
-    "triggers": "⚡",
-    "message_scheduler": "🗓️",
-    "daily_resoconto": "🗓️",
-    "daily_activity_report": "📆",
-    "activity_dm": "📬",
-    "user_activity": "👤",
-    "channel_summary": "#️⃣",
-    "inactivity_moderation": "🛠️",
-    "member_flow_notifications": "🚪",
-    "unknown": "📦",
-}
-
-_SERVICE_AUTHOR_LABELS: dict[str, str] = {
-    "campagne_notizie": "Campagne notizie",
-    "campagne_meteo": "Campagne meteo",
-    "campagne_oroscopo": "Campagne oroscopo",
-    "campagne_prompt": "Campagne prompt",
-    "campagne_timer": "Campagne timer",
-    "daily_resoconto": "Daily resoconto",
-    "daily_activity_report": "Daily activity report",
-    "activity_dm": "Activity DM",
-    "user_activity": "User activity",
-    "channel_summary": "Channel summary",
-    "inactivity_moderation": "Inactivity moderation",
-    "member_flow_notifications": "Ingressi & uscite",
-    "qna": "QnA",
+_SERVICE_CANONICAL_TOP_LEVEL_LABELS: dict[str, str] = {
+    "riassunto": "SUMMARY",
+    "resoconto": "REPORT",
+    "audio_notes": "AUDIO NOTES",
+    "aura": "AURA",
+    "attivita": "ACTIVITY",
+    "barcello": "BARCELLO",
+    "qna": "QNA",
+    "frasi": "QUOTES",
+    "campagne_notizie": "NEWS CAMPAIGNS",
+    "campagne_meteo": "WEATHER CAMPAIGNS",
+    "campagne_oroscopo": "HOROSCOPE CAMPAIGNS",
+    "campagne_prompt": "PROMPT CAMPAIGNS",
+    "campagne_timer": "TIMER CAMPAIGNS",
+    "status": "STATUS",
+    "privacy": "PRIVACY",
+    "voice_ingest": "VOICE INGEST",
+    "triggers": "TRIGGERS",
+    "message_scheduler": "MESSAGE SCHEDULER",
+    "daily_resoconto": "DAILY REPORT",
+    "daily_activity_report": "DAILY ACTIVITY REPORT",
+    "activity_dm": "ACTIVITY DM",
+    "user_activity": "USER ACTIVITY",
+    "channel_summary": "CHANNEL SUMMARY",
+    "inactivity_moderation": "INACTIVITY MODERATION",
+    "member_flow_notifications": "MEMBER FLOW",
+    "unknown": "UNKNOWN",
 }
 
 
@@ -114,6 +100,7 @@ _SERVICE_AUTHOR_LABELS: dict[str, str] = {
 class AuthorMeta:
     service_name: str
     author_icon_url: str | None = None
+    author_url: str | None = None
     minimal: bool = False
     skip: bool = False
     preserve_existing: bool = False
@@ -136,9 +123,11 @@ class AuthorStatusServiceEntry:
     phrase: str | None
     phrase_origin: str
     rendered_author: str
+    rendered_url: str | None
     rendered_thumbnail: str | None
     service_phrase_override: bool = False
     service_thumbnail_override: bool = False
+    service_url_override: bool = False
     persisted_profile: ServiceAuthorProfile | None = None
 
 
@@ -148,6 +137,7 @@ class AuthorStatusSnapshot:
     version: str | None
     global_phrase: str | None
     global_thumbnail: str | None
+    global_url: str | None
     services: list[AuthorStatusServiceEntry]
 
 
@@ -204,12 +194,7 @@ def _normalize_optional_thumbnail(value: str | None) -> str | None:
 
 def human_author_service_name(service_name: str) -> str:
     service = _clean(service_name) or "unknown"
-    return _SERVICE_AUTHOR_LABELS.get(service, service.replace("_", " ").title())
-
-
-def author_service_emoji(service_name: str) -> str:
-    service = _clean(service_name) or "unknown"
-    return _SERVICE_AUTHOR_EMOJIS.get(service, _SERVICE_AUTHOR_EMOJIS["unknown"])
+    return _SERVICE_CANONICAL_TOP_LEVEL_LABELS.get(service, service.replace("_", " ").upper())
 
 
 def render_author_name(*, service_name: str, phrase: str | None = None, version: str | None = None) -> str:
@@ -220,7 +205,21 @@ def render_author_name(*, service_name: str, phrase: str | None = None, version:
         if clean_version:
             parts.append(clean_version)
         return _truncate(AUTHOR_SEPARATOR.join(parts))
-    return _truncate(f"{author_service_emoji(service_name)} {human_author_service_name(service_name)}")
+    return _truncate(f"servizio {human_author_service_name(service_name)}")
+
+
+def render_author_name_with_page(
+    *,
+    service_name: str,
+    phrase: str | None = None,
+    version: str | None = None,
+    page_index: int | None = None,
+    page_total: int | None = None,
+) -> str:
+    base = render_author_name(service_name=service_name, phrase=phrase, version=version)
+    if page_index is not None and page_total is not None and page_total > 1:
+        return _truncate(f"{base}{AUTHOR_SEPARATOR}(Pag. {page_index}/{page_total})")
+    return base
 
 
 
@@ -229,6 +228,7 @@ def attach_author_meta(
     *,
     service_name: str,
     author_icon_url: str | None = None,
+    author_url: str | None = None,
     minimal: bool = False,
     skip: bool = False,
     preserve_existing: bool = False,
@@ -240,6 +240,7 @@ def attach_author_meta(
         AuthorMeta(
             service_name=_clean(service_name) or "unknown",
             author_icon_url=_clean(author_icon_url) or None,
+            author_url=_clean(author_url) or None,
             minimal=bool(minimal),
             skip=bool(skip),
             preserve_existing=bool(preserve_existing),
@@ -254,6 +255,7 @@ def attach_author_meta_to_all(
     *,
     service_name: str,
     author_icon_url: str | None = None,
+    author_url: str | None = None,
     minimal: bool = False,
     skip: bool = False,
     preserve_existing: bool = False,
@@ -264,6 +266,7 @@ def attach_author_meta_to_all(
             embed,
             service_name=service_name,
             author_icon_url=author_icon_url,
+            author_url=author_url,
             minimal=minimal,
             skip=skip,
             preserve_existing=preserve_existing,
@@ -307,6 +310,7 @@ def copy_author_meta(source: discord.Embed, target: discord.Embed) -> discord.Em
         target,
         service_name=meta.service_name,
         author_icon_url=meta.author_icon_url,
+        author_url=meta.author_url,
         minimal=meta.minimal,
         skip=meta.skip,
         preserve_existing=meta.preserve_existing,
@@ -340,6 +344,9 @@ class AuthorService:
     async def set_global_thumbnail(self, thumbnail: str | None) -> None:
         await self._set_or_clear(AUTHOR_GLOBAL_THUMBNAIL_KEY, _normalize_optional_thumbnail(thumbnail))
 
+    async def set_global_url(self, url: str | None) -> None:
+        await self._set_or_clear(AUTHOR_GLOBAL_URL_KEY, url)
+
     async def set_service_phrase(self, service_name: str, phrase: str | None) -> None:
         service = _clean(service_name)
         if not service:
@@ -354,6 +361,13 @@ class AuthorService:
         await self._set_or_clear(f"{AUTHOR_SERVICE_THUMBNAIL_PREFIX}{service}", _normalize_optional_thumbnail(thumbnail))
         await self.register_known_service(service, source="db")
 
+    async def set_service_url(self, service_name: str, url: str | None) -> None:
+        service = _clean(service_name)
+        if not service:
+            return
+        await self._set_or_clear(f"{AUTHOR_SERVICE_URL_PREFIX}{service}", url)
+        await self.register_known_service(service, source="db")
+
     async def get_version(self) -> str | None:
         return _clean(await self._database.get_setting(AUTHOR_VERSION_KEY)) or None
 
@@ -363,11 +377,17 @@ class AuthorService:
     async def get_global_thumbnail(self) -> str | None:
         return _clean(await self._database.get_setting(AUTHOR_GLOBAL_THUMBNAIL_KEY)) or None
 
+    async def get_global_url(self) -> str | None:
+        return _clean(await self._database.get_setting(AUTHOR_GLOBAL_URL_KEY)) or None
+
     async def get_service_phrases(self) -> dict[str, str]:
         return await self._get_prefixed_settings(AUTHOR_SERVICE_PHRASE_PREFIX)
 
     async def get_service_thumbnails(self) -> dict[str, str]:
         return await self._get_prefixed_settings(AUTHOR_SERVICE_THUMBNAIL_PREFIX)
+
+    async def get_service_urls(self) -> dict[str, str]:
+        return await self._get_prefixed_settings(AUTHOR_SERVICE_URL_PREFIX)
 
     async def _get_prefixed_settings(self, prefix: str) -> dict[str, str]:
         rows = await self._database.fetchall(
@@ -518,21 +538,51 @@ class AuthorService:
             return service_thumbnails[service_name]
         return await self.get_global_thumbnail()
 
+    async def _resolve_url(self, service_name: str, *, explicit_url: str | None = None) -> str | None:
+        if _clean(explicit_url):
+            return _clean(explicit_url) or None
+        service_urls = await self.get_service_urls()
+        if service_urls.get(service_name):
+            return service_urls[service_name]
+        return await self.get_global_url()
+
     async def render_author(
         self,
         *,
         service_name: str,
         explicit_icon_url: str | None = None,
+        explicit_url: str | None = None,
         minimal: bool = False,
-    ) -> tuple[str, str | None, str]:
+        page_index: int | None = None,
+        page_total: int | None = None,
+    ) -> tuple[str, str | None, str | None, str]:
         icon_url = await self._resolve_thumbnail(service_name, explicit_icon_url=explicit_icon_url)
+        url = await self._resolve_url(service_name, explicit_url=explicit_url)
         if minimal:
-            return render_author_name(service_name=service_name), icon_url, "fallback"
+            return render_author_name_with_page(service_name=service_name, page_index=page_index, page_total=page_total), icon_url, url, "fallback"
         phrase, phrase_origin = await self._resolve_phrase(service_name)
         version = await self.get_version()
-        return render_author_name(service_name=service_name, phrase=phrase, version=version), icon_url, phrase_origin
+        return (
+            render_author_name_with_page(
+                service_name=service_name,
+                phrase=phrase,
+                version=version,
+                page_index=page_index,
+                page_total=page_total,
+            ),
+            icon_url,
+            url,
+            phrase_origin,
+        )
 
-    async def apply(self, embed: discord.Embed, *, default_service_name: str = "unknown") -> discord.Embed:
+    async def apply(
+        self,
+        embed: discord.Embed,
+        *,
+        default_service_name: str = "unknown",
+        page_index: int | None = None,
+        page_total: int | None = None,
+    ) -> discord.Embed:
         author_name_before = getattr(embed.author, "name", None)
         meta = pop_author_meta(embed)
         if meta is None:
@@ -546,12 +596,15 @@ class AuthorService:
         persistable = _is_persistable_service_name(meta.service_name)
         if persistable:
             await self.register_known_service(meta.service_name, source="runtime")
-        author_name, resolved_icon_url, _ = await self.render_author(
+        author_name, resolved_icon_url, resolved_url, _ = await self.render_author(
             service_name=meta.service_name,
             explicit_icon_url=meta.author_icon_url,
+            explicit_url=meta.author_url,
             minimal=meta.minimal,
+            page_index=page_index,
+            page_total=page_total,
         )
-        embed.set_author(name=author_name, icon_url=resolved_icon_url)
+        embed.set_author(name=author_name, icon_url=resolved_icon_url, url=resolved_url)
         if persistable:
             try:
                 await self.record_service_author(
@@ -572,8 +625,10 @@ class AuthorService:
         version = await self.get_version()
         global_phrase = await self.get_global_phrase()
         global_thumbnail = await self.get_global_thumbnail()
+        global_url = await self.get_global_url()
         service_phrases = await self.get_service_phrases()
         service_thumbnails = await self.get_service_thumbnails()
+        service_urls = await self.get_service_urls()
         known_services = await self.get_known_services()
         service_sources = await self.get_known_service_sources()
         profile_map = await self.get_service_profiles()
@@ -583,7 +638,7 @@ class AuthorService:
         for service_name in services:
             if not _is_persistable_service_name(service_name):
                 continue
-            rendered_author, rendered_thumbnail, phrase_origin = await self.render_author(service_name=service_name)
+            rendered_author, rendered_thumbnail, rendered_url, phrase_origin = await self.render_author(service_name=service_name)
             phrase = service_phrases.get(service_name) if service_name in service_phrases else global_phrase
             entries.append(
                 AuthorStatusServiceEntry(
@@ -593,9 +648,11 @@ class AuthorService:
                     phrase=phrase,
                     phrase_origin="service" if service_name in service_phrases else ("global" if global_phrase else "fallback"),
                     rendered_author=rendered_author,
+                    rendered_url=rendered_url,
                     rendered_thumbnail=rendered_thumbnail,
                     service_phrase_override=service_name in service_phrases,
                     service_thumbnail_override=service_name in service_thumbnails,
+                    service_url_override=service_name in service_urls,
                     persisted_profile=profile_map.get(service_name),
                 )
             )
@@ -604,6 +661,7 @@ class AuthorService:
             version=version,
             global_phrase=global_phrase,
             global_thumbnail=global_thumbnail,
+            global_url=global_url,
             services=entries,
         )
 
@@ -629,7 +687,8 @@ class AuthorService:
     async def _load_services_from_template_keys(self) -> set[str]:
         phrases = await self.get_service_phrases()
         thumbnails = await self.get_service_thumbnails()
-        return set(phrases.keys()) | set(thumbnails.keys())
+        urls = await self.get_service_urls()
+        return set(phrases.keys()) | set(thumbnails.keys()) | set(urls.keys())
 
     async def _load_known_services_from_settings(self) -> tuple[list[str], dict[str, set[str]]]:
         raw = await self._database.get_setting(AUTHOR_KNOWN_SERVICES_KEY)

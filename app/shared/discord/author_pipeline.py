@@ -6,7 +6,7 @@ from typing import Any
 
 import discord
 
-from app.services.author import AuthorMeta, AuthorService, get_author_meta, render_author_name
+from app.services.author import AuthorMeta, AuthorService, get_author_meta, render_author_name_with_page
 from app.services.footer import get_footer_meta
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,8 @@ async def finalize_embed_author(
     author_service: AuthorService | None,
     *,
     default_service_name: str = "unknown",
+    page_index: int | None = None,
+    page_total: int | None = None,
 ) -> discord.Embed:
     meta = get_author_meta(embed)
     footer_meta = get_footer_meta(embed)
@@ -44,7 +46,7 @@ async def finalize_embed_author(
         return embed
     if author_service is None:
         if not getattr(embed.author, "name", None):
-            embed.set_author(name=render_author_name(service_name=meta.service_name))
+            embed.set_author(name=render_author_name_with_page(service_name=meta.service_name, page_index=page_index, page_total=page_total))
         return embed
     try:
         enabled = await author_service.is_enabled()
@@ -55,14 +57,19 @@ async def finalize_embed_author(
         if not enabled:
             embed.remove_author()
             return embed
-        return await author_service.apply(embed, default_service_name=default_service_name)
+        return await author_service.apply(
+            embed,
+            default_service_name=default_service_name,
+            page_index=page_index,
+            page_total=page_total,
+        )
     except Exception as exc:  # noqa: BLE001
         if "database is locked" in str(exc).lower():
             logger.warning("Author finalize skipped due to SQLite lock")
         else:
             logger.warning("Author finalize failed: %s", exc)
         if not getattr(embed.author, "name", None):
-            embed.set_author(name=render_author_name(service_name=meta.service_name))
+            embed.set_author(name=render_author_name_with_page(service_name=meta.service_name, page_index=page_index, page_total=page_total))
         return embed
 
 
@@ -73,8 +80,15 @@ async def finalize_embeds_author(
     default_service_name: str = "unknown",
 ) -> list[discord.Embed]:
     embed_list = list(embeds or [])
-    for embed in embed_list:
-        await finalize_embed_author(embed, author_service, default_service_name=default_service_name)
+    total = len(embed_list)
+    for idx, embed in enumerate(embed_list, start=1):
+        await finalize_embed_author(
+            embed,
+            author_service,
+            default_service_name=default_service_name,
+            page_index=idx if total > 1 else None,
+            page_total=total if total > 1 else None,
+        )
     return embed_list
 
 

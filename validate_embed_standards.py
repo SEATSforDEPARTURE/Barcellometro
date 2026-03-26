@@ -42,6 +42,7 @@ CANONICAL_HELPER_FILES = {
     "app/shared/discord/report_embeds.py",
     "app/shared/discord/component_notices.py",
     "app/shared/discord/footer_pipeline.py",
+    "app/shared/discord/embed_rendering.py",
     "app/shared/discord/embed_limits.py",
     "app/shared/discord/delivery.py",
     "app/services/footer.py",
@@ -57,6 +58,8 @@ CANONICAL_HELPER_FUNCTIONS = STANDARD_COMMAND_HELPERS | {
     "hydrate_persisted_embeds_with_footer",
     "finalize_embed",
     "finalize_embeds",
+    "finalize_embed_rendering",
+    "finalize_embeds_rendering",
 }
 
 DUPLICATE_HELPER_NAME_PATTERNS = (
@@ -242,6 +245,13 @@ _ALLOWED_MANUAL_SET_FOOTER_FILES = {
     REPO_ROOT / "app" / "shared" / "discord" / "footer_pipeline.py",
 }
 
+_ALLOWED_MANUAL_SET_AUTHOR_FILES = {
+    REPO_ROOT / "app" / "services" / "author.py",
+    REPO_ROOT / "app" / "shared" / "discord" / "author_pipeline.py",
+    REPO_ROOT / "app" / "services" / "member_flow_notifications.py",
+    REPO_ROOT / "app" / "plugins" / "commands_modular" / "riassunto.py",
+}
+
 
 def _check_manual_set_footer_calls(tree: ast.AST, path: Path, report: ValidationReport) -> None:
     if path in _ALLOWED_MANUAL_SET_FOOTER_FILES or path.parts[:1] == ("tests",):
@@ -257,6 +267,23 @@ def _check_manual_set_footer_calls(tree: ast.AST, path: Path, report: Validation
             path.relative_to(REPO_ROOT),
             node.lineno,
             "Manual embed.set_footer(...) bypasses the centralized footer contract; use footer metadata/helpers instead.",
+        )
+
+
+def _check_manual_set_author_calls(tree: ast.AST, path: Path, report: ValidationReport) -> None:
+    if path in _ALLOWED_MANUAL_SET_AUTHOR_FILES or path.parts[:1] == ("tests",):
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        chain = _attribute_chain(node.func)
+        if chain is None or chain[-1] != "set_author":
+            continue
+        report.add(
+            "manual_author_bypass",
+            path.relative_to(REPO_ROOT),
+            node.lineno,
+            "Manual embed.set_author(...) bypasses the centralized author contract; use author metadata/helpers instead.",
         )
 
 _RISKY_PERSISTED_EMBED_TARGETS = {
@@ -794,10 +821,9 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
     footer_source = footer_path.read_text(encoding="utf-8")
     footer_tree = ast.parse(footer_source, filename=str(footer_path))
     required_footer_snippets = (
-        "FOOTER_FALLBACK_VERSION =",
         "def _clean_footer_text(",
         "def render_footer_text(",
-        "brand_version = _clean(version) or FOOTER_FALLBACK_VERSION",
+        "brand = \"Barcellometro\"",
         "async def _resolve_footer_phrase(",
         "return service_phrases.get(service_name) or global_phrase or None",
         "return footer_text, clean_phrase or None",
@@ -828,6 +854,13 @@ def _check_canonical_embed_configuration(report: ValidationReport) -> None:
             footer_path.relative_to(REPO_ROOT),
             1,
             "FooterService must not use a hardcoded automatic fallback phrase for the central footer.",
+        )
+    if "FOOTER_FALLBACK_VERSION" in footer_source:
+        report.add(
+            "footer_version_implicit_fallback",
+            footer_path.relative_to(REPO_ROOT),
+            1,
+            "FooterService must not inject implicit version fallbacks; version is shown only when explicitly configured.",
         )
 
 
@@ -957,6 +990,7 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _check_manual_subtitle_concatenation(tree, path, report)
         _check_legacy_footer_service_wiring(tree, path, report)
         _check_manual_set_footer_calls(tree, path, report)
+        _check_manual_set_author_calls(tree, path, report)
         _check_persisted_embed_hydration(tree, path, report)
         _FooterMetaVisitor(path, report).visit(tree)
         if path in command_roots:

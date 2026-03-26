@@ -91,6 +91,7 @@ def test_author_template_global_set_show_reset_and_fallback_after_reset(embed_mo
                 ('Version', 'v3'),
                 ('Phrase', 'Linea author'),
                 ('Thumbnail', 'https://cdn.discordapp.com/emojis/1475962151502876695.png'),
+                ('URL', '(not set)'),
                 ('Preview', 'Linea author · v3'),
             ],
         )
@@ -104,6 +105,7 @@ def test_author_template_global_set_show_reset_and_fallback_after_reset(embed_mo
                 ('Version', 'v3'),
                 ('Phrase', 'Linea author'),
                 ('Thumbnail', 'https://cdn.discordapp.com/emojis/1475962151502876695.png'),
+                ('URL', '(not set)'),
                 ('Preview', 'Linea author · v3'),
             ],
         )
@@ -124,7 +126,8 @@ def test_author_template_global_set_show_reset_and_fallback_after_reset(embed_mo
                 ('Version', 'No custom override (version is ignored without an author phrase)'),
                 ('Phrase', 'No custom override (services use semantic fallback author)'),
                 ('Thumbnail', 'No custom override (default author has no thumbnail)'),
-                ('Preview', '📊 Status'),
+                ('URL', 'No custom override (default author has no URL)'),
+                ('Preview', 'servizio STATUS'),
             ],
         )
 
@@ -152,6 +155,7 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
             [
                 ('Phrase', 'Linea dedicata'),
                 ('Thumbnail', 'https://example.com/service.png'),
+                ('URL', '(not set)'),
                 ('Preview', 'Linea dedicata · 2026.03'),
             ],
         )
@@ -165,6 +169,7 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
             [
                 ('Phrase', 'Linea dedicata'),
                 ('Thumbnail', 'https://example.com/updated.png'),
+                ('URL', '(not set)'),
                 ('Preview', 'Linea dedicata · 2026.03'),
             ],
         )
@@ -177,6 +182,7 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
             [
                 ('Phrase', 'Linea dedicata'),
                 ('Thumbnail', 'https://example.com/updated.png'),
+                ('URL', '(not set)'),
                 ('Preview', 'Linea dedicata · 2026.03'),
             ],
         )
@@ -195,6 +201,7 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
             [
                 ('Phrase', 'No custom override (service uses global/fallback author phrase)'),
                 ('Thumbnail', 'No custom override (service uses global/no thumbnail fallback)'),
+                ('URL', 'No custom override (service uses global/no URL fallback)'),
                 ('Preview', 'Centro embed · 2026.03'),
             ],
         )

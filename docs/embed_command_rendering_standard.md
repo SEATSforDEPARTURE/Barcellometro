@@ -118,13 +118,13 @@ Regole obbligatorie:
 
 Non esiste più un output finale `minimal`: tutti gli embed standardizzati devono passare dalla stessa pipeline footer comune e includere, quando disponibili, tutti i segmenti nell’ordine:
 
-1. `Barcellometro <versione>`, sempre presente;
+1. `Barcellometro` come primo pezzo; la versione compare solo quando configurata esplicitamente (`footer.version` o override runtime).
 2. frase del footer service, solo quando esiste davvero una frase configurata e non vuota;
 3. parte tecnica finale `Dati elaborati con ...`, solo quando esistono davvero contributor/provider/model/strumenti esterni da dichiarare.
 
 `attach_minimal_footer(...)` sopravvive solo come shim di compatibilità interna: non decide più il testo finale del footer e non può bypassare `FooterService.apply(...)`. Se la frase non è configurata, il footer mostra soltanto la brand/versione e, se applicabile, il segmento tecnico finale.
 
-Se `footer_service` non è disponibile (`None`), la pipeline standard non lascia mai l'embed senza footer: usa comunque il fallback base dello stesso contratto unico e rende almeno `Barcellometro <versione>`. La versione arriva dal valore centralizzato del footer quando il service esiste; se il service manca del tutto, la pipeline usa il fallback runtime condiviso (`BARCELLOMETRO_VERSION` oppure `dev`) invece di inventare una frase. In questo scenario la seconda parte non compare, mentre la terza parte `Dati elaborati con ...` continua a comparire quando i metadata hanno contributor reali.
+Se `footer_service` non è disponibile (`None`), la pipeline standard non lascia mai l'embed senza footer: usa comunque il fallback base dello stesso contratto unico e rende almeno `Barcellometro`. In questo scenario non esiste fallback implicito di versione; la seconda parte non compare, mentre la terza parte `Dati elaborati con ...` continua a comparire quando i metadata hanno contributor reali.
 
 Vale esplicitamente per **tutti** i percorsi del repo: admin legacy, action canoniche `status/show/list/set/reset/run`, relative action composte di configurazione, embed campagne, renderer aura/report, finalize helpers, delivery helpers e qualunque invio che passi da `send_legacy_standard_response(...)`, `send_standard_response(...)`, `finalize_embed(...)`, `finalize_embeds(...)` o metadata footer condivisi. Se la frase globale o di servizio esiste, non sono ammesse eccezioni silenziose che mostrano solo `Barcellometro <version>`.
 
@@ -160,10 +160,10 @@ La regressione deve essere coperta anche lato test sul percorso reale di invio, 
 
 Esempi:
 
-- nessuna frase, nessun contributor: `Barcellometro dev6`
-- frase presente, nessun contributor: `Barcellometro dev6 · Sempre acceso.`
-- nessuna frase, contributor presente: `Barcellometro dev6 · Dati elaborati con gpt-4o`
-- frase presente, contributor presente: `Barcellometro dev6 · Sempre acceso. · Dati elaborati con gpt-4o`
+- nessuna versione, nessuna frase, nessun contributor: `Barcellometro`
+- versione esplicita + frase, nessun contributor: `Barcellometro dev6 · Sempre acceso.`
+- nessuna versione, contributor presente: `Barcellometro · Dati elaborati con gpt-4o`
+- versione esplicita + frase + contributor: `Barcellometro dev6 · Sempre acceso. · Dati elaborati con gpt-4o`
 
 Se la frase del footer non esiste, la pipeline centralizzata non aggiunge placeholder, non aggiunge sezioni vuote e non produce separatori doppi. Il flag `used_local_processing` resta metadata interno per profiling/persistenza e non genera testo visibile da solo.
 
@@ -215,21 +215,21 @@ La sezione `author` degli embed ha ora un servizio dedicato separato dal footer 
 - `author.enabled` abilita/disabilita il rendering centralizzato della sezione author;
 - `author.version`, `author.global_phrase`, `author.global_thumbnail` definiscono il template globale;
 - `author.service_phrase.<service>` e `author.service_thumbnail.<service>` definiscono override per singolo servizio;
-- il fallback puro non usa brand/versione Barcellometro: rende sempre `emoji servizio + nome servizio` e non usa thumbnail di default;
-- la `version` author ha semantica sobria: viene appesa solo quando esiste una `phrase` globale o di servizio, quindi il fallback puro resta leggibile (`🗒️ Riassunto`, non `🗒️ Riassunto · dev`).
+- il fallback puro rende `servizio <NOME CANONICO INGLESE TOP-LEVEL>` (nome canonical upper-case), senza emoji legacy e senza dipendenze dal footer;
+- la `version` author ha semantica sobria: viene appesa solo quando esiste una `phrase` globale o di servizio, quindi il fallback puro resta leggibile (`servizio SUMMARY`, non `servizio SUMMARY · dev`).
 
 Ordine di precedenza author:
 
 1. override di servizio (`phrase` / `thumbnail`);
 2. template globale;
-3. fallback semantico `emoji + nome servizio`;
+3. fallback semantico `servizio <NOME CANONICO INGLESE TOP-LEVEL>`;
 4. nessuna thumbnail se non configurata.
 
 Questo equivale alla regola normativa generale `override servizio > globale > fallback`. Se un renderer imposta un author custom per una ragione forte di dominio, quell'override runtime deve essere esplicitamente documentato e prevale solo per quel renderer; non ridefinisce il contratto standard per gli altri servizi.
 
 Regole di fallback e reset:
 
-- il fallback author per servizio è sempre `emoji del servizio + nome servizio`;
+- il fallback author per servizio è sempre `servizio <NOME CANONICO INGLESE TOP-LEVEL>`;
 - la thumbnail author del fallback è separata dal footer e resta assente se non esiste un template del dominio;
 - `template_service_reset` rimuove l'override di servizio e fa riespandere template globale oppure fallback author;
 - `template_global_reset` rimuove il template globale e fa riespandere il fallback author per tutti i servizi che non hanno override locale;
@@ -334,3 +334,13 @@ Il feed GREETINGS / `🚪 INGRESSI & USCITE` segue inoltre un contratto visivo f
 - non esiste più un campo separato `Stato barcello "<server>"`: ogni riferimento al Barcello va integrato direttamente nella narrativa quando il template JSON lo rende naturale;
 - non è ammesso un doppio embed di uscita per la stessa sequenza tecnica (per esempio `inactive_kick` assorbito da `inactive_tempban`, oppure `leave` gateway successivo a una departure esplicita già visibile);
 - i label user-facing devono mostrare `ALLONTANAMENTO` / `ALLONTANAMENTO PER INATTIVITÀ` e non il termine raw `KICK`.
+
+
+## Fase 1 — layer centrale embed rendering
+
+È stato introdotto un orchestratore centrale (`app/shared/discord/embed_rendering.py`) che coordina author/footer senza duplicare logica di dominio.
+
+- supporta singolo embed e liste multipagina;
+- applica il suffix author centrale ` · (Pag. X/Y)` su liste;
+- è usato dai path di consegna standard (`command_embeds` e `delivery`) ed è compatibile con DM/canali/ephemeral/followup/edit message;
+- resta pronto alla fase successiva per integrazione `images` e helper body, senza migrazione massiva dei renderer in questa fase.
