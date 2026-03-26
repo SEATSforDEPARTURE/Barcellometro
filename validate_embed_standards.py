@@ -474,26 +474,15 @@ def _check_body_helpers_adoption(path: Path, source: str, report: ValidationRepo
     rel = path.relative_to(REPO_ROOT)
     if rel.as_posix() != "app/shared/discord/command_embeds.py":
         return
+    # Command/response embeds follow a different contract from structured service
+    # renderers: they must preserve canonical title rendering, while description
+    # and field usage remain intentionally flexible (informative prose is valid).
     if "format_standard_title(" not in source:
         report.add(
             "body_helpers_required",
             rel,
             1,
             "Command embed builder must route title rendering through format_standard_title.",
-        )
-    if "embed.add_field(" not in source:
-        report.add(
-            "command_embed_fields_required",
-            rel,
-            1,
-            "Command embed builder must render important sections as real Discord fields (embed.add_field).",
-        )
-    if "format_standard_description(" not in source:
-        report.add(
-            "command_embed_description_intro_required",
-            rel,
-            1,
-            "Command embed builder must render description as a short canonical intro.",
         )
 
 

@@ -7,6 +7,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from validate_embed_standards import (
     REPO_ROOT,
     ValidationReport,
+    _check_body_helpers_adoption,
     _check_hardcoded_embed_title_and_field_contract,
     _check_manual_set_embed_images_calls,
     _check_persisted_embed_hydration,
@@ -100,6 +101,23 @@ def test_command_embed_helpers_do_not_finalize_with_null_services() -> None:
     assert "finalize_embeds_author(embed_list, None" not in source
     assert "finalize_embeds(embed_list, None" not in source
     assert "if footer_service is None:" not in source
+
+
+def test_command_embed_validator_does_not_require_fields_or_intro_helper() -> None:
+    source = '''
+def build():
+    title = format_standard_title("📊", "status")
+    description = "Stato completo del comando."
+    return title, description
+'''
+    report = ValidationReport()
+    _check_body_helpers_adoption(
+        REPO_ROOT / "app" / "shared" / "discord" / "command_embeds.py",
+        source,
+        report,
+    )
+    assert report.errors == []
+
 
 def test_greetings_layout_docs_and_renderer_reflect_final_visual_contract() -> None:
     member_flow_source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
