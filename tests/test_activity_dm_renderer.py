@@ -72,6 +72,8 @@ def test_dm_layout_limits_and_formatting() -> None:
     names = "\n".join(field.name for e in embeds for field in e.fields)
     assert format_standard_field_name("🏆 TOP 10 UTENTI PIÙ ATTIVI") in names
     assert format_standard_field_name("💤 TOP 10 UTENTI INATTIVI") in names
+    assert not any("🏆 **TOP" in (embed.description or "") for embed in embeds)
+    assert not any("💤 **TOP" in (embed.description or "") for embed in embeds)
     assert "🥇" in combined and "🥈" in combined and "🥉" in combined and "4️⃣" in combined
     assert "\n  🔥 Picco:" in combined
     assert "(**0 msg**)" in combined

@@ -89,22 +89,21 @@ def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fie
         window_end_dt=datetime(2026, 2, 20, 10, 0),
     )
 
-    assert "🗓️ Oggi. Venerdì, 20 Febbraio 2026" in (embeds[0].description or "")
-    assert "🫀 **PUNTI ATTIVITÀ SERVER**" in (embeds[0].description or "")
-    assert "🫀 **PUNTI ATTIVITÀ CANALI**" in (embeds[0].description or "")
-    assert "🟢 **(72/100)** - #general" in (embeds[0].description or "")
+    period_field = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("PERIODO", emoji="🕒"))
+    assert "🗓️ Oggi. Venerdì, 20 Febbraio 2026" in period_field
     first_names = [f.name for f in embeds[0].fields]
     assert format_standard_field_name("TREND", emoji="📈") in first_names
+    assert format_standard_field_name("STATISTICHE SERVER", emoji="📌") in first_names
+    assert "📈 **TREND**" not in (embeds[0].description or "")
     stats_server = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("STATISTICHE SERVER", emoji="📌"))
     assert "Ora di silenzio generale" in stats_server
     assert "Utenti attivi: **3/12 (25%)**" in stats_server
     channel_stats = next(f.value for f in embeds[1].fields if f.name == format_standard_field_name("STATISTICHE CANALE", emoji="📌"))
     assert "Ora di silenzio" in channel_stats
     assert "Utenti attivi: **2/10 (20%)**" in channel_stats
-    assert [f.name for f in embeds[1].fields][:2] == [
-        format_standard_field_name("TREND", emoji="📈"),
-        format_standard_field_name("STATISTICHE CANALE", emoji="📌"),
-    ]
+    channel_field_names = [f.name for f in embeds[1].fields]
+    assert format_standard_field_name("TREND", emoji="📈") in channel_field_names
+    assert format_standard_field_name("STATISTICHE CANALE", emoji="📌") in channel_field_names
 
 
 def test_daily_renderer_txt_contains_required_headers_and_silence(renderer_module) -> None:
@@ -161,8 +160,9 @@ def test_daily_renderer_embeds_use_ultimi_window_header(renderer_module) -> None
         window_end_dt=datetime(2026, 3, 16, 15, 19),
     )
 
-    assert "🗓️ Ultime 20 ore" in (embeds[0].description or "")
-    assert "15/03/2026 19:19 → 16/03/2026 15:19" in (embeds[0].description or "")
+    period_field = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("PERIODO", emoji="🕒"))
+    assert "🗓️ Ultime 20 ore" in period_field
+    assert "15/03/2026 19:19 → 16/03/2026 15:19" in period_field
 
 
 def test_daily_renderer_embeds_use_range_window_header(renderer_module) -> None:
@@ -189,4 +189,5 @@ def test_daily_renderer_embeds_use_range_window_header(renderer_module) -> None:
         window_end_dt=datetime(2026, 3, 12, 1, 0),
     )
 
-    assert "🗓️ 10/03/2026 00:00 → 12/03/2026 01:00" in (embeds[0].description or "")
+    period_field = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("PERIODO", emoji="🕒"))
+    assert "🗓️ 10/03/2026 00:00 → 12/03/2026 01:00" in period_field

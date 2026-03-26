@@ -46,6 +46,22 @@ _KNOWN_SUSPECT_FILES = [
     Path("app/plugins/commands_modular/resoconto.py"),
 ]
 
+_ILLEGAL_DESCRIPTION_SECTION_PATTERNS = [
+    re.compile(r"(?mi)^\s*[^\w\s]\s+\*\*[^\n*]{2,}\*\*\s*$"),
+    re.compile(r"(?mi)^\s*👇\s*\*\*\s*RISPOSTA\s*:?\s*\*\*\s*$"),
+    re.compile(r"(?mi)^\s*📈\s*\*\*\s*TREND\s*\*\*\s*$"),
+    re.compile(r"(?mi)^\s*🏆\s*\*\*\s*CLASSIFICA\s*\*\*\s*$"),
+]
+
+_SECTION_KEYWORDS = (
+    "TREND",
+    "CLASSIFICA",
+    "STATISTICHE",
+    "TOP",
+    "BREAKDOWN",
+    "RISPOSTA",
+)
+
 
 def _extract_inner_standard_text(value: str, *, field: bool) -> str:
     pattern = _STANDARD_FIELD_RE if field else _STANDARD_TITLE_RE
@@ -88,6 +104,31 @@ def assert_standard_description(description: str | None, *, strict: bool, has_fi
                 "Description non dovrebbe iniziare da faccina/simbolo grezzo: "
                 f"{description!r}"
             )
+
+    illegal_section_lines = _find_illegal_section_headings_in_description(description)
+    if has_fields and illegal_section_lines:
+        raise AssertionError(
+            "Description contiene sezioni hardcoded; usare fields standard per le sezioni principali. "
+            f"Righe sospette: {illegal_section_lines}"
+        )
+
+
+def _looks_like_section_heading_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if any(pattern.search(stripped) for pattern in _ILLEGAL_DESCRIPTION_SECTION_PATTERNS):
+        return True
+    if "**" not in stripped:
+        return False
+    plain = stripped.replace("*", "").replace("_", "").upper()
+    return any(keyword in plain for keyword in _SECTION_KEYWORDS)
+
+
+def _find_illegal_section_headings_in_description(description: str | None) -> list[str]:
+    if not description:
+        return []
+    return [line.strip() for line in description.splitlines() if _looks_like_section_heading_line(line)]
 
 
 def _all_embed_python_files() -> list[Path]:
@@ -196,6 +237,22 @@ def test_standard_body_helpers_contract() -> None:
     assert_standard_title(embed.title)
     assert_standard_description(embed.description, strict=True, has_fields=True)
     assert_standard_field_name(format_standard_field_name("trend", emoji="📈"))
+
+
+def test_description_heading_detector_flags_illegal_section_patterns() -> None:
+    bad = "\n".join(
+        [
+            "*Intro*",
+            "👇 **Risposta:**",
+            "📈 **TREND**",
+            "🏆 **CLASSIFICA**",
+        ]
+    )
+    offenders = _find_illegal_section_headings_in_description(bad)
+    assert offenders, "Il detector deve intercettare heading di sezione hardcoded in description"
+    assert any("RISPOSTA" in line.upper() for line in offenders)
+    assert any("TREND" in line.upper() for line in offenders)
+    assert any("CLASSIFICA" in line.upper() for line in offenders)
 
 
 def test_command_embeds_respect_body_contract() -> None:
@@ -368,3 +425,16 @@ def test_runtime_renderer_outputs_follow_body_standard() -> None:
         assert_standard_description(embed.description, strict=False, has_fields=bool(embed.fields))
         for field in embed.fields:
             assert_standard_field_name(field.name)
+
+    assert any("TREND" in f.name for f in activity_embeds[0].fields), (
+        "Activity report: la sezione TREND deve essere un field standard, non solo testo in description"
+    )
+    assert any("STATISTICHE SERVER" in f.name for f in activity_embeds[0].fields), (
+        "Activity report: STATISTICHE SERVER deve stare nei fields"
+    )
+    assert any("MOMENTI SALIENTI" in f.name for f in channel_embeds[1].fields), (
+        "Channel summary: le sezioni principali (es. MOMENTI SALIENTI) devono stare nei fields"
+    )
+    assert any("MISSIONI" in f.name for emb in aura_embeds[1:] for f in emb.fields), (
+        "Aura: le sezioni di dettaglio (es. MISSIONI) devono comparire come fields"
+    )
