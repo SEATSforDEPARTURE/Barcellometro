@@ -115,11 +115,18 @@ def _split_chunks(text: str, limit: int) -> list[str]:
 
 def add_field_safe(embed: discord.Embed, *, name: str, value: str, inline: bool = False) -> None:
     safe_name = _truncate(name, MAX_FIELD_NAME)
+
+    def _normalize_field_name(raw: str) -> str:
+        text = _truncate(raw, MAX_FIELD_NAME)
+        if "__**" in text:
+            return text
+        return _truncate(format_standard_field_name(text), MAX_FIELD_NAME)
+
     chunks = _split_chunks(value, MAX_FIELD_VALUE)
     for idx, chunk in enumerate(chunks):
         if len(embed.fields) >= MAX_EMBED_FIELDS:
             break
-        field_name = safe_name if idx == 0 else _truncate(f"{safe_name} (cont.)", MAX_FIELD_NAME)
+        field_name = _normalize_field_name(safe_name if idx == 0 else f"{safe_name} (cont.)")
         embed.add_field(name=field_name, value=_truncate(chunk or "—", MAX_FIELD_VALUE), inline=inline)
 
 
@@ -588,7 +595,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext, *
         except discord.HTTPException as exc:
             logger.exception("Errore invio DM report utente attivita guild=%s user=%s", interaction.guild_id, utente.id)
             if exc.status == 400 and ("50035" in str(exc) or "Invalid Form Body" in str(exc)):
-                fallback = discord.Embed(title=f"🗣️ STATO ATTIVITÀ “{utente.display_name}”", color=discord.Color.dark_grey())
+                fallback = discord.Embed(title=format_standard_title(f"STATO ATTIVITÀ “{utente.display_name}”", emoji="🗣️"), color=discord.Color.dark_grey())
                 fallback.description = _truncate(
                     f"🕒 **{window.label_periodo}**\n\n{emoji} **ATTIVITÀ {label}**\n🫀 **PUNTI ATTIVITÀ** {b(f'{score}/100')}\n📈 {trend_text}\n\nDettagli completi nel file allegato.",
                     3000,

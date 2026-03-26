@@ -253,7 +253,7 @@ def build_service_status_field(entry: FooterStatusServiceEntry, snapshot: Footer
 
     value = "\n".join(lines)
     return FooterStatusField(
-        name=_clip(f"🧾 {_human_service_name(entry.service_name).upper()}", DISCORD_MAX_FIELD_NAME),
+        name=_clip(format_standard_field_name(_human_service_name(entry.service_name), emoji="🧾"), DISCORD_MAX_FIELD_NAME),
         value=_clip(value, DISCORD_MAX_FIELD_VALUE),
     )
 

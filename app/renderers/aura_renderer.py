@@ -497,7 +497,7 @@ def _standard_field(label: str) -> str:
 
 def _add_field_with_chunks(embed: discord.Embed, *, name: str, value: str) -> None:
     for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
-        embed.add_field(name=name if part_idx == 0 else f"{name} (cont.)", value=piece, inline=False)
+        embed.add_field(name=_standard_field(name if part_idx == 0 else f"{name} (cont.)"), value=piece, inline=False)
 
 
 def _compose_channel_aura_embed(
@@ -692,8 +692,7 @@ def build_aura_embeds(
         embed = discord.Embed(title=format_standard_title(f"{clean_prefix} — \"{tier_label}\"", emoji="🗒️"), color=0x2F3136)
         for name, value in chunk:
             for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
-                field_name = name if part_idx == 0 else f"{name} (cont.)"
-                embed.add_field(name=_standard_field(field_name), value=piece, inline=False)
+                embed.add_field(name=_standard_field(name if part_idx == 0 else f"{name} (cont.)"), value=piece, inline=False)
         attach_footer_meta(embed, service_name="aura", used_local_processing=True)
         attach_author_meta(embed, service_name="aura", canonical_top_level_command="aurasummary")
         attach_embed_images_meta(embed, service_name="aura")
