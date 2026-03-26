@@ -54,6 +54,15 @@ def test_command_validator_tracks_embed_namespace_topology() -> None:
         "embed.author.template_service_set",
         "embed.author.template_service_show",
         "embed.author.template_service_reset",
+        "embed.images.on",
+        "embed.images.off",
+        "embed.images.status",
+        "embed.images.template_global_set",
+        "embed.images.template_global_show",
+        "embed.images.template_global_reset",
+        "embed.images.template_service_set",
+        "embed.images.template_service_show",
+        "embed.images.template_service_reset",
     }
 
 

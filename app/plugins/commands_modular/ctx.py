@@ -14,6 +14,7 @@ from app.services.ingest import IngestService
 from app.services.content_summary_service import SummaryService
 from app.services.author import AuthorService
 from app.services.footer import FooterService
+from app.services.embed_images import EmbedImagesService
 
 
 @dataclass
@@ -45,6 +46,7 @@ class CommandContext:
     aura_rolling: Optional[Any] = None
     footer: Optional[FooterService] = None
     author: Optional[AuthorService] = None
+    embed_images: Optional[EmbedImagesService] = None
     member_flow_notifications: Optional[Any] = None
     greetings_backfill: Optional[Any] = None
 
@@ -82,6 +84,7 @@ class CommandContext:
         ingest: IngestService = registry.get("ingest")
         footer = registry.get("footer") if registry.has("footer") else None
         author = registry.get("author") if registry.has("author") else None
+        embed_images = registry.get("embed_images") if registry.has("embed_images") else None
         member_flow_notifications = registry.get("member_flow_notifications") if registry.has("member_flow_notifications") else None
         greetings_backfill = registry.get("greetings_backfill") if registry.has("greetings_backfill") else None
         config = registry.get("config")
@@ -113,6 +116,7 @@ class CommandContext:
             aura_rolling=aura_rolling,
             footer=footer,
             author=author,
+            embed_images=embed_images,
             member_flow_notifications=member_flow_notifications,
             greetings_backfill=greetings_backfill,
             timezone=timezone,

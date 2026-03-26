@@ -10,6 +10,7 @@ from app.shared.discord.author_status_renderer import build_author_status_embeds
 from app.shared.discord.command_embeds import CommandEmbedSection, send_command_embeds, send_standard_response
 from app.shared.discord.footer_status_pagination import FooterStatusPaginationView
 from app.shared.discord.footer_status_renderer import build_footer_status_embeds
+from app.services.embed_images import InvalidEmbedImageUrlError
 from app.services.author import InvalidAuthorThumbnailError, render_author_name
 from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
 
@@ -38,6 +39,7 @@ async def _send_embed_response(
         kind=kind,
         footer_service=ctx.footer,
         author_service=_author_service(ctx),
+        embed_images_service=getattr(ctx, "embed_images", None),
         footer_service_name="status",
         ephemeral=True,
     )
@@ -453,7 +455,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             )
             return
         view = FooterStatusPaginationView(embeds)
-        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), default_service_name="status")
+        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), embed_images_service=getattr(ctx, "embed_images", None), default_service_name="status")
 
     author_group = app_commands.Group(name="author", description="Author controls")
     embed_group.add_command(author_group)
@@ -678,4 +680,184 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "No author data available")], kind="warning")
             return
         view = AuthorStatusPaginationView(embeds)
-        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), default_service_name="status")
+        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), embed_images_service=getattr(ctx, "embed_images", None), default_service_name="status")
+
+    images_group = app_commands.Group(name="images", description="Embed image controls")
+    embed_group.add_command(images_group)
+
+    @images_group.command(name="on", description="Enable centralized embed images rendering.")
+    async def images_on_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.images.on", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images on", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        await ctx.embed_images.set_enabled(True)
+        await _send_embed_response(interaction, ctx, subcommand_path="images on", lines=[("result", "enabled")], kind="success")
+
+    @images_group.command(name="off", description="Disable centralized embed images rendering.")
+    async def images_off_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.images.off", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images off", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        await ctx.embed_images.set_enabled(False)
+        await _send_embed_response(interaction, ctx, subcommand_path="images off", lines=[("result", "disabled")], kind="success")
+
+    @images_group.command(name="status", description="Show embed images status.")
+    async def images_status_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.images.status", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images status", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        snapshot = await ctx.embed_images.build_status_snapshot()
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="images status",
+            lines=[
+                ("enabled", "on" if snapshot.enabled else "off"),
+                ("global image", _format_value(snapshot.global_image)),
+                ("global thumbnail", _format_value(snapshot.global_thumbnail)),
+                ("service image overrides", len(snapshot.service_images)),
+                ("service thumbnail overrides", len(snapshot.service_thumbnails)),
+                ("precedence", "runtime override > service template > global template > no image"),
+            ],
+        )
+
+    @images_group.command(name="template_global_set", description="Set global image and thumbnail templates.")
+    @app_commands.describe(image="Optional global embed image URL.", thumbnail="Optional global embed thumbnail URL.")
+    async def images_template_global_set_command(interaction: discord.Interaction, image: str | None = None, thumbnail: str | None = None) -> None:
+        if not await check_permission(interaction, "admin.images.template_global_set", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_global_set", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        if image is None and thumbnail is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_global_set", lines=[("reason", "No changes provided")], kind="warning")
+            return
+        try:
+            if image is not None:
+                await ctx.embed_images.set_global_image(_clean_opt(image))
+            if thumbnail is not None:
+                await ctx.embed_images.set_global_thumbnail(_clean_opt(thumbnail))
+        except InvalidEmbedImageUrlError as exc:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_global_set", lines=[("reason", str(exc))], kind="error")
+            return
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="images template_global_set",
+            lines=[("result", "updated")],
+            sections=_template_section(
+                ("Image", _format_value(await ctx.embed_images.get_global_image())),
+                ("Thumbnail", _format_value(await ctx.embed_images.get_global_thumbnail())),
+            ),
+            kind="success",
+        )
+
+    @images_group.command(name="template_global_show", description="Show global image and thumbnail templates.")
+    async def images_template_global_show_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.images.template_global_show", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_global_show", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="images template_global_show",
+            sections=_template_section(
+                ("Image", _format_override_value(await ctx.embed_images.get_global_image(), missing="No custom override (no global image template)")),
+                ("Thumbnail", _format_override_value(await ctx.embed_images.get_global_thumbnail(), missing="No custom override (no global thumbnail template)")),
+            ),
+        )
+
+    @images_group.command(name="template_global_reset", description="Reset global image and thumbnail templates.")
+    async def images_template_global_reset_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.images.template_global_reset", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_global_reset", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        await ctx.embed_images.set_global_image(None)
+        await ctx.embed_images.set_global_thumbnail(None)
+        await _send_embed_response(interaction, ctx, subcommand_path="images template_global_reset", lines=[("result", "reset")], kind="success")
+
+    @images_group.command(name="template_service_set", description="Set service-level image and thumbnail templates.")
+    @app_commands.describe(service="Service name.", image="Optional service embed image URL.", thumbnail="Optional service embed thumbnail URL.")
+    async def images_template_service_set_command(interaction: discord.Interaction, service: str, image: str | None = None, thumbnail: str | None = None) -> None:
+        if not await check_permission(interaction, "admin.images.template_service_set", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        service_name = _clean_opt(service)
+        if service_name is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
+            return
+        if image is None and thumbnail is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", subtitle_args=[service_name], lines=[("reason", "No changes provided")], kind="warning")
+            return
+        try:
+            if image is not None:
+                await ctx.embed_images.set_service_image(service_name, _clean_opt(image))
+            if thumbnail is not None:
+                await ctx.embed_images.set_service_thumbnail(service_name, _clean_opt(thumbnail))
+        except InvalidEmbedImageUrlError as exc:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", subtitle_args=[service_name], lines=[("reason", str(exc))], kind="error")
+            return
+        service_image = (await ctx.embed_images.get_service_images()).get(service_name)
+        service_thumbnail = (await ctx.embed_images.get_service_thumbnails()).get(service_name)
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="images template_service_set",
+            subtitle_args=[service_name],
+            lines=[("result", "updated")],
+            sections=_template_section(("Image", _format_value(service_image)), ("Thumbnail", _format_value(service_thumbnail))),
+            kind="success",
+        )
+
+    @images_group.command(name="template_service_show", description="Show service-level image and thumbnail templates.")
+    @app_commands.describe(service="Service name.")
+    async def images_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
+        if not await check_permission(interaction, "admin.images.template_service_show", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_service_show", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        service_name = _clean_opt(service)
+        if service_name is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
+            return
+        service_image = (await ctx.embed_images.get_service_images()).get(service_name)
+        service_thumbnail = (await ctx.embed_images.get_service_thumbnails()).get(service_name)
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="images template_service_show",
+            subtitle_args=[service_name],
+            sections=_template_section(
+                ("Image", _format_override_value(service_image, missing="No custom override (service uses global/no image fallback)")),
+                ("Thumbnail", _format_override_value(service_thumbnail, missing="No custom override (service uses global/no thumbnail fallback)")),
+            ),
+        )
+
+    @images_group.command(name="template_service_reset", description="Reset service-level image and thumbnail templates.")
+    @app_commands.describe(service="Service name.")
+    async def images_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
+        if not await check_permission(interaction, "admin.images.template_service_reset", ctx):
+            return
+        if getattr(ctx, "embed_images", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_service_reset", lines=[("reason", "Embed images service is unavailable")], kind="error")
+            return
+        service_name = _clean_opt(service)
+        if service_name is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="images template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
+            return
+        await ctx.embed_images.set_service_image(service_name, None)
+        await ctx.embed_images.set_service_thumbnail(service_name, None)
+        await _send_embed_response(interaction, ctx, subcommand_path="images template_service_reset", subtitle_args=[service_name], lines=[("result", "reset")], kind="success")

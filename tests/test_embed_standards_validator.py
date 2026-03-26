@@ -7,6 +7,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from validate_embed_standards import (
     REPO_ROOT,
     ValidationReport,
+    _check_manual_set_embed_images_calls,
     _check_persisted_embed_hydration,
     validate_embed_standards,
 )
@@ -115,3 +116,17 @@ async def safe(interaction, payload):
     _check_persisted_embed_hydration(tree, REPO_ROOT / "app" / "example_safe.py", report)
 
     assert report.errors == []
+
+
+def test_validator_flags_direct_embed_image_calls_outside_allowed_files() -> None:
+    source = '''
+def broken(embed):
+    embed.set_image(url="https://example.com/x.png")
+'''
+    tree = ast.parse(source)
+    report = ValidationReport()
+
+    _check_manual_set_embed_images_calls(tree, REPO_ROOT / "app" / "example_images_broken.py", report)
+
+    assert len(report.errors) == 1
+    assert report.errors[0].rule == "manual_embed_images_bypass"
