@@ -94,16 +94,16 @@ def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fie
     assert "🫀 **PUNTI ATTIVITÀ CANALI**" in (embeds[0].description or "")
     assert "🟢 **(72/100)** - #general" in (embeds[0].description or "")
     first_names = [f.name for f in embeds[0].fields]
-    assert format_standard_field_name("Trend", emoji="📈") in first_names
-    stats_server = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("Statistiche server", emoji="📌"))
+    assert format_standard_field_name("TREND", emoji="📈") in first_names
+    stats_server = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("STATISTICHE SERVER", emoji="📌"))
     assert "Ora di silenzio generale" in stats_server
     assert "Utenti attivi: **3/12 (25%)**" in stats_server
-    channel_stats = next(f.value for f in embeds[1].fields if f.name == format_standard_field_name("Statistiche canale", emoji="📌"))
+    channel_stats = next(f.value for f in embeds[1].fields if f.name == format_standard_field_name("STATISTICHE CANALE", emoji="📌"))
     assert "Ora di silenzio" in channel_stats
     assert "Utenti attivi: **2/10 (20%)**" in channel_stats
     assert [f.name for f in embeds[1].fields][:2] == [
-        format_standard_field_name("Trend", emoji="📈"),
-        format_standard_field_name("Statistiche canale", emoji="📌"),
+        format_standard_field_name("TREND", emoji="📈"),
+        format_standard_field_name("STATISTICHE CANALE", emoji="📌"),
     ]
 
 

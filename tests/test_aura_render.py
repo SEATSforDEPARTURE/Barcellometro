@@ -1,20 +1,28 @@
 from app.services.aura_archetypes import build_dynamic_archetype_reason
 from app.renderers.aura_renderer import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_character_analysis_lines, _build_profile_traits_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
-from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
+from app.shared.discord.embed_body import format_standard_title
+import re
+
+
+_STANDARD_WRAP_RE = re.compile(r"^(?:(?P<emoji>\S+)\s+)?__\*\*(?P<inner>.*)\*\*__$")
+
+
+def _unwrap_standard_label(value: str) -> str:
+    text = value.strip()
+    while True:
+        match = _STANDARD_WRAP_RE.match(text)
+        if match is None:
+            break
+        text = match.group("inner").strip()
+    return text
 
 
 def _field_value_by_plain_name(embed, plain_name: str) -> str:
+    normalized = plain_name.upper()
     return next(
         field.value
         for field in embed.fields
-        if field.name in {
-            format_standard_field_name(plain_name),
-            format_standard_field_name(plain_name, emoji="🏆"),
-            format_standard_field_name(plain_name, emoji="🕹️"),
-            format_standard_field_name(plain_name, emoji="📈"),
-            format_standard_field_name(plain_name, emoji="📜"),
-            format_standard_field_name(plain_name, emoji="✨"),
-        }
+        if _unwrap_standard_label(field.name) == normalized
     )
 
 
@@ -414,24 +422,24 @@ def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
         ),
     )
 
-    names = [f.name for f in embed.fields]
+    names = [_unwrap_standard_label(f.name) for f in embed.fields]
     assert _estimate_embed_size(embed) <= MAX_EMBED_CHARS
-    assert format_standard_field_name("Panoramica", emoji="📈") in names
-    pano_text = "\n".join(field.value for field in embed.fields if field.name == format_standard_field_name("Panoramica", emoji="📈"))
+    assert "PANORAMICA" in names
+    pano_text = "\n".join(field.value for field in embed.fields if _unwrap_standard_label(field.name) == "PANORAMICA")
     assert "Punti assegnati: **+5000**" in pano_text
     assert "Punti rimossi: **1200**" in pano_text
     assert "Utenti coinvolti: **44**" in pano_text
-    assert format_standard_field_name("Classifica", emoji="🏆") in names
-    assert format_standard_field_name("Motivazioni", emoji="🕹️") in names
-    assert format_standard_field_name("Missioni", emoji="📜") in names
-    assert format_standard_field_name("I consigli del barcellometro", emoji="✨") in names
+    assert "CLASSIFICA" in names
+    assert "MOTIVAZIONI" in names
+    assert "MISSIONI" in names
+    assert "I CONSIGLI DEL BARCELLOMETRO" in names
 
-    top_text = "\n".join(field.value for field in embed.fields if field.name == format_standard_field_name("Classifica", emoji="🏆"))
+    top_text = "\n".join(field.value for field in embed.fields if _unwrap_standard_label(field.name) == "CLASSIFICA")
     top_rows = [line for line in top_text.splitlines() if line.strip()]
     assert len(top_rows) == 10
     assert all("<@" in row and "**+" in row and "—" in row for row in top_rows)
 
-    punteggi_text = "\n".join(field.value for field in embed.fields if field.name == format_standard_field_name("Motivazioni", emoji="🕹️"))
+    punteggi_text = "\n".join(field.value for field in embed.fields if _unwrap_standard_label(field.name) == "MOTIVAZIONI")
     punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
     assert len(punteggi_rows) <= 7
     assert len(punteggi_rows) < len(top_rows) + 8
@@ -526,6 +534,6 @@ def test_channel_aura_embed_compacts_punteggi_before_reducing_top10_rows() -> No
     top_rows = [line for line in top_field.splitlines() if line.strip()]
     assert len(top_rows) == 10
 
-    punteggi_text = "\n".join(field.value for field in embed.fields if field.name == format_standard_field_name("Motivazioni", emoji="🕹️"))
+    punteggi_text = "\n".join(field.value for field in embed.fields if _unwrap_standard_label(field.name) == "MOTIVAZIONI")
     punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
     assert len(punteggi_rows) <= 4

@@ -133,10 +133,10 @@ def test_footer_status_overview_page_is_always_present_and_readable() -> None:
         assert "Vista amministrativa del footer embed" in overview.description
         assert "INIZIO / INDIETRO / AVANTI" in overview.description
         assert [field.name for field in overview.fields] == [
-            format_standard_field_name("Stato", emoji="ℹ️"),
-            format_standard_field_name("Servizi", emoji="📊"),
-            format_standard_field_name("Famiglie", emoji="📂"),
-            format_standard_field_name("Configurazione", emoji="⚙️"),
+            format_standard_field_name("STATO", emoji="ℹ️"),
+            format_standard_field_name("SERVIZI", emoji="📊"),
+            format_standard_field_name("FAMIGLIE", emoji="📂"),
+            format_standard_field_name("CONFIGURAZIONE", emoji="⚙️"),
         ]
         assert all("• " in field.value for field in overview.fields)
         assert "Navigazione" not in "\n".join(field.name for field in overview.fields)
@@ -169,7 +169,7 @@ def test_footer_status_service_blocks_are_compact_and_variant_aware() -> None:
         entry = snapshot.services[0]
         field = build_service_status_field(entry, snapshot)
 
-        assert field.name == "🧾 __**RIASSUNTO**__"
+        assert field.name == format_standard_field_name("RIASSUNTO", emoji="🧾")
         assert "• Footer effettivo:" in field.value
         assert "• Sorgente: **service**" in field.value
         assert "Varianti: **2**" in field.value

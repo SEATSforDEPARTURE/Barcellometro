@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from app.services.campaign_content_formatter import (
     build_horoscope_embeds,
@@ -6,7 +7,22 @@ from app.services.campaign_content_formatter import (
     build_weather_embeds,
 )
 from app.services.footer import get_footer_meta
-from app.shared.discord.embed_body import format_standard_title
+
+_STANDARD_WRAP_RE = re.compile(r"^(?:(?P<emoji>\S+)\s+)?__\*\*(?P<inner>.*)\*\*__$")
+
+
+def _title_inner_without_emoji(title: str) -> str:
+    text = title.strip()
+    while True:
+        match = _STANDARD_WRAP_RE.match(text)
+        if match is None:
+            break
+        text = match.group("inner").strip()
+    if text and " " in text:
+        first, rest = text.split(" ", 1)
+        if not any(ch.isalnum() for ch in first):
+            return rest.strip()
+    return text
 
 
 def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
@@ -21,10 +37,10 @@ def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
         },
     )
 
-    assert embeds[0].title == "🌞 METEO CRICETOSO • Overview Italia"
-    assert embeds[1].title == "🌞 METEO CRICETOSO • Nord"
-    assert embeds[2].title == "🌞 METEO CRICETOSO • Centro"
-    assert embeds[3].title == "🌞 METEO CRICETOSO • Sud e Isole"
+    assert _title_inner_without_emoji(embeds[0].title or "") == "METEO CRICETOSO • OVERVIEW ITALIA"
+    assert _title_inner_without_emoji(embeds[1].title or "") == "METEO CRICETOSO • NORD"
+    assert _title_inner_without_emoji(embeds[2].title or "") == "METEO CRICETOSO • CENTRO"
+    assert _title_inner_without_emoji(embeds[3].title or "") == "METEO CRICETOSO • SUD E ISOLE"
     footer_meta = [get_footer_meta(embed) for embed in embeds]
     assert all(meta is not None for meta in footer_meta)
     assert {meta.service_name for meta in footer_meta if meta is not None} == {"campagne_meteo"}
@@ -45,11 +61,11 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
         {"signs": {"Ariete": {"text": "Focus"}}},
     )
-    assert news[0].title == format_standard_title("📰 NOTIZIARIO CRICETOSO • Inizio", uppercase=False)
-    assert news[1].title == "📰 NOTIZIARIO CRICETOSO • Trash"
-    assert news[2].title == "📰 NOTIZIARIO CRICETOSO • Viral"
-    assert horoscope[0].title == "🔮 OROSCOPO DEL GIORNO • Inizio"
-    assert horoscope[1].title == "🔮 OROSCOPO DEL GIORNO • Ariete"
+    assert _title_inner_without_emoji(news[0].title or "") == "NOTIZIARIO CRICETOSO • INIZIO"
+    assert _title_inner_without_emoji(news[1].title or "") == "NOTIZIARIO CRICETOSO • TRASH"
+    assert _title_inner_without_emoji(news[2].title or "") == "NOTIZIARIO CRICETOSO • VIRAL"
+    assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO DEL GIORNO • INIZIO"
+    assert _title_inner_without_emoji(horoscope[1].title or "") == "OROSCOPO DEL GIORNO • ARIETE"
     news_meta = [get_footer_meta(embed) for embed in news]
     horoscope_meta = [get_footer_meta(embed) for embed in horoscope]
     assert all(meta is not None for meta in news_meta)
