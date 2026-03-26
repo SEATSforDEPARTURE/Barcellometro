@@ -388,11 +388,12 @@ Note operative:
 Introdotti helper condivisi nel modulo `app/shared/discord/embed_body.py`:
 - `format_standard_title(...)` → `(emoji) __**TITOLO**__` (uppercase di default)
 - `format_standard_description(...)` → descrizione in corsivo, con riga vuota opzionale prima dei fields
-- `format_standard_field_name(...)` → `(emoji) __**Titolo field**__`
+- `format_standard_field_name(...)` → `(emoji) __**TITOLO FIELD**__` (sempre uppercase)
 - `apply_standard_body_helpers(...)` → applicazione orchestrata su title/description/fields
 
 Contratto:
 - questi helper definiscono lo standard globale.
+- `title` e `field name` standardizzati sono sempre uppercase + bold + underline (`(emoji) __**...**__`).
 - sono ammesse eccezioni in renderer legacy o layout specializzati già documentati.
 - in questa fase non è prevista migrazione massiva: i renderer principali verranno portati allo standard in fase 3.
 

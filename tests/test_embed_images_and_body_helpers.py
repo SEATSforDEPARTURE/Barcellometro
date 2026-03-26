@@ -119,7 +119,7 @@ def test_body_helpers_formatters_and_limits() -> None:
     assert description == "*testo*\n\n"
 
     field_name = format_standard_field_name("Dettagli", emoji="📌")
-    assert field_name == "📌 __**Dettagli**__"
+    assert field_name == "📌 __**DETTAGLI**__"
 
     long_title = format_standard_title("x" * 400, emoji="✅")
     assert len(long_title) <= 256
@@ -140,4 +140,4 @@ def test_apply_standard_body_helpers_over_embed() -> None:
     )
     assert embed.title == "📦 __**STATUS**__"
     assert embed.description == "*linea*\n\n"
-    assert embed.fields[0].name == "__**campo**__"
+    assert embed.fields[0].name == "__**CAMPO**__"

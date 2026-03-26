@@ -323,6 +323,26 @@ def _check_body_helpers_adoption(path: Path, source: str, report: ValidationRepo
         )
 
 
+def _check_body_helpers_uppercase_contract(path: Path, source: str, report: ValidationReport) -> None:
+    rel = path.relative_to(REPO_ROOT)
+    if rel.as_posix() != "app/shared/discord/embed_body.py":
+        return
+    if "rendered = base.upper()" not in source:
+        report.add(
+            "body_title_uppercase_required",
+            rel,
+            1,
+            "format_standard_title must always normalize title content to uppercase.",
+        )
+    if "normalized = base.upper()" not in source:
+        report.add(
+            "body_field_uppercase_required",
+            rel,
+            1,
+            "format_standard_field_name must always normalize field-name content to uppercase.",
+        )
+
+
 _PHASE3_MIGRATED_RENDERERS: dict[str, dict[str, object]] = {
     "app/renderers/channel_summary.py": {"allow_title_pagination": False},
     "app/renderers/detail_embeds.py": {"allow_title_pagination": False},
@@ -1089,6 +1109,7 @@ def validate_embed_standards(*, scan_roots: Iterable[str] = DEFAULT_SCAN_ROOTS) 
         _check_manual_set_embed_images_calls(tree, path, report)
         _check_persisted_embed_hydration(tree, path, report)
         _check_body_helpers_adoption(path, source, report)
+        _check_body_helpers_uppercase_contract(path, source, report)
         _check_phase3_renderer_metadata_adoption(path, source, report)
         _check_renderer_title_pagination_bypass(path, tree, report)
         _FooterMetaVisitor(path, report).visit(tree)
