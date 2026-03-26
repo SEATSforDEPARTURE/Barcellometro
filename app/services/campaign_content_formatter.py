@@ -222,7 +222,11 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     overview = discord.Embed(title=format_standard_title(f"{title} • Inizio"), color=color)
     tone = _time_of_day_label(_overview_now(payload))
     if highlights:
-        overview.description = f"🐹 Edizione di **{tone}**: il Barcellometro è in conduzione e la redazione oggi gira come una ruota da corsa."
+        highlights_preview = "\n".join(highlights)
+        overview.description = (
+            f"🐹 Edizione di **{tone}**: il Barcellometro è in conduzione e la redazione oggi gira come una ruota da corsa.\n"
+            f"{highlights_preview}"
+        )
         overview.add_field(
             name=format_standard_field_name("Titoli in evidenza", emoji="🗞️"),
             value="\n".join(highlights),
@@ -327,9 +331,10 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         )
     embeds: list[discord.Embed] = []
     for page_title, description, comment in pages:
+        page_intro = description[:1024] if page_title == "Overview Italia" else "Dettaglio meteo sintetico dell'area selezionata."
         e = discord.Embed(
             title=format_standard_title(f"{title} • {page_title}"),
-            description="Dettaglio meteo sintetico dell'area selezionata.",
+            description=page_intro,
             color=color,
         )
         e.add_field(name=format_standard_field_name("Situazione", emoji="🧾"), value=description[:1024], inline=False)

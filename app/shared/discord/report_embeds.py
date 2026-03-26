@@ -56,7 +56,7 @@ def apply_standard_report_style(
     if not embed_list:
         return []
     if cover_title:
-        embed_list[0].title = format_standard_title(cover_title)
+        embed_list[0].title = str(cover_title)
     if cover_color is not None and embed_list[0].color != discord.Color(cover_color):
         embed_list[0].color = discord.Color(cover_color)
     attach_footer_meta_to_all(embed_list, service_name=service_name, used_local_processing=True)
