@@ -15,7 +15,6 @@ from app.services.author import AuthorService, attach_author_meta, resolve_canon
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.embed_images import EmbedImagesService
 from app.shared.discord.embed_body import (
-    format_standard_description,
     format_standard_field_name,
     format_standard_section_value,
     format_standard_title,
@@ -657,6 +656,17 @@ def build_section(
     )
 
 
+def _format_description_section_header(
+    title: str,
+    *,
+    kind: CommandKind,
+    emoji: str | None = None,
+    subtitle_emoji: str | None = None,
+) -> str:
+    header_emoji = _resolve_section_emoji(title, kind=kind, explicit_emoji=emoji, subtitle_emoji=subtitle_emoji)
+    return f"**{header_emoji} {normalize_command_path(title)}**"
+
+
 
 def _resolve_footer_service_name(
     *,
@@ -736,16 +746,10 @@ async def build_command_embeds(
             line_formatter=resolved_line_formatter,
         )) is not None
     ]
-    main_field_value = "\n".join(rendered_lines) if compact_lines and rendered_lines else "\n".join(rendered_lines)
-
-    section_fields: list[tuple[str, str]] = []
+    main_field_value = "\n".join(rendered_lines)
+    description_blocks: list[str] = []
     if main_field_value.strip():
-        section_fields.append(
-            (
-                format_standard_field_name("Dettagli", emoji=display_context.subtitle_emoji),
-                format_standard_section_value(main_field_value),
-            )
-        )
+        description_blocks.append(main_field_value)
     for section in sections or []:
         if isinstance(section, dict):
             item = CommandEmbedSection(
@@ -756,16 +760,21 @@ async def build_command_embeds(
         else:
             item = section
         section_title = (section_title_formatter or str)(item.title)
-        section_fields.append(
-            build_section(
-                section_title,
-                item.lines,
-                item.emoji,
-                kind=kind,
-                line_formatter=line_formatter,
-                subtitle_emoji=display_context.subtitle_emoji,
-            )
+        _section_name, section_value = build_section(
+            section_title,
+            item.lines,
+            item.emoji,
+            kind=kind,
+            line_formatter=line_formatter,
+            subtitle_emoji=display_context.subtitle_emoji,
         )
+        section_header = _format_description_section_header(
+            section_title,
+            kind=kind,
+            emoji=item.emoji,
+            subtitle_emoji=display_context.subtitle_emoji,
+        )
+        description_blocks.append(f"{section_header}\n{section_value}")
 
     resolved_footer_service_name = _resolve_footer_service_name(
         footer_service_name=footer_service_name,
@@ -777,36 +786,29 @@ async def build_command_embeds(
         top_level=top_level,
         footer_service_name=resolved_footer_service_name,
     )
+    subtitle_line = f"**{display_context.subtitle_emoji} {intro_line}**"
+    description = subtitle_line
+    if description_blocks:
+        description = f"{subtitle_line}\n\n" + "\n".join(block for block in description_blocks if block.strip())
     embeds: list[discord.Embed] = []
     color = get_semantic_color(kind)
-    if not section_fields:
-        section_fields = [(format_standard_field_name("Dettagli", emoji="📋"), "—")]
-
-    max_fields_per_embed = 25
-    for start in range(0, len(section_fields), max_fields_per_embed):
-        embed = discord.Embed(
-            title=title,
-            description=format_standard_description(
-                intro_line,
-                italic=True,
-                blank_line_before_fields=True,
-            ),
-            color=color,
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=color,
+    )
+    if footer_mode in {"minimal", "meta"}:
+        attach_footer_meta(
+            embed,
+            service_name=resolved_footer_service_name,
+            used_local_processing=True,
         )
-        for field_name, field_value in section_fields[start : start + max_fields_per_embed]:
-            embed.add_field(name=field_name, value=field_value, inline=False)
-        if footer_mode in {"minimal", "meta"}:
-            attach_footer_meta(
-                embed,
-                service_name=resolved_footer_service_name,
-                used_local_processing=True,
-            )
-            attach_author_meta(
-                embed,
-                service_name=resolved_footer_service_name,
-                canonical_top_level_command=resolved_author_canonical_top_level,
-            )
-        embeds.append(embed)
+        attach_author_meta(
+            embed,
+            service_name=resolved_footer_service_name,
+            canonical_top_level_command=resolved_author_canonical_top_level,
+        )
+    embeds.append(embed)
     return embeds
 
 
