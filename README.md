@@ -109,6 +109,12 @@ finestra configurata in modo idempotente.
 - `/embed author template_global_set|show|reset` → template globale author.
 - `/embed author template_service_set|show|reset service:<nome>` → override author per servizio.
 
+Regole body ufficiali (single source of truth):
+- titolo embed: `(emoji) __**TITOLO**__` (sempre MAIUSCOLO, grassetto, sottolineato);
+- titolo field: `(emoji) __**TITOLO FIELD**__` (sempre MAIUSCOLO, grassetto, sottolineato);
+- usare sempre `format_standard_title(...)`, `format_standard_field_name(...)`, `format_standard_description(...)`;
+- vietate costruzioni manuali incoerenti (`📈 Trend`, `📓 RESOCONTO CANALE`, `📈 __**Trend**__`).
+
 Regole operative:
 - `footer` e `author` sono domini distinti ma centralizzati;
 - il footer controlla brand/versione/frase/contributor tecnici;

@@ -19,6 +19,32 @@ Tutti gli embed prodotti dai percorsi standardizzati (`send_standard_response`, 
 - Il body non deve mai riusare la stessa icona del sottotitolo nelle sezioni: se una sezione la erediterebbe o la riceve esplicitamente, il builder centralizzato la sostituisce con un fallback semantico o neutro non ridondante.
 - Footer, author, colori e metadata devono passare dalla pipeline centralizzata.
 
+## Standard definitivo titolo embed + titolo field (single source of truth)
+
+Questa è la regola **definitiva** e sostituisce qualsiasi wording precedente ambiguo (inclusi riferimenti legacy a title case per i field).
+
+1. **Titolo embed**: sempre nel formato `(emoji) __**TITOLO**__`.
+   - emoji iniziale obbligatoria;
+   - testo sempre MAIUSCOLO;
+   - sempre in **grassetto** + __sottolineato__.
+2. **Titolo field**: sempre nel formato `(emoji) __**TITOLO FIELD**__`.
+   - emoji iniziale obbligatoria;
+   - testo sempre MAIUSCOLO;
+   - sempre in **grassetto** + __sottolineato__.
+3. **Description standard**: testo pulito e coerente con `format_standard_description(...)`; niente prefissi narrativi legacy (`Dettaglio:`, `Warning:`, `Result:`, `Error:`) e nessuna duplicazione del sottotitolo.
+4. **Divieto di costruzioni manuali incoerenti**: non hardcodare title/field fuori standard; usare helper canonici.
+
+### Esempi rapidi
+
+CORRETTO:
+- `📓 __**RESOCONTO CANALE**__`
+- `📈 __**TREND**__`
+
+NON CORRETTO:
+- `📓 RESOCONTO CANALE`
+- `📈 Trend`
+- `📈 __**Trend**__`
+
 ## Standard ufficiale tipo embed → icona / colore
 
 Per tutti gli embed standardizzati:
@@ -386,16 +412,16 @@ Note operative:
 
 ### Standard body globale (mattoni centrali)
 Introdotti helper condivisi nel modulo `app/shared/discord/embed_body.py`:
-- `format_standard_title(...)` → `(emoji) __**TITOLO**__` (uppercase di default)
+- `format_standard_title(...)` → `(emoji) __**TITOLO**__` (**sempre uppercase**)
 - `format_standard_description(...)` → descrizione in corsivo, con riga vuota opzionale prima dei fields
-- `format_standard_field_name(...)` → `(emoji) __**TITOLO FIELD**__` (sempre uppercase)
+- `format_standard_field_name(...)` → `(emoji) __**TITOLO FIELD**__` (**sempre uppercase**)
 - `apply_standard_body_helpers(...)` → applicazione orchestrata su title/description/fields
 
 Contratto:
 - questi helper definiscono lo standard globale.
 - `title` e `field name` standardizzati sono sempre uppercase + bold + underline (`(emoji) __**...**__`).
-- sono ammesse eccezioni in renderer legacy o layout specializzati già documentati.
-- in questa fase non è prevista migrazione massiva: i renderer principali verranno portati allo standard in fase 3.
+- non sono ammesse eccezioni di casing/markup su title e field name: il contratto è unico per tutto il repo.
+- i renderer legacy possono differire solo per motivi di contenuto/layout, mai per violare il formato canonico dei titoli.
 
 ### Metadata pipeline vs rendering finale
 - Metadata pipeline: i renderer possono allegare metadati (author/footer/images/body options) senza conoscere il rendering finale.
