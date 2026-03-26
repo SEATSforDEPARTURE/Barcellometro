@@ -180,12 +180,14 @@ def build_daily_resoconto_embeds(
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
 
-    description = f"🗓️ **{day_label}**\n\n**{emoji} ALLERTA {alert_label}**\n{barcello_line}"
-    if len(description) > MAX_EMBED_DESCRIPTION:
-        logger.info("daily_resoconto renderer truncating_description original_len=%s", len(description))
-        description = description[: MAX_EMBED_DESCRIPTION - 1] + "…"
-
+    description = "Sintesi giornaliera del canale con indicatori Barcello."
     status_embed = discord.Embed(title=format_standard_title(f"RESOCONTO GIORNALIERO — #{channel_name}", emoji="📊"), description=format_standard_description(description, italic=False), color=embed_color)
+    status_embed.add_field(name=format_standard_field_name("Giorno", emoji="🗓️"), value=day_label, inline=False)
+    status_embed.add_field(
+        name=format_standard_field_name("Allerta", emoji=emoji),
+        value=f"**ALLERTA {alert_label}**\n{barcello_line}",
+        inline=False,
+    )
     health_bar = _render_health_bar(barcello_status.score, emoji)
     status_embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=f"{health_bar} ({barcello_status.score}/100)", inline=False)
     trend_text = trend_value or render_trend_value(barcello_status.trend)

@@ -673,16 +673,16 @@ def register_barcello(
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
         title_channel = channel_name or "canale"
         title = title_override or format_standard_title(f"STATO BARCELLO “{title_channel}”", emoji="🫛", uppercase=True)
-        description_lines = [
-            f"🕒 **Ultimi {window_minutes} minuti**",
-            "",
-            f"{emoji} **ALLERTA {label.upper()}**",
-            f"*{_alert_message(result.score, label)}*",
-        ]
         embed = discord.Embed(
             title=title,
-            description="\n".join(description_lines),
+            description="Stato sintetico del Barcello nel periodo monitorato.",
             color=embed_color,
+        )
+        _add_section(embed, name=format_standard_field_name("Periodo", emoji="🕒"), value=f"Ultimi {window_minutes} minuti")
+        _add_section(
+            embed,
+            name=format_standard_field_name("Allerta", emoji=emoji),
+            value=f"**ALLERTA {label.upper()}**\n{_alert_message(result.score, label)}",
         )
         bar = _render_health_bar(result.score, emoji)
         _add_section(
@@ -698,17 +698,13 @@ def register_barcello(
         title: str,
         window_minutes: int,
     ) -> discord.Embed:
-        description_lines = [
-            f"🕒 **Ultimi {window_minutes} minuti**",
-            "",
-            "Nessun messaggio nella finestra temporale selezionata.",
-            "Prova ad aumentare i minuti della finestra.",
-        ]
         embed = discord.Embed(
             title=title,
-            description="\n".join(description_lines),
+            description="Nessun dato disponibile per la finestra selezionata.",
             color=0x95A5A6,
         )
+        _add_section(embed, name=format_standard_field_name("Periodo", emoji="🕒"), value=f"Ultimi {window_minutes} minuti")
+        _add_section(embed, name=format_standard_field_name("Dettaglio", emoji="ℹ️"), value="Nessun messaggio nella finestra temporale selezionata.\nProva ad aumentare i minuti della finestra.")
         attach_footer_meta(embed, service_name="barcello", used_local_processing=True)
         return embed
 

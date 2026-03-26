@@ -639,7 +639,26 @@ def build_aura_embeds(
     main = discord.Embed(
         title=format_standard_title(f"RESOCONTO AURA \"{aura_payload.username}\"", emoji="✨"),
         color=0x5865F2,
-        description=format_standard_description(_build_main_aura_description(aura_payload=aura_payload), italic=False),
+        description=format_standard_description("Panoramica aura personale nel periodo selezionato.", italic=False),
+    )
+    main.add_field(name=format_standard_field_name("Periodo", emoji="🕒"), value=aura_payload.period_line, inline=False)
+    main.add_field(
+        name=format_standard_field_name(f"Karma \"{aura_payload.server_name}\"", emoji="✨"),
+        value=f"{render_karma_bar(aura_payload.karma_server_percent)}\nPUNTI AURA TOTALI: **{aura_payload.server_points_total}**",
+        inline=False,
+    )
+    main.add_field(
+        name=format_standard_field_name(f"Karma \"{aura_payload.channel_name}\"", emoji="✨"),
+        value=f"{render_karma_bar(aura_payload.karma_channel_percent)}\nPUNTI AURA CANALE: **{aura_payload.channel_points_month}**",
+        inline=False,
+    )
+    main.add_field(
+        name=format_standard_field_name("Trend", emoji="📈"),
+        value=(
+            f"• Nel server in generale: {_direction_label(aura_payload.trend.server_direction)}. {aura_payload.trend.server_comment}\n"
+            f"• Nel \"{aura_payload.channel_name}\": {_direction_label(aura_payload.trend.channel_direction)}. {aura_payload.trend.channel_comment}"
+        )[:1024],
+        inline=False,
     )
     attach_footer_meta(main, service_name="aura", used_local_processing=True)
     attach_author_meta(main, service_name="aura", canonical_top_level_command="aurasummary")
