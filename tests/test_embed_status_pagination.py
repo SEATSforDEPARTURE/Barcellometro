@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
@@ -87,6 +88,15 @@ def test_footer_status_command_supports_multipage_navigation(embed_module, monke
         assert all('• Pagina: **' in (page.description or '') for page in view._embeds)
         assert all('Pagina ' not in (page.footer.text or '') for page in view._embeds)
         assert all((page.title or '') == '📦 EMBED' for page in view._embeds)
+        assert all((page.author.name or '').startswith('servizio EMBED · (Pag. ') for page in view._embeds)
+        assert all('UNKNOWN' not in (page.author.name or '') for page in view._embeds)
+
+        interaction = SimpleNamespace(response=SimpleNamespace(edit_message=AsyncMock()))
+        next_button = next(button for button in view.children if getattr(button, 'label', '') == 'AVANTI')
+        await next_button.callback(interaction)
+        edited_embed = interaction.response.edit_message.await_args.kwargs['embed']
+        assert (edited_embed.author.name or '').startswith('servizio EMBED · (Pag. 2/')
+        assert 'UNKNOWN' not in (edited_embed.author.name or '')
 
     asyncio.run(_run())
 
@@ -114,8 +124,16 @@ def test_author_status_command_supports_multipage_navigation(embed_module, monke
         assert isinstance(view, embed_module.AuthorStatusPaginationView)
         assert len(view._embeds) > 1
         assert all('• Pagina ' in (page.description or '') for page in view._embeds)
-        assert all((page.author.name or '').startswith('servizio EMBED') for page in view._embeds)
+        assert all((page.author.name or '').startswith('servizio EMBED · (Pag. ') for page in view._embeds)
+        assert all('UNKNOWN' not in (page.author.name or '') for page in view._embeds)
         assert all((page.footer.text or '').startswith('Barcellometro') for page in view._embeds)
+
+        interaction = SimpleNamespace(response=SimpleNamespace(edit_message=AsyncMock()))
+        next_button = next(button for button in view.children if getattr(button, 'label', '') == 'AVANTI')
+        await next_button.callback(interaction)
+        edited_embed = interaction.response.edit_message.await_args.kwargs['embed']
+        assert (edited_embed.author.name or '').startswith('servizio EMBED · (Pag. 2/')
+        assert 'UNKNOWN' not in (edited_embed.author.name or '')
 
     asyncio.run(_run())
 

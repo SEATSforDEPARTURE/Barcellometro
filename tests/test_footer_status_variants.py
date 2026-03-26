@@ -232,6 +232,8 @@ def test_footer_status_builds_multiple_pages_when_services_are_many() -> None:
         assert all("(1/" not in (embed.title or "") for embed in embeds)
         assert all("• Pagina: **" in (embed.description or "") for embed in embeds)
         assert all("Pagina " not in (embed.footer.text or "") for embed in embeds)
+        assert all((embed.author.name or "").startswith("servizio EMBED · (Pag. ") for embed in embeds)
+        assert all("UNKNOWN" not in (embed.author.name or "") for embed in embeds)
 
     asyncio.run(_run())
 
