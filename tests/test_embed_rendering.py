@@ -55,7 +55,7 @@ def test_finalize_embeds_rendering_supports_from_dict_payload_embeds() -> None:
             default_service_name="riassunto",
         )
 
-        assert rendered[0].author.name == "servizio SUMMARY"
+        assert rendered[0].author.name == "servizio DM SUMMARY"
         assert "Dati elaborati con gpt-4o-mini" in (rendered[0].footer.text or "")
 
     asyncio.run(_run())

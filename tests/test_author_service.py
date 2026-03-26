@@ -94,7 +94,7 @@ def test_author_service_apply_uses_service_fallback_without_thumbnail() -> None:
 
         await service.apply(embed, default_service_name="fallback")
 
-        assert embed.author.name == "servizio SUMMARY"
+        assert embed.author.name == "servizio DM SUMMARY"
         assert embed.author.icon_url is None
 
     asyncio.run(_run())
@@ -195,7 +195,33 @@ def test_author_service_minimal_meta_uses_service_fallback_name() -> None:
 
         await finalize_embed_author(embed, service, default_service_name="riassunto")
 
-        assert embed.author.name == "servizio SUMMARY"
+        assert embed.author.name == "servizio DM SUMMARY"
+
+    asyncio.run(_run())
+
+
+def test_author_service_uses_canonical_top_level_metadata_when_present() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_author_meta(embed, service_name="resoconto", canonical_top_level_command="serversummary")
+        service, _ = _build_author_service()
+
+        await finalize_embed_author(embed, service, default_service_name="resoconto")
+
+        assert embed.author.name == "servizio SERVER SUMMARY"
+
+    asyncio.run(_run())
+
+
+def test_author_service_uses_canonical_alias_resolution_for_audionotes() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_author_meta(embed, service_name="audio_notes", canonical_top_level_command="audionotes")
+        service, _ = _build_author_service()
+
+        await finalize_embed_author(embed, service, default_service_name="audio_notes")
+
+        assert embed.author.name == "servizio AUDIO NOTES"
 
     asyncio.run(_run())
 
@@ -216,8 +242,8 @@ def test_author_pipeline_finalize_split_embeds_keeps_author_meta() -> None:
 
         author_names = [item.author.name for item in normalized]
         assert len(author_names) >= 2
-        assert author_names[0] == f"servizio SUMMARY · (Pag. 1/{len(author_names)})"
-        assert author_names[-1] == f"servizio SUMMARY · (Pag. {len(author_names)}/{len(author_names)})"
+        assert author_names[0] == f"servizio DM SUMMARY · (Pag. 1/{len(author_names)})"
+        assert author_names[-1] == f"servizio DM SUMMARY · (Pag. {len(author_names)}/{len(author_names)})"
 
     asyncio.run(_run())
 
@@ -239,7 +265,7 @@ def test_prepare_embeds_for_send_applies_author_and_footer_together_on_all_pages
             default_service_name="riassunto",
         )
 
-        assert [embed.author.name for embed in prepared] == ["servizio SUMMARY · (Pag. 1/2)", "servizio SUMMARY · (Pag. 2/2)"]
+        assert [embed.author.name for embed in prepared] == ["servizio DM SUMMARY · (Pag. 1/2)", "servizio DM SUMMARY · (Pag. 2/2)"]
         assert all((embed.footer.text or "").startswith("Barcellometro") for embed in prepared)
 
     asyncio.run(_run())

@@ -32,7 +32,7 @@ def test_prepare_embeds_for_send_applies_footer_and_author_when_both_are_enabled
             default_service_name='riassunto',
         )
 
-        assert [embed.author.name for embed in prepared] == ['servizio SUMMARY · (Pag. 1/2)', 'servizio SUMMARY · (Pag. 2/2)']
+        assert [embed.author.name for embed in prepared] == ['servizio DM SUMMARY · (Pag. 1/2)', 'servizio DM SUMMARY · (Pag. 2/2)']
         assert all((embed.footer.text or '').startswith('Barcellometro') for embed in prepared)
         assert all('Dati elaborati con gpt-4o-mini' in (embed.footer.text or '') for embed in prepared)
 

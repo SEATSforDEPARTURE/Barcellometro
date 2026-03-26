@@ -216,7 +216,8 @@ La sezione `author` degli embed ha ora un servizio dedicato separato dal footer 
 - `author.version`, `author.global_phrase`, `author.global_thumbnail` definiscono il template globale;
 - `author.service_phrase.<service>` e `author.service_thumbnail.<service>` definiscono override per singolo servizio;
 - il fallback puro rende `servizio <NOME CANONICO INGLESE TOP-LEVEL>` (nome canonical upper-case), senza emoji legacy e senza dipendenze dal footer;
-- la `version` author ha semantica sobria: viene appesa solo quando esiste una `phrase` globale o di servizio, quindi il fallback puro resta leggibile (`servizio SUMMARY`, non `servizio SUMMARY · dev`).
+- la label dopo `servizio` deriva sempre dal comando top-level canonico inglese reale (`channelsummary` → `CHANNEL SUMMARY`, `serversummary` → `SERVER SUMMARY`, `audionotes` → `AUDIO NOTES`, `qna` → `QNA`);
+- la `version` author ha semantica sobria: viene appesa solo quando esiste una `phrase` globale o di servizio, quindi il fallback puro resta leggibile (`servizio CHANNEL SUMMARY`, non `servizio CHANNEL SUMMARY · dev`).
 
 Ordine di precedenza author:
 
@@ -229,7 +230,7 @@ Questo equivale alla regola normativa generale `override servizio > globale > fa
 
 Regole di fallback e reset:
 
-- il fallback author per servizio è sempre `servizio <NOME CANONICO INGLESE TOP-LEVEL>`;
+- il fallback author per servizio è sempre `servizio <NOME CANONICO INGLESE TOP-LEVEL>` e usa il canonical top-level command metadata quando presente;
 - la thumbnail author del fallback è separata dal footer e resta assente se non esiste un template del dominio;
 - `template_service_reset` rimuove l'override di servizio e fa riespandere template globale oppure fallback author;
 - `template_global_reset` rimuove il template globale e fa riespandere il fallback author per tutti i servizi che non hanno override locale;
