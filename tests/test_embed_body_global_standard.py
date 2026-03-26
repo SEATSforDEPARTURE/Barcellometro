@@ -191,6 +191,12 @@ def _scan_embed_bypasses(path: Path) -> list[str]:
                     assert_standard_title(title_text)
                 except AssertionError as exc:
                     issues.append(f"{path}:{node.lineno} titolo manuale non standard: {exc}")
+            for chunk in _literal_text_chunks(_keyword_expr(node, "description")):
+                offenders = _find_illegal_section_headings_in_description(chunk)
+                if offenders:
+                    issues.append(
+                        f"{path}:{node.lineno} description con heading strutturali hardcoded: {offenders[:3]}"
+                    )
 
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "add_field":
             name_expr = _keyword_expr(node, "name")
@@ -203,6 +209,24 @@ def _scan_embed_bypasses(path: Path) -> list[str]:
                 except AssertionError as exc:
                     issues.append(f"{path}:{node.lineno} field name manuale non standard: {exc}")
 
+        if isinstance(node, ast.Assign):
+            names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if "description" in names:
+                for chunk in _literal_text_chunks(node.value):
+                    offenders = _find_illegal_section_headings_in_description(chunk)
+                    if offenders:
+                        issues.append(
+                            f"{path}:{node.lineno} assegnazione description con heading strutturali hardcoded: {offenders[:3]}"
+                        )
+
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) and node.target.id == "description":
+            for chunk in _literal_text_chunks(node.value):
+                offenders = _find_illegal_section_headings_in_description(chunk)
+                if offenders:
+                    issues.append(
+                        f"{path}:{node.lineno} concatenazione description con heading strutturali hardcoded: {offenders[:3]}"
+                    )
+
     if embed_ctor_count >= 3 and not helper_used:
         issues.append(
             f"{path}: uso intensivo di discord.Embed ({embed_ctor_count}) senza helper body canonici "
@@ -210,6 +234,16 @@ def _scan_embed_bypasses(path: Path) -> list[str]:
         )
 
     return issues
+
+
+def _literal_text_chunks(node: ast.AST | None) -> list[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.JoinedStr):
+        return [value.value for value in node.values if isinstance(value, ast.Constant) and isinstance(value.value, str)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [*_literal_text_chunks(node.left), *_literal_text_chunks(node.right)]
+    return []
 
 
 def test_standard_body_helpers_contract() -> None:
@@ -253,6 +287,46 @@ def test_description_heading_detector_flags_illegal_section_patterns() -> None:
     assert any("RISPOSTA" in line.upper() for line in offenders)
     assert any("TREND" in line.upper() for line in offenders)
     assert any("CLASSIFICA" in line.upper() for line in offenders)
+
+
+def test_static_scanner_flags_structural_headings_in_description_literals() -> None:
+    src = Path("tmp_embed_bad.py")
+    src.write_text(
+        '\n'.join(
+            [
+                "import discord",
+                'description = "*Intro*"',
+                'description += "\\n📈 **TREND**\\n- ok"',
+                'embed = discord.Embed(title="✅ __**REPORT**__", description=description)',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        issues = _scan_embed_bypasses(src)
+    finally:
+        src.unlink(missing_ok=True)
+    assert any("heading strutturali hardcoded" in item for item in issues)
+
+
+def test_static_scanner_allows_narrative_bold_without_section_heading() -> None:
+    src = Path("tmp_embed_good.py")
+    src.write_text(
+        '\n'.join(
+            [
+                "import discord",
+                'description = "*Ottimo risultato*: crescita continua e collaborazione alta."',
+                'embed = discord.Embed(title="✅ __**REPORT**__", description=description)',
+                'embed.add_field(name="📈 __**TREND**__", value="ok", inline=False)',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        issues = _scan_embed_bypasses(src)
+    finally:
+        src.unlink(missing_ok=True)
+    assert not any("heading strutturali hardcoded" in item for item in issues)
 
 
 def test_command_embeds_respect_body_contract() -> None:
