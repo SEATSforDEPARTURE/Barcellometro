@@ -124,12 +124,12 @@ async def build_author_status_embeds(
         for field in page.fields:
             embed.add_field(name=field.name, value=field.value, inline=False)
         attach_footer_meta(embed, service_name="status")
-        attach_author_meta(embed, service_name="status")
+        attach_author_meta(embed, service_name="status", canonical_top_level_command="embed")
         embeds.append(embed)
     await finalize_footer_embeds(embeds, footer_service, default_service_name="status")
-    await apply_author_metadata_to_embeds(embeds, author_service, default_service_name="status")
+    await apply_author_metadata_to_embeds(embeds, author_service, default_service_name="embed")
     normalized = normalize_embeds_for_discord(embeds, max_chars=MAX_EMBED_CHARS)
     if normalized is not embeds:
         await finalize_footer_embeds(normalized, footer_service, default_service_name="status")
-        await apply_author_metadata_to_embeds(normalized, author_service, default_service_name="status")
+        await apply_author_metadata_to_embeds(normalized, author_service, default_service_name="embed")
     return normalized

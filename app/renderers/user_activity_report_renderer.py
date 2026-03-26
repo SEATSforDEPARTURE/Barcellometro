@@ -62,7 +62,7 @@ def build_user_activity_embeds(
         f"• 📨 {trend_text}"
     )
     attach_footer_meta(overview, service_name="user_activity", used_local_processing=True)
-    attach_author_meta(overview, service_name="user_activity")
+    attach_author_meta(overview, service_name="user_activity", canonical_top_level_command="serversummary")
     attach_embed_images_meta(overview, service_name="user_activity")
 
     details = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
@@ -73,7 +73,7 @@ def build_user_activity_embeds(
         inline=False,
     )
     attach_footer_meta(details, service_name="user_activity", used_local_processing=True)
-    attach_author_meta(details, service_name="user_activity")
+    attach_author_meta(details, service_name="user_activity", canonical_top_level_command="serversummary")
     attach_embed_images_meta(details, service_name="user_activity")
     return [overview, details]
 

@@ -191,7 +191,7 @@ def build_daily_resoconto_embeds(
     if trend_text:
         status_embed.add_field(name="📈 TREND", value=trend_text, inline=False)
     attach_footer_meta(status_embed, service_name="daily_resoconto", used_local_processing=True)
-    attach_author_meta(status_embed, service_name="daily_resoconto")
+    attach_author_meta(status_embed, service_name="daily_resoconto", canonical_top_level_command="serversummary")
     attach_embed_images_meta(status_embed, service_name="daily_resoconto")
 
     pages: list[discord.Embed] = [discord.Embed(title="🗒️ DETTAGLI", color=0x95A5A6)]
@@ -239,7 +239,7 @@ def build_daily_resoconto_embeds(
     for embed in pages:
         embed.title = "🗒️ DETTAGLI"
     attach_footer_meta_to_all(pages, service_name="daily_resoconto", used_local_processing=True)
-    attach_author_meta_to_all(pages, service_name="daily_resoconto")
+    attach_author_meta_to_all(pages, service_name="daily_resoconto", canonical_top_level_command="serversummary")
     attach_embed_images_meta_to_all(pages, service_name="daily_resoconto")
 
     return [status_embed, *pages]

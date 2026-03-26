@@ -67,17 +67,27 @@ _SERVICE_NAME_OVERRIDES: dict[str, str | None] = {
 }
 
 _SERVICE_CANONICAL_TOP_LEVEL_FALLBACKS: dict[str, str] = {
+    "status": "embed",
+    "embed": "embed",
     "riassunto": "dmsummary",
+    "activity_dm": "dmsummary",
     "resoconto": "channelsummary",
+    "daily_resoconto": "serversummary",
+    "daily_activity_report": "serversummary",
+    "user_activity": "serversummary",
     "audio_notes": "audionotes",
     "audio_notes_transcribe": "audionotes",
     "channel_summary": "channelsummary",
+    "server_summary": "serversummary",
+    "aura": "aurasummary",
     "voice_ingest": "voiceingest",
 }
 
 _CANONICAL_TOP_LEVEL_ALIASES: dict[str, str] = {
     "ask": "qna",
     "domanda": "qna",
+    "riassunto": "dmsummary",
+    "aura": "aurasummary",
     "resocontocanale": "channelsummary",
     "resocontoserver": "serversummary",
 }
@@ -88,7 +98,9 @@ _CANONICAL_TOP_LEVEL_LABELS: dict[str, str] = {
     "dmsummary": "DM SUMMARY",
     "barcellosummary": "BARCELLO SUMMARY",
     "audionotes": "AUDIO NOTES",
+    "aurasummary": "AURA SUMMARY",
     "commandguard": "COMMAND GUARD",
+    "voiceingest": "VOICE INGEST",
     "qna": "QNA",
     "embed": "EMBED",
 }
