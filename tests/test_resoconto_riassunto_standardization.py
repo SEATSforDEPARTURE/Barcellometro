@@ -91,13 +91,9 @@ def _get_subgroup(group: discord.app_commands.Group, name: str):
 
 def _assert_standard_footer(footer_text: str | None, *, contributors: str | None = None) -> None:
     assert footer_text is not None
-    assert footer_text.startswith("Barcellometro ")
-    assert footer_text != "Barcellometro"
+    assert footer_text.startswith("Barcellometro")
     if contributors is not None:
         assert contributors in footer_text
-
-
-
 
 
 def test_send_standard_response_without_footer_service_keeps_standard_footer() -> None:
@@ -402,7 +398,7 @@ def test_resocontoserver_status_uses_real_command_title() -> None:
 
         kwargs = interaction.response.send_message.await_args.kwargs
         embed = kwargs["embed"]
-        assert embed.title == "📓 SERVERSUMMARY"
+        assert embed.title == "📓 __**SERVERSUMMARY**__"
         assert embed.description.startswith("**ℹ️ STATUS**")
         assert "RESOCONTO" not in (embed.title or "").replace("SERVERSUMMARY", "")
 

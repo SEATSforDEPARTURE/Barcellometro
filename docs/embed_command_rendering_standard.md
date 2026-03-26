@@ -41,46 +41,46 @@ Questo mapping è centralizzato in `app/shared/discord/command_embeds.py` e vale
 ### Dopo
 
 - `/frasi template_global_show`
-  - titolo: `💬 FRASI`
+  - titolo: `💬 __**FRASI**__`
   - sottotitolo: `ℹ️ TEMPLATE_GLOBAL_SHOW`
 - `/qna limits_show parameter:base`
-  - titolo: `❓ QNA`
+  - titolo: `❓ __**QNA**__`
   - sottotitolo: `ℹ️ LIMITS_SHOW BASE`
 - `/qna bonus_show user:@Mario`
-  - titolo: `❓ QNA`
+  - titolo: `❓ __**QNA**__`
   - sottotitolo: `ℹ️ BONUS_SHOW MARIO`
 - `/resocontocanale status`
-  - titolo: `📓 RESOCONTOCANALE`
+  - titolo: `📓 __**RESOCONTOCANALE**__`
   - sottotitolo: `ℹ️ STATUS`
 - `/resocontoserver status`
-  - titolo: `📓 RESOCONTOSERVER`
+  - titolo: `📓 __**RESOCONTOSERVER**__`
   - sottotitolo: `ℹ️ STATUS`
 - `/riassunto ultimi quantita:30 unita:minuti`
-  - titolo: `🗒️ RIASSUNTO`
+  - titolo: `🗒️ __**RIASSUNTO**__`
   - sottotitolo: `✅ ULTIMI 30 MINUTI`
 - `/riassunto ultimi quantita:1 unita:ore`
-  - titolo: `🗒️ RIASSUNTO`
+  - titolo: `🗒️ __**RIASSUNTO**__`
   - sottotitolo: `ℹ️ ULTIMA ORA`
 - `/attivita ultimi quantita:7 unita:giorni`
-  - titolo: `📈 ATTIVITA`
+  - titolo: `📈 __**ATTIVITA**__`
   - sottotitolo: `✅ ULTIMI 7 GIORNI`
 - `/attivita ultimi quantita:1 unita:minuti`
-  - titolo: `📈 ATTIVITA`
+  - titolo: `📈 __**ATTIVITA**__`
   - sottotitolo: `ℹ️ ULTIMO MINUTO`
 - `/resocontocanale ultimi quantita:1 unita:giorni`
-  - titolo: `📓 RESOCONTOCANALE`
+  - titolo: `📓 __**RESOCONTOCANALE**__`
   - sottotitolo: `ℹ️ ULTIMO GIORNO`
 - `/riassunto range da:20/03/2026 10:15 a:21/03/2026 11:45`
-  - titolo: `🗒️ RIASSUNTO`
+  - titolo: `🗒️ __**RIASSUNTO**__`
   - sottotitolo: `ℹ️ DAL 20/03 10:15 AL 21/03 11:45`
 - `/campaigns prompt status`
-  - titolo: `📣 CAMPAIGNS`
+  - titolo: `📣 __**CAMPAIGNS**__`
   - sottotitolo: `ℹ️ PROMPT STATUS`
 - `/users tempban_list`
-  - titolo: `🛠️ USERS`
+  - titolo: `🛠️ __**USERS**__`
   - sottotitolo: `ℹ️ TEMPBAN_LIST`
 - `/admin retention on`
-  - titolo: `🫛 ADMIN`
+  - titolo: `🫛 __**ADMIN**__`
   - sottotitolo: `ℹ️ RETENTION ON`
 
 ## Implementazione
@@ -242,6 +242,8 @@ Il namespace `/embed author` replica il modello amministrativo del footer con i 
 - `/embed author template_service_set|show|reset`.
 
 Lo status author usa una vista multipagina navigabile parallela a quella del footer, ma mostra solo dati author: stato, template globale, regola versione, author effettivo e thumbnail effettiva per servizio.
+
+Wording unico per valori template mancanti (`template_global_show`/`template_service_show` di author, footer e images): usare sempre `(not set)` senza fallback descrittivi legacy.
 
 Semantica forte dei toggle globali:
 

@@ -183,7 +183,7 @@ def test_send_command_embeds_applies_author_and_footer_when_enabled() -> None:
 
         sent_embed = interaction.response.sent_messages[0]['embed']
         assert isinstance(sent_embed, discord.Embed)
-        assert sent_embed.author.name == '❓ QnA'
+        assert sent_embed.author.name == 'servizio QNA'
         assert (sent_embed.footer.text or '').startswith('Barcellometro')
 
     asyncio.run(_run())

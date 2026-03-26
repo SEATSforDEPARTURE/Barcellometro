@@ -32,7 +32,7 @@ def test_prepare_embeds_for_send_applies_footer_and_author_when_both_are_enabled
             default_service_name='riassunto',
         )
 
-        assert [embed.author.name for embed in prepared] == ['🗒️ Riassunto', '🗒️ Riassunto']
+        assert [embed.author.name for embed in prepared] == ['servizio SUMMARY · (Pag. 1/2)', 'servizio SUMMARY · (Pag. 2/2)']
         assert all((embed.footer.text or '').startswith('Barcellometro') for embed in prepared)
         assert all('Dati elaborati con gpt-4o-mini' in (embed.footer.text or '') for embed in prepared)
 
@@ -114,7 +114,7 @@ def test_author_status_command_supports_multipage_navigation(embed_module, monke
         assert isinstance(view, embed_module.AuthorStatusPaginationView)
         assert len(view._embeds) > 1
         assert all('• Pagina ' in (page.description or '') for page in view._embeds)
-        assert all((page.author.name or '') == '📊 Status' for page in view._embeds)
+        assert all((page.author.name or '').startswith('servizio STATUS') for page in view._embeds)
         assert all((page.footer.text or '').startswith('Barcellometro') for page in view._embeds)
 
     asyncio.run(_run())

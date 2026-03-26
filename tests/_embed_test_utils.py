@@ -7,6 +7,7 @@ from discord import app_commands
 
 from app.services.author import AuthorService
 from app.services.footer import FooterService
+from app.services.embed_images import EmbedImagesService
 
 
 class SettingsDatabaseStub:
@@ -84,10 +85,12 @@ def register_embed_tree(embed_module):
     database = SettingsDatabaseStub()
     footer = FooterService(database)
     author = AuthorService(database)
+    embed_images = EmbedImagesService(database)
     ctx = SimpleNamespace(
         database=database,
         footer=footer,
         author=author,
+        embed_images=embed_images,
         ai=None,
         guard=None,
         timezone=None,
@@ -122,12 +125,16 @@ def register_embed_tree(embed_module):
     author_group = next(
         cmd for cmd in embed_group.commands if isinstance(cmd, discord.app_commands.Group) and cmd.name == 'author'
     )
+    images_group = next(
+        cmd for cmd in embed_group.commands if isinstance(cmd, discord.app_commands.Group) and cmd.name == 'images'
+    )
     return SimpleNamespace(
         database=database,
         ctx=ctx,
         embed_group=embed_group,
         footer_group=footer_group,
         author_group=author_group,
+        images_group=images_group,
     )
 
 
