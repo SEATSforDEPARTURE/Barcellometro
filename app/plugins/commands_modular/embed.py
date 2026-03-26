@@ -444,7 +444,11 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             return
 
         snapshot = await ctx.footer.build_status_snapshot(inferred_profile_resolver=lambda service_name: _infer_service_profile(service_name, ctx))
-        embeds = await build_footer_status_embeds(snapshot, footer_service=ctx.footer)
+        embeds = await build_footer_status_embeds(
+            snapshot,
+            footer_service=ctx.footer,
+            author_service=getattr(ctx, "author", None),
+        )
         if not embeds:
             await _send_embed_response(
                 interaction,

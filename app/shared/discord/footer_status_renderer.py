@@ -7,6 +7,8 @@ import logging
 import discord
 
 from app.services.footer import FooterService, FooterStatusServiceEntry, FooterStatusSnapshot, ServiceFooterProfile, ServiceFooterVariant
+from app.services.author import AuthorService, attach_author_meta
+from app.services.footer import attach_footer_meta
 from app.shared.discord.embed_limits import (
     DISCORD_MAX_EMBED_DESCRIPTION,
     DISCORD_MAX_FIELD_NAME,
@@ -16,7 +18,7 @@ from app.shared.discord.embed_limits import (
     _estimate_embed_size,
     normalize_embeds_for_discord,
 )
-from app.shared.discord.footer_pipeline import finalize_embeds
+from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
 logger = logging.getLogger(__name__)
 
@@ -397,12 +399,31 @@ async def build_footer_status_embeds(
     snapshot: FooterStatusSnapshot,
     *,
     footer_service: FooterService | None = None,
+    author_service: AuthorService | None = None,
 ) -> list[discord.Embed]:
     pages = build_footer_status_pages(snapshot)
     total_pages = len(pages)
     embeds = [_build_embed_for_page(page, page_index=index, total_pages=total_pages) for index, page in enumerate(pages, start=1)]
-    await finalize_embeds(embeds, footer_service, default_service_name="status")
+    for embed in embeds:
+        attach_footer_meta(embed, service_name="status")
+        attach_author_meta(embed, service_name="status", canonical_top_level_command="embed")
+    await finalize_embeds_rendering(
+        embeds,
+        footer_service=footer_service,
+        author_service=author_service,
+        default_service_name="status",
+    )
     normalized = normalize_embeds_for_discord(embeds, max_chars=MAX_EMBED_CHARS)
     if len(normalized) != len(embeds):
         logger.warning("footer_status_renderer_normalized_embeds before=%s after=%s", len(embeds), len(normalized))
+    if normalized is not embeds:
+        for embed in normalized:
+            attach_footer_meta(embed, service_name="status")
+            attach_author_meta(embed, service_name="status", canonical_top_level_command="embed")
+        await finalize_embeds_rendering(
+            normalized,
+            footer_service=footer_service,
+            author_service=author_service,
+            default_service_name="status",
+        )
     return normalized

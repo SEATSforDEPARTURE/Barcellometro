@@ -12,9 +12,8 @@ from app.services.author import (
     human_author_service_name,
 )
 from app.services.footer import attach_footer_meta
-from app.shared.discord.author_pipeline import apply_author_metadata_to_embeds
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, normalize_embeds_for_discord
-from app.shared.discord.footer_pipeline import finalize_embeds as finalize_footer_embeds
+from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
 _CATEGORY_TITLES: dict[int, str] = {
     0: "STANDARD SERVICES",
@@ -126,10 +125,21 @@ async def build_author_status_embeds(
         attach_footer_meta(embed, service_name="status")
         attach_author_meta(embed, service_name="status", canonical_top_level_command="embed")
         embeds.append(embed)
-    await finalize_footer_embeds(embeds, footer_service, default_service_name="status")
-    await apply_author_metadata_to_embeds(embeds, author_service, default_service_name="embed")
+    await finalize_embeds_rendering(
+        embeds,
+        footer_service=footer_service,
+        author_service=author_service,
+        default_service_name="status",
+    )
     normalized = normalize_embeds_for_discord(embeds, max_chars=MAX_EMBED_CHARS)
     if normalized is not embeds:
-        await finalize_footer_embeds(normalized, footer_service, default_service_name="status")
-        await apply_author_metadata_to_embeds(normalized, author_service, default_service_name="embed")
+        for embed in normalized:
+            attach_footer_meta(embed, service_name="status")
+            attach_author_meta(embed, service_name="status", canonical_top_level_command="embed")
+        await finalize_embeds_rendering(
+            normalized,
+            footer_service=footer_service,
+            author_service=author_service,
+            default_service_name="status",
+        )
     return normalized
