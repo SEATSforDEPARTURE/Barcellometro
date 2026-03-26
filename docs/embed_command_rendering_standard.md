@@ -219,6 +219,7 @@ La sezione `author` degli embed ha ora un servizio dedicato separato dal footer 
 - la label dopo `servizio` deriva sempre dal comando top-level canonico inglese reale (`channelsummary` → `CHANNEL SUMMARY`, `serversummary` → `SERVER SUMMARY`, `audionotes` → `AUDIO NOTES`, `qna` → `QNA`);
 - la source of truth visuale è il metadata `canonical_top_level_command` (non `service_name` tecnico): pipeline `embed origin command -> canonical top-level command -> author label`;
 - `service_name` resta solo tecnico (profilazione template, logging, diagnostica) e non può più determinare direttamente la label visibile;
+- i report helpers centrali `build_report_cover_embed(...)` e `apply_standard_report_style(...)` devono ricevere/propagare `canonical_top_level_command` e allegano sia footer metadata sia author metadata.
 - la `version` author ha semantica sobria: viene appesa solo quando esiste una `phrase` globale o di servizio, quindi il fallback puro resta leggibile (`servizio CHANNEL SUMMARY`, non `servizio CHANNEL SUMMARY · dev`).
 
 Ordine di precedenza author:
@@ -334,7 +335,7 @@ Non introdurre renderer paralleli o embed manuali per aggirare questo standard.
 
 Il feed GREETINGS / `🚪 INGRESSI & USCITE` segue inoltre un contratto visivo fisso, distinto dagli embed comando standardizzati:
 
-- il renderer live usa sempre author fisso `🚪 INGRESSI & USCITE`;
+- l'author live deve passare dalla pipeline standard (metadata canonici con top-level `greetings`, senza `set_author(...)` hardcoded);
 - il titolo dell'embed coincide con la label evento (`event_label`);
 - la narrativa occupa la `description` principale dell'embed;
 - non esiste più il field separato `Evento`;

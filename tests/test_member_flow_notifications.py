@@ -57,6 +57,15 @@ def member_flow_module(monkeypatch):
     footer_stub = types.ModuleType("app.services.footer")
     footer_stub.attach_footer_meta = lambda embed, **kwargs: embed
     monkeypatch.setitem(sys.modules, "app.services.footer", footer_stub)
+    author_stub = types.ModuleType("app.services.author")
+
+    def _attach_author_meta(embed, **kwargs):
+        canonical = str(kwargs.get("canonical_top_level_command") or "").strip().upper()
+        embed.set_author(name=f"servizio {canonical}" if canonical else "servizio UNKNOWN")
+        return embed
+
+    author_stub.attach_author_meta = _attach_author_meta
+    monkeypatch.setitem(sys.modules, "app.services.author", author_stub)
 
     sys.modules.pop("app.services.member_flow_notifications", None)
     return importlib.import_module("app.services.member_flow_notifications")
@@ -512,7 +521,9 @@ def test_source_contains_author_title_mapping_and_footer_service_name() -> None:
     assert 'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))' in source
     assert '_ENTRY_LIKE_EVENT_TYPES = frozenset({"join", "grace", "inactive_grace"})' in source
     assert '"inactive_tempban",' in source
-    assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' in source
+    assert 'attach_author_meta(' in source
+    assert 'canonical_top_level_command="greetings"' in source
+    assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' not in source
     assert 'service_name="member_flow_notifications"' in source
     assert 'embed.add_field(name="Evento"' not in source
     assert 'timestamp=created_at' not in source
@@ -567,7 +578,7 @@ def test_send_notification_renders_author_title_description_and_footer_from_cano
         )
 
         payload = channel.sent[0]["embed"]
-        assert payload.author.name == "🚪 INGRESSI & USCITE"
+        assert payload.author.name == "servizio GREETINGS"
         assert payload.title == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
         assert payload.description is not None
         assert payload.description == payload.description[:4096]
@@ -692,8 +703,8 @@ def test_send_notification_skips_reason_block_when_greetings_reason_is_missing(m
 def test_member_flow_renderer_source_mentions_final_author_title_layout() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
 
-    assert "Layout canonico live: author fisso per il canale GREETINGS" in source
-    assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' in source
+    assert "derivato dal top-level canonico (non hardcoded)" in source
+    assert "attach_author_meta(" in source
     assert "embed.set_thumbnail(url=avatar_url)" in source
     assert 'title=copy.event_label' in source
     assert 'description=copy.narrative[:4096]' in source
@@ -756,7 +767,7 @@ def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_mo
         )
 
         embed = channel.sent[0]
-        assert embed.author.name == "🚪 INGRESSI & USCITE"
+        assert embed.author.name == "servizio GREETINGS"
         assert embed.title == "**✨ PRIMO INGRESSO**"
         assert "benvenut" in embed.description.lower()
         assert "<@42>" in embed.description
@@ -877,7 +888,7 @@ def test_send_notification_uses_canonical_greetings_palette_by_event_type(member
 
         embed = channel.sent[0]
         assert embed.colour == expected_colour
-        assert embed.author.name == "🚪 INGRESSI & USCITE"
+        assert embed.author.name == "servizio GREETINGS"
         assert embed.fields == []
 
     asyncio.run(_run())
@@ -936,7 +947,7 @@ def test_send_notification_uses_copy_service_as_single_source_for_title_and_desc
         )
 
         embed = channel.sent[0]
-        assert embed.author.name == "🚪 INGRESSI & USCITE"
+        assert embed.author.name == "servizio GREETINGS"
         assert embed.title == "COPY EVENT LABEL"
         assert embed.description == "COPY NARRATIVE"
         assert embed.fields == []
@@ -1001,7 +1012,7 @@ def test_send_notification_reads_runtime_values_only_from_canonical_timeline(mem
         )
 
         embed = channel.sent[0]
-        assert embed.author.name == "🚪 INGRESSI & USCITE"
+        assert embed.author.name == "servizio GREETINGS"
         assert embed.title == "CANONICAL EVENT"
         assert embed.description == "CANONICAL NARRATIVE"
         assert embed.fields == []

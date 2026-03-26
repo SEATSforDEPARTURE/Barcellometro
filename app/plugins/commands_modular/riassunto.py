@@ -2070,7 +2070,12 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext,
                 payload_time_link_count,
             )
             _log_summary_link_loss_between_embed_sets(normalized_details, payload_embeds, req_id=req_id, stage="pagination")
-            payload_embeds = apply_standard_report_style(payload_embeds, service_name="riassunto", cover_title=payload_embeds[0].title if payload_embeds else "🗒️ RIASSUNTO")
+            payload_embeds = apply_standard_report_style(
+                payload_embeds,
+                service_name="riassunto",
+                canonical_top_level_command="dmsummary",
+                cover_title=payload_embeds[0].title if payload_embeds else "🗒️ RIASSUNTO",
+            )
             attach_footer_meta_to_all(
                 payload_embeds,
                 service_name="riassunto",

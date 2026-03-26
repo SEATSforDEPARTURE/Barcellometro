@@ -122,7 +122,14 @@ async def _run_channel_aura_window(
             lines=[("warning", "No relevant aura data was found for this period.")],
         )
         return
-    await interaction.followup.send(embeds=apply_standard_report_style([embed], service_name="aurasummary", cover_title=embed.title or "📓 RESOCONTO CANALE"))
+    await interaction.followup.send(
+        embeds=apply_standard_report_style(
+            [embed],
+            service_name="aurasummary",
+            canonical_top_level_command="channelsummary",
+            cover_title=embed.title or "📓 RESOCONTO CANALE",
+        )
+    )
 
 
 async def _run_server_summary_window(
@@ -237,7 +244,15 @@ async def _run_server_aura_window(
     txt_lines = ["=== RESOCONTO AURA MOD ===", f"guild_id: {guild_id}", f"period_start: {start_ts}", f"period_end: {end_ts}", "", "=== BY REASON ==="]
     txt_lines.extend([f"{item['reason_code']} => {item['total']:+d} ({item['count']})" for item in report["by_reason"]])
     file = discord.File(BytesIO("\n".join(txt_lines).encode("utf-8")), filename=f"resoconto_aura_{guild_id}.txt")
-    await interaction.followup.send(embeds=apply_standard_report_style([embed], service_name="aurasummary", cover_title=embed.title or "📓 RESOCONTO SERVER"), file=file)
+    await interaction.followup.send(
+        embeds=apply_standard_report_style(
+            [embed],
+            service_name="aurasummary",
+            canonical_top_level_command="serversummary",
+            cover_title=embed.title or "📓 RESOCONTO SERVER",
+        ),
+        file=file,
+    )
 
 
 def register_resoconto(
