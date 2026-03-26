@@ -175,7 +175,7 @@ def test_standard_body_helpers_contract() -> None:
     title = format_standard_title("resoconto canale", emoji="📓")
     assert_standard_title(title)
 
-    field = format_standard_field_name("Trend", emoji="📈")
+    field = format_standard_field_name("TREND", emoji="📈")
     assert_standard_field_name(field)
 
     description = format_standard_description("Riepilogo operativo", italic=True, blank_line_before_fields=True)
