@@ -14,7 +14,12 @@ from app.plugins.commands_modular.time_windows import format_italian_ts, format_
 from app.services.author import AuthorService, attach_author_meta, resolve_canonical_top_level_command
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.embed_images import EmbedImagesService
-from app.shared.discord.embed_body import format_standard_title
+from app.shared.discord.embed_body import (
+    format_standard_description,
+    format_standard_field_name,
+    format_standard_section_value,
+    format_standard_title,
+)
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, chunk_embeds_for_message_batches, is_valid_embed, normalize_embeds_for_discord
 from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
@@ -174,7 +179,6 @@ class DisplayCommandContext:
     subtitle_parameter_parts: tuple[str, ...]
 
 
-_MAX_DESCRIPTION = 3800
 _MAX_SUBTITLE_ARG_LENGTH = 80
 _RAW_OBJECT_HINTS = ("{", "}", "[", "]", "\n")
 _MENTION_RE = re.compile(r"^<@!?(?P<user_id>\d+)>$")
@@ -636,9 +640,9 @@ def build_section(
     kind: CommandKind = "info",
     line_formatter: Callable[[str, Any], str] | None = None,
     subtitle_emoji: str | None = None,
-) -> str:
+) -> tuple[str, str]:
     header_emoji = _resolve_section_emoji(title, kind=kind, explicit_emoji=emoji, subtitle_emoji=subtitle_emoji)
-    rendered = [f"**{header_emoji} {title.upper()}**"]
+    rendered: list[str] = []
     for line in lines:
         if isinstance(line, str):
             cleaned_line = _strip_duplicate_kind_emoji(line, kind=kind)
@@ -647,7 +651,10 @@ def build_section(
             formatter = line_formatter or (lambda label, value: format_bullet(label, value, kind=kind))
             cleaned_line = _strip_duplicate_kind_emoji(formatter(line[0], line[1]), kind=kind)
             rendered.append(_strip_duplicate_leading_emoji(cleaned_line, emoji=subtitle_emoji))
-    return "\n".join(rendered)
+    return (
+        format_standard_field_name(title, emoji=header_emoji),
+        format_standard_section_value("\n".join(rendered)),
+    )
 
 
 
@@ -715,10 +722,9 @@ async def build_command_embeds(
     )
     title = format_standard_title(display_context.visual_title, emoji=display_context.title_emoji, uppercase=True)
     raw_subtitle_parameters = [*(subtitle_args or ()), *(relevant_parameters or ())]
-    blocks: list[str] = []
-    header = f"**{display_context.subtitle_emoji} {display_context.visual_subtitle}**" if display_context.visual_subtitle else ""
+    intro_line = f"{display_context.visual_subtitle}" if display_context.visual_subtitle else "Dettagli operativi del comando."
     resolved_line_formatter = line_formatter or (lambda label, value: format_bullet(label, value, kind=kind))
-    rendered_lines = [
+    rendered_lines: list[str] = [
         _strip_duplicate_leading_emoji(rendered, emoji=display_context.subtitle_emoji)
         for label, value in lines or []
         if (rendered := _format_primary_bullet(
@@ -730,12 +736,16 @@ async def build_command_embeds(
             line_formatter=resolved_line_formatter,
         )) is not None
     ]
-    if header:
-        blocks.append(header)
-    if compact_lines and rendered_lines:
-        blocks.append("\n".join(rendered_lines))
-    else:
-        blocks.extend(rendered_lines)
+    main_field_value = "\n".join(rendered_lines) if compact_lines and rendered_lines else "\n".join(rendered_lines)
+
+    section_fields: list[tuple[str, str]] = []
+    if main_field_value.strip():
+        section_fields.append(
+            (
+                format_standard_field_name("Dettagli", emoji=display_context.subtitle_emoji),
+                format_standard_section_value(main_field_value),
+            )
+        )
     for section in sections or []:
         if isinstance(section, dict):
             item = CommandEmbedSection(
@@ -746,7 +756,7 @@ async def build_command_embeds(
         else:
             item = section
         section_title = (section_title_formatter or str)(item.title)
-        blocks.append(
+        section_fields.append(
             build_section(
                 section_title,
                 item.lines,
@@ -756,32 +766,6 @@ async def build_command_embeds(
                 subtitle_emoji=display_context.subtitle_emoji,
             )
         )
-
-    chunks: list[str] = []
-    current = ""
-    for block in blocks:
-        candidate = block if not current else f"{current}\n\n{block}"
-        if len(candidate) <= _MAX_DESCRIPTION:
-            current = candidate
-            continue
-        if current:
-            chunks.append(current)
-        if len(block) <= _MAX_DESCRIPTION:
-            current = block
-            continue
-        lines_split = block.splitlines()
-        current = ""
-        for line in lines_split:
-            candidate_line = line if not current else f"{current}\n{line}"
-            if len(candidate_line) <= _MAX_DESCRIPTION:
-                current = candidate_line
-            else:
-                if current:
-                    chunks.append(current)
-                current = line[:_MAX_DESCRIPTION]
-        
-    if current:
-        chunks.append(current)
 
     resolved_footer_service_name = _resolve_footer_service_name(
         footer_service_name=footer_service_name,
@@ -795,8 +779,22 @@ async def build_command_embeds(
     )
     embeds: list[discord.Embed] = []
     color = get_semantic_color(kind)
-    for chunk in chunks or [blocks[0]]:
-        embed = discord.Embed(title=title, description=chunk, color=color)
+    if not section_fields:
+        section_fields = [(format_standard_field_name("Dettagli", emoji="📋"), "—")]
+
+    max_fields_per_embed = 25
+    for start in range(0, len(section_fields), max_fields_per_embed):
+        embed = discord.Embed(
+            title=title,
+            description=format_standard_description(
+                intro_line,
+                italic=True,
+                blank_line_before_fields=True,
+            ),
+            color=color,
+        )
+        for field_name, field_value in section_fields[start : start + max_fields_per_embed]:
+            embed.add_field(name=field_name, value=field_value, inline=False)
         if footer_mode in {"minimal", "meta"}:
             attach_footer_meta(
                 embed,
