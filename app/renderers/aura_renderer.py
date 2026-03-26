@@ -15,6 +15,7 @@ from app.services.footer import attach_footer_meta
 from app.services.aura_archetypes import build_dynamic_archetype_reason
 from app.config.file_loader import load_json_file
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, _ensure_embed_limits, _estimate_embed_size, _split_field_chunks
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
 logger = logging.getLogger(__name__)
 AURA_DETAILS_INTERNAL_BUDGET = 5700
@@ -122,7 +123,7 @@ def _score_lines(ledger_lines: list[str]) -> list[str]:
 def _build_main_aura_description(*, aura_payload: AuraRenderPayload) -> str:
     return "\n\n".join(
         [
-            f"**🕒 {aura_payload.period_line}**",
+            f"Periodo: **🕒 {aura_payload.period_line}**",
             (
                 f"**✨ KARMA \"{aura_payload.server_name}\"**\n"
                 f"{render_karma_bar(aura_payload.karma_server_percent)}\n\n"
@@ -485,6 +486,15 @@ def _build_points_lines(
     return lines
 
 
+
+
+def _standard_field(label: str) -> str:
+    raw = str(label or "").strip()
+    for emoji in ("📈", "🏆", "🕹️", "📜", "✨", "👤", "🧭", "🧾", "📌", ":bricks:"):
+        if raw.startswith(f"{emoji} "):
+            return format_standard_field_name(raw[len(emoji)+1:].strip(), emoji=emoji)
+    return format_standard_field_name(raw)
+
 def _add_field_with_chunks(embed: discord.Embed, *, name: str, value: str) -> None:
     for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
         embed.add_field(name=name if part_idx == 0 else f"{name} (cont.)", value=piece, inline=False)
@@ -501,10 +511,10 @@ def _compose_channel_aura_embed(
     compact_advice: bool,
     footer_text: str | None,
 ) -> discord.Embed:
-    embed = discord.Embed(title=title, color=0x5865F2)
+    embed = discord.Embed(title=format_standard_title(title.replace("🗒️ ", ""), emoji="🗒️"), color=0x5865F2)
     _add_field_with_chunks(
         embed,
-        name="📈 PANORAMICA",
+        name=_standard_field("📈 Panoramica"),
         value=(
             f"• Punti assegnati: **+{int(data.positive_points)}**\n"
             f"• Punti rimossi: **{abs(int(data.negative_points))}**\n"
@@ -518,7 +528,7 @@ def _compose_channel_aura_embed(
     ]
     _add_field_with_chunks(
         embed,
-        name="🏆 CLASSIFICA",
+        name=_standard_field("🏆 Classifica"),
         value="\n".join(rank_lines) or "• Nessun dato rilevante nel periodo.",
     )
 
@@ -530,7 +540,7 @@ def _compose_channel_aura_embed(
     )
     _add_field_with_chunks(
         embed,
-        name="🕹️ MOTIVAZIONI",
+        name=_standard_field("🕹️ Motivazioni"),
         value="\n".join(points_lines),
     )
 
@@ -558,7 +568,7 @@ def _compose_channel_aura_embed(
     )
     _add_field_with_chunks(
         embed,
-        name="📜 MISSIONI",
+        name=_standard_field("📜 Missioni"),
         value=mission_value,
     )
 
@@ -566,7 +576,7 @@ def _compose_channel_aura_embed(
     advice_lines = [_shorten_with_ellipsis(line, max_len=advice_max_len) for line in data.advice_lines[:advice_limit]]
     _add_field_with_chunks(
         embed,
-        name="✨ I CONSIGLI DEL BARCELLOMETRO",
+        name=_standard_field("✨ I consigli del barcellometro"),
         value="\n".join(f"• {line}" for line in advice_lines) or "• Nessun consiglio disponibile.",
     )
     if footer_text:
@@ -627,9 +637,9 @@ def build_aura_embeds(
     ledger_lines: list[str],
 ) -> list[discord.Embed]:
     main = discord.Embed(
-        title=f"✨ RESOCONTO AURA \"{aura_payload.username}\"",
+        title=format_standard_title(f"RESOCONTO AURA \"{aura_payload.username}\"", emoji="✨"),
         color=0x5865F2,
-        description=_build_main_aura_description(aura_payload=aura_payload),
+        description=format_standard_description(_build_main_aura_description(aura_payload=aura_payload), italic=False),
     )
     attach_footer_meta(main, service_name="aura", used_local_processing=True)
     attach_author_meta(main, service_name="aura", canonical_top_level_command="aurasummary")
@@ -678,10 +688,12 @@ def build_aura_embeds(
 
     for page_idx, chunk in enumerate(page_chunks, start=1):
         prefix = details_title_prefix.strip() if details_title_prefix else "🗒️ DETTAGLI AURA"
-        embed = discord.Embed(title=f"{prefix} — \"{tier_label}\"", color=0x2F3136)
+        clean_prefix = prefix.replace("🗒️", "").strip()
+        embed = discord.Embed(title=format_standard_title(f"{clean_prefix} — \"{tier_label}\"", emoji="🗒️"), color=0x2F3136)
         for name, value in chunk:
             for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
-                embed.add_field(name=name if part_idx == 0 else f"{name} (cont.)", value=piece, inline=False)
+                field_name = name if part_idx == 0 else f"{name} (cont.)"
+                embed.add_field(name=_standard_field(field_name), value=piece, inline=False)
         attach_footer_meta(embed, service_name="aura", used_local_processing=True)
         attach_author_meta(embed, service_name="aura", canonical_top_level_command="aurasummary")
         attach_embed_images_meta(embed, service_name="aura")

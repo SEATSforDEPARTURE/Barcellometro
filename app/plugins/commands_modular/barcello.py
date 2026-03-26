@@ -11,6 +11,7 @@ import discord
 
 from app.core.config_paths import BARCELLO_TRIGGER_JSON
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 from discord import app_commands
 
 from app.services.entitlements import EntitlementsService
@@ -666,7 +667,7 @@ def register_barcello(
         }
         embed_color, emoji, label = color_map.get(color_label, (0x2C2F33, "⚫", color_label))
         title_channel = channel_name or "canale"
-        title = title_override or f"🫛 **STATO BARCELLO “{title_channel}”**"
+        title = title_override or format_standard_title(f"STATO BARCELLO “{title_channel}”", emoji="🫛", uppercase=True)
         description_lines = [
             f"🕒 **Ultimi {window_minutes} minuti**",
             "",
@@ -681,7 +682,7 @@ def register_barcello(
         bar = _render_health_bar(result.score, emoji)
         _add_section(
             embed,
-            name="🫀 **PUNTI SALUTE**",
+            name=format_standard_field_name("Punti salute", emoji="🫀"),
             value=_with_spacing(f"{bar}  **({result.score}/100)**\n*{_health_description(result.score)}*"),
         )
         attach_footer_meta(embed, service_name="barcello", used_local_processing=True)
@@ -727,46 +728,46 @@ def register_barcello(
         ai_debug_line: str | None = None,
         ai_note: str = "",
     ) -> discord.Embed:
-        embed = discord.Embed(title=f"🧾 **DETTAGLI BARCELLO — {tier_display_name}**", color=embed_color)
+        embed = discord.Embed(title=format_standard_title(f"DETTAGLI BARCELLO — {tier_display_name}", emoji="🧾"), color=embed_color)
         if warning_text and not _is_effectively_empty_text(warning_text):
-            _add_section(embed, name="⚠️ **CAMPIONE PICCOLO**", value=_with_spacing(warning_text))
+            _add_section(embed, name=format_standard_field_name("Campione piccolo", emoji="⚠️"), value=_with_spacing(warning_text))
         if output_flags.get("show_motivation") and reasons_text:
             if not _is_effectively_empty_text(reasons_text):
-                _add_section(embed, name="🔥 **MOTIVAZIONI**", value=_with_spacing(reasons_text))
+                _add_section(embed, name=format_standard_field_name("Motivazioni", emoji="🔥"), value=_with_spacing(reasons_text))
         if output_flags.get("show_trend"):
             trend_value = trend_text if trend_text else render_trend_value(result.trend)
             if trend_reason and not _is_effectively_empty_text(trend_reason):
                 trend_value = f"{trend_value}\n{trend_reason}"
-            _add_section(embed, name="📈 **TREND**", value=_with_spacing(trend_value))
+            _add_section(embed, name=format_standard_field_name("Trend", emoji="📈"), value=_with_spacing(trend_value))
         if output_flags.get("show_advice"):
             if pair_mode and pair_mode_profile == "role3":
                 advice_lines = clean_bullets(personal_advice)[:5]
                 if should_show_section(advice_lines):
-                    _add_section(embed, name="🧠 **COME ANDARE D’ACCORDO**", value=_format_bullets(advice_lines))
+                    _add_section(embed, name=format_standard_field_name("Come andare d’accordo", emoji="🧠"), value=_format_bullets(advice_lines))
                 affinity_lines = clean_bullets(affinity_bullets)[:5]
                 if should_show_section(affinity_lines):
-                    _add_section(embed, name="💞 **AFFINITÀ**", value=_format_bullets(affinity_lines))
+                    _add_section(embed, name=format_standard_field_name("Affinità", emoji="💞"), value=_format_bullets(affinity_lines))
             elif pair_mode and pair_mode_profile == "mod":
                 mod_lines = clean_bullets(mod_advice)[:6]
                 if should_show_section(mod_lines):
-                    _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_format_bullets(mod_lines))
+                    _add_section(embed, name=format_standard_field_name("Consigli per la moderazione", emoji="🛡️"), value=_format_bullets(mod_lines))
                 contact_lines = clean_bullets(contact_points_bullets)[:5]
                 if should_show_section(contact_lines):
-                    _add_section(embed, name="🤝 **PUNTI DI CONTATTO**", value=_format_bullets(contact_lines))
+                    _add_section(embed, name=format_standard_field_name("Punti di contatto", emoji="🤝"), value=_format_bullets(contact_lines))
             else:
                 advice_lines = clean_bullets(personal_advice)[:5]
                 if should_show_section(advice_lines):
-                    _add_section(embed, name="🧠 **CONSIGLI PERSONALIZZATI**", value=_format_bullets(advice_lines))
+                    _add_section(embed, name=format_standard_field_name("Consigli personalizzati", emoji="🧠"), value=_format_bullets(advice_lines))
                 if profile == "mod":
                     mod_lines = clean_bullets(mod_advice)[:5]
                     if should_show_section(mod_lines):
-                        _add_section(embed, name="🛡️ **CONSIGLI PER LA MODERAZIONE**", value=_format_bullets(mod_lines))
+                        _add_section(embed, name=format_standard_field_name("Consigli per la moderazione", emoji="🛡️"), value=_format_bullets(mod_lines))
         if output_flags.get("show_mod_metrics") and profile == "mod":
-            _add_section(embed, name="🧮 **METRICHE AGGREGATE**", value=_with_spacing(_format_metrics(result.metrics)))
+            _add_section(embed, name=format_standard_field_name("Metriche aggregate", emoji="🧮"), value=_with_spacing(_format_metrics(result.metrics)))
         if ai_note:
-            _add_section(embed, name="ℹ️ **NOTA**", value=_with_spacing(ai_note))
+            _add_section(embed, name=format_standard_field_name("Nota", emoji="ℹ️"), value=_with_spacing(ai_note))
         if ai_debug_line and (profile == "mod" or os.getenv("DEBUG", "").lower() in {"1", "true", "yes", "y"}):
-            _add_section(embed, name="🔎 **AI**", value=_with_spacing(ai_debug_line))
+            _add_section(embed, name=format_standard_field_name("AI", emoji="🔎"), value=_with_spacing(ai_debug_line))
         notes_by_profile = {
             "base": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
             "role1": "*Per maggiori info su trend e consigli passa a un piano superiore! 😉*",
@@ -777,7 +778,7 @@ def register_barcello(
         if profile != "role3":
             note_value = notes_by_profile.get(profile, "")
             if note_value:
-                _add_section(embed, name="📌 **NOTE**", value=_with_spacing(note_value))
+                _add_section(embed, name=format_standard_field_name("Note", emoji="📌"), value=_with_spacing(note_value))
         attach_footer_meta(embed, service_name="barcello", used_local_processing=True)
         return embed
 

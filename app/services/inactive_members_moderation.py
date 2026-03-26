@@ -16,6 +16,7 @@ import discord
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
+from app.shared.discord.embed_body import format_standard_title
 from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ class InactivityActionsView(discord.ui.View):
             if isinstance(child, discord.ui.Button):
                 child.disabled = True
         await interaction.response.edit_message(view=self)
-        embed = discord.Embed(title="❌ Annullato", description="Azione manuale inattivi annullata.", color=0x808080)
+        embed = discord.Embed(title=format_standard_title("Annullato", emoji="❌", uppercase=False), description="Azione manuale inattivi annullata.", color=0x808080)
         attach_footer_meta(embed, service_name="inactivity_moderation", used_local_processing=True)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -551,7 +552,7 @@ class InactiveMembersModerationService:
             current_len += add_len
         if extra > 0:
             preview_lines.append(f"+ altri {extra}…")
-        embed = discord.Embed(title="⚠️ GRACE SCADUTO (AUTO OFF)", colour=discord.Colour.orange())
+        embed = discord.Embed(title=format_standard_title("GRACE SCADUTO (AUTO OFF)", emoji="⚠️"), colour=discord.Colour.orange())
         safe_add_field(embed, name="Utenti scaduti", value=str(len(expired)), inline=True)
         safe_add_field(embed, name="Dettaglio", value="\n".join(preview_lines) if preview_lines else "Nessun utente.", inline=False)
         attach_footer_meta(embed, service_name="inactivity_moderation", used_local_processing=True)

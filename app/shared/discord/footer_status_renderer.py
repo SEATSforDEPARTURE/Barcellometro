@@ -299,10 +299,10 @@ def _overview_fields(snapshot: FooterStatusSnapshot) -> list[FooterStatusField]:
     ]
 
     return [
-        FooterStatusField(name="ℹ️ STATO", value="\n".join(status_lines)),
-        FooterStatusField(name="📊 SERVIZI", value="\n".join(service_lines)),
-        FooterStatusField(name="📂 FAMIGLIE", value="\n".join(group_lines) or "• Nessuna famiglia disponibile."),
-        FooterStatusField(name="⚙️ CONFIGURAZIONE", value="\n".join(config_lines)),
+        FooterStatusField(name=format_standard_field_name("Stato", emoji="ℹ️"), value="\n".join(status_lines)),
+        FooterStatusField(name=format_standard_field_name("Servizi", emoji="📊"), value="\n".join(service_lines)),
+        FooterStatusField(name=format_standard_field_name("Famiglie", emoji="📂"), value="\n".join(group_lines) or "• Nessuna famiglia disponibile."),
+        FooterStatusField(name=format_standard_field_name("Configurazione", emoji="⚙️"), value="\n".join(config_lines)),
     ]
 
 
@@ -330,7 +330,7 @@ def _render_page_description(page: FooterStatusPage, *, page_index: int, total_p
 
 def _build_embed_for_page(page: FooterStatusPage, *, page_index: int, total_pages: int) -> discord.Embed:
     embed = discord.Embed(
-        title="📦 EMBED",
+        title=format_standard_title("EMBED", emoji="📦"),
         description=_render_page_description(page, page_index=page_index, total_pages=total_pages),
         color=discord.Color.blurple(),
     )

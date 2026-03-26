@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 from discord import Forbidden, app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
@@ -176,7 +177,7 @@ def _build_user_activity_embeds_safe(
     filled = max(0, min(10, int(round(max(0, min(score, 100)) / 10))))
     bar = f"{emoji * filled}{'⚪' * (10 - filled)}"
 
-    embed1 = discord.Embed(title=f"🗣️ STATO ATTIVITÀ “{display_name}”", color=color_map.get(label, 0x95A5A6))
+    embed1 = discord.Embed(title=format_standard_title(f"STATO ATTIVITÀ “{display_name}”", emoji="🗣️"), color=color_map.get(label, 0x95A5A6))
     embed1.description = _truncate(
         (
             f"🕒 **{period_label}**\n\n"
@@ -190,11 +191,11 @@ def _build_user_activity_embeds_safe(
     )
     attach_footer_meta(embed1, service_name="attivita", used_local_processing=True)
 
-    embed2 = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
-    add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value=_with_blank_lines(stats_lines))
-    add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI MAGGIORI", value="\n".join(interaction_lines))
-    add_field_safe(embed2, name="🔎 TEMI E PAROLE PIÙ USATE", value="\n".join(topics_lines))
-    add_field_safe(embed2, name="💡 CONSIGLI PER LA MODERAZIONE", value="\n".join(f"• {line}" for line in advice_lines[:4]))
+    embed2 = discord.Embed(title=format_standard_title("DETTAGLI ATTIVITÀ — Staff", emoji="📄"), color=discord.Color.dark_grey())
+    add_field_safe(embed2, name=format_standard_field_name("Statistiche utente", emoji="📊"), value=_with_blank_lines(stats_lines))
+    add_field_safe(embed2, name=format_standard_field_name("Interazioni maggiori", emoji="🧑‍🤝‍🧑"), value="\n".join(interaction_lines))
+    add_field_safe(embed2, name=format_standard_field_name("Temi e parole più usate", emoji="🔎"), value="\n".join(topics_lines))
+    add_field_safe(embed2, name=format_standard_field_name("Consigli per la moderazione", emoji="💡"), value="\n".join(f"• {line}" for line in advice_lines[:4]))
     attach_footer_meta(embed2, service_name="attivita", used_local_processing=True)
 
     too_long = (
@@ -206,10 +207,10 @@ def _build_user_activity_embeds_safe(
     )
     if too_long:
         embed2.clear_fields()
-        add_field_safe(embed2, name="📊 STATISTICHE UTENTE", value=_with_blank_lines(stats_lines[:6]))
-        add_field_safe(embed2, name="🧑‍🤝‍🧑 INTERAZIONI MAGGIORI", value="\n".join(interaction_lines))
-        add_field_safe(embed2, name="🔎 TEMI E PAROLE PIÙ USATE", value="Dettagli completi nel file allegato.")
-        add_field_safe(embed2, name="💡 CONSIGLI PER LA MODERAZIONE", value="Dettagli completi nel file allegato.")
+        add_field_safe(embed2, name=format_standard_field_name("Statistiche utente", emoji="📊"), value=_with_blank_lines(stats_lines[:6]))
+        add_field_safe(embed2, name=format_standard_field_name("Interazioni maggiori", emoji="🧑‍🤝‍🧑"), value="\n".join(interaction_lines))
+        add_field_safe(embed2, name=format_standard_field_name("Temi e parole più usate", emoji="🔎"), value="Dettagli completi nel file allegato.")
+        add_field_safe(embed2, name=format_standard_field_name("Consigli per la moderazione", emoji="💡"), value="Dettagli completi nel file allegato.")
     return [embed1, embed2], too_long
 
 

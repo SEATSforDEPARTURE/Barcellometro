@@ -7,6 +7,7 @@ import discord
 from app.services.author import attach_author_meta
 from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
 
 
@@ -48,7 +49,7 @@ def build_user_activity_embeds(
     advice_lines: list[str],
 ) -> list[discord.Embed]:
     overview = discord.Embed(
-        title=f"🗣️ STATO ATTIVITÀ “{display_name}”",
+        title=format_standard_title(f"STATO ATTIVITÀ “{display_name}”", emoji="🗣️"),
         color=_color_for_label(activity_label),
     )
     overview.description = (
@@ -65,10 +66,10 @@ def build_user_activity_embeds(
     attach_author_meta(overview, service_name="user_activity", canonical_top_level_command="serversummary")
     attach_embed_images_meta(overview, service_name="user_activity")
 
-    details = discord.Embed(title="📄 DETTAGLI ATTIVITÀ — Staff", color=discord.Color.dark_grey())
-    details.add_field(name="📊 STATISTICHE UTENTE", value="\n".join(stats_lines) if stats_lines else "—", inline=False)
+    details = discord.Embed(title=format_standard_title("DETTAGLI ATTIVITÀ — Staff", emoji="📄"), color=discord.Color.dark_grey())
+    details.add_field(name=format_standard_field_name("Statistiche utente", emoji="📊"), value="\n".join(stats_lines) if stats_lines else "—", inline=False)
     details.add_field(
-        name="💡 CONSIGLI PER LA MODERAZIONE",
+        name=format_standard_field_name("Consigli per la moderazione", emoji="💡"),
         value="\n".join(f"• {line}" for line in advice_lines) if advice_lines else "• Nessun consiglio disponibile.",
         inline=False,
     )

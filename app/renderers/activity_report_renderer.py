@@ -9,6 +9,7 @@ from app.renderers.channel_summary import format_window_header
 from app.services.author import attach_author_meta
 from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
 ITALIAN_WEEKDAYS = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 ITALIAN_MONTHS = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
@@ -116,20 +117,20 @@ def build_daily_activity_embeds(
     )
 
     overview = discord.Embed(
-        title=f"🗣️ RESOCONTO SERVER “{guild_name}”",
+        title=format_standard_title(f"RESOCONTO SERVER “{guild_name}”", emoji="🗣️"),
         color=_color_for_emoji(emoji),
         description=(
-            f"{window_header}\n\n"
-            f"{emoji} **ATTIVITÀ {label}**\n"
+            f"Periodo: {window_header}\n\n"
+            f"Stato: {emoji} **ATTIVITÀ {label}**\n"
             "*Ritmo del server valutato su volume, persone attive e continuità.*\n\n"
             f"🫀 **PUNTI ATTIVITÀ SERVER**\n{_bar(score, emoji)} **({score}/100)**\n\n"
             "🫀 **PUNTI ATTIVITÀ CANALI**\n"
             f"{_truncate_overview_channels(channel_score_lines)}"
         ),
     )
-    overview.add_field(name="📈 TREND", value=_truncate_field(trend), inline=False)
+    overview.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=_truncate_field(trend), inline=False)
     overview.add_field(
-        name="📌 STATISTICHE SERVER",
+        name=format_standard_field_name("Statistiche server", emoji="📌"),
         value=_truncate_field(
             f"• Messaggi: **{total_messages}**\n"
             f"• Utenti attivi: **{_fmt_active_ratio(active_x, total_y, fallback_label=total_y_label)}**\n"
@@ -140,7 +141,7 @@ def build_daily_activity_embeds(
         ),
         inline=False,
     )
-    overview.add_field(name="💡 CONSIGLI", value=_truncate_field("\n".join(f"• {x}" for x in advice[:4])), inline=False)
+    overview.add_field(name=format_standard_field_name("Consigli", emoji="💡"), value=_truncate_field("\n".join(f"• {x}" for x in advice[:4])), inline=False)
     attach_footer_meta(overview, service_name="daily_activity_report", used_local_processing=True)
     attach_author_meta(overview, service_name="daily_activity_report", canonical_top_level_command="serversummary")
     attach_embed_images_meta(overview, service_name="daily_activity_report")
@@ -166,16 +167,16 @@ def build_daily_activity_embeds(
             else:
                 stats_lines.append("• Chiamate: **0**")
         embed = discord.Embed(
-            title=f"📄 DETTAGLI ATTIVITÀ “#{getattr(dc, 'name', 'sconosciuto')}”",
+            title=format_standard_title(f"DETTAGLI ATTIVITÀ “#{getattr(dc, 'name', 'sconosciuto')}”", emoji="📄"),
             color=_color_for_emoji(s.emoji),
             description=(
-                f"{s.emoji} **ATTIVITÀ {s.label}**\n"
+                f"Stato: {s.emoji} **ATTIVITÀ {s.label}**\n"
                 "*Ritmo del canale valutato su volume, persone attive e continuità.*\n\n"
                 f"🫀 **PUNTI ATTIVITÀ**\n{_bar(s.score, s.emoji)} **({s.score}/100)**"
             ),
         )
-        embed.add_field(name="📈 TREND", value=_truncate_field(s.trend_text or "n/d"), inline=False)
-        embed.add_field(name="📌 STATISTICHE CANALE", value=_truncate_field("\n".join(stats_lines)), inline=False)
+        embed.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=_truncate_field(s.trend_text or "n/d"), inline=False)
+        embed.add_field(name=format_standard_field_name("Statistiche canale", emoji="📌"), value=_truncate_field("\n".join(stats_lines)), inline=False)
         attach_footer_meta(embed, service_name="daily_activity_report", used_local_processing=True)
         attach_author_meta(embed, service_name="daily_activity_report", canonical_top_level_command="serversummary")
         attach_embed_images_meta(embed, service_name="daily_activity_report")
