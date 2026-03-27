@@ -247,8 +247,8 @@ def test_footer_status_command_uses_embed_namespace_and_interactive_view(embed_m
         kwargs = send_command_embeds.await_args.kwargs
         assert kwargs['ephemeral'] is True
         assert len(kwargs['embeds']) == 1
-        assert kwargs['embeds'][0].title == format_standard_title('EMBED', emoji='📦')
+        assert kwargs['embeds'][0].title == format_standard_title('FOOTER STATUS', emoji='📦')
         assert isinstance(kwargs['view'], embed_module.FooterStatusPaginationView)
-        assert kwargs['view']._embeds[0].title == format_standard_title('EMBED', emoji='📦')
+        assert kwargs['view']._embeds[0].title == format_standard_title('FOOTER STATUS', emoji='📦')
 
     asyncio.run(_run())

@@ -634,8 +634,7 @@ def stringify_value(value: Any) -> str:
 
 
 def _fallback_command_description(display_context: DisplayCommandContext) -> str:
-    title = display_context.visual_title or "COMMAND"
-    return f"Esecuzione del comando **{title}**."
+    return "Descrizione sintetica dell'esecuzione del comando."
 
 
 def format_bullet(label: str, value: Any, *, kind: CommandKind = "info") -> str:
@@ -733,7 +732,8 @@ async def build_command_embeds(
         top_level_emoji=top_level_emoji,
         subcommand_emoji=subcommand_emoji,
     )
-    title = format_standard_title(display_context.visual_title, emoji=display_context.title_emoji, uppercase=True)
+    title_text = display_context.visual_subtitle or display_context.visual_title
+    title = format_standard_title(title_text, emoji=display_context.title_emoji, uppercase=True)
     raw_subtitle_parameters = [*(subtitle_args or ()), *(relevant_parameters or ())]
     resolved_line_formatter = line_formatter or (lambda label, value: format_bullet(label, value, kind=kind))
     rendered_lines: list[str] = [
@@ -756,19 +756,18 @@ async def build_command_embeds(
     description = format_standard_description(
         command_description or _fallback_command_description(display_context),
         italic=True,
-        blank_line_before_fields=has_primary_field or has_additional_sections,
+        blank_line_before_fields=True,
     )
     embed = discord.Embed(
         title=title,
         description=description,
         color=color,
     )
-    if has_primary_field:
-        embed.add_field(
-            name=format_standard_field_name(_PRIMARY_FIELD_TITLES[kind], emoji=KIND_EMOJIS[kind]),
-            value=format_standard_section_value(main_field_value),
-            inline=False,
-        )
+    embed.add_field(
+        name=format_standard_field_name(_PRIMARY_FIELD_TITLES[kind], emoji=KIND_EMOJIS[kind]),
+        value=format_standard_section_value(main_field_value if has_primary_field else "—"),
+        inline=False,
+    )
     for section in sections or []:
         if isinstance(section, dict):
             item = CommandEmbedSection(

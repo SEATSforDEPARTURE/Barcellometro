@@ -12,6 +12,7 @@ from app.services.author import (
     human_author_service_name,
 )
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, normalize_embeds_for_discord
 from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
@@ -73,7 +74,18 @@ def build_author_status_pages(snapshot: AuthorStatusSnapshot) -> list[AuthorStat
         f"• URL globale: `{_clip(snapshot.global_url, 100)}`",
         "• Regola fallback: `servizio <NOME CANONICO INGLESE>`; le pagine multi-embed aggiungono `· (Pag. X/Y)`.",
     ]
-    pages = [AuthorStatusPage(title="📦 EMBED", description="\n".join(overview_lines), fields=[])]
+    pages = [
+        AuthorStatusPage(
+            title="AUTHOR STATUS",
+            description="Stato e diagnostica dell'author embed.",
+            fields=[
+                AuthorStatusField(
+                    name=format_standard_field_name("INFO", emoji="ℹ️"),
+                    value="\n".join(overview_lines),
+                )
+            ],
+        )
+    ]
     grouped: dict[int, list[AuthorStatusServiceEntry]] = {}
     for entry in snapshot.services:
         grouped.setdefault(entry.category, []).append(entry)
@@ -84,12 +96,18 @@ def build_author_status_pages(snapshot: AuthorStatusSnapshot) -> list[AuthorStat
         for entry in entries:
             field = build_service_status_field(entry)
             field_size = len(field.name) + len(field.value)
-            if current_fields and (len(current_fields) >= 8 or current_chars + field_size > 3600):
+            if current_fields and (len(current_fields) >= 7 or current_chars + field_size > 3400):
                 pages.append(
                     AuthorStatusPage(
-                        title="📦 EMBED",
-                        description=f"• Author status · {title}",
-                        fields=current_fields,
+                        title=f"AUTHOR STATUS · {title}",
+                        description=f"Dettaglio servizi categoria {title.lower()}.",
+                        fields=[
+                            AuthorStatusField(
+                                name=format_standard_field_name("INFO", emoji="ℹ️"),
+                                value=f"• Categoria: **{title}**\n• Blocchi servizio author renderizzati come field dedicati.",
+                            ),
+                            *current_fields,
+                        ],
                     )
                 )
                 current_fields = []
@@ -99,14 +117,17 @@ def build_author_status_pages(snapshot: AuthorStatusSnapshot) -> list[AuthorStat
         if current_fields:
             pages.append(
                 AuthorStatusPage(
-                    title="📦 EMBED",
-                    description=f"• Author status · {title}",
-                    fields=current_fields,
+                    title=f"AUTHOR STATUS · {title}",
+                    description=f"Dettaglio servizi categoria {title.lower()}.",
+                    fields=[
+                        AuthorStatusField(
+                            name=format_standard_field_name("INFO", emoji="ℹ️"),
+                            value=f"• Categoria: **{title}**\n• Blocchi servizio author renderizzati come field dedicati.",
+                        ),
+                        *current_fields,
+                    ],
                 )
             )
-    total = len(pages)
-    for index, page in enumerate(pages, start=1):
-        page.description = f"{page.description}\n• Pagina {index}/{total}"
     return pages
 
 
@@ -119,7 +140,11 @@ async def build_author_status_embeds(
     pages = build_author_status_pages(snapshot)
     embeds: list[discord.Embed] = []
     for page in pages:
-        embed = discord.Embed(title=page.title, description=page.description, color=0x3498DB)
+        embed = discord.Embed(
+            title=format_standard_title(page.title, emoji="📦"),
+            description=f"*{page.description}*",
+            color=0x3498DB,
+        )
         for field in page.fields:
             embed.add_field(name=field.name, value=field.value, inline=False)
         attach_footer_meta(embed, service_name="status")

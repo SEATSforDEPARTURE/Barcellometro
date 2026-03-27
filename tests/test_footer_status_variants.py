@@ -130,8 +130,7 @@ def test_footer_status_overview_page_is_always_present_and_readable() -> None:
         overview = pages[0]
 
         assert overview.title == "FOOTER STATUS"
-        assert "Vista amministrativa del footer embed" in overview.description
-        assert "INIZIO / INDIETRO / AVANTI" in overview.description
+        assert "Stato e diagnostica del footer embed." in overview.description
         assert [field.name for field in overview.fields] == [
             format_standard_field_name("STATO", emoji="ℹ️"),
             format_standard_field_name("SERVIZI", emoji="📊"),
@@ -227,11 +226,13 @@ def test_footer_status_builds_multiple_pages_when_services_are_many() -> None:
         embeds = await build_footer_status_embeds(await footer.build_status_snapshot(), footer_service=footer)
 
         assert len(embeds) > 2
-        assert embeds[0].title == format_standard_title("EMBED", emoji="📦")
-        assert embeds[0].description and "**ℹ️ FOOTER STATUS**" in embeds[0].description
-        assert any(embed.description and "FOOTER STATUS · STANDARD SERVICES" in embed.description for embed in embeds[1:])
+        assert embeds[0].title == format_standard_title("FOOTER STATUS", emoji="📦")
+        assert embeds[0].description and "Stato e diagnostica del footer embed." in embeds[0].description
+        assert any("FOOTER STATUS · STANDARD SERVICES" in (embed.title or "") for embed in embeds[1:])
         assert all("(1/" not in (embed.title or "") for embed in embeds)
-        assert all("• Pagina: **" in (embed.description or "") for embed in embeds)
+        assert all("*" in (embed.description or "") for embed in embeds)
+        assert all(embed.fields and embed.fields[0].name == format_standard_field_name("INFO", emoji="ℹ️") for embed in embeds)
+        assert all("• Pagina: **" in (embed.fields[0].value or "") for embed in embeds)
         assert all("Pagina " not in (embed.footer.text or "") for embed in embeds)
         assert all((embed.author.name or "").startswith("servizio EMBED · (Pag. ") for embed in embeds)
         assert all("UNKNOWN" not in (embed.author.name or "") for embed in embeds)

@@ -260,11 +260,7 @@ def build_service_status_field(entry: FooterStatusServiceEntry, snapshot: Footer
 
 def _overview_description(snapshot: FooterStatusSnapshot) -> str:
     _ = snapshot
-    lines = [
-        "• Vista amministrativa del footer embed.",
-        "• Navigazione con **INIZIO / INDIETRO / AVANTI** sullo stesso messaggio.",
-    ]
-    return _clip("\n".join(lines), DISCORD_MAX_EMBED_DESCRIPTION)
+    return _clip("Stato e diagnostica del footer embed.", DISCORD_MAX_EMBED_DESCRIPTION)
 
 
 def _overview_fields(snapshot: FooterStatusSnapshot) -> list[FooterStatusField]:
@@ -310,30 +306,34 @@ def _overview_fields(snapshot: FooterStatusSnapshot) -> list[FooterStatusField]:
 def _build_group_description(title: str, entries: list[FooterStatusServiceEntry], snapshot: FooterStatusSnapshot) -> str:
     override_count = sum(1 for entry in entries if _has_service_override(entry))
     runtime_count = sum(1 for entry in entries if effective_config_source(entry, snapshot) == "runtime")
-    return "\n".join(
-        [
-            f"• Servizi: **{len(entries)}** · Override: **{override_count}** · Runtime: **{runtime_count}**",
-            "• Blocchi compatti con footer effettivo, sorgente e varianti persistite.",
-        ]
+    return (
+        f"Dettaglio categoria {title.lower()}: servizi={len(entries)}, "
+        f"override={override_count}, runtime={runtime_count}."
     )
 
 
 def _render_page_description(page: FooterStatusPage, *, page_index: int, total_pages: int) -> str:
-    lines = [
-        f"**ℹ️ {page.title}**",
-        "",
-        f"• Pagina: **{page_index}/{total_pages}**",
-    ]
-    if page.description and page.description.strip() and page.description.strip() != "—":
-        lines.append(page.description.strip())
-    return _clip("\n".join(lines), DISCORD_MAX_EMBED_DESCRIPTION)
+    _ = (page_index, total_pages)
+    base = page.description.strip() if page.description else ""
+    if not base or base == "—":
+        base = "Stato footer embed."
+    return _clip(f"*{base}*", DISCORD_MAX_EMBED_DESCRIPTION)
 
 
 def _build_embed_for_page(page: FooterStatusPage, *, page_index: int, total_pages: int) -> discord.Embed:
     embed = discord.Embed(
-        title=format_standard_title("EMBED", emoji="📦"),
+        title=format_standard_title(page.title, emoji="📦"),
         description=_render_page_description(page, page_index=page_index, total_pages=total_pages),
         color=discord.Color.blurple(),
+    )
+    info_lines = [
+        f"• Pagina: **{page_index}/{total_pages}**",
+        "• Navigazione: **INIZIO / INDIETRO / AVANTI**",
+    ]
+    embed.add_field(
+        name=format_standard_field_name("INFO", emoji="ℹ️"),
+        value=_clip("\n".join(info_lines), DISCORD_MAX_FIELD_VALUE),
+        inline=False,
     )
     for field in page.fields:
         embed.add_field(
@@ -359,7 +359,7 @@ def _paginate_group(title: str, description: str, fields: list[FooterStatusField
             page_index=current_index + 1,
             total_pages=current_index + 1,
         )
-        if current_fields and (len(candidate_fields) > DISCORD_MAX_FIELDS or _estimate_embed_size(probe) > _PAGE_EMBED_MAX):
+        if current_fields and (len(candidate_fields) >= DISCORD_MAX_FIELDS or _estimate_embed_size(probe) > _PAGE_EMBED_MAX):
             pages.append(FooterStatusPage(title=title, description=description, fields=current_fields))
             current_index += 1
             current_fields = [field]
