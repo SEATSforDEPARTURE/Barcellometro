@@ -92,7 +92,8 @@ def test_command_setup_root_order_matches_the_new_contract() -> None:
     ]
 
     start = source.index('root_commands: list[app_commands.Command | app_commands.Group] = [')
-    root_block = source[start: source.index(']\n\n    def add_tree_command', start)]
+    root_block_end = source.index("    def add_tree_command", start)
+    root_block = source[start:root_block_end]
     current_index = -1
     for token in expected_order:
         new_index = root_block.index(token)

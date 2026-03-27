@@ -39,6 +39,37 @@ from app.shared.discord.footer_pipeline import install_footer_auto_finalize
 logger = logging.getLogger(__name__)
 
 
+_REQUIRED_TRIGGER_BARCELLO_COMMANDS = {"on", "off", "status", "calibrate", "run"}
+
+
+def _find_group_child(parent: app_commands.Group, name: str) -> app_commands.Group | None:
+    for command in parent.commands:
+        if isinstance(command, app_commands.Group) and command.name == name:
+            return command
+    return None
+
+
+def _validate_triggers_contract(
+    *,
+    root_commands: list[app_commands.Command | app_commands.Group],
+    triggers_group: app_commands.Group,
+) -> None:
+    root_group_names = [group.name for group in root_commands if isinstance(group, app_commands.Group)]
+    if "triggers" not in root_group_names:
+        raise RuntimeError("Command registration invariant failed: root /triggers is missing from root_commands.")
+
+    trigger_barcello = _find_group_child(triggers_group, "barcello")
+    if trigger_barcello is None:
+        raise RuntimeError("Command registration invariant failed: /triggers barcello subgroup is missing.")
+
+    trigger_barcello_commands = {command.name for command in trigger_barcello.commands}
+    missing = sorted(_REQUIRED_TRIGGER_BARCELLO_COMMANDS - trigger_barcello_commands)
+    if missing:
+        raise RuntimeError(
+            "Command registration invariant failed: missing /triggers barcello commands: " + ", ".join(missing)
+        )
+
+
 def setup(registry: ServiceRegistry) -> None:
     logged_tree_once = False
     ctx = CommandContext.from_registry(registry)
@@ -167,6 +198,12 @@ def setup(registry: ServiceRegistry) -> None:
         attivita_group,
     ]
 
+    _validate_triggers_contract(root_commands=root_commands, triggers_group=triggers_group)
+    logger.info(
+        "Command roots scheduled for tree registration: %s",
+        [command.name for command in root_commands],
+    )
+
     def add_tree_command(command: app_commands.Command | app_commands.Group) -> None:
         if use_guild:
             bot.tree.add_command(command, guild=guild_obj)
@@ -246,6 +283,12 @@ def setup(registry: ServiceRegistry) -> None:
                 )
                 synced = await bot.tree.sync()
                 logger.info("Synced %d commands for %s", len(synced), "global")
+            synced_root_names = [command.name for command in synced]
+            logger.info("Synced root commands (%s): %s", command_scope, synced_root_names)
+            if "triggers" not in synced_root_names:
+                logger.error("Synced command set is missing /triggers (scope=%s).", command_scope)
+            else:
+                logger.info("/triggers synced successfully (%s).", command_scope)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to sync commands")
 
