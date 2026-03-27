@@ -11,6 +11,7 @@ from app.services.author import (
     get_author_meta,
     normalize_author_thumbnail,
     render_author_name,
+    resolve_candidate_service_keys,
 )
 from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.author_pipeline import finalize_embed_author, finalize_embeds_author
@@ -325,7 +326,7 @@ def test_author_service_supports_global_and_service_url() -> None:
 
 def test_render_author_name_uses_refactored_canonical_roots_for_alias_services() -> None:
     assert render_author_name(service_name="riassunto") == "servizio DM CHANNEL SUMMARY"
-    assert render_author_name(service_name="barcello") == "servizio DM CHANNEL SUMMARY"
+    assert render_author_name(service_name="barcello") == "servizio TRIGGERS"
     assert render_author_name(service_name="aura") == "servizio DM SERVER SUMMARY"
     assert render_author_name(service_name="attivita") == "servizio DM SERVER SUMMARY"
 
@@ -337,7 +338,7 @@ def test_finalize_embed_author_falls_back_to_default_service_name_without_meta()
 
         await finalize_embed_author(embed, service, default_service_name="barcello")
 
-        assert embed.author.name == "servizio DM CHANNEL SUMMARY"
+        assert embed.author.name == "servizio TRIGGERS"
 
     asyncio.run(_run())
 
@@ -369,3 +370,92 @@ def test_author_service_supports_status_placeholders_in_phrase_template() -> Non
         assert embed.author.name == "DM CHANNEL SUMMARY · riassunto · 2026.03 · 2026.03"
 
     asyncio.run(_run())
+
+
+def test_author_template_thumbnail_falls_back_to_canonical_service_key() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="audio")
+        attach_author_meta(embed, service_name="audio_notes", canonical_top_level_command="audio")
+        service, _ = _build_author_service()
+        await service.set_service_thumbnail("audio", "https://example.com/audio.png")
+
+        await service.apply(embed, default_service_name="audio_notes")
+
+        assert embed.author.icon_url == "https://example.com/audio.png"
+
+    asyncio.run(_run())
+
+
+def test_author_template_technical_key_beats_canonical_for_thumbnail_phrase_and_url() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="audio")
+        attach_author_meta(embed, service_name="audio_notes", canonical_top_level_command="audio")
+        service, _ = _build_author_service()
+        await service.set_version("2026.03")
+        await service.set_service_phrase("audio", "Canonical phrase")
+        await service.set_service_phrase("audio_notes", "Technical phrase")
+        await service.set_service_thumbnail("audio", "https://example.com/audio.png")
+        await service.set_service_thumbnail("audio_notes", "https://example.com/audio-notes.png")
+        await service.set_service_url("audio", "https://example.com/audio")
+        await service.set_service_url("audio_notes", "https://example.com/audio-notes")
+
+        await service.apply(embed, default_service_name="audio_notes")
+
+        assert embed.author.name == "Technical phrase · 2026.03"
+        assert embed.author.icon_url == "https://example.com/audio-notes.png"
+        assert embed.author.url == "https://example.com/audio-notes"
+
+    asyncio.run(_run())
+
+
+def test_author_template_canonical_fallback_covers_triggers_dmchannel_and_dmserver_aliases() -> None:
+    async def _run() -> None:
+        barcello_embed = discord.Embed(title="triggers")
+        attach_author_meta(barcello_embed, service_name="barcello", canonical_top_level_command="triggers")
+        riassunto_embed = discord.Embed(title="dmchannelsummary")
+        attach_author_meta(riassunto_embed, service_name="riassunto", canonical_top_level_command="dmchannelsummary")
+        aura_embed = discord.Embed(title="dmserversummary")
+        attach_author_meta(aura_embed, service_name="aura", canonical_top_level_command="dmserversummary")
+        service, _ = _build_author_service()
+        await service.set_service_thumbnail("triggers", "https://example.com/triggers.png")
+        await service.set_service_thumbnail("dmchannelsummary", "https://example.com/dmchannelsummary.png")
+        await service.set_service_thumbnail("dmserversummary", "https://example.com/dmserversummary.png")
+
+        await service.apply(barcello_embed, default_service_name="barcello")
+        await service.apply(riassunto_embed, default_service_name="riassunto")
+        await service.apply(aura_embed, default_service_name="aura")
+
+        assert barcello_embed.author.icon_url == "https://example.com/triggers.png"
+        assert riassunto_embed.author.icon_url == "https://example.com/dmchannelsummary.png"
+        assert aura_embed.author.icon_url == "https://example.com/dmserversummary.png"
+
+    asyncio.run(_run())
+
+
+def test_author_template_uses_global_fallback_when_service_and_canonical_missing() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="fallback")
+        attach_author_meta(embed, service_name="unknown_service", canonical_top_level_command="unknown_alias")
+        service, _ = _build_author_service()
+        await service.set_global_thumbnail("https://example.com/global.png")
+        await service.set_global_url("https://example.com/global")
+
+        await service.apply(embed, default_service_name="unknown_service")
+
+        assert embed.author.icon_url == "https://example.com/global.png"
+        assert embed.author.url == "https://example.com/global"
+
+    asyncio.run(_run())
+
+
+def test_author_candidate_service_keys_deduplicate_values() -> None:
+    candidates = resolve_candidate_service_keys(
+        service_name="audio_notes",
+        canonical_top_level_command="audio",
+    )
+
+    assert candidates == ("audio_notes", "audio", "audio_notes_transcribe", "audio_transcribe")
+
+
+def test_render_author_name_maps_trigger_aliases_to_triggers_public_family() -> None:
+    assert render_author_name(service_name="barcello") == "servizio TRIGGERS"
