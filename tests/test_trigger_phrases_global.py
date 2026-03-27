@@ -1,4 +1,5 @@
 import asyncio
+import re
 import sys
 import types
 from datetime import datetime, timezone
@@ -188,9 +189,7 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
             await service._handle_phrases(envelope)
 
             embed = channel.target.replies[0]
-            assert "HA DETTO UNA FRASE ICONICA!" in embed.title
-            assert "\"U1\"" in embed.title
-            assert embed.title.startswith("💬 __**") and embed.title.endswith("**__")
+            assert embed.title == "💬 __**FRASE ICONICA**__"
             assert getattr(embed.footer, "text", None) in ("", None)
             assert embed.color.value == 0xFFAA00
 
@@ -226,7 +225,7 @@ def test_phrase_embed_title_uses_clean_display_name_in_quotes() -> None:
             message_author = SimpleNamespace(display_name="😂 Lorenzo 😂", name="Lorenzo")
             embed = await _run_phrase_once(db, message_author=message_author)
 
-            assert '"LORENZO" HA DETTO UNA FRASE ICONICA!' in embed.title
+            assert embed.title == "💬 __**FRASE ICONICA**__"
             assert "😂" not in embed.title
             assert embed.title.startswith("💬 __**") and embed.title.endswith("**__")
             await db.close()
@@ -252,7 +251,66 @@ def test_embed_description_uses_default_template_not_raw_phrase() -> None:
                 db,
                 trigger_state={"templates": {"DEFAULT": "template default {count_user}", "FIRST": "template first"}},
             )
-            assert embed2.description == "*template default 2*"
+            assert embed2.description == "*template default **2***"
+            await db.close()
+        finally:
+            triggers_module.discord.TextChannel = original_text_channel
+
+    asyncio.run(_run())
+
+
+def test_phrase_description_bolds_dynamic_count_and_last_seen_placeholders() -> None:
+    async def _run() -> None:
+        original_text_channel = triggers_module.discord.TextChannel
+        triggers_module.discord.TextChannel = _FakeTextChannel
+        try:
+            db = DatabaseService(":memory:")
+            await db.connect()
+            await db.initialize_schema()
+            await db.set_trigger_enabled("g1", "101", "frasi", True)
+            await db.add_trigger_phrase("g1", "101", "ciao", "CONTAINS", False, "#FFAA00")
+            await db.set_trigger_state_global(
+                "g1",
+                "frasi",
+                {"templates": {"DEFAULT": "È la {count_user}ª volta. Ultima: {last_seen_human} fa.", "FIRST": "prima"}},
+            )
+
+            channel = _FakeTextChannel()
+            service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
+            service._bot = _FakeBot(channel)
+
+            first = EventEnvelope(
+                event_id="evt-1",
+                event_type="message.create",
+                platform="discord",
+                ts="2026-01-01T10:00:00+00:00",
+                guild_id="g1",
+                channel_id="101",
+                thread_id=None,
+                author_id="u1",
+                content="ciao a tutti",
+                meta={"message_id": "1"},
+            )
+            second = EventEnvelope(
+                event_id="evt-2",
+                event_type="message.create",
+                platform="discord",
+                ts="2026-01-01T10:22:00+00:00",
+                guild_id="g1",
+                channel_id="101",
+                thread_id=None,
+                author_id="u1",
+                content="ciao di nuovo",
+                meta={"message_id": "2"},
+            )
+
+            await service._handle_phrases(first)
+            await service._handle_phrases(second)
+
+            embed = channel.target.replies[-1]
+            assert embed.description.startswith("*") and embed.description.endswith("*")
+            assert "**2**ª" in embed.description
+            assert re.search(r"\*\*\d+ minuti\*\*", str(embed.description or ""))
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
@@ -473,7 +531,7 @@ def test_phrase_cooldown_blocks_second_hit_and_does_not_consume_first() -> None:
 
             assert len(channel.target.replies) == 2
             assert channel.target.replies[0].description == "*first*"
-            assert channel.target.replies[1].description == "*default 2*"
+            assert channel.target.replies[1].description == "*default **2***"
 
             phrase_row = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
             assert phrase_row is not None
@@ -768,8 +826,8 @@ def test_phrase_global_milestone_priority_and_exact_threshold_trigger() -> None:
                 await service._handle_phrases(envelope)
 
             assert channel.target.replies[0].description == "*first*"
-            assert channel.target.replies[4].description == "*milestone 5 4->5*"
-            assert channel.target.replies[5].description == "*default 6*"
+            assert channel.target.replies[4].description == "*milestone 5 **4**->**5***"
+            assert channel.target.replies[5].description == "*default **6***"
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel

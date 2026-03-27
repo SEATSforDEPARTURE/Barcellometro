@@ -174,8 +174,8 @@ def test_run_barcello_trigger_now_force_publish_sends_even_without_transition() 
     assert out["notified"] is True
     assert len(channel.sent) == 1
     embed = channel.sent[0]
-    assert "AGGIORNAMENTO BARCELLO" not in str(embed.title or "")
-    assert "L'ALLERTA BARCELLO" in str(embed.title or "")
+    assert str(embed.title or "") == "🫛 __**AGGIORNAMENTO BARCELLO**__"
+    assert "L'ALLERTA BARCELLO PASSA" not in str(embed.title or "")
     assert str(embed.description or "").startswith("*") and str(embed.description or "").endswith("*")
     field_names = [str(field.name or "") for field in embed.fields]
     assert not any("AGGIORNAMENTO" in name for name in field_names)
