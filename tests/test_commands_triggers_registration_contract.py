@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import discord
@@ -10,6 +11,8 @@ class _FakeTree:
     def __init__(self) -> None:
         self._commands: list[discord.app_commands.Command | discord.app_commands.Group] = []
         self._error_handler = None
+        self._global_remote_commands = []
+        self._guild_remote_commands = []
 
     def add_command(self, command, *, guild=None) -> None:  # noqa: ANN001
         self._commands.append(command)
@@ -20,6 +23,11 @@ class _FakeTree:
     async def sync(self, *, guild=None):  # noqa: ANN001
         return list(self._commands)
 
+    async def fetch_commands(self, *, guild=None):  # noqa: ANN001
+        if guild is None:
+            return list(self._global_remote_commands)
+        return list(self._guild_remote_commands)
+
     def error(self, handler):
         self._error_handler = handler
         return handler
@@ -29,9 +37,22 @@ class _FakeBot:
     def __init__(self) -> None:
         self.tree = _FakeTree()
         self.listeners: list[tuple[str, object]] = []
+        self.application_id = 999
+        self.http = SimpleNamespace(
+            delete_global_command=self._delete_global_command,
+            delete_guild_command=self._delete_guild_command,
+        )
+        self.deleted_global_ids: list[int] = []
+        self.deleted_guild_ids: list[tuple[int, int]] = []
 
     def add_listener(self, callback, name: str) -> None:  # noqa: ANN001
         self.listeners.append((name, callback))
+
+    async def _delete_global_command(self, application_id: int, command_id: int) -> None:
+        self.deleted_global_ids.append(command_id)
+
+    async def _delete_guild_command(self, application_id: int, guild_id: int, command_id: int) -> None:
+        self.deleted_guild_ids.append((guild_id, command_id))
 
 
 def _stub_register_barcello(
@@ -143,3 +164,38 @@ def test_setup_fails_fast_when_triggers_barcello_run_contract_is_broken(import_f
 
     with pytest.raises(RuntimeError, match="missing /triggers barcello commands: run"):
         commands_module.setup(registry=SimpleNamespace())
+
+
+def test_remove_legacy_summary_commands_removes_only_banned_roots(import_fresh) -> None:
+    commands_module = import_fresh("app.plugins.commands")
+    bot = _FakeBot()
+    guild = discord.Object(id=123)
+
+    bot.tree._global_remote_commands = [
+        SimpleNamespace(name="dmsummary", id=10),
+        SimpleNamespace(name="triggers", id=11),
+    ]
+    bot.tree._guild_remote_commands = [
+        SimpleNamespace(name="activitysummary", id=20),
+        SimpleNamespace(name="dmchannelsummary", id=21),
+    ]
+
+    asyncio.run(commands_module._remove_legacy_summary_commands(bot=bot, guild_obj=guild))
+
+    assert bot.deleted_global_ids == [10]
+    assert bot.deleted_guild_ids == [(123, 20)]
+
+
+def test_remove_legacy_summary_commands_is_idempotent_when_no_legacy(import_fresh) -> None:
+    commands_module = import_fresh("app.plugins.commands")
+    bot = _FakeBot()
+    guild = discord.Object(id=123)
+
+    bot.tree._global_remote_commands = [SimpleNamespace(name="dmchannelsummary", id=100)]
+    bot.tree._guild_remote_commands = [SimpleNamespace(name="dmserversummary", id=200)]
+
+    asyncio.run(commands_module._remove_legacy_summary_commands(bot=bot, guild_obj=guild))
+    asyncio.run(commands_module._remove_legacy_summary_commands(bot=bot, guild_obj=guild))
+
+    assert bot.deleted_global_ids == []
+    assert bot.deleted_guild_ids == []
