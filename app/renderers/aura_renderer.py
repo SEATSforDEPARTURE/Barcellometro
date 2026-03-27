@@ -582,7 +582,7 @@ def _compose_channel_aura_embed(
     if footer_text:
         logger.debug("aura_footer_note_delegated_to_central_pipeline=%s", footer_text)
     attach_footer_meta(embed, service_name="aura", used_local_processing=True)
-    attach_author_meta(embed, service_name="aura", canonical_top_level_command="aurasummary")
+    attach_author_meta(embed, service_name="aura", canonical_top_level_command="dmserversummary")
     attach_embed_images_meta(embed, service_name="aura")
     return embed
 
@@ -661,7 +661,7 @@ def build_aura_embeds(
         inline=False,
     )
     attach_footer_meta(main, service_name="aura", used_local_processing=True)
-    attach_author_meta(main, service_name="aura", canonical_top_level_command="aurasummary")
+    attach_author_meta(main, service_name="aura", canonical_top_level_command="dmserversummary")
     attach_embed_images_meta(main, service_name="aura")
 
     details_sections: list[tuple[str, str]] = []
@@ -713,12 +713,12 @@ def build_aura_embeds(
             for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):
                 embed.add_field(name=_standard_field(name if part_idx == 0 else f"{name} (cont.)"), value=piece, inline=False)
         attach_footer_meta(embed, service_name="aura", used_local_processing=True)
-        attach_author_meta(embed, service_name="aura", canonical_top_level_command="aurasummary")
+        attach_author_meta(embed, service_name="aura", canonical_top_level_command="dmserversummary")
         attach_embed_images_meta(embed, service_name="aura")
         details.append(embed)
 
     embeds = [main, *details]
-    attach_author_meta_to_all(embeds, service_name="aura", canonical_top_level_command="aurasummary")
+    attach_author_meta_to_all(embeds, service_name="aura", canonical_top_level_command="dmserversummary")
     attach_embed_images_meta_to_all(embeds, service_name="aura")
     sanitized = _ensure_embed_limits(embeds, max_chars=MAX_EMBED_CHARS)
     return [emb for emb in sanitized if _estimate_embed_size(emb) <= MAX_EMBED_CHARS]

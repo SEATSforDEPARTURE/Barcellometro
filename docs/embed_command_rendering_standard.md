@@ -346,8 +346,8 @@ Alias canonici principali (risolti centralmente in `app/services/author.py`):
 - `ask` / `domanda` → `qna`
 - `resocontocanale` → `channelsummary`
 - `resocontoserver` → `serversummary`
-- `riassunto` → `dmsummary`
-- `aura` → `aurasummary`
+- `riassunto` → `dmchannelsummary`
+- `aura` → `dmserversummary`
 
 Il namespace `/embed author` replica il modello amministrativo del footer con i comandi:
 

@@ -126,7 +126,7 @@ async def _run_channel_aura_window(
     await interaction.followup.send(
         embeds=apply_standard_report_style(
             [embed],
-            service_name="aurasummary",
+            service_name="aura",
             canonical_top_level_command="channelsummary",
             cover_title=embed.title or "📓 RESOCONTO CANALE",
         )
@@ -240,7 +240,7 @@ async def _run_server_aura_window(
         ),
         inline=False,
     )
-    attach_footer_meta(embed, service_name="aurasummary", used_local_processing=True)
+    attach_footer_meta(embed, service_name="aura", used_local_processing=True)
 
     txt_lines = ["=== RESOCONTO AURA MOD ===", f"guild_id: {guild_id}", f"period_start: {start_ts}", f"period_end: {end_ts}", "", "=== BY REASON ==="]
     txt_lines.extend([f"{item['reason_code']} => {item['total']:+d} ({item['count']})" for item in report["by_reason"]])
@@ -248,7 +248,7 @@ async def _run_server_aura_window(
     await interaction.followup.send(
         embeds=apply_standard_report_style(
             [embed],
-            service_name="aurasummary",
+            service_name="aura",
             canonical_top_level_command="serversummary",
             cover_title=embed.title or "📓 RESOCONTO SERVER",
         ),
