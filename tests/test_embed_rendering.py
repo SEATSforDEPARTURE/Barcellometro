@@ -59,3 +59,39 @@ def test_finalize_embeds_rendering_supports_from_dict_payload_embeds() -> None:
         assert "Dati elaborati con gpt-4o-mini" in (rendered[0].footer.text or "")
 
     asyncio.run(_run())
+
+
+def test_finalize_embeds_rendering_from_dict_respects_minimal_author_and_footer_contract() -> None:
+    async def _run() -> None:
+        source = discord.Embed(title="Persisted minimal")
+        attach_author_meta(
+            source,
+            service_name="attivita",
+            canonical_top_level_command="dmserversummary",
+            minimal=True,
+        )
+        attach_footer_meta(source, service_name="attivita", contributors=["gpt-4o-mini"], used_local_processing=False)
+
+        reloaded = discord.Embed.from_dict(source.to_dict())
+        attach_author_meta(
+            reloaded,
+            service_name="attivita",
+            canonical_top_level_command="dmserversummary",
+            minimal=True,
+        )
+        attach_footer_meta(reloaded, service_name="attivita", contributors=["gpt-4o-mini"], used_local_processing=False)
+
+        author = AuthorService(_FakeDatabase())
+        footer = FooterService(_FakeDatabase())
+
+        rendered = await finalize_embeds_rendering(
+            [reloaded],
+            footer_service=footer,
+            author_service=author,
+            default_service_name="attivita",
+        )
+
+        assert rendered[0].author.name == "servizio DM SERVER SUMMARY"
+        assert "Dati elaborati con gpt-4o-mini" in (rendered[0].footer.text or "")
+
+    asyncio.run(_run())

@@ -204,3 +204,29 @@ def test_alias_resolution() -> None:
         assert "DM CHANNEL SUMMARY" in str(embed.author.name)
 
     asyncio.run(_run())
+
+
+def test_author_sensitive_sources_do_not_reference_legacy_summary_labels_or_roots() -> None:
+    banned_tokens = (
+        "DM SUMMARY",
+        "dmsummary",
+        "AURA SUMMARY",
+        "aurasummary",
+        "ACTIVITY SUMMARY",
+        "activitysummary",
+        "BARCELLO SUMMARY",
+        "barcellosummary",
+    )
+    sensitive_files = (
+        pathlib.Path("app/services/author.py"),
+        pathlib.Path("app/shared/discord/author_pipeline.py"),
+        pathlib.Path("app/shared/discord/embed_rendering.py"),
+        pathlib.Path("app/shared/discord/delivery.py"),
+        pathlib.Path("tests/test_author_service.py"),
+        pathlib.Path("tests/test_embed_rendering.py"),
+    )
+
+    for path in sensitive_files:
+        source = path.read_text(encoding="utf-8")
+        for token in banned_tokens:
+            assert token not in source, f"Legacy token {token!r} found in {path}"
