@@ -32,7 +32,6 @@ from app.services.database import DatabaseService
 from app.services.ingest import EventEnvelope
 from app.services.triggers_service import TriggerEngineService
 import app.services.triggers_service as triggers_module
-from app.shared.discord.embed_body import format_standard_title
 
 
 class _FakeRepliedMessage:
@@ -189,7 +188,9 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
             await service._handle_phrases(envelope)
 
             embed = channel.target.replies[0]
-            assert embed.title == format_standard_title("FRASI ICONICHE", emoji="💬")
+            assert "HA DETTO UNA FRASE ICONICA!" in embed.title
+            assert "\"U1\"" in embed.title
+            assert embed.title.startswith("💬 __**") and embed.title.endswith("**__")
             assert getattr(embed.footer, "text", None) in ("", None)
             assert embed.color.value == 0xFFAA00
 
@@ -210,6 +211,29 @@ def test_phrases_are_guild_wide_with_dedup_and_embed() -> None:
 
     asyncio.run(_run())
 
+
+
+
+def test_phrase_embed_title_uses_clean_display_name_in_quotes() -> None:
+    async def _run() -> None:
+        original_text_channel = triggers_module.discord.TextChannel
+        triggers_module.discord.TextChannel = _FakeTextChannel
+        try:
+            db = DatabaseService(":memory:")
+            await db.connect()
+            await db.initialize_schema()
+
+            message_author = SimpleNamespace(display_name="😂 Lorenzo 😂", name="Lorenzo")
+            embed = await _run_phrase_once(db, message_author=message_author)
+
+            assert '"LORENZO" HA DETTO UNA FRASE ICONICA!' in embed.title
+            assert "😂" not in embed.title
+            assert embed.title.startswith("💬 __**") and embed.title.endswith("**__")
+            await db.close()
+        finally:
+            triggers_module.discord.TextChannel = original_text_channel
+
+    asyncio.run(_run())
 
 def test_embed_description_uses_default_template_not_raw_phrase() -> None:
     async def _run() -> None:

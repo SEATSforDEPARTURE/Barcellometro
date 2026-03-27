@@ -32,6 +32,7 @@ from app.services.qna_sessions_repo import QnaSessionsRepo
 from app.services.qna_query_engine import QnaAnswerResult, QnaQueryEngine
 from app.shared.safety.pii import contains_pii
 from app.shared.discord.embed_body import (
+    build_user_event_title,
     format_standard_description,
     format_standard_field_name,
     format_standard_title,
@@ -1298,7 +1299,7 @@ class TriggerEngineService:
 
         color = self._discord_color_from_phrase(phrase)
         embed = discord.Embed(
-            title=format_standard_title("FRASI ICONICHE", emoji="💬"),
+            title=build_user_event_title(event_text="HA DETTO UNA FRASE ICONICA!", display_name=author_name, emoji="💬"),
             description=format_standard_description(rendered_text),
             color=color,
         )

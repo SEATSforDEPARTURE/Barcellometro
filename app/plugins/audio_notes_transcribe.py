@@ -20,12 +20,12 @@ from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
 from app.shared.discord.embed_rendering import finalize_embeds_rendering
 from app.shared.discord.embed_body import (
+    build_user_event_title,
     format_standard_description,
     format_standard_field_name,
     format_standard_section_value,
-    format_standard_title,
 )
-from app.shared.discord.user_display import format_user_display_name
+from app.shared.discord.user_display import clean_embed_display_name, format_user_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +59,14 @@ def _audio_loading_description() -> str:
 
 
 def _audio_final_description(*, user_ref: str, ordinal_label: str | None) -> str:
+    safe_user_ref = clean_embed_display_name(user_ref)
     if ordinal_label:
-        return f"Leggiamo cosa ci dice **{user_ref}** in quest'audio... È il **{ordinal_label}** di oggi."
-    return f"Leggiamo cosa ci dice **{user_ref}** in quest'audio..."
+        return f"Leggiamo cosa ci dice **{safe_user_ref}** in quest'audio... È il **{ordinal_label}** di oggi."
+    return f"Leggiamo cosa ci dice **{safe_user_ref}** in quest'audio..."
+
+
+def _build_audio_note_title(user_display_name: str) -> str:
+    return build_user_event_title(event_text="CI MANDA UN AUDIO!", display_name=user_display_name, emoji="🗣️")
 
 
 def _now_iso() -> str:
@@ -116,7 +121,7 @@ def _build_audio_note_embed(
     normalized_description = (description or "").strip()
     description_already_formatted = normalized_description.startswith("*") and normalized_description.endswith("*")
     embed = discord.Embed(
-        title=format_standard_title(f"NOTA AUDIO DI {user_display_name}", emoji="🗣️"),
+        title=_build_audio_note_title(user_display_name),
         description=format_standard_description(normalized_description, italic=not description_already_formatted),
         color=_AUDIO_NOTE_COLOR,
     )
