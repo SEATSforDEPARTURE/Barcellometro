@@ -24,6 +24,7 @@ def test_embed_footer_registers_under_top_level_embed_only(embed_module) -> None
     assert {group.name for group in bundle.embed_group.commands if isinstance(group, discord.app_commands.Group)} == {
         'footer',
         'author',
+        'description',
         'images',
     }
     assert {command.name for command in bundle.footer_group.commands} == {

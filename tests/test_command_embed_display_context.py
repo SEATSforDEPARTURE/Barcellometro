@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import discord
 
 from app.services.footer import FooterService, attach_footer_meta, get_footer_meta
+from app.services.description_template_service import DescriptionTemplateService
 from app.shared.discord import command_embeds as command_embeds_module
 from app.shared.discord.command_embeds import (
     build_command_embed,
@@ -141,6 +142,36 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
     assert embed.title == "❓ __**BONUS_SHOW MARIO ROSSI**__"
     assert embed.description == "*Command execution summary.*\n\n"
     assert "<@123>" not in (embed.description or "")
+
+
+def test_build_command_embed_uses_description_template_service() -> None:
+    class _DbStub:
+        def __init__(self) -> None:
+            self.values: dict[str, str] = {}
+
+        async def get_setting(self, key: str):
+            return self.values.get(key)
+
+        async def set_setting(self, key: str, value: str) -> None:
+            self.values[key] = value
+
+        async def delete_setting(self, key: str) -> None:
+            self.values.pop(key, None)
+
+    async def _run() -> discord.Embed:
+        template_service = DescriptionTemplateService(_DbStub())
+        await template_service.set_template("qna", "Template per **{user_name}**")
+        return await build_command_embed(
+            top_level="admin",
+            subcommand_path="qna limits_show",
+            visual_top_level="qna",
+            footer_service=None,
+            interaction=SimpleNamespace(user=SimpleNamespace(display_name="Mario", name="mario")),
+            description_template_service=template_service,
+        )
+
+    embed = asyncio.run(_run())
+    assert embed.description == "*Template per **Mario***\n\n"
 
 
 def test_build_command_embed_admin_standard_footer_omits_invented_phrase() -> None:

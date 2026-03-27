@@ -15,6 +15,7 @@ from app.services.content_summary_service import SummaryService
 from app.services.author import AuthorService
 from app.services.footer import FooterService
 from app.services.embed_images import EmbedImagesService
+from app.services.description_template_service import DescriptionTemplateService
 
 
 @dataclass
@@ -47,6 +48,7 @@ class CommandContext:
     footer: Optional[FooterService] = None
     author: Optional[AuthorService] = None
     embed_images: Optional[EmbedImagesService] = None
+    description_template: Optional[DescriptionTemplateService] = None
     member_flow_notifications: Optional[Any] = None
     greetings_backfill: Optional[Any] = None
 
@@ -85,6 +87,7 @@ class CommandContext:
         footer = registry.get("footer") if registry.has("footer") else None
         author = registry.get("author") if registry.has("author") else None
         embed_images = registry.get("embed_images") if registry.has("embed_images") else None
+        description_template = registry.get("description_template") if registry.has("description_template") else None
         member_flow_notifications = registry.get("member_flow_notifications") if registry.has("member_flow_notifications") else None
         greetings_backfill = registry.get("greetings_backfill") if registry.has("greetings_backfill") else None
         config = registry.get("config")
@@ -117,6 +120,7 @@ class CommandContext:
             footer=footer,
             author=author,
             embed_images=embed_images,
+            description_template=description_template,
             member_flow_notifications=member_flow_notifications,
             greetings_backfill=greetings_backfill,
             timezone=timezone,

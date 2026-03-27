@@ -234,6 +234,42 @@ Regole obbligatorie:
 - le thumbnail di footer e author sono indipendenti e non devono essere derivate una dall'altra;
 - i renderer standardizzati devono passare metadata sufficienti a entrambe le pipeline e lasciare la decisione finale ai servizi centrali del dominio.
 
+## Description Templates
+
+Il dominio `/embed description` abilita template dinamici della `description` per servizio, con fallback automatico al comportamento attuale.
+
+Comandi disponibili:
+
+- `/embed description template_service_set service:<nome> template:<testo>`
+- `/embed description template_service_show service:<nome>`
+- `/embed description template_service_reset service:<nome>`
+
+Storage:
+
+- chiave centralizzata: `description_template:{service}`.
+
+Fallback:
+
+- se il template non esiste, il renderer usa la descrizione fallback esistente del servizio (nessuna regressione locale).
+
+Placeholder supportati (set iniziale):
+
+- generici: `{user_name}`, `{user_bold}`, `{service_name}`, `{ordinal_today}`, `{ordinal_today_bold}`;
+- audio: `{audio_intro}`, `{is_first_today}`, `{count_today}`.
+
+Regole obbligatorie:
+
+- la description finale resta sempre in corsivo;
+- nessuna emoji iniziale;
+- no mention utente (`<@id>`) nei template renderizzati;
+- i dati importanti restano esprimibili in **bold** nel template;
+- placeholder non validi generano errore in `template_service_set`;
+- placeholder mancanti nel contesto runtime degradano a fallback sicuro (`—`) senza eccezioni.
+
+Esempio valido:
+
+- `*Leggiamo cosa ci dice **{user_name}** in quest'audio... È il **{ordinal_today}** di oggi.*`
+
 ## Footer centralizzato
 
 Non esiste più un output finale `minimal`: tutti gli embed standardizzati devono passare dalla stessa pipeline footer comune e includere, quando disponibili, tutti i segmenti nell’ordine:
