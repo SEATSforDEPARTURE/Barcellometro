@@ -59,12 +59,12 @@ def test_author_on_off_and_status_commands(embed_module, monkeypatch: pytest.Mon
         status_kwargs = send_standard.await_args.kwargs
         assert status_kwargs['subcommand_path'] == 'author status'
         assert ('enabled', 'on') in status_kwargs['lines']
-        assert ('supported services', 10) in status_kwargs['lines']
+        assert ('supported services', 15) in status_kwargs['lines']
         assert ('services with custom template', 1) in status_kwargs['lines']
-        assert ('services using default', 9) in status_kwargs['lines']
+        assert ('services using default', 14) in status_kwargs['lines']
         assert ('runtime rule', 'ON = runtime uses service custom author when configured; otherwise standard default') in status_kwargs['lines']
         custom_section = next(section for section in status_kwargs['sections'] if section.title == 'Custom Templates')
-        assert ('riassunto', 'phrase, url') in custom_section.lines
+        assert ('dmchannelsummary', 'phrase, url') in custom_section.lines
         default_section = next(section for section in status_kwargs['sections'] if section.title == 'Default Services')
         assert 'audio' in default_section.lines[0][1]
         assert 'triggers' in default_section.lines[0][1]
@@ -181,7 +181,7 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
         send_standard.reset_mock()
         await set_command.callback(InteractionStub(set_command), 'riassunto', thumbnail='https://example.com/updated.png')
         partial_kwargs = send_standard.await_args.kwargs
-        assert partial_kwargs['subtitle_args'] == ['riassunto']
+        assert partial_kwargs['subtitle_args'] == ['dmchannelsummary']
         assert section_payload(partial_kwargs) == (
             'Template',
             [
@@ -215,8 +215,8 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
         reset_command = find_command(bundle.author_group, 'template_service_reset')
         await reset_command.callback(InteractionStub(reset_command), 'riassunto')
         assert send_standard.await_args.kwargs['lines'] == [('result', 'reset')]
-        assert (await bundle.ctx.author.get_service_phrases()).get('riassunto') is None
-        assert (await bundle.ctx.author.get_service_thumbnails()).get('riassunto') is None
+        assert (await bundle.ctx.author.get_service_phrases()).get('dmchannelsummary') is None
+        assert (await bundle.ctx.author.get_service_thumbnails()).get('dmchannelsummary') is None
 
         send_standard.reset_mock()
         await show_command.callback(InteractionStub(show_command), 'riassunto')
@@ -254,9 +254,9 @@ def test_author_template_set_rejects_invalid_thumbnail(embed_module, monkeypatch
         send_standard.reset_mock()
         service_command = find_command(bundle.author_group, 'template_service_set')
         await service_command.callback(InteractionStub(service_command), 'riassunto', thumbnail='bad-value')
-        assert send_standard.await_args.kwargs['subtitle_args'] == ['riassunto']
+        assert send_standard.await_args.kwargs['subtitle_args'] == ['dmchannelsummary']
         assert send_standard.await_args.kwargs['kind'] == 'error'
-        assert (await bundle.ctx.author.get_service_thumbnails()).get('riassunto') is None
+        assert (await bundle.ctx.author.get_service_thumbnails()).get('dmchannelsummary') is None
 
     asyncio.run(_run())
 
@@ -279,7 +279,7 @@ def test_author_template_set_without_changes_returns_warning(embed_module, monke
         service_command = find_command(bundle.author_group, 'template_service_set')
         await service_command.callback(InteractionStub(service_command), 'riassunto')
         service_kwargs = send_standard.await_args.kwargs
-        assert service_kwargs['subtitle_args'] == ['riassunto']
+        assert service_kwargs['subtitle_args'] == ['dmchannelsummary']
         assert service_kwargs['kind'] == 'warning'
         assert service_kwargs['lines'] == [('reason', 'No changes provided')]
 
