@@ -228,6 +228,29 @@ def test_footer_template_set_without_changes_returns_warning_and_next_step(embed
     asyncio.run(_run())
 
 
+def test_footer_template_service_resolves_legacy_aliases(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
+        bundle = register_embed_tree(embed_module)
+        bundle.database.settings["footer.service_phrase.audio_notes"] = "Legacy audio footer"
+
+        show_command = find_command(bundle.footer_group, "template_service_show")
+        await show_command.callback(InteractionStub(show_command), "audio")
+        assert section_payload(send_standard.await_args.kwargs) == (
+            "Template",
+            [("Phrase", "Legacy audio footer"), ("Thumbnail", "(not set)")],
+        )
+
+        send_standard.reset_mock()
+        reset_command = find_command(bundle.footer_group, "template_service_reset")
+        await reset_command.callback(InteractionStub(reset_command), "audio")
+        assert "footer.service_phrase.audio_notes" not in bundle.database.settings
+
+    asyncio.run(_run())
+
+
 def test_footer_status_command_uses_embed_namespace_and_interactive_view(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, 'check_permission', AsyncMock(return_value=True))

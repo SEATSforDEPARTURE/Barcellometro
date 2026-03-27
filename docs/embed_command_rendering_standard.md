@@ -244,7 +244,14 @@ Comandi disponibili:
 - `/embed description template_service_show service:<nome>`
 - `/embed description template_service_reset service:<nome>`
 
-Per tutti i comandi `/embed ... template_service_*` dei domini `author`, `footer`, `images` e `description`, il parametro `service` usa autocomplete dinamico centralizzato: le choice sono ricavate dalla source of truth dei servizi embed-capable (inventory footer/author, override images, template description persistiti), deduplicate, ordinate stabilmente e filtrate in base all'input utente.
+Per tutti i comandi `/embed ... template_service_*` dei domini `author`, `footer`, `images` e `description`, il parametro `service` usa una source of truth **pubblica** centralizzata: `audio`, `aura`, `riassunto`, `resoconto`, `attivita`, `barcello`, `campagne`, `qna`, `status`.  
+I nomi interni/tecnici (`audio_notes`, `campaign_content_formatter`, `detail_embeds`, ecc.) non devono apparire in autocomplete né essere usati come chiavi UX.
+
+Compatibilità legacy:
+
+- input storici/tecnici possono essere risolti internamente verso la public key canonica (es. `audio_notes` → `audio`, `campagne_prompt` → `campagne`);
+- i nuovi salvataggi usano sempre la chiave pubblica canonica;
+- in lettura/reset si mantiene la compatibilità con alias legacy già persistiti.
 
 Storage:
 

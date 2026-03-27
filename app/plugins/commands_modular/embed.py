@@ -13,7 +13,11 @@ from app.shared.discord.footer_status_renderer import build_footer_status_embeds
 from app.services.embed_images import InvalidEmbedImageUrlError
 from app.services.author import InvalidAuthorThumbnailError, render_author_name
 from app.services.description_template_service import InvalidDescriptionTemplateError
-from app.services.embed_template_service_catalog import build_embed_template_service_autocomplete_choices
+from app.services.embed_public_service_keys import list_embed_service_aliases
+from app.services.embed_template_service_catalog import (
+    build_embed_template_service_autocomplete_choices,
+    resolve_embed_template_public_service,
+)
 from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
 
 
@@ -72,6 +76,18 @@ def _format_value(value: str | None) -> str:
 
 def _format_override_value(value: str | None, *, missing: str) -> str:
     return value if value else missing
+
+
+def _normalize_template_service_key(value: str) -> str | None:
+    return resolve_embed_template_public_service(_clean_opt(value))
+
+
+def _resolve_public_service_value(values: dict[str, str], public_service_key: str) -> str | None:
+    for alias in list_embed_service_aliases(public_service_key):
+        found = values.get(alias)
+        if found is not None:
+            return found
+    return None
 
 
 def _description_preview_context(*, service_name: str, user_name: str = "Mario") -> dict[str, object]:
@@ -314,7 +330,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 kind="error",
             )
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(
                 interaction,
@@ -349,8 +365,8 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                     kind="error",
                 )
                 return
-        service_thumbnail = (await ctx.footer.get_service_thumbnails()).get(service_name)
-        service_phrase = (await ctx.footer.get_service_phrases()).get(service_name)
+        service_thumbnail = _resolve_public_service_value(await ctx.footer.get_service_thumbnails(), service_name)
+        service_phrase = _resolve_public_service_value(await ctx.footer.get_service_phrases(), service_name)
         await _send_embed_response(
             interaction,
             ctx,
@@ -379,7 +395,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 kind="error",
             )
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(
                 interaction,
@@ -389,8 +405,8 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 kind="error",
             )
             return
-        phrase = (await ctx.footer.get_service_phrases()).get(service_name)
-        thumbnail_value = (await ctx.footer.get_service_thumbnails()).get(service_name)
+        phrase = _resolve_public_service_value(await ctx.footer.get_service_phrases(), service_name)
+        thumbnail_value = _resolve_public_service_value(await ctx.footer.get_service_thumbnails(), service_name)
         await _send_embed_response(
             interaction,
             ctx,
@@ -417,7 +433,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 kind="error",
             )
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(
                 interaction,
@@ -427,8 +443,9 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 kind="error",
             )
             return
-        await ctx.footer.set_service_phrase(service_name, None)
-        await ctx.footer.set_service_thumbnail(service_name, None)
+        for alias in list_embed_service_aliases(service_name):
+            await ctx.footer.set_service_phrase(alias, None)
+            await ctx.footer.set_service_thumbnail(alias, None)
         await _send_embed_response(
             interaction,
             ctx,
@@ -607,7 +624,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -624,9 +641,9 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 return
         if url is not None:
             await _author_service(ctx).set_service_url(service_name, _clean_opt(url))
-        service_thumbnail = (await _author_service(ctx).get_service_thumbnails()).get(service_name)
-        service_phrase = (await _author_service(ctx).get_service_phrases()).get(service_name)
-        service_url = (await _author_service(ctx).get_service_urls()).get(service_name)
+        service_thumbnail = _resolve_public_service_value(await _author_service(ctx).get_service_thumbnails(), service_name)
+        service_phrase = _resolve_public_service_value(await _author_service(ctx).get_service_phrases(), service_name)
+        service_url = _resolve_public_service_value(await _author_service(ctx).get_service_urls(), service_name)
         await _send_embed_response(
             interaction,
             ctx,
@@ -651,13 +668,13 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_show", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
             return
-        phrase = (await _author_service(ctx).get_service_phrases()).get(service_name)
-        thumbnail_value = (await _author_service(ctx).get_service_thumbnails()).get(service_name)
-        url_value = (await _author_service(ctx).get_service_urls()).get(service_name)
+        phrase = _resolve_public_service_value(await _author_service(ctx).get_service_phrases(), service_name)
+        thumbnail_value = _resolve_public_service_value(await _author_service(ctx).get_service_thumbnails(), service_name)
+        url_value = _resolve_public_service_value(await _author_service(ctx).get_service_urls(), service_name)
         global_phrase = await _author_service(ctx).get_global_phrase()
         version = await _author_service(ctx).get_version()
         await _send_embed_response(
@@ -682,13 +699,14 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
             return
-        await _author_service(ctx).set_service_phrase(service_name, None)
-        await _author_service(ctx).set_service_thumbnail(service_name, None)
-        await _author_service(ctx).set_service_url(service_name, None)
+        for alias in list_embed_service_aliases(service_name):
+            await _author_service(ctx).set_service_phrase(alias, None)
+            await _author_service(ctx).set_service_thumbnail(alias, None)
+            await _author_service(ctx).set_service_url(alias, None)
         await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", subtitle_args=[service_name], lines=[("result", "reset")], kind="success")
 
     @author_group.command(name="status", description="Show author status and effective service templates.")
@@ -722,7 +740,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "description_template", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_set", lines=[("reason", "Description template service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -762,7 +780,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "description_template", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_show", lines=[("reason", "Description template service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -792,7 +810,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "description_template", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_reset", lines=[("reason", "Description template service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -912,7 +930,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "embed_images", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", lines=[("reason", "Embed images service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -927,8 +945,8 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         except InvalidEmbedImageUrlError as exc:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", subtitle_args=[service_name], lines=[("reason", str(exc))], kind="error")
             return
-        service_image = (await ctx.embed_images.get_service_images()).get(service_name)
-        service_thumbnail = (await ctx.embed_images.get_service_thumbnails()).get(service_name)
+        service_image = _resolve_public_service_value(await ctx.embed_images.get_service_images(), service_name)
+        service_thumbnail = _resolve_public_service_value(await ctx.embed_images.get_service_thumbnails(), service_name)
         await _send_embed_response(
             interaction,
             ctx,
@@ -948,12 +966,12 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "embed_images", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_show", lines=[("reason", "Embed images service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
             return
-        service_image = (await ctx.embed_images.get_service_images()).get(service_name)
-        service_thumbnail = (await ctx.embed_images.get_service_thumbnails()).get(service_name)
+        service_image = _resolve_public_service_value(await ctx.embed_images.get_service_images(), service_name)
+        service_thumbnail = _resolve_public_service_value(await ctx.embed_images.get_service_thumbnails(), service_name)
         await _send_embed_response(
             interaction,
             ctx,
@@ -974,10 +992,11 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "embed_images", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_reset", lines=[("reason", "Embed images service is unavailable")], kind="error")
             return
-        service_name = _clean_opt(service)
+        service_name = _normalize_template_service_key(service)
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
             return
-        await ctx.embed_images.set_service_image(service_name, None)
-        await ctx.embed_images.set_service_thumbnail(service_name, None)
+        for alias in list_embed_service_aliases(service_name):
+            await ctx.embed_images.set_service_image(alias, None)
+            await ctx.embed_images.set_service_thumbnail(alias, None)
         await _send_embed_response(interaction, ctx, subcommand_path="images template_service_reset", subtitle_args=[service_name], lines=[("result", "reset")], kind="success")

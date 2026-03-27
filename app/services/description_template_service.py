@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 import discord
 
+from app.services.embed_public_service_keys import list_embed_service_aliases, resolve_public_embed_service_key
 from app.services.database import DatabaseService
 from app.shared.discord.embed_body import DISCORD_DESCRIPTION_MAX, format_standard_description
 
@@ -24,7 +25,6 @@ _GENERIC_PLACEHOLDERS: tuple[str, ...] = (
 
 _SERVICE_PLACEHOLDERS: dict[str, tuple[str, ...]] = {
     "audio": ("audio_intro", "is_first_today", "count_today"),
-    "audio_notes": ("audio_intro", "is_first_today", "count_today"),
 }
 
 
@@ -40,10 +40,10 @@ class DescriptionTemplateService:
         return f"{_DESCRIPTION_TEMPLATE_KEY_PREFIX}{self.normalize_service_name(service)}"
 
     def normalize_service_name(self, service: str) -> str:
-        cleaned = (service or "").strip().lower()
-        if not cleaned:
+        resolved = resolve_public_embed_service_key(service)
+        if resolved is None:
             raise InvalidDescriptionTemplateError("Provide a valid service name")
-        return cleaned
+        return resolved
 
     def allowed_placeholders(self, service: str) -> set[str]:
         service_name = self.normalize_service_name(service)
@@ -80,12 +80,17 @@ class DescriptionTemplateService:
 
     async def get_template(self, service: str) -> str | None:
         service_name = self.normalize_service_name(service)
-        value = await self._database.get_setting(self._key_for_service(service_name))
-        return (value or "").strip() or None
+        for alias in list_embed_service_aliases(service_name):
+            value = await self._database.get_setting(f"{_DESCRIPTION_TEMPLATE_KEY_PREFIX}{alias}")
+            cleaned = (value or "").strip()
+            if cleaned:
+                return cleaned
+        return None
 
     async def reset_template(self, service: str) -> None:
         service_name = self.normalize_service_name(service)
-        await self._database.delete_setting(self._key_for_service(service_name))
+        for alias in list_embed_service_aliases(service_name):
+            await self._database.delete_setting(f"{_DESCRIPTION_TEMPLATE_KEY_PREFIX}{alias}")
 
     def _sanitize_value(self, value: Any) -> str:
         text = "" if value is None else str(value)
