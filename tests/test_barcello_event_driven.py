@@ -203,9 +203,13 @@ def test_run_barcello_trigger_now_trend_field_is_named_trend_when_present() -> N
     trend_fields = [field for field in embed.fields if "TREND" in str(field.name or "")]
     assert len(trend_fields) == 1
     trend_value = str(trend_fields[0].value or "")
+    assert "• È la" in trend_value
     assert "**2ª volta**" in trend_value
-    assert "stato **ROSSA**" in trend_value
-    assert "Ultima: **7 minuti fa**." in trend_value
+    assert "**ROSSA**" in trend_value
+    assert "• L'ultima è stata" in trend_value
+    assert "**7 minuti**" in trend_value
+    assert "in stato" not in trend_value
+    assert "Ultima:" not in trend_value
 
 
 def test_run_barcello_trigger_now_pair_mode_uses_compute_pair() -> None:
