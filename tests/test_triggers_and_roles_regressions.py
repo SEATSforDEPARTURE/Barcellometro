@@ -197,6 +197,25 @@ def test_role_list_and_user_list_render_labels(roles_module, monkeypatch: pytest
     assert "command=admin.other" in user_lines[1][1]
 
 
+def test_commandguard_namespace_does_not_register_reset_commands(roles_module) -> None:
+    group = discord.app_commands.Group(name="commandguard", description="commandguard")
+    roles_module.register_roles(group, SimpleNamespace(database=SimpleNamespace(), footer=None), top_level="commandguard", visual_top_level="commandguard")
+
+    registered_commands = {command.name for command in group.commands}
+    assert registered_commands == {
+        "role_add",
+        "role_edit",
+        "role_remove",
+        "role_show",
+        "role_list",
+        "user_add",
+        "user_edit",
+        "user_remove",
+        "user_show",
+        "user_list",
+    }
+
+
 def test_qna_limits_set_uses_canonical_setting_key(triggers_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _check_permission(*args, **kwargs):
         return True

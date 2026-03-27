@@ -115,13 +115,11 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `commandguard` | `—` | `role_edit` | Edit a role command policy. | `app/plugins/commands_modular/roles.py:91` |
 | `commandguard` | `—` | `role_list` | List all role policies. | `app/plugins/commands_modular/roles.py:122` |
 | `commandguard` | `—` | `role_remove` | Remove a role command policy. | `app/plugins/commands_modular/roles.py:102` |
-| `commandguard` | `—` | `role_reset` | Reset all policies for a role. | `app/plugins/commands_modular/roles.py:133` |
 | `commandguard` | `—` | `role_show` | Show role policies. | `app/plugins/commands_modular/roles.py:110` |
 | `commandguard` | `—` | `user_add` | Add a user command policy. | `app/plugins/commands_modular/roles.py:141` |
 | `commandguard` | `—` | `user_edit` | Edit a user command policy. | `app/plugins/commands_modular/roles.py:152` |
 | `commandguard` | `—` | `user_list` | List all user policies. | `app/plugins/commands_modular/roles.py:183` |
 | `commandguard` | `—` | `user_remove` | Remove a user command policy. | `app/plugins/commands_modular/roles.py:163` |
-| `commandguard` | `—` | `user_reset` | Reset all policies for a user. | `app/plugins/commands_modular/roles.py:194` |
 | `commandguard` | `—` | `user_show` | Show user policies. | `app/plugins/commands_modular/roles.py:171` |
 | `database` | `backfill` | `limits_reset` | Reset backfill limits to defaults. | `app/plugins/commands_modular/admin.py:343` |
 | `database` | `backfill` | `limits_set` | Update backfill limits. | `app/plugins/commands_modular/admin.py:292` |

@@ -128,14 +128,6 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext, 
             return
         await _send_roles_response(interaction, ctx, subcommand_path="commandguard role_list", lines=[("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(_format_role_label(interaction.guild, row['role_id']), f"command={_canonical_policy_command(row['command'])} · {_policy_line(_canonical_policy_command(row['command']), row['usage_limit'], row['cooldown_seconds'])}") for row in rows])], footer_service=ctx.footer)
 
-    @commandguard_group.command(name="role_reset", description="Reset all policies for a role.")
-    @app_commands.describe(role="Target role.")
-    async def role_reset_command(interaction: discord.Interaction, role: discord.Role) -> None:
-        if not await check_permission(interaction, "admin.commandguard.role_reset", ctx):
-            return
-        await ctx.database.delete_role_policies(str(interaction.guild_id), str(role.id))
-        await _send_roles_response(interaction, ctx, subcommand_path="commandguard role_reset", subtitle_args=[role], lines=[("role", role.mention), ("result", "reset")], kind="success", footer_service=ctx.footer)
-
     @commandguard_group.command(name="user_add", description="Add a user command policy.")
     @app_commands.describe(user="Target user.", command="Command path.", usage_limit="Optional daily usage limit.", cooldown_seconds="Optional cooldown in seconds.")
     async def user_add_command(interaction: discord.Interaction, user: discord.User, command: str, usage_limit: int | None = None, cooldown_seconds: int | None = None) -> None:
@@ -188,11 +180,3 @@ def register_roles(commandguard_group: app_commands.Group, ctx: CommandContext, 
             await _send_roles_response(interaction, ctx, subcommand_path="commandguard user_list", lines=[("warning", "No user policies configured.")], kind="warning", footer_service=ctx.footer)
             return
         await _send_roles_response(interaction, ctx, subcommand_path="commandguard user_list", lines=[("policies", len(rows))], sections=[CommandEmbedSection(title="Details", lines=[(_format_user_label(interaction.guild, row['user_id']), f"command={_canonical_policy_command(row['command'])} · {_policy_line(_canonical_policy_command(row['command']), row['usage_limit'], row['cooldown_seconds'])}") for row in rows])], footer_service=ctx.footer)
-
-    @commandguard_group.command(name="user_reset", description="Reset all policies for a user.")
-    @app_commands.describe(user="Target user.")
-    async def user_reset_command(interaction: discord.Interaction, user: discord.User) -> None:
-        if not await check_permission(interaction, "admin.commandguard.user_reset", ctx):
-            return
-        await ctx.database.delete_user_policies(str(interaction.guild_id), str(user.id))
-        await _send_roles_response(interaction, ctx, subcommand_path="commandguard user_reset", subtitle_args=[user], lines=[("user", getattr(user, "mention", user.display_name)), ("result", "reset")], kind="success", footer_service=ctx.footer)
