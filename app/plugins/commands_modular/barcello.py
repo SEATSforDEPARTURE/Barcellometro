@@ -22,6 +22,7 @@ from app.shared.discord.embed_limits import _split_field_chunks
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
+from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
 from app.shared.discord.command_embeds import send_standard_response
 from app.shared.discord.component_notices import send_standard_component_notice
 from app.shared.discord.delivery import send_dm_or_followup
@@ -34,11 +35,14 @@ logger = logging.getLogger(__name__)
 
 def register_barcello(
     triggers_group: app_commands.Group,
+    dmchannelsummary_group: app_commands.Group,
+    barcello_alias_group: app_commands.Group,
     tree: app_commands.CommandTree,
     guild: discord.abc.Snowflake | None,
     ctx: CommandContext,
     *,
-    root_top_level: str = "barcello",
+    root_top_level: str = "dmchannelsummary",
+    alias_top_level: str = "barcello",
     trigger_top_level: str = "triggers",
 ) -> None:
     response_format_supported: bool | None = None
@@ -119,7 +123,7 @@ def register_barcello(
         return apply_standard_report_style(
             [public_embed, details_embed],
             service_name="barcello",
-            canonical_top_level_command="barcellosummary",
+            canonical_top_level_command="dmchannelsummary",
             cover_title=public_embed.title or "❤️ REPORT BARCELLO",
         )
 
@@ -1036,6 +1040,8 @@ def register_barcello(
         user1: discord.Member | None = None,
         user2: discord.Member | None = None,
         window_minutes: int | None = None,
+        start_ts: str | None = None,
+        end_ts: str | None = None,
         permission_name: str,
         command_path: str,
     ) -> None:
@@ -1077,17 +1083,18 @@ def register_barcello(
             if not await check_permission(interaction, permission_name, ctx):
                 return
 
-            if window_minutes is None:
-                raw_default = await get_setting(ctx, "barcello.default_window_minutes", "30")
-                trigger_config = load_json_file(BARCELLO_TRIGGER_JSON)
-                window_minutes = resolve_default_window_minutes(interaction.channel_id, raw_default, trigger_config)
-                default_window_minutes = int(raw_default) if str(raw_default).isdigit() else 30
-                if default_window_minutes <= 0:
-                    default_window_minutes = 30
-                if window_minutes != default_window_minutes:
-                    logger.info("barcello window override applied channel_id=%s window=%s", interaction.channel_id, window_minutes)
-            if window_minutes <= 0:
-                window_minutes = 30
+            if start_ts is None or end_ts is None:
+                if window_minutes is None:
+                    raw_default = await get_setting(ctx, "barcello.default_window_minutes", "30")
+                    trigger_config = load_json_file(BARCELLO_TRIGGER_JSON)
+                    window_minutes = resolve_default_window_minutes(interaction.channel_id, raw_default, trigger_config)
+                    default_window_minutes = int(raw_default) if str(raw_default).isdigit() else 30
+                    if default_window_minutes <= 0:
+                        default_window_minutes = 30
+                    if window_minutes != default_window_minutes:
+                        logger.info("barcello window override applied channel_id=%s window=%s", interaction.channel_id, window_minutes)
+                if window_minutes <= 0:
+                    window_minutes = 30
 
             if user2 is not None and user1 is None:
                 await send_ephemeral(interaction, "Specifica il primo utente.", command_path=command_path)
@@ -1124,7 +1131,23 @@ def register_barcello(
                     await send_ephemeral(interaction, "Utenti non validi.", command_path=command_path)
                     return
 
-            if pair_mode:
+            if start_ts is not None and end_ts is not None and pair_mode:
+                result = await ctx.barcello_service.compute_pair_range(
+                    str(interaction.guild_id),
+                    str(interaction.channel_id),
+                    str(pair_user_a.id),
+                    str(pair_user_b.id),
+                    start_ts,
+                    end_ts,
+                )
+            elif start_ts is not None and end_ts is not None:
+                result = await ctx.barcello_service.compute_channel_range(
+                    str(interaction.guild_id),
+                    str(interaction.channel_id),
+                    start_ts,
+                    end_ts,
+                )
+            elif pair_mode:
                 result = await ctx.barcello_service.compute_pair(
                     str(interaction.guild_id),
                     str(interaction.channel_id),
@@ -1639,37 +1662,141 @@ def register_barcello(
             command_path=f"{trigger_top_level} barcello run",
         )
 
-    @app_commands.command(name="barcello", description="Mostra lo stato del barcello (in DM)")
-    @app_commands.rename(window_minutes="minuti")
-    @app_commands.describe(
-        user1="Utente 1 (opzionale)",
-        user2="Utente 2 (opzionale)",
-        window_minutes="Finestra in minuti",
-    )
-    async def barcello_command(
+    dmchannelsummary_barcello_group = app_commands.Group(name="barcello", description="Barcello DM summaries")
+    add_group_once(dmchannelsummary_group, dmchannelsummary_barcello_group, logger)
+
+    async def _run_window(
         interaction: discord.Interaction,
+        *,
+        start_dt: datetime,
+        end_dt: datetime,
         user1: discord.Member | None = None,
         user2: discord.Member | None = None,
-        window_minutes: int | None = None,
+        command_path: str,
     ) -> None:
         await _run_barcello_command(
             interaction,
             user1=user1,
             user2=user2,
-            window_minutes=window_minutes,
+            start_ts=start_dt.astimezone(timezone.utc).isoformat(),
+            end_ts=end_dt.astimezone(timezone.utc).isoformat(),
             permission_name="barcello",
-            command_path="barcello",
+            command_path=command_path,
         )
 
-    if guild is not None:
-        tree.add_command(barcello_command, guild=guild)
-        logger.info("Registered /barcello scope=guild guild_id=%s", getattr(guild, "id", None))
-    else:
-        tree.add_command(barcello_command)
-        logger.info("Registered /barcello scope=global")
+    @dmchannelsummary_barcello_group.command(name="on", description="Enable Barcello DM summary in this channel.")
+    async def dmchannelsummary_barcello_on(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, f"admin.{root_top_level}.barcello.on", ctx):
+            return
+        await _set_toggle(interaction, "on")
+
+    @dmchannelsummary_barcello_group.command(name="off", description="Disable Barcello DM summary in this channel.")
+    async def dmchannelsummary_barcello_off(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, f"admin.{root_top_level}.barcello.off", ctx):
+            return
+        await _set_toggle(interaction, "off")
+
+    @dmchannelsummary_barcello_group.command(name="status", description="Show Barcello DM summary status in this channel.")
+    async def dmchannelsummary_barcello_status(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, f"admin.{root_top_level}.barcello.status", ctx):
+            return
+        await _set_toggle(interaction, "status")
+
+    @dmchannelsummary_barcello_group.command(name="today", description="Run Barcello summary for today.")
+    async def dmchannelsummary_barcello_today(
+        interaction: discord.Interaction, user1: discord.Member | None = None, user2: discord.Member | None = None
+    ) -> None:
+        w = resolve_oggi_window()
+        await _run_window(interaction, start_dt=w.start_dt, end_dt=w.end_dt, user1=user1, user2=user2, command_path=f"{root_top_level} barcello today")
+
+    @dmchannelsummary_barcello_group.command(name="yesterday", description="Run Barcello summary for yesterday.")
+    async def dmchannelsummary_barcello_yesterday(
+        interaction: discord.Interaction, user1: discord.Member | None = None, user2: discord.Member | None = None
+    ) -> None:
+        w = resolve_ieri_window()
+        await _run_window(interaction, start_dt=w.start_dt, end_dt=w.end_dt, user1=user1, user2=user2, command_path=f"{root_top_level} barcello yesterday")
+
+    @dmchannelsummary_barcello_group.command(name="last", description="Run Barcello summary for the last N units.")
+    @app_commands.rename(quantita="quantity", unita="unit")
+    @app_commands.choices(
+        unita=[
+            app_commands.Choice(name="minuti", value="minuti"),
+            app_commands.Choice(name="ore", value="ore"),
+            app_commands.Choice(name="giorni", value="giorni"),
+            app_commands.Choice(name="settimane", value="settimane"),
+        ]
+    )
+    async def dmchannelsummary_barcello_last(
+        interaction: discord.Interaction,
+        quantita: int,
+        unita: app_commands.Choice[str],
+        user1: discord.Member | None = None,
+        user2: discord.Member | None = None,
+    ) -> None:
+        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+        if error:
+            await send_ephemeral(interaction, error, command_path=f"{root_top_level} barcello last")
+            return
+        assert window is not None
+        await _run_window(interaction, start_dt=window.start_dt, end_dt=window.end_dt, user1=user1, user2=user2, command_path=f"{root_top_level} barcello last")
+
+    @dmchannelsummary_barcello_group.command(name="range", description="Run Barcello summary for a custom range.")
+    @app_commands.rename(da="from", a="to")
+    async def dmchannelsummary_barcello_range(
+        interaction: discord.Interaction,
+        da: str,
+        a: str,
+        user1: discord.Member | None = None,
+        user2: discord.Member | None = None,
+    ) -> None:
+        window, error = resolve_range_window(da, a, ctx.config)
+        if error:
+            await send_ephemeral(interaction, error, command_path=f"{root_top_level} barcello range")
+            return
+        assert window is not None
+        await _run_window(interaction, start_dt=window.start_dt, end_dt=window.end_dt, user1=user1, user2=user2, command_path=f"{root_top_level} barcello range")
+
+    @barcello_alias_group.command(name="oggi", description="Mostra lo stato del barcello di oggi (in DM)")
+    async def barcello_alias_oggi(interaction: discord.Interaction) -> None:
+        w = resolve_oggi_window()
+        await _run_window(interaction, start_dt=w.start_dt, end_dt=w.end_dt, command_path=f"{alias_top_level} oggi")
+
+    @barcello_alias_group.command(name="ieri", description="Mostra lo stato del barcello di ieri (in DM)")
+    async def barcello_alias_ieri(interaction: discord.Interaction) -> None:
+        w = resolve_ieri_window()
+        await _run_window(interaction, start_dt=w.start_dt, end_dt=w.end_dt, command_path=f"{alias_top_level} ieri")
+
+    @barcello_alias_group.command(name="ultimi", description="Mostra lo stato del barcello per gli ultimi N periodi.")
+    @app_commands.rename(quantita="quantità", unita="unità")
+    @app_commands.choices(
+        unita=[
+            app_commands.Choice(name="minuti", value="minuti"),
+            app_commands.Choice(name="ore", value="ore"),
+            app_commands.Choice(name="giorni", value="giorni"),
+            app_commands.Choice(name="settimane", value="settimane"),
+        ]
+    )
+    async def barcello_alias_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
+        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+        if error:
+            await send_ephemeral(interaction, error, command_path=f"{alias_top_level} ultimi")
+            return
+        assert window is not None
+        await _run_window(interaction, start_dt=window.start_dt, end_dt=window.end_dt, command_path=f"{alias_top_level} ultimi")
+
+    @barcello_alias_group.command(name="intervallo", description="Mostra lo stato del barcello per intervallo.")
+    async def barcello_alias_intervallo(interaction: discord.Interaction, da: str, a: str) -> None:
+        window, error = resolve_range_window(da, a, ctx.config)
+        if error:
+            await send_ephemeral(interaction, error, command_path=f"{alias_top_level} intervallo")
+            return
+        assert window is not None
+        await _run_window(interaction, start_dt=window.start_dt, end_dt=window.end_dt, command_path=f"{alias_top_level} intervallo")
 
     logger.info(
-        "Registered /%s barcello subcommands=%s",
+        "Registered /%s barcello subcommands triggers=%s summary=%s alias=%s",
         trigger_top_level,
         [command.name for command in trigger_barcello_group.commands],
+        [command.name for command in dmchannelsummary_barcello_group.commands],
+        [command.name for command in barcello_alias_group.commands],
     )

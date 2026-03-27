@@ -16,14 +16,7 @@ def test_command_validator_has_no_errors() -> None:
 def test_command_validator_tracks_expected_alias_exceptions() -> None:
     result = validate_command_tree()
 
-    expected = {
-        "riassunto.oggi",
-        "riassunto.ieri",
-        "riassunto.ultimi",
-        "riassunto.range",
-        "resocontocanale.oggi",
-        "resocontoserver.oggi",
-    }
+    expected = {"resocontocanale.oggi", "resocontoserver.oggi"}
     assert expected.issubset(result.exceptions)
     assert any(command.path == "campaigns.prompt.schedule_add" for command in result.commands)
     assert any(command.path == "commandguard.role_list" for command in result.commands)
@@ -114,3 +107,35 @@ def test_command_validator_has_no_legacy_tracking_fields() -> None:
     result = validate_command_tree()
 
     assert all(issue.code != "legacy_root" for issue in result.warnings)
+
+
+def test_dm_summary_contract_roots_and_children_are_exact() -> None:
+    source = Path("app/plugins/commands.py").read_text(encoding="utf-8")
+    barcello_source = Path("app/plugins/commands_modular/barcello.py").read_text(encoding="utf-8")
+    riassunto_source = Path("app/plugins/commands_modular/riassunto.py").read_text(encoding="utf-8")
+    aura_source = Path("app/plugins/commands_modular/aura.py").read_text(encoding="utf-8")
+    attivita_source = Path("app/plugins/commands_modular/attivita.py").read_text(encoding="utf-8")
+
+    assert 'app_commands.Group(name="dmchannelsummary"' in source
+    assert 'app_commands.Group(name="dmserversummary"' in source
+    assert 'app_commands.Group(name="dmsummary"' not in source
+    assert 'app_commands.Group(name="aurasummary"' not in source
+    assert 'app_commands.Group(name="barcellosummary"' not in source
+
+    for token in ['name="on"', 'name="off"', 'name="status"']:
+        assert token in riassunto_source
+        assert token in barcello_source
+    for token in ['"today" if is_english else "oggi"', '"yesterday" if is_english else "ieri"', '"last" if is_english else "ultimi"', '"range" if is_english else "intervallo"']:
+        assert token in riassunto_source
+    for token in ['name="on"', 'name="off"', 'name="status"']:
+        assert token in aura_source
+    for token in ['"today" if is_english else "oggi"', '"yesterday" if is_english else "ieri"', '"last" if is_english else "ultimi"']:
+        assert token in aura_source
+        assert token in attivita_source
+    assert '"range" if is_english else "intervallo"' in aura_source
+    assert 'command_names = {' in attivita_source
+
+    assert '@barcello_alias_group.command(name="oggi"' in barcello_source
+    assert '@barcello_alias_group.command(name="intervallo"' in barcello_source
+    assert '"range" if is_english else "intervallo"' in riassunto_source
+    assert '"range" if is_english else "intervallo"' in aura_source

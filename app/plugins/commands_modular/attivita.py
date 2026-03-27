@@ -376,7 +376,20 @@ def _format_interactions(interactions: dict[int, dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
-def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "attivita") -> None:
+def register_attivita(
+    attivita_group: app_commands.Group,
+    ctx: CommandContext,
+    *,
+    root_top_level: str = "attivita",
+    locale: str = "it",
+) -> None:
+    is_english = locale == "en"
+    command_names = {
+        "today": "today" if is_english else "oggi",
+        "yesterday": "yesterday" if is_english else "ieri",
+        "last": "last" if is_english else "ultimi",
+        "range": "range",
+    }
     async def _send_standard(
         interaction: discord.Interaction,
         *,
@@ -451,7 +464,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext, *
                 window.label_periodo,
                 details,
                 reference_ts=end_ts,
-            ), service_name="attivita", canonical_top_level_command="activitysummary", cover_title="📈 REPORT ATTIVITÀ")
+            ), service_name="attivita", canonical_top_level_command="dmserversummary", cover_title="📈 REPORT ATTIVITÀ")
             txt_payload = build_activity_details_txt(
                 interaction.guild,
                 interaction.guild.name,
@@ -576,7 +589,7 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext, *
         embeds = apply_standard_report_style(
             embeds,
             service_name="attivita",
-            canonical_top_level_command="activitysummary",
+            canonical_top_level_command="dmserversummary",
             cover_title=f"📈 REPORT ATTIVITÀ — {utente.display_name}",
         )
         txt_payload = _make_user_report_txt(utente.display_name, window.label_periodo, stats_lines, interaction_lines, topics_lines, advice)
@@ -611,18 +624,59 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext, *
             else:
                 await _send_standard(interaction, subcommand_path=subcommand_path, subtitle_args=subtitle_args, lines=[("error", "Non riesco a inviarti il report in DM al momento. Riprova tra poco.")], kind="error")
 
-    @attivita_group.command(name="oggi", description="Report attività di oggi (DM staff)")
+    if is_english:
+        async def _set_activity_toggle(interaction: discord.Interaction, action: str) -> None:
+            if not await check_permission(interaction, f"admin.{root_top_level}.activity.{action}", ctx):
+                return
+            if interaction.guild_id is None or interaction.channel_id is None:
+                await _send_standard(interaction, subcommand_path=f"{root_top_level} activity {action}", lines=[("error", "Comando disponibile solo nei server.")], kind="error")
+                return
+            guild_id = str(interaction.guild_id)
+            channel_id = str(interaction.channel_id)
+            if action == "status":
+                enabled = await ctx.database.get_activity_channel_status(guild_id, channel_id)
+                await _send_standard(interaction, subcommand_path=f"{root_top_level} activity status", lines=[("status", "on" if enabled else "off")], kind="info")
+                return
+            enabled = action == "on"
+            await ctx.database.set_activity_channel_enabled(guild_id, channel_id, enabled)
+            await _send_standard(
+                interaction,
+                subcommand_path=f"{root_top_level} activity {action}",
+                lines=[("result", f"Activity summary {'enabled' if enabled else 'disabled'} for this channel.")],
+                kind="success",
+            )
+
+        @attivita_group.command(name="on", description="Enable activity summary in this channel.")
+        async def attivita_on(interaction: discord.Interaction) -> None:
+            await _set_activity_toggle(interaction, "on")
+
+        @attivita_group.command(name="off", description="Disable activity summary in this channel.")
+        async def attivita_off(interaction: discord.Interaction) -> None:
+            await _set_activity_toggle(interaction, "off")
+
+        @attivita_group.command(name="status", description="Show activity summary status in this channel.")
+        async def attivita_status(interaction: discord.Interaction) -> None:
+            await _set_activity_toggle(interaction, "status")
+
+    @attivita_group.command(name=command_names["today"], description="Report attività di oggi (DM staff)")
     @app_commands.describe(utente="Utente da analizzare (opzionale)")
+    @app_commands.rename(utente="user" if is_english else "utente")
     async def attivita_oggi(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
         await _send_activity_report(interaction, resolve_oggi_window(), utente, subcommand_path="attivita oggi", subtitle_args=[utente] if utente is not None else None)
 
-    @attivita_group.command(name="ieri", description="Report attività di ieri (DM staff)")
+    @attivita_group.command(name=command_names["yesterday"], description="Report attività di ieri (DM staff)")
     @app_commands.describe(utente="Utente da analizzare (opzionale)")
+    @app_commands.rename(utente="user" if is_english else "utente")
     async def attivita_ieri(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
         await _send_activity_report(interaction, resolve_ieri_window(), utente, subcommand_path="attivita ieri", subtitle_args=[utente] if utente is not None else None)
 
-    @attivita_group.command(name="ultimi", description="Report attività ultimi N periodi")
+    @attivita_group.command(name=command_names["last"], description="Report attività ultimi N periodi")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", utente="Utente da analizzare (opzionale)")
+    @app_commands.rename(
+        quantita="quantity" if is_english else "quantità",
+        unita="unit" if is_english else "unità",
+        utente="user" if is_english else "utente",
+    )
     @app_commands.choices(
         unita=[
             app_commands.Choice(name="minuti", value="minuti"),
@@ -644,8 +698,9 @@ def register_attivita(attivita_group: app_commands.Group, ctx: CommandContext, *
             subtitle_args.append(utente)
         await _send_activity_report(interaction, window, utente, subcommand_path="attivita ultimi", subtitle_args=subtitle_args)
 
-    @attivita_group.command(name="range", description="Report attività per range custom")
+    @attivita_group.command(name=command_names["range"], description="Report attività per range custom")
     @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)", utente="Utente da analizzare (opzionale)")
+    @app_commands.rename(da="from" if is_english else "da", a="to" if is_english else "a", utente="user" if is_english else "utente")
     async def attivita_range(interaction: discord.Interaction, da: str, a: str, utente: discord.Member | None = None) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:

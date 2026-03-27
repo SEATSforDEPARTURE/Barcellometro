@@ -41,11 +41,15 @@ LOCALIZED_COMMAND_EXCEPTIONS = {
     "riassunto.oggi",
     "riassunto.ieri",
     "riassunto.ultimi",
-    "riassunto.range",
+    "riassunto.intervallo",
     "aura.oggi",
     "aura.ieri",
     "aura.ultimi",
-    "aura.range",
+    "aura.intervallo",
+    "barcello.oggi",
+    "barcello.ieri",
+    "barcello.ultimi",
+    "barcello.intervallo",
     "attivita.oggi",
     "attivita.ieri",
     "attivita.ultimi",
@@ -59,7 +63,7 @@ LOCALIZED_COMMAND_EXCEPTIONS = {
     "resocontoserver.aura.ultimi",
     "resocontoserver.aura.range",
 }
-LOCALIZED_ROOT_EXCEPTIONS = {"riassunto", "attivita", "resocontocanale", "resocontoserver"}
+LOCALIZED_ROOT_EXCEPTIONS = {"riassunto", "barcello", "aura", "attivita", "resocontocanale", "resocontoserver"}
 CONFIG_TARGET_NAMES = {
     "channel",
     "id",

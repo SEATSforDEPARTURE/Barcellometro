@@ -32,7 +32,20 @@ from app.shared.discord.report_embeds import apply_standard_report_style, send_r
 logger = logging.getLogger(__name__)
 
 
-def register_aura(aura_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "aurasummary") -> None:
+def register_aura(
+    aura_group: app_commands.Group,
+    ctx: CommandContext,
+    *,
+    root_top_level: str = "dmserversummary",
+    locale: str = "it",
+) -> None:
+    is_english = locale == "en"
+    command_names = {
+        "last": "last" if is_english else "ultimi",
+        "today": "today" if is_english else "oggi",
+        "yesterday": "yesterday" if is_english else "ieri",
+        "range": "range" if is_english else "intervallo",
+    }
     async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
         text = str(message or "").strip()
         kind = "info"
@@ -264,7 +277,7 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext, *, root_t
             embeds=apply_standard_report_style(
                 embeds,
                 service_name="aura",
-                canonical_top_level_command="aurasummary",
+                canonical_top_level_command="dmserversummary",
                 cover_title=embeds[0].title or "✨ RESOCONTO AURA",
             ),
             files=[mod_file] if mod_file is not None else None,
@@ -433,8 +446,41 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext, *, root_t
             logger.warning("aura dm blocked: user=%s guild=%s", str(interaction.user.id), guild_id)
             await send_ephemeral(interaction, "⚠️ Non posso scriverti in DM. Abilita i DM dal server e riprova.")
 
-    @aura_group.command(name="ultimi", description="Aura ultimi N periodi")
+    if is_english:
+        async def _set_aura_toggle(interaction: discord.Interaction, action: str) -> None:
+            if not await check_permission(interaction, f"admin.{root_top_level}.aura.{action}", ctx):
+                return
+            if interaction.guild_id is None:
+                await send_ephemeral(interaction, "Comando disponibile solo in un server.")
+                return
+            guild_id = str(interaction.guild_id)
+            if action == "status":
+                enabled = await ctx.database.get_trigger_enabled_global(guild_id, "aura")
+                await send_ephemeral(interaction, f"Aura summary is {'on' if enabled else 'off'} for this server.")
+                return
+            enabled = action == "on"
+            await ctx.database.set_trigger_enabled_global(guild_id, "aura", enabled)
+            await send_ephemeral(interaction, f"Aura summary {'enabled' if enabled else 'disabled'} for this server.")
+
+        @aura_group.command(name="on", description="Enable Aura summary.")
+        async def aura_on(interaction: discord.Interaction) -> None:
+            await _set_aura_toggle(interaction, "on")
+
+        @aura_group.command(name="off", description="Disable Aura summary.")
+        async def aura_off(interaction: discord.Interaction) -> None:
+            await _set_aura_toggle(interaction, "off")
+
+        @aura_group.command(name="status", description="Show Aura summary status.")
+        async def aura_status(interaction: discord.Interaction) -> None:
+            await _set_aura_toggle(interaction, "status")
+
+    @aura_group.command(name=command_names["last"], description="Aura ultimi N periodi")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo", utente="Utente target (solo mod)")
+    @app_commands.rename(
+        quantita="quantity" if is_english else "quantità",
+        unita="unit" if is_english else "unità",
+        utente="user" if is_english else "utente",
+    )
     @app_commands.choices(unita=[
         app_commands.Choice(name="minuti", value="minuti"),
         app_commands.Choice(name="ore", value="ore"),
@@ -457,18 +503,19 @@ def register_aura(aura_group: app_commands.Group, ctx: CommandContext, *, root_t
             assert window is not None
         await _run(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ultimi", target_user=utente)
 
-    @aura_group.command(name="oggi", description="Aura di oggi")
+    @aura_group.command(name=command_names["today"], description="Aura di oggi")
     async def aura_oggi(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
         w = resolve_oggi_window()
         await _run(interaction, start_dt=w.start_dt, end_dt=w.end_dt, period_label="oggi", target_user=utente)
 
-    @aura_group.command(name="ieri", description="Aura di ieri")
+    @aura_group.command(name=command_names["yesterday"], description="Aura di ieri")
     async def aura_ieri(interaction: discord.Interaction, utente: discord.Member | None = None) -> None:
         w = resolve_ieri_window()
         await _run(interaction, start_dt=w.start_dt, end_dt=w.end_dt, period_label="ieri", target_user=utente)
 
-    @aura_group.command(name="range", description="Aura per intervallo")
+    @aura_group.command(name=command_names["range"], description="Aura per intervallo")
     @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)", utente="Utente target (solo mod)")
+    @app_commands.rename(da="from" if is_english else "da", a="to" if is_english else "a", utente="user" if is_english else "utente")
     async def aura_range(interaction: discord.Interaction, da: str, a: str, utente: discord.Member | None = None) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:

@@ -14,7 +14,7 @@ def test_build_report_cover_embed_attaches_footer_and_author_meta_with_canonical
         title="Cover",
         description="Body",
         service_name="riassunto",
-        canonical_top_level_command="dmsummary",
+        canonical_top_level_command="dmchannelsummary",
         lines=[("A", "B")],
     )
 
@@ -24,7 +24,7 @@ def test_build_report_cover_embed_attaches_footer_and_author_meta_with_canonical
     assert footer.service_name == "riassunto"
     assert author is not None
     assert author.service_name == "riassunto"
-    assert author.canonical_top_level_command == "dmsummary"
+    assert author.canonical_top_level_command == "dmchannelsummary"
 
 
 def test_apply_standard_report_style_attaches_author_meta_to_all_pages() -> None:
@@ -49,12 +49,12 @@ def test_apply_standard_report_style_attaches_author_meta_to_all_pages() -> None
 
 def test_canonical_top_level_wiring_is_explicit_in_target_command_modules() -> None:
     expected_snippets = {
-        "app/plugins/commands_modular/attivita.py": 'canonical_top_level_command="activitysummary"',
-        "app/plugins/commands_modular/aura.py": 'canonical_top_level_command="aurasummary"',
-        "app/plugins/commands_modular/barcello.py": 'canonical_top_level_command="barcellosummary"',
+        "app/plugins/commands_modular/attivita.py": 'canonical_top_level_command="dmserversummary"',
+        "app/plugins/commands_modular/aura.py": 'canonical_top_level_command="dmserversummary"',
+        "app/plugins/commands_modular/barcello.py": 'canonical_top_level_command="dmchannelsummary"',
         "app/plugins/commands_modular/resoconto.py": 'canonical_top_level_command="channelsummary"',
         "app/plugins/commands_modular/resoconto.py#server": 'canonical_top_level_command="serversummary"',
-        "app/plugins/commands_modular/riassunto.py": 'canonical_top_level_command="dmsummary"',
+        "app/plugins/commands_modular/riassunto.py": 'canonical_top_level_command="dmchannelsummary"',
     }
 
     for key, snippet in expected_snippets.items():
