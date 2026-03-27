@@ -174,7 +174,7 @@ def test_prompt_show_resolves_schedule_by_name() -> None:
         assert "morning-news" in visible_text
         assert "Prompt Text" in visible_text
         assert "Scrivi un update" in visible_text
-        assert "SCHEDULE" in primary_field(sent_embed).name.upper()
+        assert primary_field(sent_embed).name == "ℹ️ __**INFO**__"
 
     asyncio.run(_run())
 
