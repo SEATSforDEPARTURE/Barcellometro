@@ -58,6 +58,9 @@ def test_commands_setup_keeps_only_explicit_italian_alias_roots() -> None:
     assert 'resocontocanale_alias_group = app_commands.Group(name="resocontocanale"' in source
     assert 'resocontoserver_alias_group = app_commands.Group(name="resocontoserver"' in source
     assert 'attivita_group = app_commands.Group(name="attivita"' in source
+    assert 'dmserversummary_activity_group = app_commands.Group(name="activity", description="Activity summary controls")' in source
+    assert 'add_group_once(dmserversummary_group, dmserversummary_activity_group, logger)' in source
+    assert 'register_attivita(dmserversummary_activity_group, ctx, root_top_level="dmserversummary", locale="en")' in source
     assert 'register_ask(bot.tree, guild_obj, ctx, command_name="domanda", root_top_level="qna", visual_top_level="qna")' in source
     assert 'domanda_group = app_commands.Group(' not in source
 

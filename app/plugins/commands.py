@@ -161,6 +161,8 @@ def setup(registry: ServiceRegistry) -> None:
     serversummary_group = app_commands.Group(name="serversummary", description="Server summary schedules")
     dmchannelsummary_group = app_commands.Group(name="dmchannelsummary", description="DM channel summaries")
     dmserversummary_group = app_commands.Group(name="dmserversummary", description="DM server summaries")
+    dmserversummary_activity_group = app_commands.Group(name="activity", description="Activity summary controls")
+    add_group_once(dmserversummary_group, dmserversummary_activity_group, logger)
 
     riassunto_alias_group = app_commands.Group(name="riassunto", description="Riassunti")
     barcello_alias_group = app_commands.Group(name="barcello", description="Barcello reports")
@@ -200,7 +202,7 @@ def setup(registry: ServiceRegistry) -> None:
     register_riassunto(riassunto_alias_group, ctx, root_top_level="riassunto", locale="it")
     register_aura(dmserversummary_group, ctx, root_top_level="dmserversummary", locale="en")
     register_aura(aura_alias_group, ctx, root_top_level="aura", locale="it")
-    register_attivita(dmserversummary_group, ctx, root_top_level="dmserversummary", locale="en")
+    register_attivita(dmserversummary_activity_group, ctx, root_top_level="dmserversummary", locale="en")
     register_attivita(attivita_group, ctx, root_top_level="attivita", locale="it")
 
     register_inattivi(inactivity_group, ctx, top_level="inactivity", visual_top_level="inactivity")
