@@ -15,10 +15,6 @@ def audio_notes_module(monkeypatch):
     imageio_ffmpeg_stub.get_ffmpeg_exe = lambda: ""
     monkeypatch.setitem(sys.modules, "imageio_ffmpeg", imageio_ffmpeg_stub)
 
-    footer_stub = types.ModuleType("app.services.footer")
-    footer_stub.attach_footer_meta = lambda embed, **kwargs: embed
-    monkeypatch.setitem(sys.modules, "app.services.footer", footer_stub)
-
     service_registry_stub = types.ModuleType("app.core.service_registry")
     service_registry_stub.ServiceRegistry = object
     monkeypatch.setitem(sys.modules, "app.core.service_registry", service_registry_stub)
@@ -196,11 +192,12 @@ def test_parse_chars_summary_limit_non_positive_disables_feature(audio_notes_mod
 def test_loading_embed_uses_standard_title_and_italic_description_without_leading_emoji(audio_notes_module) -> None:
     embed = audio_notes_module._build_audio_note_embed(
         audio_notes_module._audio_loading_description(),
-        user_ref="@mario",
+        user_display_name="Mario",
     )
-    assert embed.title == "__**NOTA AUDIO DI @MARIO**__"
+    assert embed.title == "🗣️ __**NOTA AUDIO DI MARIO**__"
     assert embed.description == "*Nota audio ricevuta, sto trascrivendo...*"
     assert not embed.description.startswith("*🎙️")
+    assert "<@" not in embed.title
 
 
 def test_final_embed_description_includes_bold_user_and_bold_ordinal_when_available(audio_notes_module) -> None:
@@ -212,14 +209,17 @@ def test_final_embed_description_includes_bold_user_and_bold_ordinal_when_availa
     )
     embeds = audio_notes_module._build_audio_note_embeds_from_sections(
         sections,
-        user_ref="@mario",
+        user_display_name="Criceto Mannaro",
         ordinal_label="secondo",
     )
     assert embeds
     first = embeds[0]
-    assert first.description == "*Leggiamo cosa ci dice **@mario** in quest'audio... È il **secondo** di oggi.*"
+    assert first.description == "*Leggiamo cosa ci dice **Criceto Mannaro** in quest'audio... È il **secondo** di oggi.*"
     assert "Trascrizione audio elaborata" not in first.description
+    assert "<@" not in first.description
     field_names = [field.name for field in first.fields]
+    assert all("SEZIONE" not in name for name in field_names)
+    assert all("1/2" not in name and "2/2" not in name for name in field_names)
     assert any("TRASCRIZIONE" in name for name in field_names)
 
 
@@ -232,10 +232,63 @@ def test_final_embed_description_fallback_without_ordinal_is_human_and_italic(au
     )
     embeds = audio_notes_module._build_audio_note_embeds_from_sections(
         sections,
-        user_ref="@mario",
+        user_display_name="Mario",
         ordinal_label=None,
     )
-    assert embeds[0].description == "*Leggiamo cosa ci dice **@mario** in quest'audio...*"
+    assert embeds[0].description == "*Leggiamo cosa ci dice **Mario** in quest'audio...*"
+
+
+def test_audio_user_display_name_never_returns_mention_or_raw_id(audio_notes_module) -> None:
+    user = SimpleNamespace(display_name="Mario_**<@123>", name="fallback", mention="<@123456789012345678>", id=123456789012345678)
+    rendered = audio_notes_module._audio_user_display_name(user)
+
+    assert rendered == "Mario\\_\\*\\*<@123>"
+    assert rendered != user.mention
+    assert "<@123456789012345678>" not in rendered
+
+
+def test_audio_embeds_keep_single_message_payload_with_multiple_embeds(audio_notes_module) -> None:
+    sections = []
+    for index in range(30):
+        sections.append((f"Trascrizione {index}", "✍️", f"contenuto {index}"))
+
+    embeds = audio_notes_module._build_audio_note_embeds_from_sections(
+        sections,
+        user_display_name="Mario",
+        ordinal_label="primo",
+    )
+
+    assert len(embeds) == 2
+    assert sum(len(embed.fields) for embed in embeds) == 30
+    assert all("<@" not in (embed.title or "") for embed in embeds)
+
+
+def test_audio_embed_author_pagination_is_applied_in_author_not_in_section_titles(audio_notes_module) -> None:
+    async def _run() -> None:
+        sections = []
+        for index in range(30):
+            sections.append(("Trascrizione", "✍️", f"contenuto {index}"))
+
+        embeds = audio_notes_module._build_audio_note_embeds_from_sections(
+            sections,
+            user_display_name="Mario",
+            ordinal_label="primo",
+        )
+        assert len(embeds) == 2
+
+        await audio_notes_module.finalize_embeds_rendering(
+            embeds,
+            footer_service=None,
+            author_service=None,
+            default_service_name="audio_notes",
+        )
+
+        assert embeds[0].author.name == "servizio AUDIO · (Pag. 1/2)"
+        assert embeds[1].author.name == "servizio AUDIO · (Pag. 2/2)"
+        assert embeds[0].footer.text == embeds[1].footer.text
+        assert all("SEZIONE" not in field.name for embed in embeds for field in embed.fields)
+
+    asyncio.run(_run())
 
 
 def test_audio_ordinal_label_returns_expected_values(audio_notes_module) -> None:

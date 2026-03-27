@@ -375,11 +375,12 @@ Alias canonici principali (risolti centralmente in `app/services/author.py`):
 Per il servizio slash top-level `/audio` valgono in modo vincolante le seguenti regole UI:
 
 - label author fallback: `servizio AUDIO` (mai `AUDIO NOTES`);
-- titolo embed: `NOTA AUDIO DI @utente` tramite pipeline title centralizzata (`format_standard_title`);
+- titolo embed: `🗣️ NOTA AUDIO DI NICKNAME` tramite pipeline title centralizzata (`format_standard_title`) e usando solo display name visuale (mai mention `<@...>` o raw id);
 - descrizione: sempre in corsivo (`format_standard_description`), senza emoji iniziale;
 - stato loading: frase breve informativa (es. “Nota audio ricevuta, sto trascrivendo...”);
-- stato finale: intro naturale con utente in `**bold**` e ordinale giornaliero in `**bold**` quando disponibile (es. `**primo**`, `**secondo**`);
-- field principali (trascrizione / traduzione / riassunto): naming standardizzato con helper centrali e valori con enfasi `**bold**` solo sui dati semanticamente rilevanti.
+- stato finale: intro naturale con utente in `**bold**` e ordinale giornaliero in `**bold**` quando disponibile (es. `**primo**`, `**secondo**`), senza mention pinganti;
+- field principali (trascrizione / traduzione / riassunto): naming standardizzato con helper centrali e valori con enfasi `**bold**` solo sui dati semanticamente rilevanti; non sono ammessi prefissi legacy `SEZIONE 1/2`, `SEZIONE 2/2`;
+- rendering output: singolo invio Discord con `embeds=[...]` (un embed se corto, più embed nello stesso messaggio se lungo), con paginazione visualizzata nell'AUTHOR (`servizio AUDIO · (Pag. X/Y)`), mai in label field.
 
 Canonical legacy deprecati e non più validi per il rendering author standard:
 
