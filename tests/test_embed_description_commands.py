@@ -121,6 +121,7 @@ def test_description_on_off_status_and_runtime_gate(embed_module, monkeypatch: p
         custom_section = next(section for section in sections if section.title == "Custom Templates")
         assert ("audio", "Template {audio_intro} {user_name}") in custom_section.lines
         default_section = next(section for section in sections if section.title == "Default Services")
+        assert "triggers" in default_section.lines[0][1]
         assert "audio_notes" not in str(default_section.lines)
         assert "campaign_content_formatter" not in str(default_section.lines)
         placeholders = dict(next(section for section in sections if section.title == "PLACEHOLDERS").lines)

@@ -76,8 +76,9 @@ def test_footer_status_command_is_ux_focused_and_uses_public_services(embed_modu
         kwargs = send_standard.await_args.kwargs
         assert kwargs['subcommand_path'] == 'footer status'
         assert ('enabled', 'off') in kwargs['lines']
-        assert ('supported services', 9) in kwargs['lines']
+        assert ('supported services', 10) in kwargs['lines']
         default_section = next(section for section in kwargs['sections'] if section.title == 'Default Services')
+        assert 'triggers' in default_section.lines[0][1]
         assert 'campagne_notizie' not in default_section.lines[0][1]
         assert 'service_1' not in default_section.lines[0][1]
 
@@ -99,8 +100,9 @@ def test_author_status_command_is_ux_focused_and_uses_public_services(embed_modu
         kwargs = send_standard.await_args.kwargs
         assert kwargs['subcommand_path'] == 'author status'
         assert ('enabled', 'off') in kwargs['lines']
-        assert ('supported services', 9) in kwargs['lines']
+        assert ('supported services', 10) in kwargs['lines']
         default_section = next(section for section in kwargs['sections'] if section.title == 'Default Services')
+        assert 'triggers' in default_section.lines[0][1]
         assert 'audio_notes' not in default_section.lines[0][1]
         assert 'service_1' not in default_section.lines[0][1]
 

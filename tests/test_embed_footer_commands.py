@@ -277,14 +277,15 @@ def test_footer_status_command_uses_embed_namespace_and_simplified_status_payloa
         kwargs = send_standard.await_args.kwargs
         assert kwargs['subcommand_path'] == 'footer status'
         assert ('enabled', 'off') in kwargs['lines']
-        assert ('supported services', 9) in kwargs['lines']
+        assert ('supported services', 10) in kwargs['lines']
         assert ('services with custom template', 1) in kwargs['lines']
-        assert ('services using default', 8) in kwargs['lines']
+        assert ('services using default', 9) in kwargs['lines']
         assert ('runtime rule', 'OFF = runtime always uses standard default footer even if custom is saved') in kwargs['lines']
         custom_section = next(section for section in kwargs['sections'] if section.title == 'Custom Templates')
         assert ('riassunto', 'phrase, thumbnail') in custom_section.lines
         default_section = next(section for section in kwargs['sections'] if section.title == 'Default Services')
         assert 'audio' in default_section.lines[0][1]
+        assert 'triggers' in default_section.lines[0][1]
         assert 'campagne' in default_section.lines[0][1]
         assert 'campagne_notizie' not in default_section.lines[0][1]
         assert 'builder' not in default_section.lines[0][1]

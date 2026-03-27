@@ -46,7 +46,7 @@ class DescriptionTemplateService:
         return f"{_DESCRIPTION_TEMPLATE_KEY_PREFIX}{self.normalize_service_name(service)}"
 
     def normalize_service_name(self, service: str) -> str:
-        resolved = resolve_public_embed_service_key(service)
+        resolved = resolve_public_embed_service_key(service, system="description")
         if resolved is None:
             raise InvalidDescriptionTemplateError("Provide a valid service name")
         return resolved
@@ -189,12 +189,12 @@ class DescriptionTemplateService:
 
     async def build_status_snapshot(self) -> DescriptionTemplateStatusSnapshot:
         custom_templates: dict[str, str] = {}
-        for service_name in list_public_embed_service_keys():
+        for service_name in list_public_embed_service_keys(system="description"):
             template = await self.get_template(service_name)
             if template:
                 custom_templates[service_name] = template
         return DescriptionTemplateStatusSnapshot(
             enabled=await self.is_enabled(),
-            total_services=len(list_public_embed_service_keys()),
+            total_services=len(list_public_embed_service_keys(system="description")),
             custom_templates=custom_templates,
         )
