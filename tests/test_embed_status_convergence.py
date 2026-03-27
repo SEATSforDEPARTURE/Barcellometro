@@ -44,12 +44,29 @@ def test_embed_status_commands_share_public_service_source_and_custom_default_sp
             assert ("services with custom template", 1) in payload["lines"]
             assert ("services using default", 8) in payload["lines"]
             section_titles = {section.title for section in payload["sections"]}
-            assert section_titles == {"Custom Templates", "Default Services"}
+            assert section_titles == {"Custom Templates", "Default Services", "PLACEHOLDERS"}
             default_services_text = next(section for section in payload["sections"] if section.title == "Default Services").lines[0][1]
             assert "audio_notes" not in default_services_text
             assert "campagne_notizie" not in default_services_text
             assert "formatter" not in default_services_text
             assert "builder" not in default_services_text
             assert "renderer" not in default_services_text
+            placeholders_section = next(section for section in payload["sections"] if section.title == "PLACEHOLDERS")
+            assert placeholders_section.lines
+
+        description_placeholders = dict(next(section for section in description_kwargs["sections"] if section.title == "PLACEHOLDERS").lines)
+        assert "{user_name}" in description_placeholders
+        assert "{audio_intro}" in description_placeholders
+        assert "{service_label}" not in description_placeholders
+
+        author_placeholders = dict(next(section for section in author_kwargs["sections"] if section.title == "PLACEHOLDERS").lines)
+        assert "{service_name}" in author_placeholders
+        assert "{service_label}" in author_placeholders
+        assert "{user_name}" not in author_placeholders
+
+        footer_placeholders = dict(next(section for section in footer_kwargs["sections"] if section.title == "PLACEHOLDERS").lines)
+        assert "{service_name}" in footer_placeholders
+        assert "{bot_version}" in footer_placeholders
+        assert "{audio_intro}" not in footer_placeholders
 
     asyncio.run(_run())

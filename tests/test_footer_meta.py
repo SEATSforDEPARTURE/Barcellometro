@@ -693,3 +693,17 @@ def test_footer_service_apply_does_not_promote_custom_emoji_from_phrase() -> Non
         assert embed.footer.icon_url is None
 
     asyncio.run(_run())
+
+def test_footer_service_supports_status_placeholders_in_phrase_template() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_footer_meta(embed, service_name="riassunto", contributors=[], used_local_processing=True)
+        service, _ = _build_footer_service()
+        await service.set_version("dev9")
+        await service.set_global_phrase("{service_label} · {service_name} · {bot_version}")
+
+        await service.apply(embed, default_service_name="riassunto")
+
+        assert embed.footer.text == "Barcellometro dev9 · RIASSUNTO · riassunto · dev9"
+
+    asyncio.run(_run())

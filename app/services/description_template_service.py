@@ -13,6 +13,7 @@ from app.services.embed_public_service_keys import (
     list_public_embed_service_keys,
     resolve_public_embed_service_key,
 )
+from app.services.embed_status_placeholders import placeholder_names_for_system
 from app.services.database import DatabaseService
 from app.shared.discord.embed_body import DISCORD_DESCRIPTION_MAX, format_standard_description
 
@@ -20,14 +21,6 @@ _DESCRIPTION_TEMPLATE_KEY_PREFIX = "description_template:"
 _DESCRIPTION_ENABLED_KEY = "description_template.enabled"
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _MENTION_RE = re.compile(r"<@!?&?#?\d+>")
-
-_GENERIC_PLACEHOLDERS: tuple[str, ...] = (
-    "user_name",
-    "user_bold",
-    "service_name",
-    "ordinal_today",
-    "ordinal_today_bold",
-)
 
 _SERVICE_PLACEHOLDERS: dict[str, tuple[str, ...]] = {
     "audio": ("audio_intro", "is_first_today", "count_today"),
@@ -60,7 +53,8 @@ class DescriptionTemplateService:
 
     def allowed_placeholders(self, service: str) -> set[str]:
         service_name = self.normalize_service_name(service)
-        return set(_GENERIC_PLACEHOLDERS).union(_SERVICE_PLACEHOLDERS.get(service_name, ()))
+        generic = placeholder_names_for_system("description") - {"audio_intro", "is_first_today", "count_today"}
+        return generic.union(_SERVICE_PLACEHOLDERS.get(service_name, ()))
 
     def validate_template(self, service: str, template: str) -> str:
         cleaned = (template or "").strip()

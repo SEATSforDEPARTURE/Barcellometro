@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable, Iterable
 import discord
 
 from app.services.database import DatabaseService
+from app.services.embed_status_placeholders import render_supported_placeholders
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,37 @@ def render_footer_text(
         parts.append(processing)
     footer_text = _truncate(FOOTER_SEPARATOR.join(parts))
     return footer_text, clean_phrase or None
+
+
+def _human_footer_service_label(service_name: str) -> str:
+    labels = {
+        "audio_notes": "AUDIO",
+        "aura": "AURA",
+        "riassunto": "RIASSUNTO",
+        "resoconto": "RESOCONTO",
+        "attivita": "ATTIVITÀ",
+        "barcello": "BARCELLO",
+        "campagne_notizie": "CAMPAGNE",
+        "campagne_meteo": "CAMPAGNE",
+        "campagne_oroscopo": "CAMPAGNE",
+        "campagne_prompt": "CAMPAGNE",
+        "campagne_timer": "CAMPAGNE",
+        "qna": "QNA",
+        "status": "STATUS",
+    }
+    return labels.get(service_name, service_name.replace("_", " ").upper())
+
+
+def _render_footer_phrase_template(phrase: str | None, *, service_name: str, version: str | None) -> str | None:
+    cleaned = _clean(phrase)
+    if not cleaned:
+        return None
+    values = {
+        "service_name": _clean(service_name) or "unknown",
+        "service_label": _human_footer_service_label(service_name),
+        "bot_version": _clean(version) or "—",
+    }
+    return render_supported_placeholders(cleaned, values, system="footer")
 
 
 def _custom_emoji_icon_url(match: re.Match[str]) -> str:
@@ -813,7 +845,11 @@ class FooterService:
         minimal: bool = False,
     ) -> tuple[str, str | None]:
         version = await self.get_version()
-        phrase = await self._resolve_footer_phrase(service_name)
+        phrase = _render_footer_phrase_template(
+            await self._resolve_footer_phrase(service_name),
+            service_name=service_name,
+            version=version,
+        )
         return render_footer_text(
             version=version,
             phrase=phrase,
