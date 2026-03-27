@@ -689,6 +689,9 @@ class TriggerEngineService:
         channel_id: str,
         *,
         window_minutes: int | None = None,
+        force_publish: bool = False,
+        user1_id: str | None = None,
+        user2_id: str | None = None,
     ) -> dict[str, Any]:
         enabled = await self._database.get_trigger_enabled(guild_id, channel_id, "barcello")
         if not enabled:
@@ -698,6 +701,9 @@ class TriggerEngineService:
             channel_id,
             reason="manual_run",
             forced_window_minutes=window_minutes,
+            force_publish=force_publish,
+            pair_user1_id=user1_id,
+            pair_user2_id=user2_id,
         )
         return {"evaluated": True, "notified": bool(notified), "reason": "ok"}
 
@@ -739,6 +745,9 @@ class TriggerEngineService:
         reason: str = "event",
         allow_recovery: bool = False,
         forced_window_minutes: int | None = None,
+        force_publish: bool = False,
+        pair_user1_id: str | None = None,
+        pair_user2_id: str | None = None,
     ) -> bool:
         if self._bot is None:
             return False
@@ -787,7 +796,7 @@ class TriggerEngineService:
                 (channel_id, window_start.isoformat(), window_end.isoformat()),
             )
         message_count = int(count_row["count"]) if count_row else 0
-        if message_count < min_messages and not allow_recovery:
+        if message_count < min_messages and not allow_recovery and not force_publish:
             logger.debug(
                 "barcello skip low activity channel=%s count=%s min_messages=%s reason=%s",
                 channel_id,
@@ -796,7 +805,22 @@ class TriggerEngineService:
                 reason,
             )
             return False
-        status = await self._barcello.get_current_status(
+        pair_mode = bool(pair_user1_id and pair_user2_id)
+        if pair_mode:
+            pair_result = await self._barcello.compute_pair(
+                guild_id,
+                channel_id,
+                str(pair_user1_id),
+                str(pair_user2_id),
+                window_minutes_effective,
+            )
+            status: dict[str, object] = {
+                "score": pair_result.score,
+                "color": pair_result.color,
+                "reason": "pair",
+            }
+        else:
+            status = await self._barcello.get_current_status(
                 guild_id,
                 channel_id=channel_id,
                 window_minutes=window_minutes_effective,
@@ -830,7 +854,8 @@ class TriggerEngineService:
                 )
                 await self._database.upsert_barcello_trigger_state(guild_id, channel_id, prev_color, score, now_iso)
                 logger.debug("barcello minor transition pending confirm channel=%s transition=%s->%s", channel_id, prev_color, stored_color)
-                return False
+                if not force_publish:
+                    return False
             try:
                 candidate_since = datetime.fromisoformat(candidate_since_ts) if candidate_since_ts else now
             except ValueError:
@@ -839,7 +864,8 @@ class TriggerEngineService:
                 candidate_since = candidate_since.replace(tzinfo=timezone.utc)
             if (now - candidate_since).total_seconds() < confirm_seconds:
                 logger.debug("barcello minor transition suppressed by confirmation channel=%s transition=%s->%s", channel_id, prev_color, stored_color)
-                return False
+                if not force_publish:
+                    return False
         else:
             await self._database.update_barcello_candidate_state(guild_id, channel_id, candidate_color=None, candidate_since_ts=None)
 
@@ -884,6 +910,8 @@ class TriggerEngineService:
 
         if prev_score is not None and abs(score - prev_score) < min_score_delta_for_notify and prev_color == stored_color:
             should_notify = False
+        if force_publish:
+            should_notify = True
 
         if stored_color in {"ROSSO", "NERO"} and prev_color != stored_color:
             await self._database.update_barcello_recovery_state(
@@ -972,8 +1000,8 @@ class TriggerEngineService:
                 description="Aggiornamento automatico dello stato Barcello.",
                 color=self._barcello_embed_color(stable_color),
             )
-            if main_msg:
-                embed.add_field(name=format_standard_field_name("Aggiornamento", emoji="📣"), value=main_msg[:1024], inline=False)
+            update_text = main_msg or f"Stato corrente: **{stored_color or 'N/D'}**."
+            embed.add_field(name=format_standard_field_name("Aggiornamento", emoji="📣"), value=update_text[:1024], inline=False)
             if mod_block_text and stored_color in {"ROSSO", "NERO"}:
                 embed.add_field(name=format_standard_field_name("Moderazione", emoji="🛡️"), value=mod_block_text[:1024], inline=False)
             salute_value = f"{score}/100" if prev_score is None else f"{prev_score}→{score}/100"
@@ -986,7 +1014,7 @@ class TriggerEngineService:
                 )
             attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
             channel = self._bot.get_channel(int(channel_id))
-            if channel and isinstance(channel, discord.abc.Messageable) and main_msg:
+            if channel and isinstance(channel, discord.abc.Messageable):
                 await channel.send(embed=embed)
                 did_notify = True
                 cooldown_key = "recovery" if is_recovery_notify else ("minor" if stored_color in {"VERDE", "GIALLO"} else "major")

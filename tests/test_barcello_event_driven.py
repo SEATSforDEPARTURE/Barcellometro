@@ -4,6 +4,7 @@ import asyncio
 import sys
 import types
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import discord
@@ -164,6 +165,24 @@ def test_run_barcello_trigger_now_uses_evaluate_flow() -> None:
     assert out["reason"] == "ok"
     service._barcello.get_current_status.assert_awaited_once_with("1", channel_id="2", window_minutes=15)
     assert len(channel.sent) == 1
+
+
+def test_run_barcello_trigger_now_force_publish_sends_even_without_transition() -> None:
+    service, _db, channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 71})
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["evaluated"] is True
+    assert out["notified"] is True
+    assert len(channel.sent) == 1
+    assert "AGGIORNAMENTO BARCELLO" in str(channel.sent[0].title or "")
+
+
+def test_run_barcello_trigger_now_pair_mode_uses_compute_pair() -> None:
+    service, _db, _channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 70})
+    service._barcello.compute_pair = AsyncMock(return_value=SimpleNamespace(score=24, color="rosso"))
+    service._barcello.get_current_status = AsyncMock(return_value={"color": "VERDE", "score": 80})
+    asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True, user1_id="11", user2_id="22"))
+    service._barcello.compute_pair.assert_awaited_once_with("1", "2", "11", "22", 60)
+    service._barcello.get_current_status.assert_not_awaited()
 
 
 def test_run_barcello_trigger_now_returns_disabled_when_trigger_off() -> None:
