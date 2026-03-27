@@ -50,13 +50,18 @@ def test_description_template_set_show_reset(embed_module, monkeypatch: pytest.M
         send_standard.reset_mock()
         show_command = find_command(bundle.description_group, "template_service_show")
         await show_command.callback(InteractionStub(show_command), "audio")
-        assert section_payload(send_standard.await_args.kwargs) == (
+        show_kwargs = send_standard.await_args.kwargs
+        assert section_payload(show_kwargs) == (
             "Template",
             [
                 ("Template", "{audio_intro} **{user_name}** — **{ordinal_today}**"),
                 ("Preview", "*Leggiamo cosa ci dice **Mario** — **secondo***"),
             ],
         )
+        placeholders = dict(next(section for section in show_kwargs["sections"] if section.title == "PLACEHOLDERS").lines)
+        assert "{user_name}" in placeholders
+        assert "{audio_intro}" in placeholders
+        assert "{service_label}" not in placeholders
 
         send_standard.reset_mock()
         reset_command = find_command(bundle.description_group, "template_service_reset")
@@ -65,13 +70,16 @@ def test_description_template_set_show_reset(embed_module, monkeypatch: pytest.M
 
         send_standard.reset_mock()
         await show_command.callback(InteractionStub(show_command), "audio")
-        assert section_payload(send_standard.await_args.kwargs) == (
+        fallback_kwargs = send_standard.await_args.kwargs
+        assert section_payload(fallback_kwargs) == (
             "Template",
             [
                 ("Template", "usa default del servizio"),
                 ("Preview", "*Usa default del servizio*"),
             ],
         )
+        fallback_placeholders = dict(next(section for section in fallback_kwargs["sections"] if section.title == "PLACEHOLDERS").lines)
+        assert fallback_placeholders == placeholders
 
     asyncio.run(_run())
 

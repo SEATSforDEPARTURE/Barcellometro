@@ -70,3 +70,43 @@ def test_embed_status_commands_share_public_service_source_and_custom_default_sp
         assert "{audio_intro}" not in footer_placeholders
 
     asyncio.run(_run())
+
+
+def test_template_service_show_uses_same_placeholder_source_as_status(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
+        bundle = register_embed_tree(embed_module)
+
+        author_status = find_command(bundle.author_group, "status")
+        author_show = find_command(bundle.author_group, "template_service_show")
+        footer_status = find_command(bundle.footer_group, "status")
+        footer_show = find_command(bundle.footer_group, "template_service_show")
+        description_status = find_command(bundle.description_group, "status")
+        description_show = find_command(bundle.description_group, "template_service_show")
+
+        await author_status.callback(InteractionStub(author_status))
+        author_status_placeholders = next(section for section in send_standard.await_args.kwargs["sections"] if section.title == "PLACEHOLDERS").lines
+        send_standard.reset_mock()
+        await author_show.callback(InteractionStub(author_show), "audio")
+        author_show_placeholders = next(section for section in send_standard.await_args.kwargs["sections"] if section.title == "PLACEHOLDERS").lines
+        assert author_show_placeholders == author_status_placeholders
+
+        send_standard.reset_mock()
+        await footer_status.callback(InteractionStub(footer_status))
+        footer_status_placeholders = next(section for section in send_standard.await_args.kwargs["sections"] if section.title == "PLACEHOLDERS").lines
+        send_standard.reset_mock()
+        await footer_show.callback(InteractionStub(footer_show), "audio")
+        footer_show_placeholders = next(section for section in send_standard.await_args.kwargs["sections"] if section.title == "PLACEHOLDERS").lines
+        assert footer_show_placeholders == footer_status_placeholders
+
+        send_standard.reset_mock()
+        await description_status.callback(InteractionStub(description_status))
+        description_status_placeholders = next(section for section in send_standard.await_args.kwargs["sections"] if section.title == "PLACEHOLDERS").lines
+        send_standard.reset_mock()
+        await description_show.callback(InteractionStub(description_show), "audio")
+        description_show_placeholders = next(section for section in send_standard.await_args.kwargs["sections"] if section.title == "PLACEHOLDERS").lines
+        assert description_show_placeholders == description_status_placeholders
+
+    asyncio.run(_run())
