@@ -104,10 +104,10 @@ finestra configurata in modo idempotente.
 ### Rendering embed centralizzato
 - `/embed footer on|off|status` → amministrazione canonica del dominio footer.
 - `/embed footer template_global_set|show|reset` → template globale footer.
-- `/embed footer template_service_set|show|reset service:<nome>` → override footer per servizio.
+- `/embed footer template_service_set|show|reset service:<nome>` → override footer per servizio con autocomplete dinamico dei servizi supportati.
 - `/embed author on|off|status` → amministrazione canonica del dominio author.
 - `/embed author template_global_set|show|reset` → template globale author.
-- `/embed author template_service_set|show|reset service:<nome>` → override author per servizio.
+- `/embed author template_service_set|show|reset service:<nome>` → override author per servizio con autocomplete dinamico dei servizi supportati.
 
 Regole body ufficiali (single source of truth):
 - AUTHOR: `servizio NOME CANONICO INGLESE TOP-LEVEL` (o `· Pag. X/Y` per multipagina);

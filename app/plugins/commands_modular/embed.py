@@ -13,6 +13,7 @@ from app.shared.discord.footer_status_renderer import build_footer_status_embeds
 from app.services.embed_images import InvalidEmbedImageUrlError
 from app.services.author import InvalidAuthorThumbnailError, render_author_name
 from app.services.description_template_service import InvalidDescriptionTemplateError
+from app.services.embed_template_service_catalog import build_embed_template_service_autocomplete_choices
 from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
 
 
@@ -133,6 +134,10 @@ async def _infer_service_profile(service_name: str, ctx: CommandContext) -> Serv
 
 
 def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None:
+    async def _autocomplete_embed_template_service(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        del interaction
+        return await build_embed_template_service_autocomplete_choices(ctx, current)
+
     footer_group = app_commands.Group(name="footer", description="Footer controls")
     embed_group.add_command(footer_group)
 
@@ -291,6 +296,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @footer_group.command(name="template_service_set", description="Set a service-specific footer template.")
     @app_commands.describe(service="Service name.", phrase="Optional service-specific footer phrase.", thumbnail="Optional footer thumbnail: Discord custom emoji or http/https image URL.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def footer_template_service_set_command(
         interaction: discord.Interaction,
         service: str,
@@ -360,6 +366,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @footer_group.command(name="template_service_show", description="Show a service-specific footer template.")
     @app_commands.describe(service="Service name.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def footer_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.footer.template_service_show", ctx):
             return
@@ -397,6 +404,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @footer_group.command(name="template_service_reset", description="Reset a service-specific footer template.")
     @app_commands.describe(service="Service name.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def footer_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.footer.template_service_reset", ctx):
             return
@@ -586,6 +594,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @author_group.command(name="template_service_set", description="Set a service-specific author template.")
     @app_commands.describe(service="Service name.", phrase="Optional service-specific author phrase.", thumbnail="Optional author thumbnail: Discord custom emoji or http/https image URL.", url="Optional service-specific author URL.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def author_template_service_set_command(
         interaction: discord.Interaction,
         service: str,
@@ -635,6 +644,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @author_group.command(name="template_service_show", description="Show a service-specific author template.")
     @app_commands.describe(service="Service name.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def author_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.author.template_service_show", ctx):
             return
@@ -665,6 +675,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @author_group.command(name="template_service_reset", description="Reset a service-specific author template.")
     @app_commands.describe(service="Service name.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def author_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.author.template_service_reset", ctx):
             return
@@ -704,6 +715,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @description_group.command(name="template_service_set", description="Set a service-specific description template.")
     @app_commands.describe(service="Service name.", template="Description template with placeholders.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def description_template_service_set_command(interaction: discord.Interaction, service: str, template: str) -> None:
         if not await check_permission(interaction, "admin.description.template_service_set", ctx):
             return
@@ -743,6 +755,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @description_group.command(name="template_service_show", description="Show a service-specific description template.")
     @app_commands.describe(service="Service name.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def description_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.description.template_service_show", ctx):
             return
@@ -772,6 +785,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @description_group.command(name="template_service_reset", description="Reset a service-specific description template.")
     @app_commands.describe(service="Service name.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def description_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.description.template_service_reset", ctx):
             return
@@ -891,6 +905,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @images_group.command(name="template_service_set", description="Set service-level image and thumbnail templates.")
     @app_commands.describe(service="Service name.", image="Optional service embed image URL.", thumbnail="Optional service embed thumbnail URL.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def images_template_service_set_command(interaction: discord.Interaction, service: str, image: str | None = None, thumbnail: str | None = None) -> None:
         if not await check_permission(interaction, "admin.images.template_service_set", ctx):
             return
@@ -926,6 +941,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @images_group.command(name="template_service_show", description="Show service-level image and thumbnail templates.")
     @app_commands.describe(service="Service name.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def images_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.images.template_service_show", ctx):
             return
@@ -951,6 +967,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @images_group.command(name="template_service_reset", description="Reset service-level image and thumbnail templates.")
     @app_commands.describe(service="Service name.")
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
     async def images_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.images.template_service_reset", ctx):
             return

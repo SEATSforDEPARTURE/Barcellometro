@@ -244,6 +244,8 @@ Comandi disponibili:
 - `/embed description template_service_show service:<nome>`
 - `/embed description template_service_reset service:<nome>`
 
+Per tutti i comandi `/embed ... template_service_*` dei domini `author`, `footer`, `images` e `description`, il parametro `service` usa autocomplete dinamico centralizzato: le choice sono ricavate dalla source of truth dei servizi embed-capable (inventory footer/author, override images, template description persistiti), deduplicate, ordinate stabilmente e filtrate in base all'input utente.
+
 Storage:
 
 - chiave centralizzata: `description_template:{service}`.
