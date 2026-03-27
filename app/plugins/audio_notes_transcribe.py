@@ -51,7 +51,14 @@ def _audio_user_display_name(user: Any) -> str:
 def _audio_ordinal_label(count_today: int | None) -> str | None:
     if count_today is None or count_today <= 0:
         return None
-    return _AUDIO_ORDINALS_IT.get(count_today, f"{count_today}°")
+    return _AUDIO_ORDINALS_IT.get(count_today, f"{count_today}º")
+
+
+def _escape_audio_markdown_value(value: str) -> str:
+    sanitized = (value or "").replace("`", "")
+    sanitized = re.sub(r"(?<!\\)\*", r"\\*", sanitized)
+    sanitized = re.sub(r"(?<!\\)_", r"\\_", sanitized)
+    return sanitized
 
 
 def _audio_loading_description() -> str:
@@ -59,12 +66,12 @@ def _audio_loading_description() -> str:
 
 
 def _audio_final_description(*, user_ref: str, ordinal_label: str | None) -> str:
-    safe_user_ref = clean_embed_display_name(user_ref)
+    safe_user_ref = _escape_audio_markdown_value(clean_embed_display_name(user_ref))
     intro = "*Leggiamo cosa ci dice*"
     in_audio = "*in quest'audio...*"
     if ordinal_label:
-        return f"{intro} **{safe_user_ref}** {in_audio} *È il* **{ordinal_label}** *di oggi.*"
-    return f"{intro} **{safe_user_ref}** {in_audio}"
+        return f"{intro} ***{safe_user_ref}*** {in_audio} *È il* ***{ordinal_label}*** *di oggi.*"
+    return f"{intro} ***{safe_user_ref}*** {in_audio}"
 
 
 def _build_audio_note_title(user_display_name: str) -> str:

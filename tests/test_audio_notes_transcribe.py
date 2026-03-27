@@ -200,7 +200,7 @@ def test_loading_embed_uses_standard_title_and_italic_description_without_leadin
     assert "<@" not in embed.title
 
 
-def test_final_embed_description_includes_bold_user_and_bold_ordinal_when_available(audio_notes_module) -> None:
+def test_final_embed_description_includes_bold_and_italic_user_and_ordinal_when_available(audio_notes_module) -> None:
     sections = audio_notes_module._build_audio_note_sections(
         transcript_text="testo trascritto",
         detected_lang="en",
@@ -214,9 +214,10 @@ def test_final_embed_description_includes_bold_user_and_bold_ordinal_when_availa
     )
     assert embeds
     first = embeds[0]
-    assert first.description == "*Leggiamo cosa ci dice* **Criceto Mannaro** *in quest'audio...* *È il* **secondo** *di oggi.*"
-    assert first.description.count("**") == 4
-    assert "*Leggiamo cosa ci dice **Criceto Mannaro**" not in first.description
+    assert first.description == "*Leggiamo cosa ci dice* ***Criceto Mannaro*** *in quest'audio...* *È il* ***secondo*** *di oggi.*"
+    assert "***Criceto Mannaro***" in first.description
+    assert "***secondo***" in first.description
+    assert "**Criceto Mannaro**" not in first.description.replace("***Criceto Mannaro***", "")
     assert "Trascrizione audio elaborata" not in first.description
     assert "<@" not in first.description
     field_names = [field.name for field in first.fields]
@@ -237,7 +238,7 @@ def test_final_embed_description_fallback_without_ordinal_is_human_and_italic(au
         user_display_name="Mario",
         ordinal_label=None,
     )
-    assert embeds[0].description == "*Leggiamo cosa ci dice* **Mario** *in quest'audio...*"
+    assert embeds[0].description == "*Leggiamo cosa ci dice* ***Mario*** *in quest'audio...*"
 
 
 
@@ -253,15 +254,17 @@ def test_audio_note_title_and_description_clean_decorative_nickname_and_keep_mar
     assert embed.description.startswith("*") and embed.description.endswith("*")
     assert embed.description.count("*") % 2 == 0
     assert "\\*\\*" not in embed.description
-    assert "**CRICETO MANNARO**" in embed.description
+    assert "***CRICETO MANNARO***" in embed.description
 
 
-def test_audio_final_description_sanitizes_markdown_and_keeps_bold_segments_outside_italic_wrapper(audio_notes_module) -> None:
+def test_audio_final_description_sanitizes_markdown_and_keeps_tripled_markdown_segments(audio_notes_module) -> None:
     rendered = audio_notes_module._audio_final_description(user_ref="Cr*ic_eto` ~~", ordinal_label="quinto")
 
     assert rendered.startswith("*Leggiamo cosa ci dice* ")
-    assert "**Cric\\_eto" in rendered
-    assert "**quinto**" in rendered
+    assert "***Cric\\_eto***" in rendered
+    assert "***quinto***" in rendered
+    assert "~~" not in rendered
+    assert "`" not in rendered
     assert "*Leggiamo cosa ci dice **" not in rendered
 
 def test_audio_user_display_name_never_returns_mention_or_raw_id(audio_notes_module) -> None:
@@ -320,5 +323,6 @@ def test_audio_embed_author_pagination_is_applied_in_author_not_in_section_title
 def test_audio_ordinal_label_returns_expected_values(audio_notes_module) -> None:
     assert audio_notes_module._audio_ordinal_label(1) == "primo"
     assert audio_notes_module._audio_ordinal_label(2) == "secondo"
-    assert audio_notes_module._audio_ordinal_label(9) == "9°"
+    assert audio_notes_module._audio_ordinal_label(6) == "6º"
+    assert audio_notes_module._audio_ordinal_label(9) == "9º"
     assert audio_notes_module._audio_ordinal_label(None) is None
