@@ -250,7 +250,9 @@ def test_footer_template_service_resolves_legacy_aliases(embed_module, monkeypat
     asyncio.run(_run())
 
 
-def test_footer_status_command_uses_embed_namespace_and_interactive_view(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_footer_status_command_uses_embed_namespace_and_simplified_status_payload(
+    embed_module, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, 'check_permission', AsyncMock(return_value=True))
         send_standard = AsyncMock()

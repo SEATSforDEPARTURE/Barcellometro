@@ -323,16 +323,12 @@ def test_footer_status_pagination_view_navigates_and_disables_buttons_correctly(
 
 
 
-def test_footer_status_command_sends_single_embed_with_interactive_view() -> None:
+def test_footer_status_command_sends_single_embed_without_pagination_view() -> None:
     async def _run() -> None:
         footer = _build_footer_service()
-        await footer.record_service_footer_variant(
-            service_name="riassunto",
-            contributors=["llama3.2"],
-            used_local_processing=True,
-            last_rendered_footer="Footer riassunto",
-            origin="runtime",
-        )
+        await footer.set_enabled(False)
+        await footer.set_service_phrase("riassunto", "Footer riassunto")
+        await footer.set_service_thumbnail("riassunto", "https://example.com/footer.png")
 
         ctx = SimpleNamespace(footer=footer, database=SimpleNamespace(), ai=None)
         embed_group = app_commands.Group(name="embed", description="embed")
@@ -356,9 +352,29 @@ def test_footer_status_command_sends_single_embed_with_interactive_view() -> Non
             embed_module.check_permission = original_check_permission
 
         kwargs = interaction.response.send_message.await_args.kwargs
-        assert "embed" in kwargs
-        assert isinstance(kwargs.get("view"), FooterStatusPaginationView)
         assert kwargs["ephemeral"] is True
+        assert "embed" in kwargs
+        assert "view" not in kwargs or kwargs.get("view") is None
         assert interaction.followup.send.await_count == 0
+        embed = kwargs["embed"]
+        assert embed.title and "FOOTER STATUS" in embed.title
+        assert len(embed.fields) >= 3
+
+        info_field = embed.fields[0]
+        assert "INFO" in info_field.name
+        info_text = info_field.value.lower()
+        assert "enabled: **off**" in info_text
+        assert "supported services: **9**" in info_text
+        assert "services with custom template: **1**" in info_text
+        assert "services using default: **8**" in info_text
+        assert "runtime rule" in info_text
+
+        custom_field = next(field for field in embed.fields if "CUSTOM TEMPLATES" in field.name)
+        assert "riassunto" in custom_field.value.lower()
+        assert "phrase, thumbnail" in custom_field.value.lower()
+
+        default_field = next(field for field in embed.fields if "DEFAULT SERVICES" in field.name)
+        assert "riassunto" not in default_field.value.lower()
+        assert "audio" in default_field.value.lower()
 
     asyncio.run(_run())
