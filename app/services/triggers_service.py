@@ -683,6 +683,24 @@ class TriggerEngineService:
         for row in rows:
             await self._evaluate_barcello_channel(str(row["guild_id"]), str(row["channel_id"]), reason="legacy_poll")
 
+    async def run_barcello_trigger_now(
+        self,
+        guild_id: str,
+        channel_id: str,
+        *,
+        window_minutes: int | None = None,
+    ) -> dict[str, Any]:
+        enabled = await self._database.get_trigger_enabled(guild_id, channel_id, "barcello")
+        if not enabled:
+            return {"evaluated": False, "notified": False, "reason": "disabled"}
+        notified = await self._evaluate_barcello_channel(
+            guild_id,
+            channel_id,
+            reason="manual_run",
+            forced_window_minutes=window_minutes,
+        )
+        return {"evaluated": True, "notified": bool(notified), "reason": "ok"}
+
     async def _on_barcello_message(self, envelope: EventEnvelope) -> None:
         if envelope.event_type != "message.create" or not envelope.guild_id or not envelope.channel_id:
             return
@@ -720,13 +738,16 @@ class TriggerEngineService:
         *,
         reason: str = "event",
         allow_recovery: bool = False,
-    ) -> None:
+        forced_window_minutes: int | None = None,
+    ) -> bool:
         if self._bot is None:
-            return
+            return False
         config = self._load_barcello_trigger_cfg_cached()
         window_minutes_global = config.get("window_minutes")
         if not isinstance(window_minutes_global, int) or window_minutes_global <= 0:
             window_minutes_global = 60
+        if forced_window_minutes is not None and forced_window_minutes > 0:
+            window_minutes_global = forced_window_minutes
         min_messages = config.get("min_messages")
         if not isinstance(min_messages, int) or min_messages <= 0:
             min_messages = 10
@@ -774,7 +795,7 @@ class TriggerEngineService:
                 min_messages,
                 reason,
             )
-            return
+            return False
         status = await self._barcello.get_current_status(
                 guild_id,
                 channel_id=channel_id,
@@ -782,7 +803,7 @@ class TriggerEngineService:
             )
         raw_color = self._normalize_barcello_color(status.get("color"))
         if raw_color is None:
-            return
+            return False
         score = int(status.get("score") or 0)
         prev = await self._database.get_barcello_trigger_state(guild_id, channel_id)
         prev_color = self._normalize_barcello_color(prev.get("last_color") if prev else None)
@@ -809,7 +830,7 @@ class TriggerEngineService:
                 )
                 await self._database.upsert_barcello_trigger_state(guild_id, channel_id, prev_color, score, now_iso)
                 logger.debug("barcello minor transition pending confirm channel=%s transition=%s->%s", channel_id, prev_color, stored_color)
-                return
+                return False
             try:
                 candidate_since = datetime.fromisoformat(candidate_since_ts) if candidate_since_ts else now
             except ValueError:
@@ -818,7 +839,7 @@ class TriggerEngineService:
                 candidate_since = candidate_since.replace(tzinfo=timezone.utc)
             if (now - candidate_since).total_seconds() < confirm_seconds:
                 logger.debug("barcello minor transition suppressed by confirmation channel=%s transition=%s->%s", channel_id, prev_color, stored_color)
-                return
+                return False
         else:
             await self._database.update_barcello_candidate_state(guild_id, channel_id, candidate_color=None, candidate_since_ts=None)
 
@@ -944,6 +965,7 @@ class TriggerEngineService:
             mod_mention = f"<@&{mod_role_id}>" if mod_role_id else ""
             mod_block_text = self._render_with_placeholders(mod_template, {"mod_mention": mod_mention}) if mod_template else mod_mention
 
+        did_notify = False
         if should_notify:
             embed = discord.Embed(
                 title=format_standard_title("AGGIORNAMENTO BARCELLO", emoji="🫛"),
@@ -966,6 +988,7 @@ class TriggerEngineService:
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable) and main_msg:
                 await channel.send(embed=embed)
+                did_notify = True
                 cooldown_key = "recovery" if is_recovery_notify else ("minor" if stored_color in {"VERDE", "GIALLO"} else "major")
                 await self._database.set_barcello_last_notified(guild_id, channel_id, cooldown_key.upper(), now_iso)
                 if is_recovery_notify:
@@ -991,6 +1014,7 @@ class TriggerEngineService:
             "barcello_daily",
             {"date": day_key, "counts": counts, "last_entered_ts": last_entered_ts},
         )
+        return did_notify
 
     async def _get_recent_barcello_activity(self, channel_id: str, fresh_minutes: int) -> dict[str, Any]:
         now = datetime.now(timezone.utc)

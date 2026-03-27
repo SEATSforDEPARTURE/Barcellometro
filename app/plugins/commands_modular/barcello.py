@@ -1687,13 +1687,56 @@ def register_barcello(
         user2: discord.Member | None = None,
         window_minutes: int | None = None,
     ) -> None:
-        await _run_barcello_command(
-            interaction,
-            user1=user1,
-            user2=user2,
+        command_path = f"{trigger_top_level} barcello run"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.run", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        trigger_engine = getattr(ctx, "trigger_engine", None)
+        if trigger_engine is None or not hasattr(trigger_engine, "run_barcello_trigger_now"):
+            await send_ephemeral(
+                interaction,
+                "Servizio trigger non disponibile al momento.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        if user1 is not None or user2 is not None:
+            logger.info(
+                "triggers barcello run: ignored pair parameters guild_id=%s channel_id=%s user1=%s user2=%s",
+                guild_id,
+                channel_id,
+                getattr(user1, "id", None),
+                getattr(user2, "id", None),
+            )
+        outcome = await trigger_engine.run_barcello_trigger_now(
+            guild_id,
+            channel_id,
             window_minutes=window_minutes,
-            permission_name=f"admin.{trigger_top_level}.barcello.run",
-            command_path=f"{trigger_top_level} barcello run",
+        )
+        if outcome.get("reason") == "disabled":
+            await send_ephemeral(
+                interaction,
+                "Trigger Barcello disattivato in questo canale. Usa /triggers barcello on prima di lanciare run.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        if outcome.get("notified"):
+            await send_ephemeral(
+                interaction,
+                "Valutazione trigger eseguita: aggiornamento Barcello pubblicato nel canale.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        await send_ephemeral(
+            interaction,
+            "Valutazione trigger eseguita: nessun aggiornamento necessario.",
+            command_path=command_path,
+            top_level=trigger_top_level,
         )
 
     dmchannelsummary_barcello_group = app_commands.Group(name="barcello", description="Barcello DM summaries")
