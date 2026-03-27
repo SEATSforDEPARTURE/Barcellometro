@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.services.embed_public_service_keys import list_public_embed_service_keys
 from tests._embed_test_utils import InteractionStub, find_command, register_embed_tree
 
 
@@ -19,6 +20,11 @@ def test_embed_status_commands_share_public_service_source_and_custom_default_sp
         send_standard = AsyncMock()
         monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
         bundle = register_embed_tree(embed_module)
+        public_services = list_public_embed_service_keys()
+        assert "triggers" in public_services
+        assert "audio_notes" not in public_services
+        assert "campagne_notizie" not in public_services
+        assert len(public_services) == 10
 
         await bundle.ctx.author.set_service_phrase("riassunto", "Author custom")
         await bundle.ctx.footer.set_service_phrase("riassunto", "Footer custom")
@@ -40,12 +46,13 @@ def test_embed_status_commands_share_public_service_source_and_custom_default_sp
         description_kwargs = send_standard.await_args.kwargs
 
         for payload in (author_kwargs, footer_kwargs, description_kwargs):
-            assert ("supported services", 9) in payload["lines"]
+            assert ("supported services", len(public_services)) in payload["lines"]
             assert ("services with custom template", 1) in payload["lines"]
-            assert ("services using default", 8) in payload["lines"]
+            assert ("services using default", len(public_services) - 1) in payload["lines"]
             section_titles = {section.title for section in payload["sections"]}
             assert section_titles == {"Custom Templates", "Default Services", "PLACEHOLDERS"}
             default_services_text = next(section for section in payload["sections"] if section.title == "Default Services").lines[0][1]
+            assert "triggers" in default_services_text
             assert "audio_notes" not in default_services_text
             assert "campagne_notizie" not in default_services_text
             assert "formatter" not in default_services_text
