@@ -222,7 +222,7 @@ def test_author_service_uses_canonical_alias_resolution_for_audionotes() -> None
 
         await finalize_embed_author(embed, service, default_service_name="audio_notes")
 
-        assert embed.author.name == "servizio AUDIO NOTES"
+        assert embed.author.name == "servizio AUDIO"
 
     asyncio.run(_run())
 

@@ -3867,6 +3867,29 @@ class DatabaseService:
         row = await self.fetchone(query, tuple(params))
         return int(row["total"] or 0) if row else 0
 
+    async def count_audio_notes_for_user_in_range(
+        self,
+        *,
+        guild_id: str,
+        author_id: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> int:
+        row = await self.fetchone(
+            """
+            SELECT COUNT(*) AS total
+            FROM messages
+            WHERE guild_id = ?
+              AND author_id = ?
+              AND ts >= ?
+              AND ts < ?
+              AND COALESCE(is_deleted, 0) = 0
+              AND embeds_json LIKE '%"source": "audio_note_stt"%'
+            """,
+            (guild_id, author_id, start_ts, end_ts),
+        )
+        return int(row["total"] or 0) if row else 0
+
     async def fetch_user_messages_in_range(
         self,
         guild_id: str,

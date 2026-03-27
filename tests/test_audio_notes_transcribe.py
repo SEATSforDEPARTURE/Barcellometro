@@ -191,3 +191,55 @@ def test_parse_chars_summary_limit_non_positive_disables_feature(audio_notes_mod
     assert audio_notes_module._parse_chars_summary_limit("0") == 0
     assert audio_notes_module._parse_chars_summary_limit("-10") == 0
     assert audio_notes_module._parse_chars_summary_limit("1200") == 1200
+
+
+def test_loading_embed_uses_standard_title_and_italic_description_without_leading_emoji(audio_notes_module) -> None:
+    embed = audio_notes_module._build_audio_note_embed(
+        audio_notes_module._audio_loading_description(),
+        user_ref="@mario",
+    )
+    assert embed.title == "__**NOTA AUDIO DI @MARIO**__"
+    assert embed.description == "*Nota audio ricevuta, sto trascrivendo...*"
+    assert not embed.description.startswith("*🎙️")
+
+
+def test_final_embed_description_includes_bold_user_and_bold_ordinal_when_available(audio_notes_module) -> None:
+    sections = audio_notes_module._build_audio_note_sections(
+        transcript_text="testo trascritto",
+        detected_lang="en",
+        translation_text="testo tradotto",
+        summary_text="riassunto breve",
+    )
+    embeds = audio_notes_module._build_audio_note_embeds_from_sections(
+        sections,
+        user_ref="@mario",
+        ordinal_label="secondo",
+    )
+    assert embeds
+    first = embeds[0]
+    assert first.description == "*Leggiamo cosa ci dice **@mario** in quest'audio... È il **secondo** di oggi.*"
+    assert "Trascrizione audio elaborata" not in first.description
+    field_names = [field.name for field in first.fields]
+    assert any("TRASCRIZIONE" in name for name in field_names)
+
+
+def test_final_embed_description_fallback_without_ordinal_is_human_and_italic(audio_notes_module) -> None:
+    sections = audio_notes_module._build_audio_note_sections(
+        transcript_text="testo trascritto",
+        detected_lang="it",
+        translation_text=None,
+        summary_text=None,
+    )
+    embeds = audio_notes_module._build_audio_note_embeds_from_sections(
+        sections,
+        user_ref="@mario",
+        ordinal_label=None,
+    )
+    assert embeds[0].description == "*Leggiamo cosa ci dice **@mario** in quest'audio...*"
+
+
+def test_audio_ordinal_label_returns_expected_values(audio_notes_module) -> None:
+    assert audio_notes_module._audio_ordinal_label(1) == "primo"
+    assert audio_notes_module._audio_ordinal_label(2) == "secondo"
+    assert audio_notes_module._audio_ordinal_label(9) == "9°"
+    assert audio_notes_module._audio_ordinal_label(None) is None
