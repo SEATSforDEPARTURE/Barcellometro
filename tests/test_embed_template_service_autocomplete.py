@@ -8,8 +8,8 @@ import pytest
 from app.services.embed_template_service_catalog import (
     build_embed_template_service_autocomplete_choices,
     list_embed_template_services,
+    resolve_embed_template_public_service,
 )
-from app.services.footer import SUPPORTED_FOOTER_SERVICES
 from tests._embed_test_utils import find_command, register_embed_tree
 
 
@@ -18,76 +18,53 @@ def embed_module(import_fresh):
     return import_fresh("app.plugins.commands_modular.embed")
 
 
-def test_embed_template_services_source_of_truth_is_centralized_and_sorted() -> None:
+def test_embed_template_services_source_of_truth_is_public_and_stable() -> None:
     async def _run() -> None:
-        async def _known_footer_services() -> list[str]:
-            return ["riassunto", "custom_service", "Custom_Service", "unknown"]
-
-        async def _known_author_services() -> list[str]:
-            return ["aura", "custom_service", "fallback"]
-
-        async def _service_images() -> dict[str, str]:
-            return {"image_only": "https://example.com/image.png"}
-
-        async def _service_thumbnails() -> dict[str, str]:
-            return {"thumb_only": "https://example.com/thumb.png"}
-
-        async def _fetchall(_query: str, _params: tuple[str, ...]):
-            return [
-                {"key": "description_template:desc_only", "value": "tpl"},
-                {"key": "description_template:CUSTOM_SERVICE", "value": "tpl"},
-            ]
-
-        ctx = SimpleNamespace(
-            footer=SimpleNamespace(get_known_services=_known_footer_services),
-            author=SimpleNamespace(get_known_services=_known_author_services),
-            embed_images=SimpleNamespace(
-                get_service_images=_service_images,
-                get_service_thumbnails=_service_thumbnails,
-            ),
-            database=SimpleNamespace(fetchall=_fetchall),
-        )
-
+        ctx = SimpleNamespace()
         services = await list_embed_template_services(ctx)
-
-        assert services == sorted(services)
+        assert services == [
+            "audio",
+            "aura",
+            "riassunto",
+            "resoconto",
+            "attivita",
+            "barcello",
+            "campagne",
+            "qna",
+            "status",
+        ]
         assert len(services) == len(set(services))
-        assert "custom_service" in services
-        assert "image_only" in services
-        assert "thumb_only" in services
-        assert "desc_only" in services
-        assert "unknown" not in services
-        assert "fallback" not in services
-        for expected in ("riassunto", "aura", "status"):
-            assert expected in services
+        assert "audio_notes" not in services
+        assert "campaign_content_formatter" not in services
+        assert "detail_embeds" not in services
 
     asyncio.run(_run())
 
 
-def test_embed_template_services_autocomplete_filters_and_limits() -> None:
+def test_embed_template_services_autocomplete_only_shows_public_keys() -> None:
     async def _run() -> None:
-        dynamic_services = [f"service_{idx:02d}" for idx in range(40)]
-
-        async def _known_footer_services() -> list[str]:
-            return list(SUPPORTED_FOOTER_SERVICES) + dynamic_services
-
-        ctx = SimpleNamespace(
-            footer=SimpleNamespace(get_known_services=_known_footer_services),
-            author=None,
-            embed_images=None,
-            database=None,
-        )
-
-        filtered = await build_embed_template_service_autocomplete_choices(ctx, "service_1")
+        ctx = SimpleNamespace()
+        filtered = await build_embed_template_service_autocomplete_choices(ctx, "au")
         assert filtered
-        assert all("service_1" in choice.value for choice in filtered)
-        assert len(filtered) <= 25
+        assert [choice.value for choice in filtered] == ["audio", "aura"]
 
         full = await build_embed_template_service_autocomplete_choices(ctx, "")
-        assert len(full) == 25
-        assert [choice.value for choice in full] == sorted(choice.value for choice in full)
+        values = [choice.value for choice in full]
+        assert len(values) <= 25
+        assert "audio" in values
+        assert "audio_notes" not in values
+        assert "campaign_content_views" not in values
+        assert "detail_embeds" not in values
+        assert len(values) == len(set(values))
 
     asyncio.run(_run())
+
+
+def test_embed_template_service_resolver_maps_legacy_aliases_to_public_keys() -> None:
+    assert resolve_embed_template_public_service("audio") == "audio"
+    assert resolve_embed_template_public_service("audio_notes") == "audio"
+    assert resolve_embed_template_public_service("campagne_prompt") == "campagne"
+    assert resolve_embed_template_public_service("detail_embeds") is None
 
 
 def test_embed_template_service_commands_share_same_autocomplete_binding(embed_module) -> None:

@@ -86,3 +86,20 @@ def test_description_template_set_rejects_invalid_placeholder(embed_module, monk
         assert "Invalid placeholders" in send_standard.await_args.kwargs["lines"][0][1]
 
     asyncio.run(_run())
+
+
+def test_description_template_service_legacy_alias_is_normalized_to_public_key(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
+        bundle = register_embed_tree(embed_module)
+
+        set_command = find_command(bundle.description_group, "template_service_set")
+        await set_command.callback(InteractionStub(set_command), "audio_notes", "{audio_intro} {user_name}")
+
+        assert send_standard.await_args.kwargs["subtitle_args"] == ["audio"]
+        assert "description_template:audio" in bundle.database.settings
+        assert "description_template:audio_notes" not in bundle.database.settings
+
+    asyncio.run(_run())

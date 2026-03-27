@@ -72,3 +72,22 @@ def test_render_sanitizes_mentions_and_missing_placeholders() -> None:
         assert rendered.startswith("*") and rendered.endswith("*")
 
     asyncio.run(_run())
+
+
+def test_legacy_service_alias_reads_and_resets_on_public_key() -> None:
+    async def _run() -> None:
+        db = _DbStub()
+        db.values["description_template:audio_notes"] = "Legacy {audio_intro} {user_name}"
+        service = DescriptionTemplateService(db)
+
+        assert await service.get_template("audio") == "Legacy {audio_intro} {user_name}"
+
+        await service.set_template("audio_notes", "{audio_intro} {user_name}")
+        assert "description_template:audio" in db.values
+        assert "description_template:audio_notes" in db.values
+
+        await service.reset_template("audio")
+        assert "description_template:audio" not in db.values
+        assert "description_template:audio_notes" not in db.values
+
+    asyncio.run(_run())
