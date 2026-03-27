@@ -201,6 +201,6 @@ def test_alias_resolution() -> None:
 
         await _finalize_single(embed, default_service_name="dmchannelsummary")
 
-        assert "DMCHANNELSUMMARY" in str(embed.author.name)
+        assert "DM CHANNEL SUMMARY" in str(embed.author.name)
 
     asyncio.run(_run())
