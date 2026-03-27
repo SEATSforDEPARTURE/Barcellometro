@@ -8,6 +8,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - Compatibility note: top-level `/kick`, `/ban`, `/tempban`, `/grace` are registered as real aliases of `/users kick|ban|tempban|grace`; they are inventoried below as standalone compatibility roots because the validator parses those top-level command registrations directly.
 - Compatibility note: `/users unban` remains available as a non-canonical compatibility command for audit/backfill alignment even though it is outside the target contract list.
 - Contract note: `greetings template_set/show/reset` are intentionally absent; editorial greetings copy stays externalized in `settings/greetings_trigger.json`.
+- Contract note: `/embed description` is intentionally minimal and currently exposes only `template_service_set/show/reset` (no `on/off/status`, no `template_global_*`).
 
 ## Inventory
 

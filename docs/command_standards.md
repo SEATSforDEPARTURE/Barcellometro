@@ -95,10 +95,17 @@ Regole obbligatorie:
 
 - `/embed footer ...` è il namespace canonico per amministrare il dominio footer centralizzato;
 - `/embed author ...` è il namespace canonico per amministrare il dominio author centralizzato;
+- `/embed images ...` è il namespace canonico per amministrare il dominio immagini embed centralizzato;
+- `/embed description ...` è il namespace canonico per amministrare i template dinamici della description;
 - `/admin footer ...` **non** deve essere presentato come standard corrente, comando canonico o namespace raccomandato;
 - eventuali riferimenti a percorsi legacy o wrapper interni devono essere descritti solo come compatibilità tecnica e mai come superficie utente preferita.
 
-Questa regola non contraddice i command standards esistenti: `footer` e `author` restano domini amministrativi che usano le stesse action canoniche `on/off/status`, `template_*_set/show/reset` e la stessa semantica generale di override.
+Questa regola non contraddice i command standards esistenti: `footer`, `author` e `images` restano domini amministrativi che usano le stesse action canoniche `on/off/status`, `template_*_set/show/reset` e la stessa semantica generale di override.
+
+Eccezione intenzionale:
+
+- `description` è un dominio **minimale** e al momento espone solo `template_service_set/show/reset`;
+- non prevede `on/off/status` né `template_global_*` perché delega il fallback alla description standard già esistente del servizio.
 
 Per i toggle globali vale una semantica forte: `author off` deve sopprimere qualsiasi author visibile negli embed standard del progetto e `footer off` deve sopprimere qualsiasi footer visibile negli embed standard del progetto, non solo evitare nuove aggiunte.
 
@@ -128,9 +135,11 @@ Per i comandi di configurazione template/override, `set` deve inoltre supportare
 
 Per il namespace `/embed` valgono anche queste regole specifiche:
 
-- `footer` e `author` sono domini distinti ma centralizzati;
+- `footer`, `author` e `images` sono domini distinti ma centralizzati;
 - `footer` controlla brand/versione/frase/contributor tecnici del footer renderizzato;
 - `author` controlla intestazione visuale del servizio nell'embed;
+- `images` controlla template immagine/thumbnail globali e service-level;
+- `description` controlla solo template description service-level;
 - `thumbnail` author e `thumbnail` footer sono configurazioni separate e non devono essere dedotte una dall'altra;
 - i comandi `template_global_set` e `template_service_set` possono aggiornare in modo parziale i campi del proprio dominio (`phrase`, `thumbnail`, altri metadata previsti) senza resettare implicitamente quelli non passati;
 - `reset` deve sempre riportare al fallback del dominio, non a un valore arbitrario persistito o a un ultimo valore memoizzato fuori contratto.

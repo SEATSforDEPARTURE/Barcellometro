@@ -244,6 +244,12 @@ Comandi disponibili:
 - `/embed description template_service_show service:<nome>`
 - `/embed description template_service_reset service:<nome>`
 
+Nota architetturale:
+
+- il namespace `description` è intenzionalmente minimale e non replica la simmetria completa di `footer/author/images`;
+- non espone `on/off/status` e non espone `template_global_*`;
+- il fallback resta la description standard del servizio quando non è presente un template service-level.
+
 Storage:
 
 - chiave centralizzata: `description_template:{service}`.
