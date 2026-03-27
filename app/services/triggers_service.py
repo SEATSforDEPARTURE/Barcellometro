@@ -1016,12 +1016,13 @@ class TriggerEngineService:
             salute_value = self._render_trigger_health_bar(score=score, color=stored_color)
             embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
             if state_count_today >= 2 and last_in_state_human:
+                trend_lines = [
+                    f"• È la **{state_count_today}ª volta** che diventa **{self._barcello_state_ui_label(stored_color)}**.",
+                    f"• L'ultima è stata **{last_in_state_human}** fa.",
+                ]
                 embed.add_field(
                     name=format_standard_field_name("Trend", emoji="📊"),
-                    value=(
-                        f"**{state_count_today}ª volta** in stato **{self._barcello_state_ui_label(stored_color)}**.\n"
-                        f"Ultima: **{last_in_state_human} fa**."
-                    ),
+                    value="\n".join(trend_lines),
                     inline=False,
                 )
             attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
