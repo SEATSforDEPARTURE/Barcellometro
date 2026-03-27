@@ -136,7 +136,7 @@ def test_footer_template_service_set_show_and_reset_roundtrip(embed_module, monk
         )
 
         set_kwargs = send_standard.await_args.kwargs
-        assert set_kwargs['subtitle_args'] == ['riassunto']
+        assert set_kwargs['subtitle_args'] == ['dmchannelsummary']
         assert set_kwargs['lines'] == [('result', 'updated')]
         assert section_payload(set_kwargs) == (
             'Template',
@@ -167,8 +167,8 @@ def test_footer_template_service_set_show_and_reset_roundtrip(embed_module, monk
         reset_command = find_command(bundle.footer_group, 'template_service_reset')
         await reset_command.callback(InteractionStub(reset_command), 'riassunto')
         assert send_standard.await_args.kwargs['lines'] == [('result', 'reset')]
-        assert (await bundle.ctx.footer.get_service_phrases()).get('riassunto') is None
-        assert (await bundle.ctx.footer.get_service_thumbnails()).get('riassunto') is None
+        assert (await bundle.ctx.footer.get_service_phrases()).get('dmchannelsummary') is None
+        assert (await bundle.ctx.footer.get_service_thumbnails()).get('dmchannelsummary') is None
 
         send_standard.reset_mock()
         await show_command.callback(InteractionStub(show_command), 'riassunto')
@@ -204,9 +204,9 @@ def test_footer_template_set_rejects_invalid_thumbnail(embed_module, monkeypatch
         send_standard.reset_mock()
         service_command = find_command(bundle.footer_group, 'template_service_set')
         await service_command.callback(InteractionStub(service_command), 'riassunto', thumbnail='bad-value')
-        assert send_standard.await_args.kwargs['subtitle_args'] == ['riassunto']
+        assert send_standard.await_args.kwargs['subtitle_args'] == ['dmchannelsummary']
         assert send_standard.await_args.kwargs['kind'] == 'error'
-        assert (await bundle.ctx.footer.get_service_thumbnails()).get('riassunto') is None
+        assert (await bundle.ctx.footer.get_service_thumbnails()).get('dmchannelsummary') is None
 
     asyncio.run(_run())
 
@@ -229,7 +229,7 @@ def test_footer_template_set_without_changes_returns_warning_and_next_step(embed
         service_command = find_command(bundle.footer_group, 'template_service_set')
         await service_command.callback(InteractionStub(service_command), 'riassunto')
         service_kwargs = send_standard.await_args.kwargs
-        assert service_kwargs['subtitle_args'] == ['riassunto']
+        assert service_kwargs['subtitle_args'] == ['dmchannelsummary']
         assert service_kwargs['kind'] == 'warning'
         assert service_kwargs['lines'] == [('reason', 'No changes provided')]
 
@@ -277,16 +277,16 @@ def test_footer_status_command_uses_embed_namespace_and_simplified_status_payloa
         kwargs = send_standard.await_args.kwargs
         assert kwargs['subcommand_path'] == 'footer status'
         assert ('enabled', 'off') in kwargs['lines']
-        assert ('supported services', 10) in kwargs['lines']
+        assert ('supported services', 15) in kwargs['lines']
         assert ('services with custom template', 1) in kwargs['lines']
-        assert ('services using default', 9) in kwargs['lines']
+        assert ('services using default', 14) in kwargs['lines']
         assert ('runtime rule', 'OFF = runtime always uses standard default footer even if custom is saved') in kwargs['lines']
         custom_section = next(section for section in kwargs['sections'] if section.title == 'Custom Templates')
-        assert ('riassunto', 'phrase, thumbnail') in custom_section.lines
+        assert ('dmchannelsummary', 'phrase, thumbnail') in custom_section.lines
         default_section = next(section for section in kwargs['sections'] if section.title == 'Default Services')
         assert 'audio' in default_section.lines[0][1]
         assert 'triggers' in default_section.lines[0][1]
-        assert 'campagne' in default_section.lines[0][1]
+        assert 'campaigns' in default_section.lines[0][1]
         assert 'campagne_notizie' not in default_section.lines[0][1]
         assert 'builder' not in default_section.lines[0][1]
         placeholders = dict(next(section for section in kwargs['sections'] if section.title == 'PLACEHOLDERS').lines)

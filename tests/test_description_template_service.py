@@ -126,7 +126,7 @@ def test_build_status_snapshot_uses_public_service_keys_only() -> None:
 
         snapshot = await service.build_status_snapshot()
         assert snapshot.enabled is True
-        assert snapshot.total_services == 10
+        assert snapshot.total_services == 15
         assert snapshot.custom_templates == {"audio": "Legacy {audio_intro} {user_name}"}
 
     asyncio.run(_run())

@@ -51,8 +51,11 @@ def test_embed_status_commands_share_public_service_source_and_custom_default_sp
             assert ("services using default", len(public_services) - 1) in payload["lines"]
             section_titles = {section.title for section in payload["sections"]}
             assert section_titles == {"Custom Templates", "Default Services", "PLACEHOLDERS"}
+            custom_templates = next(section for section in payload["sections"] if section.title == "Custom Templates").lines
+            assert any(service_name == "dmchannelsummary" for service_name, _ in custom_templates)
             default_services_text = next(section for section in payload["sections"] if section.title == "Default Services").lines[0][1]
             assert "triggers" in default_services_text
+            assert "campaigns" in default_services_text
             assert "audio_notes" not in default_services_text
             assert "campagne_notizie" not in default_services_text
             assert "formatter" not in default_services_text
@@ -75,6 +78,27 @@ def test_embed_status_commands_share_public_service_source_and_custom_default_sp
         assert "{service_name}" in footer_placeholders
         assert "{bot_version}" in footer_placeholders
         assert "{audio_intro}" not in footer_placeholders
+
+    asyncio.run(_run())
+
+
+def test_embed_status_maps_legacy_custom_services_to_public_canonical_keys(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
+        bundle = register_embed_tree(embed_module)
+
+        await bundle.ctx.footer.set_service_phrase("campagne", "Campagne custom")
+        await bundle.ctx.footer.set_service_phrase("barcello", "Trigger custom")
+
+        footer_status = find_command(bundle.footer_group, "status")
+        await footer_status.callback(InteractionStub(footer_status))
+        footer_custom_lines = next(section for section in send_standard.await_args.kwargs["sections"] if section.title == "Custom Templates").lines
+
+        assert ("campaigns", "phrase") in footer_custom_lines
+        assert ("triggers", "phrase") in footer_custom_lines
+        assert not any(service in {"campagne", "barcello", "frasi"} for service, _ in footer_custom_lines)
 
     asyncio.run(_run())
 
