@@ -34,7 +34,7 @@ def test_prepare_embeds_for_send_applies_footer_and_author_when_both_are_enabled
             default_service_name='riassunto',
         )
 
-        assert [embed.author.name for embed in prepared] == ['servizio DM SUMMARY · (Pag. 1/2)', 'servizio DM SUMMARY · (Pag. 2/2)']
+        assert [embed.author.name for embed in prepared] == ['servizio DM CHANNEL SUMMARY · (Pag. 1/2)', 'servizio DM CHANNEL SUMMARY · (Pag. 2/2)']
         assert all((embed.footer.text or '').startswith('Barcellometro') for embed in prepared)
         assert all('Dati elaborati con gpt-4o-mini' in (embed.footer.text or '') for embed in prepared)
 
@@ -143,5 +143,5 @@ def test_author_canonical_labels_use_top_level_command_tokens() -> None:
     from app.services.author import render_author_name
 
     assert render_author_name(service_name='status') == 'servizio EMBED'
-    assert render_author_name(service_name='riassunto') == 'servizio DM SUMMARY'
-    assert render_author_name(service_name='aura') == 'servizio AURA SUMMARY'
+    assert render_author_name(service_name='riassunto') == 'servizio DM CHANNEL SUMMARY'
+    assert render_author_name(service_name='aura') == 'servizio DM SERVER SUMMARY'
