@@ -86,9 +86,11 @@ def test_footer_status_command_supports_multipage_navigation(embed_module, monke
         view = kwargs['view']
         assert isinstance(view, embed_module.FooterStatusPaginationView)
         assert len(view._embeds) > 1
-        assert all('• Pagina: **' in (page.description or '') for page in view._embeds)
+        assert all((page.description or '').startswith('*') for page in view._embeds)
+        assert all(page.fields and page.fields[0].name == 'ℹ️ __**INFO**__' for page in view._embeds)
+        assert all('• Pagina: **' in (page.fields[0].value or '') for page in view._embeds)
         assert all('Pagina ' not in (page.footer.text or '') for page in view._embeds)
-        assert all((page.title or '') == format_standard_title('EMBED', emoji='📦') for page in view._embeds)
+        assert all('FOOTER STATUS' in (page.title or '') for page in view._embeds)
         assert all((page.author.name or '').startswith('servizio EMBED · (Pag. ') for page in view._embeds)
         assert all('UNKNOWN' not in (page.author.name or '') for page in view._embeds)
 
@@ -124,7 +126,8 @@ def test_author_status_command_supports_multipage_navigation(embed_module, monke
         view = kwargs['view']
         assert isinstance(view, embed_module.AuthorStatusPaginationView)
         assert len(view._embeds) > 1
-        assert all('• Pagina ' in (page.description or '') for page in view._embeds)
+        assert all((page.description or '').startswith('*') for page in view._embeds)
+        assert all(page.fields and page.fields[0].name == 'ℹ️ __**INFO**__' for page in view._embeds)
         assert all((page.author.name or '').startswith('servizio EMBED · (Pag. ') for page in view._embeds)
         assert all('UNKNOWN' not in (page.author.name or '') for page in view._embeds)
         assert all((page.footer.text or '').startswith('Barcellometro') for page in view._embeds)

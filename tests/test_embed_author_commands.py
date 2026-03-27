@@ -63,7 +63,7 @@ def test_author_on_off_and_status_commands(embed_module, monkeypatch: pytest.Mon
         status_kwargs = send_command_embeds.await_args.kwargs
         assert status_kwargs['ephemeral'] is True
         assert len(status_kwargs['embeds']) == 1
-        assert status_kwargs['embeds'][0].title == '📦 EMBED'
+        assert status_kwargs['embeds'][0].title == '📦 __**AUTHOR STATUS**__'
         assert isinstance(status_kwargs['view'], embed_module.AuthorStatusPaginationView)
 
     asyncio.run(_run())

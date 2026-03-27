@@ -70,7 +70,7 @@ def test_build_command_embed_uses_users_visual_top_level() -> None:
     )
 
     assert embed.title == "🛠️ __**TEMPBAN_LIST**__"
-    assert embed.description == "*Esecuzione del comando **TEMPBAN_LIST**.*"
+    assert embed.description == "*Descrizione sintetica dell'esecuzione del comando.*\n\n"
     assert get_footer_meta(embed) is not None
     assert get_footer_meta(embed).service_name == "users"
 
@@ -115,7 +115,7 @@ def test_build_command_embed_omits_top_level_duplication_for_parameterized_comma
     )
 
     assert embed.title == "❓ __**LIMITS_SHOW BASE**__"
-    assert embed.description == "*Esecuzione del comando **LIMITS_SHOW BASE**.*"
+    assert embed.description == "*Descrizione sintetica dell'esecuzione del comando.*\n\n"
     assert "QNA LIMITS_SHOW BASE" not in (embed.title or "")
 
 
@@ -132,7 +132,7 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
     )
 
     assert embed.title == "❓ __**BONUS_SHOW MARIO ROSSI**__"
-    assert embed.description == "*Esecuzione del comando **BONUS_SHOW MARIO ROSSI**.*"
+    assert embed.description == "*Descrizione sintetica dell'esecuzione del comando.*\n\n"
     assert "<@123>" not in (embed.description or "")
 
 
@@ -244,7 +244,7 @@ def test_build_command_embed_strips_ugly_prefixes_from_narrative_bullets() -> No
     assert "• Phrase entry #1 not found." in body
     assert "• Updated." in body
     assert "• Qualcosa è andato storto." in body
-    assert description.startswith("*Esecuzione del comando **OGGI**.*")
+    assert description.startswith("*Descrizione sintetica dell'esecuzione del comando.*")
 
 
 def test_build_command_embed_deduplicates_identity_lines_already_in_subtitle() -> None:
@@ -310,7 +310,7 @@ def test_build_command_embed_never_reuses_subtitle_icon_for_info_sections() -> N
         )
     )
 
-    section_field = embed.fields[0]
+    section_field = embed.fields[1]
     assert section_field.name != "ℹ️ __**LIMITS**__"
     assert section_field.name == "📊 __**LIMITS**__"
 
@@ -334,19 +334,19 @@ def test_build_command_embed_never_reuses_subtitle_icon_for_standard_kinds() -> 
             )
         )
 
-        assert len(embed.fields) == 1
-        assert embed.fields[0].name == expected_section_header
+        assert len(embed.fields) == 2
+        assert embed.fields[1].name == expected_section_header
 
 
 def test_build_command_embed_uses_official_kind_mapping_for_all_standard_types() -> None:
     scenarios = {
-        "success": ("✅", 0x57F287),
-        "warning": ("⚠️", 0xFEE75C),
-        "error": ("❌", 0xED4245),
-        "info": ("ℹ️", 0x3498DB),
+        "success": ("✅ __**OK**__", 0x57F287),
+        "warning": ("⚠️ __**WARNING**__", 0xFEE75C),
+        "error": ("❌ __**ERROR**__", 0xED4245),
+        "info": ("ℹ️ __**INFO**__", 0x3498DB),
     }
 
-    for kind, (_emoji, color) in scenarios.items():
+    for kind, (expected_field, color) in scenarios.items():
         embed = asyncio.run(
             build_command_embed(
                 top_level="admin",
@@ -357,7 +357,9 @@ def test_build_command_embed_uses_official_kind_mapping_for_all_standard_types()
             )
         )
 
-        assert len(embed.fields) == 0
+        assert len(embed.fields) == 1
+        assert embed.fields[0].name == expected_field
+        assert embed.fields[0].value == "—"
         assert embed.colour.value == color
 
 
@@ -373,7 +375,7 @@ def test_build_command_embed_keeps_blank_line_between_subtitle_and_body() -> Non
         )
     )
 
-    assert embed.description == "*Esecuzione del comando **STATUS**.*\n\n"
+    assert embed.description == "*Descrizione sintetica dell'esecuzione del comando.*\n\n"
     assert embed.fields[0].value == "• Prima riga.\n• Seconda riga."
 
 
