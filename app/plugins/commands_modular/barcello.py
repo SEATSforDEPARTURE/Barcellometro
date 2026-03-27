@@ -1703,18 +1703,21 @@ def register_barcello(
                 top_level=trigger_top_level,
             )
             return
-        if user1 is not None or user2 is not None:
-            logger.info(
-                "triggers barcello run: ignored pair parameters guild_id=%s channel_id=%s user1=%s user2=%s",
-                guild_id,
-                channel_id,
-                getattr(user1, "id", None),
-                getattr(user2, "id", None),
+        if (user1 is None) != (user2 is None):
+            await send_ephemeral(
+                interaction,
+                "Per usare la modalità coppia devi specificare sia user1 che user2.",
+                command_path=command_path,
+                top_level=trigger_top_level,
             )
+            return
         outcome = await trigger_engine.run_barcello_trigger_now(
             guild_id,
             channel_id,
             window_minutes=window_minutes,
+            force_publish=True,
+            user1_id=str(user1.id) if user1 is not None else None,
+            user2_id=str(user2.id) if user2 is not None else None,
         )
         if outcome.get("reason") == "disabled":
             await send_ephemeral(
@@ -1727,14 +1730,14 @@ def register_barcello(
         if outcome.get("notified"):
             await send_ephemeral(
                 interaction,
-                "Valutazione trigger eseguita: aggiornamento Barcello pubblicato nel canale.",
+                "Aggiornamento Barcello pubblicato nel canale.",
                 command_path=command_path,
                 top_level=trigger_top_level,
             )
             return
         await send_ephemeral(
             interaction,
-            "Valutazione trigger eseguita: nessun aggiornamento necessario.",
+            "Impossibile pubblicare l'aggiornamento Barcello nel canale.",
             command_path=command_path,
             top_level=trigger_top_level,
         )
