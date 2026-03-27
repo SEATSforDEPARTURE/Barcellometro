@@ -17,7 +17,8 @@ def test_normalize_display_context_triggers_phrases_template_global_show() -> No
         visual_top_level="triggers",
     )
 
-    assert context.visual_title == "TRIGGERS"
+    assert context.service_title == "TRIGGERS"
+    assert context.visual_title == "PHRASES TEMPLATE_GLOBAL_SHOW"
     assert context.visual_subtitle == "PHRASES TEMPLATE_GLOBAL_SHOW"
 
 
@@ -29,9 +30,9 @@ def test_normalize_display_context_qna_limits_with_parameter() -> None:
         subtitle_args=["parameter:base"],
     )
 
-    assert context.visual_title == "QNA"
-    assert context.visual_subtitle == "LIMITS_SHOW BASE"
-    assert "QNA" not in context.visual_subtitle
+    assert context.service_title == "QNA"
+    assert context.visual_title == "LIMITS_SHOW BASE"
+    assert "QNA" not in context.visual_title
 
 
 def test_normalize_display_context_campaigns_prompt_status() -> None:
@@ -41,8 +42,8 @@ def test_normalize_display_context_campaigns_prompt_status() -> None:
         visual_top_level="campaigns",
     )
 
-    assert context.visual_title == "CAMPAIGNS"
-    assert context.visual_subtitle == "PROMPT STATUS"
+    assert context.service_title == "CAMPAIGNS"
+    assert context.visual_title == "PROMPT STATUS"
 
 
 def test_normalize_display_context_admin_command_keeps_admin_title() -> None:
@@ -51,8 +52,8 @@ def test_normalize_display_context_admin_command_keeps_admin_title() -> None:
         subcommand_path="retention on",
     )
 
-    assert context.visual_title == "ADMIN"
-    assert context.visual_subtitle == "RETENTION ON"
+    assert context.service_title == "ADMIN"
+    assert context.visual_title == "RETENTION ON"
 
 
 def test_build_command_embed_uses_users_visual_top_level() -> None:
@@ -68,8 +69,8 @@ def test_build_command_embed_uses_users_visual_top_level() -> None:
         )
     )
 
-    assert embed.title == "🛠️ __**USERS**__"
-    assert embed.description.startswith("**ℹ️ TEMPBAN_LIST**")
+    assert embed.title == "🛠️ __**TEMPBAN_LIST**__"
+    assert embed.description == "*Esecuzione del comando **TEMPBAN_LIST**.*"
     assert get_footer_meta(embed) is not None
     assert get_footer_meta(embed).service_name == "users"
 
@@ -113,9 +114,9 @@ def test_build_command_embed_omits_top_level_duplication_for_parameterized_comma
         )
     )
 
-    assert embed.title == "❓ __**QNA**__"
-    assert embed.description.startswith("**ℹ️ LIMITS_SHOW BASE**")
-    assert "QNA LIMITS_SHOW BASE" not in (embed.description or "")
+    assert embed.title == "❓ __**LIMITS_SHOW BASE**__"
+    assert embed.description == "*Esecuzione del comando **LIMITS_SHOW BASE**.*"
+    assert "QNA LIMITS_SHOW BASE" not in (embed.title or "")
 
 
 def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
@@ -130,8 +131,8 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
         )
     )
 
-    assert embed.title == "❓ __**QNA**__"
-    assert embed.description.startswith("**ℹ️ BONUS_SHOW MARIO ROSSI**")
+    assert embed.title == "❓ __**BONUS_SHOW MARIO ROSSI**__"
+    assert embed.description == "*Esecuzione del comando **BONUS_SHOW MARIO ROSSI**.*"
     assert "<@123>" not in (embed.description or "")
 
 
@@ -174,8 +175,7 @@ def test_build_command_embed_formats_period_subtitle_for_riassunto_ultimi() -> N
         )
     )
 
-    assert embed.title == "🗒️ __**RIASSUNTO**__"
-    assert embed.description.startswith("**ℹ️ ULTIMA ORA**")
+    assert embed.title == "🗒️ __**ULTIMA ORA**__"
 
 
 def test_build_command_embed_formats_period_subtitle_for_attivita_ultimi() -> None:
@@ -189,8 +189,7 @@ def test_build_command_embed_formats_period_subtitle_for_attivita_ultimi() -> No
         )
     )
 
-    assert embed.title == "📈 __**ATTIVITA**__"
-    assert embed.description.startswith("**ℹ️ ULTIMO MINUTO**")
+    assert embed.title == "📈 __**ULTIMO MINUTO**__"
 
 
 def test_build_command_embed_formats_range_subtitle_centrally() -> None:
@@ -203,8 +202,7 @@ def test_build_command_embed_formats_range_subtitle_centrally() -> None:
         )
     )
 
-    assert embed.title == "🗒️ __**RIASSUNTO**__"
-    assert embed.description.startswith("**ℹ️ DAL 20/03 10:15 AL 21/03 11:45**")
+    assert embed.title == "🗒️ __**DAL 20/03 10:15 AL 21/03 11:45**__"
 
 
 def test_build_command_embed_uses_real_top_level_for_resocontocanale() -> None:
@@ -216,8 +214,7 @@ def test_build_command_embed_uses_real_top_level_for_resocontocanale() -> None:
         )
     )
 
-    assert embed.title == "📓 __**RESOCONTOCANALE**__"
-    assert embed.description.startswith("**ℹ️ STATUS**")
+    assert embed.title == "📓 __**STATUS**__"
     assert "RESOCONTO STATUS" not in (embed.description or "")
 
 
@@ -238,14 +235,16 @@ def test_build_command_embed_strips_ugly_prefixes_from_narrative_bullets() -> No
     )
 
     description = embed.description or ""
-    assert "Dettaglio:" not in description
-    assert "Warning:" not in description
-    assert "Result:" not in description
-    assert "Error:" not in description
-    assert "• Ti ho inviato il riassunto in DM." in description
-    assert "• Phrase entry #1 not found." in description
-    assert "• Updated." in description
-    assert "• Qualcosa è andato storto." in description
+    body = embed.fields[0].value
+    assert "Dettaglio:" not in body
+    assert "Warning:" not in body
+    assert "Result:" not in body
+    assert "Error:" not in body
+    assert "• Ti ho inviato il riassunto in DM." in body
+    assert "• Phrase entry #1 not found." in body
+    assert "• Updated." in body
+    assert "• Qualcosa è andato storto." in body
+    assert description.startswith("*Esecuzione del comando **OGGI**.*")
 
 
 def test_build_command_embed_deduplicates_identity_lines_already_in_subtitle() -> None:
@@ -260,11 +259,11 @@ def test_build_command_embed_deduplicates_identity_lines_already_in_subtitle() -
         )
     )
 
-    description = embed.description or ""
-    assert description.startswith("**ℹ️ BONUS_SHOW MARIO**")
-    assert "• User:" not in description
-    assert "<@123>" not in description
-    assert "• Bonus: **3**" in description
+    info_field = embed.fields[0]
+    assert info_field.name == "ℹ️ __**INFO**__"
+    assert "• User:" not in info_field.value
+    assert "<@123>" not in info_field.value
+    assert "• Bonus: **3**" in info_field.value
 
 
 def test_build_command_embed_deduplicates_tier_line_already_in_subtitle() -> None:
@@ -279,10 +278,9 @@ def test_build_command_embed_deduplicates_tier_line_already_in_subtitle() -> Non
         )
     )
 
-    description = embed.description or ""
-    assert description.startswith("**ℹ️ LIMITS_SHOW BASE**")
-    assert "Tier: **base**" not in description
-    assert "• Limit: **5**" in description
+    info_field = embed.fields[0]
+    assert "Tier: **base**" not in info_field.value
+    assert "• Limit: **5**" in info_field.value
 
 
 def test_build_command_embed_skips_long_unreadable_subtitle_input() -> None:
@@ -297,9 +295,8 @@ def test_build_command_embed_skips_long_unreadable_subtitle_input() -> None:
         )
     )
 
-    assert embed.title == "⚡ __**TRIGGERS**__"
-    assert embed.description.startswith("**ℹ️ PHRASES TEMPLATE_USER_SET**")
-    assert "X" * 120 not in (embed.description or "")
+    assert embed.title == "⚡ __**PHRASES TEMPLATE_USER_SET**__"
+    assert "X" * 120 not in (embed.title or "")
 
 
 def test_build_command_embed_never_reuses_subtitle_icon_for_info_sections() -> None:
@@ -313,35 +310,32 @@ def test_build_command_embed_never_reuses_subtitle_icon_for_info_sections() -> N
         )
     )
 
-    description = embed.description or ""
-    assert description.startswith("**ℹ️ LIMITS_SHOW**")
-    assert "**ℹ️ LIMITS**" not in description
-    assert "**📊 LIMITS**" in description
+    section_field = embed.fields[0]
+    assert section_field.name != "ℹ️ __**LIMITS**__"
+    assert section_field.name == "📊 __**LIMITS**__"
 
 
 def test_build_command_embed_never_reuses_subtitle_icon_for_standard_kinds() -> None:
     scenarios = {
-        "success": ("✅", "**📋 RESULT**"),
-        "warning": ("⚠️", "**📋 WARNINGS**"),
-        "error": ("❌", "**🧩 ERRORS**"),
+        "success": ("📋 __**RESULT**__", "✅"),
+        "warning": ("📋 __**WARNINGS**__", "⚠️"),
+        "error": ("🧩 __**ERRORS**__", "❌"),
     }
 
-    for kind, (subtitle_emoji, expected_section_header) in scenarios.items():
+    for kind, (expected_section_header, subtitle_emoji) in scenarios.items():
         embed = asyncio.run(
             build_command_embed(
                 top_level="admin",
                 visual_top_level="qna",
                 subcommand_path="qna status",
                 kind=kind,
-                sections=[{"title": expected_section_header.split(' ', 1)[1].strip('*'), "lines": ["done"], "emoji": subtitle_emoji}],
+                sections=[{"title": expected_section_header.split("__**", 1)[1].rstrip("*_"), "lines": ["done"], "emoji": subtitle_emoji}],
                 footer_service=None,
             )
         )
 
-        description = embed.description or ""
-        assert description.startswith(f"**{subtitle_emoji} STATUS**")
-        assert expected_section_header in description
-        assert f"**{subtitle_emoji} {expected_section_header.split(' ', 1)[1].strip('*')}**" not in description
+        assert len(embed.fields) == 1
+        assert embed.fields[0].name == expected_section_header
 
 
 def test_build_command_embed_uses_official_kind_mapping_for_all_standard_types() -> None:
@@ -352,7 +346,7 @@ def test_build_command_embed_uses_official_kind_mapping_for_all_standard_types()
         "info": ("ℹ️", 0x3498DB),
     }
 
-    for kind, (emoji, color) in scenarios.items():
+    for kind, (_emoji, color) in scenarios.items():
         embed = asyncio.run(
             build_command_embed(
                 top_level="admin",
@@ -363,7 +357,7 @@ def test_build_command_embed_uses_official_kind_mapping_for_all_standard_types()
             )
         )
 
-        assert embed.description == f"**{emoji} STATUS**"
+        assert len(embed.fields) == 0
         assert embed.colour.value == color
 
 
@@ -379,7 +373,8 @@ def test_build_command_embed_keeps_blank_line_between_subtitle_and_body() -> Non
         )
     )
 
-    assert embed.description == "**ℹ️ STATUS**\n\n• Prima riga.\n• Seconda riga."
+    assert embed.description == "*Esecuzione del comando **STATUS**.*\n\n"
+    assert embed.fields[0].value == "• Prima riga.\n• Seconda riga."
 
 
 def test_build_command_embed_strips_duplicate_kind_emoji_from_body_lines() -> None:
@@ -394,11 +389,10 @@ def test_build_command_embed_strips_duplicate_kind_emoji_from_body_lines() -> No
         )
     )
 
-    description = embed.description or ""
-    assert description.startswith("**✅ SET**\n\n")
-    assert "• ✅ Operazione completata." not in description
-    assert "• Operazione completata." in description
-    assert "• Status: **enabled**" in description
+    info_field = embed.fields[0]
+    assert "• ✅ Operazione completata." not in info_field.value
+    assert "• Operazione completata." in info_field.value
+    assert "• Status: **enabled**" in info_field.value
 
 
 class _FooterDb:
@@ -529,8 +523,7 @@ def test_build_command_embed_uses_embed_namespace_title_for_footer_show() -> Non
         )
     )
 
-    assert embed.title == "📦 __**EMBED**__"
-    assert embed.description.startswith("**ℹ️ FOOTER TEMPLATE_GLOBAL_SHOW**")
+    assert embed.title == "📦 __**FOOTER TEMPLATE_GLOBAL_SHOW**__"
 
 
 def test_build_command_embed_uses_service_name_in_embed_footer_subtitle_without_body_duplication() -> None:
@@ -544,6 +537,5 @@ def test_build_command_embed_uses_service_name_in_embed_footer_subtitle_without_
         )
     )
 
-    assert embed.title == "📦 __**EMBED**__"
-    assert embed.description.startswith("**ℹ️ FOOTER TEMPLATE_SERVICE_SHOW RIASSUNTO**")
-    assert "• Service:" not in (embed.description or "")
+    assert embed.title == "📦 __**FOOTER TEMPLATE_SERVICE_SHOW RIASSUNTO**__"
+    assert "• Service:" not in embed.fields[0].value

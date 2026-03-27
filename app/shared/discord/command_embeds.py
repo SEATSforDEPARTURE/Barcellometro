@@ -15,6 +15,7 @@ from app.services.author import AuthorService, attach_author_meta, resolve_canon
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.embed_images import EmbedImagesService
 from app.shared.discord.embed_body import (
+    format_standard_description,
     format_standard_field_name,
     format_standard_section_value,
     format_standard_title,
@@ -158,6 +159,13 @@ KIND_COLORS: dict[CommandKind, int] = {
     "error": 0xED4245,
 }
 
+_PRIMARY_FIELD_TITLES: dict[CommandKind, str] = {
+    "info": "INFO",
+    "success": "OK",
+    "warning": "WARNING",
+    "error": "ERROR",
+}
+
 
 @dataclass(slots=True)
 class CommandEmbedSection:
@@ -169,6 +177,7 @@ class CommandEmbedSection:
 @dataclass(slots=True)
 class DisplayCommandContext:
     visual_top_level: str
+    service_title: str
     visual_title: str
     title_emoji: str
     visual_subtitle: str
@@ -593,12 +602,14 @@ def normalize_display_command_context(
             subtitle_parameter_parts.insert(0, temporal_tail)
 
     visual_subtitle = normalize_command_path(*subtitle_parts)
+    visual_title = visual_subtitle or normalize_command_path(inferred_visual_top_level)
     resolved_subtitle_emoji = subcommand_emoji or KIND_EMOJIS[kind]
     resolved_title_emoji = top_level_emoji or get_command_emoji(inferred_visual_top_level or raw_top_level)
 
     return DisplayCommandContext(
         visual_top_level=inferred_visual_top_level.upper(),
-        visual_title=inferred_visual_top_level.upper(),
+        service_title=inferred_visual_top_level.upper(),
+        visual_title=visual_title,
         title_emoji=resolved_title_emoji,
         visual_subtitle=visual_subtitle,
         subtitle_emoji=resolved_subtitle_emoji,
@@ -620,6 +631,11 @@ def stringify_value(value: Any) -> str:
         except TypeError:
             return str(value)
     return str(value)
+
+
+def _fallback_command_description(display_context: DisplayCommandContext) -> str:
+    title = display_context.visual_title or "COMMAND"
+    return f"Esecuzione del comando **{title}**."
 
 
 def format_bullet(label: str, value: Any, *, kind: CommandKind = "info") -> str:
@@ -652,18 +668,6 @@ def build_section(
         format_standard_field_name(title, emoji=header_emoji),
         format_standard_section_value("\n".join(rendered)),
     )
-
-
-def _format_description_section_header(
-    title: str,
-    *,
-    kind: CommandKind,
-    emoji: str | None = None,
-    subtitle_emoji: str | None = None,
-) -> str:
-    header_emoji = _resolve_section_emoji(title, kind=kind, explicit_emoji=emoji, subtitle_emoji=subtitle_emoji)
-    return f"**{header_emoji} {normalize_command_path(title)}**"
-
 
 
 def _resolve_footer_service_name(
@@ -717,6 +721,7 @@ async def build_command_embeds(
     compact_lines: bool = False,
     line_formatter: Callable[[str, Any], str] | None = None,
     section_title_formatter: Callable[[str], str] | None = None,
+    command_description: str | None = None,
 ) -> list[discord.Embed]:
     display_context = normalize_display_command_context(
         top_level=top_level,
@@ -730,7 +735,6 @@ async def build_command_embeds(
     )
     title = format_standard_title(display_context.visual_title, emoji=display_context.title_emoji, uppercase=True)
     raw_subtitle_parameters = [*(subtitle_args or ()), *(relevant_parameters or ())]
-    intro_line = f"{display_context.visual_subtitle}" if display_context.visual_subtitle else "Dettagli operativi del comando."
     resolved_line_formatter = line_formatter or (lambda label, value: format_bullet(label, value, kind=kind))
     rendered_lines: list[str] = [
         _strip_duplicate_leading_emoji(rendered, emoji=display_context.subtitle_emoji)
@@ -745,9 +749,26 @@ async def build_command_embeds(
         )) is not None
     ]
     main_field_value = "\n".join(rendered_lines)
-    description_blocks: list[str] = []
-    if main_field_value.strip():
-        description_blocks.append(main_field_value)
+    embeds: list[discord.Embed] = []
+    color = get_semantic_color(kind)
+    has_primary_field = bool(main_field_value.strip())
+    has_additional_sections = any(True for _ in (sections or ()))
+    description = format_standard_description(
+        command_description or _fallback_command_description(display_context),
+        italic=True,
+        blank_line_before_fields=has_primary_field or has_additional_sections,
+    )
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=color,
+    )
+    if has_primary_field:
+        embed.add_field(
+            name=format_standard_field_name(_PRIMARY_FIELD_TITLES[kind], emoji=KIND_EMOJIS[kind]),
+            value=format_standard_section_value(main_field_value),
+            inline=False,
+        )
     for section in sections or []:
         if isinstance(section, dict):
             item = CommandEmbedSection(
@@ -758,7 +779,7 @@ async def build_command_embeds(
         else:
             item = section
         section_title = (section_title_formatter or str)(item.title)
-        _section_name, section_value = build_section(
+        section_name, section_value = build_section(
             section_title,
             item.lines,
             item.emoji,
@@ -766,13 +787,11 @@ async def build_command_embeds(
             line_formatter=line_formatter,
             subtitle_emoji=display_context.subtitle_emoji,
         )
-        section_header = _format_description_section_header(
-            section_title,
-            kind=kind,
-            emoji=item.emoji,
-            subtitle_emoji=display_context.subtitle_emoji,
+        embed.add_field(
+            name=section_name,
+            value=section_value,
+            inline=False,
         )
-        description_blocks.append(f"{section_header}\n{section_value}")
 
     resolved_footer_service_name = _resolve_footer_service_name(
         footer_service_name=footer_service_name,
@@ -783,17 +802,6 @@ async def build_command_embeds(
         visual_top_level=visual_top_level or display_context.visual_top_level,
         top_level=top_level,
         footer_service_name=resolved_footer_service_name,
-    )
-    subtitle_line = f"**{display_context.subtitle_emoji} {intro_line}**"
-    description = subtitle_line
-    if description_blocks:
-        description = f"{subtitle_line}\n\n" + "\n".join(block for block in description_blocks if block.strip())
-    embeds: list[discord.Embed] = []
-    color = get_semantic_color(kind)
-    embed = discord.Embed(
-        title=title,
-        description=description,
-        color=color,
     )
     if footer_mode in {"minimal", "meta"}:
         attach_footer_meta(
@@ -912,6 +920,7 @@ async def send_standard_response(
     section_title_formatter: Callable[[str], str] | None = None,
     top_level_emoji: str | None = None,
     subcommand_emoji: str | None = None,
+    command_description: str | None = None,
 ) -> None:
     embeds = await build_command_embeds(
         top_level=top_level,
@@ -930,6 +939,7 @@ async def send_standard_response(
         section_title_formatter=section_title_formatter,
         top_level_emoji=top_level_emoji,
         subcommand_emoji=subcommand_emoji,
+        command_description=command_description,
     )
     resolved_footer_service_name = _resolve_footer_service_name(
         footer_service_name=footer_service_name,
