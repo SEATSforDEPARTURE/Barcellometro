@@ -20,9 +20,8 @@ def test_commands_setup_declares_canonical_english_roots() -> None:
         "inactivity",
         "channelsummary",
         "serversummary",
-        "dmsummary",
-        "aurasummary",
-        "barcellosummary",
+        "dmchannelsummary",
+        "dmserversummary",
     ]:
         assert f'app_commands.Group(name="{root}"' in source
 
@@ -45,6 +44,7 @@ def test_commands_setup_registers_canonical_namespaces_with_matching_top_levels(
     assert 'register_moderazione_utenti(users_group, ctx, top_level="users", visual_top_level="users", alias_commands=user_alias_commands)' in source
     assert 'register_resoconto(channelsummary_group, serversummary_group, ctx, channel_root="channelsummary", server_root="serversummary")' in source
     assert 'register_barcello(' in source
+    assert 'root_top_level="dmchannelsummary"' in source
     assert 'trigger_top_level="triggers"' in source
     assert 'register_triggers(triggers_group, campaigns_group, qna_group, ctx, triggers_root="triggers")' in source
 
@@ -53,6 +53,7 @@ def test_commands_setup_keeps_only_explicit_italian_alias_roots() -> None:
     source = Path("app/plugins/commands.py").read_text()
 
     assert 'riassunto_alias_group = app_commands.Group(name="riassunto"' in source
+    assert 'barcello_alias_group = app_commands.Group(name="barcello"' in source
     assert 'aura_alias_group = app_commands.Group(name="aura"' in source
     assert 'resocontocanale_alias_group = app_commands.Group(name="resocontocanale"' in source
     assert 'resocontoserver_alias_group = app_commands.Group(name="resocontoserver"' in source
@@ -80,10 +81,10 @@ def test_command_setup_root_order_matches_the_new_contract() -> None:
         'inactivity_group,',
         'channelsummary_group,',
         'serversummary_group,',
-        'dmsummary_group,',
-        'aurasummary_group,',
-        'barcellosummary_group,',
+        'dmchannelsummary_group,',
+        'dmserversummary_group,',
         'riassunto_alias_group,',
+        'barcello_alias_group,',
         'aura_alias_group,',
         'resocontocanale_alias_group,',
         'resocontoserver_alias_group,',

@@ -179,10 +179,10 @@ def test_report_helpers_attach_author() -> None:
         apply_standard_report_style(
             [embed],
             service_name="riassunto",
-            canonical_top_level_command="dmsummary",
+            canonical_top_level_command="dmchannelsummary",
         )
 
-        await _finalize_single(embed, default_service_name="dmsummary")
+        await _finalize_single(embed, default_service_name="dmchannelsummary")
 
         assert_author_is_standard(embed.author.name)
 
@@ -195,12 +195,12 @@ def test_alias_resolution() -> None:
 
         attach_author_meta(
             embed,
-            service_name="dmsummary",
-            canonical_top_level_command="dmsummary",
+            service_name="dmchannelsummary",
+            canonical_top_level_command="dmchannelsummary",
         )
 
-        await _finalize_single(embed, default_service_name="dmsummary")
+        await _finalize_single(embed, default_service_name="dmchannelsummary")
 
-        assert "DM SUMMARY" in str(embed.author.name)
+        assert "DMCHANNELSUMMARY" in str(embed.author.name)
 
     asyncio.run(_run())

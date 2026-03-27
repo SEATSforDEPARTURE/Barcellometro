@@ -45,7 +45,9 @@ def _ctx_for_result(result: BarcelloResult, *, allowed: bool = True, profile: st
         entitlements=_FakeEntitlements(allowed=allowed, profile=profile),
         barcello_service=SimpleNamespace(
             compute_channel=AsyncMock(return_value=result),
+            compute_channel_range=AsyncMock(return_value=result),
             compute_pair=AsyncMock(return_value=result),
+            compute_pair_range=AsyncMock(return_value=result),
         ),
         barcello_calibration_service=None,
         database=SimpleNamespace(get_setting=AsyncMock(return_value=None)),
@@ -60,6 +62,13 @@ def _top_level_command(tree: _FakeTree, name: str):
         if command.name == name:
             return command
     raise AssertionError(f"Command {name} not registered")
+
+
+def _group_command(group: discord.app_commands.Group, name: str):
+    for command in group.commands:
+        if command.name == name:
+            return command
+    raise AssertionError(f"Command {name} not registered in group {group.name}")
 
 
 def _triggers_barcello_command(triggers_group: discord.app_commands.Group, name: str):
@@ -99,13 +108,22 @@ def barcello_module(import_fresh):
     return import_fresh("app.plugins.commands_modular.barcello")
 
 
-def test_register_barcello_restores_top_level_command_and_registers_triggers_namespace(barcello_module) -> None:
+def test_register_barcello_registers_summary_and_alias_namespaces(barcello_module) -> None:
     triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+    dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+    barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
     tree = _FakeTree()
 
-    barcello_module.register_barcello(triggers_group, tree, None, _ctx_for_result(BarcelloResult(score=75, color="verde")))
+    barcello_module.register_barcello(
+        triggers_group,
+        dmchannelsummary_group,
+        barcello_alias_group,
+        tree,
+        None,
+        _ctx_for_result(BarcelloResult(score=75, color="verde")),
+    )
 
-    assert any(command.name == "barcello" for command in tree.commands)
+    assert tree.commands == []
     assert any(command.name == "barcello" for command in triggers_group.commands)
     assert {child.name for child in next(command for command in triggers_group.commands if command.name == "barcello").commands} == {
         "on",
@@ -114,6 +132,9 @@ def test_register_barcello_restores_top_level_command_and_registers_triggers_nam
         "run",
         "calibrate",
     }
+    summary_barcello = _group_command(dmchannelsummary_group, "barcello")
+    assert {child.name for child in summary_barcello.commands} == {"on", "off", "status", "today", "yesterday", "last", "range"}
+    assert {child.name for child in barcello_alias_group.commands} == {"oggi", "ieri", "ultimi", "intervallo"}
 
 
 def test_user_facing_barcello_uses_standardized_dm_flow_and_non_admin_permission(
@@ -130,6 +151,8 @@ def test_user_facing_barcello_uses_standardized_dm_flow_and_non_admin_permission
         )
         ctx = _ctx_for_result(result)
         triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
         tree = _FakeTree()
         send_standard_response = AsyncMock()
         send_dm_or_followup = AsyncMock(return_value=True)
@@ -139,10 +162,10 @@ def test_user_facing_barcello_uses_standardized_dm_flow_and_non_admin_permission
         monkeypatch.setattr(barcello_module, "check_permission", check_permission)
         monkeypatch.setattr(barcello_module, "get_setting", AsyncMock(return_value="30"))
 
-        barcello_module.register_barcello(triggers_group, tree, None, ctx)
-        callback = _top_level_command(tree, "barcello").callback
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _group_command(barcello_alias_group, "oggi").callback
 
-        await callback(_interaction(qualified_name="barcello"), window_minutes=30)
+        await callback(_interaction(qualified_name="barcello oggi"))
 
         check_permission.assert_awaited_once()
         assert check_permission.await_args.args[1] == "barcello"
@@ -152,7 +175,7 @@ def test_user_facing_barcello_uses_standardized_dm_flow_and_non_admin_permission
         assert len(dm_kwargs["embeds"]) == 2
         assert all(get_footer_meta(embed).service_name == "barcello" for embed in dm_kwargs["embeds"])
         notice_kwargs = send_standard_response.await_args.kwargs
-        assert notice_kwargs["subcommand_path"] == "barcello"
+        assert notice_kwargs["subcommand_path"] == "barcello oggi"
         assert notice_kwargs["kind"] == "success"
         assert notice_kwargs["lines"] == [("result", "Ti ho inviato un DM")]
 
@@ -173,13 +196,15 @@ def test_triggers_barcello_run_uses_canonical_permission_namespace(
         )
         ctx = _ctx_for_result(result)
         triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
         tree = _FakeTree()
         monkeypatch.setattr(barcello_module, "send_standard_response", AsyncMock())
         monkeypatch.setattr(barcello_module, "send_dm_or_followup", AsyncMock(return_value=True))
         check_permission = AsyncMock(return_value=True)
         monkeypatch.setattr(barcello_module, "check_permission", check_permission)
 
-        barcello_module.register_barcello(triggers_group, tree, None, ctx)
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
         callback = _triggers_barcello_command(triggers_group, "run").callback
 
         await callback(_interaction(qualified_name="triggers barcello run"), window_minutes=30)
@@ -198,16 +223,18 @@ def test_user_facing_barcello_no_data_sends_single_report_embed(
         result = BarcelloResult(score=50, color="giallo", metrics={"message_count": 0, "cache_hit": False})
         ctx = _ctx_for_result(result)
         triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
         tree = _FakeTree()
         monkeypatch.setattr(barcello_module, "send_standard_response", AsyncMock())
         send_dm_or_followup = AsyncMock(return_value=True)
         monkeypatch.setattr(barcello_module, "send_dm_or_followup", send_dm_or_followup)
         monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
 
-        barcello_module.register_barcello(triggers_group, tree, None, ctx)
-        callback = _top_level_command(tree, "barcello").callback
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _group_command(barcello_alias_group, "oggi").callback
 
-        await callback(_interaction(qualified_name="barcello"), window_minutes=30)
+        await callback(_interaction(qualified_name="barcello oggi"))
 
         send_dm_or_followup.assert_awaited_once()
         embeds = send_dm_or_followup.await_args.kwargs["embeds"]
@@ -231,19 +258,21 @@ def test_user_facing_barcello_warns_when_dm_delivery_fails(
         )
         ctx = _ctx_for_result(result)
         triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
         tree = _FakeTree()
         send_standard_response = AsyncMock()
         monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
         monkeypatch.setattr(barcello_module, "send_dm_or_followup", AsyncMock(return_value=False))
         monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
 
-        barcello_module.register_barcello(triggers_group, tree, None, ctx)
-        callback = _top_level_command(tree, "barcello").callback
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _group_command(barcello_alias_group, "oggi").callback
 
-        await callback(_interaction(qualified_name="barcello"), window_minutes=30)
+        await callback(_interaction(qualified_name="barcello oggi"))
 
         notice_kwargs = send_standard_response.await_args.kwargs
-        assert notice_kwargs["subcommand_path"] == "barcello"
+        assert notice_kwargs["subcommand_path"] == "barcello oggi"
         assert notice_kwargs["kind"] == "warning"
         assert notice_kwargs["lines"] == [("warning", "Non riesco a inviarti DM. Ti mostro il report qui in privato.")]
 

@@ -362,7 +362,20 @@ def _summary_footer_inputs(ai_status: dict[str, Any]) -> tuple[list[str], bool]:
     return contributors, (not used_ai_output)
 
 
-def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext, *, root_top_level: str = "dmsummary") -> None:
+def register_riassunto(
+    riassunto_group: app_commands.Group,
+    ctx: CommandContext,
+    *,
+    root_top_level: str = "dmchannelsummary",
+    locale: str = "it",
+) -> None:
+    is_english = locale == "en"
+    command_names = {
+        "last": "last" if is_english else "ultimi",
+        "today": "today" if is_english else "oggi",
+        "yesterday": "yesterday" if is_english else "ieri",
+        "range": "range" if is_english else "intervallo",
+    }
     def _kind_from_message(message: str) -> str:
         text = str(message or "").strip()
         if text.startswith("✅"):
@@ -2073,7 +2086,7 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext,
             payload_embeds = apply_standard_report_style(
                 payload_embeds,
                 service_name="riassunto",
-                canonical_top_level_command="dmsummary",
+                canonical_top_level_command="dmchannelsummary",
                 cover_title=payload_embeds[0].title if payload_embeds else "🗒️ RIASSUNTO",
             )
             attach_footer_meta_to_all(
@@ -2128,8 +2141,38 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext,
             )
             return
 
-    @riassunto_group.command(name="ultimi", description="Riassunto ultimi N periodi")
+    if is_english:
+        async def _set_auto_summary(interaction: discord.Interaction, action: str) -> None:
+            if not await check_permission(interaction, f"admin.{root_top_level}.{action}", ctx):
+                return
+            if interaction.guild_id is None or interaction.channel_id is None:
+                await send_ephemeral(interaction, "Comando disponibile solo nei canali server.")
+                return
+            guild_id = str(interaction.guild_id)
+            channel_id = str(interaction.channel_id)
+            if action == "status":
+                enabled = await ctx.database.get_channel_summary_auto_enabled(guild_id, channel_id)
+                await send_ephemeral(interaction, f"DM channel summary is {'on' if enabled else 'off'} for this channel.")
+                return
+            enabled = action == "on"
+            await ctx.database.set_channel_summary_auto_enabled(guild_id, channel_id, enabled)
+            await send_ephemeral(interaction, f"DM channel summary {'enabled' if enabled else 'disabled'} for this channel.")
+
+        @riassunto_group.command(name="on", description="Enable DM channel summary in this channel.")
+        async def dmchannelsummary_on(interaction: discord.Interaction) -> None:
+            await _set_auto_summary(interaction, "on")
+
+        @riassunto_group.command(name="off", description="Disable DM channel summary in this channel.")
+        async def dmchannelsummary_off(interaction: discord.Interaction) -> None:
+            await _set_auto_summary(interaction, "off")
+
+        @riassunto_group.command(name="status", description="Show DM channel summary status in this channel.")
+        async def dmchannelsummary_status(interaction: discord.Interaction) -> None:
+            await _set_auto_summary(interaction, "status")
+
+    @riassunto_group.command(name=command_names["last"], description="Riassunto ultimi N periodi")
     @app_commands.describe(quantita="Numero di unità", unita="Unità di tempo")
+    @app_commands.rename(quantita="quantity" if is_english else "quantità", unita="unit" if is_english else "unità")
     @app_commands.choices(
         unita=[
             app_commands.Choice(name="minuti", value="minuti"),
@@ -2157,18 +2200,19 @@ def register_riassunto(riassunto_group: app_commands.Group, ctx: CommandContext,
             subtitle_args=[quantita, unita],
         )
 
-    @riassunto_group.command(name="oggi", description="Riassunto della giornata di oggi")
+    @riassunto_group.command(name=command_names["today"], description="Riassunto della giornata di oggi")
     async def riassunto_oggi(interaction: discord.Interaction) -> None:
         window = resolve_oggi_window()
         await _run_riassunto(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="oggi", granularity_hint="hours")
 
-    @riassunto_group.command(name="ieri", description="Riassunto della giornata di ieri")
+    @riassunto_group.command(name=command_names["yesterday"], description="Riassunto della giornata di ieri")
     async def riassunto_ieri(interaction: discord.Interaction) -> None:
         window = resolve_ieri_window()
         await _run_riassunto(interaction, start_dt=window.start_dt, end_dt=window.end_dt, period_label="ieri", granularity_hint="days")
 
-    @riassunto_group.command(name="range", description="Riassunto per intervallo")
+    @riassunto_group.command(name=command_names["range"], description="Riassunto per intervallo")
     @app_commands.describe(da="Da (DD/MM/YYYY HH:MM)", a="A (DD/MM/YYYY HH:MM)")
+    @app_commands.rename(da="from" if is_english else "da", a="to" if is_english else "a")
     async def riassunto_range(interaction: discord.Interaction, da: str, a: str) -> None:
         window, error = resolve_range_window(da, a, ctx.config)
         if error:

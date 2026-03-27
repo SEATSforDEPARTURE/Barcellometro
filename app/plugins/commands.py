@@ -71,11 +71,11 @@ def setup(registry: ServiceRegistry) -> None:
     inactivity_group = app_commands.Group(name="inactivity", description="Inactive member moderation")
     channelsummary_group = app_commands.Group(name="channelsummary", description="Channel summary schedules")
     serversummary_group = app_commands.Group(name="serversummary", description="Server summary schedules")
-    dmsummary_group = app_commands.Group(name="dmsummary", description="Direct message summaries")
-    aurasummary_group = app_commands.Group(name="aurasummary", description="Aura summaries")
-    barcellosummary_group = app_commands.Group(name="barcellosummary", description="Barcello summaries")
+    dmchannelsummary_group = app_commands.Group(name="dmchannelsummary", description="DM channel summaries")
+    dmserversummary_group = app_commands.Group(name="dmserversummary", description="DM server summaries")
 
     riassunto_alias_group = app_commands.Group(name="riassunto", description="Riassunti")
+    barcello_alias_group = app_commands.Group(name="barcello", description="Barcello reports")
     aura_alias_group = app_commands.Group(name="aura", description="Aura reports")
     resocontocanale_alias_group = app_commands.Group(name="resocontocanale", description="Channel summary schedules")
     resocontoserver_alias_group = app_commands.Group(name="resocontoserver", description="Server summary schedules")
@@ -99,17 +99,21 @@ def setup(registry: ServiceRegistry) -> None:
     register_privacy(privacy_group, ctx, top_level="privacy", visual_top_level="privacy")
     register_barcello(
         triggers_group,
+        dmchannelsummary_group,
+        barcello_alias_group,
         bot.tree,
         guild_obj,
         ctx,
-        root_top_level="barcellosummary",
+        root_top_level="dmchannelsummary",
+        alias_top_level="barcello",
         trigger_top_level="triggers",
     )
-    register_riassunto(dmsummary_group, ctx, root_top_level="dmsummary")
-    register_riassunto(riassunto_alias_group, ctx, root_top_level="riassunto")
-    register_aura(aurasummary_group, ctx, root_top_level="aurasummary")
-    register_aura(aura_alias_group, ctx, root_top_level="aura")
-    register_attivita(attivita_group, ctx, root_top_level="attivita")
+    register_riassunto(dmchannelsummary_group, ctx, root_top_level="dmchannelsummary", locale="en")
+    register_riassunto(riassunto_alias_group, ctx, root_top_level="riassunto", locale="it")
+    register_aura(dmserversummary_group, ctx, root_top_level="dmserversummary", locale="en")
+    register_aura(aura_alias_group, ctx, root_top_level="aura", locale="it")
+    register_attivita(dmserversummary_group, ctx, root_top_level="dmserversummary", locale="en")
+    register_attivita(attivita_group, ctx, root_top_level="attivita", locale="it")
 
     register_inattivi(inactivity_group, ctx, top_level="inactivity", visual_top_level="inactivity")
     register_greetings(greetings_group, ctx, top_level="greetings", visual_top_level="greetings")
@@ -153,10 +157,10 @@ def setup(registry: ServiceRegistry) -> None:
         inactivity_group,
         channelsummary_group,
         serversummary_group,
-        dmsummary_group,
-        aurasummary_group,
-        barcellosummary_group,
+        dmchannelsummary_group,
+        dmserversummary_group,
         riassunto_alias_group,
+        barcello_alias_group,
         aura_alias_group,
         resocontocanale_alias_group,
         resocontoserver_alias_group,
