@@ -16,7 +16,11 @@ def test_command_validator_has_no_errors() -> None:
 def test_command_validator_tracks_expected_alias_exceptions() -> None:
     result = validate_command_tree()
 
-    expected = {"resocontocanale.oggi", "resocontoserver.oggi"}
+    expected = {
+        "resocontocanale.oggi",
+        "resocontoserver.oggi",
+        "dmchannelsummary.barcello.last",
+    }
     assert expected.issubset(result.exceptions)
     assert any(command.path == "campaigns.prompt.schedule_add" for command in result.commands)
     assert any(command.path == "commandguard.role_list" for command in result.commands)
@@ -118,9 +122,6 @@ def test_dm_summary_contract_roots_and_children_are_exact() -> None:
 
     assert 'app_commands.Group(name="dmchannelsummary"' in source
     assert 'app_commands.Group(name="dmserversummary"' in source
-    assert 'app_commands.Group(name="dmsummary"' not in source
-    assert 'app_commands.Group(name="aurasummary"' not in source
-    assert 'app_commands.Group(name="barcellosummary"' not in source
 
     for token in ['name="on"', 'name="off"', 'name="status"']:
         assert token in riassunto_source

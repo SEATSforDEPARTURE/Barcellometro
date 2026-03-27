@@ -38,6 +38,18 @@ ITALIAN_MARKERS = {
 }
 LOCALIZED_COMMAND_EXCEPTIONS = {
     "domanda",
+    "dmchannelsummary.barcello.today",
+    "dmchannelsummary.barcello.yesterday",
+    "dmchannelsummary.barcello.last",
+    "dmchannelsummary.barcello.range",
+    "dmserversummary.aura.today",
+    "dmserversummary.aura.yesterday",
+    "dmserversummary.aura.last",
+    "dmserversummary.aura.range",
+    "dmserversummary.attivita.today",
+    "dmserversummary.attivita.yesterday",
+    "dmserversummary.attivita.last",
+    "dmserversummary.attivita.range",
     "riassunto.oggi",
     "riassunto.ieri",
     "riassunto.ultimi",

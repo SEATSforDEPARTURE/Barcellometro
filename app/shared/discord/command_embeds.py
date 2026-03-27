@@ -43,6 +43,7 @@ DISPLAY_TOP_LEVEL_OVERRIDES: set[str] = {
     "channelsummary",
     "serversummary",
     "riassunto",
+    "barcello",
     "aura",
     "resocontocanale",
     "resocontoserver",
