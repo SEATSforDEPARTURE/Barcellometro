@@ -442,6 +442,7 @@ def test_riassunto_no_data_guardrail_uses_standard_embed() -> None:
 def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> None:
     bot = _FakeBot()
     ctx = SimpleNamespace(bot=bot, config=SimpleNamespace(guild_id="123"), footer=None)
+    required_barcello_commands = ("on", "off", "status", "calibrate", "run")
 
     monkeypatch.setattr(commands_module, "CommandContext", SimpleNamespace(from_registry=lambda registry: ctx))
     monkeypatch.setattr(commands_module, "install_footer_auto_finalize", lambda footer: None)
@@ -453,7 +454,28 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
     monkeypatch.setattr(commands_module, "register_voice_ingest", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_privacy", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_status", lambda *args, **kwargs: None)
-    monkeypatch.setattr(commands_module, "register_barcello", lambda *args, **kwargs: None)
+    def _register_barcello_contract_stub(
+        triggers_group: discord.app_commands.Group,
+        *_args,
+        **_kwargs,
+    ) -> None:
+        barcello_group = discord.app_commands.Group(name="barcello", description="x")
+        triggers_group.add_command(barcello_group)
+        for name in required_barcello_commands:
+            @barcello_group.command(name=name, description=name)
+            async def _placeholder(interaction):  # noqa: ANN001
+                return None
+
+    def _register_triggers_contract_stub(
+        triggers_group: discord.app_commands.Group,
+        *_args,
+        **_kwargs,
+    ) -> discord.app_commands.Group:
+        frasi_group = discord.app_commands.Group(name="frasi", description="x")
+        triggers_group.add_command(frasi_group)
+        return frasi_group
+
+    monkeypatch.setattr(commands_module, "register_barcello", _register_barcello_contract_stub)
     monkeypatch.setattr(commands_module, "register_riassunto", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_aura", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_attivita", lambda *args, **kwargs: None)
@@ -461,7 +483,7 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
     monkeypatch.setattr(commands_module, "register_moderazione_utenti", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_resoconto", lambda *args, **kwargs: None)
     monkeypatch.setattr(commands_module, "register_ask", lambda *args, **kwargs: None)
-    monkeypatch.setattr(commands_module, "register_triggers", lambda *args, **kwargs: discord.app_commands.Group(name="frasi", description="x"))
+    monkeypatch.setattr(commands_module, "register_triggers", _register_triggers_contract_stub)
 
     commands_module.setup(SimpleNamespace())
     interaction = _FakeInteraction(qualified_name="riassunto oggi")
