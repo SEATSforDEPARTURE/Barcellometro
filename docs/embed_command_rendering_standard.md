@@ -632,3 +632,32 @@ In questa fase i renderer principali sono stati riallineati alla pipeline centra
 - bypass manuali `set_author/set_footer/set_image/set_thumbnail` fuori helper canonici;
 - renderer fase 3 senza metadata helper author/images/footer;
 - paginazione hardcoded nei titoli dei renderer migrati (eccetto eccezioni esplicite).
+
+## Status template UX-first (author/footer/description)
+
+Gli status di:
+
+- `/embed author status`
+- `/embed footer status`
+- `/embed description status`
+
+devono convergere su una vista **semplificata e UX-oriented**.
+
+Regole:
+
+- usare solo la source of truth dei servizi pubblici canonici (`audio`, `aura`, `riassunto`, `resoconto`, `attivita`, `barcello`, `campagne`, `qna`, `status`);
+- mostrare solo:
+  - stato globale on/off;
+  - totale servizi supportati;
+  - servizi con custom template configurato;
+  - servizi in default;
+  - runtime rule chiara (differenza ON/OFF rispetto al template salvato);
+- sezioni standard consigliate: `INFO`, `Custom Templates`, `Default Services`.
+
+Da non includere nello status standard:
+
+- famiglie/varianti tecniche;
+- inventari di servizi interni o alias runtime;
+- sorgenti persistite/origini diagnostiche verbose;
+- liste di builder/formatter/renderer/plugin;
+- paginazione artificiale dovuta a rumore tecnico.

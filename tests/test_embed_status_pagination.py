@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
@@ -9,7 +8,6 @@ import pytest
 
 from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
-from app.shared.discord.embed_body import format_standard_title
 from app.shared.discord.delivery import _prepare_embeds_for_send
 from tests._embed_test_utils import InteractionStub, find_command, register_embed_tree
 
@@ -63,81 +61,48 @@ def test_prepare_embeds_for_send_keeps_footer_when_author_is_disabled() -> None:
     asyncio.run(_run())
 
 
-def test_footer_status_command_supports_multipage_navigation(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_footer_status_command_is_ux_focused_and_uses_public_services(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, 'check_permission', AsyncMock(return_value=True))
-        send_command_embeds = AsyncMock()
-        monkeypatch.setattr(embed_module, 'send_command_embeds', send_command_embeds)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, 'send_standard_response', send_standard)
         bundle = register_embed_tree(embed_module)
 
-        for idx in range(40):
-            await bundle.ctx.footer.record_service_footer_variant(
-                service_name=f'service_{idx}',
-                contributors=[f'model_{idx}', f'fallback_{idx}'],
-                used_local_processing=idx % 2 == 0,
-                last_rendered_footer=f'Footer {idx} ' + ('x' * 120),
-                origin='runtime',
-            )
+        await bundle.ctx.footer.set_service_phrase('riassunto', 'Footer riassunto')
+        await bundle.ctx.footer.set_enabled(False)
 
         status_command = find_command(bundle.footer_group, 'status')
         await status_command.callback(InteractionStub(status_command))
-
-        kwargs = send_command_embeds.await_args.kwargs
-        view = kwargs['view']
-        assert isinstance(view, embed_module.FooterStatusPaginationView)
-        assert len(view._embeds) > 1
-        assert all((page.description or '').startswith('*') for page in view._embeds)
-        assert all(page.fields and page.fields[0].name == 'ℹ️ __**INFO**__' for page in view._embeds)
-        assert all('• Pagina: **' in (page.fields[0].value or '') for page in view._embeds)
-        assert all('Pagina ' not in (page.footer.text or '') for page in view._embeds)
-        assert all('FOOTER STATUS' in (page.title or '') for page in view._embeds)
-        assert all((page.author.name or '').startswith('servizio EMBED · (Pag. ') for page in view._embeds)
-        assert all('UNKNOWN' not in (page.author.name or '') for page in view._embeds)
-
-        interaction = SimpleNamespace(response=SimpleNamespace(edit_message=AsyncMock()))
-        next_button = next(button for button in view.children if getattr(button, 'label', '') == 'AVANTI')
-        await next_button.callback(interaction)
-        edited_embed = interaction.response.edit_message.await_args.kwargs['embed']
-        assert (edited_embed.author.name or '').startswith('servizio EMBED · (Pag. 2/')
-        assert 'UNKNOWN' not in (edited_embed.author.name or '')
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs['subcommand_path'] == 'footer status'
+        assert ('enabled', 'off') in kwargs['lines']
+        assert ('supported services', 9) in kwargs['lines']
+        default_section = next(section for section in kwargs['sections'] if section.title == 'Default Services')
+        assert 'campagne_notizie' not in default_section.lines[0][1]
+        assert 'service_1' not in default_section.lines[0][1]
 
     asyncio.run(_run())
 
 
-def test_author_status_command_supports_multipage_navigation(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_author_status_command_is_ux_focused_and_uses_public_services(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, 'check_permission', AsyncMock(return_value=True))
-        send_command_embeds = AsyncMock()
-        monkeypatch.setattr(embed_module, 'send_command_embeds', send_command_embeds)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, 'send_standard_response', send_standard)
         bundle = register_embed_tree(embed_module)
 
-        for idx in range(24):
-            await bundle.ctx.author.record_service_author(
-                service_name=f'service_{idx}',
-                last_rendered_author=f'Author render {idx} ' + ('x' * 100),
-                last_icon_url=None,
-                origin='runtime',
-            )
+        await bundle.ctx.author.set_service_phrase('riassunto', 'Author riassunto')
+        await bundle.ctx.author.set_enabled(False)
 
         status_command = find_command(bundle.author_group, 'status')
         await status_command.callback(InteractionStub(status_command))
-
-        kwargs = send_command_embeds.await_args.kwargs
-        view = kwargs['view']
-        assert isinstance(view, embed_module.AuthorStatusPaginationView)
-        assert len(view._embeds) > 1
-        assert all((page.description or '').startswith('*') for page in view._embeds)
-        assert all(page.fields and page.fields[0].name == 'ℹ️ __**INFO**__' for page in view._embeds)
-        assert all((page.author.name or '').startswith('servizio EMBED · (Pag. ') for page in view._embeds)
-        assert all('UNKNOWN' not in (page.author.name or '') for page in view._embeds)
-        assert all((page.footer.text or '').startswith('Barcellometro') for page in view._embeds)
-
-        interaction = SimpleNamespace(response=SimpleNamespace(edit_message=AsyncMock()))
-        next_button = next(button for button in view.children if getattr(button, 'label', '') == 'AVANTI')
-        await next_button.callback(interaction)
-        edited_embed = interaction.response.edit_message.await_args.kwargs['embed']
-        assert (edited_embed.author.name or '').startswith('servizio EMBED · (Pag. 2/')
-        assert 'UNKNOWN' not in (edited_embed.author.name or '')
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs['subcommand_path'] == 'author status'
+        assert ('enabled', 'off') in kwargs['lines']
+        assert ('supported services', 9) in kwargs['lines']
+        default_section = next(section for section in kwargs['sections'] if section.title == 'Default Services')
+        assert 'audio_notes' not in default_section.lines[0][1]
+        assert 'service_1' not in default_section.lines[0][1]
 
     asyncio.run(_run())
 
