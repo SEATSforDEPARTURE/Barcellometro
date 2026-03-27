@@ -104,7 +104,7 @@ finestra configurata in modo idempotente.
 ### Rendering embed centralizzato
 - `/embed footer on|off|status` → amministrazione canonica del dominio footer.
 - `/embed footer template_global_set|show|reset` → template globale footer.
-- `/embed footer template_service_set|show|reset service:<nome>` → override footer per servizio con autocomplete basato su **servizi top-level pubblici che producono embed visibili** (`audio`, `aura`, `riassunto`, `resoconto`, `attivita`, `barcello`, `campagne`, `qna`, `status`, `triggers`), con alias tecnici gestiti internamente.
+- `/embed footer template_service_set|show|reset service:<nome>` → override footer per servizio con autocomplete basato su **servizi top-level pubblici che producono embed visibili** (`audio`, `triggers`, `greetings`, `channelsummary`, `serversummary`, `dmchannelsummary`, `dmserversummary`, `campaigns`, `qna`, `inactivity`, `embed`, `commandguard`, `database`, `status`, `ai`), con alias tecnici gestiti internamente.
 - `/embed author on|off|status` → amministrazione canonica del dominio author.
 - `/embed author template_global_set|show|reset` → template globale author.
 - `/embed author template_service_set|show|reset service:<nome>` → override author per servizio con la stessa source of truth top-level condivisa con footer/images/description.

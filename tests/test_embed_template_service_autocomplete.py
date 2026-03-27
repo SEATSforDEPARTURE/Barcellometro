@@ -18,56 +18,62 @@ def embed_module(import_fresh):
     return import_fresh("app.plugins.commands_modular.embed")
 
 
-def test_embed_template_services_source_of_truth_is_public_and_stable() -> None:
+_EXPECTED_CANONICAL_PUBLIC_SERVICES = [
+    "audio",
+    "triggers",
+    "greetings",
+    "channelsummary",
+    "serversummary",
+    "dmchannelsummary",
+    "dmserversummary",
+    "campaigns",
+    "qna",
+    "inactivity",
+    "embed",
+    "commandguard",
+    "database",
+    "status",
+    "ai",
+]
+
+
+def test_embed_template_services_canonical_public_list_is_exact() -> None:
     async def _run() -> None:
         ctx = SimpleNamespace()
         services = await list_embed_template_services(ctx)
-        assert services == [
-            "audio",
-            "aura",
-            "riassunto",
-            "resoconto",
-            "attivita",
-            "barcello",
-            "campagne",
-            "qna",
-            "status",
-            "triggers",
-        ]
+        assert services == _EXPECTED_CANONICAL_PUBLIC_SERVICES
         assert len(services) == len(set(services))
-        assert "audio_notes" not in services
-        assert "campaign_content_formatter" not in services
-        assert "detail_embeds" not in services
 
     asyncio.run(_run())
 
 
-def test_embed_template_services_autocomplete_only_shows_public_keys() -> None:
+def test_embed_template_services_autocomplete_excludes_legacy_keys() -> None:
     async def _run() -> None:
         ctx = SimpleNamespace()
-        filtered = await build_embed_template_service_autocomplete_choices(ctx, "au")
-        assert filtered
-        assert [choice.value for choice in filtered] == ["audio", "aura"]
-
         full = await build_embed_template_service_autocomplete_choices(ctx, "")
         values = [choice.value for choice in full]
         assert len(values) <= 25
-        assert "audio" in values
-        assert "triggers" in values
-        assert "audio_notes" not in values
-        assert "campaign_content_views" not in values
-        assert "detail_embeds" not in values
-        assert len(values) == len(set(values))
+        assert values == _EXPECTED_CANONICAL_PUBLIC_SERVICES
+
+        for legacy in ("attivita", "aura", "barcello", "campagne", "riassunto", "resoconto", "frasi"):
+            assert legacy not in values
 
     asyncio.run(_run())
 
 
 def test_embed_template_service_resolver_maps_legacy_aliases_to_public_keys() -> None:
-    assert resolve_embed_template_public_service("audio") == "audio"
     assert resolve_embed_template_public_service("audio_notes") == "audio"
-    assert resolve_embed_template_public_service("campagne_prompt") == "campagne"
+    assert resolve_embed_template_public_service("barcello") == "triggers"
     assert resolve_embed_template_public_service("frasi") == "triggers"
-    assert resolve_embed_template_public_service("detail_embeds") is None
+    assert resolve_embed_template_public_service("member_flow_notifications") == "greetings"
+    assert resolve_embed_template_public_service("resoconto") == "channelsummary"
+    assert resolve_embed_template_public_service("riassunto") == "dmchannelsummary"
+    assert resolve_embed_template_public_service("attivita") == "dmserversummary"
+    assert resolve_embed_template_public_service("aura") == "dmserversummary"
+    assert resolve_embed_template_public_service("campagne_prompt") == "campaigns"
+    assert resolve_embed_template_public_service("domanda") == "qna"
+    assert resolve_embed_template_public_service("inattivi") == "inactivity"
+    assert resolve_embed_template_public_service("audio notes") == "audio"
 
 
 def test_embed_template_service_supports_explicit_system_validation() -> None:
@@ -117,3 +123,17 @@ def test_embed_template_service_commands_use_same_source_with_system_specific_au
     assert all(callback is author_callbacks[0] for callback in author_callbacks)
     assert all(callback is description_callbacks[0] for callback in description_callbacks)
     assert all(callback is images_callbacks[0] for callback in images_callbacks)
+
+    async def _run() -> None:
+        ctx = SimpleNamespace()
+        footer = await list_embed_template_services(ctx, system="footer")
+        author = await list_embed_template_services(ctx, system="author")
+        description = await list_embed_template_services(ctx, system="description")
+        images = await list_embed_template_services(ctx, system="images")
+        assert footer == author == description == images == _EXPECTED_CANONICAL_PUBLIC_SERVICES
+
+    asyncio.run(_run())
+
+
+def test_embed_template_service_resolver_returns_none_for_unknown_key() -> None:
+    assert resolve_embed_template_public_service("unknown_service") is None

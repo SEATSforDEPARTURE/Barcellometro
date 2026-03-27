@@ -24,7 +24,7 @@ def test_embed_status_commands_share_public_service_source_and_custom_default_sp
         assert "triggers" in public_services
         assert "audio_notes" not in public_services
         assert "campagne_notizie" not in public_services
-        assert len(public_services) == 10
+        assert len(public_services) == 15
 
         await bundle.ctx.author.set_service_phrase("riassunto", "Author custom")
         await bundle.ctx.footer.set_service_phrase("riassunto", "Footer custom")

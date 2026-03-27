@@ -16,28 +16,100 @@ class PublicEmbedService:
 
 
 _PUBLIC_TOP_LEVEL_EMBED_SERVICES: tuple[PublicEmbedService, ...] = (
-    PublicEmbedService(key="audio", label="AUDIO", aliases=("audio_notes", "audio_notes_transcribe")),
-    PublicEmbedService(key="aura", label="AURA"),
-    PublicEmbedService(key="riassunto", label="RIASSUNTO"),
-    PublicEmbedService(key="resoconto", label="RESOCONTO", aliases=("channel_summary",)),
-    PublicEmbedService(key="attivita", label="ATTIVITÀ", aliases=("activity_dm", "daily_activity_report", "user_activity")),
-    PublicEmbedService(key="barcello", label="BARCELLO"),
     PublicEmbedService(
-        key="campagne",
-        label="CAMPAGNE",
+        key="audio",
+        label="AUDIO",
+        aliases=("audio_notes", "audio_notes_transcribe", "audio_transcribe"),
+    ),
+    PublicEmbedService(
+        key="triggers",
+        label="TRIGGERS",
+        aliases=("frasi", "phrases", "barcello", "barcello_trigger", "trigger_phrases", "trigger_barcello"),
+    ),
+    PublicEmbedService(
+        key="greetings",
+        label="GREETINGS",
+        aliases=("greeting", "member_flow_notifications", "welcome", "goodbye"),
+    ),
+    PublicEmbedService(
+        key="channelsummary",
+        label="CHANNELSUMMARY",
+        aliases=("channel_summary", "resoconto", "daily_resoconto"),
+    ),
+    PublicEmbedService(
+        key="serversummary",
+        label="SERVERSUMMARY",
+        aliases=("server_summary", "serversummary_report", "server_report"),
+    ),
+    PublicEmbedService(
+        key="dmchannelsummary",
+        label="DMCHANNELSUMMARY",
+        aliases=("dm_channel_summary", "riassunto", "channel_highlights", "detail_embeds"),
+    ),
+    PublicEmbedService(
+        key="dmserversummary",
+        label="DMSERVERSUMMARY",
+        aliases=("dm_server_summary", "dmserversummary_report", "attivita", "activity_dm", "daily_activity_report", "user_activity", "aura"),
+    ),
+    PublicEmbedService(
+        key="campaigns",
+        label="CAMPAIGNS",
         aliases=(
-            "campaigns",
+            "campagne",
+            "campagne_prompt",
+            "campaign_prompt",
             "campagne_notizie",
             "campagne_meteo",
             "campagne_oroscopo",
-            "campagne_prompt",
             "campagne_timer",
+            "message_campaigns",
         ),
     ),
-    PublicEmbedService(key="qna", label="QNA"),
-    PublicEmbedService(key="status", label="STATUS"),
-    PublicEmbedService(key="triggers", label="TRIGGERS", aliases=("frasi",)),
+    PublicEmbedService(
+        key="qna",
+        label="QNA",
+        aliases=("ask", "domanda", "question_answer"),
+    ),
+    PublicEmbedService(
+        key="inactivity",
+        label="INACTIVITY",
+        aliases=("inactive", "inattivi"),
+    ),
+    PublicEmbedService(
+        key="embed",
+        label="EMBED",
+        aliases=("footer", "author", "description_template", "images_template"),
+    ),
+    PublicEmbedService(
+        key="commandguard",
+        label="COMMANDGUARD",
+        aliases=("command_guard", "guards"),
+    ),
+    PublicEmbedService(
+        key="database",
+        label="DATABASE",
+        aliases=("db", "retention", "backfill"),
+    ),
+    PublicEmbedService(
+        key="status",
+        label="STATUS",
+        aliases=("mood", "presence"),
+    ),
+    PublicEmbedService(
+        key="ai",
+        label="AI",
+        aliases=("model", "fallback_model", "ai_model"),
+    ),
 )
+
+
+
+def _normalize_service_alias(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return ""
+    return normalized.replace(" ", "_")
+
 
 _CANONICAL_BY_ALIAS: dict[str, str] = {}
 _ALIASES_BY_CANONICAL: dict[str, tuple[str, ...]] = {}
@@ -45,11 +117,12 @@ _SERVICE_BY_KEY: dict[str, PublicEmbedService] = {}
 for entry in _PUBLIC_TOP_LEVEL_EMBED_SERVICES:
     canonical = entry.key
     aliases = {canonical, *entry.aliases}
-    normalized_aliases = tuple(sorted(alias.strip().lower() for alias in aliases if alias.strip()))
+    normalized_aliases = tuple(sorted({_normalize_service_alias(alias) for alias in aliases if _normalize_service_alias(alias)}))
     _ALIASES_BY_CANONICAL[canonical] = normalized_aliases
     _SERVICE_BY_KEY[canonical] = entry
     for alias in normalized_aliases:
         _CANONICAL_BY_ALIAS[alias] = canonical
+
 
 
 def list_public_embed_services(
@@ -65,12 +138,14 @@ def list_public_embed_services(
     return services
 
 
+
 def list_public_embed_service_keys(
     *,
     system: EmbedTemplateSystem | None = None,
     visible_embed_only: bool = True,
 ) -> list[str]:
     return [service.key for service in list_public_embed_services(system=system, visible_embed_only=visible_embed_only)]
+
 
 
 def get_public_embed_service(public_service_key: str | None) -> PublicEmbedService | None:
@@ -80,12 +155,14 @@ def get_public_embed_service(public_service_key: str | None) -> PublicEmbedServi
     return _SERVICE_BY_KEY.get(canonical)
 
 
+
 def is_public_embed_service_key(value: str | None, *, system: EmbedTemplateSystem | None = None) -> bool:
     return resolve_public_embed_service_key(value, system=system) is not None
 
 
+
 def resolve_public_embed_service_key(value: str | None, *, system: EmbedTemplateSystem | None = None) -> str | None:
-    normalized = (value or "").strip().lower()
+    normalized = _normalize_service_alias(value)
     if not normalized:
         return None
     canonical = _CANONICAL_BY_ALIAS.get(normalized)
@@ -99,6 +176,7 @@ def resolve_public_embed_service_key(value: str | None, *, system: EmbedTemplate
     if not service.visible_embed:
         return None
     return canonical
+
 
 
 def list_embed_service_aliases(public_service_key: str) -> tuple[str, ...]:
