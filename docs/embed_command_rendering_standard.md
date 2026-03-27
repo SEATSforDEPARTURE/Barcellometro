@@ -96,6 +96,7 @@ Tutti gli embed prodotti dai percorsi standardizzati (`send_standard_response`, 
 - Il body deve evitare duplicazioni inutili dei parametri già presenti nel sottotitolo.
 - Le prime righe del body non devono introdurre prefissi narrativi come `Dettaglio:`, `Warning:`, `Result:`, `Results:`, `Error:`.
 - Le sezioni extra (`Details`, `Metrics`, `Templates`, ecc.) devono restare veri field Discord.
+- Il body non deve mai riusare la stessa icona del sottotitolo nelle sezioni.
 - Footer, author, colori e metadata devono passare dalla pipeline centralizzata.
 
 ## Standard definitivo titolo embed + titolo field (single source of truth)
@@ -154,41 +155,53 @@ Questo mapping è centralizzato in `app/shared/discord/command_embeds.py` e vale
   - description: `*...*`
   - primo field: `ℹ️ __**INFO**__`
 - `/qna bonus_show user:@Mario`
-  - titolo: `❓ __**QNA**__`
-  - sottotitolo: `ℹ️ BONUS_SHOW MARIO`
+  - titolo: `❓ __**BONUS_SHOW MARIO**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/resocontocanale status`
-  - titolo: `📓 __**RESOCONTOCANALE**__`
-  - sottotitolo: `ℹ️ STATUS`
+  - titolo: `📓 __**STATUS**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/resocontoserver status`
-  - titolo: `📓 __**RESOCONTOSERVER**__`
-  - sottotitolo: `ℹ️ STATUS`
+  - titolo: `📓 __**STATUS**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/riassunto ultimi quantita:30 unita:minuti`
-  - titolo: `🗒️ __**RIASSUNTO**__`
-  - sottotitolo: `✅ ULTIMI 30 MINUTI`
+  - titolo: `🗒️ __**ULTIMI 30 MINUTI**__`
+  - description: `*...*`
+  - primo field: `✅ __**OK**__`
 - `/riassunto ultimi quantita:1 unita:ore`
-  - titolo: `🗒️ __**RIASSUNTO**__`
-  - sottotitolo: `ℹ️ ULTIMA ORA`
+  - titolo: `🗒️ __**ULTIMA ORA**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/attivita ultimi quantita:7 unita:giorni`
-  - titolo: `📈 __**ATTIVITA**__`
-  - sottotitolo: `✅ ULTIMI 7 GIORNI`
+  - titolo: `📈 __**ULTIMI 7 GIORNI**__`
+  - description: `*...*`
+  - primo field: `✅ __**OK**__`
 - `/attivita ultimi quantita:1 unita:minuti`
-  - titolo: `📈 __**ATTIVITA**__`
-  - sottotitolo: `ℹ️ ULTIMO MINUTO`
+  - titolo: `📈 __**ULTIMO MINUTO**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/resocontocanale ultimi quantita:1 unita:giorni`
-  - titolo: `📓 __**RESOCONTOCANALE**__`
-  - sottotitolo: `ℹ️ ULTIMO GIORNO`
+  - titolo: `📓 __**ULTIMO GIORNO**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/riassunto range da:20/03/2026 10:15 a:21/03/2026 11:45`
-  - titolo: `🗒️ __**RIASSUNTO**__`
-  - sottotitolo: `ℹ️ DAL 20/03 10:15 AL 21/03 11:45`
+  - titolo: `🗒️ __**DAL 20/03 10:15 AL 21/03 11:45**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/campaigns prompt status`
-  - titolo: `📣 __**CAMPAIGNS**__`
-  - sottotitolo: `ℹ️ PROMPT STATUS`
+  - titolo: `📣 __**PROMPT STATUS**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/users tempban_list`
-  - titolo: `🛠️ __**USERS**__`
-  - sottotitolo: `ℹ️ TEMPBAN_LIST`
+  - titolo: `🛠️ __**TEMPBAN_LIST**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/admin retention on`
-  - titolo: `🫛 __**ADMIN**__`
-  - sottotitolo: `ℹ️ RETENTION ON`
+  - titolo: `🫛 __**RETENTION ON**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 
 ## Implementazione
 

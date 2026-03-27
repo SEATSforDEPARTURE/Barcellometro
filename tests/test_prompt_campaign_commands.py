@@ -7,6 +7,7 @@ import discord
 import pytest
 
 from tests._sqlite_stub import ensure_sqlite_stub
+from tests._embed_test_utils import embed_visible_text, primary_field
 
 ensure_sqlite_stub()
 
@@ -65,14 +66,14 @@ def test_prompt_create_supports_optional_fields_and_one_shot_defaults() -> None:
         assert kwargs["name"].startswith("prompt-")
         assert len(kwargs["start_time_local"]) == 5 and ":" in kwargs["start_time_local"]
         sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
-        description = sent_embed.description or ""
-        description_upper = description.upper()
-        assert "PROMPT" in description_upper
-        assert "SCHEDULE_ADD" in description_upper
-        assert "42" in description_upper
-        assert "CREATED" in description_upper
-        if "NEXT RUN" in description_upper:
-            next_run_section = description_upper.split("NEXT RUN", 1)[1]
+        body_upper = embed_visible_text(sent_embed).upper()
+        assert "PROMPT" in body_upper
+        assert "SCHEDULE_ADD" in body_upper
+        assert "42" in body_upper
+        assert "CREATED" in body_upper
+        assert primary_field(sent_embed).name == "✅ __**OK**__"
+        if "NEXT RUN" in body_upper:
+            next_run_section = body_upper.split("NEXT RUN", 1)[1]
             assert any(char.isdigit() for char in next_run_section)
 
     asyncio.run(_run())
@@ -118,7 +119,8 @@ def test_prompt_list_shows_one_shot_label() -> None:
             triggers_module.check_permission = old_permission
 
         sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
-        assert "every=one-shot" in (sent_embed.description or "")
+        assert "every=one-shot" in embed_visible_text(sent_embed)
+        assert primary_field(sent_embed).name == "ℹ️ __**INFO**__"
 
     asyncio.run(_run())
 
@@ -168,9 +170,11 @@ def test_prompt_show_resolves_schedule_by_name() -> None:
             triggers_module.check_permission = old_permission
 
         sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
-        assert "morning-news" in (sent_embed.description or "")
-        assert "Prompt Text" in (sent_embed.description or "")
-        assert "Scrivi un update" in (sent_embed.description or "")
+        visible_text = embed_visible_text(sent_embed)
+        assert "morning-news" in visible_text
+        assert "Prompt Text" in visible_text
+        assert "Scrivi un update" in visible_text
+        assert "SCHEDULE" in primary_field(sent_embed).name.upper()
 
     asyncio.run(_run())
 
@@ -209,6 +213,7 @@ def test_prompt_show_rejects_ambiguous_schedule_name() -> None:
             triggers_module.check_permission = old_permission
 
         sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
-        assert "ambiguous" in (sent_embed.description or "")
+        assert "ambiguous" in embed_visible_text(sent_embed).lower()
+        assert primary_field(sent_embed).name == "⚠️ __**WARNING**__"
 
     asyncio.run(_run())

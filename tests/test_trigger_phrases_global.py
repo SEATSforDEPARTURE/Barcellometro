@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from tests._sqlite_stub import ensure_sqlite_stub
+from tests._embed_test_utils import embed_visible_text, primary_field
 
 ensure_sqlite_stub()
 
@@ -567,10 +568,11 @@ def test_frasi_add_and_list_include_cooldown_and_roles() -> None:
 
             await list_cmd.callback(interaction)
             sent_embed = response.send_message.await_args_list[-1].kwargs["embed"]
-            description = sent_embed.description or ""
-            assert "#" in description
-            assert "cooldown: 120s" in description
-            assert "roles: <@&123>, <@&456>" in description
+            visible_text = embed_visible_text(sent_embed)
+            assert "#" in visible_text
+            assert "cooldown: 120s" in visible_text
+            assert "roles: <@&123>, <@&456>" in visible_text
+            assert primary_field(sent_embed).name == "ℹ️ __**INFO**__"
             await db.close()
         finally:
             trigger_commands_module.check_permission = old_permission
@@ -698,7 +700,8 @@ def test_frasi_edit_reset_fields_and_missing_id() -> None:
 
             await edit_cmd.callback(interaction, id=99999)
             sent_embed = response.send_message.await_args_list[-1].kwargs["embed"]
-            assert "not found" in (sent_embed.description or "").lower()
+            assert "not found" in embed_visible_text(sent_embed).lower()
+            assert primary_field(sent_embed).name == "⚠️ __**WARNING**__"
             await db.close()
         finally:
             trigger_commands_module.check_permission = old_permission
@@ -893,8 +896,9 @@ def test_frasi_milestone_commands() -> None:
 
             await list_cmd.callback(interaction)
             sent_embed = response.send_message.await_args_list[-1].kwargs["embed"]
-            description = sent_embed.description or ""
-            assert "5 -> cinque" in description and "10 -> dieci" in description
+            visible_text = embed_visible_text(sent_embed)
+            assert "5 -> cinque" in visible_text and "10 -> dieci" in visible_text
+            assert primary_field(sent_embed).name == "ℹ️ __**INFO**__"
 
             await remove_cmd.callback(interaction)
             milestones_after = await db.list_trigger_phrase_global_milestones("1")
