@@ -12,6 +12,7 @@ from app.shared.discord.footer_status_pagination import FooterStatusPaginationVi
 from app.shared.discord.footer_status_renderer import build_footer_status_embeds
 from app.services.embed_images import InvalidEmbedImageUrlError
 from app.services.author import InvalidAuthorThumbnailError, render_author_name
+from app.services.description_template_service import InvalidDescriptionTemplateError
 from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
 
 
@@ -41,6 +42,7 @@ async def _send_embed_response(
         author_service=_author_service(ctx),
         embed_images_service=getattr(ctx, "embed_images", None),
         footer_service_name="status",
+        description_template_service=getattr(ctx, "description_template", None),
         ephemeral=True,
     )
 
@@ -69,6 +71,17 @@ def _format_value(value: str | None) -> str:
 
 def _format_override_value(value: str | None, *, missing: str) -> str:
     return value if value else missing
+
+
+def _description_preview_context(*, service_name: str, user_name: str = "Mario") -> dict[str, object]:
+    return {
+        "user_name": user_name,
+        "service_name": service_name,
+        "ordinal_today": "secondo",
+        "audio_intro": "Leggiamo cosa ci dice",
+        "is_first_today": False,
+        "count_today": 2,
+    }
 
 
 async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
@@ -685,6 +698,92 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             return
         view = AuthorStatusPaginationView(embeds)
         await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), embed_images_service=getattr(ctx, "embed_images", None), default_service_name="status")
+
+    description_group = app_commands.Group(name="description", description="Description controls")
+    embed_group.add_command(description_group)
+
+    @description_group.command(name="template_service_set", description="Set a service-specific description template.")
+    @app_commands.describe(service="Service name.", template="Description template with placeholders.")
+    async def description_template_service_set_command(interaction: discord.Interaction, service: str, template: str) -> None:
+        if not await check_permission(interaction, "admin.description.template_service_set", ctx):
+            return
+        if getattr(ctx, "description_template", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description template_service_set", lines=[("reason", "Description template service is unavailable")], kind="error")
+            return
+        service_name = _clean_opt(service)
+        if service_name is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
+            return
+        try:
+            stored = await ctx.description_template.set_template(service_name, template)
+            preview = await ctx.description_template.render_preview(
+                service=service_name,
+                context=_description_preview_context(service_name=service_name),
+                fallback="Usa default del servizio",
+            )
+        except InvalidDescriptionTemplateError as exc:
+            await _send_embed_response(
+                interaction,
+                ctx,
+                subcommand_path="description template_service_set",
+                subtitle_args=[service_name],
+                lines=[("reason", str(exc))],
+                kind="error",
+            )
+            return
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="description template_service_set",
+            subtitle_args=[service_name],
+            lines=[("result", "updated")],
+            sections=_template_section(("Template", stored), ("Preview", preview)),
+            kind="success",
+        )
+
+    @description_group.command(name="template_service_show", description="Show a service-specific description template.")
+    @app_commands.describe(service="Service name.")
+    async def description_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
+        if not await check_permission(interaction, "admin.description.template_service_show", ctx):
+            return
+        if getattr(ctx, "description_template", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description template_service_show", lines=[("reason", "Description template service is unavailable")], kind="error")
+            return
+        service_name = _clean_opt(service)
+        if service_name is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
+            return
+        current = await ctx.description_template.get_template(service_name)
+        preview = await ctx.description_template.render_preview(
+            service=service_name,
+            context=_description_preview_context(service_name=service_name),
+            fallback="Usa default del servizio",
+        )
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="description template_service_show",
+            subtitle_args=[service_name],
+            sections=_template_section(
+                ("Template", current or "usa default del servizio"),
+                ("Preview", preview),
+            ),
+        )
+
+    @description_group.command(name="template_service_reset", description="Reset a service-specific description template.")
+    @app_commands.describe(service="Service name.")
+    async def description_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
+        if not await check_permission(interaction, "admin.description.template_service_reset", ctx):
+            return
+        if getattr(ctx, "description_template", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description template_service_reset", lines=[("reason", "Description template service is unavailable")], kind="error")
+            return
+        service_name = _clean_opt(service)
+        if service_name is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
+            return
+        await ctx.description_template.reset_template(service_name)
+        await _send_embed_response(interaction, ctx, subcommand_path="description template_service_reset", subtitle_args=[service_name], lines=[("result", "reset")], kind="success")
 
     images_group = app_commands.Group(name="images", description="Embed image controls")
     embed_group.add_command(images_group)

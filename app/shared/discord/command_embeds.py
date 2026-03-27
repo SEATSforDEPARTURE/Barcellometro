@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from typing import Any, Literal
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -24,6 +25,9 @@ from app.shared.discord.embed_limits import MAX_EMBED_CHARS, chunk_embeds_for_me
 from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from app.services.description_template_service import DescriptionTemplateService
 
 CommandKind = Literal["info", "success", "warning", "error"]
 FooterMode = Literal["minimal", "meta", "none"]
@@ -731,6 +735,7 @@ async def build_command_embeds(
     section_title_formatter: Callable[[str], str] | None = None,
     command_description: str | None = None,
     interaction: discord.Interaction | None = None,
+    description_template_service: DescriptionTemplateService | None = None,
 ) -> list[discord.Embed]:
     display_context = normalize_display_command_context(
         top_level=top_level,
@@ -768,11 +773,28 @@ async def build_command_embeds(
         or _resolve_interaction_command_description(interaction)
         or _fallback_command_description(display_context)
     )
-    description = format_standard_description(
-        resolved_command_description,
-        italic=True,
-        blank_line_before_fields=True,
-    )
+    if description_template_service is not None:
+        description = await description_template_service.render(
+            service=_resolve_footer_service_name(
+                footer_service_name=footer_service_name,
+                visual_top_level=visual_top_level or display_context.visual_top_level,
+                top_level=top_level,
+            ),
+            context={
+                "user_name": getattr(getattr(interaction, "user", None), "display_name", None)
+                or getattr(getattr(interaction, "user", None), "name", None)
+                or "utente",
+            },
+            fallback=resolved_command_description,
+        )
+        if description and not description.endswith("\n\n"):
+            description = f"{description}\n\n"
+    else:
+        description = format_standard_description(
+            resolved_command_description,
+            italic=True,
+            blank_line_before_fields=True,
+        )
     embed = discord.Embed(
         title=title,
         description=description,
@@ -935,6 +957,7 @@ async def send_standard_response(
     top_level_emoji: str | None = None,
     subcommand_emoji: str | None = None,
     command_description: str | None = None,
+    description_template_service: DescriptionTemplateService | None = None,
 ) -> None:
     resolved_command_description = (
         (command_description.strip() if isinstance(command_description, str) and command_description.strip() else None)
@@ -959,6 +982,7 @@ async def send_standard_response(
         subcommand_emoji=subcommand_emoji,
         command_description=resolved_command_description,
         interaction=interaction,
+        description_template_service=description_template_service,
     )
     resolved_footer_service_name = _resolve_footer_service_name(
         footer_service_name=footer_service_name,

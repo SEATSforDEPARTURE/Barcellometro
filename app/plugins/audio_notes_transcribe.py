@@ -113,9 +113,11 @@ def _build_audio_note_embed(
     contributors: list[str] | None = None,
     used_local_processing: bool = True,
 ) -> discord.Embed:
+    normalized_description = (description or "").strip()
+    description_already_formatted = normalized_description.startswith("*") and normalized_description.endswith("*")
     embed = discord.Embed(
         title=format_standard_title(f"NOTA AUDIO DI {user_display_name}", emoji="🗣️"),
-        description=format_standard_description(description, italic=True),
+        description=format_standard_description(normalized_description, italic=not description_already_formatted),
         color=_AUDIO_NOTE_COLOR,
     )
     attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
@@ -162,6 +164,7 @@ def _build_audio_note_embeds_from_sections(
     *,
     user_display_name: str,
     ordinal_label: str | None,
+    final_description: str | None = None,
     contributors: list[str] | None = None,
     used_local_processing: bool = True,
 ) -> list[discord.Embed]:
@@ -174,7 +177,7 @@ def _build_audio_note_embeds_from_sections(
     if not section_chunks:
         return [
             _build_audio_note_embed(
-                _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
+                final_description or _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
                 user_display_name=user_display_name,
                 contributors=contributors,
                 used_local_processing=used_local_processing,
@@ -182,8 +185,9 @@ def _build_audio_note_embeds_from_sections(
         ]
 
     embeds: list[discord.Embed] = []
+    resolved_description = final_description or _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label)
     current_embed = _build_audio_note_embed(
-        _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
+        resolved_description,
         user_display_name=user_display_name,
         contributors=contributors,
         used_local_processing=used_local_processing,
@@ -192,7 +196,7 @@ def _build_audio_note_embeds_from_sections(
         if len(current_embed.fields) >= 25:
             embeds.append(current_embed)
             current_embed = _build_audio_note_embed(
-                _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
+                resolved_description,
                 user_display_name=user_display_name,
                 contributors=contributors,
                 used_local_processing=used_local_processing,
@@ -205,7 +209,7 @@ def _build_audio_note_embeds_from_sections(
     embeds.append(current_embed)
     return embeds or [
         _build_audio_note_embed(
-            _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
+            resolved_description,
             user_display_name=user_display_name,
             contributors=contributors,
             used_local_processing=used_local_processing,
@@ -445,6 +449,7 @@ def setup(registry: ServiceRegistry) -> None:
     footer_service = registry.get("footer") if registry.has("footer") else None
     author_service = registry.get("author") if registry.has("author") else None
     embed_images_service = registry.get("embed_images") if registry.has("embed_images") else None
+    description_template_service = registry.get("description_template") if registry.has("description_template") else None
     config = registry.get("config")
 
     queue: asyncio.Queue[tuple[discord.Message, discord.Attachment, discord.Message]] = asyncio.Queue()
@@ -459,6 +464,27 @@ def setup(registry: ServiceRegistry) -> None:
         if stored is None:
             return False
         return stored.lower() in {"1", "true", "yes", "y"}
+
+    async def _render_audio_description(
+        *,
+        user_name: str,
+        ordinal_label: str | None,
+        fallback: str,
+        count_today: int | None = None,
+    ) -> str:
+        if description_template_service is None:
+            return format_standard_description(fallback, italic=True)
+        return await description_template_service.render(
+            service="audio_notes",
+            context={
+                "user_name": user_name,
+                "ordinal_today": ordinal_label or "—",
+                "audio_intro": "Leggiamo cosa ci dice",
+                "is_first_today": bool((count_today or 0) <= 1),
+                "count_today": count_today or 0,
+            },
+            fallback=fallback,
+        )
 
     async def _handle_message(message: discord.Message) -> None:
         if message.author.bot and config.ignore_bots:
@@ -488,7 +514,11 @@ def setup(registry: ServiceRegistry) -> None:
                 return
             reply = await message.reply(
                 embed=_build_audio_note_embed(
-                    _audio_loading_description(),
+                    await _render_audio_description(
+                        user_name=_audio_user_display_name(message.author),
+                        ordinal_label=None,
+                        fallback=_audio_loading_description(),
+                    ),
                     user_display_name=_audio_user_display_name(message.author),
                     used_local_processing=True,
                 )
@@ -618,10 +648,22 @@ def setup(registry: ServiceRegistry) -> None:
                 start_ts=start_utc,
                 end_ts=end_utc,
             )
+            ordinal_label = _audio_ordinal_label(ordinal_count + 1)
+            final_fallback_description = _audio_final_description(
+                user_ref=_audio_user_display_name(message.author),
+                ordinal_label=ordinal_label,
+            )
+            final_description = await _render_audio_description(
+                user_name=_audio_user_display_name(message.author),
+                ordinal_label=ordinal_label,
+                count_today=ordinal_count + 1,
+                fallback=final_fallback_description,
+            )
             embeds = _build_audio_note_embeds_from_sections(
                 sections,
                 user_display_name=_audio_user_display_name(message.author),
-                ordinal_label=_audio_ordinal_label(ordinal_count + 1),
+                ordinal_label=ordinal_label,
+                final_description=final_description,
                 contributors=contributors,
                 used_local_processing=used_local_processing,
             )
