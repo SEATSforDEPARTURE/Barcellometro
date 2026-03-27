@@ -59,14 +59,15 @@ def test_author_on_off_and_status_commands(embed_module, monkeypatch: pytest.Mon
         status_kwargs = send_standard.await_args.kwargs
         assert status_kwargs['subcommand_path'] == 'author status'
         assert ('enabled', 'on') in status_kwargs['lines']
-        assert ('supported services', 9) in status_kwargs['lines']
+        assert ('supported services', 10) in status_kwargs['lines']
         assert ('services with custom template', 1) in status_kwargs['lines']
-        assert ('services using default', 8) in status_kwargs['lines']
+        assert ('services using default', 9) in status_kwargs['lines']
         assert ('runtime rule', 'ON = runtime uses service custom author when configured; otherwise standard default') in status_kwargs['lines']
         custom_section = next(section for section in status_kwargs['sections'] if section.title == 'Custom Templates')
         assert ('riassunto', 'phrase, url') in custom_section.lines
         default_section = next(section for section in status_kwargs['sections'] if section.title == 'Default Services')
         assert 'audio' in default_section.lines[0][1]
+        assert 'triggers' in default_section.lines[0][1]
         assert 'audio_notes' not in default_section.lines[0][1]
         assert 'campaign_content_formatter' not in default_section.lines[0][1]
         placeholders = dict(next(section for section in status_kwargs['sections'] if section.title == 'PLACEHOLDERS').lines)

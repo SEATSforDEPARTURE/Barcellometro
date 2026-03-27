@@ -10,7 +10,7 @@ from app.shared.discord.command_embeds import CommandEmbedSection, send_standard
 from app.services.embed_images import InvalidEmbedImageUrlError
 from app.services.author import InvalidAuthorThumbnailError, render_author_name
 from app.services.description_template_service import InvalidDescriptionTemplateError
-from app.services.embed_public_service_keys import list_embed_service_aliases, list_public_embed_service_keys
+from app.services.embed_public_service_keys import EmbedTemplateSystem, list_embed_service_aliases, list_public_embed_service_keys
 from app.services.embed_template_service_catalog import (
     build_embed_template_service_autocomplete_choices,
     resolve_embed_template_public_service,
@@ -76,8 +76,8 @@ def _format_override_value(value: str | None, *, missing: str) -> str:
     return value if value else missing
 
 
-def _normalize_template_service_key(value: str) -> str | None:
-    return resolve_embed_template_public_service(_clean_opt(value))
+def _normalize_template_service_key(value: str, *, system: EmbedTemplateSystem) -> str | None:
+    return resolve_embed_template_public_service(_clean_opt(value), system=system)
 
 
 def _resolve_public_service_value(values: dict[str, str], public_service_key: str) -> str | None:
@@ -137,6 +137,18 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
     async def _autocomplete_embed_template_service(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         del interaction
         return await build_embed_template_service_autocomplete_choices(ctx, current)
+
+    async def _autocomplete_embed_template_service_footer(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        del interaction
+        return await build_embed_template_service_autocomplete_choices(ctx, current, system="footer")
+
+    async def _autocomplete_embed_template_service_author(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        del interaction
+        return await build_embed_template_service_autocomplete_choices(ctx, current, system="author")
+
+    async def _autocomplete_embed_template_service_description(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        del interaction
+        return await build_embed_template_service_autocomplete_choices(ctx, current, system="description")
 
     footer_group = app_commands.Group(name="footer", description="Footer controls")
     embed_group.add_command(footer_group)
@@ -296,7 +308,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @footer_group.command(name="template_service_set", description="Set a service-specific footer template.")
     @app_commands.describe(service="Service name.", phrase="Optional service-specific footer phrase.", thumbnail="Optional footer thumbnail: Discord custom emoji or http/https image URL.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_footer)
     async def footer_template_service_set_command(
         interaction: discord.Interaction,
         service: str,
@@ -314,7 +326,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 kind="error",
             )
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="footer")
         if service_name is None:
             await _send_embed_response(
                 interaction,
@@ -366,7 +378,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @footer_group.command(name="template_service_show", description="Show a service-specific footer template.")
     @app_commands.describe(service="Service name.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_footer)
     async def footer_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.footer.template_service_show", ctx):
             return
@@ -379,7 +391,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 kind="error",
             )
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="footer")
         if service_name is None:
             await _send_embed_response(
                 interaction,
@@ -407,7 +419,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @footer_group.command(name="template_service_reset", description="Reset a service-specific footer template.")
     @app_commands.describe(service="Service name.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_footer)
     async def footer_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.footer.template_service_reset", ctx):
             return
@@ -420,7 +432,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                 kind="error",
             )
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="footer")
         if service_name is None:
             await _send_embed_response(
                 interaction,
@@ -456,7 +468,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             )
             return
 
-        supported_services = list_public_embed_service_keys()
+        supported_services = list_public_embed_service_keys(system="footer")
         enabled = await ctx.footer.is_enabled()
         service_phrases = await ctx.footer.get_service_phrases()
         service_thumbnails = await ctx.footer.get_service_thumbnails()
@@ -624,7 +636,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @author_group.command(name="template_service_set", description="Set a service-specific author template.")
     @app_commands.describe(service="Service name.", phrase="Optional service-specific author phrase.", thumbnail="Optional author thumbnail: Discord custom emoji or http/https image URL.", url="Optional service-specific author URL.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_author)
     async def author_template_service_set_command(
         interaction: discord.Interaction,
         service: str,
@@ -637,7 +649,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="author")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -674,14 +686,14 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @author_group.command(name="template_service_show", description="Show a service-specific author template.")
     @app_commands.describe(service="Service name.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_author)
     async def author_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.author.template_service_show", ctx):
             return
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_show", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="author")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -708,14 +720,14 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @author_group.command(name="template_service_reset", description="Reset a service-specific author template.")
     @app_commands.describe(service="Service name.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_author)
     async def author_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.author.template_service_reset", ctx):
             return
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="author")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -732,7 +744,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        supported_services = list_public_embed_service_keys()
+        supported_services = list_public_embed_service_keys(system="author")
         enabled = await _author_service(ctx).is_enabled()
         service_phrases = await _author_service(ctx).get_service_phrases()
         service_thumbnails = await _author_service(ctx).get_service_thumbnails()
@@ -821,7 +833,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             await _send_embed_response(interaction, ctx, subcommand_path="description status", lines=[("reason", "Description template service is unavailable")], kind="error")
             return
         snapshot = await ctx.description_template.build_status_snapshot()
-        supported_services = list_public_embed_service_keys()
+        supported_services = list_public_embed_service_keys(system="description")
         custom_services = sorted(snapshot.custom_templates)
         default_services = [service for service in supported_services if service not in snapshot.custom_templates]
         await _send_embed_response(
@@ -854,14 +866,14 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @description_group.command(name="template_service_set", description="Set a service-specific description template.")
     @app_commands.describe(service="Service name.", template="Description template with placeholders.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_description)
     async def description_template_service_set_command(interaction: discord.Interaction, service: str, template: str) -> None:
         if not await check_permission(interaction, "admin.description.template_service_set", ctx):
             return
         if getattr(ctx, "description_template", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_set", lines=[("reason", "Description template service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="description")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -894,14 +906,14 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @description_group.command(name="template_service_show", description="Show a service-specific description template.")
     @app_commands.describe(service="Service name.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_description)
     async def description_template_service_show_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.description.template_service_show", ctx):
             return
         if getattr(ctx, "description_template", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_show", lines=[("reason", "Description template service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="description")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -927,14 +939,14 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     @description_group.command(name="template_service_reset", description="Reset a service-specific description template.")
     @app_commands.describe(service="Service name.")
-    @app_commands.autocomplete(service=_autocomplete_embed_template_service)
+    @app_commands.autocomplete(service=_autocomplete_embed_template_service_description)
     async def description_template_service_reset_command(interaction: discord.Interaction, service: str) -> None:
         if not await check_permission(interaction, "admin.description.template_service_reset", ctx):
             return
         if getattr(ctx, "description_template", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_reset", lines=[("reason", "Description template service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="description")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="description template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -1054,7 +1066,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "embed_images", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", lines=[("reason", "Embed images service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="images")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_set", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -1090,7 +1102,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "embed_images", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_show", lines=[("reason", "Embed images service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="images")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_show", lines=[("reason", "Provide a valid service name")], kind="error")
             return
@@ -1116,7 +1128,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if getattr(ctx, "embed_images", None) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_reset", lines=[("reason", "Embed images service is unavailable")], kind="error")
             return
-        service_name = _normalize_template_service_key(service)
+        service_name = _normalize_template_service_key(service, system="images")
         if service_name is None:
             await _send_embed_response(interaction, ctx, subcommand_path="images template_service_reset", lines=[("reason", "Provide a valid service name")], kind="error")
             return
