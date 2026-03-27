@@ -141,3 +141,16 @@ def register_embed_tree(embed_module):
 def section_payload(kwargs: dict[str, object], index: int = 0):
     section = kwargs['sections'][index]
     return section.title, section.lines
+
+
+def primary_field(embed: discord.Embed) -> discord.EmbedProxy:
+    assert embed.fields, "Expected at least one field in standardized command embed."
+    return embed.fields[0]
+
+
+def embed_visible_text(embed: discord.Embed) -> str:
+    parts: list[str] = [embed.title or "", embed.description or ""]
+    for field in embed.fields:
+        parts.append(field.name or "")
+        parts.append(field.value or "")
+    return "\n".join(part for part in parts if part).strip()

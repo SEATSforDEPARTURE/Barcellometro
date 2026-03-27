@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import discord
 import pytest
 
+from tests._embed_test_utils import primary_field
+
 
 @pytest.fixture
 def attivita_module(import_fresh):
@@ -216,7 +218,9 @@ def test_dm_forbidden_fallback(attivita_module, monkeypatch: pytest.MonkeyPatch)
     assert payload["ephemeral"] is True
     assert payload["content"] is None
     assert payload["embed"] is not None
-    assert "Non posso inviarti DM. Abilita i DM dal server e riprova." in (payload["embed"].description or "")
+    warning_field = primary_field(payload["embed"])
+    assert warning_field.name == "❌ __**ERROR**__"
+    assert "Non posso inviarti DM. Abilita i DM dal server e riprova." in warning_field.value
 
 
 class _NoopUser:
@@ -244,9 +248,12 @@ def test_attivita_ultimi_validation_uses_standard_embed(attivita_module, monkeyp
     payload = interaction.response.payload
     assert payload is not None
     assert payload["embed"] is not None
-    assert "ATTIVITA" in (payload["embed"].title or "")
-    assert "ULTIMI 0 GIORNI" in (payload["embed"].description or "")
-    assert "ATTIVITA ULTIMI" not in (payload["embed"].description or "")
+    embed = payload["embed"]
+    assert "ULTIMI 0 GIORNI" in (embed.title or "")
+    assert "ATTIVITA" not in (embed.title or "")
+    assert getattr(embed.author, "name", "").upper().startswith("SERVIZIO ")
+    info_field = primary_field(embed)
+    assert info_field.name == "❌ __**ERROR**__"
     assert payload["content"] is None
 
 
@@ -270,5 +277,9 @@ def test_attivita_ultimi_dm_status_keeps_runtime_window_in_subtitle(attivita_mod
     payload = interaction.response.payload
 
     assert payload is not None
-    assert "ATTIVITA" in (payload["embed"].title or "")
-    assert "ULTIMI 7 GIORNI" in (payload["embed"].description or "")
+    embed = payload["embed"]
+    assert "ULTIMI 7 GIORNI" in (embed.title or "")
+    assert "ATTIVITA" not in (embed.title or "")
+    assert getattr(embed.author, "name", "").upper().startswith("SERVIZIO ")
+    info_field = primary_field(embed)
+    assert info_field.name == "✅ __**OK**__"

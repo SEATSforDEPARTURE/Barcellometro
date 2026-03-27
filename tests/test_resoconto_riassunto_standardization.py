@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 import sys
+import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
@@ -9,6 +10,12 @@ import discord
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if "httpx" not in sys.modules:
+    httpx_stub = types.ModuleType("httpx")
+    httpx_stub.AsyncClient = object
+    httpx_stub.Client = object
+    sys.modules["httpx"] = httpx_stub
+
 pytest.importorskip("aiosqlite")
 
 from app.plugins import commands as commands_module
@@ -17,6 +24,7 @@ from app.plugins.commands_modular import riassunto as riassunto_module
 from app.plugins.commands_modular.resoconto import register_resoconto
 from app.plugins.commands_modular.riassunto import register_riassunto
 from app.shared.discord.command_embeds import send_standard_response
+from tests._embed_test_utils import primary_field
 
 
 class _FakeResponse:
@@ -493,7 +501,9 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
     assert "embed" in kwargs
     _assert_standard_footer(kwargs["embed"].footer.text)
     assert kwargs["embed"].description and "DETAIL:" not in kwargs["embed"].description.upper()
-    assert "• Ho avuto un problema a costruire l’embed" in (kwargs["embed"].description or "")
+    main_field = primary_field(kwargs["embed"])
+    assert main_field.name == "⚠️ __**WARNING**__"
+    assert "• Ho avuto un problema a costruire l’embed" in main_field.value
 
 
 def test_critical_modules_no_longer_use_raw_slash_text_helpers() -> None:
