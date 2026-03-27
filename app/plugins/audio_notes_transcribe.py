@@ -60,9 +60,11 @@ def _audio_loading_description() -> str:
 
 def _audio_final_description(*, user_ref: str, ordinal_label: str | None) -> str:
     safe_user_ref = clean_embed_display_name(user_ref)
+    intro = "*Leggiamo cosa ci dice*"
+    in_audio = "*in quest'audio...*"
     if ordinal_label:
-        return f"Leggiamo cosa ci dice **{safe_user_ref}** in quest'audio... È il **{ordinal_label}** di oggi."
-    return f"Leggiamo cosa ci dice **{safe_user_ref}** in quest'audio..."
+        return f"{intro} **{safe_user_ref}** {in_audio} *È il* **{ordinal_label}** *di oggi.*"
+    return f"{intro} **{safe_user_ref}** {in_audio}"
 
 
 def _build_audio_note_title(user_display_name: str) -> str:
@@ -490,7 +492,11 @@ def setup(registry: ServiceRegistry) -> None:
         count_today: int | None = None,
     ) -> str:
         if description_template_service is None:
-            return format_standard_description(fallback, italic=True)
+            return fallback
+        if not await description_template_service.is_enabled():
+            return fallback
+        if await description_template_service.get_template("audio_notes") is None:
+            return fallback
         return await description_template_service.render(
             service="audio_notes",
             context={

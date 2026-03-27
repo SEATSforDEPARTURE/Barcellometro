@@ -214,8 +214,9 @@ def test_final_embed_description_includes_bold_user_and_bold_ordinal_when_availa
     )
     assert embeds
     first = embeds[0]
-    assert first.description == "_Leggiamo cosa ci dice **Criceto Mannaro** in quest'audio... È il **secondo** di oggi._"
+    assert first.description == "*Leggiamo cosa ci dice* **Criceto Mannaro** *in quest'audio...* *È il* **secondo** *di oggi.*"
     assert first.description.count("**") == 4
+    assert "*Leggiamo cosa ci dice **Criceto Mannaro**" not in first.description
     assert "Trascrizione audio elaborata" not in first.description
     assert "<@" not in first.description
     field_names = [field.name for field in first.fields]
@@ -236,7 +237,7 @@ def test_final_embed_description_fallback_without_ordinal_is_human_and_italic(au
         user_display_name="Mario",
         ordinal_label=None,
     )
-    assert embeds[0].description == "_Leggiamo cosa ci dice **Mario** in quest'audio..._"
+    assert embeds[0].description == "*Leggiamo cosa ci dice* **Mario** *in quest'audio...*"
 
 
 
@@ -249,10 +250,19 @@ def test_audio_note_title_and_description_clean_decorative_nickname_and_keep_mar
 
     assert embed.title == "🗣️ __**NOTA AUDIO**__"
     assert "🐹" not in embed.title and "🐭" not in embed.title
-    assert embed.description.startswith("_") and embed.description.endswith("_")
+    assert embed.description.startswith("*") and embed.description.endswith("*")
     assert embed.description.count("*") % 2 == 0
     assert "\\*\\*" not in embed.description
     assert "**CRICETO MANNARO**" in embed.description
+
+
+def test_audio_final_description_sanitizes_markdown_and_keeps_bold_segments_outside_italic_wrapper(audio_notes_module) -> None:
+    rendered = audio_notes_module._audio_final_description(user_ref="Cr*ic_eto` ~~", ordinal_label="quinto")
+
+    assert rendered.startswith("*Leggiamo cosa ci dice* ")
+    assert "**Cric\\_eto" in rendered
+    assert "**quinto**" in rendered
+    assert "*Leggiamo cosa ci dice **" not in rendered
 
 def test_audio_user_display_name_never_returns_mention_or_raw_id(audio_notes_module) -> None:
     user = SimpleNamespace(display_name="Mario_**<@123>", name="fallback", mention="<@123456789012345678>", id=123456789012345678)
