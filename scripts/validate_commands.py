@@ -16,6 +16,7 @@ MODULAR_DIR = COMMANDS_ROOT / "commands_modular"
 DEFAULT_REPORT_PATH = REPO_ROOT / "docs" / "command_tree_report.md"
 
 BANNED_SEGMENTS = {"delete", "clear", "create", "update", "stats", "get", "toggle"}
+BANNED_ROOTS = {"dmsummary", "aurasummary", "barcellosummary", "activitysummary"}
 ITALIAN_MARKERS = {
     "attivita",
     "calibra",
@@ -449,6 +450,16 @@ def _validate_commands(result: ValidationResult) -> ValidationResult:
 
         segments = command.path.split(".")
         action = command.action
+        if command.root in BANNED_ROOTS:
+            _add_issue(
+                result,
+                "error",
+                "banned_root",
+                f"Command uses banned legacy root '{command.root}'.",
+                command.path,
+                command.source_file,
+                command.line,
+            )
         if action in BANNED_SEGMENTS:
             _add_issue(result, "error", "banned_segment", f"Command uses banned legacy action '{action}'.", command.path, command.source_file, command.line)
         if not re.fullmatch(r"[a-z]+(?:_[a-z]+){0,2}", action):

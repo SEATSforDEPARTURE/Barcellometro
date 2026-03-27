@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 _REQUIRED_TRIGGER_BARCELLO_COMMANDS = {"on", "off", "status", "calibrate", "run"}
+_LEGACY_SUMMARY_ROOTS = {"dmsummary", "aurasummary", "barcellosummary", "activitysummary"}
 
 
 def _find_group_child(parent: app_commands.Group, name: str) -> app_commands.Group | None:
@@ -67,6 +68,62 @@ def _validate_triggers_contract(
     if missing:
         raise RuntimeError(
             "Command registration invariant failed: missing /triggers barcello commands: " + ", ".join(missing)
+        )
+
+
+async def _delete_remote_app_command(
+    *,
+    bot: discord.Client,
+    command_id: int,
+    guild_id: int | None,
+) -> None:
+    application_id = getattr(bot, "application_id", None)
+    if not application_id:
+        logger.warning("Cannot delete remote app command id=%s: application_id unavailable.", command_id)
+        return
+    if guild_id is None:
+        await bot.http.delete_global_command(application_id, command_id)
+        return
+    await bot.http.delete_guild_command(application_id, guild_id, command_id)
+
+
+async def _remove_legacy_summary_commands(
+    *,
+    bot: discord.Client,
+    guild_obj: discord.Object | None,
+) -> None:
+    scopes: list[tuple[str, discord.Object | None]] = [("global", None)]
+    if guild_obj is not None:
+        scopes.append(("guild", guild_obj))
+
+    for scope_label, scope_guild in scopes:
+        try:
+            remote_commands = await bot.tree.fetch_commands(guild=scope_guild)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to fetch application commands for cleanup (scope=%s)", scope_label)
+            continue
+        removed_names: list[str] = []
+        for command in remote_commands:
+            command_name = str(getattr(command, "name", "") or "").strip()
+            if command_name not in _LEGACY_SUMMARY_ROOTS:
+                continue
+            command_id = int(getattr(command, "id", 0) or 0)
+            logger.info("Removing legacy command: %s (scope=%s id=%s)", command_name, scope_label, command_id)
+            try:
+                await _delete_remote_app_command(
+                    bot=bot,
+                    command_id=command_id,
+                    guild_id=(scope_guild.id if scope_guild is not None else None),
+                )
+                removed_names.append(command_name)
+            except NotFound:
+                logger.info("Legacy command already absent: %s (scope=%s id=%s)", command_name, scope_label, command_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed deleting legacy command: %s (scope=%s id=%s)", command_name, scope_label, command_id)
+        logger.info(
+            "Legacy cleanup completed (scope=%s removed=%s)",
+            scope_label,
+            sorted(set(removed_names)),
         )
 
 
@@ -274,6 +331,8 @@ def setup(registry: ServiceRegistry) -> None:
             commands = bot.tree.get_commands(guild=guild_obj) if use_guild else bot.tree.get_commands()
             names = [command.qualified_name for command in commands]
             logger.info("Command tree pre-sync (%s) count=%d names=%s", command_scope, len(names), names)
+            await _remove_legacy_summary_commands(bot=bot, guild_obj=guild_obj)
+            logger.info("Syncing command tree (clean mode) scope=%s", command_scope)
             if use_guild:
                 synced = await bot.tree.sync(guild=guild_obj)
                 logger.info("Synced %d commands for %s", len(synced), "guild")
@@ -285,6 +344,11 @@ def setup(registry: ServiceRegistry) -> None:
                 logger.info("Synced %d commands for %s", len(synced), "global")
             synced_root_names = [command.name for command in synced]
             logger.info("Synced root commands (%s): %s", command_scope, synced_root_names)
+            final_global = await bot.tree.fetch_commands()
+            logger.info("Registered commands (global): %s", [command.name for command in final_global])
+            if guild_obj is not None:
+                final_guild = await bot.tree.fetch_commands(guild=guild_obj)
+                logger.info("Registered commands (guild=%s): %s", guild_obj.id, [command.name for command in final_guild])
             if "triggers" not in synced_root_names:
                 logger.error("Synced command set is missing /triggers (scope=%s).", command_scope)
             else:
