@@ -199,3 +199,65 @@ def test_remove_legacy_summary_commands_is_idempotent_when_no_legacy(import_fres
 
     assert bot.deleted_global_ids == []
     assert bot.deleted_guild_ids == []
+
+
+def test_setup_registers_activity_subgroup_without_duplicate_on(import_fresh, monkeypatch: pytest.MonkeyPatch) -> None:
+    commands_module = import_fresh("app.plugins.commands")
+
+    noop = lambda *args, **kwargs: None
+    for name in [
+        "register_status",
+        "register_database",
+        "register_ai",
+        "register_embed",
+        "register_roles",
+        "register_stt",
+        "register_translate",
+        "register_audio_notes",
+        "register_messaggi",
+        "register_voice_ingest",
+        "register_privacy",
+        "register_riassunto",
+        "register_aura",
+        "register_inattivi",
+        "register_greetings",
+        "register_moderazione_utenti",
+        "register_resoconto",
+        "register_ask",
+    ]:
+        monkeypatch.setattr(commands_module, name, noop)
+
+    monkeypatch.setattr(commands_module, "register_barcello", _stub_register_barcello)
+    monkeypatch.setattr(commands_module, "register_triggers", _stub_register_triggers)
+
+    from app.plugins.commands_modular.attivita import register_attivita as real_register_attivita
+
+    monkeypatch.setattr(commands_module, "register_attivita", real_register_attivita)
+
+    bot = _FakeBot()
+    config = SimpleNamespace(guild_id=123)
+    ctx = SimpleNamespace(bot=bot, config=config, footer=None, author=None)
+    monkeypatch.setattr(commands_module.CommandContext, "from_registry", lambda registry: ctx)
+
+    commands_module.setup(registry=SimpleNamespace())
+
+    root_by_name = {command.name: command for command in bot.tree.get_commands()}
+    assert "triggers" in root_by_name
+    assert "barcello" in root_by_name
+    assert "dmserversummary" in root_by_name
+    assert "attivita" in root_by_name
+
+    dmserversummary_group = root_by_name["dmserversummary"]
+    activity_group = next(command for command in dmserversummary_group.commands if command.name == "activity")
+    assert {command.name for command in activity_group.commands} == {
+        "on",
+        "off",
+        "status",
+        "today",
+        "yesterday",
+        "last",
+        "range",
+    }
+
+    attivita_alias_group = root_by_name["attivita"]
+    assert {command.name for command in attivita_alias_group.commands} == {"oggi", "ieri", "ultimi", "range"}
