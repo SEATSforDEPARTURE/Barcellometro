@@ -10,6 +10,7 @@ from collections.abc import Iterable
 import discord
 
 from app.services.database import DatabaseService
+from app.services.embed_public_service_keys import list_embed_service_aliases, resolve_public_embed_service_key
 from app.services.embed_status_placeholders import render_supported_placeholders
 from app.services.footer import SUPPORTED_FOOTER_SERVICES, footer_service_category, get_footer_meta, normalize_footer_thumbnail
 
@@ -71,19 +72,47 @@ _SERVICE_CANONICAL_TOP_LEVEL_FALLBACKS: dict[str, str] = {
     "status": "embed",
     "embed": "embed",
     "riassunto": "dmchannelsummary",
-    "barcello": "dmchannelsummary",
+    "dm_channel_summary": "dmchannelsummary",
+    "detail_embeds": "dmchannelsummary",
+    "barcello": "triggers",
+    "frasi": "triggers",
+    "phrases": "triggers",
+    "trigger_barcello": "triggers",
+    "trigger_phrases": "triggers",
     "activity_dm": "dmserversummary",
     "attivita": "dmserversummary",
+    "daily_activity_report": "dmserversummary",
+    "user_activity": "dmserversummary",
     "resoconto": "channelsummary",
+    "channel_summary": "channelsummary",
     "daily_resoconto": "serversummary",
-    "daily_activity_report": "serversummary",
-    "user_activity": "serversummary",
+    "member_flow_notifications": "greetings",
+    "welcome": "greetings",
+    "goodbye": "greetings",
     "audio_notes": "audio",
     "audio_notes_transcribe": "audio",
-    "channel_summary": "channelsummary",
     "server_summary": "serversummary",
     "aura": "dmserversummary",
     "voice_ingest": "voiceingest",
+    "campagne": "campaigns",
+    "campagne_prompt": "campaigns",
+    "campagne_notizie": "campaigns",
+    "campagne_meteo": "campaigns",
+    "campagne_oroscopo": "campaigns",
+    "message_campaigns": "campaigns",
+    "domanda": "qna",
+    "ask": "qna",
+    "question_answer": "qna",
+    "inattivi": "inactivity",
+    "inactive": "inactivity",
+    "db": "database",
+    "retention": "database",
+    "backfill": "database",
+    "mood": "status",
+    "presence": "status",
+    "model": "ai",
+    "ai_model": "ai",
+    "fallback_model": "ai",
 }
 
 _CANONICAL_TOP_LEVEL_ALIASES: dict[str, str] = {
@@ -91,7 +120,7 @@ _CANONICAL_TOP_LEVEL_ALIASES: dict[str, str] = {
     "domanda": "qna",
     "audionotes": "audio",
     "riassunto": "dmchannelsummary",
-    "barcello": "dmchannelsummary",
+    "barcello": "triggers",
     "aura": "dmserversummary",
     "attivita": "dmserversummary",
     "resocontocanale": "channelsummary",
@@ -220,6 +249,9 @@ def resolve_canonical_top_level_command(
     canonical_top_level_command: str | None = None,
     service_name: str | None = None,
 ) -> str:
+    canonical = resolve_public_embed_service_key(canonical_top_level_command, system="author")
+    if canonical:
+        return canonical
     canonical = _normalize_canonical_top_level_command(canonical_top_level_command)
     if canonical:
         return canonical
@@ -229,7 +261,45 @@ def resolve_canonical_top_level_command(
         canonical_fallback = _normalize_canonical_top_level_command(mapped)
         if canonical_fallback:
             return canonical_fallback
+    canonical_from_service = resolve_public_embed_service_key(normalized_service, system="author")
+    if canonical_from_service:
+        return canonical_from_service
     return _normalize_canonical_top_level_command(normalized_service) or "unknown"
+
+
+def resolve_candidate_service_keys(
+    *,
+    service_name: str | None,
+    canonical_top_level_command: str | None = None,
+) -> tuple[str, ...]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _add(candidate: str | None) -> None:
+        normalized = _clean(candidate).lower()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(normalized)
+
+    normalized_service = _clean(service_name).lower()
+    _add(normalized_service)
+
+    canonical_from_input = resolve_public_embed_service_key(canonical_top_level_command, system="author")
+    if canonical_from_input is None:
+        canonical_from_input = _normalize_canonical_top_level_command(canonical_top_level_command)
+    _add(canonical_from_input)
+
+    canonical_from_service = resolve_public_embed_service_key(normalized_service, system="author")
+    _add(canonical_from_service)
+
+    for canonical in (canonical_from_input, canonical_from_service):
+        if not canonical:
+            continue
+        for alias in list_embed_service_aliases(canonical):
+            _add(alias)
+
+    return tuple(candidates)
 
 
 def human_author_service_name(service_name: str, canonical_top_level_command: str | None = None) -> str:
@@ -606,29 +676,60 @@ class AuthorService:
                 profiles[service] = profile
         return profiles
 
-    async def _resolve_phrase(self, service_name: str) -> tuple[str | None, str]:
+    async def _resolve_phrase(
+        self,
+        service_name: str,
+        *,
+        canonical_top_level_command: str | None = None,
+    ) -> tuple[str | None, str]:
         service_phrases = await self.get_service_phrases()
         global_phrase = await self.get_global_phrase()
-        if service_name in service_phrases:
-            return service_phrases[service_name], "service"
+        for candidate in resolve_candidate_service_keys(
+            service_name=service_name,
+            canonical_top_level_command=canonical_top_level_command,
+        ):
+            if candidate in service_phrases:
+                return service_phrases[candidate], "service"
         if global_phrase:
             return global_phrase, "global"
         return None, "fallback"
 
-    async def _resolve_thumbnail(self, service_name: str, *, explicit_icon_url: str | None = None) -> str | None:
+    async def _resolve_thumbnail(
+        self,
+        service_name: str,
+        *,
+        canonical_top_level_command: str | None = None,
+        explicit_icon_url: str | None = None,
+    ) -> str | None:
         if _clean(explicit_icon_url):
             return _clean(explicit_icon_url) or None
         service_thumbnails = await self.get_service_thumbnails()
-        if service_thumbnails.get(service_name):
-            return service_thumbnails[service_name]
+        for candidate in resolve_candidate_service_keys(
+            service_name=service_name,
+            canonical_top_level_command=canonical_top_level_command,
+        ):
+            value = service_thumbnails.get(candidate)
+            if value:
+                return value
         return await self.get_global_thumbnail()
 
-    async def _resolve_url(self, service_name: str, *, explicit_url: str | None = None) -> str | None:
+    async def _resolve_url(
+        self,
+        service_name: str,
+        *,
+        canonical_top_level_command: str | None = None,
+        explicit_url: str | None = None,
+    ) -> str | None:
         if _clean(explicit_url):
             return _clean(explicit_url) or None
         service_urls = await self.get_service_urls()
-        if service_urls.get(service_name):
-            return service_urls[service_name]
+        for candidate in resolve_candidate_service_keys(
+            service_name=service_name,
+            canonical_top_level_command=canonical_top_level_command,
+        ):
+            value = service_urls.get(candidate)
+            if value:
+                return value
         return await self.get_global_url()
 
     async def render_author(
@@ -642,8 +743,16 @@ class AuthorService:
         page_index: int | None = None,
         page_total: int | None = None,
     ) -> tuple[str, str | None, str | None, str]:
-        icon_url = await self._resolve_thumbnail(service_name, explicit_icon_url=explicit_icon_url)
-        url = await self._resolve_url(service_name, explicit_url=explicit_url)
+        icon_url = await self._resolve_thumbnail(
+            service_name,
+            canonical_top_level_command=canonical_top_level_command,
+            explicit_icon_url=explicit_icon_url,
+        )
+        url = await self._resolve_url(
+            service_name,
+            canonical_top_level_command=canonical_top_level_command,
+            explicit_url=explicit_url,
+        )
         if minimal:
             return (
                 render_author_name_with_page(
@@ -656,7 +765,10 @@ class AuthorService:
                 url,
                 "fallback",
             )
-        phrase, phrase_origin = await self._resolve_phrase(service_name)
+        phrase, phrase_origin = await self._resolve_phrase(
+            service_name,
+            canonical_top_level_command=canonical_top_level_command,
+        )
         version = await self.get_version()
         rendered_phrase = _render_author_phrase_template(
             phrase,
