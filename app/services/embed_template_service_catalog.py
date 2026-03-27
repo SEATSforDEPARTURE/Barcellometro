@@ -46,7 +46,8 @@ async def build_embed_template_service_autocomplete_choices(
     services = await list_embed_template_services(ctx, system=system)
 
     filtered = [service_name for service_name in services if not query or query in service_name]
-    filtered.sort(key=lambda service_name: _autocomplete_sort_key(service_name, query))
+    if query:
+        filtered.sort(key=lambda service_name: _autocomplete_sort_key(service_name, query))
 
     return [
         app_commands.Choice(name=service_name, value=service_name)

@@ -247,12 +247,12 @@ Comandi disponibili:
 - `/embed description template_service_show service:<nome>`
 - `/embed description template_service_reset service:<nome>`
 
-Per tutti i comandi `/embed ... template_service_*` dei domini `author`, `footer`, `images` e `description`, il parametro `service` usa una source of truth **pubblica** centralizzata: `audio`, `aura`, `riassunto`, `resoconto`, `attivita`, `barcello`, `campagne`, `qna`, `status`.  
+Per tutti i comandi `/embed ... template_service_*` dei domini `author`, `footer`, `images` e `description`, il parametro `service` usa una source of truth **pubblica** centralizzata: `audio`, `triggers`, `greetings`, `channelsummary`, `serversummary`, `dmchannelsummary`, `dmserversummary`, `campaigns`, `qna`, `inactivity`, `embed`, `commandguard`, `database`, `status`, `ai`.  
 I nomi interni/tecnici (`audio_notes`, `campaign_content_formatter`, `detail_embeds`, ecc.) non devono apparire in autocomplete né essere usati come chiavi UX.
 
 Compatibilità legacy:
 
-- input storici/tecnici possono essere risolti internamente verso la public key canonica (es. `audio_notes` → `audio`, `campagne_prompt` → `campagne`);
+- input storici/tecnici possono essere risolti internamente verso la public key canonica (es. `audio_notes` → `audio`, `campagne_prompt` → `campaigns`, `attivita` → `dmserversummary`, `riassunto` → `dmchannelsummary`);
 - i nuovi salvataggi usano sempre la chiave pubblica canonica;
 - in lettura/reset si mantiene la compatibilità con alias legacy già persistiti.
 
@@ -270,7 +270,7 @@ Fallback:
 Status:
 
 - `status` deve mostrare almeno stato globale ON/OFF, totale servizi pubblici supportati, quanti servizi hanno template custom salvata e quali restano su default;
-- lo status deve usare solo public service keys canoniche (`audio`, `aura`, `riassunto`, `resoconto`, `attivita`, `barcello`, `campagne`, `qna`, `status`), mai nomi tecnici interni.
+- lo status deve usare solo public service keys canoniche (`audio`, `triggers`, `greetings`, `channelsummary`, `serversummary`, `dmchannelsummary`, `dmserversummary`, `campaigns`, `qna`, `inactivity`, `embed`, `commandguard`, `database`, `status`, `ai`), mai nomi tecnici interni.
 
 Placeholder supportati (set iniziale):
 
@@ -645,7 +645,7 @@ devono convergere su una vista **semplificata e UX-oriented**.
 
 Regole:
 
-- usare solo la source of truth dei servizi pubblici canonici (`audio`, `aura`, `riassunto`, `resoconto`, `attivita`, `barcello`, `campagne`, `qna`, `status`);
+- usare solo la source of truth dei servizi pubblici canonici (`audio`, `triggers`, `greetings`, `channelsummary`, `serversummary`, `dmchannelsummary`, `dmserversummary`, `campaigns`, `qna`, `inactivity`, `embed`, `commandguard`, `database`, `status`, `ai`);
 - mostrare solo:
   - stato globale on/off;
   - totale servizi supportati;
