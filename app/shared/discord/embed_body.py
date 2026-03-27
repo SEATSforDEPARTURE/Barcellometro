@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import discord
 
+from app.shared.discord.user_display import clean_embed_display_name
+
 DISCORD_TITLE_MAX = 256
 DISCORD_DESCRIPTION_MAX = 4096
 DISCORD_FIELD_NAME_MAX = 256
@@ -30,6 +32,11 @@ def format_standard_title(text: str, *, emoji: str | None = None, uppercase: boo
     else:
         rendered = f"__**{rendered}**__"
     return _truncate(rendered, DISCORD_TITLE_MAX)
+
+
+def build_user_event_title(*, event_text: str, display_name: str, emoji: str) -> str:
+    cleaned_name = clean_embed_display_name(display_name)
+    return format_standard_title(f'"{cleaned_name}" {event_text}', emoji=emoji)
 
 
 def format_standard_description(text: str, *, italic: bool = True, blank_line_before_fields: bool = False) -> str:

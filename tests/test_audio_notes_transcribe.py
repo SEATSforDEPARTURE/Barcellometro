@@ -194,7 +194,7 @@ def test_loading_embed_uses_standard_title_and_italic_description_without_leadin
         audio_notes_module._audio_loading_description(),
         user_display_name="Mario",
     )
-    assert embed.title == "🗣️ __**NOTA AUDIO DI MARIO**__"
+    assert embed.title == "🗣️ __**\"MARIO\" CI MANDA UN AUDIO!**__"
     assert embed.description == "*Nota audio ricevuta, sto trascrivendo...*"
     assert not embed.description.startswith("*🎙️")
     assert "<@" not in embed.title
@@ -215,6 +215,7 @@ def test_final_embed_description_includes_bold_user_and_bold_ordinal_when_availa
     assert embeds
     first = embeds[0]
     assert first.description == "*Leggiamo cosa ci dice **Criceto Mannaro** in quest'audio... È il **secondo** di oggi.*"
+    assert first.description.count("**") == 4
     assert "Trascrizione audio elaborata" not in first.description
     assert "<@" not in first.description
     field_names = [field.name for field in first.fields]
@@ -237,6 +238,21 @@ def test_final_embed_description_fallback_without_ordinal_is_human_and_italic(au
     )
     assert embeds[0].description == "*Leggiamo cosa ci dice **Mario** in quest'audio...*"
 
+
+
+
+def test_audio_note_title_and_description_clean_decorative_nickname_and_keep_markdown_valid(audio_notes_module) -> None:
+    embed = audio_notes_module._build_audio_note_embed(
+        audio_notes_module._audio_final_description(user_ref="🐹@🐭 CRICETO MANNARO**", ordinal_label="terzo"),
+        user_display_name="🐹@🐭 CRICETO MANNARO",
+    )
+
+    assert '"CRICETO MANNARO" CI MANDA UN AUDIO!' in embed.title
+    assert "🐹" not in embed.title and "🐭" not in embed.title
+    assert embed.description.startswith("*") and embed.description.endswith("*")
+    assert embed.description.count("*") % 2 == 0
+    assert "\\*\\*" not in embed.description
+    assert "**CRICETO MANNARO**" in embed.description
 
 def test_audio_user_display_name_never_returns_mention_or_raw_id(audio_notes_module) -> None:
     user = SimpleNamespace(display_name="Mario_**<@123>", name="fallback", mention="<@123456789012345678>", id=123456789012345678)
