@@ -336,7 +336,7 @@ La sezione `author` degli embed ha ora un servizio dedicato separato dal footer 
 - `author.version`, `author.global_phrase`, `author.global_thumbnail` definiscono il template globale;
 - `author.service_phrase.<service>` e `author.service_thumbnail.<service>` definiscono override per singolo servizio;
 - il fallback puro rende `servizio <NOME CANONICO INGLESE TOP-LEVEL>` (nome canonical upper-case), senza emoji legacy e senza dipendenze dal footer;
-- la label dopo `servizio` deriva sempre dal comando top-level canonico inglese reale (`channelsummary` → `CHANNEL SUMMARY`, `serversummary` → `SERVER SUMMARY`, `audionotes` → `AUDIO NOTES`, `qna` → `QNA`);
+- la label dopo `servizio` deriva sempre dal comando top-level canonico inglese reale (`channelsummary` → `CHANNEL SUMMARY`, `serversummary` → `SERVER SUMMARY`, `audio` → `AUDIO`, `qna` → `QNA`);
 - la source of truth visuale è il metadata `canonical_top_level_command` (non `service_name` tecnico): pipeline `embed origin command -> canonical top-level command -> author label`;
 - `service_name` resta solo tecnico (profilazione template, logging, diagnostica) e non può più determinare direttamente la label visibile;
 - i report helpers centrali `build_report_cover_embed(...)` e `apply_standard_report_style(...)` devono ricevere/propagare `canonical_top_level_command` e allegano sia footer metadata sia author metadata.
@@ -368,6 +368,18 @@ Alias canonici principali (risolti centralmente in `app/services/author.py`):
 - `barcello` → `dmchannelsummary`
 - `aura` → `dmserversummary`
 - `attivita` → `dmserversummary`
+- `audionotes` → `audio` (alias legacy compatibile)
+
+## Standard UI servizio `/audio` (top-level slash)
+
+Per il servizio slash top-level `/audio` valgono in modo vincolante le seguenti regole UI:
+
+- label author fallback: `servizio AUDIO` (mai `AUDIO NOTES`);
+- titolo embed: `NOTA AUDIO DI @utente` tramite pipeline title centralizzata (`format_standard_title`);
+- descrizione: sempre in corsivo (`format_standard_description`), senza emoji iniziale;
+- stato loading: frase breve informativa (es. “Nota audio ricevuta, sto trascrivendo...”);
+- stato finale: intro naturale con utente in `**bold**` e ordinale giornaliero in `**bold**` quando disponibile (es. `**primo**`, `**secondo**`);
+- field principali (trascrizione / traduzione / riassunto): naming standardizzato con helper centrali e valori con enfasi `**bold**` solo sui dati semanticamente rilevanti.
 
 Canonical legacy deprecati e non più validi per il rendering author standard:
 

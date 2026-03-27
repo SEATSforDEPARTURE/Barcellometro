@@ -7,7 +7,8 @@ import re
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -17,15 +18,52 @@ import imageio_ffmpeg
 from app.core.service_registry import ServiceRegistry
 from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
-from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
+from app.shared.discord.embed_body import (
+    format_standard_description,
+    format_standard_field_name,
+    format_standard_section_value,
+    format_standard_title,
+)
 
 logger = logging.getLogger(__name__)
 
 _AUDIO_EXTENSIONS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".webm"}
-_AUDIO_NOTE_TITLE = format_standard_title("NOTE AUDIO", emoji="🗣️")
 _AUDIO_NOTE_COLOR = discord.Color(0xFFFFFF)
 _DISCORD_EMBED_DESCRIPTION_MAX = 4096
 _DISCORD_FIELD_MAX = 1024
+
+
+_AUDIO_ORDINALS_IT: dict[int, str] = {
+    1: "primo",
+    2: "secondo",
+    3: "terzo",
+    4: "quarto",
+    5: "quinto",
+}
+
+
+def _audio_user_reference(user: Any) -> str:
+    mention = (getattr(user, "mention", None) or "").strip()
+    if mention:
+        return mention
+    display_name = (getattr(user, "display_name", None) or getattr(user, "name", None) or "utente").strip()
+    return f"@{display_name}"
+
+
+def _audio_ordinal_label(count_today: int | None) -> str | None:
+    if count_today is None or count_today <= 0:
+        return None
+    return _AUDIO_ORDINALS_IT.get(count_today, f"{count_today}°")
+
+
+def _audio_loading_description() -> str:
+    return "Nota audio ricevuta, sto trascrivendo..."
+
+
+def _audio_final_description(*, user_ref: str, ordinal_label: str | None) -> str:
+    if ordinal_label:
+        return f"Leggiamo cosa ci dice **{user_ref}** in quest'audio... È il **{ordinal_label}** di oggi."
+    return f"Leggiamo cosa ci dice **{user_ref}** in quest'audio..."
 
 
 def _now_iso() -> str:
@@ -70,10 +108,20 @@ def _split_embed_descriptions(text: str, max_chars: int = _DISCORD_EMBED_DESCRIP
     return split_parts or [""]
 
 
-def _build_audio_note_embed(description: str, *, contributors: list[str] | None = None, used_local_processing: bool = True) -> discord.Embed:
-    embed = discord.Embed(title=_AUDIO_NOTE_TITLE, description=description, color=_AUDIO_NOTE_COLOR)
+def _build_audio_note_embed(
+    description: str,
+    *,
+    user_ref: str = "@utente",
+    contributors: list[str] | None = None,
+    used_local_processing: bool = True,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=format_standard_title(f"NOTA AUDIO DI {user_ref}"),
+        description=format_standard_description(description, italic=True),
+        color=_AUDIO_NOTE_COLOR,
+    )
     attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
-    attach_author_meta(embed, service_name="audio_notes", canonical_top_level_command="audionotes")
+    attach_author_meta(embed, service_name="audio_notes", canonical_top_level_command="audio")
     return embed
 
 
@@ -114,6 +162,8 @@ def _build_audio_note_sections(*, transcript_text: str, detected_lang: str, tran
 def _build_audio_note_embeds_from_sections(
     sections: list[tuple[str, str, str | None]],
     *,
+    user_ref: str,
+    ordinal_label: str | None,
     contributors: list[str] | None = None,
     used_local_processing: bool = True,
 ) -> list[discord.Embed]:
@@ -122,7 +172,8 @@ def _build_audio_note_embeds_from_sections(
         chunks = _split_embed_descriptions((content or "—").strip() or "—", _DISCORD_FIELD_MAX)
         for cidx, chunk in enumerate(chunks, start=1):
             embed = _build_audio_note_embed(
-                "Trascrizione audio elaborata. Contenuti completi nelle sezioni in field.",
+                _audio_final_description(user_ref=user_ref, ordinal_label=ordinal_label),
+                user_ref=user_ref,
                 contributors=contributors,
                 used_local_processing=used_local_processing,
             )
@@ -130,11 +181,18 @@ def _build_audio_note_embeds_from_sections(
             prefix = f"Sezione {idx}/{len(sections)} — " if len(sections) > 1 else ""
             embed.add_field(
                 name=format_standard_field_name(f"{prefix}{title}{suffix}".strip(), emoji=emoji),
-                value=chunk or "—",
+                value=format_standard_section_value(chunk or "—"),
                 inline=False,
             )
             embeds.append(embed)
-    return embeds or [_build_audio_note_embed("Trascrizione audio elaborata.", contributors=contributors, used_local_processing=used_local_processing)]
+    return embeds or [
+        _build_audio_note_embed(
+            _audio_final_description(user_ref=user_ref, ordinal_label=ordinal_label),
+            user_ref=user_ref,
+            contributors=contributors,
+            used_local_processing=used_local_processing,
+        )
+    ]
 
 
 def _sanitize_transcript_for_summary(text: str) -> str:
@@ -294,6 +352,14 @@ def _normalize_lang(value: str) -> str:
     return lowered.split("-")[0]
 
 
+def _rome_day_utc_bounds(reference_ts: datetime | None = None) -> tuple[str, str]:
+    tz = ZoneInfo("Europe/Rome")
+    instant = reference_ts.astimezone(tz) if reference_ts is not None else datetime.now(tz)
+    start_local = datetime.combine(instant.date(), time.min, tzinfo=tz)
+    end_local = start_local + timedelta(days=1)
+    return start_local.astimezone(timezone.utc).isoformat(), end_local.astimezone(timezone.utc).isoformat()
+
+
 def _ffprobe_duration(path: str) -> Optional[int]:
     ffprobe_path = shutil.which("ffprobe")
     if ffprobe_path is None:
@@ -391,9 +457,21 @@ def setup(registry: ServiceRegistry) -> None:
                 continue
             queue_max = int(await _get_setting("audio_notes.queue_max", os.getenv("AUDIO_NOTES_QUEUE_MAX", "50")))
             if queue.qsize() >= queue_max:
-                await message.reply(embed=_build_audio_note_embed("⏳ Troppi audio in coda, riprova tra poco.", used_local_processing=True))
+                await message.reply(
+                    embed=_build_audio_note_embed(
+                        "Troppi audio in coda, riprova tra poco.",
+                        user_ref=_audio_user_reference(message.author),
+                        used_local_processing=True,
+                    )
+                )
                 return
-            reply = await message.reply(embed=_build_audio_note_embed("🎙️ Nota audio ricevuta, sto trascrivendo…", used_local_processing=True))
+            reply = await message.reply(
+                embed=_build_audio_note_embed(
+                    _audio_loading_description(),
+                    user_ref=_audio_user_reference(message.author),
+                    used_local_processing=True,
+                )
+            )
             await queue.put((message, attachment, reply))
             return
 
@@ -405,7 +483,10 @@ def setup(registry: ServiceRegistry) -> None:
 
         size_mb = attachment.size / (1024 * 1024)
         if size_mb > max_mb:
-            await reply.edit(content=None, embed=_build_audio_note_embed("❌ Audio troppo grande per la trascrizione."))
+            await reply.edit(
+                content=None,
+                embed=_build_audio_note_embed("Audio troppo grande per la trascrizione.", user_ref=_audio_user_reference(message.author)),
+            )
             return
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -417,10 +498,16 @@ def setup(registry: ServiceRegistry) -> None:
 
             duration = _ffprobe_duration(raw_path)
             if duration is not None and duration > max_duration:
-                await reply.edit(content=None, embed=_build_audio_note_embed("❌ Audio troppo lungo per la trascrizione."))
+                await reply.edit(
+                    content=None,
+                    embed=_build_audio_note_embed("Audio troppo lungo per la trascrizione.", user_ref=_audio_user_reference(message.author)),
+                )
                 return
             if not _convert_to_wav(raw_path, wav_path):
-                await reply.edit(content=None, embed=_build_audio_note_embed("❌ Errore durante la conversione audio."))
+                await reply.edit(
+                    content=None,
+                    embed=_build_audio_note_embed("Errore durante la conversione audio.", user_ref=_audio_user_reference(message.author)),
+                )
                 return
 
             stt_backend = (await _get_setting("stt.backend", "local")).lower()
@@ -503,8 +590,17 @@ def setup(registry: ServiceRegistry) -> None:
                 translation_text=translation_text,
                 summary_text=summary_text,
             )
+            start_utc, end_utc = _rome_day_utc_bounds()
+            ordinal_count = await database.count_audio_notes_for_user_in_range(
+                guild_id=str(message.guild.id),
+                author_id=str(message.author.id),
+                start_ts=start_utc,
+                end_ts=end_utc,
+            )
             embeds = _build_audio_note_embeds_from_sections(
                 sections,
+                user_ref=_audio_user_reference(message.author),
+                ordinal_label=_audio_ordinal_label(ordinal_count + 1),
                 contributors=contributors,
                 used_local_processing=used_local_processing,
             )
@@ -561,7 +657,10 @@ def setup(registry: ServiceRegistry) -> None:
                 logger.exception("Audio note processing failed")
                 await reply.edit(
                     content=None,
-                    embed=_build_audio_note_embed("❌ Errore durante la trascrizione della nota audio."),
+                    embed=_build_audio_note_embed(
+                        "Errore durante la trascrizione della nota audio.",
+                        used_local_processing=True,
+                    ),
                 )
             finally:
                 queue.task_done()
