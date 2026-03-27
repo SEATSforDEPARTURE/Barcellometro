@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import discord
 
 from app.services.footer import FooterService, attach_footer_meta, get_footer_meta
-from app.shared.discord.command_embeds import build_command_embed, normalize_display_command_context
+from app.shared.discord import command_embeds as command_embeds_module
+from app.shared.discord.command_embeds import (
+    build_command_embed,
+    normalize_display_command_context,
+    send_legacy_standard_response,
+    send_standard_response,
+)
 from app.shared.discord.footer_pipeline import finalize_embed
 
 
@@ -70,7 +77,7 @@ def test_build_command_embed_uses_users_visual_top_level() -> None:
     )
 
     assert embed.title == "🛠️ __**TEMPBAN_LIST**__"
-    assert embed.description == "*Descrizione sintetica dell'esecuzione del comando.*\n\n"
+    assert embed.description == "*Command execution summary.*\n\n"
     assert get_footer_meta(embed) is not None
     assert get_footer_meta(embed).service_name == "users"
 
@@ -115,7 +122,7 @@ def test_build_command_embed_omits_top_level_duplication_for_parameterized_comma
     )
 
     assert embed.title == "❓ __**LIMITS_SHOW BASE**__"
-    assert embed.description == "*Descrizione sintetica dell'esecuzione del comando.*\n\n"
+    assert embed.description == "*Command execution summary.*\n\n"
     assert "QNA LIMITS_SHOW BASE" not in (embed.title or "")
 
 
@@ -132,7 +139,7 @@ def test_build_command_embed_uses_readable_user_name_in_subtitle() -> None:
     )
 
     assert embed.title == "❓ __**BONUS_SHOW MARIO ROSSI**__"
-    assert embed.description == "*Descrizione sintetica dell'esecuzione del comando.*\n\n"
+    assert embed.description == "*Command execution summary.*\n\n"
     assert "<@123>" not in (embed.description or "")
 
 
@@ -244,7 +251,7 @@ def test_build_command_embed_strips_ugly_prefixes_from_narrative_bullets() -> No
     assert "• Phrase entry #1 not found." in body
     assert "• Updated." in body
     assert "• Qualcosa è andato storto." in body
-    assert description.startswith("*Descrizione sintetica dell'esecuzione del comando.*")
+    assert description.startswith("*Command execution summary.*")
 
 
 def test_build_command_embed_deduplicates_identity_lines_already_in_subtitle() -> None:
@@ -375,7 +382,7 @@ def test_build_command_embed_keeps_blank_line_between_subtitle_and_body() -> Non
         )
     )
 
-    assert embed.description == "*Descrizione sintetica dell'esecuzione del comando.*\n\n"
+    assert embed.description == "*Command execution summary.*\n\n"
     assert embed.fields[0].value == "• Prima riga.\n• Seconda riga."
 
 
@@ -541,3 +548,80 @@ def test_build_command_embed_uses_service_name_in_embed_footer_subtitle_without_
 
     assert embed.title == "📦 __**FOOTER TEMPLATE_SERVICE_SHOW RIASSUNTO**__"
     assert "• Service:" not in embed.fields[0].value
+
+
+def test_send_standard_response_uses_interaction_command_description_in_english(monkeypatch) -> None:
+    async def _run() -> None:
+        interaction = SimpleNamespace(
+            command=SimpleNamespace(description="Show configured AI fallback models."),
+            response=SimpleNamespace(is_done=lambda: False),
+            followup=SimpleNamespace(),
+        )
+        captured: dict[str, object] = {}
+
+        async def _capture_send(*_args, **kwargs) -> None:
+            captured["embeds"] = kwargs["embeds"]
+
+        monkeypatch.setattr(command_embeds_module, "send_command_embeds", _capture_send)
+        monkeypatch.setattr(command_embeds_module, "finalize_embeds_rendering", AsyncMock())
+        await send_standard_response(
+            interaction,
+            top_level="ai",
+            subcommand_path="fallback_show",
+            lines=[("Task", "campaign_editorial")],
+            relevant_parameters=["campaign_editorial"],
+        )
+        embed = captured["embeds"][0]
+        assert embed.description == "*Show configured AI fallback models.*\n\n"
+        assert embed.title == "🧠 __**FALLBACK_SHOW CAMPAIGN_EDITORIAL**__"
+
+    asyncio.run(_run())
+
+
+def test_send_standard_response_uses_interaction_command_description_in_italian(monkeypatch) -> None:
+    async def _run() -> None:
+        interaction = SimpleNamespace(
+            command=SimpleNamespace(description="Mostra lo stato audio."),
+            response=SimpleNamespace(is_done=lambda: False),
+            followup=SimpleNamespace(),
+        )
+        captured: dict[str, object] = {}
+
+        async def _capture_send(*_args, **kwargs) -> None:
+            captured["embeds"] = kwargs["embeds"]
+
+        monkeypatch.setattr(command_embeds_module, "send_command_embeds", _capture_send)
+        monkeypatch.setattr(command_embeds_module, "finalize_embeds_rendering", AsyncMock())
+        await send_standard_response(
+            interaction,
+            top_level="audio",
+            subcommand_path="audio status",
+            lines=[("Enabled", True)],
+        )
+        embed = captured["embeds"][0]
+        assert embed.description == "*Mostra lo stato audio.*\n\n"
+        assert embed.title == "🎙️ __**STATUS**__"
+
+    asyncio.run(_run())
+
+
+def test_send_legacy_standard_response_forwards_description_and_parameters(monkeypatch) -> None:
+    async def _run() -> None:
+        interaction = SimpleNamespace()
+        mocked_send_standard = AsyncMock()
+        monkeypatch.setattr(command_embeds_module, "send_standard_response", mocked_send_standard)
+        await send_legacy_standard_response(
+            interaction,
+            top_level="ai",
+            path_parts=["fallback_show"],
+            entries=[("Task", "campaign_editorial"), ("Model", "openai:gpt-4o-mini")],
+            command_description="Show configured AI fallback models.",
+            relevant_parameters=["campaign_editorial"],
+        )
+
+        kwargs = mocked_send_standard.await_args.kwargs
+        assert kwargs["command_description"] == "Show configured AI fallback models."
+        assert kwargs["relevant_parameters"] == ["campaign_editorial"]
+        assert kwargs["subcommand_path"] == "FALLBACK_SHOW"
+
+    asyncio.run(_run())

@@ -10,6 +10,7 @@ from app.plugins.commands_modular.settings import set_setting
 
 
 async def _send_legacy(interaction: discord.Interaction, ctx: CommandContext, **kwargs) -> None:
+    kwargs.setdefault("command_description", getattr(getattr(interaction, "command", None), "description", None))
     await send_legacy_standard_response(interaction, footer_service=ctx.footer, **kwargs)
 
 
