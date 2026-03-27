@@ -82,17 +82,20 @@ Per il vocabolario canonico delle action e la loro semantica normativa si applic
 
 Tutti gli embed prodotti dai percorsi standardizzati (`send_standard_response`, `send_legacy_standard_response`, `build_command_embeds` e wrapper locali che li delegano) devono seguire questa regola:
 
-- **Titolo** = top-level visuale reale del comando mostrato all'utente, **pari pari**.
-- **Sottotitolo** = soli sotto-comandi + eventuali parametri rilevanti.
-- Gli input runtime rilevanti devono comparire nel sottotitolo in forma leggibile e stabile.
-- Il top-level **non va mai ripetuto** nel sottotitolo.
-- Wrapper tecnici o namespace interni (per esempio `admin`) **non devono comparire nel titolo** se il comando visuale appartiene a un altro namespace.
+- **Titolo** = sottocomando visuale (sotto-path + eventuali parametri rilevanti), non il top-level.
+- Il top-level resta usato per routing servizi e pipeline author/footer, ma **non** per il titolo visuale.
+- Il titolo deve seguire sempre il formato `(emoji servizio) __**SOTTOCOMANDO**__`.
+- La description è un testo introduttivo breve in corsivo, preferibilmente derivato dalla command description slash.
+- Dopo la description va mantenuta una riga vuota prima dei field.
+- Il contenuto principale deve essere il primo field con naming per kind:
+  - `info` -> `ℹ️ __**INFO**__`
+  - `success` -> `✅ __**OK**__`
+  - `warning` -> `⚠️ __**WARNING**__`
+  - `error` -> `❌ __**ERROR**__`
+- Gli input runtime rilevanti devono comparire nel titolo visuale in forma leggibile e stabile.
 - Il body deve evitare duplicazioni inutili dei parametri già presenti nel sottotitolo.
 - Le prime righe del body non devono introdurre prefissi narrativi come `Dettaglio:`, `Warning:`, `Result:`, `Results:`, `Error:`.
-- Il builder standard deve mantenere sempre una separazione visiva stabile tra sottotitolo e body: `sottotitolo`, riga vuota, body.
-- Il sottotitolo usa sempre l’icona semantica ufficiale del tipo embed, non icone locali di sezione.
-- Il body non deve ripetere come primo marker la stessa icona già usata nel sottotitolo.
-- Il body non deve mai riusare la stessa icona del sottotitolo nelle sezioni: se una sezione la erediterebbe o la riceve esplicitamente, il builder centralizzato la sostituisce con un fallback semantico o neutro non ridondante.
+- Le sezioni extra (`Details`, `Metrics`, `Templates`, ecc.) devono restare veri field Discord.
 - Footer, author, colori e metadata devono passare dalla pipeline centralizzata.
 
 ## Standard definitivo titolo embed + titolo field (single source of truth)
@@ -143,11 +146,13 @@ Questo mapping è centralizzato in `app/shared/discord/command_embeds.py` e vale
 ### Dopo
 
 - `/frasi template_global_show`
-  - titolo: `💬 __**FRASI**__`
-  - sottotitolo: `ℹ️ TEMPLATE_GLOBAL_SHOW`
+  - titolo: `💬 __**TEMPLATE_GLOBAL_SHOW**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/qna limits_show parameter:base`
-  - titolo: `❓ __**QNA**__`
-  - sottotitolo: `ℹ️ LIMITS_SHOW BASE`
+  - titolo: `❓ __**LIMITS_SHOW BASE**__`
+  - description: `*...*`
+  - primo field: `ℹ️ __**INFO**__`
 - `/qna bonus_show user:@Mario`
   - titolo: `❓ __**QNA**__`
   - sottotitolo: `ℹ️ BONUS_SHOW MARIO`
