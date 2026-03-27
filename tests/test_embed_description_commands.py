@@ -16,6 +16,9 @@ def embed_module(import_fresh):
 def test_description_commands_registered(embed_module) -> None:
     bundle = register_embed_tree(embed_module)
     assert {command.name for command in bundle.description_group.commands} == {
+        "on",
+        "off",
+        "status",
         "template_service_set",
         "template_service_show",
         "template_service_reset",
@@ -69,6 +72,49 @@ def test_description_template_set_show_reset(embed_module, monkeypatch: pytest.M
                 ("Preview", "*Usa default del servizio*"),
             ],
         )
+
+    asyncio.run(_run())
+
+
+def test_description_on_off_status_and_runtime_gate(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(embed_module, "check_permission", AsyncMock(return_value=True))
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, "send_standard_response", send_standard)
+        bundle = register_embed_tree(embed_module)
+
+        on_command = find_command(bundle.description_group, "on")
+        await on_command.callback(InteractionStub(on_command))
+        assert send_standard.await_args.kwargs["lines"] == [("result", "enabled")]
+        assert await bundle.ctx.description_template.is_enabled() is True
+
+        set_command = find_command(bundle.description_group, "template_service_set")
+        await set_command.callback(InteractionStub(set_command), "audio", "Template {audio_intro} {user_name}")
+
+        off_command = find_command(bundle.description_group, "off")
+        send_standard.reset_mock()
+        await off_command.callback(InteractionStub(off_command))
+        assert send_standard.await_args.kwargs["lines"] == [("result", "disabled")]
+        assert await bundle.ctx.description_template.is_enabled() is False
+        assert await bundle.ctx.description_template.get_template("audio") == "Template {audio_intro} {user_name}"
+
+        runtime_render = await bundle.ctx.description_template.render(
+            service="audio",
+            context={"user_name": "Mario"},
+            fallback="Fallback nativo",
+        )
+        assert runtime_render == "*Fallback nativo*"
+
+        status_command = find_command(bundle.description_group, "status")
+        send_standard.reset_mock()
+        await status_command.callback(InteractionStub(status_command))
+        assert ("enabled", "off") in send_standard.await_args.kwargs["lines"]
+        sections = send_standard.await_args.kwargs["sections"]
+        custom_section = next(section for section in sections if section.title == "Custom Templates")
+        assert ("audio", "Template {audio_intro} {user_name}") in custom_section.lines
+        default_section = next(section for section in sections if section.title == "Default Services")
+        assert "audio_notes" not in str(default_section.lines)
+        assert "campaign_content_formatter" not in str(default_section.lines)
 
     asyncio.run(_run())
 

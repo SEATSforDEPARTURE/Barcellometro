@@ -240,6 +240,9 @@ Il dominio `/embed description` abilita template dinamici della `description` pe
 
 Comandi disponibili:
 
+- `/embed description on`
+- `/embed description off`
+- `/embed description status`
 - `/embed description template_service_set service:<nome> template:<testo>`
 - `/embed description template_service_show service:<nome>`
 - `/embed description template_service_reset service:<nome>`
@@ -256,10 +259,18 @@ Compatibilità legacy:
 Storage:
 
 - chiave centralizzata: `description_template:{service}`.
+- flag globale centralizzato: `description_template.enabled`.
 
 Fallback:
 
-- se il template non esiste, il renderer usa la descrizione fallback esistente del servizio (nessuna regressione locale).
+- se il flag globale è OFF, il renderer usa sempre la descrizione fallback esistente del servizio;
+- se il flag globale è ON e il template non esiste, il renderer usa la descrizione fallback esistente del servizio (nessuna regressione locale);
+- spegnere con `off` non cancella i template salvati: sospende solo l'applicazione runtime.
+
+Status:
+
+- `status` deve mostrare almeno stato globale ON/OFF, totale servizi pubblici supportati, quanti servizi hanno template custom salvata e quali restano su default;
+- lo status deve usare solo public service keys canoniche (`audio`, `aura`, `riassunto`, `resoconto`, `attivita`, `barcello`, `campagne`, `qna`, `status`), mai nomi tecnici interni.
 
 Placeholder supportati (set iniziale):
 

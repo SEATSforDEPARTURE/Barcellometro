@@ -13,7 +13,7 @@ from app.shared.discord.footer_status_renderer import build_footer_status_embeds
 from app.services.embed_images import InvalidEmbedImageUrlError
 from app.services.author import InvalidAuthorThumbnailError, render_author_name
 from app.services.description_template_service import InvalidDescriptionTemplateError
-from app.services.embed_public_service_keys import list_embed_service_aliases
+from app.services.embed_public_service_keys import list_embed_service_aliases, list_public_embed_service_keys
 from app.services.embed_template_service_catalog import (
     build_embed_template_service_autocomplete_choices,
     resolve_embed_template_public_service,
@@ -99,6 +99,13 @@ def _description_preview_context(*, service_name: str, user_name: str = "Mario")
         "is_first_today": False,
         "count_today": 2,
     }
+
+
+def _truncate_preview(value: str, *, limit: int = 80) -> str:
+    cleaned = (value or "").strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[: limit - 1].rstrip()}…"
 
 
 async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
@@ -730,6 +737,64 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
 
     description_group = app_commands.Group(name="description", description="Description controls")
     embed_group.add_command(description_group)
+
+    @description_group.command(name="on", description="Enable centralized description template overrides.")
+    async def description_on_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.description.on", ctx):
+            return
+        if getattr(ctx, "description_template", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description on", lines=[("reason", "Description template service is unavailable")], kind="error")
+            return
+        await ctx.description_template.set_enabled(True)
+        await _send_embed_response(interaction, ctx, subcommand_path="description on", lines=[("result", "enabled")], kind="success")
+
+    @description_group.command(name="off", description="Disable centralized description template overrides.")
+    async def description_off_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.description.off", ctx):
+            return
+        if getattr(ctx, "description_template", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description off", lines=[("reason", "Description template service is unavailable")], kind="error")
+            return
+        await ctx.description_template.set_enabled(False)
+        await _send_embed_response(interaction, ctx, subcommand_path="description off", lines=[("result", "disabled")], kind="success")
+
+    @description_group.command(name="status", description="Show centralized description template override status.")
+    async def description_status_command(interaction: discord.Interaction) -> None:
+        if not await check_permission(interaction, "admin.description.status", ctx):
+            return
+        if getattr(ctx, "description_template", None) is None:
+            await _send_embed_response(interaction, ctx, subcommand_path="description status", lines=[("reason", "Description template service is unavailable")], kind="error")
+            return
+        snapshot = await ctx.description_template.build_status_snapshot()
+        supported_services = list_public_embed_service_keys()
+        custom_services = sorted(snapshot.custom_templates)
+        default_services = [service for service in supported_services if service not in snapshot.custom_templates]
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="description status",
+            lines=[
+                ("enabled", "on" if snapshot.enabled else "off"),
+                ("supported services", snapshot.total_services),
+                ("services with custom template", len(custom_services)),
+                ("services using default", len(default_services)),
+                ("runtime rule", "OFF = always native fallback; ON = service custom template when present"),
+            ],
+            sections=[
+                CommandEmbedSection(
+                    title="Custom Templates",
+                    lines=(
+                        [(service, _truncate_preview(snapshot.custom_templates[service])) for service in custom_services]
+                        if custom_services
+                        else [("services", "(none)")]
+                    ),
+                ),
+                CommandEmbedSection(
+                    title="Default Services",
+                    lines=[("services", ", ".join(default_services) if default_services else "(none)")],
+                ),
+            ],
+        )
 
     @description_group.command(name="template_service_set", description="Set a service-specific description template.")
     @app_commands.describe(service="Service name.", template="Description template with placeholders.")
