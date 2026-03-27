@@ -157,6 +157,24 @@ def test_on_event_schedules_barcello_eval() -> None:
     service._schedule_barcello_eval.assert_awaited_once_with("1", "2")
 
 
+def test_run_barcello_trigger_now_uses_evaluate_flow() -> None:
+    service, _db, channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "ROSSO", "score": 20})
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", window_minutes=15))
+    assert out["evaluated"] is True
+    assert out["reason"] == "ok"
+    service._barcello.get_current_status.assert_awaited_once_with("1", channel_id="2", window_minutes=15)
+    assert len(channel.sent) == 1
+
+
+def test_run_barcello_trigger_now_returns_disabled_when_trigger_off() -> None:
+    service, db, _channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "ROSSO", "score": 20})
+    db.get_trigger_enabled = AsyncMock(return_value=False)
+    service._evaluate_barcello_channel = AsyncMock()
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2"))
+    assert out == {"evaluated": False, "notified": False, "reason": "disabled"}
+    service._evaluate_barcello_channel.assert_not_awaited()
+
+
 def test_insights_loop_kept_in_polling_mode() -> None:
     service, _db, _channel = _base_service({"last_color": "VERDE", "last_score": 90}, {"color": "VERDE", "score": 90})
     called = {"count": 0}
