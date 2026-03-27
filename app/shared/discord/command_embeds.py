@@ -634,7 +634,16 @@ def stringify_value(value: Any) -> str:
 
 
 def _fallback_command_description(display_context: DisplayCommandContext) -> str:
-    return "Descrizione sintetica dell'esecuzione del comando."
+    return "Command execution summary."
+
+
+def _resolve_interaction_command_description(interaction: discord.Interaction | None) -> str | None:
+    command = getattr(interaction, "command", None) if interaction is not None else None
+    description = getattr(command, "description", None)
+    if not isinstance(description, str):
+        return None
+    cleaned = description.strip()
+    return cleaned or None
 
 
 def format_bullet(label: str, value: Any, *, kind: CommandKind = "info") -> str:
@@ -721,6 +730,7 @@ async def build_command_embeds(
     line_formatter: Callable[[str, Any], str] | None = None,
     section_title_formatter: Callable[[str], str] | None = None,
     command_description: str | None = None,
+    interaction: discord.Interaction | None = None,
 ) -> list[discord.Embed]:
     display_context = normalize_display_command_context(
         top_level=top_level,
@@ -753,8 +763,13 @@ async def build_command_embeds(
     color = get_semantic_color(kind)
     has_primary_field = bool(main_field_value.strip())
     has_additional_sections = any(True for _ in (sections or ()))
+    resolved_command_description = (
+        (command_description.strip() if isinstance(command_description, str) and command_description.strip() else None)
+        or _resolve_interaction_command_description(interaction)
+        or _fallback_command_description(display_context)
+    )
     description = format_standard_description(
-        command_description or _fallback_command_description(display_context),
+        resolved_command_description,
         italic=True,
         blank_line_before_fields=True,
     )
@@ -921,6 +936,10 @@ async def send_standard_response(
     subcommand_emoji: str | None = None,
     command_description: str | None = None,
 ) -> None:
+    resolved_command_description = (
+        (command_description.strip() if isinstance(command_description, str) and command_description.strip() else None)
+        or _resolve_interaction_command_description(interaction)
+    )
     embeds = await build_command_embeds(
         top_level=top_level,
         subcommand_path=subcommand_path,
@@ -938,7 +957,8 @@ async def send_standard_response(
         section_title_formatter=section_title_formatter,
         top_level_emoji=top_level_emoji,
         subcommand_emoji=subcommand_emoji,
-        command_description=command_description,
+        command_description=resolved_command_description,
+        interaction=interaction,
     )
     resolved_footer_service_name = _resolve_footer_service_name(
         footer_service_name=footer_service_name,
@@ -1025,6 +1045,9 @@ async def send_legacy_standard_response(
     author_service: AuthorService | None = None,
     embed_images_service: EmbedImagesService | None = None,
     ephemeral: bool = True,
+    command_description: str | None = None,
+    subtitle_args: Sequence[object] | None = None,
+    relevant_parameters: Sequence[object] | None = None,
 ) -> None:
     normalized_path = [part.strip().lower() for part in path_parts if part and part.strip()]
     subcommand_path = " ".join(part.replace("-", " ").upper() for part in normalized_path) or top_level.strip().upper()
@@ -1042,6 +1065,8 @@ async def send_legacy_standard_response(
         interaction,
         top_level=top_level,
         subcommand_path=subcommand_path,
+        subtitle_args=subtitle_args,
+        relevant_parameters=relevant_parameters,
         lines=list(entries),
         sections=legacy_sections,
         kind=tone,
@@ -1054,4 +1079,5 @@ async def send_legacy_standard_response(
         footer_service_name=service_name,
         top_level_emoji=_LEGACY_TOP_LEVEL_EMOJIS.get(top_level.strip().lower(), "🧭"),
         subcommand_emoji=KIND_EMOJIS[tone],
+        command_description=command_description,
     )

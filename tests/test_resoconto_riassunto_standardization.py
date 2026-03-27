@@ -407,7 +407,7 @@ def test_resocontoserver_status_uses_real_command_title() -> None:
         kwargs = interaction.response.send_message.await_args.kwargs
         embed = kwargs["embed"]
         assert embed.title == "📓 __**STATUS**__"
-        assert embed.description.startswith("*Descrizione sintetica dell'esecuzione del comando.*")
+        assert embed.description.startswith("*Command execution summary.*")
         assert "RESOCONTO" not in (embed.title or "").replace("SERVERSUMMARY", "")
 
     asyncio.run(_run())
