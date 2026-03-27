@@ -115,6 +115,10 @@ def test_description_on_off_status_and_runtime_gate(embed_module, monkeypatch: p
         default_section = next(section for section in sections if section.title == "Default Services")
         assert "audio_notes" not in str(default_section.lines)
         assert "campaign_content_formatter" not in str(default_section.lines)
+        placeholders = dict(next(section for section in sections if section.title == "PLACEHOLDERS").lines)
+        assert "{user_name}" in placeholders
+        assert "{audio_intro}" in placeholders
+        assert "{service_label}" not in placeholders
 
     asyncio.run(_run())
 

@@ -355,3 +355,17 @@ def test_finalize_embeds_author_applies_default_service_name_and_pagination_with
         ]
 
     asyncio.run(_run())
+
+def test_author_service_supports_status_placeholders_in_phrase_template() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="x")
+        attach_author_meta(embed, service_name="riassunto", canonical_top_level_command="dmchannelsummary")
+        service, _ = _build_author_service()
+        await service.set_version("2026.03")
+        await service.set_global_phrase("{service_label} · {service_name} · {bot_version}")
+
+        await service.apply(embed, default_service_name="riassunto")
+
+        assert embed.author.name == "DM CHANNEL SUMMARY · riassunto · 2026.03 · 2026.03"
+
+    asyncio.run(_run())

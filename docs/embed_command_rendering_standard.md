@@ -653,6 +653,24 @@ Regole:
   - servizi in default;
   - runtime rule chiara (differenza ON/OFF rispetto al template salvato);
 - sezioni standard consigliate: `INFO`, `Custom Templates`, `Default Services`.
+- per `/embed author status`, `/embed footer status`, `/embed description status` è obbligatoria anche la sezione `PLACEHOLDERS`, popolata dalla source of truth centralizzata `app/services/embed_status_placeholders.py`.
+- `PLACEHOLDERS` deve mostrare solo placeholder realmente supportati dal sistema corrente, in formato compatto `placeholder → legenda`.
+
+Placeholder attualmente supportati per sistema:
+
+- `description`:
+  - `{service_name}` → chiave pubblica del servizio;
+  - `{user_name}`, `{user_bold}` → nome utente plain/bold;
+  - `{ordinal_today}`, `{ordinal_today_bold}` → ordinale giornaliero plain/bold;
+  - `{audio_intro}`, `{is_first_today}`, `{count_today}` → placeholder audio-specific (solo service `audio`).
+- `author`:
+  - `{service_name}` → chiave pubblica del servizio;
+  - `{service_label}` → label leggibile del servizio;
+  - `{bot_version}` → versione configurata (`author.version`).
+- `footer`:
+  - `{service_name}` → chiave pubblica del servizio;
+  - `{service_label}` → label leggibile del servizio;
+  - `{bot_version}` → versione configurata (`footer.version`).
 
 Da non includere nello status standard:
 

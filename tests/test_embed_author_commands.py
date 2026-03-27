@@ -69,6 +69,11 @@ def test_author_on_off_and_status_commands(embed_module, monkeypatch: pytest.Mon
         assert 'audio' in default_section.lines[0][1]
         assert 'audio_notes' not in default_section.lines[0][1]
         assert 'campaign_content_formatter' not in default_section.lines[0][1]
+        placeholders = dict(next(section for section in status_kwargs['sections'] if section.title == 'PLACEHOLDERS').lines)
+        assert "{service_name}" in placeholders
+        assert "{service_label}" in placeholders
+        assert "{bot_version}" in placeholders
+        assert "{user_name}" not in placeholders
         all_text = " ".join(
             [
                 *(f"{k} {v}" for k, v in status_kwargs['lines']),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import discord
 from discord import app_commands
+from typing import Literal
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
@@ -14,6 +15,7 @@ from app.services.embed_template_service_catalog import (
     build_embed_template_service_autocomplete_choices,
     resolve_embed_template_public_service,
 )
+from app.services.embed_status_placeholders import format_placeholder_status_lines
 from app.services.footer import InvalidFooterThumbnailError
 
 
@@ -103,6 +105,14 @@ def _build_status_service_buckets(
     custom_services = sorted([service for service in supported_services if has_override(service)])
     default_services = [service for service in supported_services if service not in custom_services]
     return custom_services, default_services
+
+
+def _placeholder_section(system: Literal["author", "footer", "description"]) -> CommandEmbedSection:
+    lines = format_placeholder_status_lines(system)
+    return CommandEmbedSection(
+        title="PLACEHOLDERS",
+        lines=lines if lines else [("none", "Nessun placeholder supportato")],
+    )
 
 
 def _description_preview_context(*, service_name: str, user_name: str = "Mario") -> dict[str, object]:
@@ -495,6 +505,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                     title="Default Services",
                     lines=[("services", ", ".join(default_services) if default_services else "(none)")],
                 ),
+                _placeholder_section("footer"),
             ],
         )
 
@@ -769,6 +780,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                     title="Default Services",
                     lines=[("services", ", ".join(default_services) if default_services else "(none)")],
                 ),
+                _placeholder_section("author"),
             ],
         )
 
@@ -830,6 +842,7 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
                     title="Default Services",
                     lines=[("services", ", ".join(default_services) if default_services else "(none)")],
                 ),
+                _placeholder_section("description"),
             ],
         )
 

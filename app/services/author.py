@@ -10,6 +10,7 @@ from collections.abc import Iterable
 import discord
 
 from app.services.database import DatabaseService
+from app.services.embed_status_placeholders import render_supported_placeholders
 from app.services.footer import SUPPORTED_FOOTER_SERVICES, footer_service_category, get_footer_meta, normalize_footer_thumbnail
 
 logger = logging.getLogger(__name__)
@@ -258,6 +259,27 @@ def render_author_name(
     return _truncate(
         f"servizio {human_author_service_name(service_name=service_name, canonical_top_level_command=canonical_top_level_command)}"
     )
+
+
+def _render_author_phrase_template(
+    phrase: str | None,
+    *,
+    service_name: str,
+    canonical_top_level_command: str | None,
+    version: str | None,
+) -> str | None:
+    clean_phrase = _clean(phrase)
+    if not clean_phrase:
+        return None
+    values = {
+        "service_name": _clean(service_name) or "unknown",
+        "service_label": human_author_service_name(
+            service_name=service_name,
+            canonical_top_level_command=canonical_top_level_command,
+        ),
+        "bot_version": _clean(version) or "—",
+    }
+    return render_supported_placeholders(clean_phrase, values, system="author")
 
 
 def render_author_name_with_page(
@@ -636,11 +658,17 @@ class AuthorService:
             )
         phrase, phrase_origin = await self._resolve_phrase(service_name)
         version = await self.get_version()
+        rendered_phrase = _render_author_phrase_template(
+            phrase,
+            service_name=service_name,
+            canonical_top_level_command=canonical_top_level_command,
+            version=version,
+        )
         return (
             render_author_name_with_page(
                 service_name=service_name,
                 canonical_top_level_command=canonical_top_level_command,
-                phrase=phrase,
+                phrase=rendered_phrase,
                 version=version,
                 page_index=page_index,
                 page_total=page_total,

@@ -279,6 +279,11 @@ def test_footer_status_command_uses_embed_namespace_and_simplified_status_payloa
         assert 'campagne' in default_section.lines[0][1]
         assert 'campagne_notizie' not in default_section.lines[0][1]
         assert 'builder' not in default_section.lines[0][1]
+        placeholders = dict(next(section for section in kwargs['sections'] if section.title == 'PLACEHOLDERS').lines)
+        assert "{service_name}" in placeholders
+        assert "{service_label}" in placeholders
+        assert "{bot_version}" in placeholders
+        assert "{ordinal_today}" not in placeholders
         all_text = " ".join(
             [
                 *(f"{k} {v}" for k, v in kwargs['lines']),
