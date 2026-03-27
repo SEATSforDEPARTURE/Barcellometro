@@ -32,6 +32,9 @@ def test_command_validator_tracks_embed_namespace_topology() -> None:
     result = validate_command_tree()
 
     embed_paths = {command.path for command in result.commands if command.root == "embed"}
+    # NOTE:
+    # embed.description is intentionally a minimal namespace (service-level templates only),
+    # unlike footer/author/images which expose full global + service configuration.
     assert embed_paths == {
         "embed.footer.on",
         "embed.footer.off",
@@ -60,6 +63,9 @@ def test_command_validator_tracks_embed_namespace_topology() -> None:
         "embed.images.template_service_set",
         "embed.images.template_service_show",
         "embed.images.template_service_reset",
+        "embed.description.template_service_set",
+        "embed.description.template_service_show",
+        "embed.description.template_service_reset",
     }
 
 
