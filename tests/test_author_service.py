@@ -10,6 +10,7 @@ from app.services.author import (
     copy_author_meta,
     get_author_meta,
     normalize_author_thumbnail,
+    render_author_name,
 )
 from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.author_pipeline import finalize_embed_author, finalize_embeds_author
@@ -318,5 +319,39 @@ def test_author_service_supports_global_and_service_url() -> None:
 
         assert global_embed.author.url == "https://example.com/global"
         assert service_embed.author.url == "https://example.com/riassunto"
+
+    asyncio.run(_run())
+
+
+def test_render_author_name_uses_refactored_canonical_roots_for_alias_services() -> None:
+    assert render_author_name(service_name="riassunto") == "servizio DM CHANNEL SUMMARY"
+    assert render_author_name(service_name="barcello") == "servizio DM CHANNEL SUMMARY"
+    assert render_author_name(service_name="aura") == "servizio DM SERVER SUMMARY"
+    assert render_author_name(service_name="attivita") == "servizio DM SERVER SUMMARY"
+
+
+def test_finalize_embed_author_falls_back_to_default_service_name_without_meta() -> None:
+    async def _run() -> None:
+        embed = discord.Embed(title="fallback")
+        service, _ = _build_author_service()
+
+        await finalize_embed_author(embed, service, default_service_name="barcello")
+
+        assert embed.author.name == "servizio DM CHANNEL SUMMARY"
+
+    asyncio.run(_run())
+
+
+def test_finalize_embeds_author_applies_default_service_name_and_pagination_without_meta() -> None:
+    async def _run() -> None:
+        embeds = [discord.Embed(title="Page 1"), discord.Embed(title="Page 2")]
+        service, _ = _build_author_service()
+
+        rendered = await finalize_embeds_author(embeds, service, default_service_name="attivita")
+
+        assert [embed.author.name for embed in rendered] == [
+            "servizio DM SERVER SUMMARY · (Pag. 1/2)",
+            "servizio DM SERVER SUMMARY · (Pag. 2/2)",
+        ]
 
     asyncio.run(_run())

@@ -347,7 +347,16 @@ Alias canonici principali (risolti centralmente in `app/services/author.py`):
 - `resocontocanale` → `channelsummary`
 - `resocontoserver` → `serversummary`
 - `riassunto` → `dmchannelsummary`
+- `barcello` → `dmchannelsummary`
 - `aura` → `dmserversummary`
+- `attivita` → `dmserversummary`
+
+Canonical legacy deprecati e non più validi per il rendering author standard:
+
+- `dmsummary`
+- `aurasummary`
+- `barcellosummary`
+- `activitysummary`
 
 Il namespace `/embed author` replica il modello amministrativo del footer con i comandi:
 
