@@ -223,12 +223,12 @@ def test_embed_description_uses_default_template_not_raw_phrase() -> None:
                 db,
                 trigger_state={"templates": {"DEFAULT": "template default {count_user}", "FIRST": "template first"}},
             )
-            assert embed.description == "template first"
+            assert embed.description == "*template first*"
             embed2 = await _run_phrase_once(
                 db,
                 trigger_state={"templates": {"DEFAULT": "template default {count_user}", "FIRST": "template first"}},
             )
-            assert embed2.description == "template default 2"
+            assert embed2.description == "*template default 2*"
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
@@ -252,7 +252,7 @@ def test_custom_user_phrase_is_rendered_in_template() -> None:
                     "templates": {"DEFAULT": "default {custom_user_phrase}", "FIRST": "first {custom_user_phrase}"},
                 },
             )
-            assert embed.description == "first Che micia"
+            assert embed.description == "*first Che micia*"
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
@@ -296,7 +296,7 @@ def test_template_fallback_does_not_break_trigger() -> None:
                 service._render_phrase_template = original_render
 
             embed = channel.target.replies[0]
-            assert embed.description == "il criccy"
+            assert embed.description == "*il criccy*"
             assert embed.color.value == 0xF1C40F
             await db.close()
         finally:
@@ -320,7 +320,7 @@ def test_author_name_placeholder_prefers_display_name_then_name_then_default() -
                 trigger_state={"templates": {"FIRST": "ciao {author_name}"}},
                 message_author=SimpleNamespace(display_name="Display Hero", name="RawName"),
             )
-            assert embed_display.description == "ciao Display Hero"
+            assert embed_display.description == "*ciao Display Hero*"
 
             embed_name = await _run_phrase_once(
                 db,
@@ -328,7 +328,7 @@ def test_author_name_placeholder_prefers_display_name_then_name_then_default() -
                 trigger_state={"templates": {"FIRST": "ciao {author_name}"}},
                 message_author=SimpleNamespace(display_name=None, name="OnlyName"),
             )
-            assert embed_name.description == "ciao OnlyName"
+            assert embed_name.description == "*ciao OnlyName*"
 
             embed_default = await _run_phrase_once(
                 db,
@@ -336,7 +336,7 @@ def test_author_name_placeholder_prefers_display_name_then_name_then_default() -
                 trigger_state={"templates": {"FIRST": "ciao {author_name}"}},
                 message_author=SimpleNamespace(display_name=None, name=None),
             )
-            assert embed_default.description == "ciao utente"
+            assert embed_default.description == "*ciao utente*"
 
             await db.close()
         finally:
@@ -448,8 +448,8 @@ def test_phrase_cooldown_blocks_second_hit_and_does_not_consume_first() -> None:
             await service._handle_phrases(envelope)
 
             assert len(channel.target.replies) == 2
-            assert channel.target.replies[0].description == "first"
-            assert channel.target.replies[1].description == "default 2"
+            assert channel.target.replies[0].description == "*first*"
+            assert channel.target.replies[1].description == "*default 2*"
 
             phrase_row = await db.fetchone("SELECT id FROM trigger_phrases WHERE guild_id = ? LIMIT 1", ("g1",))
             assert phrase_row is not None
@@ -743,9 +743,9 @@ def test_phrase_global_milestone_priority_and_exact_threshold_trigger() -> None:
             for _ in range(6):
                 await service._handle_phrases(envelope)
 
-            assert channel.target.replies[0].description == "first"
-            assert channel.target.replies[4].description == "milestone 5 4->5"
-            assert channel.target.replies[5].description == "default 6"
+            assert channel.target.replies[0].description == "*first*"
+            assert channel.target.replies[4].description == "*milestone 5 4->5*"
+            assert channel.target.replies[5].description == "*default 6*"
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel
@@ -790,7 +790,7 @@ def test_custom_user_phrase_works_inside_global_milestone() -> None:
             )
             await service._handle_phrases(envelope)
             await service._handle_phrases(envelope)
-            assert channel.target.replies[1].description == "milestone Che micia"
+            assert channel.target.replies[1].description == "*milestone Che micia*"
             await db.close()
         finally:
             triggers_module.discord.TextChannel = original_text_channel

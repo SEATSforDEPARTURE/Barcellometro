@@ -31,7 +31,11 @@ from app.services.qna_session_store import QnaSession, QnaSessionStore
 from app.services.qna_sessions_repo import QnaSessionsRepo
 from app.services.qna_query_engine import QnaAnswerResult, QnaQueryEngine
 from app.shared.safety.pii import contains_pii
-from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
+from app.shared.discord.embed_body import (
+    format_standard_description,
+    format_standard_field_name,
+    format_standard_title,
+)
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -995,21 +999,23 @@ class TriggerEngineService:
 
         did_notify = False
         if should_notify:
+            update_text = main_msg or f"Stato corrente: {self._barcello_state_ui_label(stored_color)}."
             embed = discord.Embed(
-                title=format_standard_title("AGGIORNAMENTO BARCELLO", emoji="🫛"),
-                description="Aggiornamento automatico dello stato Barcello.",
+                title=self._render_barcello_alert_title(old_color=prev_color, new_color=stored_color),
+                description=format_standard_description(update_text),
                 color=self._barcello_embed_color(stable_color),
             )
-            update_text = main_msg or f"Stato corrente: **{stored_color or 'N/D'}**."
-            embed.add_field(name=format_standard_field_name("Aggiornamento", emoji="📣"), value=update_text[:1024], inline=False)
             if mod_block_text and stored_color in {"ROSSO", "NERO"}:
                 embed.add_field(name=format_standard_field_name("Moderazione", emoji="🛡️"), value=mod_block_text[:1024], inline=False)
-            salute_value = f"{score}/100" if prev_score is None else f"{prev_score}→{score}/100"
+            salute_value = self._render_trigger_health_bar(score=score, color=stored_color)
             embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
             if state_count_today >= 2 and last_in_state_human:
                 embed.add_field(
-                    name=format_standard_field_name("Andamento di oggi", emoji="📊"),
-                    value=f"{state_count_today}ª volta in stato {stored_color}.\nUltima: {last_in_state_human} fa.",
+                    name=format_standard_field_name("Trend", emoji="📊"),
+                    value=(
+                        f"**{state_count_today}ª volta** in stato **{self._barcello_state_ui_label(stored_color)}**.\n"
+                        f"Ultima: **{last_in_state_human} fa**."
+                    ),
                     inline=False,
                 )
             attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
@@ -1293,7 +1299,7 @@ class TriggerEngineService:
         color = self._discord_color_from_phrase(phrase)
         embed = discord.Embed(
             title=format_standard_title("FRASI ICONICHE", emoji="💬"),
-            description=rendered_text,
+            description=format_standard_description(rendered_text),
             color=color,
         )
         attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
@@ -1496,6 +1502,42 @@ class TriggerEngineService:
             "NERO": discord.Color.dark_grey(),
         }
         return mapping.get(normalized_color, discord.Color.blurple())
+
+    def _barcello_state_emoji(self, color: str | None) -> str:
+        normalized = self._normalize_barcello_color(color) or ""
+        mapping = {
+            "VERDE": "🟢",
+            "GIALLO": "🟡",
+            "ROSSO": "🔴",
+            "NERO": "⚫",
+        }
+        return mapping.get(normalized, "🫛")
+
+    def _barcello_state_ui_label(self, color: str | None) -> str:
+        normalized = self._normalize_barcello_color(color) or ""
+        mapping = {
+            "VERDE": "VERDE",
+            "GIALLO": "GIALLA",
+            "ROSSO": "ROSSA",
+            "NERO": "NERA",
+        }
+        return mapping.get(normalized, normalized or "N/D")
+
+    def _render_barcello_alert_title(self, *, old_color: str | None, new_color: str) -> str:
+        new_ui = self._barcello_state_ui_label(new_color)
+        if old_color:
+            old_ui = self._barcello_state_ui_label(old_color)
+            text = f"L'ALLERTA BARCELLO PASSA DA {old_ui} A {new_ui}"
+        else:
+            text = f"L'ALLERTA BARCELLO PASSA A {new_ui}"
+        return format_standard_title(text, emoji=self._barcello_state_emoji(new_color))
+
+    def _render_trigger_health_bar(self, *, score: int, color: str) -> str:
+        safe_score = max(0, min(100, int(score)))
+        filled = int(round(safe_score / 10))
+        empty = max(0, 10 - filled)
+        bar = f"{self._barcello_state_emoji(color) * filled}{'⚪' * empty}"
+        return f"{bar} **({safe_score}/100)**"
 
     def _format_barcello_last_seen_dt(self, last_seen_ts: str | None) -> str:
         if not last_seen_ts:
