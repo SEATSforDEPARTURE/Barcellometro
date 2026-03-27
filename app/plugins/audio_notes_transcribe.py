@@ -18,12 +18,14 @@ import imageio_ffmpeg
 from app.core.service_registry import ServiceRegistry
 from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
+from app.shared.discord.embed_rendering import finalize_embeds_rendering
 from app.shared.discord.embed_body import (
     format_standard_description,
     format_standard_field_name,
     format_standard_section_value,
     format_standard_title,
 )
+from app.shared.discord.user_display import format_user_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +44,8 @@ _AUDIO_ORDINALS_IT: dict[int, str] = {
 }
 
 
-def _audio_user_reference(user: Any) -> str:
-    mention = (getattr(user, "mention", None) or "").strip()
-    if mention:
-        return mention
-    display_name = (getattr(user, "display_name", None) or getattr(user, "name", None) or "utente").strip()
-    return f"@{display_name}"
+def _audio_user_display_name(user: Any) -> str:
+    return format_user_display_name(user)
 
 
 def _audio_ordinal_label(count_today: int | None) -> str | None:
@@ -111,12 +109,12 @@ def _split_embed_descriptions(text: str, max_chars: int = _DISCORD_EMBED_DESCRIP
 def _build_audio_note_embed(
     description: str,
     *,
-    user_ref: str = "@utente",
+    user_display_name: str = "utente",
     contributors: list[str] | None = None,
     used_local_processing: bool = True,
 ) -> discord.Embed:
     embed = discord.Embed(
-        title=format_standard_title(f"NOTA AUDIO DI {user_ref}"),
+        title=format_standard_title(f"NOTA AUDIO DI {user_display_name}", emoji="🗣️"),
         description=format_standard_description(description, italic=True),
         color=_AUDIO_NOTE_COLOR,
     )
@@ -162,33 +160,53 @@ def _build_audio_note_sections(*, transcript_text: str, detected_lang: str, tran
 def _build_audio_note_embeds_from_sections(
     sections: list[tuple[str, str, str | None]],
     *,
-    user_ref: str,
+    user_display_name: str,
     ordinal_label: str | None,
     contributors: list[str] | None = None,
     used_local_processing: bool = True,
 ) -> list[discord.Embed]:
-    embeds: list[discord.Embed] = []
-    for idx, (title, emoji, content) in enumerate(sections, start=1):
+    section_chunks: list[tuple[str, str, str]] = []
+    for title, emoji, content in sections:
         chunks = _split_embed_descriptions((content or "—").strip() or "—", _DISCORD_FIELD_MAX)
-        for cidx, chunk in enumerate(chunks, start=1):
-            embed = _build_audio_note_embed(
-                _audio_final_description(user_ref=user_ref, ordinal_label=ordinal_label),
-                user_ref=user_ref,
+        for chunk in chunks:
+            section_chunks.append((title, emoji, chunk or "—"))
+
+    if not section_chunks:
+        return [
+            _build_audio_note_embed(
+                _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
+                user_display_name=user_display_name,
                 contributors=contributors,
                 used_local_processing=used_local_processing,
             )
-            suffix = f" ({cidx}/{len(chunks)})" if len(chunks) > 1 else ""
-            prefix = f"Sezione {idx}/{len(sections)} — " if len(sections) > 1 else ""
-            embed.add_field(
-                name=format_standard_field_name(f"{prefix}{title}{suffix}".strip(), emoji=emoji),
-                value=format_standard_section_value(chunk or "—"),
-                inline=False,
+        ]
+
+    embeds: list[discord.Embed] = []
+    current_embed = _build_audio_note_embed(
+        _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
+        user_display_name=user_display_name,
+        contributors=contributors,
+        used_local_processing=used_local_processing,
+    )
+    for title, emoji, chunk in section_chunks:
+        if len(current_embed.fields) >= 25:
+            embeds.append(current_embed)
+            current_embed = _build_audio_note_embed(
+                _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
+                user_display_name=user_display_name,
+                contributors=contributors,
+                used_local_processing=used_local_processing,
             )
-            embeds.append(embed)
+        current_embed.add_field(
+            name=format_standard_field_name(title.strip(), emoji=emoji),
+            value=format_standard_section_value(chunk),
+            inline=False,
+        )
+    embeds.append(current_embed)
     return embeds or [
         _build_audio_note_embed(
-            _audio_final_description(user_ref=user_ref, ordinal_label=ordinal_label),
-            user_ref=user_ref,
+            _audio_final_description(user_ref=user_display_name, ordinal_label=ordinal_label),
+            user_display_name=user_display_name,
             contributors=contributors,
             used_local_processing=used_local_processing,
         )
@@ -424,6 +442,9 @@ def setup(registry: ServiceRegistry) -> None:
     translate_local = registry.get("translate.local")
     translate_ai = registry.get("translate.ai")
     ai_service = registry.get("ai") if registry.has("ai") else None
+    footer_service = registry.get("footer") if registry.has("footer") else None
+    author_service = registry.get("author") if registry.has("author") else None
+    embed_images_service = registry.get("embed_images") if registry.has("embed_images") else None
     config = registry.get("config")
 
     queue: asyncio.Queue[tuple[discord.Message, discord.Attachment, discord.Message]] = asyncio.Queue()
@@ -460,7 +481,7 @@ def setup(registry: ServiceRegistry) -> None:
                 await message.reply(
                     embed=_build_audio_note_embed(
                         "Troppi audio in coda, riprova tra poco.",
-                        user_ref=_audio_user_reference(message.author),
+                        user_display_name=_audio_user_display_name(message.author),
                         used_local_processing=True,
                     )
                 )
@@ -468,7 +489,7 @@ def setup(registry: ServiceRegistry) -> None:
             reply = await message.reply(
                 embed=_build_audio_note_embed(
                     _audio_loading_description(),
-                    user_ref=_audio_user_reference(message.author),
+                    user_display_name=_audio_user_display_name(message.author),
                     used_local_processing=True,
                 )
             )
@@ -485,7 +506,7 @@ def setup(registry: ServiceRegistry) -> None:
         if size_mb > max_mb:
             await reply.edit(
                 content=None,
-                embed=_build_audio_note_embed("Audio troppo grande per la trascrizione.", user_ref=_audio_user_reference(message.author)),
+                embed=_build_audio_note_embed("Audio troppo grande per la trascrizione.", user_display_name=_audio_user_display_name(message.author)),
             )
             return
 
@@ -500,13 +521,13 @@ def setup(registry: ServiceRegistry) -> None:
             if duration is not None and duration > max_duration:
                 await reply.edit(
                     content=None,
-                    embed=_build_audio_note_embed("Audio troppo lungo per la trascrizione.", user_ref=_audio_user_reference(message.author)),
+                    embed=_build_audio_note_embed("Audio troppo lungo per la trascrizione.", user_display_name=_audio_user_display_name(message.author)),
                 )
                 return
             if not _convert_to_wav(raw_path, wav_path):
                 await reply.edit(
                     content=None,
-                    embed=_build_audio_note_embed("Errore durante la conversione audio.", user_ref=_audio_user_reference(message.author)),
+                    embed=_build_audio_note_embed("Errore durante la conversione audio.", user_display_name=_audio_user_display_name(message.author)),
                 )
                 return
 
@@ -599,14 +620,19 @@ def setup(registry: ServiceRegistry) -> None:
             )
             embeds = _build_audio_note_embeds_from_sections(
                 sections,
-                user_ref=_audio_user_reference(message.author),
+                user_display_name=_audio_user_display_name(message.author),
                 ordinal_label=_audio_ordinal_label(ordinal_count + 1),
                 contributors=contributors,
                 used_local_processing=used_local_processing,
             )
-            await reply.edit(content=None, embed=embeds[0])
-            for embed in embeds[1:]:
-                await message.reply(embed=embed)
+            await finalize_embeds_rendering(
+                embeds,
+                footer_service=footer_service,
+                author_service=author_service,
+                default_service_name="audio_notes",
+                embed_images_service=embed_images_service,
+            )
+            await reply.edit(content=None, embeds=embeds)
 
             meta: dict[str, Any] = {
                 "discord_message_id": str(message.id),
