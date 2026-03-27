@@ -89,11 +89,9 @@ _CANONICAL_TOP_LEVEL_ALIASES: dict[str, str] = {
     "ask": "qna",
     "domanda": "qna",
     "riassunto": "dmchannelsummary",
+    "barcello": "dmchannelsummary",
     "aura": "dmserversummary",
-    "dmsummary": "dmchannelsummary",
-    "barcellosummary": "dmchannelsummary",
-    "aurasummary": "dmserversummary",
-    "activitysummary": "dmserversummary",
+    "attivita": "dmserversummary",
     "resocontocanale": "channelsummary",
     "resocontoserver": "serversummary",
 }
