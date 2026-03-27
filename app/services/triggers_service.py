@@ -32,7 +32,6 @@ from app.services.qna_sessions_repo import QnaSessionsRepo
 from app.services.qna_query_engine import QnaAnswerResult, QnaQueryEngine
 from app.shared.safety.pii import contains_pii
 from app.shared.discord.embed_body import (
-    build_user_event_title,
     format_standard_description,
     format_standard_field_name,
     format_standard_title,
@@ -56,6 +55,12 @@ PHRASE_PLACEHOLDERS = {
     "{milestone}",
     "{next_milestone}",
     "{remaining_to_next_milestone}",
+}
+PHRASE_BOLD_PLACEHOLDERS = {
+    "count_user",
+    "count_user_prev",
+    "count_total",
+    "last_seen_human",
 }
 IT_STOPWORDS = {
     "a", "ad", "ai", "al", "all", "alla", "alle", "anche", "avete", "che", "chi", "ci", "coi", "col", "come",
@@ -1299,7 +1304,7 @@ class TriggerEngineService:
 
         color = self._discord_color_from_phrase(phrase)
         embed = discord.Embed(
-            title=build_user_event_title(event_text="HA DETTO UNA FRASE ICONICA!", display_name=author_name, emoji="💬"),
+            title=format_standard_title("FRASE ICONICA", emoji="💬"),
             description=format_standard_description(rendered_text),
             color=color,
         )
@@ -1437,7 +1442,10 @@ class TriggerEngineService:
         rendered = template
         for placeholder in PHRASE_PLACEHOLDERS:
             key = placeholder[1:-1]
-            rendered = rendered.replace(placeholder, values.get(key, ""))
+            value = values.get(key, "")
+            if value and key in PHRASE_BOLD_PLACEHOLDERS:
+                value = f"**{value}**"
+            rendered = rendered.replace(placeholder, value)
         return rendered
 
     def _phrase_matches(self, content: str, phrase: dict[str, object]) -> bool:
@@ -1525,13 +1533,9 @@ class TriggerEngineService:
         return mapping.get(normalized, normalized or "N/D")
 
     def _render_barcello_alert_title(self, *, old_color: str | None, new_color: str) -> str:
-        new_ui = self._barcello_state_ui_label(new_color)
-        if old_color:
-            old_ui = self._barcello_state_ui_label(old_color)
-            text = f"L'ALLERTA BARCELLO PASSA DA {old_ui} A {new_ui}"
-        else:
-            text = f"L'ALLERTA BARCELLO PASSA A {new_ui}"
-        return format_standard_title(text, emoji=self._barcello_state_emoji(new_color))
+        _ = old_color
+        _ = new_color
+        return format_standard_title("AGGIORNAMENTO BARCELLO", emoji="🫛")
 
     def _render_trigger_health_bar(self, *, score: int, color: str) -> str:
         safe_score = max(0, min(100, int(score)))

@@ -20,7 +20,7 @@ from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
 from app.shared.discord.embed_rendering import finalize_embeds_rendering
 from app.shared.discord.embed_body import (
-    build_user_event_title,
+    format_standard_title,
     format_standard_description,
     format_standard_field_name,
     format_standard_section_value,
@@ -66,7 +66,15 @@ def _audio_final_description(*, user_ref: str, ordinal_label: str | None) -> str
 
 
 def _build_audio_note_title(user_display_name: str) -> str:
-    return build_user_event_title(event_text="CI MANDA UN AUDIO!", display_name=user_display_name, emoji="🗣️")
+    _ = user_display_name
+    return format_standard_title("NOTA AUDIO", emoji="🗣️")
+
+
+def _audio_italicize_description(text: str) -> str:
+    normalized = (text or "").strip()
+    if not normalized:
+        return normalized
+    return f"_{normalized}_"
 
 
 def _now_iso() -> str:
@@ -119,10 +127,14 @@ def _build_audio_note_embed(
     used_local_processing: bool = True,
 ) -> discord.Embed:
     normalized_description = (description or "").strip()
-    description_already_formatted = normalized_description.startswith("*") and normalized_description.endswith("*")
+    if normalized_description and not (
+        (normalized_description.startswith("*") and normalized_description.endswith("*"))
+        or (normalized_description.startswith("_") and normalized_description.endswith("_"))
+    ):
+        normalized_description = _audio_italicize_description(normalized_description)
     embed = discord.Embed(
         title=_build_audio_note_title(user_display_name),
-        description=format_standard_description(normalized_description, italic=not description_already_formatted),
+        description=format_standard_description(normalized_description, italic=False),
         color=_AUDIO_NOTE_COLOR,
     )
     attach_footer_meta(embed, service_name="audio_notes", contributors=contributors or [], used_local_processing=used_local_processing)
