@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import difflib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
 import discord
 
-from app.services.embed_public_service_keys import list_embed_service_aliases, resolve_public_embed_service_key
+from app.services.embed_public_service_keys import (
+    list_embed_service_aliases,
+    list_public_embed_service_keys,
+    resolve_public_embed_service_key,
+)
 from app.services.database import DatabaseService
 from app.shared.discord.embed_body import DISCORD_DESCRIPTION_MAX, format_standard_description
 
 _DESCRIPTION_TEMPLATE_KEY_PREFIX = "description_template:"
+_DESCRIPTION_ENABLED_KEY = "description_template.enabled"
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _MENTION_RE = re.compile(r"<@!?&?#?\d+>")
 
@@ -30,6 +36,13 @@ _SERVICE_PLACEHOLDERS: dict[str, tuple[str, ...]] = {
 
 class InvalidDescriptionTemplateError(ValueError):
     pass
+
+
+@dataclass(slots=True)
+class DescriptionTemplateStatusSnapshot:
+    enabled: bool
+    total_services: int
+    custom_templates: dict[str, str]
 
 
 class DescriptionTemplateService:
@@ -77,6 +90,16 @@ class DescriptionTemplateService:
         validated = self.validate_template(service_name, template)
         await self._database.set_setting(self._key_for_service(service_name), validated)
         return validated
+
+    async def set_enabled(self, enabled: bool) -> None:
+        await self._database.set_setting(_DESCRIPTION_ENABLED_KEY, "true" if enabled else "false")
+
+    async def is_enabled(self) -> bool:
+        stored = await self._database.get_setting(_DESCRIPTION_ENABLED_KEY)
+        if stored is None:
+            await self._database.set_setting(_DESCRIPTION_ENABLED_KEY, "true")
+            return True
+        return stored.lower() in {"1", "true", "yes", "y"}
 
     async def get_template(self, service: str) -> str | None:
         service_name = self.normalize_service_name(service)
@@ -147,8 +170,12 @@ class DescriptionTemplateService:
         service: str,
         context: dict[str, Any] | None,
         fallback: str | Callable[[], str],
+        respect_global_toggle: bool = True,
     ) -> str:
         service_name = self.normalize_service_name(service)
+        if respect_global_toggle and not await self.is_enabled():
+            fallback_text = fallback() if callable(fallback) else fallback
+            return format_standard_description(self._sanitize_value(fallback_text), italic=True)
         template = await self.get_template(service_name)
         if template is None:
             fallback_text = fallback() if callable(fallback) else fallback
@@ -164,4 +191,16 @@ class DescriptionTemplateService:
         context: dict[str, Any] | None = None,
         fallback: str | Callable[[], str] = "Usa default del servizio",
     ) -> str:
-        return await self.render(service=service, context=context, fallback=fallback)
+        return await self.render(service=service, context=context, fallback=fallback, respect_global_toggle=False)
+
+    async def build_status_snapshot(self) -> DescriptionTemplateStatusSnapshot:
+        custom_templates: dict[str, str] = {}
+        for service_name in list_public_embed_service_keys():
+            template = await self.get_template(service_name)
+            if template:
+                custom_templates[service_name] = template
+        return DescriptionTemplateStatusSnapshot(
+            enabled=await self.is_enabled(),
+            total_services=len(list_public_embed_service_keys()),
+            custom_templates=custom_templates,
+        )

@@ -91,3 +91,42 @@ def test_legacy_service_alias_reads_and_resets_on_public_key() -> None:
         assert "description_template:audio_notes" not in db.values
 
     asyncio.run(_run())
+
+
+def test_enabled_flag_persistence_and_runtime_behavior() -> None:
+    async def _run() -> None:
+        db = _DbStub()
+        service = DescriptionTemplateService(db)
+        await service.set_template("audio", "Custom {audio_intro} {user_name}")
+
+        assert await service.is_enabled() is True
+        await service.set_enabled(False)
+        assert await service.is_enabled() is False
+        assert db.values["description_template.enabled"] == "false"
+
+        rendered_off = await service.render(service="audio", context={"user_name": "Mario"}, fallback="Native fallback")
+        assert rendered_off == "*Native fallback*"
+
+        await service.set_enabled(True)
+        rendered_on = await service.render(service="audio", context={"user_name": "Mario"}, fallback="Native fallback")
+        assert rendered_on == "*Custom Leggiamo cosa ci dice Mario*"
+
+        rendered_no_custom = await service.render(service="qna", context={"user_name": "Mario"}, fallback="Qna fallback")
+        assert rendered_no_custom == "*Qna fallback*"
+
+    asyncio.run(_run())
+
+
+def test_build_status_snapshot_uses_public_service_keys_only() -> None:
+    async def _run() -> None:
+        db = _DbStub()
+        service = DescriptionTemplateService(db)
+        db.values["description_template:audio_notes"] = "Legacy {audio_intro} {user_name}"
+        db.values["description_template:campaign_content_formatter"] = "Hidden"
+
+        snapshot = await service.build_status_snapshot()
+        assert snapshot.enabled is True
+        assert snapshot.total_services == 9
+        assert snapshot.custom_templates == {"audio": "Legacy {audio_intro} {user_name}"}
+
+    asyncio.run(_run())
