@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
 import pytest
+from app.plugins.commands_modular.time_windows import TimeWindowResult
 
 from app.services.barcello_service import BarcelloResult
 from app.services.footer import get_footer_meta
@@ -49,8 +51,12 @@ def _ctx_for_result(result: BarcelloResult, *, allowed: bool = True, profile: st
             compute_pair=AsyncMock(return_value=result),
             compute_pair_range=AsyncMock(return_value=result),
         ),
-        barcello_calibration_service=None,
-        database=SimpleNamespace(get_setting=AsyncMock(return_value=None)),
+        barcello_calibration_service=SimpleNamespace(run_calibration=AsyncMock(return_value={"updated": False, "samples": 0, "summary": ""})),
+        database=SimpleNamespace(
+            get_setting=AsyncMock(return_value=None),
+            get_trigger_enabled=AsyncMock(return_value=False),
+            set_trigger_enabled=AsyncMock(),
+        ),
         config=SimpleNamespace(ignore_bots=True, openai_api_key=""),
         ai=None,
         timezone=None,
@@ -124,6 +130,7 @@ def test_register_barcello_registers_summary_and_alias_namespaces(barcello_modul
     )
 
     assert tree.commands == []
+    assert isinstance(barcello_alias_group, discord.app_commands.Group)
     assert any(command.name == "barcello" for command in triggers_group.commands)
     assert {child.name for child in next(command for command in triggers_group.commands if command.name == "barcello").commands} == {
         "on",
@@ -135,6 +142,38 @@ def test_register_barcello_registers_summary_and_alias_namespaces(barcello_modul
     summary_barcello = _group_command(dmchannelsummary_group, "barcello")
     assert {child.name for child in summary_barcello.commands} == {"on", "off", "status", "today", "yesterday", "last", "range"}
     assert {child.name for child in barcello_alias_group.commands} == {"oggi", "ieri", "ultimi", "intervallo"}
+    assert all(child.name != "barcello" for child in barcello_alias_group.commands)
+
+
+def test_dmchannelsummary_barcello_toggles_use_canonical_permission_namespace(
+    barcello_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        ctx = _ctx_for_result(BarcelloResult(score=75, color="verde"))
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        check_permission = AsyncMock(return_value=True)
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", check_permission)
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        summary_barcello = _group_command(dmchannelsummary_group, "barcello")
+        on_callback = _group_command(summary_barcello, "on").callback
+        status_callback = _group_command(summary_barcello, "status").callback
+
+        await on_callback(_interaction(qualified_name="dmchannelsummary barcello on"))
+        await status_callback(_interaction(qualified_name="dmchannelsummary barcello status"))
+
+        assert check_permission.await_args_list[0].args[1] == "admin.dmchannelsummary.barcello.on"
+        assert check_permission.await_args_list[1].args[1] == "admin.dmchannelsummary.barcello.status"
+        assert send_standard_response.await_args_list[0].kwargs["subcommand_path"] == "dmchannelsummary barcello on"
+        assert send_standard_response.await_args_list[1].kwargs["subcommand_path"] == "dmchannelsummary barcello status"
+
+    asyncio.run(_run())
 
 
 def test_user_facing_barcello_uses_standardized_dm_flow_and_non_admin_permission(
@@ -275,5 +314,58 @@ def test_user_facing_barcello_warns_when_dm_delivery_fails(
         assert notice_kwargs["subcommand_path"] == "barcello oggi"
         assert notice_kwargs["kind"] == "warning"
         assert notice_kwargs["lines"] == [("warning", "Non riesco a inviarti DM. Ti mostro il report qui in privato.")]
+
+    asyncio.run(_run())
+
+
+def test_alias_and_canonical_report_commands_share_the_same_report_pipeline(
+    barcello_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        result = BarcelloResult(
+            score=80,
+            color="verde",
+            window_start_ts="2026-03-21T10:00:00+00:00",
+            window_end_ts="2026-03-21T10:30:00+00:00",
+            metrics={"message_count": 50, "cache_hit": False},
+        )
+        ctx = _ctx_for_result(result)
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        monkeypatch.setattr(barcello_module, "send_standard_response", AsyncMock())
+        monkeypatch.setattr(barcello_module, "send_dm_or_followup", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(
+            barcello_module,
+            "resolve_oggi_window",
+            lambda: TimeWindowResult(
+                start_dt=datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+                end_dt=datetime(2026, 3, 22, 0, 0, tzinfo=timezone.utc),
+                period_label="oggi",
+                label_periodo="oggi",
+            ),
+        )
+
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        summary_barcello = _group_command(dmchannelsummary_group, "barcello")
+        today_callback = _group_command(summary_barcello, "today").callback
+        oggi_callback = _group_command(barcello_alias_group, "oggi").callback
+
+        await today_callback(_interaction(qualified_name="dmchannelsummary barcello today"))
+        await oggi_callback(_interaction(qualified_name="barcello oggi"))
+
+        assert ctx.barcello_service.compute_channel_range.await_count == 2
+        first_call = ctx.barcello_service.compute_channel_range.await_args_list[0]
+        second_call = ctx.barcello_service.compute_channel_range.await_args_list[1]
+
+        first_start = first_call.kwargs.get("start_ts", first_call.args[2])
+        first_end = first_call.kwargs.get("end_ts", first_call.args[3])
+        second_start = second_call.kwargs.get("start_ts", second_call.args[2])
+        second_end = second_call.kwargs.get("end_ts", second_call.args[3])
+        assert first_start == second_start
+        assert first_end == second_end
 
     asyncio.run(_run())
