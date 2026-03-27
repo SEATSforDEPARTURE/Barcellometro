@@ -396,10 +396,13 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             ctx,
             subcommand_path="footer template_service_show",
             subtitle_args=[service_name],
-            sections=_template_section(
-                ("Phrase", _format_override_value(phrase, missing="(not set)")),
-                ("Thumbnail", _format_override_value(thumbnail_value, missing="(not set)")),
-            ),
+            sections=[
+                *_template_section(
+                    ("Phrase", _format_override_value(phrase, missing="(not set)")),
+                    ("Thumbnail", _format_override_value(thumbnail_value, missing="(not set)")),
+                ),
+                _placeholder_section("footer"),
+            ],
         )
 
     @footer_group.command(name="template_service_reset", description="Reset a service-specific footer template.")
@@ -692,12 +695,15 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             ctx,
             subcommand_path="author template_service_show",
             subtitle_args=[service_name],
-            sections=_template_section(
-                ("Phrase", _format_override_value(phrase, missing="(not set)")),
-                ("Thumbnail", _format_override_value(thumbnail_value, missing="(not set)")),
-                ("URL", _format_override_value(url_value, missing="(not set)")),
-                ("Preview", render_author_name(service_name=service_name, phrase=phrase or global_phrase, version=version)),
-            ),
+            sections=[
+                *_template_section(
+                    ("Phrase", _format_override_value(phrase, missing="(not set)")),
+                    ("Thumbnail", _format_override_value(thumbnail_value, missing="(not set)")),
+                    ("URL", _format_override_value(url_value, missing="(not set)")),
+                    ("Preview", render_author_name(service_name=service_name, phrase=phrase or global_phrase, version=version)),
+                ),
+                _placeholder_section("author"),
+            ],
         )
 
     @author_group.command(name="template_service_reset", description="Reset a service-specific author template.")
@@ -910,10 +916,13 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             ctx,
             subcommand_path="description template_service_show",
             subtitle_args=[service_name],
-            sections=_template_section(
-                ("Template", current or "usa default del servizio"),
-                ("Preview", preview),
-            ),
+            sections=[
+                *_template_section(
+                    ("Template", current or "usa default del servizio"),
+                    ("Preview", preview),
+                ),
+                _placeholder_section("description"),
+            ],
         )
 
     @description_group.command(name="template_service_reset", description="Reset a service-specific description template.")

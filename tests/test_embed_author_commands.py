@@ -194,7 +194,8 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
         send_standard.reset_mock()
         show_command = find_command(bundle.author_group, 'template_service_show')
         await show_command.callback(InteractionStub(show_command), 'riassunto')
-        assert section_payload(send_standard.await_args.kwargs) == (
+        show_kwargs = send_standard.await_args.kwargs
+        assert section_payload(show_kwargs) == (
             'Template',
             [
                 ('Phrase', 'Linea dedicata'),
@@ -203,6 +204,11 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
                 ('Preview', 'Linea dedicata · 2026.03'),
             ],
         )
+        placeholders = dict(next(section for section in show_kwargs['sections'] if section.title == 'PLACEHOLDERS').lines)
+        assert "{service_name}" in placeholders
+        assert "{service_label}" in placeholders
+        assert "{bot_version}" in placeholders
+        assert "{user_name}" not in placeholders
 
         send_standard.reset_mock()
         reset_command = find_command(bundle.author_group, 'template_service_reset')
@@ -213,7 +219,8 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
 
         send_standard.reset_mock()
         await show_command.callback(InteractionStub(show_command), 'riassunto')
-        assert section_payload(send_standard.await_args.kwargs) == (
+        fallback_kwargs = send_standard.await_args.kwargs
+        assert section_payload(fallback_kwargs) == (
             'Template',
             [
                 ('Phrase', '(not set)'),
@@ -222,6 +229,8 @@ def test_author_template_service_set_show_reset_and_partial_updates(embed_module
                 ('Preview', 'Centro embed · 2026.03'),
             ],
         )
+        fallback_placeholders = dict(next(section for section in fallback_kwargs['sections'] if section.title == 'PLACEHOLDERS').lines)
+        assert fallback_placeholders == placeholders
 
     asyncio.run(_run())
 

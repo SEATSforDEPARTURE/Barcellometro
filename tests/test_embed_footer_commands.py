@@ -149,13 +149,19 @@ def test_footer_template_service_set_show_and_reset_roundtrip(embed_module, monk
         send_standard.reset_mock()
         show_command = find_command(bundle.footer_group, 'template_service_show')
         await show_command.callback(InteractionStub(show_command), 'riassunto')
-        assert section_payload(send_standard.await_args.kwargs) == (
+        show_kwargs = send_standard.await_args.kwargs
+        assert section_payload(show_kwargs) == (
             'Template',
             [
                 ('Phrase', 'Servizio dedicato'),
                 ('Thumbnail', 'https://example.com/service.png'),
             ],
         )
+        placeholders = dict(next(section for section in show_kwargs['sections'] if section.title == 'PLACEHOLDERS').lines)
+        assert "{service_name}" in placeholders
+        assert "{service_label}" in placeholders
+        assert "{bot_version}" in placeholders
+        assert "{ordinal_today}" not in placeholders
 
         send_standard.reset_mock()
         reset_command = find_command(bundle.footer_group, 'template_service_reset')
@@ -166,13 +172,16 @@ def test_footer_template_service_set_show_and_reset_roundtrip(embed_module, monk
 
         send_standard.reset_mock()
         await show_command.callback(InteractionStub(show_command), 'riassunto')
-        assert section_payload(send_standard.await_args.kwargs) == (
+        fallback_kwargs = send_standard.await_args.kwargs
+        assert section_payload(fallback_kwargs) == (
             'Template',
             [
                 ('Phrase', '(not set)'),
                 ('Thumbnail', '(not set)'),
             ],
         )
+        fallback_placeholders = dict(next(section for section in fallback_kwargs['sections'] if section.title == 'PLACEHOLDERS').lines)
+        assert fallback_placeholders == placeholders
 
     asyncio.run(_run())
 

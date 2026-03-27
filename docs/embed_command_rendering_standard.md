@@ -655,6 +655,11 @@ Regole:
 - sezioni standard consigliate: `INFO`, `Custom Templates`, `Default Services`.
 - per `/embed author status`, `/embed footer status`, `/embed description status` è obbligatoria anche la sezione `PLACEHOLDERS`, popolata dalla source of truth centralizzata `app/services/embed_status_placeholders.py`.
 - `PLACEHOLDERS` deve mostrare solo placeholder realmente supportati dal sistema corrente, in formato compatto `placeholder → legenda`.
+- la stessa sezione `PLACEHOLDERS` è obbligatoria anche in:
+  - `/embed author template_service_show`
+  - `/embed footer template_service_show`
+  - `/embed description template_service_show`
+  e deve usare **la stessa source of truth centralizzata** usata dagli status (niente liste duplicate per comando).
 
 Placeholder attualmente supportati per sistema:
 
