@@ -8,7 +8,6 @@ import discord
 import pytest
 from discord import app_commands
 
-from app.shared.discord.embed_body import format_standard_title
 from tests._embed_test_utils import InteractionStub, find_command, register_embed_tree, section_payload
 
 
@@ -254,25 +253,37 @@ def test_footer_template_service_resolves_legacy_aliases(embed_module, monkeypat
 def test_footer_status_command_uses_embed_namespace_and_interactive_view(embed_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         monkeypatch.setattr(embed_module, 'check_permission', AsyncMock(return_value=True))
-        send_command_embeds = AsyncMock()
-        monkeypatch.setattr(embed_module, 'send_command_embeds', send_command_embeds)
+        send_standard = AsyncMock()
+        monkeypatch.setattr(embed_module, 'send_standard_response', send_standard)
         bundle = register_embed_tree(embed_module)
-        await bundle.ctx.footer.record_service_footer_variant(
-            service_name='riassunto',
-            contributors=['gpt-4o-mini'],
-            used_local_processing=False,
-            last_rendered_footer='Footer riassunto',
-            origin='runtime',
-        )
+        await bundle.ctx.footer.set_service_phrase('riassunto', 'Footer riassunto')
+        await bundle.ctx.footer.set_service_thumbnail('riassunto', 'https://example.com/f.png')
+        await bundle.ctx.footer.set_enabled(False)
 
         status_command = find_command(bundle.footer_group, 'status')
         await status_command.callback(InteractionStub(status_command))
 
-        kwargs = send_command_embeds.await_args.kwargs
-        assert kwargs['ephemeral'] is True
-        assert len(kwargs['embeds']) == 1
-        assert kwargs['embeds'][0].title == format_standard_title('FOOTER STATUS', emoji='📦')
-        assert isinstance(kwargs['view'], embed_module.FooterStatusPaginationView)
-        assert kwargs['view']._embeds[0].title == format_standard_title('FOOTER STATUS', emoji='📦')
+        kwargs = send_standard.await_args.kwargs
+        assert kwargs['subcommand_path'] == 'footer status'
+        assert ('enabled', 'off') in kwargs['lines']
+        assert ('supported services', 9) in kwargs['lines']
+        assert ('services with custom template', 1) in kwargs['lines']
+        assert ('services using default', 8) in kwargs['lines']
+        assert ('runtime rule', 'OFF = runtime always uses standard default footer even if custom is saved') in kwargs['lines']
+        custom_section = next(section for section in kwargs['sections'] if section.title == 'Custom Templates')
+        assert ('riassunto', 'phrase, thumbnail') in custom_section.lines
+        default_section = next(section for section in kwargs['sections'] if section.title == 'Default Services')
+        assert 'audio' in default_section.lines[0][1]
+        assert 'campagne' in default_section.lines[0][1]
+        assert 'campagne_notizie' not in default_section.lines[0][1]
+        assert 'builder' not in default_section.lines[0][1]
+        all_text = " ".join(
+            [
+                *(f"{k} {v}" for k, v in kwargs['lines']),
+                *(f"{section.title} {section.lines}" for section in kwargs['sections']),
+            ]
+        ).lower()
+        for noisy_token in ('famiglie', 'varianti', 'sorgenti', 'runtime persistito', 'page', 'navigazione'):
+            assert noisy_token not in all_text
 
     asyncio.run(_run())

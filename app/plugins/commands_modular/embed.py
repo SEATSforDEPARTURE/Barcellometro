@@ -5,11 +5,7 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
-from app.shared.discord.author_status_pagination import AuthorStatusPaginationView
-from app.shared.discord.author_status_renderer import build_author_status_embeds
-from app.shared.discord.command_embeds import CommandEmbedSection, send_command_embeds, send_standard_response
-from app.shared.discord.footer_status_pagination import FooterStatusPaginationView
-from app.shared.discord.footer_status_renderer import build_footer_status_embeds
+from app.shared.discord.command_embeds import CommandEmbedSection, send_standard_response
 from app.services.embed_images import InvalidEmbedImageUrlError
 from app.services.author import InvalidAuthorThumbnailError, render_author_name
 from app.services.description_template_service import InvalidDescriptionTemplateError
@@ -18,7 +14,7 @@ from app.services.embed_template_service_catalog import (
     build_embed_template_service_autocomplete_choices,
     resolve_embed_template_public_service,
 )
-from app.services.footer import InvalidFooterThumbnailError, ServiceFooterProfile
+from app.services.footer import InvalidFooterThumbnailError
 
 
 def _author_service(ctx: CommandContext):
@@ -90,6 +86,25 @@ def _resolve_public_service_value(values: dict[str, str], public_service_key: st
     return None
 
 
+def _service_has_any_override(public_service_key: str, *override_maps: dict[str, str]) -> bool:
+    for alias in list_embed_service_aliases(public_service_key):
+        for values in override_maps:
+            value = values.get(alias)
+            if value is not None and str(value).strip():
+                return True
+    return False
+
+
+def _build_status_service_buckets(
+    supported_services: list[str],
+    *,
+    has_override,
+) -> tuple[list[str], list[str]]:
+    custom_services = sorted([service for service in supported_services if has_override(service)])
+    default_services = [service for service in supported_services if service not in custom_services]
+    return custom_services, default_services
+
+
 def _description_preview_context(*, service_name: str, user_name: str = "Mario") -> dict[str, object]:
     return {
         "user_name": user_name,
@@ -106,54 +121,6 @@ def _truncate_preview(value: str, *, limit: int = 80) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return f"{cleaned[: limit - 1].rstrip()}…"
-
-
-async def _infer_audio_notes_profile(ctx: CommandContext) -> ServiceFooterProfile:
-    stt_backend = ((await ctx.database.get_setting("stt.backend")) or "local").strip().lower()
-    translate_backend = ((await ctx.database.get_setting("translate.backend")) or "local").strip().lower()
-    stt_local_model = ((await ctx.database.get_setting("stt.local.model")) or "small").strip()
-    stt_ai_model = ctx.ai.get_runtime_model("transcription") if ctx.ai is not None else "openai:gpt-4o-transcribe"
-    translate_ai_model = ctx.ai.get_runtime_model("translation") if ctx.ai is not None else "openai:gpt-4o-mini"
-
-    stt_model = stt_local_model if stt_backend != "ai" else (stt_ai_model or "gpt-4o-transcribe")
-    translation_model = "argos" if translate_backend != "ai" else (translate_ai_model or "gpt-4o-mini")
-
-    contributors: list[str] = []
-    if stt_model:
-        contributors.append(stt_model)
-    if translation_model:
-        contributors.append(translation_model)
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for item in contributors:
-        clean = item.strip()
-        if not clean or clean in seen:
-            continue
-        seen.add(clean)
-        deduped.append(clean)
-
-    return ServiceFooterProfile(
-        service_name="audio_notes",
-        contributors=deduped,
-        used_local_processing=(stt_backend != "ai" or translate_backend != "ai"),
-        last_rendered_footer=None,
-        updated_at=None,
-        origins={"inference"},
-    )
-
-
-async def _infer_service_profile(service_name: str, ctx: CommandContext) -> ServiceFooterProfile:
-    if service_name == "audio_notes":
-        return await _infer_audio_notes_profile(ctx)
-    return ServiceFooterProfile(
-        service_name=service_name,
-        contributors=[],
-        used_local_processing=True,
-        last_rendered_footer=None,
-        updated_at=None,
-        origins={"fallback"},
-    )
 
 
 def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None:
@@ -476,35 +443,60 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
             )
             return
 
-        known_services = await ctx.footer.get_known_services()
-
-        if not known_services:
-            await _send_embed_response(
-                interaction,
-                ctx,
-                subcommand_path="footer status",
-                lines=[("reason", "No known footer services")],
-                kind="warning",
-            )
-            return
-
-        snapshot = await ctx.footer.build_status_snapshot(inferred_profile_resolver=lambda service_name: _infer_service_profile(service_name, ctx))
-        embeds = await build_footer_status_embeds(
-            snapshot,
-            footer_service=ctx.footer,
-            author_service=getattr(ctx, "author", None),
+        supported_services = list_public_embed_service_keys()
+        enabled = await ctx.footer.is_enabled()
+        service_phrases = await ctx.footer.get_service_phrases()
+        service_thumbnails = await ctx.footer.get_service_thumbnails()
+        custom_services, default_services = _build_status_service_buckets(
+            supported_services,
+            has_override=lambda service: _service_has_any_override(service, service_phrases, service_thumbnails),
         )
-        if not embeds:
-            await _send_embed_response(
-                interaction,
-                ctx,
-                subcommand_path="footer status",
-                lines=[("reason", "No footer data available")],
-                kind="warning",
-            )
-            return
-        view = FooterStatusPaginationView(embeds)
-        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), embed_images_service=getattr(ctx, "embed_images", None), default_service_name="status")
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="footer status",
+            lines=[
+                ("enabled", "on" if enabled else "off"),
+                ("supported services", len(supported_services)),
+                ("services with custom template", len(custom_services)),
+                ("services using default", len(default_services)),
+                (
+                    "runtime rule",
+                    (
+                        "OFF = runtime always uses standard default footer even if custom is saved"
+                        if not enabled
+                        else "ON = runtime uses service custom footer when configured; otherwise standard default"
+                    ),
+                ),
+            ],
+            sections=[
+                CommandEmbedSection(
+                    title="Custom Templates",
+                    lines=(
+                        [
+                            (
+                                service,
+                                ", ".join(
+                                    token
+                                    for token, value in (
+                                        ("phrase", _resolve_public_service_value(service_phrases, service)),
+                                        ("thumbnail", _resolve_public_service_value(service_thumbnails, service)),
+                                    )
+                                    if value
+                                ),
+                            )
+                            for service in custom_services
+                        ]
+                        if custom_services
+                        else [("services", "(none)")]
+                    ),
+                ),
+                CommandEmbedSection(
+                    title="Default Services",
+                    lines=[("services", ", ".join(default_services) if default_services else "(none)")],
+                ),
+            ],
+        )
 
     author_group = app_commands.Group(name="author", description="Author controls")
     embed_group.add_command(author_group)
@@ -723,17 +715,62 @@ def register_embed(embed_group: app_commands.Group, ctx: CommandContext) -> None
         if _author_service(ctx) is None:
             await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "Author service is unavailable")], kind="error")
             return
-        known_services = await _author_service(ctx).get_known_services()
-        if not known_services:
-            await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "No known author services")], kind="warning")
-            return
-        snapshot = await _author_service(ctx).build_status_snapshot()
-        embeds = await build_author_status_embeds(snapshot, footer_service=ctx.footer, author_service=getattr(ctx, "author", None))
-        if not embeds:
-            await _send_embed_response(interaction, ctx, subcommand_path="author status", lines=[("reason", "No author data available")], kind="warning")
-            return
-        view = AuthorStatusPaginationView(embeds)
-        await send_command_embeds(interaction, embeds=[embeds[0]], ephemeral=True, view=view, footer_service=ctx.footer, author_service=_author_service(ctx), embed_images_service=getattr(ctx, "embed_images", None), default_service_name="status")
+        supported_services = list_public_embed_service_keys()
+        enabled = await _author_service(ctx).is_enabled()
+        service_phrases = await _author_service(ctx).get_service_phrases()
+        service_thumbnails = await _author_service(ctx).get_service_thumbnails()
+        service_urls = await _author_service(ctx).get_service_urls()
+        custom_services, default_services = _build_status_service_buckets(
+            supported_services,
+            has_override=lambda service: _service_has_any_override(service, service_phrases, service_thumbnails, service_urls),
+        )
+        await _send_embed_response(
+            interaction,
+            ctx,
+            subcommand_path="author status",
+            lines=[
+                ("enabled", "on" if enabled else "off"),
+                ("supported services", len(supported_services)),
+                ("services with custom template", len(custom_services)),
+                ("services using default", len(default_services)),
+                (
+                    "runtime rule",
+                    (
+                        "OFF = runtime always uses standard default author even if custom is saved"
+                        if not enabled
+                        else "ON = runtime uses service custom author when configured; otherwise standard default"
+                    ),
+                ),
+            ],
+            sections=[
+                CommandEmbedSection(
+                    title="Custom Templates",
+                    lines=(
+                        [
+                            (
+                                service,
+                                ", ".join(
+                                    token
+                                    for token, value in (
+                                        ("phrase", _resolve_public_service_value(service_phrases, service)),
+                                        ("thumbnail", _resolve_public_service_value(service_thumbnails, service)),
+                                        ("url", _resolve_public_service_value(service_urls, service)),
+                                    )
+                                    if value
+                                ),
+                            )
+                            for service in custom_services
+                        ]
+                        if custom_services
+                        else [("services", "(none)")]
+                    ),
+                ),
+                CommandEmbedSection(
+                    title="Default Services",
+                    lines=[("services", ", ".join(default_services) if default_services else "(none)")],
+                ),
+            ],
+        )
 
     description_group = app_commands.Group(name="description", description="Description controls")
     embed_group.add_command(description_group)

@@ -34,16 +34,11 @@ def test_author_on_off_and_status_commands(embed_module, monkeypatch: pytest.Mon
     async def _run() -> None:
         monkeypatch.setattr(embed_module, 'check_permission', AsyncMock(return_value=True))
         send_standard = AsyncMock()
-        send_command_embeds = AsyncMock()
         monkeypatch.setattr(embed_module, 'send_standard_response', send_standard)
-        monkeypatch.setattr(embed_module, 'send_command_embeds', send_command_embeds)
         bundle = register_embed_tree(embed_module)
-        await bundle.ctx.author.record_service_author(
-            service_name='riassunto',
-            last_rendered_author='🗒️ Riassunto',
-            last_icon_url=None,
-            origin='runtime',
-        )
+        await bundle.ctx.author.set_service_phrase('riassunto', 'Autore riassunto')
+        await bundle.ctx.author.set_service_url('riassunto', 'https://example.com/riassunto')
+        await bundle.ctx.author.set_enabled(False)
 
         off_command = find_command(bundle.author_group, 'off')
         await off_command.callback(InteractionStub(off_command))
@@ -59,12 +54,29 @@ def test_author_on_off_and_status_commands(embed_module, monkeypatch: pytest.Mon
         assert await bundle.ctx.author.is_enabled() is True
 
         status_command = find_command(bundle.author_group, 'status')
+        send_standard.reset_mock()
         await status_command.callback(InteractionStub(status_command))
-        status_kwargs = send_command_embeds.await_args.kwargs
-        assert status_kwargs['ephemeral'] is True
-        assert len(status_kwargs['embeds']) == 1
-        assert status_kwargs['embeds'][0].title == '📦 __**AUTHOR STATUS**__'
-        assert isinstance(status_kwargs['view'], embed_module.AuthorStatusPaginationView)
+        status_kwargs = send_standard.await_args.kwargs
+        assert status_kwargs['subcommand_path'] == 'author status'
+        assert ('enabled', 'on') in status_kwargs['lines']
+        assert ('supported services', 9) in status_kwargs['lines']
+        assert ('services with custom template', 1) in status_kwargs['lines']
+        assert ('services using default', 8) in status_kwargs['lines']
+        assert ('runtime rule', 'ON = runtime uses service custom author when configured; otherwise standard default') in status_kwargs['lines']
+        custom_section = next(section for section in status_kwargs['sections'] if section.title == 'Custom Templates')
+        assert ('riassunto', 'phrase, url') in custom_section.lines
+        default_section = next(section for section in status_kwargs['sections'] if section.title == 'Default Services')
+        assert 'audio' in default_section.lines[0][1]
+        assert 'audio_notes' not in default_section.lines[0][1]
+        assert 'campaign_content_formatter' not in default_section.lines[0][1]
+        all_text = " ".join(
+            [
+                *(f"{k} {v}" for k, v in status_kwargs['lines']),
+                *(f"{section.title} {section.lines}" for section in status_kwargs['sections']),
+            ]
+        ).lower()
+        for noisy_token in ('famiglie', 'varianti', 'sorgenti', 'navigazione', 'pagina'):
+            assert noisy_token not in all_text
 
     asyncio.run(_run())
 
