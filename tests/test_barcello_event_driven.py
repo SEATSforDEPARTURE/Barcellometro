@@ -173,7 +173,39 @@ def test_run_barcello_trigger_now_force_publish_sends_even_without_transition() 
     assert out["evaluated"] is True
     assert out["notified"] is True
     assert len(channel.sent) == 1
-    assert "AGGIORNAMENTO BARCELLO" in str(channel.sent[0].title or "")
+    embed = channel.sent[0]
+    assert "AGGIORNAMENTO BARCELLO" not in str(embed.title or "")
+    assert "L'ALLERTA BARCELLO" in str(embed.title or "")
+    assert str(embed.description or "").startswith("*") and str(embed.description or "").endswith("*")
+    field_names = [str(field.name or "") for field in embed.fields]
+    assert not any("AGGIORNAMENTO" in name for name in field_names)
+    assert any("PUNTI SALUTE" in name for name in field_names)
+    salute_field = next(field for field in embed.fields if "PUNTI SALUTE" in str(field.name or ""))
+    assert "⚪" in str(salute_field.value or "")
+    assert "**(" in str(salute_field.value or "") and "/100)**" in str(salute_field.value or "")
+
+
+def test_run_barcello_trigger_now_trend_field_is_named_trend_when_present() -> None:
+    now = datetime.now(timezone.utc)
+    prev = {"last_color": "ROSSO", "last_score": 25, "recovery_armed": 0}
+    service, db, channel = _base_service(prev, {"color": "ROSSO", "score": 25})
+    db.get_trigger_state = AsyncMock(
+        return_value={
+            "date": now.date().isoformat(),
+            "counts": {"ROSSO": 1},
+            "last_entered_ts": {"ROSSO": (now - timedelta(minutes=7)).isoformat()},
+        }
+    )
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    assert len(channel.sent) == 1
+    embed = channel.sent[0]
+    trend_fields = [field for field in embed.fields if "TREND" in str(field.name or "")]
+    assert len(trend_fields) == 1
+    trend_value = str(trend_fields[0].value or "")
+    assert "**2ª volta**" in trend_value
+    assert "stato **ROSSA**" in trend_value
+    assert "Ultima: **7 minuti fa**." in trend_value
 
 
 def test_run_barcello_trigger_now_pair_mode_uses_compute_pair() -> None:
