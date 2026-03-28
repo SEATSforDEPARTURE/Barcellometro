@@ -167,7 +167,10 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/users ban_list`
 - `/users tempban user:<utente> quantity:<n> unit:<minuti|ore|giorni|settimane> [reason:<testo>]`
 - `/users tempban_list`
-- `/users grace user:<utente> quantity:<n> unit:<minuti|ore|giorni|settimane> [reason:<testo>]`
+- `/users grace assign user:<utente> quantity:<n> unit:<minuti|ore|giorni|settimane> [reason:<testo>]`
+- `/users grace tempban_set quantity:<n> unit:<minuti|ore|giorni|settimane>`
+- `/users grace tempban_show`
+- `/users grace tempban_reset`
 - `/users grace_list`
 - `/users unban user nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
 - `/users untempban user nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
@@ -177,6 +180,7 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
   - italiano: `oggi`, `ieri`, `ultimi quantita:<n> unita:<minuti|ore|giorni|settimane>`, `intervallo da:<DD/MM/YYYY HH:MM> a:<DD/MM/YYYY HH:MM>`
   - disponibili sotto: `/users unban ...`, `/users untempban ...`, `/users ungrace ...`
 - Alias top-level reali: `/kick`, `/ban`, `/unban`, `/tempban`, `/untempban`, `/grace`, `/ungrace`.
+- Scadenza grace manuale: quando `/users grace assign` (o alias `/grace`) scade, il servizio revoca automaticamente il grace e applica un tempban automatico solo se il default configurato con `grace tempban_set` è maggiore di `0` secondi.
 
 ### Greetings / inactivity
 - `/greetings on [channel]`

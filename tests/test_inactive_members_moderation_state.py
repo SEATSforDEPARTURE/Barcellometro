@@ -162,3 +162,34 @@ def test_run_due_unbans_skips_auto_tempban_after_reset_to_zero() -> None:
         assert database.log_moderation_action.await_args.kwargs["action_type"] == "ungrace"
 
     asyncio.run(_run())
+
+
+def test_run_due_unbans_uses_member_flow_audit_for_manual_grace_auto_actions() -> None:
+    async def _run() -> None:
+        sys.modules["discord"].Object = lambda id: SimpleNamespace(id=id)
+        guild = SimpleNamespace(id=1, unban=AsyncMock(), ban=AsyncMock())
+        database = SimpleNamespace(
+            list_due_temp_unbans=AsyncMock(return_value=[]),
+            list_due_manual_grace=AsyncMock(return_value=[{"id": "g1", "guild_id": "1", "user_id": "42"}]),
+            get_setting=AsyncMock(return_value="1800"),
+            log_moderation_action=AsyncMock(),
+            add_temp_ban=AsyncMock(),
+            clear_user_ban_state=AsyncMock(),
+        )
+        member_flow_notifications = SimpleNamespace(log_action=AsyncMock(return_value={"canonical_written": True, "canonical_visible": False}))
+        service = InactiveMembersModerationService(
+            database,
+            SimpleNamespace(get_guild=lambda guild_id: guild),
+            member_flow_notifications=member_flow_notifications,
+        )
+
+        await service._run_due_unbans()
+
+        assert member_flow_notifications.log_action.await_count == 2
+        assert member_flow_notifications.log_action.await_args_list[0].kwargs["action_type"] == "ungrace"
+        assert member_flow_notifications.log_action.await_args_list[0].kwargs["metadata"]["source"] == "users_grace_auto_expiry"
+        assert member_flow_notifications.log_action.await_args_list[1].kwargs["action_type"] == "tempban"
+        assert member_flow_notifications.log_action.await_args_list[1].kwargs["metadata"]["source"] == "users_grace_auto_tempban"
+        database.log_moderation_action.assert_not_awaited()
+
+    asyncio.run(_run())
