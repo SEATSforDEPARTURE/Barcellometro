@@ -849,6 +849,36 @@ class InactiveMembersModerationService:
             inactivity_text=inactivity_text or f"è stato inattivo per {days_inactive} giorni",
         )
 
+    @staticmethod
+    def _parse_iso_datetime(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except Exception:
+            return None
+
+    async def _latest_grace_dm_delivery(self, guild_id: str, user_id: str) -> Any | None:
+        latest_delivery_lookup = getattr(self._database, "get_latest_inactivity_dm_delivery", None)
+        if latest_delivery_lookup is None:
+            return None
+        latest_grace = await latest_delivery_lookup(guild_id, user_id, "grace")
+        latest_legacy = await latest_delivery_lookup(guild_id, user_id, "reminder")
+        if latest_grace is None:
+            return latest_legacy
+        if latest_legacy is None:
+            return latest_grace
+        grace_sent_at = self._parse_iso_datetime(str(latest_grace["sent_at"]) if latest_grace["sent_at"] else None)
+        legacy_sent_at = self._parse_iso_datetime(str(latest_legacy["sent_at"]) if latest_legacy["sent_at"] else None)
+        if grace_sent_at is None:
+            return latest_legacy
+        if legacy_sent_at is None:
+            return latest_grace
+        return latest_grace if grace_sent_at >= legacy_sent_at else latest_legacy
+
     async def execute_reminders(self, guild_id: str) -> dict[str, Any]:
         inactive, _, cfg = await self.scan_inactive_members(guild_id)
         guild = self._bot.get_guild(int(guild_id))
@@ -858,7 +888,7 @@ class InactiveMembersModerationService:
             logger.info("inactive reminders disabled for guild=%s", guild_id)
             return {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": [], "disabled": True}
         now = datetime.now(timezone.utc)
-        template = cfg.get("template_grace") or cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
+        grace_template = cfg.get("template_grace") or cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
         cooldown_days = max(1, int(cfg.get("reminder_cooldown_days", 14) or 14))
         ok = 0
         fail = 0
@@ -866,23 +896,18 @@ class InactiveMembersModerationService:
         errors: list[str] = []
         for candidate in inactive:
             state = await self._database.get_inactivity_user_state(guild_id, str(candidate.member.id))
-            latest_delivery_lookup = getattr(self._database, "get_latest_inactivity_dm_delivery", None)
-            latest_delivery = (
-                await latest_delivery_lookup(guild_id, str(candidate.member.id), "reminder")
-                if latest_delivery_lookup is not None
-                else None
-            )
+            latest_delivery = await self._latest_grace_dm_delivery(guild_id, str(candidate.member.id))
             if latest_delivery and latest_delivery["sent_at"] and str(latest_delivery["outcome"] or "").lower() == "success":
                 try:
-                    last_sent = datetime.fromisoformat(str(latest_delivery["sent_at"]).replace("Z", "+00:00"))
-                    if last_sent.tzinfo is None:
-                        last_sent = last_sent.replace(tzinfo=timezone.utc)
+                    last_sent = self._parse_iso_datetime(str(latest_delivery["sent_at"]))
+                    if last_sent is None:
+                        raise ValueError("invalid sent_at")
                     if now - last_sent < timedelta(days=cooldown_days):
                         skipped += 1
                         await self._database.log_inactivity_dm_delivery(
                             guild_id=guild_id,
                             user_id=str(candidate.member.id),
-                            event_type="reminder",
+                            event_type="grace",
                             reason="cooldown",
                             sent_at=now.isoformat(),
                             outcome="skipped",
@@ -899,7 +924,7 @@ class InactiveMembersModerationService:
                     logger.debug("inactive reminder cooldown parse failed", exc_info=True)
             inactivity_text = f"è stato inattivo per {candidate.days_inactive} giorni"
             body = self._render_template(
-                template,
+                grace_template,
                 member=candidate.member,
                 guild=guild,
                 days_inactive=candidate.days_inactive,
@@ -922,7 +947,7 @@ class InactiveMembersModerationService:
                 await self._database.log_inactivity_dm_delivery(
                     guild_id=guild_id,
                     user_id=str(candidate.member.id),
-                    event_type="reminder",
+                    event_type="grace",
                     reason=inactivity_text,
                     sent_at=now.isoformat(),
                     outcome="success",
@@ -957,7 +982,7 @@ class InactiveMembersModerationService:
                     await self._database.log_inactivity_dm_delivery(
                         guild_id=guild_id,
                         user_id=str(candidate.member.id),
-                        event_type="reminder",
+                        event_type="grace",
                         reason=inactivity_text,
                         sent_at=now.isoformat(),
                         outcome="success",
@@ -976,7 +1001,7 @@ class InactiveMembersModerationService:
                     await self._database.log_inactivity_dm_delivery(
                         guild_id=guild_id,
                         user_id=str(candidate.member.id),
-                        event_type="reminder",
+                        event_type="grace",
                         reason=inactivity_text,
                         sent_at=now.isoformat(),
                         outcome="fail",
@@ -998,7 +1023,7 @@ class InactiveMembersModerationService:
         now = datetime.now(timezone.utc)
         grace_days = int(cfg.get("grace_days_after_reminder", 7))
         ban_days = int(cfg.get("ban_days", 7))
-        kick_template = cfg.get("template_tempban") or cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}"
+        tempban_template = cfg.get("template_tempban") or cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}"
         stats = {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "notify_ok": 0, "errors": []}
         by_id = {c.member.id: c for c in inactive}
         for user_id, candidate in by_id.items():
@@ -1015,23 +1040,81 @@ class InactiveMembersModerationService:
                 if candidate.last_message_ts and candidate.last_message_ts > str(state["last_reminder_at"]):
                     continue
             reminder_count = _state_int(state, "reminder_count", 0)
+            inactivity_text = f"è stato inattivo per {candidate.days_inactive} giorni"
+            msg = self._render_template(
+                tempban_template,
+                member=candidate.member,
+                guild=guild,
+                days_inactive=candidate.days_inactive,
+                policy=candidate.policy,
+                cfg=cfg,
+                message_count=candidate.count_in_window,
+                reminder_count=reminder_count,
+                reason="Inattività prolungata",
+                inactivity_text=inactivity_text,
+            )
             try:
-                msg = self._render_template(
-                    kick_template,
-                    member=candidate.member,
-                    guild=guild,
-                    days_inactive=candidate.days_inactive,
-                    policy=candidate.policy,
-                    cfg=cfg,
-                    message_count=candidate.count_in_window,
-                    reminder_count=reminder_count,
-                    reason="Inattività prolungata",
+                tempban_embed = await build_standard_dm_embed(
+                    service_name="inactivity_moderation",
+                    canonical_top_level_command="inattivi",
+                    title="Tempban inattività",
+                    title_emoji="⛔",
+                    description=msg,
+                    color=discord.Colour.orange(),
                 )
-                await candidate.member.send(msg)
+                await candidate.member.send(embed=tempban_embed)
+                await self._database.log_inactivity_dm_delivery(
+                    guild_id=guild_id,
+                    user_id=str(user_id),
+                    event_type="tempban",
+                    reason="Inattività prolungata",
+                    sent_at=now.isoformat(),
+                    outcome="success",
+                    metadata={
+                        "source": "inactive_members_moderation",
+                        "days_inactive": candidate.days_inactive,
+                        "message_count": candidate.count_in_window,
+                        "grace_required": require_grace,
+                    },
+                )
                 stats["dm_ok"] += 1
             except Exception as exc:
-                stats["dm_fail"] += 1
-                stats["errors"].append(f"dm {user_id}: {exc.__class__.__name__}")
+                try:
+                    await candidate.member.send(msg)
+                    await self._database.log_inactivity_dm_delivery(
+                        guild_id=guild_id,
+                        user_id=str(user_id),
+                        event_type="tempban",
+                        reason="Inattività prolungata",
+                        sent_at=now.isoformat(),
+                        outcome="success",
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "days_inactive": candidate.days_inactive,
+                            "message_count": candidate.count_in_window,
+                            "grace_required": require_grace,
+                            "delivery_fallback": "text",
+                        },
+                    )
+                    stats["dm_ok"] += 1
+                except Exception:
+                    stats["dm_fail"] += 1
+                    stats["errors"].append(f"dm {user_id}: {exc.__class__.__name__}")
+                    await self._database.log_inactivity_dm_delivery(
+                        guild_id=guild_id,
+                        user_id=str(user_id),
+                        event_type="tempban",
+                        reason="Inattività prolungata",
+                        sent_at=now.isoformat(),
+                        outcome="fail",
+                        error_summary=exc.__class__.__name__,
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "days_inactive": candidate.days_inactive,
+                            "message_count": candidate.count_in_window,
+                            "grace_required": require_grace,
+                        },
+                    )
             try:
                 if self._member_flow_notifications is not None:
                     remember = getattr(self._member_flow_notifications, "remember_departure_action", None)
