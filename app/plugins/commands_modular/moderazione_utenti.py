@@ -11,6 +11,7 @@ import discord
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
+from app.plugins.commands_modular.placeholders import describe_placeholders
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import (
     TimeWindowResult,
@@ -22,6 +23,7 @@ from app.plugins.commands_modular.time_windows import (
 )
 from app.services.greetings_copy_service import GreetingsCopyService
 from app.services.member_flow_notifications import format_duration_human
+from app.services.users_moderation_dms import DEFAULT_USERS_DM_COOLDOWN_DAYS, UsersModerationDmService
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ WINDOW_ACTION_LABELS = {
     "ungrace": "grace",
 }
 USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
+USERS_DM_TEMPLATE_HELP = f"Supported placeholders: {describe_placeholders()} Example: {{user}}, {{expires_at_utc}}."
 ROME_TZ = ZoneInfo("Europe/Rome")
 
 
@@ -137,6 +140,39 @@ def _format_italian_datetime(value: object) -> str | None:
     return dt.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
 
 
+def _render_users_dm_template_preview(template: str) -> str:
+    sample = {
+        "user": "@ExampleUser",
+        "username": "ExampleUser",
+        "display_name": "Example",
+        "user_id": "1234567890",
+        "server": "Barcellometro",
+        "guild_id": "987654321",
+        "event_type": "grace",
+        "duration_seconds": 7200,
+        "duration_human": "2h 0m",
+        "expires_at_utc": "2026-03-28 18:00 UTC",
+        "reason": "Manual grace",
+        "reason_line": "Reason: Manual grace. ",
+        "invite_url": "https://discord.gg/example",
+        "invite_line": "Invite: https://discord.gg/example",
+    }
+    try:
+        return template.format(**sample)
+    except Exception as exc:  # noqa: BLE001
+        return f"[Template render error: {exc}]\n{template}"
+
+
+def _fmt_utc(ts: object) -> str:
+    if not ts:
+        return "n/a"
+    try:
+        parsed = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except Exception:
+        return str(ts)
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def _format_moderation_list_line(
     row: dict | object,
     *,
@@ -195,6 +231,7 @@ def register_moderazione_utenti(
     alias_commands: list[app_commands.Command] | None = None,
 ) -> None:
     greetings_copy_service = GreetingsCopyService(ctx.database, barcello_service=getattr(ctx, "barcello_service", None))
+    users_dm_service = UsersModerationDmService(ctx.database)
 
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, PERM, ctx)
@@ -461,6 +498,13 @@ def register_moderazione_utenti(
         await ctx.database.set_setting(_users_grace_tempban_setting_key(guild_id), str(normalized))
         return normalized
 
+    async def _ensure_users_dm_cfg(guild_id: str) -> dict[str, object]:
+        row = await ctx.database.get_users_dm_config(guild_id)
+        if row is None:
+            await ctx.database.upsert_users_dm_config(guild_id)
+            row = await ctx.database.get_users_dm_config(guild_id)
+        return dict(row) if row else {}
+
     async def _tempban_impl(
         interaction: discord.Interaction,
         user: discord.Member,
@@ -559,6 +603,15 @@ def register_moderazione_utenti(
             moderator=interaction.user,
             duration_seconds=duration_seconds,
             expires_at=expires_at,
+        )
+        await users_dm_service.send_for_event(
+            guild=interaction.guild,
+            user=user,
+            event_type="grace",
+            duration_seconds=duration_seconds,
+            expires_at=expires_at,
+            reason=resolved_reason,
+            metadata={"source": "users_grace_manual"},
         )
         await _send(
             interaction,
@@ -1010,6 +1063,163 @@ def register_moderazione_utenti(
     @users_group.command(name="tempban_list", description="List active temporary bans.")
     async def users_tempban_list(interaction: discord.Interaction) -> None:
         await _tempban_list_impl(interaction)
+
+    dms_group = app_commands.Group(name="dms", description="Direct message settings for manual grace and automatic tempban.")
+
+    @dms_group.command(name="on", description="Enable USERS DMs for manual grace and auto-tempban.")
+    async def users_dms_on(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.set_users_dm_enabled(str(interaction.guild_id), True)
+        await _send(interaction, subcommand_path="users dms on", lines=[("result", "enabled"), ("dms", "on")], kind="success")
+
+    @dms_group.command(name="off", description="Disable USERS DMs for manual grace and auto-tempban.")
+    async def users_dms_off(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.set_users_dm_enabled(str(interaction.guild_id), False)
+        await _send(interaction, subcommand_path="users dms off", lines=[("result", "disabled"), ("dms", "off")], kind="success")
+
+    @dms_group.command(name="status", description="Show USERS DM status and delivery metrics.")
+    async def users_dms_status(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        guild_id = str(interaction.guild_id)
+        cfg = await _ensure_users_dm_cfg(guild_id)
+        stats = await ctx.database.get_users_dm_delivery_stats(guild_id)
+        recent_rows = await ctx.database.list_users_dm_delivery_events(guild_id, limit=5)
+        by_event = stats.get("by_event") or []
+        event_summary = ", ".join(f"{row['event_type']}={row['total']}" for row in by_event) if by_event else "none"
+        latest_success = stats.get("latest_success") or {}
+        latest_fail = stats.get("latest_fail") or {}
+        recent_lines = [
+            f"{_fmt_utc(row['sent_at'])} · user={row['user_id']} · event={row['event_type']} · outcome={row['outcome']}"
+            + (f" · reason={row['reason']}" if row["reason"] else "")
+            + (f" · error={row['error_summary']}" if row["error_summary"] else "")
+            for row in recent_rows
+        ]
+        await _send(
+            interaction,
+            subcommand_path="users dms status",
+            lines=[
+                ("dms", "on" if bool(cfg.get("enabled", 1)) else "off"),
+                ("template_grace", cfg.get("grace_template") or "not set"),
+                ("template_tempban", cfg.get("tempban_template") or "not set"),
+                ("cooldown_days", int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS)),
+                ("invite_url", cfg.get("invite_url") or "not set"),
+                ("dm_sent_ok", int(stats.get("ok", 0))),
+                ("dm_sent_fail", int(stats.get("fail", 0))),
+                ("dm_events_total", int(stats.get("total", 0))),
+                ("dm_events_by_type", event_summary),
+                ("last_success", f"user={latest_success.get('user_id', 'n/a')} at {_fmt_utc(latest_success.get('sent_at'))} reason={latest_success.get('reason') or 'n/a'}"),
+                ("last_fail", f"user={latest_fail.get('user_id', 'n/a')} at {_fmt_utc(latest_fail.get('sent_at'))} reason={latest_fail.get('reason') or 'n/a'} error={latest_fail.get('error_summary') or 'n/a'}"),
+            ],
+            sections=[CommandEmbedSection(title="Recent DM deliveries", lines=recent_lines or ["No DM deliveries logged yet."])],
+        )
+
+    @dms_group.command(name="template_grace_set", description="Set the DM template for manual grace entry.")
+    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP)
+    async def users_dms_template_grace_set(interaction: discord.Interaction, text: str) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), grace_template=text)
+        await _send(interaction, subcommand_path="users dms template_grace_set", lines=[("result", "updated")], kind="success")
+
+    @dms_group.command(name="template_grace_show", description="Show the DM template for manual grace entry.")
+    async def users_dms_template_grace_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
+        template = str(cfg.get("grace_template") or "")
+        preview = _render_users_dm_template_preview(template) if template else "No custom template configured."
+        await _send(
+            interaction,
+            subcommand_path="users dms template_grace_show",
+            lines=[("template_grace", template or "not set")],
+            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+        )
+
+    @dms_group.command(name="template_grace_reset", description="Reset the DM template for manual grace entry.")
+    async def users_dms_template_grace_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), grace_template=None)
+        await _send(interaction, subcommand_path="users dms template_grace_reset", lines=[("result", "reset")], kind="success")
+
+    @dms_group.command(name="template_tempban_set", description="Set the DM template for auto-tempban after manual grace.")
+    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP)
+    async def users_dms_template_tempban_set(interaction: discord.Interaction, text: str) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), tempban_template=text)
+        await _send(interaction, subcommand_path="users dms template_tempban_set", lines=[("result", "updated")], kind="success")
+
+    @dms_group.command(name="template_tempban_show", description="Show the DM template for auto-tempban after manual grace.")
+    async def users_dms_template_tempban_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
+        template = str(cfg.get("tempban_template") or "")
+        preview = _render_users_dm_template_preview(template) if template else "No custom template configured."
+        await _send(
+            interaction,
+            subcommand_path="users dms template_tempban_show",
+            lines=[("template_tempban", template or "not set")],
+            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+        )
+
+    @dms_group.command(name="template_tempban_reset", description="Reset the DM template for auto-tempban after manual grace.")
+    async def users_dms_template_tempban_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), tempban_template=None)
+        await _send(interaction, subcommand_path="users dms template_tempban_reset", lines=[("result", "reset")], kind="success")
+
+    @dms_group.command(name="cooldown_set", description="Set the DM cooldown for USERS contexts.")
+    @app_commands.describe(days="Number of days between DMs in the same USERS context.")
+    async def users_dms_cooldown_set(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365]) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), cooldown_days=int(days))
+        await _send(interaction, subcommand_path="users dms cooldown_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
+
+    @dms_group.command(name="cooldown_show", description="Show the DM cooldown for USERS contexts.")
+    async def users_dms_cooldown_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
+        await _send(interaction, subcommand_path="users dms cooldown_show", lines=[("days", int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS))])
+
+    @dms_group.command(name="cooldown_reset", description="Reset the DM cooldown for USERS contexts.")
+    async def users_dms_cooldown_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), cooldown_days=DEFAULT_USERS_DM_COOLDOWN_DAYS)
+        await _send(interaction, subcommand_path="users dms cooldown_reset", lines=[("days", DEFAULT_USERS_DM_COOLDOWN_DAYS), ("result", "reset")], kind="success")
+
+    @dms_group.command(name="invite_set", description="Set the invite link used in USERS DMs.")
+    @app_commands.describe(url="Invite URL included in USERS DMs.")
+    async def users_dms_invite_set(interaction: discord.Interaction, url: str) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), invite_url=url)
+        await _send(interaction, subcommand_path="users dms invite_set", lines=[("invite_url", url), ("result", "updated")], kind="success")
+
+    @dms_group.command(name="invite_show", description="Show the invite link used in USERS DMs.")
+    async def users_dms_invite_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
+        await _send(interaction, subcommand_path="users dms invite_show", lines=[("invite_url", cfg.get("invite_url") or "not set")])
+
+    @dms_group.command(name="invite_reset", description="Reset the invite link used in USERS DMs.")
+    async def users_dms_invite_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), invite_url=None)
+        await _send(interaction, subcommand_path="users dms invite_reset", lines=[("result", "reset")], kind="success")
+
+    users_group.add_command(dms_group)
 
     grace_group = app_commands.Group(name="grace", description="Manual grace commands and follow-up tempban defaults.")
 

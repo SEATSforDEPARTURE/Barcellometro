@@ -47,6 +47,7 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert 'untempban_group = app_commands.Group(name="untempban"' in modular
     assert '@users_group.command(name="tempban"' in modular
     assert '@users_group.command(name="tempban_list"' in modular
+    assert 'dms_group = app_commands.Group(name="dms"' in modular
     assert 'grace_group = app_commands.Group(name="grace"' in modular
     assert '@grace_group.command(name="manual"' in modular
     assert '@grace_group.command(name="tempban_set"' in modular
@@ -159,11 +160,29 @@ def test_users_canonical_inventory_matches_contract() -> None:
         "ban_list",
         "tempban",
         "tempban_list",
+        "dms",
         "grace",
         "grace_list",
         "unban",
         "untempban",
         "ungrace",
+    }
+    assert {cmd.name for cmd in _find_command(users_group, "dms").commands} == {
+        "on",
+        "off",
+        "status",
+        "template_grace_set",
+        "template_grace_show",
+        "template_grace_reset",
+        "template_tempban_set",
+        "template_tempban_show",
+        "template_tempban_reset",
+        "cooldown_set",
+        "cooldown_show",
+        "cooldown_reset",
+        "invite_set",
+        "invite_show",
+        "invite_reset",
     }
     assert {cmd.name for cmd in _find_command(users_group, "grace").commands} == {
         "manual",

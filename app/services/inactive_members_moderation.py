@@ -16,6 +16,7 @@ import discord
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
+from app.services.users_moderation_dms import UsersModerationDmService
 from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 from app.shared.discord.component_notices import send_standard_component_notice
 
@@ -195,6 +196,7 @@ class InactiveMembersModerationService:
         self._database = database
         self._bot = bot
         self._member_flow_notifications = member_flow_notifications
+        self._users_dm_service = UsersModerationDmService(database, bot)
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -298,7 +300,17 @@ class InactiveMembersModerationService:
                 remember = getattr(self._member_flow_notifications, "remember_departure_action", None)
                 if remember is not None:
                     remember(guild_id, user_id, "tempban")
+            expires_at = now + timedelta(seconds=duration_seconds)
             try:
+                await self._users_dm_service.send_for_event_by_user_id(
+                    guild=guild,
+                    user_id=user_id,
+                    event_type="tempban",
+                    duration_seconds=duration_seconds,
+                    expires_at=expires_at,
+                    reason="Automatic tempban after manual grace expiry",
+                    metadata={"source": "users_grace_auto_tempban"},
+                )
                 await guild.ban(discord.Object(id=int(user_id)), reason="Automatic tempban after manual grace expiry", delete_message_seconds=0)
             except Exception:
                 if self._member_flow_notifications is not None:
@@ -307,7 +319,6 @@ class InactiveMembersModerationService:
                         forget(guild_id, user_id)
                 logger.warning("users grace auto-tempban failed user=%s guild=%s", user_id, guild_id, exc_info=True)
                 continue
-            expires_at = now + timedelta(seconds=duration_seconds)
             await self._database.add_temp_ban(guild_id, user_id, expires_at.isoformat(), "Automatic tempban after manual grace expiry")
             result = await self._log_moderation_action(
                 guild_id=guild_id,
