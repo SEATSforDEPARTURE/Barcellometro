@@ -78,10 +78,13 @@ def test_users_dm_manual_grace_renders_template_and_logs_success() -> None:
 
         assert result == {"sent": True}
         user.send.assert_awaited_once()
-        sent_text = user.send.await_args.args[0]
-        assert "GRACE" in sent_text
-        assert "Manual grace reason" in sent_text
-        assert "https://discord.gg/server" in sent_text
+        sent_embed = user.send.await_args.kwargs["embed"]
+        assert sent_embed.title.startswith("🛡️")
+        assert "GRACE MANUALE ATTIVATO" in sent_embed.title
+        assert "Manual grace reason" in str(sent_embed.description)
+        assert "https://discord.gg/server" in str(sent_embed.description)
+        assert sent_embed.author.name
+        assert sent_embed.footer.text
         assert db.logs[-1]["outcome"] == "success"
         assert db.logs[-1]["event_type"] == "grace"
 
@@ -140,6 +143,32 @@ def test_users_dm_disabled_skips_send_and_logs_skipped() -> None:
     asyncio.run(_run())
 
 
+def test_users_dm_text_fallback_when_embed_send_fails() -> None:
+    async def _run() -> None:
+        db = _FakeDb(invite_url="https://discord.gg/server")
+        user = _FakeUser(42)
+        user.send = AsyncMock(side_effect=[RuntimeError("embed blocked"), None])
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="grace",
+            duration_seconds=7200,
+            expires_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+            reason="Manual grace reason",
+            metadata={"source": "test"},
+        )
+
+        assert result == {"sent": True, "fallback": "text"}
+        assert user.send.await_count == 2
+        assert db.logs[-1]["outcome"] == "success"
+        assert db.logs[-1]["metadata"]["delivery_fallback"] == "text"
+
+    asyncio.run(_run())
+
+
 def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> None:
     async def _run() -> None:
         user = _FakeUser(42)
@@ -174,9 +203,13 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
 
         guild.ban.assert_awaited_once()
         user.send.assert_awaited_once()
-        dm_body = user.send.await_args.args[0]
-        assert "AUTO TEMPBAN" in dm_body
-        assert "https://discord.gg/rejoin" in dm_body
+        dm_embed = user.send.await_args.kwargs["embed"]
+        assert dm_embed.title.startswith("🔨")
+        assert "BAN TEMPORANEO AUTOMATICO" in dm_embed.title
+        assert "AUTO TEMPBAN" in str(dm_embed.description)
+        assert "https://discord.gg/rejoin" in str(dm_embed.description)
+        assert dm_embed.author.name
+        assert dm_embed.footer.text
         assert database.log_users_dm_delivery.await_count >= 1
         assert database.log_users_dm_delivery.await_args_list[-1].kwargs["event_type"] == "tempban"
         assert database.log_users_dm_delivery.await_args_list[-1].kwargs["outcome"] == "success"
