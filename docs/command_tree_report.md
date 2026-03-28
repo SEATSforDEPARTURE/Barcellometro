@@ -304,7 +304,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `triggers` | `phrases` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:615` |
 | `users` | `—` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:714` |
 | `users` | `—` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:718` |
-| `users` | `grace` | `assign` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `grace` | `manual` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_set` | Set the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_show` | Show the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_reset` | Disable the automatic tempban applied after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
