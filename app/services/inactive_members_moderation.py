@@ -858,7 +858,7 @@ class InactiveMembersModerationService:
             logger.info("inactive reminders disabled for guild=%s", guild_id)
             return {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": [], "disabled": True}
         now = datetime.now(timezone.utc)
-        template = cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
+        template = cfg.get("template_grace") or cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
         cooldown_days = max(1, int(cfg.get("reminder_cooldown_days", 14) or 14))
         ok = 0
         fail = 0
@@ -998,7 +998,7 @@ class InactiveMembersModerationService:
         now = datetime.now(timezone.utc)
         grace_days = int(cfg.get("grace_days_after_reminder", 7))
         ban_days = int(cfg.get("ban_days", 7))
-        kick_template = cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}"
+        kick_template = cfg.get("template_tempban") or cfg.get("dm_kick_template") or "Ciao {user}, sei stato rimosso da {server} per inattività. Puoi rientrare: {rejoin_link}"
         stats = {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "notify_ok": 0, "errors": []}
         by_id = {c.member.id: c for c in inactive}
         for user_id, candidate in by_id.items():
