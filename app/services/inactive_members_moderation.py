@@ -17,6 +17,7 @@ from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 from app.services.users_moderation_dms import UsersModerationDmService
+from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 from app.shared.discord.component_notices import send_standard_component_notice
 
@@ -876,8 +877,16 @@ class InactiveMembersModerationService:
                 message_count=candidate.count_in_window,
                 reminder_count=_state_int(state, "reminder_count", 0),
             )
+            reminder_embed = await build_standard_dm_embed(
+                service_name="inactivity_moderation",
+                canonical_top_level_command="inattivi",
+                title="Promemoria inattività",
+                title_emoji="🔔",
+                description=body,
+                color=discord.Colour.blurple(),
+            )
             try:
-                await candidate.member.send(body)
+                await candidate.member.send(embed=reminder_embed)
                 await self._database.mark_user_reminded(guild_id, str(candidate.member.id), now.isoformat())
                 await self._database.log_inactivity_dm_delivery(
                     guild_id=guild_id,
@@ -911,22 +920,42 @@ class InactiveMembersModerationService:
                     )
                 ok += 1
             except Exception as exc:
-                fail += 1
-                errors.append(f"{candidate.member.id}: {exc.__class__.__name__}")
-                await self._database.log_inactivity_dm_delivery(
-                    guild_id=guild_id,
-                    user_id=str(candidate.member.id),
-                    event_type="reminder",
-                    reason=inactivity_text,
-                    sent_at=now.isoformat(),
-                    outcome="fail",
-                    error_summary=exc.__class__.__name__,
-                    metadata={
-                        "source": "inactive_members_moderation",
-                        "days_inactive": candidate.days_inactive,
-                        "message_count": candidate.count_in_window,
-                    },
-                )
+                try:
+                    await candidate.member.send(body)
+                    await self._database.mark_user_reminded(guild_id, str(candidate.member.id), now.isoformat())
+                    await self._database.log_inactivity_dm_delivery(
+                        guild_id=guild_id,
+                        user_id=str(candidate.member.id),
+                        event_type="reminder",
+                        reason=inactivity_text,
+                        sent_at=now.isoformat(),
+                        outcome="success",
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "days_inactive": candidate.days_inactive,
+                            "message_count": candidate.count_in_window,
+                            "delivery_fallback": "text",
+                        },
+                    )
+                    ok += 1
+                    continue
+                except Exception:
+                    fail += 1
+                    errors.append(f"{candidate.member.id}: {exc.__class__.__name__}")
+                    await self._database.log_inactivity_dm_delivery(
+                        guild_id=guild_id,
+                        user_id=str(candidate.member.id),
+                        event_type="reminder",
+                        reason=inactivity_text,
+                        sent_at=now.isoformat(),
+                        outcome="fail",
+                        error_summary=exc.__class__.__name__,
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "days_inactive": candidate.days_inactive,
+                            "message_count": candidate.count_in_window,
+                        },
+                    )
         logger.info("inactive reminders guild=%s ok=%s fail=%s", guild_id, ok, fail)
         return {"dm_ok": ok, "dm_fail": fail, "errors": errors[:10]}
 

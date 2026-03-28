@@ -6,6 +6,7 @@ from typing import Any
 import discord
 
 from app.services.database import DatabaseService
+from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 
 DEFAULT_USERS_DM_COOLDOWN_DAYS = 14
 DEFAULT_USERS_DM_GRACE_TEMPLATE = (
@@ -32,6 +33,8 @@ USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
     "invite_url",
     "invite_line",
 )
+
+USERS_DM_SERVICE_NAME = "inactivity_moderation"
 
 
 class UsersModerationDmService:
@@ -176,9 +179,18 @@ class UsersModerationDmService:
             reason=reason,
             invite_url=str(cfg.get("invite_url") or "").strip(),
         )
+        title, emoji = self._title_for_event(event_type)
+        dm_embed = await build_standard_dm_embed(
+            service_name=USERS_DM_SERVICE_NAME,
+            canonical_top_level_command="inattivi",
+            title=title,
+            title_emoji=emoji,
+            description=body,
+            color=discord.Colour.orange() if event_type == "tempban" else discord.Colour.blurple(),
+        )
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            await user.send(body)
+            await user.send(embed=dm_embed)
             await self._log_delivery(
                 guild_id=guild_id,
                 user_id=user_id,
@@ -190,6 +202,20 @@ class UsersModerationDmService:
             )
             return {"sent": True}
         except Exception as exc:  # noqa: BLE001
+            try:
+                await user.send(body)
+                await self._log_delivery(
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    event_type=event_type,
+                    reason=reason,
+                    sent_at=now_iso,
+                    outcome="success",
+                    metadata={**(metadata or {}), "delivery_fallback": "text"},
+                )
+                return {"sent": True, "fallback": "text"}
+            except Exception:
+                pass
             await self._log_delivery(
                 guild_id=guild_id,
                 user_id=user_id,
@@ -247,6 +273,12 @@ class UsersModerationDmService:
         if hours > 0:
             return f"{hours}h {mins}m"
         return f"{max(1, mins)}m"
+
+    @staticmethod
+    def _title_for_event(event_type: str) -> tuple[str, str]:
+        if event_type == "tempban":
+            return "Ban temporaneo automatico", "🔨"
+        return "Grace manuale attivato", "🛡️"
 
     @classmethod
     def _render_template(

@@ -271,6 +271,12 @@ def test_execute_reminders_logs_dm_delivery_outcomes() -> None:
 
         assert result["dm_ok"] == 1
         assert result["dm_fail"] == 1
+        sent_embed = member_ok.send.await_args.kwargs["embed"]
+        assert sent_embed.title.startswith("🔔")
+        assert "PROMEMORIA INATTIVITÀ" in sent_embed.title
+        assert "Ciao <@42>" in str(sent_embed.description)
+        assert sent_embed.author.name
+        assert sent_embed.footer.text
         database.mark_user_reminded.assert_awaited_once()
         assert database.log_inactivity_dm_delivery.await_count == 2
         outcomes = [call.kwargs["outcome"] for call in database.log_inactivity_dm_delivery.await_args_list]
