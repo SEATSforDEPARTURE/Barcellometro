@@ -220,3 +220,45 @@ def test_revoke_user_grace_state_clears_inactivity_reminder_and_active_grace(
         await db.close()
 
     asyncio.run(_run())
+
+
+def test_inactivity_dm_delivery_log_tracks_stats_and_recent_events(tmp_path) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "inactivity_dm_delivery.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+
+        await db.log_inactivity_dm_delivery(
+            guild_id="1",
+            user_id="10",
+            event_type="reminder",
+            reason="inactive 40d",
+            sent_at="2026-01-01T10:00:00+00:00",
+            outcome="success",
+            metadata={"source": "test"},
+        )
+        await db.log_inactivity_dm_delivery(
+            guild_id="1",
+            user_id="11",
+            event_type="reminder",
+            reason="inactive 50d",
+            sent_at="2026-01-01T11:00:00+00:00",
+            outcome="fail",
+            error_summary="Forbidden",
+            metadata={"source": "test"},
+        )
+
+        stats = await db.get_inactivity_dm_delivery_stats("1")
+        recent = await db.list_inactivity_dm_delivery_events("1", limit=2)
+
+        assert stats["total"] == 2
+        assert stats["ok"] == 1
+        assert stats["fail"] == 1
+        assert stats["by_event"] == [{"event_type": "reminder", "total": 2}]
+        assert stats["latest_success"]["user_id"] == "10"
+        assert stats["latest_fail"]["error_summary"] == "Forbidden"
+        assert [row["user_id"] for row in recent] == ["11", "10"]
+
+        await db.close()
+
+    asyncio.run(_run())

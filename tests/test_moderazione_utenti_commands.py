@@ -114,6 +114,14 @@ def test_legacy_inactivity_commands_are_removed_from_namespace() -> None:
     assert 'name="role_del"' not in source
 
 
+def test_inactivity_dms_on_off_status_commands_are_registered() -> None:
+    source = Path("app/plugins/commands_modular/inattivi.py").read_text()
+
+    assert '@dms_group.command(name="on"' in source
+    assert '@dms_group.command(name="off"' in source
+    assert '@dms_group.command(name="status"' in source
+
+
 def test_users_alias_commands_are_registered_as_top_level_aliases() -> None:
     source = Path("app/plugins/commands.py").read_text()
     group = discord.app_commands.Group(name="users", description="x")

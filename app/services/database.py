@@ -649,6 +649,7 @@ class DatabaseService:
                 guild_id TEXT PRIMARY KEY,
                 enabled INTEGER NOT NULL DEFAULT 0,
                 auto_enabled INTEGER NOT NULL DEFAULT 0,
+                dm_reminders_enabled INTEGER NOT NULL DEFAULT 1,
                 grace_days_after_reminder INTEGER NOT NULL DEFAULT 7,
                 reminder_cooldown_days INTEGER NOT NULL DEFAULT 14,
                 ban_days INTEGER NOT NULL DEFAULT 7,
@@ -686,6 +687,24 @@ class DatabaseService:
                 last_kick_at TEXT NULL,
                 PRIMARY KEY (guild_id, user_id)
             );
+
+            CREATE TABLE IF NOT EXISTS inactivity_dm_delivery_log (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                reason TEXT NULL,
+                sent_at TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail')),
+                error_summary TEXT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_inactivity_dm_delivery_log_guild_sent
+            ON inactivity_dm_delivery_log (guild_id, sent_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_inactivity_dm_delivery_log_guild_outcome
+            ON inactivity_dm_delivery_log (guild_id, outcome, sent_at DESC);
 
             CREATE TABLE IF NOT EXISTS daily_report_pagination_state (
                 message_id TEXT PRIMARY KEY,
@@ -864,6 +883,7 @@ class DatabaseService:
         await self._ensure_trigger_barcello_state_columns()
         await self._ensure_daily_report_pagination_state_columns()
         await self._ensure_inactivity_config_columns()
+        await self._ensure_inactivity_dm_delivery_log_schema()
         await self._ensure_moderation_actions_columns()
         await self._ensure_member_flow_event_types()
         await self._conn.commit()
@@ -879,6 +899,7 @@ class DatabaseService:
         missing = {
             "notify_channel_id": "TEXT NULL",
             "notify_card_enabled": "INTEGER NOT NULL DEFAULT 0",
+            "dm_reminders_enabled": "INTEGER NOT NULL DEFAULT 1",
             "template_inactivity_reason": "TEXT NULL",
             "template_kick_reason": "TEXT NULL",
             "template_ban_reason": "TEXT NULL",
@@ -888,6 +909,36 @@ class DatabaseService:
         for name, col_def in missing.items():
             if name not in existing:
                 await self._conn.execute(f"ALTER TABLE inactivity_config ADD COLUMN {name} {col_def}")
+
+    async def _ensure_inactivity_dm_delivery_log_schema(self) -> None:
+        assert self._conn is not None
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS inactivity_dm_delivery_log (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                reason TEXT NULL,
+                sent_at TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail')),
+                error_summary TEXT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        await self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_inactivity_dm_delivery_log_guild_sent
+            ON inactivity_dm_delivery_log (guild_id, sent_at DESC)
+            """
+        )
+        await self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_inactivity_dm_delivery_log_guild_outcome
+            ON inactivity_dm_delivery_log (guild_id, outcome, sent_at DESC)
+            """
+        )
 
     async def _ensure_moderation_actions_columns(self) -> None:
         assert self._conn is not None
@@ -4664,6 +4715,7 @@ class DatabaseService:
         base: dict[str, Any] = {
             "enabled": 0,
             "auto_enabled": 0,
+            "dm_reminders_enabled": 1,
             "grace_days_after_reminder": 7,
             "reminder_cooldown_days": 14,
             "ban_days": 7,
@@ -4694,6 +4746,7 @@ class DatabaseService:
             "guild_id",
             "enabled",
             "auto_enabled",
+            "dm_reminders_enabled",
             "grace_days_after_reminder",
             "reminder_cooldown_days",
             "ban_days",
@@ -4733,6 +4786,98 @@ class DatabaseService:
 
     async def set_inactivity_auto_enabled(self, guild_id: str, auto_enabled: bool) -> None:
         await self.upsert_inactivity_config(guild_id, auto_enabled=1 if auto_enabled else 0)
+
+    async def set_inactivity_dm_reminders_enabled(self, guild_id: str, enabled: bool) -> None:
+        await self.upsert_inactivity_config(guild_id, dm_reminders_enabled=1 if enabled else 0)
+
+    async def log_inactivity_dm_delivery(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        event_type: str,
+        outcome: str,
+        reason: str | None = None,
+        sent_at: str | None = None,
+        error_summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        now = sent_at or datetime.now(timezone.utc).isoformat()
+        row_id = str(uuid.uuid4())
+        payload = json.dumps(metadata or {}, ensure_ascii=False)
+        await self.execute(
+            """
+            INSERT INTO inactivity_dm_delivery_log (
+                id, guild_id, user_id, event_type, reason, sent_at, outcome, error_summary, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (row_id, guild_id, user_id, event_type, reason, now, outcome, error_summary, payload),
+        )
+        return row_id
+
+    async def get_inactivity_dm_delivery_stats(self, guild_id: str) -> dict[str, Any]:
+        totals = await self.fetchone(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS ok,
+                SUM(CASE WHEN outcome = 'fail' THEN 1 ELSE 0 END) AS fail
+            FROM inactivity_dm_delivery_log
+            WHERE guild_id = ?
+            """,
+            (guild_id,),
+        )
+        by_event = await self.fetchall(
+            """
+            SELECT event_type, COUNT(*) AS total
+            FROM inactivity_dm_delivery_log
+            WHERE guild_id = ?
+            GROUP BY event_type
+            ORDER BY total DESC, event_type ASC
+            """,
+            (guild_id,),
+        )
+        latest_success = await self.fetchone(
+            """
+            SELECT user_id, event_type, reason, sent_at
+            FROM inactivity_dm_delivery_log
+            WHERE guild_id = ? AND outcome = 'success'
+            ORDER BY sent_at DESC
+            LIMIT 1
+            """,
+            (guild_id,),
+        )
+        latest_fail = await self.fetchone(
+            """
+            SELECT user_id, event_type, reason, sent_at, error_summary
+            FROM inactivity_dm_delivery_log
+            WHERE guild_id = ? AND outcome = 'fail'
+            ORDER BY sent_at DESC
+            LIMIT 1
+            """,
+            (guild_id,),
+        )
+        return {
+            "total": int((totals["total"] if totals else 0) or 0),
+            "ok": int((totals["ok"] if totals else 0) or 0),
+            "fail": int((totals["fail"] if totals else 0) or 0),
+            "by_event": [{"event_type": str(row["event_type"]), "total": int(row["total"] or 0)} for row in by_event],
+            "latest_success": dict(latest_success) if latest_success else None,
+            "latest_fail": dict(latest_fail) if latest_fail else None,
+        }
+
+    async def list_inactivity_dm_delivery_events(self, guild_id: str, *, limit: int = 10) -> list[aiosqlite.Row]:
+        capped = max(1, min(int(limit), 50))
+        return await self.fetchall(
+            """
+            SELECT user_id, event_type, reason, sent_at, outcome, error_summary
+            FROM inactivity_dm_delivery_log
+            WHERE guild_id = ?
+            ORDER BY sent_at DESC
+            LIMIT ?
+            """,
+            (guild_id, capped),
+        )
 
     async def upsert_inactivity_role_policy(self, guild_id: str, role_id: str, policy_json: str, priority: int) -> None:
         await self.execute(
