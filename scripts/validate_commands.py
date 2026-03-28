@@ -75,6 +75,18 @@ LOCALIZED_COMMAND_EXCEPTIONS = {
     "resocontoserver.aura.ieri",
     "resocontoserver.aura.ultimi",
     "resocontoserver.aura.range",
+    "users.unban.oggi",
+    "users.unban.ieri",
+    "users.unban.ultimi",
+    "users.unban.intervallo",
+    "users.untempban.oggi",
+    "users.untempban.ieri",
+    "users.untempban.ultimi",
+    "users.untempban.intervallo",
+    "users.ungrace.oggi",
+    "users.ungrace.ieri",
+    "users.ungrace.ultimi",
+    "users.ungrace.intervallo",
 }
 LOCALIZED_ROOT_EXCEPTIONS = {"riassunto", "barcello", "aura", "attivita", "resocontocanale", "resocontoserver"}
 CONFIG_TARGET_NAMES = {

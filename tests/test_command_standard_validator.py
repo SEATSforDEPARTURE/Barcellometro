@@ -20,6 +20,9 @@ def test_command_validator_tracks_expected_alias_exceptions() -> None:
         "resocontocanale.oggi",
         "resocontoserver.oggi",
         "dmchannelsummary.barcello.last",
+        "users.unban.oggi",
+        "users.untempban.oggi",
+        "users.ungrace.oggi",
     }
     assert expected.issubset(result.exceptions)
     assert any(command.path == "campaigns.prompt.schedule_add" for command in result.commands)
