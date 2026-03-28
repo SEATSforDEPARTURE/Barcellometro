@@ -357,7 +357,8 @@ class MemberFlowNotificationsService:
         )
         embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))
         moderation_note = getattr(copy, "moderation_note", None)
-        if moderation_note:
+        event_type_key = str(canonical_payload.get("event_type_key") or action_type or "").strip().lower()
+        if moderation_note and event_type_key != "inactive_tempban":
             embed.add_field(
                 name=_GREETINGS_MODERATION_FIELD_NAME,
                 value=str(moderation_note)[:1024],

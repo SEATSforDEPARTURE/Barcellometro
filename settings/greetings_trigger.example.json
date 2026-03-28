@@ -1,15 +1,15 @@
 {
   "docs": {
-    "version": 3,
+    "version": 4,
     "purpose": [
-      "Fonte ufficiale del copy GREETINGS: narrativa breve a struttura fissa.",
-      "Il renderer compone una singola description narrativa (non un elenco) partendo dagli slot del contratto.",
-      "Il titolo evento resta separato e usa sempre il formato emoji + __**MAIUSCOLO**__.",
-      "Il file mantiene il label evento nel titolo dell'embed e governa solo la grammatica narrativa della description."
+      "Fonte ufficiale del copy GREETINGS: description narrativa con struttura fissa e rigida.",
+      "Il renderer compone una sola frase narrativa in corsivo, con mention iniziale e verbi evento in grassetto.",
+      "Il titolo evento resta separato e usa il mapping canonico senza conteggi numerici nel titolo.",
+      "Il titolo usa sempre il formato emoji + __**MAIUSCOLO**__."
     ],
     "narrative_order": [
       "opening",
-      "event_phrase",
+      "action_phrase",
       "occurrence_phrase",
       "detail_phrase",
       "barcello_phrase (solo leave)",
@@ -17,16 +17,13 @@
     ],
     "placeholders": {
       "mention": {
-        "description": "Mention Discord completa dell'utente; deve comparire nello slot opening."
+        "description": "Mention Discord completa dell'utente."
       },
       "guild_name": {
         "description": "Nome del server Discord."
       },
-      "occurrence_ordinal": {
-        "description": "Ordinale evento in formato maiuscolo (es. TERZA)."
-      },
-      "reason": {
-        "description": "Motivo tecnico evento (non va duplicato nella description dei casi moderativi)."
+      "occurrence_number": {
+        "description": "Numero occorrenza canonico dell'evento."
       },
       "duration": {
         "description": "Durata umana (es. 7g, 2h)."
@@ -39,57 +36,30 @@
       },
       "barcello_score_text": {
         "description": "Score Barcello formattato (es. 58/100)."
+      },
+      "reason": {
+        "description": "Motivo tecnico evento (esposto nel field moderazione quando applicabile)."
+      },
+      "occurrence_ordinal": {
+        "description": "Ordinale evento legacy compatibile (es. TERZA)."
       }
     }
   },
-  "mood_default": "accogliente",
-  "time_buckets": {
-    "night": {
-      "start": 0,
-      "end": 6
-    },
-    "morning": {
-      "start": 6,
-      "end": 12
-    },
-    "afternoon": {
-      "start": 12,
-      "end": 18
-    },
-    "evening": {
-      "start": 18,
-      "end": 24
-    }
-  },
-  "count_tiers": [
-    {
-      "min_occurrence": 1,
-      "label": "t1"
-    },
-    {
-      "min_occurrence": 2,
-      "label": "t2"
-    },
-    {
-      "min_occurrence": 3,
-      "label": "t3"
-    }
-  ],
   "defaults": {
     "fallbacks": {
       "join": {
         "default": [
-          "{mention} entra in {guild_name}."
+          "{mention} torna in {guild_name}."
         ]
       },
       "leave": {
         "default": [
-          "{mention} lascia {guild_name}."
+          "{mention} ha lasciato {guild_name}."
         ]
       },
       "kick": {
         "default": [
-          "{mention} viene allontanato da {guild_name}."
+          "{mention} è stato espulso da {guild_name}."
         ]
       },
       "ban": {
@@ -99,102 +69,102 @@
       },
       "tempban": {
         "default": [
-          "{mention} è stato escluso temporaneamente da {guild_name} per {duration}."
+          "{mention} è stato temporaneamente bannato da {guild_name} per {duration}."
         ]
       },
       "grace": {
         "default": [
-          "{mention} riceve un periodo di grazia su {guild_name} per {duration}."
+          "{mention} è stato graziato in {guild_name} per {duration}."
         ]
       },
       "inactive_kick": {
         "default": [
-          "{mention} viene allontanato da {guild_name} per inattività ({inactivity_text})."
+          "{mention} è stato espulso da {guild_name} per inattività ({inactivity_text})."
         ]
       },
       "inactive_tempban": {
         "default": [
-          "{mention} riceve un ban temporaneo per inattività su {guild_name} per {duration} ({inactivity_text})."
+          "{mention} è stato temporaneamente bannato da {guild_name} per inattività ({duration}, {inactivity_text})."
         ]
       },
       "inactive_grace": {
         "default": [
-          "{mention} riceve un periodo di grazia per inattività su {guild_name} per {duration} ({inactivity_text})."
+          "{mention} è stato graziato in {guild_name} per inattività ({duration}, {inactivity_text})."
         ]
       }
     }
   },
-  "narrative_contract": {
+  "event_templates": {
     "join": {
       "first_occurrence": {
         "opening": "{mention}",
-        "event_phrase": "entra in",
-        "occurrence_phrase": "{guild_name} per la",
-        "detail_phrase": "{occurrence_ordinal} volta",
+        "action_phrase": "entra",
+        "occurrence_phrase": "in {guild_name} per la",
+        "detail_phrase": "{occurrence_number}° volta",
         "closing_comment": "Benvenut*."
       },
       "repeat": {
         "opening": "{mention}",
-        "event_phrase": "torna in",
-        "occurrence_phrase": "{guild_name} per la",
-        "detail_phrase": "{occurrence_ordinal} volta",
+        "action_phrase": "torna",
+        "occurrence_phrase": "in {guild_name} per la",
+        "detail_phrase": "{occurrence_number}° volta",
         "closing_comment": "Bentornat*."
       }
     },
     "leave": {
       "opening": "{mention}",
-      "event_phrase": "ha lasciato",
+      "action_phrase": "ha lasciato",
       "occurrence_phrase": "{guild_name} per la",
-      "detail_phrase": "{occurrence_ordinal} volta",
-      "barcello_phrase": "In quel momento il Barcello era {barcello_alert} ({barcello_score_text}).",
+      "detail_phrase": "{occurrence_number}° volta",
+      "barcello_phrase": "In quel momento il Barcello era {barcello_alert} ({barcello_score_text})",
       "closing_comment": "Vediamo se tornerà."
     },
     "kick": {
       "opening": "{mention}",
-      "event_phrase": "è stato",
-      "occurrence_phrase": "allontanato dal server per la",
-      "detail_phrase": "{occurrence_ordinal} volta",
-      "closing_comment": "Decisione operativa registrata."
+      "action_phrase": "è stato espulso",
+      "occurrence_phrase": "da {guild_name} per la",
+      "detail_phrase": "{occurrence_number}° volta",
+      "closing_comment": "Provvedimento registrato."
     },
     "ban": {
       "opening": "{mention}",
-      "event_phrase": "è stato",
-      "occurrence_phrase": "bannato dal server per la",
-      "detail_phrase": "{occurrence_ordinal} volta",
+      "action_phrase": "è stato bannato",
+      "occurrence_phrase": "da {guild_name} per la",
+      "detail_phrase": "{occurrence_number}° volta",
       "closing_comment": "Che peccato."
     },
     "tempban": {
       "opening": "{mention}",
-      "event_phrase": "è stato",
-      "occurrence_phrase": "temporaneamente bannato per",
+      "action_phrase": "è stato temporaneamente bannato",
+      "occurrence_phrase": "da {guild_name} per",
       "detail_phrase": "{duration}",
-      "closing_comment": "Provvedimento temporaneo attivo."
+      "closing_comment": "Rientro possibile alla scadenza."
     },
     "grace": {
       "opening": "{mention}",
-      "event_phrase": "ha ricevuto",
-      "occurrence_phrase": "un periodo di grazia di",
+      "action_phrase": "è stato graziato",
+      "occurrence_phrase": "in {guild_name} per",
       "detail_phrase": "{duration}",
       "closing_comment": "Occasione da non sprecare."
     },
     "inactive_kick": {
       "opening": "{mention}",
-      "event_phrase": "è stato",
-      "occurrence_phrase": "allontanato per inattività dopo",
+      "action_phrase": "è stato espulso",
+      "occurrence_phrase": "da {guild_name} per inattività dopo",
       "detail_phrase": "{inactivity_text}",
       "closing_comment": "Timeline aggiornata."
     },
     "inactive_tempban": {
       "opening": "{mention}",
-      "event_phrase": "è stato",
-      "occurrence_phrase": "temporaneamente bannato per inattività:",
+      "action_phrase": "è stato temporaneamente bannato",
+      "occurrence_phrase": "da {guild_name} per inattività:",
       "detail_phrase": "{duration} ({inactivity_text})",
       "closing_comment": "Rientro possibile alla scadenza."
     },
     "inactive_grace": {
       "opening": "{mention}",
-      "event_phrase": "ha ricevuto",
-      "occurrence_phrase": "un periodo di grazia per inattività di",
+      "action_phrase": "è stato graziato",
+      "occurrence_phrase": "in {guild_name} per inattività per",
       "detail_phrase": "{duration} ({inactivity_text})",
       "closing_comment": "Ultimo margine disponibile."
     }

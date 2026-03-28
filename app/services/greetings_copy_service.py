@@ -54,15 +54,15 @@ _ORDINALS_UPPER_FEMININE = {
 }
 
 _EVENT_LABELS = {
-    "join": ("✨", "INGRESSO", "m"),
+    "join": ("🤝", "ENTRATA", "f"),
     "leave": ("👋", "USCITA", "f"),
-    "kick": ("🥾", "ALLONTANAMENTO", "m"),
-    "ban": ("🔨", "BAN", "m"),
-    "tempban": ("⏳", "BAN TEMPORANEO", "m"),
-    "grace": ("🛟", "PERIODO DI GRAZIA", "m"),
-    "inactive_kick": ("💤", "ALLONTANAMENTO PER INATTIVITÀ", "m"),
-    "inactive_tempban": ("💤", "BAN TEMPORANEO PER INATTIVITÀ", "m"),
-    "inactive_grace": ("🛟", "PERIODO DI GRAZIA PER INATTIVITÀ", "m"),
+    "kick": ("👢", "ESPULSIONE", "f"),
+    "ban": ("⛔", "INTERDIZIONE PERENNE", "f"),
+    "tempban": ("⌛", "INTERDIZIONE TEMPORANEA", "f"),
+    "grace": ("🕊️", "GRAZIA", "f"),
+    "inactive_kick": ("👢", "ESPULSIONE", "f"),
+    "inactive_tempban": ("⌛", "INTERDIZIONE TEMPORANEA", "f"),
+    "inactive_grace": ("🕊️", "GRAZIA", "f"),
 }
 
 _BARCELLO_ALERTS = {
@@ -113,7 +113,6 @@ _REASON_BLOCK_EVENT_TYPES = frozenset(
         "tempban",
         "grace",
         "inactive_kick",
-        "inactive_tempban",
         "inactive_grace",
     }
 )
@@ -538,7 +537,9 @@ class GreetingsCopyService:
         barcello_state: str,
         count_tier: str,
     ) -> dict[str, str]:
-        contract = cfg.get("narrative_contract")
+        contract = cfg.get("event_templates")
+        if not isinstance(contract, dict):
+            contract = cfg.get("narrative_contract")
         if isinstance(contract, dict):
             event_contract = contract.get(event_type_key)
             selected = self._resolve_contract_variant(event_contract, occurrence_number=occurrence_number)
@@ -570,7 +571,7 @@ class GreetingsCopyService:
     def _normalize_narrative_template(self, value: dict[str, Any]) -> dict[str, str]:
         return {
             "opening": str(value.get("opening") or "{mention}"),
-            "event_phrase": str(value.get("event_phrase") or ""),
+            "action_phrase": str(value.get("action_phrase") or value.get("event_phrase") or ""),
             "occurrence_phrase": str(value.get("occurrence_phrase") or ""),
             "detail_phrase": str(value.get("detail_phrase") or ""),
             "barcello_phrase": str(value.get("barcello_phrase") or ""),
@@ -578,18 +579,29 @@ class GreetingsCopyService:
         }
 
     def _render_narrative_markdown(self, template: dict[str, str], *, context: dict[str, Any], event_type_key: str) -> str:
-        parts: list[str] = []
+        opening_parts: list[str] = []
         opening = self.render_moderation_template(template.get("opening"), **context).strip()
         if opening:
-            parts.append(self._to_bold_italic(opening))
-        for key in ("event_phrase", "occurrence_phrase", "detail_phrase", "barcello_phrase", "closing_comment"):
+            opening_parts.append(self._to_bold_italic(opening))
+        action_phrase = self.render_moderation_template(template.get("action_phrase"), **context).strip()
+        if action_phrase:
+            opening_parts.append(self._to_bold_italic(action_phrase))
+        for key in ("occurrence_phrase", "detail_phrase", "barcello_phrase"):
             if key == "barcello_phrase" and event_type_key != "leave":
                 continue
             rendered = self.render_moderation_template(template.get(key), **context).strip()
             if not rendered:
                 continue
-            parts.append(self._to_italic(rendered))
-        return " ".join(part for part in parts if part).strip()
+            opening_parts.append(self._to_italic(rendered))
+        body = " ".join(part for part in opening_parts if part).strip()
+        closing_comment = self.render_moderation_template(template.get("closing_comment"), **context).strip()
+        if not closing_comment:
+            return body
+        if body and body[-1] not in ".!?":
+            body = f"{body}."
+        if not body:
+            return self._to_italic(closing_comment)
+        return f"{body} {self._to_italic(closing_comment)}".strip()
 
     @staticmethod
     def _to_italic(text: str) -> str:
@@ -950,10 +962,27 @@ class GreetingsCopyService:
 
 
 def format_greetings_event_label(event_type_key: str, occurrence_number: int) -> str:
-    if event_type_key not in _EVENT_LABELS:
+    return build_greetings_title(event_type_key, occurrence_number)
+
+
+def build_greetings_title(event_type_key: str, occurrence_count: int, is_auto_inactivity: bool = False) -> str:
+    normalized = str(event_type_key or "").strip().lower()
+    occurrence = max(1, int(occurrence_count))
+    if is_auto_inactivity and normalized == "tempban":
+        normalized = "inactive_tempban"
+    title_map: dict[str, tuple[str, str, str]] = {
+        "leave": ("👋", "PRIMA USCITA", "RIUSCITA"),
+        "join": ("🤝", "PRIMA ENTRATA", "RIENTRATA"),
+        "kick": ("👢", "PRIMA ESPULSIONE", "ALTRA ESPULSIONE"),
+        "inactive_kick": ("👢", "PRIMA ESPULSIONE", "ALTRA ESPULSIONE"),
+        "ban": ("⛔", "PRIMA INTERDIZIONE PERENNE", "ALTRA INTERDIZIONE PERENNE"),
+        "tempban": ("⌛", "PRIMA INTERDIZIONE TEMPORANEA", "ALTRA INTERDIZIONE TEMPORANEA"),
+        "inactive_tempban": ("⌛", "PRIMA INTERDIZIONE TEMPORANEA", "ALTRA INTERDIZIONE TEMPORANEA"),
+        "grace": ("🕊️", "PRIMA GRAZIA", "ALTRA GRAZIA"),
+        "inactive_grace": ("🕊️", "PRIMA GRAZIA", "ALTRA GRAZIA"),
+    }
+    if normalized not in title_map:
         raise ValueError(f"Unsupported greetings event type: {event_type_key}")
-    occurrence = max(1, int(occurrence_number))
-    emoji, label, gender = _EVENT_LABELS[event_type_key]
-    mapping = _ORDINALS_UPPER_FEMININE if gender == "f" else _ORDINALS_UPPER_MASCULINE
-    ordinal = mapping.get(occurrence, f"{occurrence}{'ª' if gender == 'f' else '°'}")
-    return f"{emoji} __**{ordinal} {label}**__"
+    emoji, first, repeat = title_map[normalized]
+    text = first if occurrence == 1 else repeat
+    return f"{emoji} __**{text}**__"
