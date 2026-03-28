@@ -118,6 +118,7 @@ _REASON_BLOCK_EVENT_TYPES = frozenset(
 )
 
 _MODERATION_REASON_BLOCK_HEADER = "**👇 La moderazione aggiunge:**"
+_REASON_PLACEHOLDER_VALUES = frozenset({"none", "null", "n/a", "na", "-", "—"})
 
 _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
     "docs": {
@@ -302,7 +303,7 @@ class GreetingsCopyService:
         event_label = format_greetings_event_label(event_type_key, occurrence_number)
         label_text = self._event_label_text(event_type_key)
         ordinal = self._format_ordinal_upper(event_type_key, occurrence_number)
-        reason_text = reason or ""
+        reason_text = normalize_reason(reason) or ""
         reason_suffix = f": {reason_text}" if reason_text else ""
         return {
             "user": username,
@@ -618,7 +619,7 @@ class GreetingsCopyService:
         for idx, segment in enumerate(normalized):
             current = segment
             if idx < len(normalized) - 1 and not GreetingsCopyService._has_terminal_sentence_punctuation(current):
-                current = f"{current}."
+                current = f"{current}{GreetingsCopyService._to_italic('.')}"
             joined_parts.append(current)
         return " ".join(joined_parts)
 
@@ -638,7 +639,12 @@ class GreetingsCopyService:
         stripped = text.strip()
         if not stripped:
             return ""
-        if stripped.startswith("*") and stripped.endswith("*"):
+        if stripped.startswith("***") and stripped.endswith("***") and len(stripped) >= 6:
+            return stripped
+        if stripped.startswith("**") and stripped.endswith("**") and len(stripped) >= 4:
+            core = stripped[2:-2].strip()
+            return f"***{core}***" if core else stripped
+        if stripped.startswith("*") and stripped.endswith("*") and len(stripped) >= 2:
             return stripped
         return f"*{stripped}*"
 
@@ -728,8 +734,7 @@ class GreetingsCopyService:
 
     @staticmethod
     def _normalize_reason(value: Any) -> str | None:
-        text = str(value or "").strip()
-        return text or None
+        return normalize_reason(value)
 
     def _load_cfg(self) -> dict[str, Any]:
         loaded = load_json_file(self._config_path, example_path=GREETINGS_TRIGGER_EXAMPLE_JSON)
@@ -997,22 +1002,29 @@ def format_greetings_event_label(event_type_key: str, occurrence_number: int) ->
 
 def build_greetings_title(event_type_key: str, occurrence_count: int, is_auto_inactivity: bool = False) -> str:
     normalized = str(event_type_key or "").strip().lower()
-    occurrence = max(1, int(occurrence_count))
     if is_auto_inactivity and normalized == "tempban":
         normalized = "inactive_tempban"
-    title_map: dict[str, tuple[str, str, str]] = {
-        "leave": ("👋", "PRIMA USCITA", "RIUSCITA"),
-        "join": ("🤝", "PRIMA ENTRATA", "RIENTRATA"),
-        "kick": ("👢", "PRIMA ESPULSIONE", "ALTRA ESPULSIONE"),
-        "inactive_kick": ("👢", "PRIMA ESPULSIONE", "ALTRA ESPULSIONE"),
-        "ban": ("⛔", "PRIMA INTERDIZIONE PERENNE", "ALTRA INTERDIZIONE PERENNE"),
-        "tempban": ("⌛", "PRIMA INTERDIZIONE TEMPORANEA", "ALTRA INTERDIZIONE TEMPORANEA"),
-        "inactive_tempban": ("⌛", "PRIMA INTERDIZIONE TEMPORANEA", "ALTRA INTERDIZIONE TEMPORANEA"),
-        "grace": ("🕊️", "PRIMA GRAZIA", "ALTRA GRAZIA"),
-        "inactive_grace": ("🕊️", "PRIMA GRAZIA", "ALTRA GRAZIA"),
+    title_map: dict[str, tuple[str, str]] = {
+        "leave": ("👋", "USCITA"),
+        "join": ("🤝", "ENTRATA"),
+        "kick": ("👢", "ESPULSIONE"),
+        "inactive_kick": ("👢", "ESPULSIONE"),
+        "ban": ("⛔", "INTERDIZIONE PERENNE"),
+        "tempban": ("⌛", "INTERDIZIONE TEMPORANEA"),
+        "inactive_tempban": ("⌛", "INTERDIZIONE TEMPORANEA"),
+        "grace": ("🕊️", "GRAZIA"),
+        "inactive_grace": ("🕊️", "GRAZIA"),
     }
     if normalized not in title_map:
         raise ValueError(f"Unsupported greetings event type: {event_type_key}")
-    emoji, first, repeat = title_map[normalized]
-    text = first if occurrence == 1 else repeat
+    emoji, text = title_map[normalized]
     return f"{emoji} __**{text}**__"
+
+
+def normalize_reason(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.lower() in _REASON_PLACEHOLDER_VALUES:
+        return None
+    return text

@@ -12,6 +12,7 @@ from app.services.greetings_copy_service import (
     SUPPORTED_GREETINGS_EVENT_TYPES,
     GreetingsCopyService,
     format_greetings_event_label,
+    normalize_reason,
 )
 
 
@@ -37,17 +38,17 @@ def _service(*, tmp_path=None, occurrence_number: int = 1, payload: dict | None 
 
 
 def test_format_greetings_event_label_covers_supported_keys() -> None:
-    assert format_greetings_event_label("join", 1) == "🤝 __**PRIMA ENTRATA**__"
-    assert format_greetings_event_label("leave", 1) == "👋 __**PRIMA USCITA**__"
-    assert format_greetings_event_label("leave", 2) == "👋 __**RIUSCITA**__"
-    assert format_greetings_event_label("kick", 1) == "👢 __**PRIMA ESPULSIONE**__"
-    assert format_greetings_event_label("ban", 1) == "⛔ __**PRIMA INTERDIZIONE PERENNE**__"
-    assert format_greetings_event_label("tempban", 1) == "⌛ __**PRIMA INTERDIZIONE TEMPORANEA**__"
-    assert format_greetings_event_label("grace", 1) == "🕊️ __**PRIMA GRAZIA**__"
-    assert format_greetings_event_label("inactive_kick", 1) == "👢 __**PRIMA ESPULSIONE**__"
-    assert format_greetings_event_label("inactive_tempban", 1) == "⌛ __**PRIMA INTERDIZIONE TEMPORANEA**__"
-    assert format_greetings_event_label("inactive_grace", 1) == "🕊️ __**PRIMA GRAZIA**__"
-    assert "KICK" not in format_greetings_event_label("kick", 3)
+    assert format_greetings_event_label("join", 1) == "🤝 __**ENTRATA**__"
+    assert format_greetings_event_label("leave", 1) == "👋 __**USCITA**__"
+    assert format_greetings_event_label("leave", 2) == "👋 __**USCITA**__"
+    assert format_greetings_event_label("kick", 1) == "👢 __**ESPULSIONE**__"
+    assert format_greetings_event_label("ban", 1) == "⛔ __**INTERDIZIONE PERENNE**__"
+    assert format_greetings_event_label("tempban", 1) == "⌛ __**INTERDIZIONE TEMPORANEA**__"
+    assert format_greetings_event_label("grace", 1) == "🕊️ __**GRAZIA**__"
+    assert format_greetings_event_label("inactive_kick", 1) == "👢 __**ESPULSIONE**__"
+    assert format_greetings_event_label("inactive_tempban", 1) == "⌛ __**INTERDIZIONE TEMPORANEA**__"
+    assert format_greetings_event_label("inactive_grace", 1) == "🕊️ __**GRAZIA**__"
+    assert format_greetings_event_label("kick", 3) == "👢 __**ESPULSIONE**__"
 
 
 def test_render_event_copy_uses_second_occurrence_for_ordinals() -> None:
@@ -64,7 +65,7 @@ def test_render_event_copy_uses_second_occurrence_for_ordinals() -> None:
     )
 
     assert result.occurrence_number == 2
-    assert result.event_label == "👋 __**RIUSCITA**__"
+    assert result.event_label == "👋 __**USCITA**__"
     assert service._test_database.count_calls == [("1", "42", "leave")]  # type: ignore[attr-defined]
 
 
@@ -150,8 +151,8 @@ def test_grace_manual_and_inactive_have_distinct_copy() -> None:
         )
     )
 
-    assert grace.event_label == "🕊️ __**PRIMA GRAZIA**__"
-    assert inactive_grace.event_label == "🕊️ __**PRIMA GRAZIA**__"
+    assert grace.event_label == "🕊️ __**GRAZIA**__"
+    assert inactive_grace.event_label == "🕊️ __**GRAZIA**__"
     assert "inattività" not in grace.narrative.lower()
     assert "inattività" in inactive_grace.narrative.lower()
 
@@ -239,8 +240,8 @@ def test_leave_narrative_inserts_periods_between_main_barcello_and_comment(tmp_p
         )
     )
 
-    assert "volta*. *In quel momento" in result.narrative
-    assert "100/100**)*. *Vediamo" in result.narrative
+    assert "*.* *In quel momento" in result.narrative
+    assert "*.* *Vediamo" in result.narrative
     assert ".." not in result.narrative
     assert " ." not in result.narrative
 
@@ -286,7 +287,7 @@ def test_join_ban_kick_insert_period_before_closing_comment(tmp_path) -> None:
                 now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
             )
         )
-        assert ". *" in result.narrative
+        assert "*.* *" in result.narrative
         assert ".." not in result.narrative
         assert " ." not in result.narrative
 
@@ -318,6 +319,41 @@ def test_join_narrative_does_not_duplicate_existing_terminal_punctuation(tmp_pat
     assert ".." not in result.narrative
     assert " ." not in result.narrative
     assert "***arriva su **Barcellometro**.*** *Che sia l'inizio" in result.narrative
+
+
+def test_tempban_description_stays_fully_italic_and_starts_with_mention(tmp_path) -> None:
+    payload = {
+        "event_templates": {
+            "tempban": {
+                "opening": "{mention}",
+                "action_phrase": "è stato temporaneamente bannato",
+                "occurrence_phrase": "da {guild_name} per",
+                "detail_phrase": "{duration}",
+                "closing_comment": "Rientro possibile alla scadenza.",
+            }
+        }
+    }
+    service = _service(tmp_path=tmp_path, payload=payload)
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="GABBIETTA DORATA"),
+            user=SimpleNamespace(id=42, name="fakuzzo", display_name="Fakuzzo", mention="@Fakuzzo"),
+            event_type_key="tempban",
+            duration_seconds=10 * 60,
+            barcello_status={"color": "verde", "score": 100},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    assert result.narrative.startswith("***@Fakuzzo***")
+    assert not result.narrative.startswith(("👋", "🤝", "👢", "⛔", "⌛", "🕊️"))
+    assert "***10m***" in result.narrative
+    assert "10m***" in result.narrative
+    assert "10m**." not in result.narrative
+
+
+@pytest.mark.parametrize("raw_reason", [None, "", "   ", "None", " none ", "N/A", "-", "—", "null"])
+def test_normalize_reason_discards_missing_values(raw_reason: str | None) -> None:
+    assert normalize_reason(raw_reason) is None
 
 
 def test_render_moderation_preview_renders_context_placeholders() -> None:
@@ -386,7 +422,7 @@ def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canoni
     )
 
     assert result.occurrence_number == 3
-    assert result.event_label == "⌛ __**ALTRA INTERDIZIONE TEMPORANEA**__"
+    assert result.event_label == "⌛ __**INTERDIZIONE TEMPORANEA**__"
     assert "30 giorni" in result.narrative
 
 
@@ -515,7 +551,7 @@ def test_narrative_respects_fixed_slot_flow_and_markdown_emphasis() -> None:
     assert result.narrative.startswith("***<@42>***")
     assert not result.narrative.startswith(("🤝", "👋", "👢", "⛔", "⌛", "🕊️"))
     assert "***è stato bannato***" in result.narrative
-    assert ". *" in result.narrative
+    assert "*.* *" in result.narrative
 
 
 def test_leave_includes_barcello_reference_only_for_leave() -> None:
