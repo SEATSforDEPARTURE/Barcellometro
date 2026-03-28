@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -29,6 +30,19 @@ WINDOW_UNIT_CHOICES = [
 def _normalize_optional_reason(value: str | None) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _normalize_lookup_key(value: str | None) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+class _ResolvedModerationUser:
+    def __init__(self, *, user_id: str, display_name: str | None = None) -> None:
+        clean_display = str(display_name or "").strip()
+        self.id = int(user_id)
+        self.name = clean_display or f"ID {user_id}"
+        self.display_name = self.name
+        self.mention = f"<@{user_id}>"
 
 
 async def _send_lines(
@@ -284,7 +298,7 @@ def register_moderazione_utenti(
 
     async def _unban_impl(
         interaction: discord.Interaction,
-        user: discord.User,
+        user: _ResolvedModerationUser,
         reason: str | None = None,
         *,
         subcommand_path: str = "users unban",
@@ -479,6 +493,82 @@ def register_moderazione_utenti(
             kind="success",
         )
 
+    async def _resolve_moderation_user(
+        interaction: discord.Interaction,
+        *,
+        nick_or_id: str,
+        mode: str,
+    ) -> _ResolvedModerationUser | None:
+        raw_value = str(nick_or_id or "").strip()
+        if not raw_value or interaction.guild_id is None:
+            await _send(
+                interaction,
+                subcommand_path=f"users {mode}",
+                lines=[("error", "Inserisci un ID utente o un nickname noto.")],
+                kind="error",
+            )
+            return None
+        guild_id = str(interaction.guild_id)
+
+        if re.fullmatch(r"\d+", raw_value):
+            resolved_name = await ctx.database.fetch_user_display_name(guild_id=guild_id, user_id=raw_value)
+            return _ResolvedModerationUser(user_id=raw_value, display_name=resolved_name)
+
+        if mode in {"unban", "untempban"}:
+            candidate_rows = await ctx.database.list_active_tempbans(guild_id)
+            if mode == "unban":
+                candidate_rows.extend(await ctx.database.list_active_bans(guild_id, limit=200))
+        else:
+            candidate_rows = await ctx.database.list_active_grace_users(guild_id)
+
+        candidate_ids = sorted(
+            {
+                str(row["user_id"])
+                for row in candidate_rows
+                if row["user_id"] is not None
+            }
+        )
+        if not candidate_ids:
+            await _send(
+                interaction,
+                subcommand_path=f"users {mode}",
+                lines=[("error", "Nessun utente attualmente in stato revocabile.")],
+                kind="error",
+            )
+            return None
+
+        matches: list[tuple[str, str]] = []
+        target_key = _normalize_lookup_key(raw_value)
+        for user_id in candidate_ids:
+            display = await ctx.database.fetch_user_display_name(guild_id=guild_id, user_id=user_id)
+            display_key = _normalize_lookup_key(display)
+            if display_key and display_key == target_key:
+                matches.append((user_id, str(display or "").strip() or user_id))
+
+        if not matches:
+            await _send(
+                interaction,
+                subcommand_path=f"users {mode}",
+                lines=[("error", f"Nessun utente trovato per '{raw_value}'. Usa ID o ultimo nick noto.")],
+                kind="error",
+            )
+            return None
+        if len(matches) > 1:
+            hints = ", ".join(f"{name} (ID {uid})" for uid, name in matches[:5])
+            await _send(
+                interaction,
+                subcommand_path=f"users {mode}",
+                lines=[
+                    ("error", f"Nickname ambiguo: '{raw_value}'."),
+                    ("matches", hints),
+                    ("hint", "Specifica l'ID utente."),
+                ],
+                kind="error",
+            )
+            return None
+        matched_id, matched_name = matches[0]
+        return _ResolvedModerationUser(user_id=matched_id, display_name=matched_name)
+
     @users_group.command(name="kick", description="Remove a user from the server.")
     @app_commands.describe(user="Member to kick.", reason="Optional reason override.")
     async def users_kick(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
@@ -498,13 +588,19 @@ def register_moderazione_utenti(
         await _ban_list_impl(interaction)
 
     @users_group.command(name="unban", description="Revoke an active ban for a user.")
-    @app_commands.describe(user="User to unban.", reason="Optional reason override.")
-    async def users_unban(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+    @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
+    async def users_unban(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
+        user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="unban")
+        if user is None:
+            return
         await _unban_impl(interaction, user, reason)
 
     @users_group.command(name="untempban", description="Revoke an active temporary ban for a user.")
-    @app_commands.describe(user="User to unban.", reason="Optional reason override.")
-    async def users_untempban(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+    @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
+    async def users_untempban(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
+        user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="untempban")
+        if user is None:
+            return
         await _unban_impl(
             interaction,
             user,
@@ -556,8 +652,11 @@ def register_moderazione_utenti(
         await _grace_list_impl(interaction)
 
     @users_group.command(name="ungrace", description="Revoke an active grace period for a user.")
-    @app_commands.describe(user="User whose grace period is revoked.", reason="Optional reason override.")
-    async def users_ungrace(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+    @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
+    async def users_ungrace(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
+        user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="ungrace")
+        if user is None:
+            return
         await _ungrace_impl(interaction, user, reason)
 
     if alias_commands is not None:
@@ -572,13 +671,19 @@ def register_moderazione_utenti(
             await _ban_impl(interaction, user, reason)
 
         @app_commands.command(name="unban", description="Alias of /users unban.")
-        @app_commands.describe(user="User to unban.", reason="Optional reason override.")
-        async def unban_alias(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+        @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
+        async def unban_alias(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
+            user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="unban")
+            if user is None:
+                return
             await _unban_impl(interaction, user, reason)
 
         @app_commands.command(name="untempban", description="Alias of /users untempban.")
-        @app_commands.describe(user="User to unban.", reason="Optional reason override.")
-        async def untempban_alias(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+        @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
+        async def untempban_alias(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
+            user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="untempban")
+            if user is None:
+                return
             await _unban_impl(
                 interaction,
                 user,
@@ -622,8 +727,11 @@ def register_moderazione_utenti(
             await _grace_impl(interaction, user, quantity, unit.value, reason)
 
         @app_commands.command(name="ungrace", description="Alias of /users ungrace.")
-        @app_commands.describe(user="User whose grace period is revoked.", reason="Optional reason override.")
-        async def ungrace_alias(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+        @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
+        async def ungrace_alias(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
+            user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="ungrace")
+            if user is None:
+                return
             await _ungrace_impl(interaction, user, reason)
 
         alias_commands.extend([kick_alias, ban_alias, unban_alias, tempban_alias, untempban_alias, grace_alias, ungrace_alias])

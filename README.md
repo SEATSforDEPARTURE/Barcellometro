@@ -169,7 +169,9 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/users tempban_list`
 - `/users grace user:<utente> duration:<durata> [reason:<testo>]`
 - `/users grace_list`
-- `/users unban user:<utente> [reason:<testo>]` → comando compatibile non canonico mantenuto per riallineamento audit/backfill.
+- `/users unban nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
+- `/users untempban nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
+- `/users ungrace nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
 - Alias top-level: `/kick`, `/ban`, `/tempban`, `/grace` → alias reali dei corrispondenti `/users ...`.
 
 ### Greetings / inactivity
