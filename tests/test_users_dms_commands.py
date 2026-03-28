@@ -142,6 +142,7 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert "{mention}" in sections[1].lines
         assert "{now_it}" in sections[1].lines
         assert "{expires_at_it}" in sections[1].lines
+        assert "{reason_text}" in sections[1].lines
 
         cooldown_set_calls = [call for call in send_response.await_args_list if call.kwargs.get("subcommand_path") == "users dms cooldown_set"]
         assert len(cooldown_set_calls) == 6

@@ -272,7 +272,35 @@ def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_reason_text
         sent_embed = user.send.await_args.kwargs["embed"]
         body = str(sent_embed.description)
         assert body.startswith("_") and body.endswith("_")
-        assert "***Motivo moderatore***" in body
+        assert "***La moderazione aggiunge: Motivo moderatore***" in body
+        assert "La moderazione aggiunge:" in body
         assert "{unknown_placeholder}" not in body
+
+    asyncio.run(_run())
+
+
+def test_users_dm_render_reason_text_is_empty_when_reason_missing() -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.config["grace_template"] = "X {mention} {reason_text}{unknown_placeholder}"
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="grace",
+            duration_seconds=60,
+            expires_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+            reason=None,
+        )
+
+        assert result == {"sent": True}
+        sent_embed = user.send.await_args.kwargs["embed"]
+        body = str(sent_embed.description)
+        assert "{unknown_placeholder}" not in body
+        assert "La moderazione aggiunge:" not in body
+        assert "None" not in body
 
     asyncio.run(_run())

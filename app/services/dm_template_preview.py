@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from string import Formatter
 from typing import Any
 
-from app.services.dm_template_placeholders import build_reason_line
+from app.services.dm_template_placeholders import format_reason_text
 from app.services.member_flow_notifications import format_duration_human
 
 _UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
@@ -38,7 +38,7 @@ def build_dm_template_preview_payload(
     safe_duration_seconds = max(0, _to_int(duration_seconds, 2 * 86400))
     expires_at = utc_now + timedelta(seconds=safe_duration_seconds)
     safe_reason = str(reason or "").strip()
-    safe_event_type = str(event_type or "").strip() or "tempban"
+    safe_reason_text = format_reason_text(safe_reason)
     safe_invite_url = str(invite_url or "").strip()
 
     payload: dict[str, Any] = {
@@ -51,8 +51,8 @@ def build_dm_template_preview_payload(
         "guild_id": "987654321",
         "event_type": safe_event_type,
         "reason": safe_reason,
-        "reason_text": safe_reason,
-        "reason_line": "",
+        "reason_text": safe_reason_text,
+        "reason_line": f"Reason: {safe_reason}. " if safe_reason else "",
         "reasoning": "template_preview",
         "duration_seconds": safe_duration_seconds,
         "duration_human": format_duration_human(safe_duration_seconds) or "0m",
