@@ -165,8 +165,8 @@ def test_users_alias_tempban_and_grace_expose_quantity_unit_not_duration() -> No
     tempban_params = [param.name for param in by_name["tempban"].parameters]
     grace_params = [param.name for param in by_name["grace"].parameters]
 
-    assert tempban_params == ["user", "quantity", "unit", "reason"]
-    assert grace_params == ["user", "quantity", "unit", "reason"]
+    assert tempban_params == ["nick_or_id", "quantity", "unit", "reason"]
+    assert grace_params == ["nick_or_id", "quantity", "unit", "reason"]
     assert "duration" not in tempban_params
     assert "duration" not in grace_params
 
@@ -197,7 +197,7 @@ def test_grace_alias_is_direct_command_without_assign_subcommand() -> None:
     by_name = {command.name: command for command in aliases}
     assert "grace" in by_name
     assert not isinstance(by_name["grace"], discord.app_commands.Group)
-    assert [param.name for param in by_name["grace"].parameters] == ["user", "quantity", "unit", "reason"]
+    assert [param.name for param in by_name["grace"].parameters] == ["nick_or_id", "quantity", "unit", "reason"]
 
 def test_greetings_tree_has_no_preview_command() -> None:
     group = discord.app_commands.Group(name="greetings", description="x")
@@ -701,8 +701,8 @@ def test_users_tempban_and_grace_manual_expose_quantity_unit_not_duration() -> N
     tempban_params = [param.name for param in tempban_command.parameters]
     grace_params = [param.name for param in grace_command.parameters]
 
-    assert tempban_params == ["user", "quantity", "unit", "reason"]
-    assert grace_params == ["user", "quantity", "unit", "reason"]
+    assert tempban_params == ["nick_or_id", "quantity", "unit", "reason"]
+    assert grace_params == ["nick_or_id", "quantity", "unit", "reason"]
     assert "duration" not in tempban_params
     assert "duration" not in grace_params
 
@@ -736,6 +736,111 @@ def test_users_unban_untempban_ungrace_groups_include_temporal_variants() -> Non
     assert {cmd.name for cmd in _find_command(users_group, "ungrace").commands} == expected
 
 
+def test_users_moderation_commands_use_nick_or_id_for_live_targets() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(
+        database=Mock(),
+        footer=None,
+        member_flow_notifications=None,
+        barcello_service=None,
+    )
+    aliases: list[discord.app_commands.Command] = []
+    register_moderazione_utenti(users_group, ctx, alias_commands=aliases)
+
+    assert [param.name for param in _find_command(users_group, "kick").parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in _find_command(users_group, "ban").parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in _find_command(users_group, "tempban").parameters] == ["nick_or_id", "quantity", "unit", "reason"]
+    assert [param.name for param in _find_command(users_group, "grace", "manual").parameters] == ["nick_or_id", "quantity", "unit", "reason"]
+
+    by_name = {command.name: command for command in aliases}
+    assert [param.name for param in by_name["kick"].parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in by_name["ban"].parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in by_name["tempban"].parameters] == ["nick_or_id", "quantity", "unit", "reason"]
+    assert [param.name for param in by_name["grace"].parameters] == ["nick_or_id", "quantity", "unit", "reason"]
+
+
+def test_mod_users_kick_unknown_target_returns_controlled_error(monkeypatch) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        ctx = SimpleNamespace(
+            database=SimpleNamespace(),
+            footer=None,
+            member_flow_notifications=None,
+            barcello_service=None,
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "kick")
+
+        guild = SimpleNamespace(
+            id=1,
+            get_member=Mock(return_value=None),
+            fetch_member=AsyncMock(side_effect=discord.NotFound(response=Mock(), message="missing")),
+            members=[],
+        )
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9))
+
+        await command.callback(interaction, "fakeuzzo")
+
+        send_standard_response.assert_awaited_once()
+        response = send_standard_response.await_args.kwargs
+        assert response["kind"] == "error"
+        assert response["subcommand_path"] == "users kick"
+        assert any("Nessun membro trovato" in str(value) for _, value in response["lines"])
+
+    asyncio.run(_run())
+
+
+def test_mod_users_live_target_commands_return_controlled_error_when_missing(monkeypatch) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        database = SimpleNamespace(add_temp_ban=AsyncMock(), extend_user_grace=AsyncMock())
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=SimpleNamespace(
+                log_action=AsyncMock(return_value={"canonical_written": False, "canonical_visible": False}),
+                send_notification=AsyncMock(),
+                remember_departure_action=Mock(),
+            ),
+            barcello_service=None,
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        ban_cmd = _find_command(users_group, "ban")
+        tempban_cmd = _find_command(users_group, "tempban")
+        grace_cmd = _find_command(users_group, "grace", "manual")
+        guild = SimpleNamespace(
+            id=1,
+            get_member=Mock(return_value=None),
+            fetch_member=AsyncMock(side_effect=discord.NotFound(response=Mock(), message="missing")),
+            members=[],
+            ban=AsyncMock(),
+        )
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9))
+        unit = discord.app_commands.Choice(name="ore", value="ore")
+
+        await ban_cmd.callback(interaction, "999")
+        await tempban_cmd.callback(interaction, "999", 1, unit, None)
+        await grace_cmd.callback(interaction, "999", 1, unit, None)
+
+        assert send_standard_response.await_count == 3
+        for idx, expected_path in enumerate(("users ban", "users tempban", "users grace")):
+            kwargs = send_standard_response.await_args_list[idx].kwargs
+            assert kwargs["kind"] == "error"
+            assert kwargs["subcommand_path"] == expected_path
+        guild.ban.assert_not_awaited()
+        database.add_temp_ban.assert_not_awaited()
+        database.extend_user_grace.assert_not_awaited()
+
+    asyncio.run(_run())
+
 def test_mod_users_tempban_converts_quantity_unit_to_duration_seconds(
     monkeypatch,
 ) -> None:
@@ -764,8 +869,8 @@ def test_mod_users_tempban_converts_quantity_unit_to_duration_seconds(
         register_moderazione_utenti(users_group, ctx)
         command = _find_command(users_group, "tempban")
 
-        guild = SimpleNamespace(id=1, ban=AsyncMock())
         target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
+        guild = SimpleNamespace(id=1, ban=AsyncMock(), get_member=Mock(return_value=target_user), fetch_member=AsyncMock())
         moderator = SimpleNamespace(id=9)
         interaction = SimpleNamespace(
             guild=guild,
@@ -775,7 +880,7 @@ def test_mod_users_tempban_converts_quantity_unit_to_duration_seconds(
         )
         unit = discord.app_commands.Choice(name="ore", value="ore")
 
-        await command.callback(interaction, target_user, 3, unit, "Motivo test")
+        await command.callback(interaction, "42", 3, unit, "Motivo test")
 
         guild.ban.assert_awaited_once_with(
             target_user, reason="Motivo test", delete_message_seconds=0
@@ -818,8 +923,8 @@ def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
         register_moderazione_utenti(users_group, ctx)
         command = _find_command(users_group, "grace", "manual")
 
-        guild = SimpleNamespace(id=1)
         target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
+        guild = SimpleNamespace(id=1, get_member=Mock(return_value=target_user), fetch_member=AsyncMock())
         moderator = SimpleNamespace(id=9)
         interaction = SimpleNamespace(
             guild=guild,
@@ -829,7 +934,7 @@ def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
         )
         unit = discord.app_commands.Choice(name="settimane", value="settimane")
 
-        await command.callback(interaction, target_user, 2, unit, "Protezione test")
+        await command.callback(interaction, "42", 2, unit, "Protezione test")
 
         database.extend_user_grace.assert_awaited_once()
         notify_kwargs = member_flow_notifications.log_action.await_args.kwargs
