@@ -16,6 +16,22 @@ DEFAULT_USERS_DM_TEMPBAN_TEMPLATE = (
     "Hi {user}, your manual grace period in {server} has expired and an automatic temporary ban "
     "has started for {duration_human}. {reason_line}{invite_line}"
 )
+USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
+    "user",
+    "username",
+    "display_name",
+    "user_id",
+    "server",
+    "guild_id",
+    "event_type",
+    "duration_seconds",
+    "duration_human",
+    "expires_at_utc",
+    "reason",
+    "reason_line",
+    "invite_url",
+    "invite_line",
+)
 
 
 class UsersModerationDmService:
@@ -56,7 +72,18 @@ class UsersModerationDmService:
         reason: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        guild_id = str(guild.id)
+        clean_user_id = str(user_id)
         if self._bot is None:
+            await self._log_delivery(
+                guild_id=guild_id,
+                user_id=clean_user_id,
+                event_type=event_type,
+                reason=reason,
+                outcome="skipped",
+                error_summary="bot_unavailable",
+                metadata=metadata,
+            )
             return {"sent": False, "skipped": "bot_unavailable"}
         getter = getattr(guild, "get_member", None)
         target_user: discord.abc.User | None = getter(int(user_id)) if callable(getter) else None
@@ -64,6 +91,15 @@ class UsersModerationDmService:
             try:
                 target_user = await self._bot.fetch_user(int(user_id))
             except Exception:
+                await self._log_delivery(
+                    guild_id=guild_id,
+                    user_id=clean_user_id,
+                    event_type=event_type,
+                    reason=reason,
+                    outcome="skipped",
+                    error_summary="user_unavailable",
+                    metadata=metadata,
+                )
                 return {"sent": False, "skipped": "user_unavailable"}
         return await self.send_for_event(
             guild=guild,
@@ -90,17 +126,41 @@ class UsersModerationDmService:
         user_id = str(user.id)
         cfg = await self.get_config(guild_id)
         if int(cfg.get("enabled", 1) or 0) <= 0:
+            await self._log_delivery(
+                guild_id=guild_id,
+                user_id=user_id,
+                event_type=event_type,
+                reason=reason,
+                outcome="skipped",
+                error_summary="disabled",
+                metadata=metadata,
+            )
             return {"sent": False, "skipped": "disabled"}
 
         cooldown_days = max(1, int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS))
         latest_lookup = getattr(self._database, "get_latest_users_dm_delivery", None)
         latest = await latest_lookup(guild_id, user_id, event_type) if latest_lookup is not None else None
-        if latest and latest["sent_at"]:
+        latest_outcome = ""
+        if latest is not None:
+            try:
+                latest_outcome = str(latest["outcome"] or "").lower()
+            except Exception:
+                latest_outcome = "success"
+        if latest and latest["sent_at"] and latest_outcome == "success":
             try:
                 last_sent = datetime.fromisoformat(str(latest["sent_at"]).replace("Z", "+00:00"))
                 if last_sent.tzinfo is None:
                     last_sent = last_sent.replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) - last_sent < timedelta(days=cooldown_days):
+                    await self._log_delivery(
+                        guild_id=guild_id,
+                        user_id=user_id,
+                        event_type=event_type,
+                        reason=reason,
+                        outcome="skipped",
+                        error_summary="cooldown",
+                        metadata={**(metadata or {}), "cooldown_days": cooldown_days},
+                    )
                     return {"sent": False, "skipped": "cooldown"}
             except Exception:
                 pass
@@ -119,32 +179,54 @@ class UsersModerationDmService:
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             await user.send(body)
-            log_method = getattr(self._database, "log_users_dm_delivery", None)
-            if log_method is not None:
-                await log_method(
-                    guild_id=guild_id,
-                    user_id=user_id,
-                    event_type=event_type,
-                    reason=reason,
-                    sent_at=now_iso,
-                    outcome="success",
-                    metadata={**(metadata or {}), "source": "users_moderation_dms"},
-                )
+            await self._log_delivery(
+                guild_id=guild_id,
+                user_id=user_id,
+                event_type=event_type,
+                reason=reason,
+                sent_at=now_iso,
+                outcome="success",
+                metadata=metadata,
+            )
             return {"sent": True}
         except Exception as exc:  # noqa: BLE001
-            log_method = getattr(self._database, "log_users_dm_delivery", None)
-            if log_method is not None:
-                await log_method(
-                    guild_id=guild_id,
-                    user_id=user_id,
-                    event_type=event_type,
-                    reason=reason,
-                    sent_at=now_iso,
-                    outcome="fail",
-                    error_summary=exc.__class__.__name__,
-                    metadata={**(metadata or {}), "source": "users_moderation_dms"},
-                )
+            await self._log_delivery(
+                guild_id=guild_id,
+                user_id=user_id,
+                event_type=event_type,
+                reason=reason,
+                sent_at=now_iso,
+                outcome="fail",
+                error_summary=exc.__class__.__name__,
+                metadata=metadata,
+            )
             return {"sent": False, "skipped": "error", "error": exc.__class__.__name__}
+
+    async def _log_delivery(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        event_type: str,
+        outcome: str,
+        reason: str | None = None,
+        sent_at: str | None = None,
+        error_summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        log_method = getattr(self._database, "log_users_dm_delivery", None)
+        if log_method is None:
+            return
+        await log_method(
+            guild_id=guild_id,
+            user_id=user_id,
+            event_type=event_type,
+            reason=reason,
+            sent_at=sent_at,
+            outcome=outcome,
+            error_summary=error_summary,
+            metadata={**(metadata or {}), "source": "users_moderation_dms"},
+        )
 
     @staticmethod
     def _template_for_event(cfg: dict[str, Any], event_type: str) -> str:

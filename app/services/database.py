@@ -724,7 +724,7 @@ class DatabaseService:
                 event_type TEXT NOT NULL,
                 reason TEXT NULL,
                 sent_at TEXT NOT NULL,
-                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail')),
+                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail', 'skipped')),
                 error_summary TEXT NULL,
                 metadata_json TEXT NOT NULL DEFAULT '{}'
             );
@@ -1013,12 +1013,13 @@ class DatabaseService:
                 event_type TEXT NOT NULL,
                 reason TEXT NULL,
                 sent_at TEXT NOT NULL,
-                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail')),
+                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail', 'skipped')),
                 error_summary TEXT NULL,
                 metadata_json TEXT NOT NULL DEFAULT '{}'
             )
             """
         )
+        await self._ensure_users_dm_delivery_log_outcomes_schema()
         await self._conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_users_dm_delivery_log_guild_sent
@@ -1031,6 +1032,44 @@ class DatabaseService:
             ON users_dm_delivery_log (guild_id, outcome, sent_at DESC)
             """
         )
+
+    async def _ensure_users_dm_delivery_log_outcomes_schema(self) -> None:
+        assert self._conn is not None
+        row = await self.fetchone(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users_dm_delivery_log'"
+        )
+        raw_sql = str((row["sql"] if row else "") or "")
+        normalized = raw_sql.replace(" ", "").replace('"', "'").lower()
+        if "check(outcomein('success','fail','skipped'))" in normalized:
+            return
+        if "check(outcomein('success','fail'))" not in normalized:
+            return
+        await self._conn.execute("ALTER TABLE users_dm_delivery_log RENAME TO users_dm_delivery_log_legacy")
+        await self._conn.execute(
+            """
+            CREATE TABLE users_dm_delivery_log (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                reason TEXT NULL,
+                sent_at TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail', 'skipped')),
+                error_summary TEXT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        await self._conn.execute(
+            """
+            INSERT INTO users_dm_delivery_log (
+                id, guild_id, user_id, event_type, reason, sent_at, outcome, error_summary, metadata_json
+            )
+            SELECT id, guild_id, user_id, event_type, reason, sent_at, outcome, error_summary, metadata_json
+            FROM users_dm_delivery_log_legacy
+            """
+        )
+        await self._conn.execute("DROP TABLE users_dm_delivery_log_legacy")
 
     async def _ensure_moderation_actions_columns(self) -> None:
         assert self._conn is not None
@@ -5061,7 +5100,8 @@ class DatabaseService:
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS ok,
-                SUM(CASE WHEN outcome = 'fail' THEN 1 ELSE 0 END) AS fail
+                SUM(CASE WHEN outcome = 'fail' THEN 1 ELSE 0 END) AS fail,
+                SUM(CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END) AS skipped
             FROM users_dm_delivery_log
             WHERE guild_id = ?
             """,
@@ -5101,6 +5141,7 @@ class DatabaseService:
             "total": int((totals["total"] if totals else 0) or 0),
             "ok": int((totals["ok"] if totals else 0) or 0),
             "fail": int((totals["fail"] if totals else 0) or 0),
+            "skipped": int((totals["skipped"] if totals else 0) or 0),
             "by_event": [{"event_type": str(row["event_type"]), "total": int(row["total"] or 0)} for row in by_event],
             "latest_success": dict(latest_success) if latest_success else None,
             "latest_fail": dict(latest_fail) if latest_fail else None,
