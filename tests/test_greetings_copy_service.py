@@ -37,16 +37,16 @@ def _service(*, tmp_path=None, occurrence_number: int = 1, payload: dict | None 
 
 
 def test_format_greetings_event_label_covers_supported_keys() -> None:
-    assert format_greetings_event_label("join", 1) == "✨ __**PRIMO INGRESSO**__"
+    assert format_greetings_event_label("join", 1) == "🤝 __**PRIMA ENTRATA**__"
     assert format_greetings_event_label("leave", 1) == "👋 __**PRIMA USCITA**__"
-    assert format_greetings_event_label("leave", 2) == "👋 __**SECONDA USCITA**__"
-    assert format_greetings_event_label("kick", 1) == "🥾 __**PRIMO ALLONTANAMENTO**__"
-    assert format_greetings_event_label("ban", 1) == "🔨 __**PRIMO BAN**__"
-    assert format_greetings_event_label("tempban", 1) == "⏳ __**PRIMO BAN TEMPORANEO**__"
-    assert format_greetings_event_label("grace", 1) == "🛟 __**PRIMO PERIODO DI GRAZIA**__"
-    assert format_greetings_event_label("inactive_kick", 1) == "💤 __**PRIMO ALLONTANAMENTO PER INATTIVITÀ**__"
-    assert format_greetings_event_label("inactive_tempban", 1) == "💤 __**PRIMO BAN TEMPORANEO PER INATTIVITÀ**__"
-    assert format_greetings_event_label("inactive_grace", 1) == "🛟 __**PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**__"
+    assert format_greetings_event_label("leave", 2) == "👋 __**RIUSCITA**__"
+    assert format_greetings_event_label("kick", 1) == "👢 __**PRIMA ESPULSIONE**__"
+    assert format_greetings_event_label("ban", 1) == "⛔ __**PRIMA INTERDIZIONE PERENNE**__"
+    assert format_greetings_event_label("tempban", 1) == "⌛ __**PRIMA INTERDIZIONE TEMPORANEA**__"
+    assert format_greetings_event_label("grace", 1) == "🕊️ __**PRIMA GRAZIA**__"
+    assert format_greetings_event_label("inactive_kick", 1) == "👢 __**PRIMA ESPULSIONE**__"
+    assert format_greetings_event_label("inactive_tempban", 1) == "⌛ __**PRIMA INTERDIZIONE TEMPORANEA**__"
+    assert format_greetings_event_label("inactive_grace", 1) == "🕊️ __**PRIMA GRAZIA**__"
     assert "KICK" not in format_greetings_event_label("kick", 3)
 
 
@@ -64,7 +64,7 @@ def test_render_event_copy_uses_second_occurrence_for_ordinals() -> None:
     )
 
     assert result.occurrence_number == 2
-    assert result.event_label == "👋 __**SECONDA USCITA**__"
+    assert result.event_label == "👋 __**RIUSCITA**__"
     assert service._test_database.count_calls == [("1", "42", "leave")]  # type: ignore[attr-defined]
 
 
@@ -150,8 +150,8 @@ def test_grace_manual_and_inactive_have_distinct_copy() -> None:
         )
     )
 
-    assert grace.event_label == "🛟 __**PRIMO PERIODO DI GRAZIA**__"
-    assert inactive_grace.event_label == "🛟 __**PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**__"
+    assert grace.event_label == "🕊️ __**PRIMA GRAZIA**__"
+    assert inactive_grace.event_label == "🕊️ __**PRIMA GRAZIA**__"
     assert "inattività" not in grace.narrative.lower()
     assert "inattività" in inactive_grace.narrative.lower()
 
@@ -232,7 +232,7 @@ def test_render_moderation_preview_renders_context_placeholders() -> None:
         )
     )
 
-    assert rendered == "**SECONDO** **BAN TEMPORANEO** **teso** **night** **🔴 ALLERTA ROSSA** **41/100**"
+    assert rendered == "**SECONDA** **INTERDIZIONE TEMPORANEA** **teso** **night** **🔴 ALLERTA ROSSA** **41/100**"
     assert context["moderator"] == "Moderator"
 
 
@@ -279,7 +279,7 @@ def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canoni
     )
 
     assert result.occurrence_number == 3
-    assert result.event_label == "💤 __**TERZO BAN TEMPORANEO PER INATTIVITÀ**__"
+    assert result.event_label == "⌛ __**ALTRA INTERDIZIONE TEMPORANEA**__"
     assert "30 giorni" in result.narrative
 
 
@@ -291,7 +291,6 @@ def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canoni
         ("tempban", 7 * 86400, None),
         ("grace", 7 * 86400, None),
         ("inactive_kick", None, {"inactivity_text": "30 giorni"}),
-        ("inactive_tempban", 7 * 86400, {"inactivity_text": "30 giorni"}),
         ("inactive_grace", 7 * 86400, {"inactivity_text": "30 giorni"}),
     ],
 )
@@ -317,6 +316,24 @@ def test_render_event_copy_sets_moderation_note_for_supported_moderation_events(
 
     assert result.moderation_note == "Motivo test"
     assert "Motivo test" not in result.narrative
+
+
+def test_render_event_copy_inactive_tempban_hides_moderation_note_even_with_reason() -> None:
+    service = _service()
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="inactive_tempban",
+            reason="Motivo test",
+            duration_seconds=7 * 86400,
+            metadata={"inactivity_text": "30 giorni"},
+            barcello_status={"color": "rosso", "score": 41},
+            now=datetime(2026, 3, 21, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    assert result.moderation_note is None
+    assert "inattività" in result.narrative.lower()
 
 
 def test_render_event_copy_skips_reason_block_when_reason_is_missing() -> None:
@@ -388,10 +405,10 @@ def test_narrative_respects_fixed_slot_flow_and_markdown_emphasis() -> None:
             now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
         )
     )
-    assert result.narrative.startswith("***<@42>*** ")
-    assert not result.narrative.startswith(("✨", "👋", "🥾", "🔨", "⏳", "🛟", "💤"))
-    assert "**TERZO**" in result.narrative
-    assert "*è stato*" in result.narrative
+    assert result.narrative.startswith("***<@42>***")
+    assert not result.narrative.startswith(("🤝", "👋", "👢", "⛔", "⌛", "🕊️"))
+    assert "***è stato bannato***" in result.narrative
+    assert ". *" in result.narrative
 
 
 def test_leave_includes_barcello_reference_only_for_leave() -> None:
@@ -449,7 +466,7 @@ def test_example_config_has_fallbacks_for_every_supported_event() -> None:
 def test_example_config_join_has_explicit_first_and_repeat_copy() -> None:
     payload = json.loads(Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8"))
 
-    join_templates = payload["narrative_contract"]["join"]
+    join_templates = payload["event_templates"]["join"]
     assert join_templates["first_occurrence"]["opening"] == "{mention}"
     assert join_templates["repeat"]["opening"] == "{mention}"
     assert join_templates["first_occurrence"] != join_templates["repeat"]

@@ -581,12 +581,10 @@ def test_send_notification_renders_author_title_description_and_footer_from_cano
 
         payload = channel.sent[0]["embed"]
         assert payload.author.name == "servizio GREETINGS"
-        assert payload.title == "💤 __**PRIMO BAN TEMPORANEO PER INATTIVITÀ**__"
+        assert payload.title == "⌛ __**PRIMA INTERDIZIONE TEMPORANEA**__"
         assert payload.description is not None
         assert payload.description == payload.description[:4096]
-        assert len(payload.fields) == 1
-        assert payload.fields[0].name == "👇 __**LA MODERAZIONE AGGIUNGE**__"
-        assert payload.fields[0].value == "Assenza prolungata"
+        assert payload.fields == []
         assert payload.thumbnail.url == "https://example.test/avatar.png"
         assert payload.timestamp is None
         assert 'Stato barcello "Barcellometro"' not in payload.description
@@ -773,7 +771,7 @@ def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_mo
 
         embed = channel.sent[0]
         assert embed.author.name == "servizio GREETINGS"
-        assert embed.title == "✨ __**PRIMO INGRESSO**__"
+        assert embed.title == "🤝 __**PRIMA ENTRATA**__"
         assert "benvenut" in embed.description.lower()
         assert "<@42>" in embed.description
         assert embed.footer.text == "Barcellometro dev"
@@ -894,7 +892,7 @@ def test_send_notification_uses_canonical_greetings_palette_by_event_type(member
         embed = channel.sent[0]
         assert embed.colour == expected_colour
         assert embed.author.name == "servizio GREETINGS"
-        if event_type in {"grace", "inactive_grace", "kick", "ban", "tempban", "inactive_kick", "inactive_tempban"}:
+        if event_type in {"grace", "inactive_grace", "kick", "ban", "tempban", "inactive_kick"}:
             assert len(embed.fields) == 1
             assert embed.fields[0].name == "👇 __**LA MODERAZIONE AGGIUNGE**__"
             assert embed.fields[0].value == f"Evento {event_type}"
