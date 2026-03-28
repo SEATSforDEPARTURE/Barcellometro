@@ -275,7 +275,14 @@ def register_moderazione_utenti(
             prefix="users_ban_list",
         )
 
-    async def _unban_impl(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+    async def _unban_impl(
+        interaction: discord.Interaction,
+        user: discord.User,
+        reason: str | None = None,
+        *,
+        subcommand_path: str = "users unban",
+        success_result: str = "ban revocato",
+    ) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
         explicit_reason = _normalize_optional_reason(reason)
@@ -305,7 +312,7 @@ def register_moderazione_utenti(
         )
         response_lines = [("user", user.mention), ("reason", resolved_reason)]
         if discord_unban_result == "unbanned":
-            response_lines.insert(1, ("result", "ban revocato"))
+            response_lines.insert(1, ("result", success_result))
         else:
             response_lines.extend([
                 ("result", "nessun ban attivo trovato su Discord"),
@@ -313,7 +320,7 @@ def register_moderazione_utenti(
             ])
         await _send(
             interaction,
-            subcommand_path="users unban",
+            subcommand_path=subcommand_path,
             subtitle_args=[user],
             lines=response_lines,
             kind="success",
@@ -435,6 +442,21 @@ def register_moderazione_utenti(
             prefix="users_grace_list",
         )
 
+    async def _ungrace_impl(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+        if not await _ensure(interaction) or interaction.guild is None:
+            return
+        explicit_reason = _normalize_optional_reason(reason)
+        resolved_reason = explicit_reason or "Grace period revoked manually"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await ctx.database.revoke_user_grace_state(str(interaction.guild.id), str(user.id), now_iso=now_iso)
+        await _send(
+            interaction,
+            subcommand_path="users ungrace",
+            subtitle_args=[user],
+            lines=[("user", user.mention), ("result", "grace revoked"), ("reason", resolved_reason)],
+            kind="success",
+        )
+
     @users_group.command(name="kick", description="Remove a user from the server.")
     @app_commands.describe(user="Member to kick.", reason="Optional reason override.")
     async def users_kick(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
@@ -458,6 +480,17 @@ def register_moderazione_utenti(
     async def users_unban(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
         await _unban_impl(interaction, user, reason)
 
+    @users_group.command(name="untempban", description="Revoke an active temporary ban for a user.")
+    @app_commands.describe(user="User to unban.", reason="Optional reason override.")
+    async def users_untempban(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+        await _unban_impl(
+            interaction,
+            user,
+            reason,
+            subcommand_path="users untempban",
+            success_result="temporary ban revoked",
+        )
+
     @users_group.command(name="tempban", description="Ban a user temporarily.")
     @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
     async def users_tempban(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
@@ -476,6 +509,11 @@ def register_moderazione_utenti(
     async def users_grace_list(interaction: discord.Interaction) -> None:
         await _grace_list_impl(interaction)
 
+    @users_group.command(name="ungrace", description="Revoke an active grace period for a user.")
+    @app_commands.describe(user="User whose grace period is revoked.", reason="Optional reason override.")
+    async def users_ungrace(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+        await _ungrace_impl(interaction, user, reason)
+
     if alias_commands is not None:
         @app_commands.command(name="kick", description="Alias of /users kick.")
         @app_commands.describe(user="Member to kick.", reason="Optional reason override.")
@@ -487,6 +525,22 @@ def register_moderazione_utenti(
         async def ban_alias(interaction: discord.Interaction, user: discord.Member, reason: str | None = None) -> None:
             await _ban_impl(interaction, user, reason)
 
+        @app_commands.command(name="unban", description="Alias of /users unban.")
+        @app_commands.describe(user="User to unban.", reason="Optional reason override.")
+        async def unban_alias(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+            await _unban_impl(interaction, user, reason)
+
+        @app_commands.command(name="untempban", description="Alias of /users untempban.")
+        @app_commands.describe(user="User to unban.", reason="Optional reason override.")
+        async def untempban_alias(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+            await _unban_impl(
+                interaction,
+                user,
+                reason,
+                subcommand_path="users untempban",
+                success_result="temporary ban revoked",
+            )
+
         @app_commands.command(name="tempban", description="Alias of /users tempban.")
         @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
         async def tempban_alias(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
@@ -497,4 +551,9 @@ def register_moderazione_utenti(
         async def grace_alias(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
             await _grace_impl(interaction, user, duration, reason)
 
-        alias_commands.extend([kick_alias, ban_alias, tempban_alias, grace_alias])
+        @app_commands.command(name="ungrace", description="Alias of /users ungrace.")
+        @app_commands.describe(user="User whose grace period is revoked.", reason="Optional reason override.")
+        async def ungrace_alias(interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
+            await _ungrace_impl(interaction, user, reason)
+
+        alias_commands.extend([kick_alias, ban_alias, unban_alias, tempban_alias, untempban_alias, grace_alias, ungrace_alias])
