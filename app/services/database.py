@@ -4824,6 +4824,27 @@ class DatabaseService:
     async def list_due_temp_unbans(self, now_iso: str) -> list[aiosqlite.Row]:
         return await self.fetchall("SELECT guild_id, user_id, unban_at, reason, created_at FROM temp_bans WHERE unban_at <= ? ORDER BY unban_at ASC", (now_iso,))
 
+    async def list_due_manual_grace(self, now_iso: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT ma.*
+            FROM moderation_actions AS ma
+            WHERE ma.action_type = 'grace'
+              AND ma.expires_at IS NOT NULL
+              AND ma.expires_at <= ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM moderation_actions AS rev
+                  WHERE rev.guild_id = ma.guild_id
+                    AND rev.user_id = ma.user_id
+                    AND rev.action_type = 'ungrace'
+                    AND rev.created_at >= ma.created_at
+              )
+            ORDER BY ma.expires_at ASC
+            """,
+            (now_iso,),
+        )
+
     async def remove_temp_ban(self, guild_id: str, user_id: str) -> None:
         await self.execute("DELETE FROM temp_bans WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
 

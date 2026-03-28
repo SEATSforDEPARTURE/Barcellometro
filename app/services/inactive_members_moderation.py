@@ -21,6 +21,7 @@ from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
 ROME = ZoneInfo("Europe/Rome")
+USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
 
 
 def _state_int(state: Any, key: str, default: int = 0) -> int:
@@ -225,6 +226,58 @@ class InactiveMembersModerationService:
                 logger.info("inactive moderation: unbanned user=%s guild=%s", user_id, guild.id)
             except Exception:
                 logger.warning("inactive moderation: failed unban user=%s guild=%s", user_id, guild.id, exc_info=True)
+        await self._run_due_manual_grace_tempbans(now_iso)
+
+    @staticmethod
+    def _users_grace_tempban_setting_key(guild_id: str) -> str:
+        return f"users.grace.tempban.default_seconds.{guild_id}"
+
+    async def _manual_grace_tempban_seconds(self, guild_id: str) -> int:
+        raw = await self._database.get_setting(self._users_grace_tempban_setting_key(guild_id))
+        if raw is None:
+            return USERS_GRACE_TEMPBAN_DEFAULT_SECONDS
+        try:
+            return max(0, int(str(raw).strip()))
+        except Exception:
+            return USERS_GRACE_TEMPBAN_DEFAULT_SECONDS
+
+    async def _run_due_manual_grace_tempbans(self, now_iso: str) -> None:
+        rows = await self._database.list_due_manual_grace(now_iso)
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            guild_id = str(row["guild_id"])
+            user_id = str(row["user_id"])
+            guild = self._bot.get_guild(int(guild_id))
+            if guild is None:
+                continue
+            await self._database.log_moderation_action(
+                guild_id=guild_id,
+                user_id=user_id,
+                moderator_id=None,
+                action_type="ungrace",
+                reason="Manual grace period expired",
+                metadata={"source": "users_grace_auto_expiry"},
+            )
+            duration_seconds = await self._manual_grace_tempban_seconds(guild_id)
+            if duration_seconds <= 0:
+                continue
+            try:
+                await guild.ban(discord.Object(id=int(user_id)), reason="Automatic tempban after manual grace expiry", delete_message_seconds=0)
+            except Exception:
+                logger.warning("users grace auto-tempban failed user=%s guild=%s", user_id, guild_id, exc_info=True)
+                continue
+            expires_at = now + timedelta(seconds=duration_seconds)
+            await self._database.add_temp_ban(guild_id, user_id, expires_at.isoformat(), "Automatic tempban after manual grace expiry")
+            await self._database.log_moderation_action(
+                guild_id=guild_id,
+                user_id=user_id,
+                moderator_id=None,
+                action_type="tempban",
+                reason="Automatic tempban after manual grace expiry",
+                duration_seconds=duration_seconds,
+                expires_at=expires_at.isoformat(),
+                metadata={"source": "users_grace_auto_tempban", "grace_action_id": str(row["id"])},
+            )
 
     async def _get_config(self, guild_id: str) -> dict[str, Any] | None:
         row = await self._database.get_inactivity_config(guild_id)

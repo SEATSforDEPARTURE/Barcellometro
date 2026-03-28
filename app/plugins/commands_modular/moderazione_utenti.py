@@ -43,6 +43,11 @@ WINDOW_ACTION_LABELS = {
     "untempban": "temp ban",
     "ungrace": "grace",
 }
+USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
+
+
+def _users_grace_tempban_setting_key(guild_id: int | str) -> str:
+    return f"users.grace.tempban.default_seconds.{guild_id}"
 
 
 def _normalize_optional_reason(value: str | None) -> str | None:
@@ -370,6 +375,20 @@ def register_moderazione_utenti(
 
     def _resolve_duration_seconds(quantity: int, unit: str) -> int:
         return int(rolling_window_timedelta(quantity, unit).total_seconds())
+
+    async def _get_users_grace_tempban_default_seconds(guild_id: int | str) -> int:
+        raw = await ctx.database.get_setting(_users_grace_tempban_setting_key(guild_id))
+        if raw is None:
+            return USERS_GRACE_TEMPBAN_DEFAULT_SECONDS
+        try:
+            return max(0, int(str(raw).strip()))
+        except Exception:
+            return USERS_GRACE_TEMPBAN_DEFAULT_SECONDS
+
+    async def _set_users_grace_tempban_default_seconds(guild_id: int | str, seconds: int) -> int:
+        normalized = max(0, int(seconds))
+        await ctx.database.set_setting(_users_grace_tempban_setting_key(guild_id), str(normalized))
+        return normalized
 
     async def _tempban_impl(
         interaction: discord.Interaction,
@@ -837,7 +856,9 @@ def register_moderazione_utenti(
     async def users_tempban_list(interaction: discord.Interaction) -> None:
         await _tempban_list_impl(interaction)
 
-    @users_group.command(name="grace", description="Assign a manual grace period to a user.")
+    grace_group = app_commands.Group(name="grace", description="Manual grace commands and follow-up tempban defaults.")
+
+    @grace_group.command(name="assign", description="Assign a manual grace period to a user.")
     @app_commands.describe(
         user="Member that receives the grace period.",
         quantity="Duration quantity (for example 10, 3, 7, 2).",
@@ -845,7 +866,7 @@ def register_moderazione_utenti(
         reason="Optional reason override.",
     )
     @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
-    async def users_grace(
+    async def users_grace_assign(
         interaction: discord.Interaction,
         user: discord.Member,
         quantity: int,
@@ -853,6 +874,50 @@ def register_moderazione_utenti(
         reason: str | None = None,
     ) -> None:
         await _grace_impl(interaction, user, quantity, unit.value, reason)
+
+    @grace_group.command(name="tempban_set", description="Set the default tempban applied when a manual grace expires.")
+    @app_commands.describe(quantity="Duration quantity.", unit="Duration unit.")
+    @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+    async def users_grace_tempban_set(
+        interaction: discord.Interaction,
+        quantity: int,
+        unit: app_commands.Choice[str],
+    ) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        duration_seconds = _resolve_duration_seconds(quantity, unit.value)
+        stored = await _set_users_grace_tempban_default_seconds(interaction.guild_id, duration_seconds)
+        await _send(
+            interaction,
+            subcommand_path="users grace tempban_set",
+            lines=[("default_tempban", format_duration_human(stored)), ("result", "updated")],
+            kind="success",
+        )
+
+    @grace_group.command(name="tempban_show", description="Show the default tempban applied when a manual grace expires.")
+    async def users_grace_tempban_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        seconds = await _get_users_grace_tempban_default_seconds(interaction.guild_id)
+        await _send(
+            interaction,
+            subcommand_path="users grace tempban_show",
+            lines=[("default_tempban", format_duration_human(seconds)), ("seconds", seconds)],
+        )
+
+    @grace_group.command(name="tempban_reset", description="Disable the automatic tempban applied after manual grace.")
+    async def users_grace_tempban_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        stored = await _set_users_grace_tempban_default_seconds(interaction.guild_id, 0)
+        await _send(
+            interaction,
+            subcommand_path="users grace tempban_reset",
+            lines=[("default_tempban", format_duration_human(stored)), ("result", "reset")],
+            kind="success",
+        )
+
+    users_group.add_command(grace_group)
 
     @users_group.command(name="grace_list", description="List active grace periods.")
     async def users_grace_list(interaction: discord.Interaction) -> None:

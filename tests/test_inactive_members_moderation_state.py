@@ -115,3 +115,50 @@ def test_execute_kick_pipeline_uses_operation_id_and_hides_inactive_kick_when_te
         assert member_flow_notifications.send_notification.await_args.kwargs["action_type"] == "inactive_tempban"
 
     asyncio.run(_run())
+
+
+def test_run_due_unbans_applies_auto_tempban_after_manual_grace() -> None:
+    async def _run() -> None:
+        sys.modules["discord"].Object = lambda id: SimpleNamespace(id=id)
+        guild = SimpleNamespace(id=1, unban=AsyncMock(), ban=AsyncMock())
+        database = SimpleNamespace(
+            list_due_temp_unbans=AsyncMock(return_value=[]),
+            list_due_manual_grace=AsyncMock(return_value=[{"id": "g1", "guild_id": "1", "user_id": "42"}]),
+            get_setting=AsyncMock(return_value="7200"),
+            log_moderation_action=AsyncMock(),
+            add_temp_ban=AsyncMock(),
+            clear_user_ban_state=AsyncMock(),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        await service._run_due_unbans()
+
+        guild.ban.assert_awaited_once()
+        database.add_temp_ban.assert_awaited_once()
+        assert database.log_moderation_action.await_count == 2
+        assert database.log_moderation_action.await_args_list[0].kwargs["action_type"] == "ungrace"
+        assert database.log_moderation_action.await_args_list[1].kwargs["action_type"] == "tempban"
+        assert database.log_moderation_action.await_args_list[1].kwargs["duration_seconds"] == 7200
+
+    asyncio.run(_run())
+
+
+def test_run_due_unbans_skips_auto_tempban_after_reset_to_zero() -> None:
+    async def _run() -> None:
+        guild = SimpleNamespace(id=1, unban=AsyncMock(), ban=AsyncMock())
+        database = SimpleNamespace(
+            list_due_temp_unbans=AsyncMock(return_value=[]),
+            list_due_manual_grace=AsyncMock(return_value=[{"id": "g1", "guild_id": "1", "user_id": "42"}]),
+            get_setting=AsyncMock(return_value="0"),
+            log_moderation_action=AsyncMock(),
+            add_temp_ban=AsyncMock(),
+            clear_user_ban_state=AsyncMock(),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        await service._run_due_unbans()
+
+        guild.ban.assert_not_awaited()
+        database.add_temp_ban.assert_not_awaited()
+        assert database.log_moderation_action.await_count == 1
+        assert database.log_moderation_action.await_args.kwargs["action_type"] == "ungrace"
+
+    asyncio.run(_run())
