@@ -759,6 +759,94 @@ def test_send_notification_manual_grace_expired_auto_tempban_uses_tempban_title_
     asyncio.run(_run())
 
 
+
+
+def test_send_notification_auto_tempban_after_grace_variants_share_ui_contract(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append({"embed": embed, "files": files})
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel if channel_id == 77 else None
+
+        def get_member(self, member_id: int):
+            if member_id != 42:
+                return None
+            return types.SimpleNamespace(
+                id=42,
+                mention="<@42>",
+                name="new_user",
+                display_name="New User",
+                display_avatar=types.SimpleNamespace(url="https://example.test/avatar-from-guild.png"),
+            )
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user_without_avatar = types.SimpleNamespace(id=42, mention="<@42>", name="new_user", display_name="New User")
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user_without_avatar,
+            action_type="tempban",
+            canonical_event={
+                "event_type_key": "tempban",
+                "reason": "Automatic tempban after manual grace expiry",
+                "duration_seconds": 2 * 86400,
+                "visible_in_greetings": True,
+                "metadata": {
+                    "occurrence_number": 10,
+                    "greetings_origin": "manual_grace_expired_auto_tempban",
+                    "greetings_reason": "",
+                },
+            },
+        )
+
+        await service.send_notification(
+            guild=guild,
+            user=user_without_avatar,
+            action_type="inactive_tempban",
+            canonical_event={
+                "event_type_key": "inactive_tempban",
+                "reason": "Inattività prolungata",
+                "duration_seconds": 2 * 86400,
+                "visible_in_greetings": True,
+                "metadata": {
+                    "occurrence_number": 10,
+                    "greetings_origin": "inactive_grace_expired_auto_tempban",
+                    "greetings_reason": "",
+                },
+            },
+        )
+
+        manual_embed = channel.sent[0]["embed"]
+        inactivity_embed = channel.sent[1]["embed"]
+
+        for payload in (manual_embed, inactivity_embed):
+            assert payload.title == "⌛ __**INTERDIZIONE TEMPORANEA**__"
+            assert payload.thumbnail.url == "https://example.test/avatar-from-guild.png"
+            assert payload.fields == []
+            assert payload.description is not None
+            normalized_end = payload.description.rstrip("*_~` \n\t")
+            assert normalized_end.endswith(".")
+            assert ".." not in payload.description
+            assert "periodo di grazia è scaduto" in payload.description.lower()
+
+        assert manual_embed.description == inactivity_embed.description
+
+    asyncio.run(_run())
+
 def test_member_flow_renderer_source_mentions_final_author_title_layout() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
 

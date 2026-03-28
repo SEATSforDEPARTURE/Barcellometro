@@ -141,6 +141,7 @@ async def generate_member_flow_card(
 class MemberFlowNotificationsService:
     def __init__(self, database: Any, bot: discord.Client, *, barcello_service: Any | None = None) -> None:
         self._database = database
+        self._bot = bot
         self._copy_service = GreetingsCopyService(database, barcello_service=barcello_service)
         self._recent_departures: dict[tuple[str, str], tuple[str, datetime]] = {}
 
@@ -330,6 +331,7 @@ class MemberFlowNotificationsService:
             return
 
         created_at = datetime.now(timezone.utc)
+        render_user = await self._resolve_notification_user(guild=guild, user=user)
         canonical_payload = canonical_event or self._build_fallback_canonical_event(
             action_type=action_type,
             reason=reason,
@@ -349,7 +351,7 @@ class MemberFlowNotificationsService:
         }
         copy = await self._copy_service.render_canonical_event_copy(
             guild=guild,
-            user=user,
+            user=render_user,
             canonical_event=canonical_payload,
             moderator=moderator,
             channel_id=str(notify_channel_id),
@@ -371,7 +373,7 @@ class MemberFlowNotificationsService:
             service_name="member_flow_notifications",
             canonical_top_level_command="greetings",
         )
-        avatar_url = self._resolve_user_avatar_url(user)
+        avatar_url = self._resolve_user_avatar_url(render_user)
         if avatar_url:
             embed.set_thumbnail(url=avatar_url)
         attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)
@@ -379,13 +381,48 @@ class MemberFlowNotificationsService:
         files: list[discord.File] = []
         if bool(cfg["notify_card_enabled"]):
             label = "WELCOME" if action_type == "join" else "GOODBYE"
-            card = await generate_member_flow_card(member=user, guild_name=guild.name, event_label=label)
+            card = await generate_member_flow_card(member=render_user, guild_name=guild.name, event_label=label)
             if card is not None:
                 files.append(card)
         try:
             await channel.send(embed=embed, files=files or None)
         except Exception:
             logger.warning("member flow notification send failed guild=%s action=%s", guild.id, action_type, exc_info=True)
+
+    async def _resolve_notification_user(
+        self,
+        *,
+        guild: discord.Guild,
+        user: discord.abc.User | discord.Member,
+    ) -> discord.abc.User | discord.Member:
+        if self._resolve_user_avatar_url(user):
+            return user
+        user_id = getattr(user, "id", None)
+        if user_id is None:
+            return user
+        try:
+            member = guild.get_member(int(user_id))
+        except Exception:
+            member = None
+        if member is not None and self._resolve_user_avatar_url(member):
+            return member
+        fetch_member = getattr(guild, "fetch_member", None)
+        if callable(fetch_member):
+            try:
+                fetched_member = await fetch_member(int(user_id))
+            except Exception:
+                fetched_member = None
+            if fetched_member is not None and self._resolve_user_avatar_url(fetched_member):
+                return fetched_member
+        fetch_user = getattr(self._bot, "fetch_user", None)
+        if callable(fetch_user):
+            try:
+                fetched_user = await fetch_user(int(user_id))
+            except Exception:
+                fetched_user = None
+            if fetched_user is not None and self._resolve_user_avatar_url(fetched_user):
+                return fetched_user
+        return user
 
     @staticmethod
     def _colour_for_event_type(event_type_key: str) -> int:
