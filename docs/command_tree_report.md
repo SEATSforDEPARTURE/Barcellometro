@@ -2,9 +2,9 @@
 
 Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.
 
-- Commands discovered: **332**
+- Commands discovered: **322**
 - Errors: **0**
-- Warnings: **62**
+- Warnings: **65**
 
 ## Inventory
 
@@ -32,7 +32,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `aura` | `—` | `off` | Disable Aura summary. | `app/plugins/commands_modular/aura.py:470` |
 | `aura` | `—` | `on` | Enable Aura summary. | `app/plugins/commands_modular/aura.py:466` |
 | `aura` | `—` | `status` | Show Aura summary status. | `app/plugins/commands_modular/aura.py:474` |
-| `ban` | `—` | `ban` | Alias of /users ban. | `app/plugins/commands_modular/moderazione_utenti.py:1017` |
+| `ban` | `—` | `ban` | Alias of /users ban. | `app/plugins/commands_modular/moderazione_utenti.py:976` |
 | `barcello` | `—` | `ieri` | Mostra lo stato del barcello di ieri (in DM) | `app/plugins/commands_modular/barcello.py:1906` |
 | `barcello` | `—` | `intervallo` | Mostra lo stato del barcello per intervallo. | `app/plugins/commands_modular/barcello.py:1933` |
 | `barcello` | `—` | `oggi` | Mostra lo stato del barcello di oggi (in DM) | `app/plugins/commands_modular/barcello.py:1898` |
@@ -175,7 +175,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `embed` | `images` | `template_service_reset` | Reset service-level image and thumbnail templates. | `app/plugins/commands_modular/embed.py:1125` |
 | `embed` | `images` | `template_service_set` | Set service-level image and thumbnail templates. | `app/plugins/commands_modular/embed.py:1063` |
 | `embed` | `images` | `template_service_show` | Show service-level image and thumbnail templates. | `app/plugins/commands_modular/embed.py:1099` |
-| `grace` | `—` | `grace` | Alias of /users grace. | `app/plugins/commands_modular/moderazione_utenti.py:1067` |
+| `grace` | `—` | `grace` | Alias of /users grace. | `app/plugins/commands_modular/moderazione_utenti.py:1016` |
 | `greetings` | `backfill` | `off` | Disable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:105` |
 | `greetings` | `backfill` | `on` | Enable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:94` |
 | `greetings` | `backfill` | `run` | Run greetings timeline backfill now. | `app/plugins/commands_modular/greetings.py:122` |
@@ -227,7 +227,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `inactivity` | `tempban` | `off` | Disable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:296` |
 | `inactivity` | `tempban` | `on` | Enable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:287` |
 | `inactivity` | `tempban` | `status` | Show the inactivity tempban status. | `app/plugins/commands_modular/inattivi.py:303` |
-| `kick` | `—` | `kick` | Alias of /users kick. | `app/plugins/commands_modular/moderazione_utenti.py:1012` |
+| `kick` | `—` | `kick` | Alias of /users kick. | `app/plugins/commands_modular/moderazione_utenti.py:971` |
 | `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:90` |
 | `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:68` |
 | `privacy` | `—` | `status` | Show the current voice privacy status. | `app/plugins/commands_modular/privacy.py:113` |
@@ -279,7 +279,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `status` | `—` | `mood_set` | Set the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:144` |
 | `status` | `—` | `mood_show` | Show the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:198` |
 | `status` | `—` | `show` | Show the Barcellometro status. | `app/plugins/commands_modular/status.py:102` |
-| `tempban` | `—` | `tempban` | Alias of /users tempban. | `app/plugins/commands_modular/moderazione_utenti.py:1050` |
+| `tempban` | `—` | `tempban` | Alias of /users tempban. | `app/plugins/commands_modular/moderazione_utenti.py:999` |
 | `triggers` | `barcello` | `calibrate` | Recalculate Barcello calibration weights. | `app/plugins/commands_modular/barcello.py:205` |
 | `triggers` | `barcello` | `off` | Disable Barcello triggers in the current channel. | `app/plugins/commands_modular/barcello.py:197` |
 | `triggers` | `barcello` | `on` | Enable Barcello triggers in the current channel. | `app/plugins/commands_modular/barcello.py:193` |
@@ -302,49 +302,42 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `triggers` | `phrases` | `template_user_reset` | Reset a user-specific phrase template | `app/plugins/commands_modular/triggers.py:628` |
 | `triggers` | `phrases` | `template_user_set` | Set a user-specific phrase template | `app/plugins/commands_modular/triggers.py:598` |
 | `triggers` | `phrases` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:615` |
-| `unban` | `—` | `unban` | Alias of /users unban. | `app/plugins/commands_modular/moderazione_utenti.py:1022` |
-| `ungrace` | `—` | `ungrace` | Alias of /users ungrace. | `app/plugins/commands_modular/moderazione_utenti.py:1078` |
-| `untempban` | `—` | `untempban` | Alias of /users untempban. | `app/plugins/commands_modular/moderazione_utenti.py:1030` |
 | `users` | `—` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:714` |
 | `users` | `—` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:718` |
-| `users` | `—` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:916` |
-| `users` | `—` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:926` |
+| `users` | `—` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:848` |
+| `users` | `—` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:858` |
+| `users` | `—` | `ieri` | Revoca le azioni create ieri. | `app/plugins/commands_modular/moderazione_utenti.py:935` |
+| `users` | `—` | `intervallo` | Revoca le azioni create in un intervallo esplicito. | `app/plugins/commands_modular/moderazione_utenti.py:955` |
 | `users` | `—` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:705` |
 | `users` | `—` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:709` |
-| `users` | `—` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:895` |
-| `users` | `—` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:905` |
-| `users` | `unban` | `ieri` | Revoca i ban creati ieri. | `app/plugins/commands_modular/moderazione_utenti.py:754` |
-| `users` | `unban` | `intervallo` | Revoca i ban creati in un intervallo esplicito. | `app/plugins/commands_modular/moderazione_utenti.py:798` |
-| `users` | `unban` | `last` | Revoke bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:760` |
-| `users` | `unban` | `oggi` | Revoca i ban creati oggi. | `app/plugins/commands_modular/moderazione_utenti.py:744` |
-| `users` | `unban` | `range` | Revoke bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:789` |
+| `users` | `—` | `oggi` | Revoca le azioni create oggi. | `app/plugins/commands_modular/moderazione_utenti.py:930` |
+| `users` | `—` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:827` |
+| `users` | `—` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:837` |
+| `users` | `—` | `ultimi` | Revoca le azioni create nella finestra mobile. | `app/plugins/commands_modular/moderazione_utenti.py:941` |
+| `users` | `unban` | `last` | Revoke bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:750` |
+| `users` | `unban` | `range` | Revoke bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:764` |
 | `users` | `unban` | `today` | Revoke bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:739` |
-| `users` | `unban` | `ultimi` | Revoca i ban creati nella finestra mobile. | `app/plugins/commands_modular/moderazione_utenti.py:775` |
 | `users` | `unban` | `user` | Revoke an active ban for one user. | `app/plugins/commands_modular/moderazione_utenti.py:731` |
-| `users` | `unban` | `yesterday` | Revoke bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:749` |
-| `users` | `ungrace` | `ieri` | Revoca i grace creati ieri. | `app/plugins/commands_modular/moderazione_utenti.py:980` |
-| `users` | `ungrace` | `intervallo` | Revoca i grace creati in un intervallo esplicito. | `app/plugins/commands_modular/moderazione_utenti.py:1000` |
-| `users` | `ungrace` | `last` | Revoke grace periods created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:952` |
-| `users` | `ungrace` | `oggi` | Revoca i grace creati oggi. | `app/plugins/commands_modular/moderazione_utenti.py:975` |
-| `users` | `ungrace` | `range` | Revoke grace periods created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:966` |
-| `users` | `ungrace` | `today` | Revoke grace periods created today. | `app/plugins/commands_modular/moderazione_utenti.py:941` |
-| `users` | `ungrace` | `ultimi` | Revoca i grace creati nella finestra mobile. | `app/plugins/commands_modular/moderazione_utenti.py:986` |
-| `users` | `ungrace` | `user` | Revoke an active grace period for one user. | `app/plugins/commands_modular/moderazione_utenti.py:933` |
-| `users` | `ungrace` | `yesterday` | Revoke grace periods created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:946` |
-| `users` | `untempban` | `ieri` | Revoca i temp ban creati ieri. | `app/plugins/commands_modular/moderazione_utenti.py:858` |
-| `users` | `untempban` | `intervallo` | Revoca i temp ban creati in un intervallo esplicito. | `app/plugins/commands_modular/moderazione_utenti.py:878` |
-| `users` | `untempban` | `last` | Revoke temporary bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:830` |
-| `users` | `untempban` | `oggi` | Revoca i temp ban creati oggi. | `app/plugins/commands_modular/moderazione_utenti.py:853` |
-| `users` | `untempban` | `range` | Revoke temporary bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:844` |
-| `users` | `untempban` | `today` | Revoke temporary bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:819` |
-| `users` | `untempban` | `ultimi` | Revoca i temp ban creati nella finestra mobile. | `app/plugins/commands_modular/moderazione_utenti.py:864` |
-| `users` | `untempban` | `user` | Revoke an active temporary ban for one user. | `app/plugins/commands_modular/moderazione_utenti.py:811` |
-| `users` | `untempban` | `yesterday` | Revoke temporary bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:824` |
+| `users` | `unban` | `yesterday` | Revoke bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:744` |
+| `users` | `ungrace` | `last` | Revoke grace periods created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:884` |
+| `users` | `ungrace` | `range` | Revoke grace periods created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:898` |
+| `users` | `ungrace` | `today` | Revoke grace periods created today. | `app/plugins/commands_modular/moderazione_utenti.py:873` |
+| `users` | `ungrace` | `user` | Revoke an active grace period for one user. | `app/plugins/commands_modular/moderazione_utenti.py:865` |
+| `users` | `ungrace` | `yesterday` | Revoke grace periods created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:878` |
+| `users` | `untempban` | `last` | Revoke temporary bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:796` |
+| `users` | `untempban` | `range` | Revoke temporary bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:810` |
+| `users` | `untempban` | `today` | Revoke temporary bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:785` |
+| `users` | `untempban` | `user` | Revoke an active temporary ban for one user. | `app/plugins/commands_modular/moderazione_utenti.py:777` |
+| `users` | `untempban` | `yesterday` | Revoke temporary bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:790` |
+| `users` | `—` | `user` |  | `app/plugins/commands_modular/moderazione_utenti.py:913` |
 | `voice_ingest` | `—` | `join` | Join a voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:24` |
 | `voice_ingest` | `—` | `leave` | Leave the current voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:48` |
 
 ## Issues
 
+- **WARNING localized_description** — `users.ieri`: Command description looks non-English. (`app/plugins/commands_modular/moderazione_utenti.py:935`)
+- **WARNING localized_description** — `users.oggi`: Command description looks non-English. (`app/plugins/commands_modular/moderazione_utenti.py:930`)
+- **WARNING missing_description** — `users.user`: Command description is missing. (`app/plugins/commands_modular/moderazione_utenti.py:913`)
 - **WARNING missing_param_description** — `barcello.intervallo`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/barcello.py:1933`)
 - **WARNING missing_param_description** — `barcello.intervallo`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/barcello.py:1933`)
 - **WARNING missing_param_description** — `barcello.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/barcello.py:1923`)
@@ -460,18 +453,6 @@ The following commands remain intentionally localized and are excluded from the 
 - `riassunto.off`
 - `riassunto.on`
 - `riassunto.status`
-- `users.unban.ieri`
-- `users.unban.intervallo`
-- `users.unban.oggi`
-- `users.unban.ultimi`
-- `users.ungrace.ieri`
-- `users.ungrace.intervallo`
-- `users.ungrace.oggi`
-- `users.ungrace.ultimi`
-- `users.untempban.ieri`
-- `users.untempban.intervallo`
-- `users.untempban.oggi`
-- `users.untempban.ultimi`
 
 ## Usage
 

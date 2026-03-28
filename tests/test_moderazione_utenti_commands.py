@@ -131,9 +131,23 @@ def test_users_alias_revocation_commands_use_nick_or_id_parameter() -> None:
     register_moderazione_utenti(group, ctx, alias_commands=aliases)
 
     by_name = {command.name: command for command in aliases}
-    assert [param.name for param in by_name["unban"].parameters] == ["nick_or_id", "reason"]
-    assert [param.name for param in by_name["untempban"].parameters] == ["nick_or_id", "reason"]
-    assert [param.name for param in by_name["ungrace"].parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in _find_command(by_name["unban"], "user").parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in _find_command(by_name["untempban"], "user").parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in _find_command(by_name["ungrace"], "user").parameters] == ["nick_or_id", "reason"]
+
+
+def test_users_alias_revocation_groups_use_italian_temporal_variants_only() -> None:
+    group = discord.app_commands.Group(name="users", description="x")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+    aliases: list[discord.app_commands.Command | discord.app_commands.Group] = []
+
+    register_moderazione_utenti(group, ctx, alias_commands=aliases)
+
+    by_name = {command.name: command for command in aliases}
+    expected = {"user", "oggi", "ieri", "ultimi", "intervallo"}
+    assert {cmd.name for cmd in by_name["unban"].commands} == expected
+    assert {cmd.name for cmd in by_name["untempban"].commands} == expected
+    assert {cmd.name for cmd in by_name["ungrace"].commands} == expected
 
 
 def test_users_alias_tempban_and_grace_expose_quantity_unit_not_duration() -> None:
@@ -587,6 +601,57 @@ def test_mod_users_batch_revocations_support_today_yesterday_last_range_for_all_
     asyncio.run(_run())
 
 
+def test_alias_batch_revocations_support_oggi_ieri_ultimi_intervallo_for_all_modes(monkeypatch) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        guild = SimpleNamespace(id=1, unban=AsyncMock())
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="alias test"))
+
+        for mode in ("unban", "untempban", "ungrace"):
+            database = SimpleNamespace(
+                clear_user_ban_state=AsyncMock(),
+                revoke_user_grace_state=AsyncMock(),
+                fetch_user_display_name=AsyncMock(return_value="Dormiente"),
+                list_active_bans=AsyncMock(return_value=[{"user_id": "42"}]),
+                list_active_tempbans=AsyncMock(return_value=[{"user_id": "42"}]),
+                list_active_grace_users=AsyncMock(return_value=[{"user_id": "42"}]),
+            )
+            ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+            users_group = discord.app_commands.Group(name="users", description="users")
+            aliases: list[discord.app_commands.Command | discord.app_commands.Group] = []
+            register_moderazione_utenti(users_group, ctx, alias_commands=aliases)
+            mode_group = next(command for command in aliases if isinstance(command, discord.app_commands.Group) and command.name == mode)
+
+            await _find_command(mode_group, "oggi").callback(interaction, "batch")
+            await _find_command(mode_group, "ieri").callback(interaction, "batch")
+
+            unit = discord.app_commands.Choice(name="ore", value="ore")
+            await _find_command(mode_group, "ultimi").callback(interaction, 2, unit, "batch")
+            await _find_command(mode_group, "intervallo").callback(interaction, "20/03/2026 10:00", "21/03/2026 10:00", "batch")
+
+            paths = [call.kwargs["subcommand_path"] for call in send_standard_response.await_args_list[-4:]]
+            assert paths == [
+                f"{mode} oggi",
+                f"{mode} ieri",
+                f"{mode} ultimi",
+                f"{mode} intervallo",
+            ]
+            if mode == "ungrace":
+                assert database.revoke_user_grace_state.await_count == 4
+                assert database.list_active_grace_users.await_count == 4
+            elif mode == "untempban":
+                assert database.clear_user_ban_state.await_count == 4
+                assert database.list_active_tempbans.await_count == 4
+            else:
+                assert database.clear_user_ban_state.await_count == 4
+                assert database.list_active_bans.await_count == 4
+
+    asyncio.run(_run())
+
+
 def test_users_tempban_and_grace_expose_quantity_unit_not_duration() -> None:
     users_group = discord.app_commands.Group(name="users", description="users")
     ctx = SimpleNamespace(
@@ -632,7 +697,7 @@ def test_users_unban_untempban_ungrace_groups_include_temporal_variants() -> Non
     ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
     register_moderazione_utenti(users_group, ctx)
 
-    expected = {"user", "today", "yesterday", "last", "range", "oggi", "ieri", "ultimi", "intervallo"}
+    expected = {"user", "today", "yesterday", "last", "range"}
     assert {cmd.name for cmd in _find_command(users_group, "unban").commands} == expected
     assert {cmd.name for cmd in _find_command(users_group, "untempban").commands} == expected
     assert {cmd.name for cmd in _find_command(users_group, "ungrace").commands} == expected
