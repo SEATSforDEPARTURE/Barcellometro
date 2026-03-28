@@ -22,6 +22,7 @@ class _FakeDatabase:
             "total": 2,
             "ok": 1,
             "fail": 1,
+            "skipped": 0,
             "by_event": [{"event_type": "grace", "total": 1}, {"event_type": "tempban", "total": 1}],
             "latest_success": {"user_id": "11", "sent_at": "2026-01-01T10:00:00+00:00", "reason": "ok"},
             "latest_fail": {"user_id": "12", "sent_at": "2026-01-01T11:00:00+00:00", "reason": "fail", "error_summary": "Forbidden"},
@@ -121,6 +122,7 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert as_map["invite_url"] == "not set"
         assert as_map["dm_sent_ok"] == 1
         assert as_map["dm_sent_fail"] == 1
+        assert as_map["dm_sent_skipped"] == 0
         assert as_map["dm_events_by_type"] == "grace=1, tempban=1"
         assert "user=11" in as_map["last_success"]
         assert "user=12" in as_map["last_fail"]

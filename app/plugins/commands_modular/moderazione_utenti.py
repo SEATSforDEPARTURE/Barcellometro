@@ -11,7 +11,6 @@ import discord
 from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
-from app.plugins.commands_modular.placeholders import describe_placeholders
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import (
     TimeWindowResult,
@@ -23,7 +22,11 @@ from app.plugins.commands_modular.time_windows import (
 )
 from app.services.greetings_copy_service import GreetingsCopyService
 from app.services.member_flow_notifications import format_duration_human
-from app.services.users_moderation_dms import DEFAULT_USERS_DM_COOLDOWN_DAYS, UsersModerationDmService
+from app.services.users_moderation_dms import (
+    DEFAULT_USERS_DM_COOLDOWN_DAYS,
+    USERS_DM_SUPPORTED_PLACEHOLDERS,
+    UsersModerationDmService,
+)
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 
 logger = logging.getLogger(__name__)
@@ -47,7 +50,11 @@ WINDOW_ACTION_LABELS = {
     "ungrace": "grace",
 }
 USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
-USERS_DM_TEMPLATE_HELP = f"Supported placeholders: {describe_placeholders()} Example: {{user}}, {{expires_at_utc}}."
+USERS_DM_TEMPLATE_HELP = (
+    "Supported placeholders: "
+    + ", ".join(f"{{{name}}}" for name in USERS_DM_SUPPORTED_PLACEHOLDERS)
+    + ". Example: {user}, {expires_at_utc}."
+)
 ROME_TZ = ZoneInfo("Europe/Rome")
 
 
@@ -1109,12 +1116,19 @@ def register_moderazione_utenti(
                 ("invite_url", cfg.get("invite_url") or "not set"),
                 ("dm_sent_ok", int(stats.get("ok", 0))),
                 ("dm_sent_fail", int(stats.get("fail", 0))),
+                ("dm_sent_skipped", int(stats.get("skipped", 0))),
                 ("dm_events_total", int(stats.get("total", 0))),
                 ("dm_events_by_type", event_summary),
                 ("last_success", f"user={latest_success.get('user_id', 'n/a')} at {_fmt_utc(latest_success.get('sent_at'))} reason={latest_success.get('reason') or 'n/a'}"),
                 ("last_fail", f"user={latest_fail.get('user_id', 'n/a')} at {_fmt_utc(latest_fail.get('sent_at'))} reason={latest_fail.get('reason') or 'n/a'} error={latest_fail.get('error_summary') or 'n/a'}"),
             ],
-            sections=[CommandEmbedSection(title="Recent DM deliveries", lines=recent_lines or ["No DM deliveries logged yet."])],
+            sections=[
+                CommandEmbedSection(title="Recent DM deliveries", lines=recent_lines or ["No DM deliveries logged yet."]),
+                CommandEmbedSection(
+                    title="Supported placeholders",
+                    lines=[f"{{{name}}}" for name in USERS_DM_SUPPORTED_PLACEHOLDERS],
+                ),
+            ],
         )
 
     @dms_group.command(name="template_grace_set", description="Set the DM template for manual grace entry.")

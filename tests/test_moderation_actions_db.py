@@ -303,18 +303,29 @@ def test_users_dm_config_and_delivery_log_tracks_stats_and_recent_events(tmp_pat
             error_summary="Forbidden",
             metadata={"source": "test"},
         )
+        await db.log_users_dm_delivery(
+            guild_id="1",
+            user_id="12",
+            event_type="tempban",
+            reason="expired grace",
+            sent_at="2026-01-01T12:00:00+00:00",
+            outcome="skipped",
+            error_summary="cooldown",
+            metadata={"source": "test"},
+        )
 
         stats = await db.get_users_dm_delivery_stats("1")
         recent = await db.list_users_dm_delivery_events("1", limit=2)
         latest_grace = await db.get_latest_users_dm_delivery("1", "10", "grace")
 
-        assert stats["total"] == 2
+        assert stats["total"] == 3
         assert stats["ok"] == 1
         assert stats["fail"] == 1
-        assert stats["by_event"] == [{"event_type": "grace", "total": 1}, {"event_type": "tempban", "total": 1}]
+        assert stats["skipped"] == 1
+        assert stats["by_event"] == [{"event_type": "tempban", "total": 2}, {"event_type": "grace", "total": 1}]
         assert stats["latest_success"]["user_id"] == "10"
         assert stats["latest_fail"]["error_summary"] == "Forbidden"
-        assert [row["user_id"] for row in recent] == ["11", "10"]
+        assert [row["user_id"] for row in recent] == ["12", "11"]
         assert latest_grace is not None
         assert latest_grace["event_type"] == "grace"
 
