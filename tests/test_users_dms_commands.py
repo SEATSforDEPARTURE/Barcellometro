@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 import discord
 import pytest
 
+from app.services.users_moderation_dms import USERS_DM_SUPPORTED_PLACEHOLDERS
+
 
 class _FakeDatabase:
     def __init__(self) -> None:
@@ -126,5 +128,9 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert as_map["dm_events_by_type"] == "grace=1, tempban=1"
         assert "user=11" in as_map["last_success"]
         assert "user=12" in as_map["last_fail"]
+        sections = send_response.await_args_list[-1].kwargs["sections"]
+        assert sections[1].title == "Supported placeholders"
+        assert sections[1].lines == [f"{{{name}}}" for name in USERS_DM_SUPPORTED_PLACEHOLDERS]
+        assert "{mention}" in sections[1].lines
 
     asyncio.run(_run())

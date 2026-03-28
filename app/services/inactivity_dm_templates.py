@@ -4,7 +4,10 @@ from typing import Any
 
 import discord
 
+from app.services.dm_user_placeholders import build_user_placeholder_payload
+
 INACTIVITY_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
+    "mention",
     "user",
     "username",
     "display_name",
@@ -37,10 +40,9 @@ def build_inactivity_dm_template_payload(
     inactivity_text: str | None = None,
 ) -> dict[str, Any]:
     return {
-        "user": member.mention,
+        **build_user_placeholder_payload(member),
         "username": member.display_name,
         "display_name": member.display_name,
-        "user_id": member.id,
         "server": guild.name,
         "guild_id": guild.id,
         "days_inactive": days_inactive,

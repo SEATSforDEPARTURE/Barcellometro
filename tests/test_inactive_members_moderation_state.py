@@ -303,7 +303,7 @@ def test_execute_reminders_logs_dm_delivery_outcomes() -> None:
             return_value=(
                 [candidate_ok, candidate_fail],
                 2,
-                {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7, "template_grace": "Grace {user}"},
+                {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7, "template_grace": "Grace {mention} ({user})"},
             )
         )
 
@@ -314,7 +314,7 @@ def test_execute_reminders_logs_dm_delivery_outcomes() -> None:
         sent_embed = member_ok.send.await_args.kwargs["embed"]
         assert sent_embed.title.startswith("🔔")
         assert "PROMEMORIA INATTIVITÀ" in sent_embed.title
-        assert "Grace <@42>" in str(sent_embed.description)
+        assert "Grace <@42> (<@42>)" in str(sent_embed.description)
         assert sent_embed.author.name
         assert sent_embed.footer.text
         database.mark_user_reminded.assert_awaited_once()
@@ -411,7 +411,7 @@ def test_execute_kick_pipeline_uses_template_tempban_and_logs_tempban_dm_deliver
                 {
                     "grace_days_after_reminder": 7,
                     "ban_days": 3,
-                    "template_tempban": "Tempban {user} rientra: {rejoin_link}",
+                    "template_tempban": "Tempban {mention} ({user}) rientra: {rejoin_link}",
                     "invite_url": "https://example.test/invite",
                 },
             )
@@ -424,7 +424,7 @@ def test_execute_kick_pipeline_uses_template_tempban_and_logs_tempban_dm_deliver
         assert result["ban_ok"] == 1
         sent_embed = member.send.await_args.kwargs["embed"]
         assert "TEMPBAN INATTIVITÀ" in sent_embed.title
-        assert "Tempban <@42>" in str(sent_embed.description)
+        assert "Tempban <@42> (<@42>)" in str(sent_embed.description)
         assert "https://example.test/invite" in str(sent_embed.description)
         database.log_inactivity_dm_delivery.assert_awaited_once()
         assert database.log_inactivity_dm_delivery.await_args.kwargs["event_type"] == "tempban"

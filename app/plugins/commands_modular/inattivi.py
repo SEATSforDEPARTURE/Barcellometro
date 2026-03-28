@@ -18,7 +18,7 @@ DEFAULT_GRACE_DAYS = 7
 DEFAULT_REMINDER_COOLDOWN_DAYS = 14
 DEFAULT_TEMPBAN_DAYS = 7
 DEFAULT_POLICY_JSON = '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR","min_account_age_days":0}'
-TEMPLATE_HELP = f"Supported placeholders: {describe_placeholders()} Example: {{display_name}}, {{days_inactive}}."
+TEMPLATE_HELP = f"Supported placeholders: {describe_placeholders()} Example: {{mention}}, {{days_inactive}}."
 
 
 def _normalize_mode(mode: str) -> str:
@@ -95,6 +95,7 @@ def _policy_summary(policy: dict[str, object]) -> str:
 
 def _render_template_preview(template: str) -> str:
     sample = {
+        "mention": "<@1234567890>",
         "user": "@ExampleUser",
         "username": "ExampleUser",
         "display_name": "Example",

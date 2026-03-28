@@ -6,6 +6,7 @@ from typing import Any
 import discord
 
 from app.services.database import DatabaseService
+from app.services.dm_user_placeholders import build_user_placeholder_payload
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 
 DEFAULT_USERS_DM_COOLDOWN_DAYS = 14
@@ -18,6 +19,7 @@ DEFAULT_USERS_DM_TEMPBAN_TEMPLATE = (
     "has started for {duration_human}. {reason_line}{invite_line}"
 )
 USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
+    "mention",
     "user",
     "username",
     "display_name",
@@ -297,10 +299,7 @@ class UsersModerationDmService:
         safe_invite = str(invite_url or "").strip()
         expires = expires_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if expires_at else "n/a"
         payload = {
-            "user": user.mention,
-            "username": str(getattr(user, "name", "")),
-            "display_name": str(getattr(user, "display_name", getattr(user, "name", ""))),
-            "user_id": str(user.id),
+            **build_user_placeholder_payload(user),
             "server": guild.name,
             "guild_id": str(guild.id),
             "event_type": event_type,

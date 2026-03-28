@@ -53,7 +53,7 @@ USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
 USERS_DM_TEMPLATE_HELP = (
     "Supported placeholders: "
     + ", ".join(f"{{{name}}}" for name in USERS_DM_SUPPORTED_PLACEHOLDERS)
-    + ". Example: {user}, {expires_at_utc}."
+    + ". Example: {mention}, {expires_at_utc}."
 )
 ROME_TZ = ZoneInfo("Europe/Rome")
 
@@ -149,6 +149,7 @@ def _format_italian_datetime(value: object) -> str | None:
 
 def _render_users_dm_template_preview(template: str) -> str:
     sample = {
+        "mention": "<@1234567890>",
         "user": "@ExampleUser",
         "username": "ExampleUser",
         "display_name": "Example",

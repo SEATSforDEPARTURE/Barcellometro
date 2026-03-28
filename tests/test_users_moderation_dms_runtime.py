@@ -20,8 +20,8 @@ class _FakeDb:
             "enabled": enabled,
             "cooldown_days": cooldown_days,
             "invite_url": invite_url,
-            "grace_template": "GRACE {user} {duration_human} {expires_at_utc} {reason_line}{invite_line}",
-            "tempban_template": "TEMPBAN {user} {duration_human} {expires_at_utc} {reason_line}{invite_line}",
+            "grace_template": "GRACE {mention} ({user}) {duration_human} {expires_at_utc} {reason_line}{invite_line}",
+            "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {expires_at_utc} {reason_line}{invite_line}",
         }
         self.latest: dict[tuple[str, str, str], dict[str, str]] = {}
         self.logs: list[dict[str, object]] = []
@@ -82,6 +82,7 @@ def test_users_dm_manual_grace_renders_template_and_logs_success() -> None:
         assert sent_embed.title.startswith("🛡️")
         assert "GRACE MANUALE ATTIVATO" in sent_embed.title
         assert "Manual grace reason" in str(sent_embed.description)
+        assert "GRACE <@42> (<@42>)" in str(sent_embed.description)
         assert "https://discord.gg/server" in str(sent_embed.description)
         assert sent_embed.author.name
         assert sent_embed.footer.text
@@ -187,7 +188,7 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
                     "cooldown_days": 14,
                     "invite_url": "https://discord.gg/rejoin",
                     "grace_template": "GRACE {user}",
-                    "tempban_template": "AUTO TEMPBAN {user} {duration_human} {invite_line}",
+                    "tempban_template": "AUTO TEMPBAN {mention} ({user}) {duration_human} {invite_line}",
                 }
             ),
             get_latest_users_dm_delivery=AsyncMock(return_value=None),
@@ -206,7 +207,7 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
         dm_embed = user.send.await_args.kwargs["embed"]
         assert dm_embed.title.startswith("🔨")
         assert "BAN TEMPORANEO AUTOMATICO" in dm_embed.title
-        assert "AUTO TEMPBAN" in str(dm_embed.description)
+        assert "AUTO TEMPBAN <@42> (<@42>)" in str(dm_embed.description)
         assert "https://discord.gg/rejoin" in str(dm_embed.description)
         assert dm_embed.author.name
         assert dm_embed.footer.text
