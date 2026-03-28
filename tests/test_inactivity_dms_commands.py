@@ -316,6 +316,9 @@ def test_inactivity_tempban_preview_is_safe_and_resolves_ban_days(inattivi_modul
     assert "Template render error" not in preview
     assert "{ban_days}" not in preview
     assert "{user}" not in preview
+    assert "periodo di grazia per inattività scaduto" in preview
+    assert "Reason:" not in preview
+    assert "Inactivity" not in preview
     assert "7" in preview
 
 

@@ -315,6 +315,7 @@ class InactiveMembersModerationService:
                     duration_seconds=duration_seconds,
                     expires_at=expires_at,
                     reason="Automatic tempban after manual grace expiry",
+                    reasoning="users_manual_grace_expired_tempban",
                     metadata={"source": "users_grace_auto_tempban"},
                 )
                 await guild.ban(discord.Object(id=int(user_id)), reason="Automatic tempban after manual grace expiry", delete_message_seconds=0)
