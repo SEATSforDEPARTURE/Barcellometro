@@ -6,6 +6,7 @@ import types
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict)
@@ -176,7 +177,16 @@ def test_run_due_unbans_uses_member_flow_audit_for_manual_grace_auto_actions() -
             add_temp_ban=AsyncMock(),
             clear_user_ban_state=AsyncMock(),
         )
-        member_flow_notifications = SimpleNamespace(log_action=AsyncMock(return_value={"canonical_written": True, "canonical_visible": False}))
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(
+                side_effect=[
+                    {"canonical_written": True, "canonical_visible": False},
+                    {"canonical_written": True, "canonical_visible": True, "canonical_event": {"event_type_key": "tempban", "visible_in_greetings": True}},
+                ]
+            ),
+            send_notification=AsyncMock(),
+            remember_departure_action=Mock(),
+        )
         service = InactiveMembersModerationService(
             database,
             SimpleNamespace(get_guild=lambda guild_id: guild),
@@ -190,6 +200,11 @@ def test_run_due_unbans_uses_member_flow_audit_for_manual_grace_auto_actions() -
         assert member_flow_notifications.log_action.await_args_list[0].kwargs["metadata"]["source"] == "users_grace_auto_expiry"
         assert member_flow_notifications.log_action.await_args_list[1].kwargs["action_type"] == "tempban"
         assert member_flow_notifications.log_action.await_args_list[1].kwargs["metadata"]["source"] == "users_grace_auto_tempban"
+        assert member_flow_notifications.log_action.await_args_list[1].kwargs["metadata"]["greetings_origin"] == "manual_grace_expired_auto_tempban"
+        assert member_flow_notifications.remember_departure_action.call_count == 1
+        assert member_flow_notifications.send_notification.await_count == 1
+        assert member_flow_notifications.send_notification.await_args.kwargs["action_type"] == "tempban"
+        assert member_flow_notifications.send_notification.await_args.kwargs["reason"] is None
         database.log_moderation_action.assert_not_awaited()
 
     asyncio.run(_run())

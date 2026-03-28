@@ -723,6 +723,28 @@ def test_tempban_narrative_uses_non_technical_closing_and_no_spurious_bold() -> 
     assert "registrato" not in result.narrative.lower()
 
 
+def test_tempban_after_manual_grace_expiry_uses_special_narrative_without_moderation_note() -> None:
+    service = _service(occurrence_number=3)
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="GABBIETTA DORATA"),
+            user=SimpleNamespace(id=42, name="fakuzzo", display_name="Fakuzzo", mention="@Fakuzzo"),
+            event_type_key="tempban",
+            reason="Automatic tempban after manual grace expiry",
+            duration_seconds=2 * 86400,
+            metadata={"greetings_origin": "manual_grace_expired_auto_tempban", "greetings_reason": ""},
+            barcello_status={"color": "giallo", "score": 58},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert result.event_label == "⌛ __**INTERDIZIONE TEMPORANEA**__"
+    assert "periodo di grazia è scaduto" in result.narrative.lower()
+    assert "3° volta" in result.narrative
+    assert "2g" in result.narrative
+    assert result.moderation_note is None
+
+
 @pytest.mark.parametrize("event_type_key", ["kick", "ban"])
 def test_kick_and_ban_closing_comments_are_not_technical(event_type_key: str) -> None:
     service = _service(occurrence_number=3)

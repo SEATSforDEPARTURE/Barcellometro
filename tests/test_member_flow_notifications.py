@@ -703,6 +703,62 @@ def test_send_notification_skips_moderation_field_when_greetings_reason_is_missi
     asyncio.run(_run())
 
 
+def test_send_notification_manual_grace_expired_auto_tempban_uses_tempban_title_and_no_moderation_field(member_flow_module) -> None:
+    class _Channel:
+        def __init__(self) -> None:
+            self.sent = []
+
+        async def send(self, *, embed=None, files=None):
+            self.sent.append({"embed": embed, "files": files})
+
+    class _Guild:
+        id = 1
+        name = "Barcellometro"
+
+        def __init__(self, channel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel if channel_id == 77 else None
+
+    async def _run() -> None:
+        channel = _Channel()
+        guild = _Guild(channel)
+        user = types.SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="new_user",
+            display_name="New User",
+            display_avatar=types.SimpleNamespace(url="https://example.test/avatar.png"),
+        )
+        service = member_flow_module.MemberFlowNotificationsService(_FakeDB(), object())
+
+        await service.send_notification(
+            guild=guild,
+            user=user,
+            action_type="tempban",
+            canonical_event={
+                "event_type_key": "tempban",
+                "reason": "Automatic tempban after manual grace expiry",
+                "duration_seconds": 2 * 86400,
+                "visible_in_greetings": True,
+                "metadata": {
+                    "occurrence_number": 3,
+                    "greetings_origin": "manual_grace_expired_auto_tempban",
+                    "greetings_reason": "",
+                },
+            },
+        )
+
+        payload = channel.sent[0]["embed"]
+        assert payload.title == "⌛ __**INTERDIZIONE TEMPORANEA**__"
+        assert payload.description is not None
+        assert "periodo di grazia è scaduto" in payload.description.lower()
+        assert payload.fields == []
+
+    asyncio.run(_run())
+
+
 def test_member_flow_renderer_source_mentions_final_author_title_layout() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
 
