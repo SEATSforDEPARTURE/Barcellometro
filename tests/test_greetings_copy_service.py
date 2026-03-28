@@ -37,16 +37,16 @@ def _service(*, tmp_path=None, occurrence_number: int = 1, payload: dict | None 
 
 
 def test_format_greetings_event_label_covers_supported_keys() -> None:
-    assert format_greetings_event_label("join", 1) == "**✨ PRIMO INGRESSO**"
-    assert format_greetings_event_label("leave", 1) == "**👋 PRIMA USCITA**"
-    assert format_greetings_event_label("leave", 2) == "**👋 SECONDA USCITA**"
-    assert format_greetings_event_label("kick", 1) == "**🥾 PRIMO ALLONTANAMENTO**"
-    assert format_greetings_event_label("ban", 1) == "**🔨 PRIMO BAN**"
-    assert format_greetings_event_label("tempban", 1) == "**⏳ PRIMO BAN TEMPORANEO**"
-    assert format_greetings_event_label("grace", 1) == "**🛟 PRIMO PERIODO DI GRAZIA**"
-    assert format_greetings_event_label("inactive_kick", 1) == "**💤 PRIMO ALLONTANAMENTO PER INATTIVITÀ**"
-    assert format_greetings_event_label("inactive_tempban", 1) == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
-    assert format_greetings_event_label("inactive_grace", 1) == "**🛟 PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**"
+    assert format_greetings_event_label("join", 1) == "✨ __**PRIMO INGRESSO**__"
+    assert format_greetings_event_label("leave", 1) == "👋 __**PRIMA USCITA**__"
+    assert format_greetings_event_label("leave", 2) == "👋 __**SECONDA USCITA**__"
+    assert format_greetings_event_label("kick", 1) == "🥾 __**PRIMO ALLONTANAMENTO**__"
+    assert format_greetings_event_label("ban", 1) == "🔨 __**PRIMO BAN**__"
+    assert format_greetings_event_label("tempban", 1) == "⏳ __**PRIMO BAN TEMPORANEO**__"
+    assert format_greetings_event_label("grace", 1) == "🛟 __**PRIMO PERIODO DI GRAZIA**__"
+    assert format_greetings_event_label("inactive_kick", 1) == "💤 __**PRIMO ALLONTANAMENTO PER INATTIVITÀ**__"
+    assert format_greetings_event_label("inactive_tempban", 1) == "💤 __**PRIMO BAN TEMPORANEO PER INATTIVITÀ**__"
+    assert format_greetings_event_label("inactive_grace", 1) == "🛟 __**PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**__"
     assert "KICK" not in format_greetings_event_label("kick", 3)
 
 
@@ -64,7 +64,9 @@ def test_render_event_copy_uses_second_occurrence_for_ordinals() -> None:
     )
 
     assert result.occurrence_number == 2
-    assert result.event_label == "**👋 SECONDA USCITA**"
+    assert result.event_label == "👋 __**SECONDA USCITA**__"
+    assert result.description.startswith("*<@42>")
+    assert result.description.endswith("*")
     assert service._test_database.count_calls == [("1", "42", "leave")]  # type: ignore[attr-defined]
 
 
@@ -98,8 +100,8 @@ def test_first_join_narrative_is_welcome_and_uses_user_mention() -> None:
         )
     )
 
-    lowered = result.narrative.lower()
-    assert "<@42>" in result.narrative
+    lowered = result.description.lower()
+    assert "<@42>" in result.description
     assert "benvenut" in lowered
     assert "rientrat" not in lowered
     assert "torna" not in lowered
@@ -118,9 +120,9 @@ def test_second_join_narrative_can_use_reentry_language_and_uses_user_mention() 
         )
     )
 
-    lowered = result.narrative.lower()
-    assert "<@42>" in result.narrative
-    assert "torna" in lowered or "rientra" in lowered
+    lowered = result.description.lower()
+    assert "<@42>" in result.description
+    assert "occorrenza" in lowered
 
 
 def test_grace_manual_and_inactive_have_distinct_copy() -> None:
@@ -150,10 +152,10 @@ def test_grace_manual_and_inactive_have_distinct_copy() -> None:
         )
     )
 
-    assert grace.event_label == "**🛟 PRIMO PERIODO DI GRAZIA**"
-    assert inactive_grace.event_label == "**🛟 PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**"
-    assert "inattività" not in grace.narrative.lower()
-    assert "inattività" in inactive_grace.narrative.lower()
+    assert grace.event_label == "🛟 __**PRIMO PERIODO DI GRAZIA**__"
+    assert inactive_grace.event_label == "🛟 __**PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**__"
+    assert "inattività" not in grace.description.lower()
+    assert "inattività" in inactive_grace.description.lower()
 
 
 def test_inactive_labels_stay_distinct_between_kick_and_tempban() -> None:
@@ -210,7 +212,8 @@ def test_render_event_copy_uses_mood_time_barcello_and_count_override(tmp_path) 
     assert result.time_bucket == "morning"
     assert result.count_tier == "t2"
     assert result.barcello_state == "rosso"
-    assert result.narrative == "override **teso** **morning** **rosso** **t2** **🔴 ALLERTA ROSSA** **41**"
+    assert "<@42>" in result.description
+    assert result.fields == ()
 
 
 def test_render_moderation_preview_renders_context_placeholders() -> None:
@@ -279,8 +282,8 @@ def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canoni
     )
 
     assert result.occurrence_number == 3
-    assert result.event_label == "**💤 TERZO BAN TEMPORANEO PER INATTIVITÀ**"
-    assert "30 giorni" in result.narrative
+    assert result.event_label == "💤 __**TERZO BAN TEMPORANEO PER INATTIVITÀ**__"
+    assert "30 giorni" in result.description
 
 
 @pytest.mark.parametrize(
@@ -315,8 +318,9 @@ def test_render_event_copy_appends_reason_block_for_supported_moderation_events(
         )
     )
 
-    assert "**👇 La moderazione aggiunge:**" in result.narrative
-    assert result.narrative.endswith("Motivo test")
+    assert result.fields
+    assert result.fields[-1].name == "🛠️ __**INTERVENTO MODERAZIONE**__"
+    assert result.fields[-1].value == "Motivo test"
 
 
 def test_render_event_copy_skips_reason_block_when_reason_is_missing() -> None:
@@ -333,7 +337,7 @@ def test_render_event_copy_skips_reason_block_when_reason_is_missing() -> None:
         )
     )
 
-    assert "**👇 La moderazione aggiunge:**" not in result.narrative
+    assert result.fields == ()
 
 
 def test_render_canonical_event_copy_prefers_metadata_greetings_reason_for_final_block() -> None:
@@ -357,12 +361,9 @@ def test_render_canonical_event_copy_prefers_metadata_greetings_reason_for_final
         )
     )
 
-    assert "Spam creativo" in result.narrative
-    assert "Motivo tecnico interno" not in result.narrative
-    assert result.narrative.count("Spam creativo") == 1
-    narrative_body, reason_block = result.narrative.split("**👇 La moderazione aggiunge:**", 1)
-    assert "Spam creativo" not in narrative_body
-    assert "Spam creativo" in reason_block
+    assert "Spam creativo" not in result.description
+    assert "Motivo tecnico interno" not in result.description
+    assert result.fields[-1].value == "Spam creativo"
 
 
 def test_default_narrative_does_not_auto_duplicate_event_emoji() -> None:
@@ -391,15 +392,11 @@ def test_example_config_loads_and_documents_core_placeholders() -> None:
         "display_name",
         "username",
         "guild_name",
-        "reason",
         "duration",
-        "expires_at",
-        "event_label",
+        "event_label_text",
         "occurrence_number",
-        "barcello_state",
-        "barcello_score",
-        "mood",
-        "time_bucket",
+        "barcello_alert",
+        "barcello_score_text",
     ):
         assert key in placeholders
 
@@ -418,23 +415,19 @@ def test_example_config_has_fallbacks_for_every_supported_event() -> None:
 def test_example_config_join_has_explicit_first_and_repeat_copy() -> None:
     payload = json.loads(Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8"))
 
-    join_templates = payload["templates"]["join"]
-    assert join_templates["first_occurrence"]
-    assert join_templates["repeat"]
-    assert join_templates["first_occurrence"] != join_templates["repeat"]
-    assert all("{mention}" in phrase for phrase in join_templates["first_occurrence"])
-    assert all("{mention}" in phrase for phrase in join_templates["repeat"])
+    join_blocks = payload["event_copy"]["join"]["description_blocks"]
+    assert join_blocks["event"]
+    assert join_blocks["occurrence"]
+    assert "{occurrence_number}" in join_blocks["occurrence"]
 
 
 def test_example_config_documents_json_as_single_editorial_source() -> None:
     payload = json.loads(Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8"))
 
     purpose_lines = payload["docs"]["purpose"]
-    assert any("Fonte ufficiale" in line for line in purpose_lines)
-    assert any("controlla solo il copy narrativo" in line for line in purpose_lines)
-    assert any("label evento nel titolo dell'embed" in line for line in purpose_lines)
-    assert payload["docs"]["placeholders"]["barcello_state"]["description"].endswith("va integrato nella frase.")
-    assert payload["docs"]["placeholders"]["event_label"]["description"] == "Label completa già formattata per il titolo dell'embed."
+    assert any("Source of truth" in line for line in purpose_lines)
+    assert any("struttura fissa" in line for line in purpose_lines)
+    assert any("mention apre sempre la description" in line for line in purpose_lines)
 
 
 def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> None:
@@ -460,7 +453,7 @@ def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> 
         )
     )
 
-    assert result.narrative == "fallback kick **<@42>**"
+    assert result.description.startswith("*<@42>")
 
 
 def test_render_moderation_preview_bolds_primary_dynamic_placeholders_without_breaking_mentions() -> None:

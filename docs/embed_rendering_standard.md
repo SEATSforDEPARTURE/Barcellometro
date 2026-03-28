@@ -25,3 +25,11 @@ Esempi NON corretti da evitare:
 
 - `📈 **PANORAMICA**` dentro `description`;
 - `👇 **Risposta:**` dentro `description` quando è una sezione strutturale.
+
+## Nota applicativa GREETINGS (INGRESSI & USCITE)
+
+- Author sempre dalla pipeline centrale (`servizio GREETINGS`).
+- Titolo evento nel formato definitivo `emoji + __**LABEL EVENTO MAIUSCOLA**__`.
+- Description GREETINGS: breve, corsiva, senza emoji iniziale e con mention all'inizio.
+- Sezioni strutturali (es. moderazione) solo come field reali (`🛠️ __**INTERVENTO MODERAZIONE**__`).
+- Footer esclusivamente via pipeline centralizzata.

@@ -1166,10 +1166,13 @@ def _check_greetings_live_layout_contract(report: ValidationReport) -> None:
     member_flow_path = REPO_ROOT / "app" / "services" / "member_flow_notifications.py"
     member_flow_source = member_flow_path.read_text(encoding="utf-8")
     required_member_flow_snippets = (
-        'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))',
+        "description = str(getattr(copy, \"description\", getattr(copy, \"narrative\", \"\")) or \"\")",
+        "fields = tuple(getattr(copy, \"fields\", ()) or ())",
+        "description=description[:4096]",
         "attach_author_meta(",
         'canonical_top_level_command="greetings"',
         "embed.set_thumbnail(url=avatar_url)",
+        "for field in fields:",
         'attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)',
     )
     for snippet in required_member_flow_snippets:
@@ -1211,8 +1214,8 @@ def _check_greetings_live_layout_contract(report: ValidationReport) -> None:
             "nessun campo separato `Evento`",
         ),
         REPO_ROOT / "settings" / "greetings_trigger.example.json": (
-            "label evento nel titolo dell'embed",
-            "titolo dell'embed",
+            "struttura fissa",
+            "description_blocks",
         ),
     }
     for path, snippets in docs_expectations.items():

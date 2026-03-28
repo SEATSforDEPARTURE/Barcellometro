@@ -54,8 +54,9 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 
 - Le chiavi template GREETINGS sono quelle canoniche del dominio: `join`, `leave`, `kick`, `ban`, `tempban`, `grace`, `inactive_kick`, `inactive_tempban`, `inactive_grace`.
 - `kick` resta la chiave tecnica di compatibilità, ma il wording user-facing deve essere `allontanamento`.
-- Il file governa solo copy e variazioni mood/time/count/barcello: non ridefinisce il layout live di `🚪 INGRESSI & USCITE`, che ora usa author standard via metadata canonici, titolo embed = label evento, narrativa in description, thumbnail = avatar utente e nessun campo separato `Evento`.
+- Il file governa il copy con struttura fissa (`event_copy -> description_blocks` + field opzionali) e non ridefinisce il layout live di `🚪 INGRESSI & USCITE`: author standard via metadata canonici, titolo embed = label evento (formato `emoji + __**LABEL EVENTO**__`), description breve in corsivo senza emoji iniziale, thumbnail = avatar utente.
 - Il vecchio campo separato `Stato barcello "<server>"` non esiste più: eventuali riferimenti al barcello vanno integrati direttamente nel testo narrativo tramite placeholder/template.
+- Nel layout finale GREETINGS non esiste nessun campo separato `Evento`: il titolo embed è la label evento standardizzata.
 - Per il testo narrativo è consigliato usare `{mention}` invece di `{display_name}` quando il soggetto deve comparire come tag utente.
 - Le occorrenze lette nei placeholder (`{occurrence_number}`, `{occurrence_ordinal}`, `{event_label}`) arrivano dalla timeline canonica `member_flow_events`, non dal ledger raw `moderation_actions`.
 - La struttura example aggiornata è pensata come source of truth editoriale unica ed esplicita: nessuna frase user-facing GREETINGS deve più arrivare da template legacy salvati nel database o da copy hardcoded parallelo.
@@ -68,4 +69,4 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - La grammatica evento resta canonica e coerente col renderer live: `kick` / `inactive_kick` sono chiavi tecniche, ma le etichette e le frasi user-facing devono parlare di `allontanamento`, mai di `KICK`.
 - I flussi di moderazione del bot (`/mod users ...`) e la moderazione nativa Discord devono convergere nella stessa timeline canonica `member_flow_events`: il feed deve mostrare solo l'evento dedicato (`BAN`, `ALLONTANAMENTO`, `BAN TEMPORANEO`, `USCITA`) senza embed duplicati della stessa sequenza tecnica.
 - `unban` deve essere tracciato sia nel raw log sia nel mirror canonico per audit, backfill e pulizia coerente dello stato ban/tempban, ma non deve comparire nel feed GREETINGS come uscita o rientro visibile.
-- Quando esiste una `greetings_reason`, il renderer finale GREETINGS la mostra in coda nel blocco `👇 La moderazione aggiunge`; la narrativa principale non deve ripeterla inline.
+- Quando esiste una `greetings_reason`, il renderer finale GREETINGS la mostra nel field finale `🛠️ __**INTERVENTO MODERAZIONE**__`; la description principale non deve ripeterla.

@@ -119,6 +119,8 @@ _REASON_BLOCK_EVENT_TYPES = frozenset(
 )
 
 _MODERATION_REASON_BLOCK_HEADER = "**👇 La moderazione aggiunge:**"
+_MODERATION_REASON_FIELD_NAME = "🛠️ __**INTERVENTO MODERAZIONE**__"
+_BARCELLO_STATE_FIELD_NAME = "🟢 __**STATO BARCELLO**__"
 
 _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
     "docs": {
@@ -162,6 +164,74 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
         {"min_occurrence": 2, "label": "t2"},
         {"min_occurrence": 3, "label": "t3"},
     ],
+    "event_copy": {
+        "join": {
+            "description_blocks": {
+                "event": "{event_label_text}: ingresso registrato su {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Stato attuale: membro attivo in server.",
+                "bot_comment": "Bentornat* e buona permanenza.",
+            }
+        },
+        "leave": {
+            "description_blocks": {
+                "event": "{event_label_text}: uscita volontaria registrata da {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Dettaglio evento: uscita spontanea dal server.",
+                "leave_barcello": "Barcello al momento dell'uscita: **{barcello_alert}** con indice **{barcello_score_text}**.",
+                "bot_comment": "Se decide di rientrare, le porte restano aperte.",
+            }
+        },
+        "kick": {
+            "description_blocks": {
+                "event": "{event_label_text}: allontanamento registrato su {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Dettaglio evento: intervento di moderazione eseguito.",
+            }
+        },
+        "ban": {
+            "description_blocks": {
+                "event": "{event_label_text}: ban registrato su {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Dettaglio evento: accesso revocato.",
+            }
+        },
+        "tempban": {
+            "description_blocks": {
+                "event": "{event_label_text}: ban temporaneo registrato su {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Durata prevista: **{duration}**.",
+            }
+        },
+        "grace": {
+            "description_blocks": {
+                "event": "{event_label_text}: periodo di grazia registrato su {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Durata prevista: **{duration}**.",
+            }
+        },
+        "inactive_kick": {
+            "description_blocks": {
+                "event": "{event_label_text}: allontanamento per inattività registrato su {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Soglia inattività rilevata: **{inactivity_text}**.",
+            }
+        },
+        "inactive_tempban": {
+            "description_blocks": {
+                "event": "{event_label_text}: ban temporaneo per inattività su {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Durata **{duration}** con inattività rilevata **{inactivity_text}**.",
+            }
+        },
+        "inactive_grace": {
+            "description_blocks": {
+                "event": "{event_label_text}: grazia per inattività registrata su {guild_name}.",
+                "occurrence": "Occorrenza **{occurrence_number}** per **{display_name}**.",
+                "details": "Finestra di grazia: **{duration}** ({inactivity_text}).",
+            }
+        },
+    },
     "templates": {
         "join": {
             "first_occurrence": ["{mention} entra in {server}."],
@@ -249,16 +319,29 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
 
 
 @dataclass(frozen=True)
+class GreetingsEmbedField:
+    name: str
+    value: str
+    inline: bool = False
+
+
+@dataclass(frozen=True)
 class GreetingsRenderResult:
     event_label: str
     occurrence_number: int
     template_context: dict[str, Any]
-    narrative: str
+    description: str
+    fields: tuple[GreetingsEmbedField, ...]
+    legacy_narrative: str
     mood: str
     time_bucket: str
     count_tier: str
     barcello_state: str
     raw_template: str
+
+    @property
+    def narrative(self) -> str:
+        return self.description
 
 
 class GreetingsCopyService:
@@ -365,6 +448,64 @@ class GreetingsCopyService:
         if not base_narrative:
             return reason_block_text
         return f"{base_narrative}\n\n{reason_block_text}"
+
+    def _render_fixed_description(
+        self,
+        *,
+        cfg: dict[str, Any],
+        event_type_key: str,
+        context: dict[str, Any],
+        legacy_narrative: str,
+        reason_block: str | None,
+    ) -> tuple[str, tuple[GreetingsEmbedField, ...]]:
+        mention = str(context.get("mention") or "").strip()
+        event_copy = cfg.get("event_copy") if isinstance(cfg.get("event_copy"), dict) else {}
+        event_cfg = event_copy.get(event_type_key) if isinstance(event_copy.get(event_type_key), dict) else {}
+        description_blocks = event_cfg.get("description_blocks") if isinstance(event_cfg.get("description_blocks"), dict) else {}
+
+        block_order = (
+            "event",
+            "occurrence",
+            "details",
+            "leave_barcello",
+            "extra",
+            "bot_comment",
+        )
+        parts: list[str] = [mention] if mention else []
+        for block_name in block_order:
+            if block_name == "leave_barcello" and event_type_key != "leave":
+                continue
+            template = description_blocks.get(block_name)
+            rendered = self.render_moderation_template(template if isinstance(template, str) else "", **context).strip()
+            if rendered:
+                parts.append(rendered)
+
+        if len(parts) == 1 and mention and not description_blocks:
+            parts.append(legacy_narrative.strip())
+        elif not parts:
+            parts.append(legacy_narrative.strip())
+        description = "*{}*".format(" ".join(part for part in parts if part).strip())
+
+        fields: list[GreetingsEmbedField] = []
+        event_fields = event_cfg.get("fields") if isinstance(event_cfg.get("fields"), list) else []
+        for item in event_fields:
+            if not isinstance(item, dict):
+                continue
+            name = self.render_moderation_template(str(item.get("name") or ""), **context).strip()
+            value = self.render_moderation_template(str(item.get("value") or ""), **context).strip()
+            if name and value:
+                fields.append(GreetingsEmbedField(name=name, value=value, inline=bool(item.get("inline", False))))
+
+        normalized_reason = self._normalize_reason(reason_block)
+        if normalized_reason and event_type_key in _REASON_BLOCK_EVENT_TYPES:
+            fields.append(
+                GreetingsEmbedField(
+                    name=_MODERATION_REASON_FIELD_NAME,
+                    value=normalized_reason,
+                    inline=False,
+                )
+            )
+        return description, tuple(fields)
 
     def _format_placeholder_value(self, placeholder: str, value: Any) -> Any:
         if value is None:
@@ -511,11 +652,20 @@ class GreetingsCopyService:
             narrative=self.render_moderation_template(template, **context),
             reason_block=reason_block if reason_block is not None else reason,
         )
+        description, fields = self._render_fixed_description(
+            cfg=cfg,
+            event_type_key=event_type_key,
+            context=context,
+            legacy_narrative=self.render_moderation_template(template, **context),
+            reason_block=reason_block if reason_block is not None else reason,
+        )
         return GreetingsRenderResult(
             event_label=format_greetings_event_label(event_type_key, max(1, int(occurrence_number))),
             occurrence_number=max(1, int(occurrence_number)),
             template_context=context,
-            narrative=narrative,
+            description=description,
+            fields=fields,
+            legacy_narrative=narrative,
             mood=selected_mood,
             time_bucket=time_bucket,
             count_tier=count_tier,
@@ -867,4 +1017,4 @@ def format_greetings_event_label(event_type_key: str, occurrence_number: int) ->
     emoji, label, gender = _EVENT_LABELS[event_type_key]
     mapping = _ORDINALS_UPPER_FEMININE if gender == "f" else _ORDINALS_UPPER_MASCULINE
     ordinal = mapping.get(occurrence, f"{occurrence}{'ª' if gender == 'f' else '°'}")
-    return f"**{emoji} {ordinal} {label}**"
+    return f"{emoji} __**{ordinal} {label}**__"

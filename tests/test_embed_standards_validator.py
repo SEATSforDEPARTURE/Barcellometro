@@ -142,8 +142,8 @@ def test_greetings_layout_docs_and_renderer_reflect_final_visual_contract() -> N
     assert "thumbnail = avatar utente" in settings_readme
     assert "nessun campo separato `Evento`" in settings_readme
 
-    assert "label evento nel titolo dell'embed" in greetings_json
-    assert "titolo dell'embed" in greetings_json
+    assert "struttura fissa" in greetings_json
+    assert "description_blocks" in greetings_json
 
 
 def test_validator_flags_from_dict_embed_sent_without_footer_hydration() -> None:

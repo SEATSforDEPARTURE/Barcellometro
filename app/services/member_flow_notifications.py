@@ -354,7 +354,13 @@ class MemberFlowNotificationsService:
             channel_id=str(notify_channel_id),
             now=created_at,
         )
-        embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))
+        description = str(getattr(copy, "description", getattr(copy, "narrative", "")) or "")
+        fields = tuple(getattr(copy, "fields", ()) or ())
+        embed = discord.Embed(
+            title=copy.event_label,
+            description=description[:4096],
+            colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)),
+        )
         # Layout canonico live: titolo = label evento, narrativa = body e author
         # derivato dal top-level canonico (non hardcoded).
         attach_author_meta(
@@ -365,6 +371,8 @@ class MemberFlowNotificationsService:
         avatar_url = self._resolve_user_avatar_url(user)
         if avatar_url:
             embed.set_thumbnail(url=avatar_url)
+        for field in fields:
+            embed.add_field(name=field.name, value=field.value[:1024], inline=field.inline)
         attach_footer_meta(embed, service_name="member_flow_notifications", used_local_processing=True)
 
         files: list[discord.File] = []

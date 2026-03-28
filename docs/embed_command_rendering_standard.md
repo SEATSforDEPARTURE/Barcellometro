@@ -26,6 +26,12 @@ Ogni embed standard del progetto deve seguire **sempre** questa struttura, senza
 5. **FOOTER**
    - applicato solo tramite pipeline/footer service centralizzati.
 
+### Applicazione GREETINGS
+
+- Nel feed `🚪 INGRESSI & USCITE` il titolo coincide con `event_label` già normalizzata (`emoji + __**MAIUSCOLO**__`).
+- La description è costruita da blocchi fissi (`description_blocks`) ed è sempre corsiva con mention iniziale.
+- Il motivo moderazione non va in description: usa il field `🛠️ __**INTERVENTO MODERAZIONE**__`.
+
 ### Regole esplicite e non negoziabili
 
 - i titoli di sezione non devono stare in `description` come testo libero;
