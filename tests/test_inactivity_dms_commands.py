@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -107,6 +108,7 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         assert as_map["dms"] == "off"
         assert as_map["template_grace"] == "not set"
         assert as_map["template_tempban"] == "not set"
+        assert as_map["cooldown"] == "14 days"
         assert as_map["cooldown_days"] == 14
         assert as_map["invite_url"] == "not set"
         assert as_map["dm_sent_ok"] == 1
@@ -115,6 +117,9 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         assert as_map["dm_events_by_type"] == "reminder=2"
         assert "user=11" in as_map["last_success"]
         assert "user=12" in as_map["last_fail"]
+        sections = send_response.await_args_list[-1].kwargs["sections"]
+        assert sections[0].title == "Recent DM deliveries"
+        assert "event=reminder" in sections[0].lines[0]
 
     asyncio.run(_run())
 
@@ -204,3 +209,40 @@ def test_inactivity_dms_status_falls_back_to_legacy_templates(inattivi_module, m
         assert as_map["template_tempban"] == "Legacy tempban"
 
     asyncio.run(_run())
+
+
+def test_inactivity_dms_docs_inventory_matches_final_contract() -> None:
+    docs = Path("docs/command_tree_report.md").read_text()
+
+    for action in (
+        "on",
+        "off",
+        "status",
+        "template_grace_set",
+        "template_grace_show",
+        "template_grace_reset",
+        "template_tempban_set",
+        "template_tempban_show",
+        "template_tempban_reset",
+        "cooldown_set",
+        "cooldown_show",
+        "cooldown_reset",
+        "invite_set",
+        "invite_show",
+        "invite_reset",
+    ):
+        assert f"| `inactivity` | `dms` | `{action}` |" in docs
+
+    assert "| `inactivity` | `dms` | `template_reminder_set` |" not in docs
+    assert "| `inactivity` | `dms` | `template_reminder_show` |" not in docs
+    assert "| `inactivity` | `dms` | `template_reminder_reset` |" not in docs
+
+
+def test_command_standards_pin_inactivity_dms_surface_and_legacy_policy() -> None:
+    standards = Path("docs/command_standards.md").read_text()
+
+    assert "## 10. Contratto canonico `/inactivity dms`" in standards
+    assert "/inactivity dms template_grace_set" in standards
+    assert "/inactivity dms template_tempban_set" in standards
+    assert "`template_reminder_*`" in standards
+    assert "`dm_reminder_template`, `dm_kick_template`" in standards
