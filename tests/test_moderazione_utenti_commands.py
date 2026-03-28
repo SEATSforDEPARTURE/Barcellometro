@@ -123,6 +123,34 @@ def test_users_alias_commands_are_registered_as_top_level_aliases() -> None:
     assert '*user_alias_commands,' in source
     assert [command.name for command in aliases] == ["kick", "ban", "unban", "tempban", "untempban", "grace", "ungrace"]
 
+def test_users_alias_revocation_commands_use_nick_or_id_parameter() -> None:
+    group = discord.app_commands.Group(name="users", description="x")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None)
+    aliases: list[discord.app_commands.Command] = []
+
+    register_moderazione_utenti(group, ctx, alias_commands=aliases)
+
+    by_name = {command.name: command for command in aliases}
+    assert [param.name for param in by_name["unban"].parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in by_name["untempban"].parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in by_name["ungrace"].parameters] == ["nick_or_id", "reason"]
+
+
+def test_users_alias_tempban_and_grace_expose_quantity_unit_not_duration() -> None:
+    group = discord.app_commands.Group(name="users", description="x")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None)
+    aliases: list[discord.app_commands.Command] = []
+
+    register_moderazione_utenti(group, ctx, alias_commands=aliases)
+
+    by_name = {command.name: command for command in aliases}
+    tempban_params = [param.name for param in by_name["tempban"].parameters]
+    grace_params = [param.name for param in by_name["grace"].parameters]
+
+    assert tempban_params == ["user", "quantity", "unit", "reason"]
+    assert grace_params == ["user", "quantity", "unit", "reason"]
+    assert "duration" not in tempban_params
+    assert "duration" not in grace_params
 
 def test_greetings_tree_has_no_preview_command() -> None:
     group = discord.app_commands.Group(name="greetings", description="x")
