@@ -184,3 +184,39 @@ def test_clear_user_ban_state_removes_tempban_and_inactivity_kick_marker(
         await db.close()
 
     asyncio.run(_run())
+
+
+def test_revoke_user_grace_state_clears_inactivity_reminder_and_active_grace(
+    tmp_path,
+) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "revoke_grace_state.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+
+        now = datetime.now(timezone.utc)
+        future = (now + timedelta(days=2)).isoformat()
+        await db.extend_user_grace("1", "77", now.isoformat())
+        await db.log_moderation_action(
+            guild_id="1",
+            user_id="77",
+            moderator_id="99",
+            action_type="grace",
+            reason="grace manuale",
+            duration_seconds=2 * 86400,
+            expires_at=future,
+            metadata={},
+        )
+
+        await db.revoke_user_grace_state("1", "77", now_iso=now.isoformat())
+
+        state = await db.get_inactivity_user_state("1", "77")
+        grace = await db.list_active_grace_users("1", now_iso=now.isoformat())
+
+        assert state is not None
+        assert state["last_reminder_at"] is None
+        assert grace == []
+
+        await db.close()
+
+    asyncio.run(_run())

@@ -44,9 +44,11 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert '@users_group.command(name="ban"' in modular
     assert '@users_group.command(name="ban_list"' in modular
     assert '@users_group.command(name="unban"' in modular
+    assert '@users_group.command(name="untempban"' in modular
     assert '@users_group.command(name="tempban"' in modular
     assert '@users_group.command(name="tempban_list"' in modular
     assert 'name="grace"' in modular
+    assert '@users_group.command(name="ungrace"' in modular
     assert '@users_group.command(name="grace_list"' in modular
     assert 'description="Revoke an active ban for a user."' in modular
     assert 'description="Remove a user from the server."' in modular
@@ -119,7 +121,7 @@ def test_users_alias_commands_are_registered_as_top_level_aliases() -> None:
 
     assert 'user_alias_commands: list[app_commands.Command] = []' in source
     assert '*user_alias_commands,' in source
-    assert [command.name for command in aliases] == ["kick", "ban", "tempban", "grace"]
+    assert [command.name for command in aliases] == ["kick", "ban", "unban", "tempban", "untempban", "grace", "ungrace"]
 
 
 def test_greetings_tree_has_no_preview_command() -> None:
@@ -284,5 +286,99 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
         assert ("result", "nessun ban attivo trovato su Discord") in response_kwargs["lines"]
         assert ("sync", "stati locali riallineati") in response_kwargs["lines"]
         assert "discord ban already missing guild=1 user=42" in caplog.text
+
+    asyncio.run(_run())
+
+
+def test_mod_users_untempban_uses_canonical_unban_flow_with_tempban_message(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(
+            moderazione_utenti_module, "send_standard_response", send_standard_response
+        )
+        monkeypatch.setattr(
+            moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
+        )
+
+        database = SimpleNamespace(clear_user_ban_state=AsyncMock())
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(
+                return_value={"canonical_written": True, "canonical_visible": False}
+            ),
+            send_notification=AsyncMock(),
+            forget_departure_action=Mock(),
+        )
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=member_flow_notifications,
+            barcello_service=None,
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "untempban")
+
+        guild = SimpleNamespace(id=1, unban=AsyncMock())
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
+        moderator = SimpleNamespace(id=9)
+        interaction = SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            user=moderator,
+            command=SimpleNamespace(qualified_name="users untempban"),
+        )
+
+        await command.callback(interaction, target_user)
+
+        guild.unban.assert_awaited_once_with(target_user, reason="Revoca ban manuale")
+        database.clear_user_ban_state.assert_awaited_once_with("1", "42")
+        response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["subcommand_path"] == "users untempban"
+        assert ("result", "temporary ban revoked") in response_kwargs["lines"]
+
+    asyncio.run(_run())
+
+
+def test_mod_users_ungrace_revokes_grace_state(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(
+            moderazione_utenti_module, "send_standard_response", send_standard_response
+        )
+        monkeypatch.setattr(
+            moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
+        )
+
+        database = SimpleNamespace(revoke_user_grace_state=AsyncMock())
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=None,
+            barcello_service=None,
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "ungrace")
+
+        guild = SimpleNamespace(id=1)
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
+        moderator = SimpleNamespace(id=9)
+        interaction = SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            user=moderator,
+            command=SimpleNamespace(qualified_name="users ungrace"),
+        )
+
+        await command.callback(interaction, target_user)
+
+        database.revoke_user_grace_state.assert_awaited_once()
+        response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["subcommand_path"] == "users ungrace"
+        assert ("result", "grace revoked") in response_kwargs["lines"]
 
     asyncio.run(_run())

@@ -5,7 +5,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - Commands discovered: **283**
 - Errors: **0**
 - Warnings: **49**
-- Compatibility note: top-level `/kick`, `/ban`, `/tempban`, `/grace` are registered as real aliases of `/users kick|ban|tempban|grace`; they are inventoried below as standalone compatibility roots because the validator parses those top-level command registrations directly.
+- Compatibility note: top-level `/kick`, `/ban`, `/unban`, `/tempban`, `/untempban`, `/grace`, `/ungrace` are registered as real aliases of `/users kick|ban|unban|tempban|untempban|grace|ungrace`; they are inventoried below as standalone compatibility roots because the validator parses those top-level command registrations directly.
 - Compatibility note: `/users unban` remains available as a non-canonical compatibility command for audit/backfill alignment even though it is outside the target contract list.
 - Contract note: `greetings template_set/show/reset` are intentionally absent; editorial greetings copy stays externalized in `settings/greetings_trigger.json`.
 
@@ -37,7 +37,9 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `aura` | `—` | `oggi` | Aura di oggi | `app/plugins/commands_modular/aura.py:452` |
 | `aura` | `—` | `range` | Aura per intervallo | `app/plugins/commands_modular/aura.py:463` |
 | `aura` | `—` | `ultimi` | Aura ultimi N periodi | `app/plugins/commands_modular/aura.py:435` |
-| `ban` | `—` | `ban` | Alias of /users ban. | `app/plugins/commands_modular/moderazione_utenti.py:487` |
+| `ban` | `—` | `ban` | Alias of /users ban. | `app/plugins/commands_modular/moderazione_utenti.py:541` |
+| `unban` | `—` | `unban` | Alias of /users unban. | `app/plugins/commands_modular/moderazione_utenti.py:546` |
+| `untempban` | `—` | `untempban` | Alias of /users untempban. | `app/plugins/commands_modular/moderazione_utenti.py:551` |
 | `barcello` | `—` | `barcello` | Mostra lo stato del barcello (in DM) | `app/plugins/commands_modular/barcello.py:1646` |
 | `campaigns` | `cap` | `limits_reset` | Reset the daily cap limit | `app/plugins/commands_modular/messaggi.py:605` |
 | `campaigns` | `cap` | `limits_set` | Set the daily cap limit | `app/plugins/commands_modular/messaggi.py:588` |
@@ -155,7 +157,8 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `embed` | `footer` | `template_service_reset` | Reset a service-specific footer template. | `app/plugins/commands_modular/embed.py:385` |
 | `embed` | `footer` | `template_service_set` | Set a service-specific footer template. | `app/plugins/commands_modular/embed.py:279` |
 | `embed` | `footer` | `template_service_show` | Show a service-specific footer template. | `app/plugins/commands_modular/embed.py:348` |
-| `grace` | `—` | `grace` | Alias of /users grace. | `app/plugins/commands_modular/moderazione_utenti.py:497` |
+| `grace` | `—` | `grace` | Alias of /users grace. | `app/plugins/commands_modular/moderazione_utenti.py:562` |
+| `ungrace` | `—` | `ungrace` | Alias of /users ungrace. | `app/plugins/commands_modular/moderazione_utenti.py:567` |
 | `greetings` | `backfill` | `off` | Disable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:105` |
 | `greetings` | `backfill` | `on` | Enable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:94` |
 | `greetings` | `backfill` | `run` | Run greetings timeline backfill now. | `app/plugins/commands_modular/greetings.py:122` |
@@ -260,7 +263,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `status` | `—` | `mood_set` | Set the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:143` |
 | `status` | `—` | `mood_show` | Show the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:197` |
 | `status` | `—` | `show` | Show the Barcellometro status. | `app/plugins/commands_modular/status.py:101` |
-| `tempban` | `—` | `tempban` | Alias of /users tempban. | `app/plugins/commands_modular/moderazione_utenti.py:492` |
+| `tempban` | `—` | `tempban` | Alias of /users tempban. | `app/plugins/commands_modular/moderazione_utenti.py:557` |
 | `triggers` | `barcello` | `calibrate` | Recalculate Barcello calibration weights. | `app/plugins/commands_modular/barcello.py:165` |
 | `triggers` | `barcello` | `off` | Disable Barcello triggers in the current channel. | `app/plugins/commands_modular/barcello.py:157` |
 | `triggers` | `barcello` | `on` | Enable Barcello triggers in the current channel. | `app/plugins/commands_modular/barcello.py:153` |
@@ -289,9 +292,11 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `users` | `—` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:476` |
 | `users` | `—` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:440` |
 | `users` | `—` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:444` |
-| `users` | `—` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:463` |
-| `users` | `—` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:467` |
-| `users` | `—` | `unban` | Revoke an active ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:458` |
+| `users` | `—` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:486` |
+| `users` | `—` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:490` |
+| `users` | `—` | `unban` | Revoke an active ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:470` |
+| `users` | `—` | `ungrace` | Revoke an active grace period for a user. | `app/plugins/commands_modular/moderazione_utenti.py:503` |
+| `users` | `—` | `untempban` | Revoke an active temporary ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:475` |
 | `voice_ingest` | `—` | `join` | Join a voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:23` |
 | `voice_ingest` | `—` | `leave` | Leave the current voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:47` |
 

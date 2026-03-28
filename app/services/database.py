@@ -4834,6 +4834,29 @@ class DatabaseService:
             (guild_id, user_id),
         )
 
+    async def revoke_user_grace_state(self, guild_id: str, user_id: str, *, now_iso: str | None = None) -> None:
+        now_value = now_iso or datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            UPDATE inactivity_user_state
+            SET last_reminder_at = NULL
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (guild_id, user_id),
+        )
+        await self.execute(
+            """
+            UPDATE moderation_actions
+            SET expires_at = ?
+            WHERE guild_id = ?
+              AND user_id = ?
+              AND action_type IN ('grace', 'inactive_grace')
+              AND expires_at IS NOT NULL
+              AND expires_at > ?
+            """,
+            (now_value, guild_id, user_id, now_value),
+        )
+
     async def log_moderation_action(
         self,
         *,
