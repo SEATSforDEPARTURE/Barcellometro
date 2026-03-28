@@ -6,6 +6,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - Errors: **0**
 - Warnings: **49**
 - Compatibility note: top-level `/kick`, `/ban`, `/unban`, `/tempban`, `/untempban`, `/grace`, `/ungrace` are registered as real aliases of `/users kick|ban|unban|tempban|untempban|grace|ungrace`; they are inventoried below as standalone compatibility roots because the validator parses those top-level command registrations directly.
+- Moderation timing note: `/users tempban` and `/users grace` (plus `/tempban` and `/grace` aliases) use `quantity` + `unit` (`minuti|ore|giorni|settimane`) as the slash duration interface.
 - Compatibility note: `/users unban` remains available as a non-canonical compatibility command for audit/backfill alignment even though it is outside the target contract list.
 - Contract note: `greetings template_set/show/reset` are intentionally absent; editorial greetings copy stays externalized in `settings/greetings_trigger.json`.
 
