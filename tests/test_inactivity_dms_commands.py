@@ -124,6 +124,7 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         assert "event=reminder" in sections[0].lines[0]
         assert sections[1].title == "Supported placeholders"
         assert sections[1].lines == [f"{{{name}}}" for name in INACTIVITY_DM_SUPPORTED_PLACEHOLDERS]
+        assert "{mention}" in sections[1].lines
 
     asyncio.run(_run())
 
