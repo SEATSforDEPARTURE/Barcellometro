@@ -48,7 +48,7 @@ def test_inactivity_payload_includes_reason_and_invite_line_aliases() -> None:
     )
 
     assert payload["reason"] == "Inattività prolungata"
-    assert payload["reason_text"] == "Inattività prolungata"
+    assert payload["reason_text"] == "La moderazione aggiunge: Inattività prolungata"
     assert payload["reason_line"] == "Reason: ***Inattività prolungata***. "
     assert payload["invite_url"] == "https://discord.gg/rejoin"
     assert payload["invite_line"] == "Invite: ***https://discord.gg/rejoin***"
@@ -57,3 +57,20 @@ def test_inactivity_payload_includes_reason_and_invite_line_aliases() -> None:
     assert payload["event_type"] == "tempban"
     assert payload["event_state"] == "grace_expired"
     assert payload["event_cause"] == "inactivity"
+
+
+def test_inactivity_payload_reason_text_is_empty_without_reason() -> None:
+    member = SimpleNamespace(id=77, mention="<@77>", name="user-77", display_name="Display 77")
+    guild = SimpleNamespace(id=9, name="Test Guild")
+
+    payload = build_inactivity_dm_template_payload(
+        member=member,
+        guild=guild,
+        event_type="tempban",
+        days_inactive=80,
+        policy={"window_days": 30, "min_messages": 1},
+        cfg={"grace_days_after_reminder": 5, "ban_days": 3, "invite_url": "https://discord.gg/rejoin"},
+        reason=None,
+    )
+
+    assert payload["reason_text"] == ""

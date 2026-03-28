@@ -102,6 +102,13 @@ def _render_invite_line(invite_url: str) -> str:
     return f"Invite: {_to_bold_italic(invite_url)}"
 
 
+def format_reason_text(reason: str | None) -> str:
+    safe_reason = str(reason or "").strip()
+    if not safe_reason:
+        return ""
+    return f"La moderazione aggiunge: {safe_reason}"
+
+
 def build_dm_base_placeholder_payload(
     *,
     user: Any,
@@ -116,6 +123,7 @@ def build_dm_base_placeholder_payload(
     invite_url: str | None = None,
 ) -> dict[str, Any]:
     safe_reason = str(reason or "").strip()
+    reason_text = format_reason_text(safe_reason)
     safe_reasoning = str(reasoning or "").strip()
     safe_invite_url = str(invite_url or "").strip()
     clean_duration_seconds = max(0, int(duration_seconds or 0))
@@ -128,7 +136,7 @@ def build_dm_base_placeholder_payload(
         "guild_id": str(getattr(guild, "id", "") or ""),
         "event_type": str(event_type or "").strip(),
         "reason": safe_reason,
-        "reason_text": safe_reason,
+        "reason_text": reason_text,
         "reason_line": _render_reason_line(safe_reason),
         "reasoning": safe_reasoning,
         "duration_seconds": clean_duration_seconds,
