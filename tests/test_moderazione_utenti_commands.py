@@ -169,7 +169,12 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
             moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
         )
 
-        database = SimpleNamespace(clear_user_ban_state=AsyncMock())
+        database = SimpleNamespace(
+            clear_user_ban_state=AsyncMock(),
+            fetch_user_display_name=AsyncMock(return_value="Dormiente"),
+            list_active_tempbans=AsyncMock(return_value=[]),
+            list_active_bans=AsyncMock(return_value=[]),
+        )
         member_flow_notifications = SimpleNamespace(
             log_action=AsyncMock(
                 return_value={"canonical_written": True, "canonical_visible": False}
@@ -188,7 +193,6 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
         command = _find_command(users_group, "unban")
 
         guild = SimpleNamespace(id=1, unban=AsyncMock())
-        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
         moderator = SimpleNamespace(id=9)
         interaction = SimpleNamespace(
             guild=guild,
@@ -197,8 +201,10 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
             command=SimpleNamespace(qualified_name="users unban"),
         )
 
-        await command.callback(interaction, target_user)
+        await command.callback(interaction, "42")
 
+        target_user = guild.unban.await_args.args[0]
+        assert target_user.id == 42
         guild.unban.assert_awaited_once_with(target_user, reason="Revoca ban manuale")
         database.clear_user_ban_state.assert_awaited_once_with("1", "42")
         member_flow_notifications.forget_departure_action.assert_called_once_with(
@@ -232,7 +238,12 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
             moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
         )
 
-        database = SimpleNamespace(clear_user_ban_state=AsyncMock())
+        database = SimpleNamespace(
+            clear_user_ban_state=AsyncMock(),
+            fetch_user_display_name=AsyncMock(return_value="Dormiente"),
+            list_active_tempbans=AsyncMock(return_value=[]),
+            list_active_bans=AsyncMock(return_value=[]),
+        )
         member_flow_notifications = SimpleNamespace(
             log_action=AsyncMock(
                 return_value={"canonical_written": True, "canonical_visible": False}
@@ -255,7 +266,6 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
             {"code": 10026, "message": "Unknown Ban"},
         )
         guild = SimpleNamespace(id=1, unban=AsyncMock(side_effect=not_found))
-        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
         moderator = SimpleNamespace(id=9)
         interaction = SimpleNamespace(
             guild=guild,
@@ -265,8 +275,10 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
         )
 
         with caplog.at_level("INFO"):
-            await command.callback(interaction, target_user)
+            await command.callback(interaction, "42")
 
+        target_user = guild.unban.await_args.args[0]
+        assert target_user.id == 42
         guild.unban.assert_awaited_once_with(target_user, reason="Revoca ban manuale")
         database.clear_user_ban_state.assert_awaited_once_with("1", "42")
         member_flow_notifications.forget_departure_action.assert_called_once_with(
@@ -302,7 +314,11 @@ def test_mod_users_untempban_uses_canonical_unban_flow_with_tempban_message(
             moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
         )
 
-        database = SimpleNamespace(clear_user_ban_state=AsyncMock())
+        database = SimpleNamespace(
+            clear_user_ban_state=AsyncMock(),
+            fetch_user_display_name=AsyncMock(return_value="Dormiente"),
+            list_active_tempbans=AsyncMock(return_value=[]),
+        )
         member_flow_notifications = SimpleNamespace(
             log_action=AsyncMock(
                 return_value={"canonical_written": True, "canonical_visible": False}
@@ -321,7 +337,6 @@ def test_mod_users_untempban_uses_canonical_unban_flow_with_tempban_message(
         command = _find_command(users_group, "untempban")
 
         guild = SimpleNamespace(id=1, unban=AsyncMock())
-        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
         moderator = SimpleNamespace(id=9)
         interaction = SimpleNamespace(
             guild=guild,
@@ -330,8 +345,10 @@ def test_mod_users_untempban_uses_canonical_unban_flow_with_tempban_message(
             command=SimpleNamespace(qualified_name="users untempban"),
         )
 
-        await command.callback(interaction, target_user)
+        await command.callback(interaction, "42")
 
+        target_user = guild.unban.await_args.args[0]
+        assert target_user.id == 42
         guild.unban.assert_awaited_once_with(target_user, reason="Revoca ban manuale")
         database.clear_user_ban_state.assert_awaited_once_with("1", "42")
         response_kwargs = send_standard_response.await_args.kwargs
@@ -353,7 +370,11 @@ def test_mod_users_ungrace_revokes_grace_state(
             moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
         )
 
-        database = SimpleNamespace(revoke_user_grace_state=AsyncMock())
+        database = SimpleNamespace(
+            revoke_user_grace_state=AsyncMock(),
+            list_active_grace_users=AsyncMock(return_value=[{"user_id": "42"}]),
+            fetch_user_display_name=AsyncMock(return_value="Dormiente"),
+        )
         ctx = SimpleNamespace(
             database=database,
             footer=None,
@@ -365,7 +386,6 @@ def test_mod_users_ungrace_revokes_grace_state(
         command = _find_command(users_group, "ungrace")
 
         guild = SimpleNamespace(id=1)
-        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
         moderator = SimpleNamespace(id=9)
         interaction = SimpleNamespace(
             guild=guild,
@@ -374,12 +394,117 @@ def test_mod_users_ungrace_revokes_grace_state(
             command=SimpleNamespace(qualified_name="users ungrace"),
         )
 
-        await command.callback(interaction, target_user)
+        await command.callback(interaction, "Dormiente")
 
         database.revoke_user_grace_state.assert_awaited_once()
         response_kwargs = send_standard_response.await_args.kwargs
         assert response_kwargs["subcommand_path"] == "users ungrace"
         assert ("result", "grace revoked") in response_kwargs["lines"]
+
+    asyncio.run(_run())
+
+
+def test_mod_users_unban_resolves_known_nick(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        database = SimpleNamespace(
+            clear_user_ban_state=AsyncMock(),
+            list_active_tempbans=AsyncMock(return_value=[]),
+            list_active_bans=AsyncMock(return_value=[{"user_id": "42"}]),
+            fetch_user_display_name=AsyncMock(return_value="Dormiente"),
+        )
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(return_value={"canonical_written": True, "canonical_visible": False}),
+            send_notification=AsyncMock(),
+            forget_departure_action=Mock(),
+        )
+        ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=member_flow_notifications, barcello_service=None)
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "unban")
+
+        guild = SimpleNamespace(id=1, unban=AsyncMock())
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban"))
+
+        await command.callback(interaction, "Dormiente")
+
+        target_user = guild.unban.await_args.args[0]
+        assert target_user.id == 42
+        database.clear_user_ban_state.assert_awaited_once_with("1", "42")
+
+    asyncio.run(_run())
+
+
+def test_mod_users_unban_reports_missing_target_for_unknown_nick(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        database = SimpleNamespace(
+            clear_user_ban_state=AsyncMock(),
+            list_active_tempbans=AsyncMock(return_value=[]),
+            list_active_bans=AsyncMock(return_value=[{"user_id": "42"}]),
+            fetch_user_display_name=AsyncMock(return_value="Dormiente"),
+        )
+        ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=None, barcello_service=None)
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "unban")
+
+        guild = SimpleNamespace(id=1, unban=AsyncMock())
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban"))
+
+        await command.callback(interaction, "Sconosciuto")
+
+        guild.unban.assert_not_awaited()
+        response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["kind"] == "error"
+        assert "Nessun utente trovato" in dict(response_kwargs["lines"])["error"]
+
+    asyncio.run(_run())
+
+
+def test_mod_users_unban_reports_ambiguous_known_nick(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        async def _display_name(*, guild_id: str, user_id: str) -> str:
+            return "Dormiente" if user_id in {"42", "77"} else "Altro"
+
+        database = SimpleNamespace(
+            clear_user_ban_state=AsyncMock(),
+            list_active_tempbans=AsyncMock(return_value=[]),
+            list_active_bans=AsyncMock(return_value=[{"user_id": "42"}, {"user_id": "77"}]),
+            fetch_user_display_name=AsyncMock(side_effect=_display_name),
+        )
+        ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=None, barcello_service=None)
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "unban")
+
+        guild = SimpleNamespace(id=1, unban=AsyncMock())
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban"))
+
+        await command.callback(interaction, "Dormiente")
+
+        guild.unban.assert_not_awaited()
+        response_kwargs = send_standard_response.await_args.kwargs
+        lines = dict(response_kwargs["lines"])
+        assert response_kwargs["kind"] == "error"
+        assert "Nickname ambiguo" in lines["error"]
+        assert "Specifica l'ID utente." == lines["hint"]
 
     asyncio.run(_run())
 
@@ -404,6 +529,24 @@ def test_users_tempban_and_grace_expose_quantity_unit_not_duration() -> None:
     assert grace_params == ["user", "quantity", "unit", "reason"]
     assert "duration" not in tempban_params
     assert "duration" not in grace_params
+
+
+def test_users_unban_untempban_ungrace_expose_nick_or_id_parameter() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(
+        database=Mock(),
+        footer=None,
+        member_flow_notifications=None,
+        barcello_service=None,
+    )
+    register_moderazione_utenti(users_group, ctx)
+    unban_command = _find_command(users_group, "unban")
+    untempban_command = _find_command(users_group, "untempban")
+    ungrace_command = _find_command(users_group, "ungrace")
+
+    assert [param.name for param in unban_command.parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in untempban_command.parameters] == ["nick_or_id", "reason"]
+    assert [param.name for param in ungrace_command.parameters] == ["nick_or_id", "reason"]
 
 
 def test_mod_users_tempban_converts_quantity_unit_to_duration_seconds(
