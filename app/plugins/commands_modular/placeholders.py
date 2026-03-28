@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+from app.services.inactivity_dm_templates import INACTIVITY_DM_SUPPORTED_PLACEHOLDERS
+
 
 def describe_placeholders() -> str:
-    return (
-        "Placeholder: {user}, {username}, {display_name}, {mention}, {user_id}, {server}, {guild_id}, {days_inactive}, "
-        "{window_days}, {min_messages}, {message_count}, {grace_days}, {reminder_count}, {ban_days}, {rejoin_link}, {reason}, "
-        "{moderator}, {moderator_mention}, {duration}, {duration_days}, {expires_at}, {inactivity_text}."
-    )
+    placeholders = ", ".join(f"{{{name}}}" for name in INACTIVITY_DM_SUPPORTED_PLACEHOLDERS)
+    return f"Placeholder: {placeholders}."

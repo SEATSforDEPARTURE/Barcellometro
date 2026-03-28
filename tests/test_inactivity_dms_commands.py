@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock
 import discord
 import pytest
 
+from app.services.inactivity_dm_templates import INACTIVITY_DM_SUPPORTED_PLACEHOLDERS
+
 
 class _FakeDatabase:
     def __init__(self) -> None:
@@ -120,6 +122,8 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         sections = send_response.await_args_list[-1].kwargs["sections"]
         assert sections[0].title == "Recent DM deliveries"
         assert "event=reminder" in sections[0].lines[0]
+        assert sections[1].title == "Supported placeholders"
+        assert sections[1].lines == [f"{{{name}}}" for name in INACTIVITY_DM_SUPPORTED_PLACEHOLDERS]
 
     asyncio.run(_run())
 
