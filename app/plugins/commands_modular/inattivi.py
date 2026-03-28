@@ -10,6 +10,7 @@ from discord import app_commands
 from app.plugins.commands_modular.placeholders import describe_placeholders
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.plugins.commands_modular.time_windows import rolling_window_timedelta
 from app.services.inactivity_dm_templates import INACTIVITY_DM_SUPPORTED_PLACEHOLDERS
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, build_command_embeds, send_command_embeds, send_standard_response
 
@@ -19,6 +20,13 @@ DEFAULT_REMINDER_COOLDOWN_DAYS = 14
 DEFAULT_TEMPBAN_DAYS = 7
 DEFAULT_POLICY_JSON = '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR","min_account_age_days":0}'
 TEMPLATE_HELP = f"Supported placeholders: {describe_placeholders()} Example: {{mention}}, {{days_inactive}}."
+COOLDOWN_UNIT_CHOICES = [
+    app_commands.Choice(name="secondi", value="secondi"),
+    app_commands.Choice(name="minuti", value="minuti"),
+    app_commands.Choice(name="ore", value="ore"),
+    app_commands.Choice(name="giorni", value="giorni"),
+    app_commands.Choice(name="settimane", value="settimane"),
+]
 
 
 def _normalize_mode(mode: str) -> str:
@@ -145,6 +153,29 @@ def _fmt_utc(ts: object) -> str:
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _resolve_inactivity_cooldown_seconds(cfg: dict[str, object]) -> int:
+    if cfg.get("reminder_cooldown_seconds") is not None:
+        return max(0, int(cfg.get("reminder_cooldown_seconds") or 0))
+    return max(0, int(cfg.get("reminder_cooldown_days", DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS) * 86400)
+
+
+def _cooldown_seconds_to_quantity_unit(total_seconds: int) -> tuple[int, str]:
+    seconds = max(0, int(total_seconds))
+    if seconds == 0:
+        return 0, "secondi"
+    for unit, factor in (("settimane", 7 * 24 * 3600), ("giorni", 24 * 3600), ("ore", 3600), ("minuti", 60)):
+        if seconds % factor == 0:
+            return seconds // factor, unit
+    return seconds, "secondi"
+
+
+def _format_cooldown_label(total_seconds: int) -> str:
+    if int(total_seconds) <= 0:
+        return "disabled (0 seconds)"
+    quantity, unit = _cooldown_seconds_to_quantity_unit(total_seconds)
+    return f"{quantity} {unit}"
+
+
 def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "inactivity", visual_top_level: str = "inactivity") -> None:
     autokick_group = app_commands.Group(name="autokick", description="Automatic inactivity enforcement")
     grace_group = app_commands.Group(name="grace", description="Grace period settings")
@@ -223,7 +254,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             f"autokick={_bool_label(cfg.get('auto_enabled'))}",
             f"grace={_status_label_from_days(int(cfg.get('grace_days_after_reminder', DEFAULT_GRACE_DAYS) or 0))} ({int(cfg.get('grace_days_after_reminder', DEFAULT_GRACE_DAYS) or 0)} days)",
             f"tempban={_status_label_from_days(int(cfg.get('ban_days', DEFAULT_TEMPBAN_DAYS) or 0))} ({int(cfg.get('ban_days', DEFAULT_TEMPBAN_DAYS) or 0)} days)",
-            f"dm_cooldown={int(cfg.get('reminder_cooldown_days', DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS)} days",
+            f"dm_cooldown={_format_cooldown_label(_resolve_inactivity_cooldown_seconds(cfg))}",
             f"invite_url={cfg.get('invite_url') or 'not set'}",
             f"role_policies={len(role_policies)}",
             f"exceptions={', '.join(_role_mentions(interaction.guild, exception_role_ids)) if exception_role_ids else 'none'}",
@@ -236,7 +267,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
                 ("autokick", _bool_label(cfg.get("auto_enabled"))),
                 ("grace", f"{_status_label_from_days(int(cfg.get('grace_days_after_reminder', DEFAULT_GRACE_DAYS) or 0))} ({int(cfg.get('grace_days_after_reminder', DEFAULT_GRACE_DAYS) or 0)} days)"),
                 ("tempban", f"{_status_label_from_days(int(cfg.get('ban_days', DEFAULT_TEMPBAN_DAYS) or 0))} ({int(cfg.get('ban_days', DEFAULT_TEMPBAN_DAYS) or 0)} days)"),
-                ("dm_cooldown", f"{int(cfg.get('reminder_cooldown_days', DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS)} days"),
+                ("dm_cooldown", _format_cooldown_label(_resolve_inactivity_cooldown_seconds(cfg))),
                 ("invite_url", cfg.get("invite_url") or "not set"),
                 ("role_policies", len(role_policies)),
                 ("exceptions", ", ".join(_role_mentions(interaction.guild, exception_role_ids)) if exception_role_ids else "none"),
@@ -407,8 +438,9 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
                 ("dms", _bool_label(cfg.get("dm_reminders_enabled", 1))),
                 ("template_grace", template_grace or "not set"),
                 ("template_tempban", template_tempban or "not set"),
-                ("cooldown", f"{int(cfg.get('reminder_cooldown_days', DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS)} days"),
-                ("cooldown_days", int(cfg.get("reminder_cooldown_days", DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS)),
+                ("cooldown", _format_cooldown_label(_resolve_inactivity_cooldown_seconds(cfg))),
+                ("cooldown_seconds", _resolve_inactivity_cooldown_seconds(cfg)),
+                ("cooldown_disabled", "yes" if _resolve_inactivity_cooldown_seconds(cfg) == 0 else "no"),
                 ("invite_url", cfg.get("invite_url") or "not set"),
                 ("dm_sent_ok", int(stats.get("ok", 0))),
                 ("dm_sent_fail", int(stats.get("fail", 0))),
@@ -478,29 +510,59 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         await _send(interaction, subcommand_path="inactivity dms template_tempban_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="cooldown_set", description="Set the reminder DM cooldown.")
-    @app_commands.describe(days="Number of days between reminder DMs.")
-    async def inactivity_dms_cooldown_set(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365]) -> None:
+    @app_commands.describe(quantity="Cooldown quantity.", unit="Cooldown unit.")
+    @app_commands.choices(unit=COOLDOWN_UNIT_CHOICES)
+    async def inactivity_dms_cooldown_set(
+        interaction: discord.Interaction,
+        quantity: app_commands.Range[int, 0, 1000000],
+        unit: app_commands.Choice[str],
+    ) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), reminder_cooldown_days=int(days))
-        await _send(interaction, subcommand_path="inactivity dms cooldown_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
+        cooldown_seconds = int(rolling_window_timedelta(int(quantity), unit.value).total_seconds()) if int(quantity) > 0 else 0
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), reminder_cooldown_seconds=cooldown_seconds)
+        await _send(
+            interaction,
+            subcommand_path="inactivity dms cooldown_set",
+            lines=[
+                ("cooldown", _format_cooldown_label(cooldown_seconds)),
+                ("cooldown_seconds", cooldown_seconds),
+                ("cooldown_disabled", "yes" if cooldown_seconds == 0 else "no"),
+                ("result", "updated"),
+            ],
+            kind="success",
+        )
 
     @dms_group.command(name="cooldown_show", description="Show the reminder DM cooldown.")
     async def inactivity_dms_cooldown_show(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
-        await _send(interaction, subcommand_path="inactivity dms cooldown_show", lines=[("days", int(cfg.get("reminder_cooldown_days", DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS))])
+        cooldown_seconds = _resolve_inactivity_cooldown_seconds(cfg)
+        quantity, unit = _cooldown_seconds_to_quantity_unit(cooldown_seconds)
+        await _send(
+            interaction,
+            subcommand_path="inactivity dms cooldown_show",
+            lines=[
+                ("cooldown", _format_cooldown_label(cooldown_seconds)),
+                ("quantity", quantity),
+                ("unit", unit),
+                ("cooldown_seconds", cooldown_seconds),
+                ("cooldown_disabled", "yes" if cooldown_seconds == 0 else "no"),
+            ],
+        )
 
     @dms_group.command(name="cooldown_reset", description="Reset the reminder DM cooldown.")
     async def inactivity_dms_cooldown_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_inactivity_config(
-            str(interaction.guild_id),
-            reminder_cooldown_days=DEFAULT_REMINDER_COOLDOWN_DAYS,
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), reminder_cooldown_seconds=0)
+        await _send(
+            interaction,
+            subcommand_path="inactivity dms cooldown_reset",
+            lines=[("cooldown", "disabled (0 seconds)"), ("cooldown_seconds", 0), ("cooldown_disabled", "yes"), ("result", "reset_to_disabled")],
+            kind="success",
         )
-        await _send(interaction, subcommand_path="inactivity dms cooldown_reset", lines=[("days", DEFAULT_REMINDER_COOLDOWN_DAYS), ("result", "reset")], kind="success")
 
     @dms_group.command(name="invite_set", description="Set the invite link used in inactivity DMs.")
     @app_commands.describe(url="Invite URL sent to inactive members.")

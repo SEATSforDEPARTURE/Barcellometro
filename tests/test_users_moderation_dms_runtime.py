@@ -15,10 +15,11 @@ from app.services.users_moderation_dms import UsersModerationDmService
 
 
 class _FakeDb:
-    def __init__(self, *, enabled: int = 1, cooldown_days: int = 14, invite_url: str | None = None) -> None:
+    def __init__(self, *, enabled: int = 1, cooldown_seconds: int = 14 * 86400, invite_url: str | None = None) -> None:
         self.config = {
             "enabled": enabled,
-            "cooldown_days": cooldown_days,
+            "cooldown_days": max(0, cooldown_seconds // 86400),
+            "cooldown_seconds": cooldown_seconds,
             "invite_url": invite_url,
             "grace_template": "GRACE {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {reason_line}{invite_line}",
             "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {reason_line}{invite_line}",
@@ -97,7 +98,7 @@ def test_users_dm_manual_grace_renders_template_and_logs_success() -> None:
 
 def test_users_dm_cooldown_skips_send_and_logs_skipped() -> None:
     async def _run() -> None:
-        db = _FakeDb(cooldown_days=14)
+        db = _FakeDb(cooldown_seconds=14 * 86400)
         now_iso = datetime.now(timezone.utc).isoformat()
         db.latest[("1", "42", "grace")] = {"sent_at": now_iso, "outcome": "success"}
         user = _FakeUser(42)
@@ -118,6 +119,31 @@ def test_users_dm_cooldown_skips_send_and_logs_skipped() -> None:
         user.send.assert_not_awaited()
         assert db.logs[-1]["outcome"] == "skipped"
         assert db.logs[-1]["error_summary"] == "cooldown"
+
+    asyncio.run(_run())
+
+
+def test_users_dm_zero_cooldown_does_not_skip_send() -> None:
+    async def _run() -> None:
+        db = _FakeDb(cooldown_seconds=0)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        db.latest[("1", "42", "grace")] = {"sent_at": now_iso, "outcome": "success"}
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="grace",
+            duration_seconds=1800,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+            reason="manual grace",
+        )
+
+        assert result["sent"] is True
+        user.send.assert_awaited()
+        assert db.logs[-1]["outcome"] == "success"
 
     asyncio.run(_run())
 
@@ -189,6 +215,7 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
                 return_value={
                     "enabled": 1,
                     "cooldown_days": 14,
+                    "cooldown_seconds": 14 * 86400,
                     "invite_url": "https://discord.gg/rejoin",
                     "grace_template": "GRACE {user}",
                     "tempban_template": "AUTO TEMPBAN {mention} ({user}) {duration_human} {invite_line}",

@@ -904,7 +904,10 @@ class InactiveMembersModerationService:
             return {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": [], "disabled": True}
         now = datetime.now(timezone.utc)
         grace_template = cfg.get("template_grace") or cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
-        cooldown_days = max(1, int(cfg.get("reminder_cooldown_days", 14) or 14))
+        raw_cooldown_seconds = cfg.get("reminder_cooldown_seconds")
+        if raw_cooldown_seconds is None:
+            raw_cooldown_seconds = int(cfg.get("reminder_cooldown_days", 14) or 14) * 86400
+        cooldown_seconds = max(0, int(raw_cooldown_seconds or 0))
         ok = 0
         fail = 0
         skipped = 0
@@ -917,7 +920,7 @@ class InactiveMembersModerationService:
                     last_sent = self._parse_iso_datetime(str(latest_delivery["sent_at"]))
                     if last_sent is None:
                         raise ValueError("invalid sent_at")
-                    if now - last_sent < timedelta(days=cooldown_days):
+                    if cooldown_seconds > 0 and now - last_sent < timedelta(seconds=cooldown_seconds):
                         skipped += 1
                         await self._database.log_inactivity_dm_delivery(
                             guild_id=guild_id,
@@ -931,7 +934,7 @@ class InactiveMembersModerationService:
                                 "source": "inactive_members_moderation",
                                 "days_inactive": candidate.days_inactive,
                                 "message_count": candidate.count_in_window,
-                                "cooldown_days": cooldown_days,
+                                "cooldown_seconds": cooldown_seconds,
                             },
                         )
                         continue

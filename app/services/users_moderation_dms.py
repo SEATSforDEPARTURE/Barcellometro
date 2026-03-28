@@ -11,6 +11,7 @@ from app.services.greetings_copy_service import get_greetings_title_parts
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 
 DEFAULT_USERS_DM_COOLDOWN_DAYS = 14
+DEFAULT_USERS_DM_COOLDOWN_SECONDS = DEFAULT_USERS_DM_COOLDOWN_DAYS * 86400
 DEFAULT_USERS_DM_GRACE_TEMPLATE = (
     "Hi {user}, you have entered a manual grace period in {server}. "
     "It will expire on {expires_at_utc} ({expires_at_it}). {reason_line}{invite_line}"
@@ -37,6 +38,7 @@ class UsersModerationDmService:
                 "grace_template": None,
                 "tempban_template": None,
                 "cooldown_days": DEFAULT_USERS_DM_COOLDOWN_DAYS,
+                "cooldown_seconds": DEFAULT_USERS_DM_COOLDOWN_SECONDS,
                 "invite_url": None,
             }
         row = await get_cfg(guild_id)
@@ -45,6 +47,7 @@ class UsersModerationDmService:
             "grace_template": None,
             "tempban_template": None,
             "cooldown_days": DEFAULT_USERS_DM_COOLDOWN_DAYS,
+            "cooldown_seconds": DEFAULT_USERS_DM_COOLDOWN_SECONDS,
             "invite_url": None,
         }
         if row is not None:
@@ -127,7 +130,10 @@ class UsersModerationDmService:
             )
             return {"sent": False, "skipped": "disabled"}
 
-        cooldown_days = max(1, int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS))
+        raw_cooldown_seconds = cfg.get("cooldown_seconds")
+        if raw_cooldown_seconds is None:
+            raw_cooldown_seconds = int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS) * 86400
+        cooldown_seconds = max(0, int(raw_cooldown_seconds or 0))
         latest_lookup = getattr(self._database, "get_latest_users_dm_delivery", None)
         latest = await latest_lookup(guild_id, user_id, event_type) if latest_lookup is not None else None
         latest_outcome = ""
@@ -141,7 +147,7 @@ class UsersModerationDmService:
                 last_sent = datetime.fromisoformat(str(latest["sent_at"]).replace("Z", "+00:00"))
                 if last_sent.tzinfo is None:
                     last_sent = last_sent.replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) - last_sent < timedelta(days=cooldown_days):
+                if cooldown_seconds > 0 and datetime.now(timezone.utc) - last_sent < timedelta(seconds=cooldown_seconds):
                     await self._log_delivery(
                         guild_id=guild_id,
                         user_id=user_id,
@@ -149,7 +155,7 @@ class UsersModerationDmService:
                         reason=reason,
                         outcome="skipped",
                         error_summary="cooldown",
-                        metadata={**(metadata or {}), "cooldown_days": cooldown_days},
+                        metadata={**(metadata or {}), "cooldown_seconds": cooldown_seconds},
                     )
                     return {"sent": False, "skipped": "cooldown"}
             except Exception:

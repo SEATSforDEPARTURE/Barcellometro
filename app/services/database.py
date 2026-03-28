@@ -652,6 +652,7 @@ class DatabaseService:
                 dm_reminders_enabled INTEGER NOT NULL DEFAULT 1,
                 grace_days_after_reminder INTEGER NOT NULL DEFAULT 7,
                 reminder_cooldown_days INTEGER NOT NULL DEFAULT 14,
+                reminder_cooldown_seconds INTEGER NOT NULL DEFAULT 1209600,
                 ban_days INTEGER NOT NULL DEFAULT 7,
                 atrio_channel_id TEXT NULL,
                 notify_channel_id TEXT NULL,
@@ -714,6 +715,7 @@ class DatabaseService:
                 grace_template TEXT NULL,
                 tempban_template TEXT NULL,
                 cooldown_days INTEGER NOT NULL DEFAULT 14,
+                cooldown_seconds INTEGER NOT NULL DEFAULT 1209600,
                 invite_url TEXT NULL,
                 updated_at TEXT NOT NULL,
                 created_at TEXT NOT NULL
@@ -940,6 +942,7 @@ class DatabaseService:
             "template_grace_reason": "TEXT NULL",
             "template_grace": "TEXT NULL",
             "template_tempban": "TEXT NULL",
+            "reminder_cooldown_seconds": "INTEGER NOT NULL DEFAULT 1209600",
         }
         for name, col_def in missing.items():
             if name not in existing:
@@ -985,6 +988,7 @@ class DatabaseService:
                 grace_template TEXT NULL,
                 tempban_template TEXT NULL,
                 cooldown_days INTEGER NOT NULL DEFAULT 14,
+                cooldown_seconds INTEGER NOT NULL DEFAULT 1209600,
                 invite_url TEXT NULL,
                 updated_at TEXT NOT NULL,
                 created_at TEXT NOT NULL
@@ -998,6 +1002,7 @@ class DatabaseService:
             "grace_template": "TEXT NULL",
             "tempban_template": "TEXT NULL",
             "cooldown_days": "INTEGER NOT NULL DEFAULT 14",
+            "cooldown_seconds": "INTEGER NOT NULL DEFAULT 1209600",
             "invite_url": "TEXT NULL",
             "updated_at": "TEXT NOT NULL DEFAULT ''",
             "created_at": "TEXT NOT NULL DEFAULT ''",
@@ -4844,6 +4849,10 @@ class DatabaseService:
         data["notify_channel_id"] = data.get("notify_channel_id") or data.get("atrio_channel_id")
         data["template_grace"] = data.get("template_grace") or data.get("dm_reminder_template")
         data["template_tempban"] = data.get("template_tempban") or data.get("dm_kick_template")
+        cooldown_seconds = data.get("reminder_cooldown_seconds")
+        if cooldown_seconds is None:
+            cooldown_seconds = int(data.get("reminder_cooldown_days", 14) or 14) * 86400
+        data["reminder_cooldown_seconds"] = max(0, int(cooldown_seconds or 0))
         return data
 
     async def upsert_inactivity_config(self, guild_id: str, **fields: Any) -> None:
@@ -4856,6 +4865,10 @@ class DatabaseService:
             normalized_fields["template_grace"] = normalized_fields["dm_reminder_template"]
         if "dm_kick_template" in normalized_fields and "template_tempban" not in normalized_fields:
             normalized_fields["template_tempban"] = normalized_fields["dm_kick_template"]
+        if "reminder_cooldown_seconds" in normalized_fields and "reminder_cooldown_days" not in normalized_fields:
+            normalized_fields["reminder_cooldown_days"] = max(0, int(normalized_fields["reminder_cooldown_seconds"] or 0) // 86400)
+        if "reminder_cooldown_days" in normalized_fields and "reminder_cooldown_seconds" not in normalized_fields:
+            normalized_fields["reminder_cooldown_seconds"] = max(0, int(normalized_fields["reminder_cooldown_days"] or 0) * 86400)
         now = datetime.now(timezone.utc).isoformat()
         current = await self.get_inactivity_config(guild_id)
         base: dict[str, Any] = {
@@ -4864,6 +4877,7 @@ class DatabaseService:
             "dm_reminders_enabled": 1,
             "grace_days_after_reminder": 7,
             "reminder_cooldown_days": 14,
+            "reminder_cooldown_seconds": 14 * 86400,
             "ban_days": 7,
             "atrio_channel_id": None,
             "notify_channel_id": None,
@@ -4897,6 +4911,7 @@ class DatabaseService:
             "dm_reminders_enabled",
             "grace_days_after_reminder",
             "reminder_cooldown_days",
+            "reminder_cooldown_seconds",
             "ban_days",
             "atrio_channel_id",
             "notify_channel_id",
@@ -5049,9 +5064,22 @@ class DatabaseService:
         )
 
     async def get_users_dm_config(self, guild_id: str) -> Optional[aiosqlite.Row]:
-        return await self.fetchone("SELECT * FROM users_dm_config WHERE guild_id = ?", (guild_id,))
+        row = await self.fetchone("SELECT * FROM users_dm_config WHERE guild_id = ?", (guild_id,))
+        if row is None:
+            return None
+        data = dict(row)
+        cooldown_seconds = data.get("cooldown_seconds")
+        if cooldown_seconds is None:
+            cooldown_seconds = int(data.get("cooldown_days", 14) or 14) * 86400
+        data["cooldown_seconds"] = max(0, int(cooldown_seconds or 0))
+        return data
 
     async def upsert_users_dm_config(self, guild_id: str, **fields: Any) -> None:
+        normalized_fields = dict(fields)
+        if "cooldown_seconds" in normalized_fields and "cooldown_days" not in normalized_fields:
+            normalized_fields["cooldown_days"] = max(0, int(normalized_fields["cooldown_seconds"] or 0) // 86400)
+        if "cooldown_days" in normalized_fields and "cooldown_seconds" not in normalized_fields:
+            normalized_fields["cooldown_seconds"] = max(0, int(normalized_fields["cooldown_days"] or 0) * 86400)
         now = datetime.now(timezone.utc).isoformat()
         current = await self.get_users_dm_config(guild_id)
         base: dict[str, Any] = {
@@ -5059,6 +5087,7 @@ class DatabaseService:
             "grace_template": None,
             "tempban_template": None,
             "cooldown_days": 14,
+            "cooldown_seconds": 14 * 86400,
             "invite_url": None,
             "created_at": now,
             "updated_at": now,
@@ -5067,7 +5096,7 @@ class DatabaseService:
             for key in base:
                 if key in current.keys():
                     base[key] = current[key]
-        base.update(fields)
+        base.update(normalized_fields)
         base["updated_at"] = now
         columns = [
             "guild_id",
@@ -5075,6 +5104,7 @@ class DatabaseService:
             "grace_template",
             "tempban_template",
             "cooldown_days",
+            "cooldown_seconds",
             "invite_url",
             "updated_at",
             "created_at",

@@ -308,6 +308,7 @@ def test_users_dm_config_and_delivery_log_tracks_stats_and_recent_events(tmp_pat
         assert cfg is not None
         assert int(cfg["enabled"]) == 1
         assert int(cfg["cooldown_days"]) == 21
+        assert int(cfg["cooldown_seconds"]) == 21 * 86400
         assert cfg["invite_url"] == "https://discord.gg/example"
 
         await db.log_users_dm_delivery(
