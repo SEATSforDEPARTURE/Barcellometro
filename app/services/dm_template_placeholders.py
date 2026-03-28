@@ -36,6 +36,53 @@ DM_BASE_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
 
 _UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
 _FORMATTER = Formatter()
+_DM_IMPORTANT_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "mention",
+        "user",
+        "username",
+        "display_name",
+        "server",
+        "event_type",
+        "reason",
+        "reason_text",
+        "reasoning",
+        "duration_seconds",
+        "duration_human",
+        "started_at_utc",
+        "started_at_it",
+        "expires_at_utc",
+        "expires_at_it",
+        "now_utc",
+        "now_it",
+        "invite_url",
+        "days_inactive",
+        "window_days",
+        "min_messages",
+        "message_count",
+        "grace_days",
+        "reminder_count",
+        "ban_days",
+        "rejoin_link",
+        "inactivity_text",
+        "event_state",
+        "event_cause",
+    }
+)
+
+
+def _escape_markdown(value: str) -> str:
+    escaped = str(value or "")
+    for token in ("\\", "*", "_", "`", "~", "|"):
+        escaped = escaped.replace(token, f"\\{token}")
+    return escaped
+
+
+def _to_bold_italic(value: Any) -> str:
+    clean = str(value or "").strip()
+    if not clean:
+        return ""
+    return f"***{_escape_markdown(clean)}***"
 
 
 class _SafePlaceholderDict(dict[str, Any]):
@@ -46,13 +93,13 @@ class _SafePlaceholderDict(dict[str, Any]):
 def _render_reason_line(reason_text: str) -> str:
     if not reason_text:
         return ""
-    return f"Reason: {reason_text}. "
+    return f"Reason: {_to_bold_italic(reason_text)}. "
 
 
 def _render_invite_line(invite_url: str) -> str:
     if not invite_url:
         return ""
-    return f"Invite: {invite_url}"
+    return f"Invite: {_to_bold_italic(invite_url)}"
 
 
 def build_dm_base_placeholder_payload(
@@ -93,9 +140,24 @@ def build_dm_base_placeholder_payload(
 
 def render_dm_template(template: str, payload: dict[str, Any]) -> str:
     base = str(template or "")
-    safe_payload = _SafePlaceholderDict(payload)
+    styled_payload: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in {"reason_line", "invite_line"}:
+            styled_payload[key] = str(value or "")
+            continue
+        if key in _DM_IMPORTANT_PLACEHOLDERS:
+            styled_payload[key] = _to_bold_italic(value)
+            continue
+        if isinstance(value, str):
+            styled_payload[key] = _escape_markdown(value)
+            continue
+        styled_payload[key] = value
+    safe_payload = _SafePlaceholderDict(styled_payload)
     try:
         rendered = _FORMATTER.vformat(base, (), safe_payload)
     except Exception:
         rendered = base
-    return _UNRESOLVED_PLACEHOLDER_RE.sub("", rendered)
+    clean = _UNRESOLVED_PLACEHOLDER_RE.sub("", rendered).strip()
+    if not clean:
+        return ""
+    return f"_{clean}_"
