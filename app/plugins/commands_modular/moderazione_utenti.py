@@ -1116,6 +1116,7 @@ def register_moderazione_utenti(
                 ("dms", "on" if bool(cfg.get("enabled", 1)) else "off"),
                 ("template_grace", cfg.get("grace_template") or "not set"),
                 ("template_tempban", cfg.get("tempban_template") or "not set"),
+                ("cooldown", f"{int(cfg.get('cooldown_days', DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS)} days"),
                 ("cooldown_days", int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS)),
                 ("invite_url", cfg.get("invite_url") or "not set"),
                 ("dm_sent_ok", int(stats.get("ok", 0))),
