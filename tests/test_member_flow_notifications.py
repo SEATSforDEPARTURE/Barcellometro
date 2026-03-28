@@ -772,7 +772,7 @@ def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_mo
         embed = channel.sent[0]
         assert embed.author.name == "servizio GREETINGS"
         assert embed.title == "🤝 __**ENTRATA**__"
-        assert "benvenut" in embed.description.lower()
+        assert "entra" in embed.description.lower()
         assert "<@42>" in embed.description
         assert embed.footer.text == "Barcellometro dev"
         assert attached["service_name"] == "member_flow_notifications"
