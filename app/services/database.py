@@ -5082,8 +5082,17 @@ class DatabaseService:
             (guild_id, int(limit)),
         )
 
-    async def list_active_tempbans(self, guild_id: str, *, now_iso: str | None = None) -> list[aiosqlite.Row]:
+    async def list_active_tempbans(
+        self,
+        guild_id: str,
+        *,
+        now_iso: str | None = None,
+        created_from_iso: str | None = None,
+        created_to_iso: str | None = None,
+    ) -> list[aiosqlite.Row]:
         now_value = now_iso or datetime.now(timezone.utc).isoformat()
+        created_from_value = str(created_from_iso).strip() if created_from_iso else None
+        created_to_value = str(created_to_iso).strip() if created_to_iso else None
         return await self.fetchall(
             """
             SELECT tb.guild_id, tb.user_id, tb.unban_at AS expires_at, tb.reason, tb.created_at, ma.action_type, ma.moderator_id
@@ -5094,15 +5103,33 @@ class DatabaseService:
              AND ma.created_at = (
                  SELECT MAX(created_at) FROM moderation_actions
                  WHERE guild_id = tb.guild_id AND user_id = tb.user_id AND action_type IN ('tempban', 'inactive_tempban')
-             )
+            )
             WHERE tb.guild_id = ? AND tb.unban_at > ?
+              AND (? IS NULL OR tb.created_at >= ?)
+              AND (? IS NULL OR tb.created_at <= ?)
             ORDER BY tb.unban_at ASC
             """,
-            (guild_id, now_value),
+            (
+                guild_id,
+                now_value,
+                created_from_value,
+                created_from_value,
+                created_to_value,
+                created_to_value,
+            ),
         )
 
-    async def list_active_grace_users(self, guild_id: str, *, now_iso: str | None = None) -> list[aiosqlite.Row]:
+    async def list_active_grace_users(
+        self,
+        guild_id: str,
+        *,
+        now_iso: str | None = None,
+        created_from_iso: str | None = None,
+        created_to_iso: str | None = None,
+    ) -> list[aiosqlite.Row]:
         now_value = now_iso or datetime.now(timezone.utc).isoformat()
+        created_from_value = str(created_from_iso).strip() if created_from_iso else None
+        created_to_value = str(created_to_iso).strip() if created_to_iso else None
         return await self.fetchall(
             """
             SELECT * FROM moderation_actions
@@ -5110,18 +5137,38 @@ class DatabaseService:
               AND action_type IN ('grace', 'inactive_grace')
               AND expires_at IS NOT NULL
               AND expires_at > ?
+              AND (? IS NULL OR created_at >= ?)
+              AND (? IS NULL OR created_at <= ?)
             ORDER BY expires_at ASC
             """,
-            (guild_id, now_value),
+            (
+                guild_id,
+                now_value,
+                created_from_value,
+                created_from_value,
+                created_to_value,
+                created_to_value,
+            ),
         )
 
-    async def list_active_bans(self, guild_id: str, *, limit: int = 25) -> list[aiosqlite.Row]:
+    async def list_active_bans(
+        self,
+        guild_id: str,
+        *,
+        limit: int = 25,
+        created_from_iso: str | None = None,
+        created_to_iso: str | None = None,
+    ) -> list[aiosqlite.Row]:
+        created_from_value = str(created_from_iso).strip() if created_from_iso else None
+        created_to_value = str(created_to_iso).strip() if created_to_iso else None
         return await self.fetchall(
             """
             SELECT ma.*
             FROM moderation_actions AS ma
             WHERE ma.guild_id = ?
               AND ma.action_type = 'ban'
+              AND (? IS NULL OR ma.created_at >= ?)
+              AND (? IS NULL OR ma.created_at <= ?)
               AND NOT EXISTS (
                   SELECT 1 FROM moderation_actions AS later
                   WHERE later.guild_id = ma.guild_id
@@ -5132,7 +5179,14 @@ class DatabaseService:
             ORDER BY ma.created_at DESC
             LIMIT ?
             """,
-            (guild_id, int(limit)),
+            (
+                guild_id,
+                created_from_value,
+                created_from_value,
+                created_to_value,
+                created_to_value,
+                int(limit),
+            ),
         )
 
     async def fetch_last_message_ts_by_user_guild(self, guild_id: str) -> dict[int, str]:

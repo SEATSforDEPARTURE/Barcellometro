@@ -86,7 +86,7 @@ def test_command_validator_tracks_expected_canonical_namespaces() -> None:
         "greetings.backfill.run",
         "ai.model_reset",
         "inactivity.run",
-        "users.unban",
+        "users.unban.user",
     }.issubset(command_paths)
 
 
