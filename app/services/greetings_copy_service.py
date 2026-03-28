@@ -503,15 +503,25 @@ class GreetingsCopyService:
             context["reason"] = ""
             context["reason_suffix"] = ""
 
-        narrative_template = self._select_narrative_template(
-            event_type_key=event_type_key,
-            cfg=cfg,
-            occurrence_number=max(1, int(occurrence_number)),
-            mood=selected_mood,
-            time_bucket=time_bucket,
-            barcello_state=normalized_barcello,
-            count_tier=count_tier,
-        )
+        if self._is_manual_grace_expired_auto_tempban(event_type_key=event_type_key, metadata=metadata):
+            moderation_note = None
+            narrative_template = {
+                "opening": "{mention}",
+                "action_phrase": "è stato temporaneamente bannato",
+                "occurrence_phrase": "da {guild_name} per {duration} per la",
+                "detail_phrase": "{occurrence_number}° volta",
+                "closing_comment": "perché il periodo di grazia è scaduto",
+            }
+        else:
+            narrative_template = self._select_narrative_template(
+                event_type_key=event_type_key,
+                cfg=cfg,
+                occurrence_number=max(1, int(occurrence_number)),
+                mood=selected_mood,
+                time_bucket=time_bucket,
+                barcello_state=normalized_barcello,
+                count_tier=count_tier,
+            )
         narrative, moderation_note = self.compose_final_narrative(
             event_type_key=event_type_key,
             narrative=self._render_narrative_markdown(narrative_template, context=context, event_type_key=event_type_key),
@@ -800,6 +810,12 @@ class GreetingsCopyService:
         if "greetings_reason" in metadata:
             return self._normalize_reason(metadata.get("greetings_reason"))
         return self._normalize_reason(canonical_event.get("reason"))
+
+    @staticmethod
+    def _is_manual_grace_expired_auto_tempban(*, event_type_key: str, metadata: dict[str, Any]) -> bool:
+        if str(event_type_key or "").strip().lower() != "tempban":
+            return False
+        return str(metadata.get("greetings_origin") or "").strip().lower() == "manual_grace_expired_auto_tempban"
 
     @staticmethod
     def _normalize_reason(value: Any) -> str | None:

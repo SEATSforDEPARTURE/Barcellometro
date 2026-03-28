@@ -294,22 +294,56 @@ class InactiveMembersModerationService:
             duration_seconds = await self._manual_grace_tempban_seconds(guild_id)
             if duration_seconds <= 0:
                 continue
+            if self._member_flow_notifications is not None:
+                remember = getattr(self._member_flow_notifications, "remember_departure_action", None)
+                if remember is not None:
+                    remember(guild_id, user_id, "tempban")
             try:
                 await guild.ban(discord.Object(id=int(user_id)), reason="Automatic tempban after manual grace expiry", delete_message_seconds=0)
             except Exception:
+                if self._member_flow_notifications is not None:
+                    forget = getattr(self._member_flow_notifications, "forget_departure_action", None)
+                    if forget is not None:
+                        forget(guild_id, user_id)
                 logger.warning("users grace auto-tempban failed user=%s guild=%s", user_id, guild_id, exc_info=True)
                 continue
             expires_at = now + timedelta(seconds=duration_seconds)
             await self._database.add_temp_ban(guild_id, user_id, expires_at.isoformat(), "Automatic tempban after manual grace expiry")
-            await self._log_moderation_action(
+            result = await self._log_moderation_action(
                 guild_id=guild_id,
                 user_id=user_id,
                 action_type="tempban",
                 reason="Automatic tempban after manual grace expiry",
                 duration_seconds=duration_seconds,
                 expires_at=expires_at.isoformat(),
-                metadata={"source": "users_grace_auto_tempban", "grace_action_id": str(row["id"])},
+                metadata={
+                    "source": "users_grace_auto_tempban",
+                    "grace_action_id": str(row["id"]),
+                    "greetings_origin": "manual_grace_expired_auto_tempban",
+                    "greetings_reason": "",
+                },
             )
+            if (
+                self._member_flow_notifications is not None
+                and isinstance(result, dict)
+                and result.get("canonical_written")
+                and result.get("canonical_visible")
+            ):
+                await self._member_flow_notifications.send_notification(
+                    guild=guild,
+                    user=discord.Object(id=int(user_id)),
+                    action_type="tempban",
+                    reason=None,
+                    duration_seconds=duration_seconds,
+                    expires_at=expires_at,
+                    metadata={
+                        "source": "users_grace_auto_tempban",
+                        "grace_action_id": str(row["id"]),
+                        "greetings_origin": "manual_grace_expired_auto_tempban",
+                        "greetings_reason": "",
+                    },
+                    canonical_event=result.get("canonical_event"),
+                )
 
     async def _get_config(self, guild_id: str) -> dict[str, Any] | None:
         row = await self._database.get_inactivity_config(guild_id)
