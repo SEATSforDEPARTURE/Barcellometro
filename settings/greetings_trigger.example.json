@@ -5,7 +5,8 @@
       "Fonte ufficiale del copy GREETINGS: description narrativa con struttura fissa e rigida.",
       "Il renderer compone una sola frase narrativa in corsivo, con mention iniziale e verbi evento in grassetto.",
       "Il titolo evento resta separato e usa il mapping canonico senza conteggi numerici nel titolo.",
-      "Il titolo usa sempre il formato emoji + __**MAIUSCOLO**__."
+      "Il titolo usa sempre il formato emoji + __**MAIUSCOLO**__.",
+      "La label evento nel titolo dell'embed è canonica/finale: derivata dal tipo evento (prima occorrenza o successive), senza conteggio numerico nel titolo."
     ],
     "narrative_order": [
       "opening",
@@ -43,7 +44,17 @@
       "occurrence_ordinal": {
         "description": "Ordinale evento legacy compatibile (es. TERZA)."
       }
-    }
+    },
+    "narrative_contract": [
+      "author standard via pipeline metadata canonica (`attach_author_meta` con `canonical_top_level_command='greetings'`).",
+      "titolo dell'embed = label evento canonica finale (`event_label`) in formato `emoji + __**MAIUSCOLO**__`.",
+      "la label evento nel titolo dell'embed non include il conteggio numerico: il conteggio resta nella description narrativa.",
+      "description unica narrativa guidata dal JSON (`opening` → `action_phrase` → `occurrence_phrase` → `detail_phrase` → `barcello_phrase` → `closing_comment`).",
+      "field separato `Evento` rimosso: l'unico field opzionale è `👇 __**LA MODERAZIONE AGGIUNGE**__` quando applicabile (escluso `inactive_tempban`).",
+      "thumbnail dell'embed = avatar utente quando disponibile; footer centralizzato via pipeline.",
+      "`barcello_phrase` è consentita solo per `leave`; il commento finale arriva dopo un punto.",
+      "i verbi evento sono chiavi semantiche del contratto (`action_phrase`) e non heading strutturali separati."
+    ]
   },
   "defaults": {
     "fallbacks": {
