@@ -2,9 +2,9 @@
 
 Questo report inventaria i comandi realmente registrati nel repository. Per il vocabolario canonico delle action e la loro semantica normativa fa fede `docs/command_standards.md`; le action composte (`config_set`, `schedule_add`, `template_global_reset`, ecc.) vanno lette come estensioni dei verbi canonici e non introducono nuove action standard.
 
-- Commands discovered: **322**
+- Commands discovered: **342**
 - Errors: **0**
-- Warnings: **65**
+- Warnings: **74**
 
 ## Inventory
 
@@ -32,7 +32,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `aura` | `—` | `off` | Disable Aura summary. | `app/plugins/commands_modular/aura.py:470` |
 | `aura` | `—` | `on` | Enable Aura summary. | `app/plugins/commands_modular/aura.py:466` |
 | `aura` | `—` | `status` | Show Aura summary status. | `app/plugins/commands_modular/aura.py:474` |
-| `ban` | `—` | `ban` | Alias of /users ban. | `app/plugins/commands_modular/moderazione_utenti.py:976` |
+| `ban` | `—` | `ban` | Alias of /users ban. | `app/plugins/commands_modular/moderazione_utenti.py:1404` |
 | `barcello` | `—` | `ieri` | Mostra lo stato del barcello di ieri (in DM) | `app/plugins/commands_modular/barcello.py:1906` |
 | `barcello` | `—` | `intervallo` | Mostra lo stato del barcello per intervallo. | `app/plugins/commands_modular/barcello.py:1933` |
 | `barcello` | `—` | `oggi` | Mostra lo stato del barcello di oggi (in DM) | `app/plugins/commands_modular/barcello.py:1898` |
@@ -175,7 +175,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `embed` | `images` | `template_service_reset` | Reset service-level image and thumbnail templates. | `app/plugins/commands_modular/embed.py:1125` |
 | `embed` | `images` | `template_service_set` | Set service-level image and thumbnail templates. | `app/plugins/commands_modular/embed.py:1063` |
 | `embed` | `images` | `template_service_show` | Show service-level image and thumbnail templates. | `app/plugins/commands_modular/embed.py:1099` |
-| `grace` | `—` | `grace` | Alias of /users grace. | `app/plugins/commands_modular/moderazione_utenti.py:1016` |
+| `grace` | `—` | `grace` | Alias of /users grace. | `app/plugins/commands_modular/moderazione_utenti.py:1452` |
 | `greetings` | `backfill` | `off` | Disable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:105` |
 | `greetings` | `backfill` | `on` | Enable greetings timeline backfill. | `app/plugins/commands_modular/greetings.py:94` |
 | `greetings` | `backfill` | `run` | Run greetings timeline backfill now. | `app/plugins/commands_modular/greetings.py:122` |
@@ -189,51 +189,51 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `greetings` | `user_card` | `off` | Disable the greetings notification user card. | `app/plugins/commands_modular/greetings.py:223` |
 | `greetings` | `user_card` | `on` | Enable the greetings notification user card. | `app/plugins/commands_modular/greetings.py:216` |
 | `greetings` | `user_card` | `status` | Show whether the greetings notification user card is enabled. | `app/plugins/commands_modular/greetings.py:230` |
-| `inactivity` | `autokick` | `off` | Disable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:226` |
-| `inactivity` | `autokick` | `on` | Enable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:219` |
-| `inactivity` | `autokick` | `status` | Show the automatic inactivity action status. | `app/plugins/commands_modular/inattivi.py:233` |
-| `inactivity` | `dms` | `cooldown_reset` | Reset the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:378` |
-| `inactivity` | `dms` | `cooldown_set` | Set the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:364` |
-| `inactivity` | `dms` | `cooldown_show` | Show the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:371` |
-| `inactivity` | `dms` | `off` | Disable inactivity reminder DMs. | `app/plugins/commands_modular/inattivi.py:350` |
-| `inactivity` | `dms` | `on` | Enable inactivity reminder DMs. | `app/plugins/commands_modular/inattivi.py:343` |
-| `inactivity` | `dms` | `status` | Show inactivity DM status and delivery metrics. | `app/plugins/commands_modular/inattivi.py:357` |
-| `inactivity` | `dms` | `invite_reset` | Reset the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:403` |
-| `inactivity` | `dms` | `invite_set` | Set the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:389` |
-| `inactivity` | `dms` | `invite_show` | Show the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:396` |
-| `inactivity` | `dms` | `template_grace_reset` | Reset the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:356` |
-| `inactivity` | `dms` | `template_grace_set` | Set the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:335` |
-| `inactivity` | `dms` | `template_grace_show` | Show the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:342` |
-| `inactivity` | `dms` | `template_tempban_reset` | Reset the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:356` |
-| `inactivity` | `dms` | `template_tempban_set` | Set the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:335` |
-| `inactivity` | `dms` | `template_tempban_show` | Show the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:342` |
-| `inactivity` | `grace` | `limits_reset` | Reset the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:280` |
-| `inactivity` | `grace` | `limits_set` | Set the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:265` |
-| `inactivity` | `grace` | `limits_show` | Show the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:272` |
-| `inactivity` | `grace` | `off` | Disable the inactivity grace period. | `app/plugins/commands_modular/inattivi.py:249` |
-| `inactivity` | `grace` | `on` | Enable the inactivity grace period. | `app/plugins/commands_modular/inattivi.py:240` |
-| `inactivity` | `grace` | `status` | Show the inactivity grace period status. | `app/plugins/commands_modular/inattivi.py:256` |
-| `inactivity` | `—` | `off` | Disable inactivity moderation. | `app/plugins/commands_modular/inattivi.py:180` |
-| `inactivity` | `—` | `on` | Enable inactivity moderation. | `app/plugins/commands_modular/inattivi.py:173` |
-| `inactivity` | `policy` | `default_reset` | Reset the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:444` |
-| `inactivity` | `policy` | `default_set` | Set the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:417` |
-| `inactivity` | `policy` | `default_show` | Show the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:436` |
-| `inactivity` | `policy` | `exceptions_add` | Add a role to the inactivity exception list. | `app/plugins/commands_modular/inattivi.py:503` |
-| `inactivity` | `policy` | `exceptions_list` | List all inactivity exception roles. | `app/plugins/commands_modular/inattivi.py:540` |
-| `inactivity` | `policy` | `exceptions_remove` | Remove a role from the inactivity exception list. | `app/plugins/commands_modular/inattivi.py:517` |
-| `inactivity` | `policy` | `exceptions_show` | Show whether a role is excluded from inactivity moderation. | `app/plugins/commands_modular/inattivi.py:531` |
-| `inactivity` | `policy` | `role_reset` | Reset an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:495` |
-| `inactivity` | `policy` | `role_set` | Set an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:460` |
-| `inactivity` | `policy` | `role_show` | Show an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:482` |
-| `inactivity` | `—` | `run` | Run the inactivity moderation scan now. | `app/plugins/commands_modular/inattivi.py:555` |
-| `inactivity` | `—` | `status` | Show the inactivity moderation status. | `app/plugins/commands_modular/inattivi.py:187` |
-| `inactivity` | `tempban` | `limits_reset` | Reset the inactivity tempban limits. | `app/plugins/commands_modular/inattivi.py:327` |
-| `inactivity` | `tempban` | `limits_set` | Set the inactivity tempban limits. | `app/plugins/commands_modular/inattivi.py:312` |
-| `inactivity` | `tempban` | `limits_show` | Show the inactivity tempban limits. | `app/plugins/commands_modular/inattivi.py:319` |
-| `inactivity` | `tempban` | `off` | Disable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:296` |
-| `inactivity` | `tempban` | `on` | Enable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:287` |
-| `inactivity` | `tempban` | `status` | Show the inactivity tempban status. | `app/plugins/commands_modular/inattivi.py:303` |
-| `kick` | `—` | `kick` | Alias of /users kick. | `app/plugins/commands_modular/moderazione_utenti.py:971` |
+| `inactivity` | `autokick` | `off` | Disable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:236` |
+| `inactivity` | `autokick` | `on` | Enable automatic inactivity actions. | `app/plugins/commands_modular/inattivi.py:229` |
+| `inactivity` | `autokick` | `status` | Show the automatic inactivity action status. | `app/plugins/commands_modular/inattivi.py:243` |
+| `inactivity` | `dms` | `cooldown_reset` | Reset the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:472` |
+| `inactivity` | `dms` | `cooldown_set` | Set the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:458` |
+| `inactivity` | `dms` | `cooldown_show` | Show the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:465` |
+| `inactivity` | `dms` | `invite_reset` | Reset the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:497` |
+| `inactivity` | `dms` | `invite_set` | Set the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:483` |
+| `inactivity` | `dms` | `invite_show` | Show the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:490` |
+| `inactivity` | `dms` | `off` | Disable inactivity reminder DMs. | `app/plugins/commands_modular/inattivi.py:359` |
+| `inactivity` | `dms` | `on` | Enable inactivity reminder DMs. | `app/plugins/commands_modular/inattivi.py:352` |
+| `inactivity` | `dms` | `status` | Show inactivity DM status and delivery metrics. | `app/plugins/commands_modular/inattivi.py:366` |
+| `inactivity` | `dms` | `template_grace_reset` | Reset the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:421` |
+| `inactivity` | `dms` | `template_grace_set` | Set the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:345` |
+| `inactivity` | `dms` | `template_grace_show` | Show the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:407` |
+| `inactivity` | `dms` | `template_tempban_reset` | Reset the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:450` |
+| `inactivity` | `dms` | `template_tempban_set` | Set the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:429` |
+| `inactivity` | `dms` | `template_tempban_show` | Show the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:436` |
+| `inactivity` | `grace` | `limits_reset` | Reset the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:290` |
+| `inactivity` | `grace` | `limits_set` | Set the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:275` |
+| `inactivity` | `grace` | `limits_show` | Show the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:282` |
+| `inactivity` | `grace` | `off` | Disable the inactivity grace period. | `app/plugins/commands_modular/inattivi.py:259` |
+| `inactivity` | `grace` | `on` | Enable the inactivity grace period. | `app/plugins/commands_modular/inattivi.py:250` |
+| `inactivity` | `grace` | `status` | Show the inactivity grace period status. | `app/plugins/commands_modular/inattivi.py:266` |
+| `inactivity` | `—` | `off` | Disable inactivity moderation. | `app/plugins/commands_modular/inattivi.py:190` |
+| `inactivity` | `—` | `on` | Enable inactivity moderation. | `app/plugins/commands_modular/inattivi.py:183` |
+| `inactivity` | `policy` | `default_reset` | Reset the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:538` |
+| `inactivity` | `policy` | `default_set` | Set the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:511` |
+| `inactivity` | `policy` | `default_show` | Show the default inactivity policy. | `app/plugins/commands_modular/inattivi.py:530` |
+| `inactivity` | `policy` | `exceptions_add` | Add a role to the inactivity exception list. | `app/plugins/commands_modular/inattivi.py:597` |
+| `inactivity` | `policy` | `exceptions_list` | List all inactivity exception roles. | `app/plugins/commands_modular/inattivi.py:634` |
+| `inactivity` | `policy` | `exceptions_remove` | Remove a role from the inactivity exception list. | `app/plugins/commands_modular/inattivi.py:611` |
+| `inactivity` | `policy` | `exceptions_show` | Show whether a role is excluded from inactivity moderation. | `app/plugins/commands_modular/inattivi.py:625` |
+| `inactivity` | `policy` | `role_reset` | Reset an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:589` |
+| `inactivity` | `policy` | `role_set` | Set an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:554` |
+| `inactivity` | `policy` | `role_show` | Show an inactivity policy for a role. | `app/plugins/commands_modular/inattivi.py:576` |
+| `inactivity` | `—` | `run` | Run the inactivity moderation scan now. | `app/plugins/commands_modular/inattivi.py:649` |
+| `inactivity` | `—` | `status` | Show the inactivity moderation status. | `app/plugins/commands_modular/inattivi.py:197` |
+| `inactivity` | `tempban` | `limits_reset` | Reset the inactivity tempban limits. | `app/plugins/commands_modular/inattivi.py:337` |
+| `inactivity` | `tempban` | `limits_set` | Set the inactivity tempban limits. | `app/plugins/commands_modular/inattivi.py:322` |
+| `inactivity` | `tempban` | `limits_show` | Show the inactivity tempban limits. | `app/plugins/commands_modular/inattivi.py:329` |
+| `inactivity` | `tempban` | `off` | Disable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:306` |
+| `inactivity` | `tempban` | `on` | Enable temporary bans after inactivity kicks. | `app/plugins/commands_modular/inattivi.py:297` |
+| `inactivity` | `tempban` | `status` | Show the inactivity tempban status. | `app/plugins/commands_modular/inattivi.py:313` |
+| `kick` | `—` | `kick` | Alias of /users kick. | `app/plugins/commands_modular/moderazione_utenti.py:1396` |
 | `privacy` | `—` | `off` | Disable voice privacy. | `app/plugins/commands_modular/privacy.py:90` |
 | `privacy` | `—` | `on` | Enable voice privacy. | `app/plugins/commands_modular/privacy.py:68` |
 | `privacy` | `—` | `status` | Show the current voice privacy status. | `app/plugins/commands_modular/privacy.py:113` |
@@ -285,7 +285,7 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `status` | `—` | `mood_set` | Set the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:144` |
 | `status` | `—` | `mood_show` | Show the Barcello mood for this channel. | `app/plugins/commands_modular/status.py:198` |
 | `status` | `—` | `show` | Show the Barcellometro status. | `app/plugins/commands_modular/status.py:102` |
-| `tempban` | `—` | `tempban` | Alias of /users tempban. | `app/plugins/commands_modular/moderazione_utenti.py:999` |
+| `tempban` | `—` | `tempban` | Alias of /users tempban. | `app/plugins/commands_modular/moderazione_utenti.py:1431` |
 | `triggers` | `barcello` | `calibrate` | Recalculate Barcello calibration weights. | `app/plugins/commands_modular/barcello.py:205` |
 | `triggers` | `barcello` | `off` | Disable Barcello triggers in the current channel. | `app/plugins/commands_modular/barcello.py:197` |
 | `triggers` | `barcello` | `on` | Enable Barcello triggers in the current channel. | `app/plugins/commands_modular/barcello.py:193` |
@@ -308,52 +308,55 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `triggers` | `phrases` | `template_user_reset` | Reset a user-specific phrase template | `app/plugins/commands_modular/triggers.py:628` |
 | `triggers` | `phrases` | `template_user_set` | Set a user-specific phrase template | `app/plugins/commands_modular/triggers.py:598` |
 | `triggers` | `phrases` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:615` |
-| `users` | `—` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:714` |
-| `users` | `—` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:718` |
-| `users` | `dms` | `on` | Enable USERS DMs for manual grace and auto-tempban. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `off` | Disable USERS DMs for manual grace and auto-tempban. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `status` | Show USERS DM status and delivery metrics. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `template_grace_set` | Set the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `template_grace_show` | Show the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `template_grace_reset` | Reset the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `template_tempban_set` | Set the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `template_tempban_show` | Show the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `template_tempban_reset` | Reset the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `cooldown_set` | Set the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `cooldown_show` | Show the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `cooldown_reset` | Reset the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `invite_set` | Set the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `invite_show` | Show the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `dms` | `invite_reset` | Reset the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `grace` | `manual` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `grace` | `tempban_set` | Set the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `grace` | `tempban_show` | Show the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `grace` | `tempban_reset` | Disable the automatic tempban applied after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
-| `users` | `—` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:858` |
-| `users` | `—` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:705` |
-| `users` | `—` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:709` |
-| `users` | `—` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:827` |
-| `users` | `—` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:837` |
-| `users` | `unban` | `last` | Revoke bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:750` |
-| `users` | `unban` | `range` | Revoke bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:764` |
-| `users` | `unban` | `today` | Revoke bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:739` |
-| `users` | `unban` | `yesterday` | Revoke bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:744` |
-| `users` | `ungrace` | `last` | Revoke grace periods created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:884` |
-| `users` | `ungrace` | `range` | Revoke grace periods created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:898` |
-| `users` | `ungrace` | `today` | Revoke grace periods created today. | `app/plugins/commands_modular/moderazione_utenti.py:873` |
-| `users` | `ungrace` | `yesterday` | Revoke grace periods created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:878` |
-| `users` | `untempban` | `last` | Revoke temporary bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:796` |
-| `users` | `untempban` | `range` | Revoke temporary bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:810` |
-| `users` | `untempban` | `today` | Revoke temporary bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:785` |
-| `users` | `untempban` | `yesterday` | Revoke temporary bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:790` |
+| `users` | `—` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:956` |
+| `users` | `—` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:963` |
+| `users` | `dms` | `cooldown_reset` | Reset the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py:1208` |
+| `users` | `dms` | `cooldown_set` | Set the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py:1194` |
+| `users` | `dms` | `cooldown_show` | Show the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py:1201` |
+| `users` | `dms` | `invite_reset` | Reset the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py:1230` |
+| `users` | `dms` | `invite_set` | Set the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py:1216` |
+| `users` | `dms` | `invite_show` | Show the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py:1223` |
+| `users` | `dms` | `off` | Disable USERS DMs for manual grace and auto-tempban. | `app/plugins/commands_modular/moderazione_utenti.py:1084` |
+| `users` | `dms` | `on` | Enable USERS DMs for manual grace and auto-tempban. | `app/plugins/commands_modular/moderazione_utenti.py:1077` |
+| `users` | `dms` | `status` | Show USERS DM status and delivery metrics. | `app/plugins/commands_modular/moderazione_utenti.py:1091` |
+| `users` | `dms` | `template_grace_reset` | Reset the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py:1157` |
+| `users` | `dms` | `template_grace_set` | Set the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py:1136` |
+| `users` | `dms` | `template_grace_show` | Show the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py:1143` |
+| `users` | `dms` | `template_tempban_reset` | Reset the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py:1186` |
+| `users` | `dms` | `template_tempban_set` | Set the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py:1165` |
+| `users` | `dms` | `template_tempban_show` | Show the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py:1172` |
+| `users` | `grace` | `manual` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py:1248` |
+| `users` | `grace` | `tempban_reset` | Disable the automatic tempban applied after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py:1292` |
+| `users` | `grace` | `tempban_set` | Set the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py:1263` |
+| `users` | `grace` | `tempban_show` | Show the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py:1281` |
+| `users` | `—` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:1306` |
+| `users` | `—` | `ieri` | Revoca le azioni create ieri. | `app/plugins/commands_modular/moderazione_utenti.py:1359` |
+| `users` | `—` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:944` |
+| `users` | `—` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:951` |
+| `users` | `—` | `oggi` | Revoca le azioni create oggi. | `app/plugins/commands_modular/moderazione_utenti.py:1354` |
+| `users` | `—` | `range` | Revoca le azioni create in un intervallo esplicito. | `app/plugins/commands_modular/moderazione_utenti.py:1380` |
+| `users` | `—` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:1058` |
+| `users` | `—` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:1071` |
+| `users` | `—` | `ultimi` | Revoca le azioni create nella finestra mobile. | `app/plugins/commands_modular/moderazione_utenti.py:1366` |
+| `users` | `unban` | `last` | Revoke bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:987` |
+| `users` | `unban` | `range` | Revoke bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:1002` |
+| `users` | `unban` | `today` | Revoke bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:976` |
+| `users` | `unban` | `yesterday` | Revoke bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:981` |
+| `users` | `ungrace` | `last` | Revoke grace periods created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:1324` |
+| `users` | `ungrace` | `range` | Revoke grace periods created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:1339` |
+| `users` | `ungrace` | `today` | Revoke grace periods created today. | `app/plugins/commands_modular/moderazione_utenti.py:1313` |
+| `users` | `ungrace` | `yesterday` | Revoke grace periods created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:1318` |
+| `users` | `untempban` | `last` | Revoke temporary bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:1026` |
+| `users` | `untempban` | `range` | Revoke temporary bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:1041` |
+| `users` | `untempban` | `today` | Revoke temporary bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:1015` |
+| `users` | `untempban` | `yesterday` | Revoke temporary bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:1020` |
 | `voice_ingest` | `—` | `join` | Join a voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:24` |
 | `voice_ingest` | `—` | `leave` | Leave the current voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:48` |
 
 ## Issues
 
-- **WARNING localized_description** — `users.ieri`: Command description looks non-English. (`app/plugins/commands_modular/moderazione_utenti.py:935`)
-- **WARNING localized_description** — `users.oggi`: Command description looks non-English. (`app/plugins/commands_modular/moderazione_utenti.py:930`)
-- **WARNING missing_description** — `users.user`: Command description is missing. (`app/plugins/commands_modular/moderazione_utenti.py:913`)
+- **WARNING localized_description** — `users.ieri`: Command description looks non-English. (`app/plugins/commands_modular/moderazione_utenti.py:1359`)
+- **WARNING localized_description** — `users.oggi`: Command description looks non-English. (`app/plugins/commands_modular/moderazione_utenti.py:1354`)
 - **WARNING missing_param_description** — `barcello.intervallo`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/barcello.py:1933`)
 - **WARNING missing_param_description** — `barcello.intervallo`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/barcello.py:1933`)
 - **WARNING missing_param_description** — `barcello.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/barcello.py:1923`)
@@ -370,6 +373,8 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING missing_param_description** — `dmchannelsummary.barcello.today`: Parameter 'user2' is missing a description. (`app/plugins/commands_modular/barcello.py:1829`)
 - **WARNING missing_param_description** — `dmchannelsummary.barcello.yesterday`: Parameter 'user1' is missing a description. (`app/plugins/commands_modular/barcello.py:1841`)
 - **WARNING missing_param_description** — `dmchannelsummary.barcello.yesterday`: Parameter 'user2' is missing a description. (`app/plugins/commands_modular/barcello.py:1841`)
+- **WARNING missing_param_description** — `inactivity.dms.template_grace_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/inattivi.py:345`)
+- **WARNING missing_param_description** — `inactivity.dms.template_tempban_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/inattivi.py:429`)
 - **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:873`)
 - **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:873`)
 - **WARNING missing_param_description** — `resocontocanale.aura.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:841`)
@@ -386,6 +391,8 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING missing_param_description** — `resocontoserver.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:1196`)
 - **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1157`)
 - **WARNING missing_param_description** — `resocontoserver.ultimi`: Parameter 'unita' is missing a description. (`app/plugins/commands_modular/resoconto.py:1157`)
+- **WARNING missing_param_description** — `users.dms.template_grace_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/moderazione_utenti.py:1136`)
+- **WARNING missing_param_description** — `users.dms.template_tempban_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/moderazione_utenti.py:1165`)
 - **WARNING required_param** — `ai.fallback_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:465`)
 - **WARNING required_param** — `ai.model_set`: Parameter 'model' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/admin.py:433`)
 - **WARNING required_param** — `campaigns.cap.limits_set`: Parameter 'daily_limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:588`)
@@ -394,20 +401,20 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING required_param** — `campaigns.quiet.range_set`: Parameter 'start' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:541`)
 - **WARNING required_param** — `campaigns.quiet.range_set`: Parameter 'end' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/messaggi.py:541`)
 - **WARNING required_param** — `embed.description.template_service_set`: Parameter 'template' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/embed.py:870`)
-- **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:364`)
-- **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:389`)
-- **WARNING required_param** — `inactivity.dms.template_grace_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:335`)
-- **WARNING required_param** — `inactivity.dms.template_tempban_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:335`)
-- **WARNING required_param** — `inactivity.grace.limits_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:265`)
-- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:419`)
-- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:420`)
-- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:421`)
-- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:422`)
-- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:463`)
-- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:464`)
-- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:465`)
-- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:466`)
-- **WARNING required_param** — `inactivity.tempban.limits_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:312`)
+- **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:458`)
+- **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:483`)
+- **WARNING required_param** — `inactivity.dms.template_grace_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:345`)
+- **WARNING required_param** — `inactivity.dms.template_tempban_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:429`)
+- **WARNING required_param** — `inactivity.grace.limits_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:275`)
+- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:513`)
+- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:514`)
+- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:515`)
+- **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:516`)
+- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:557`)
+- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:558`)
+- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'min_messages' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:559`)
+- **WARNING required_param** — `inactivity.policy.role_set`: Parameter 'mode' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:560`)
+- **WARNING required_param** — `inactivity.tempban.limits_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:322`)
 - **WARNING required_param** — `qna.bonus_set`: Parameter 'amount' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:964`)
 - **WARNING required_param** — `qna.limits_set`: Parameter 'tier' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:933`)
 - **WARNING required_param** — `qna.limits_set`: Parameter 'limit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:933`)
@@ -416,6 +423,12 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING required_param** — `triggers.phrases.template_milestone_set`: Parameter 'threshold' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:510`)
 - **WARNING required_param** — `triggers.phrases.template_milestone_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:510`)
 - **WARNING required_param** — `triggers.phrases.template_user_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/triggers.py:598`)
+- **WARNING required_param** — `users.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:1194`)
+- **WARNING required_param** — `users.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:1216`)
+- **WARNING required_param** — `users.dms.template_grace_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:1136`)
+- **WARNING required_param** — `users.dms.template_tempban_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:1165`)
+- **WARNING required_param** — `users.grace.tempban_set`: Parameter 'quantity' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:1265`)
+- **WARNING required_param** — `users.grace.tempban_set`: Parameter 'unit' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/moderazione_utenti.py:1266`)
 
 ## Localized exceptions
 

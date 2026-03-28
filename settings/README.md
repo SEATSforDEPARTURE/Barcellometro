@@ -49,6 +49,7 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - Le thumbnail author e footer sono separate: override o template del footer non devono fungere da fallback implicito per l'author, e viceversa.
 - Gli override locali non devono reintrodurre wording legacy nei footer o nei template: `Dati elaborati` + ` in loco` ed `e fallback` + ` locale` sono aboliti in tutto il progetto.
 - Se un file runtime come `settings/barcello_trigger.json` contiene campi come `footer`, `fallback_footer` o simili, per output non-AI non va salvata alcuna frase tecnica finale equivalente; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare.
+- Per il sottosistema `/inactivity dms` i comandi canonici documentati sono `template_grace_*` e `template_tempban_*`; chiavi legacy interne come `dm_reminder_template` / `dm_kick_template` restano solo di compatibilità storage/runtime e non fanno parte della surface slash pubblica.
 
 ## Note specifiche per `settings/greetings_trigger.example.json`
 

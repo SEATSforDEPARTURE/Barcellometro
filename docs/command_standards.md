@@ -220,3 +220,29 @@ Chi aggiorna la documentazione dei comandi deve rispettare queste regole:
 - descrivere le action composte come estensioni di quelle canoniche, non come verbi nuovi;
 - allineare eventuali esempi, tabelle e classificazioni al comportamento reale del progetto;
 - per i domini `footer` e `author`, usare `/embed ...` come riferimento canonico e trattare eventuali residui admin solo come dettaglio storico o tecnico quando indispensabile.
+
+## 10. Contratto canonico `/inactivity dms`
+
+La superficie slash canonica del sottosistema `/inactivity dms` è **solo** questa:
+
+- `/inactivity dms on`
+- `/inactivity dms off`
+- `/inactivity dms status`
+- `/inactivity dms template_grace_set` (parametro: `text`)
+- `/inactivity dms template_grace_show`
+- `/inactivity dms template_grace_reset`
+- `/inactivity dms template_tempban_set` (parametro: `text`)
+- `/inactivity dms template_tempban_show`
+- `/inactivity dms template_tempban_reset`
+- `/inactivity dms cooldown_set` (parametro: `days`)
+- `/inactivity dms cooldown_show`
+- `/inactivity dms cooldown_reset`
+- `/inactivity dms invite_set` (parametro: `url`)
+- `/inactivity dms invite_show`
+- `/inactivity dms invite_reset`
+
+Regole obbligatorie:
+
+- `status` deve rendere in modo esplicito: stato `on/off`, template `template_grace`, template `template_tempban`, cooldown, invite e metriche/log recenti quando disponibili.
+- naming legacy tipo `template_reminder_*` non deve comparire nella superficie slash pubblica, nella command map pubblica o nella documentazione utente corrente.
+- eventuali campi legacy interni (`dm_reminder_template`, `dm_kick_template`) restano ammessi solo come compatibilità dati/runtime e non devono essere pubblicizzati come comandi canonici.
