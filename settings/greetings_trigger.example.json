@@ -6,7 +6,7 @@
       "Il renderer compone una sola frase narrativa in corsivo, con mention iniziale e verbi evento in grassetto.",
       "Il titolo evento resta separato e usa il mapping canonico senza conteggi numerici nel titolo.",
       "Il titolo usa sempre il formato emoji + __**MAIUSCOLO**__.",
-      "La label evento nel titolo dell'embed è canonica/finale: derivata dal tipo evento (prima occorrenza o successive), senza conteggio numerico nel titolo."
+      "La label evento nel titolo dell'embed è fissa per tipo evento: non distingue prima/successive e non include conteggi."
     ],
     "narrative_order": [
       "opening",
@@ -48,7 +48,7 @@
     "narrative_contract": [
       "author standard via pipeline metadata canonica (`attach_author_meta` con `canonical_top_level_command='greetings'`).",
       "titolo dell'embed = label evento canonica finale (`event_label`) in formato `emoji + __**MAIUSCOLO**__`.",
-      "la label evento nel titolo dell'embed non include il conteggio numerico: il conteggio resta nella description narrativa.",
+      "la label evento nel titolo dell'embed è fissa per event type e non include conteggio numerico.",
       "description unica narrativa guidata dal JSON (`opening` → `action_phrase` → `occurrence_phrase` → `detail_phrase` → `barcello_phrase` → `closing_comment`).",
       "field separato `Evento` rimosso: l'unico field opzionale è `👇 __**LA MODERAZIONE AGGIUNGE**__` quando applicabile (escluso `inactive_tempban`).",
       "thumbnail dell'embed = avatar utente quando disponibile; footer centralizzato via pipeline.",

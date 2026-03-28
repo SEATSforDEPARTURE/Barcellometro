@@ -221,6 +221,63 @@ def test_native_discord_kick_is_classified_as_kick_not_leave_and_preserves_reaso
     asyncio.run(_run())
 
 
+def test_native_discord_kick_without_reason_uses_default_and_no_greetings_reason(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_ATTEMPTS", 1
+        )
+        monkeypatch.setattr(
+            discord_adapter_module, "_DISCORD_NATIVE_MOD_AUDIT_RETRY_SECONDS", 0
+        )
+        monkeypatch.setattr(
+            discord_adapter_module.discord,
+            "AuditLogAction",
+            SimpleNamespace(ban="ban", kick="kick", unban="unban"),
+            raising=False,
+        )
+
+        moderator = SimpleNamespace(id=88, mention="<@88>", display_name="Mod")
+        audit_entry = SimpleNamespace(
+            id=7002,
+            target=SimpleNamespace(id=5),
+            user=moderator,
+            reason="None",
+            created_at=datetime.now(timezone.utc),
+        )
+        guild = _FakeGuild(guild_id=99, audit_entries={"kick": [audit_entry]})
+        member = _build_member(guild=guild)
+
+        member_flow = SimpleNamespace(
+            get_recent_departure_action=lambda *_args, **_kwargs: None,
+            log_action=AsyncMock(
+                return_value={
+                    "canonical_written": True,
+                    "canonical_visible": True,
+                    "canonical_event": {"event_type_key": "kick"},
+                }
+            ),
+            send_notification=AsyncMock(),
+        )
+        database = SimpleNamespace(
+            upsert_user=AsyncMock(),
+            upsert_guild_membership=AsyncMock(),
+        )
+        registry, bot = _configure_registry(member_flow=member_flow, database=database)
+        setup_discord_adapter(registry)
+
+        await bot.listeners["on_member_remove"](member)
+
+        kwargs = member_flow.log_action.await_args.kwargs
+        assert kwargs["action_type"] == "kick"
+        assert kwargs["reason"] == "Allontanamento tramite moderazione nativa Discord"
+        assert kwargs["metadata"]["greetings_reason"] is None
+        assert member_flow.send_notification.await_count == 1
+
+    asyncio.run(_run())
+
+
 def test_native_discord_ban_is_classified_as_ban_not_leave_and_deduped_across_events(
     monkeypatch,
 ) -> None:

@@ -10,7 +10,7 @@ import discord
 
 from app.services.author import attach_author_meta
 from app.services.footer import attach_footer_meta
-from app.services.greetings_copy_service import GreetingsCopyService
+from app.services.greetings_copy_service import GreetingsCopyService, normalize_reason
 
 logger = logging.getLogger(__name__)
 
@@ -356,7 +356,7 @@ class MemberFlowNotificationsService:
             now=created_at,
         )
         embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))
-        moderation_note = getattr(copy, "moderation_note", None)
+        moderation_note = normalize_reason(getattr(copy, "moderation_note", None))
         event_type_key = str(canonical_payload.get("event_type_key") or action_type or "").strip().lower()
         if moderation_note and event_type_key != "inactive_tempban":
             embed.add_field(
@@ -418,7 +418,7 @@ class MemberFlowNotificationsService:
         metadata_dict = dict(metadata or {})
         return {
             "event_type_key": action_type,
-            "reason": reason,
+            "reason": normalize_reason(reason),
             "duration_seconds": duration_seconds,
             "expires_at": expires_at.isoformat() if expires_at is not None else None,
             "visible_in_greetings": self._canonical_visibility_for_action(action_type, metadata_dict),

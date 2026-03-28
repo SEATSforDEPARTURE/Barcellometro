@@ -10,6 +10,7 @@ import discord
 
 from app.core.service_registry import ServiceRegistry
 from app.services.backfill import BackfillResult
+from app.services.greetings_copy_service import normalize_reason
 from app.services.ingest import EventEnvelope, IngestService
 from app.shared.safety.pii import redact_pii
 
@@ -28,8 +29,7 @@ def _bool_int(value: bool) -> int:
 
 
 def _normalize_optional_reason(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None
+    return normalize_reason(value)
 
 
 def _build_native_moderation_operation_id(
