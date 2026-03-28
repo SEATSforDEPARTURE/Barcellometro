@@ -215,7 +215,8 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/inactivity grace on|off|status|limits_set|limits_show|limits_reset`
 - `/inactivity tempban on|off|status|limits_set|limits_show|limits_reset`
 - `/inactivity dms on|off|status`
-- `/inactivity dms template_reminder_set|template_reminder_show|template_reminder_reset`
+- `/inactivity dms template_grace_set|template_grace_show|template_grace_reset`
+- `/inactivity dms template_tempban_set|template_tempban_show|template_tempban_reset`
 - `/inactivity dms cooldown_set|cooldown_show|cooldown_reset`
 - `/inactivity dms invite_set|invite_show|invite_reset`
 - `/inactivity policy default_set|default_show|default_reset`

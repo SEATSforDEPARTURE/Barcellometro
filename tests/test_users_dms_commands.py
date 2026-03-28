@@ -120,6 +120,7 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert as_map["dms"] == "off"
         assert as_map["template_grace"] == "not set"
         assert as_map["template_tempban"] == "not set"
+        assert as_map["cooldown"] == "14 days"
         assert as_map["cooldown_days"] == 14
         assert as_map["invite_url"] == "not set"
         assert as_map["dm_sent_ok"] == 1
