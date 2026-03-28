@@ -661,6 +661,8 @@ class DatabaseService:
                 default_policy_json TEXT NOT NULL DEFAULT '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR","min_account_age_days":0}',
                 dm_reminder_template TEXT NULL,
                 dm_kick_template TEXT NULL,
+                template_grace TEXT NULL,
+                template_tempban TEXT NULL,
                 atrio_template TEXT NULL,
                 template_inactivity_reason TEXT NULL,
                 template_kick_reason TEXT NULL,
@@ -936,6 +938,8 @@ class DatabaseService:
             "template_ban_reason": "TEXT NULL",
             "template_tempban_reason": "TEXT NULL",
             "template_grace_reason": "TEXT NULL",
+            "template_grace": "TEXT NULL",
+            "template_tempban": "TEXT NULL",
         }
         for name, col_def in missing.items():
             if name not in existing:
@@ -4838,9 +4842,20 @@ class DatabaseService:
             return None
         data = dict(row)
         data["notify_channel_id"] = data.get("notify_channel_id") or data.get("atrio_channel_id")
+        data["template_grace"] = data.get("template_grace") or data.get("dm_reminder_template")
+        data["template_tempban"] = data.get("template_tempban") or data.get("dm_kick_template")
         return data
 
     async def upsert_inactivity_config(self, guild_id: str, **fields: Any) -> None:
+        normalized_fields = dict(fields)
+        if "template_grace" in normalized_fields and "dm_reminder_template" not in normalized_fields:
+            normalized_fields["dm_reminder_template"] = normalized_fields["template_grace"]
+        if "template_tempban" in normalized_fields and "dm_kick_template" not in normalized_fields:
+            normalized_fields["dm_kick_template"] = normalized_fields["template_tempban"]
+        if "dm_reminder_template" in normalized_fields and "template_grace" not in normalized_fields:
+            normalized_fields["template_grace"] = normalized_fields["dm_reminder_template"]
+        if "dm_kick_template" in normalized_fields and "template_tempban" not in normalized_fields:
+            normalized_fields["template_tempban"] = normalized_fields["dm_kick_template"]
         now = datetime.now(timezone.utc).isoformat()
         current = await self.get_inactivity_config(guild_id)
         base: dict[str, Any] = {
@@ -4858,6 +4873,8 @@ class DatabaseService:
             "default_policy_json": '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR","min_account_age_days":0}',
             "dm_reminder_template": None,
             "dm_kick_template": None,
+            "template_grace": None,
+            "template_tempban": None,
             "atrio_template": None,
             "template_inactivity_reason": None,
             "template_kick_reason": None,
@@ -4871,7 +4888,7 @@ class DatabaseService:
             for key in base:
                 if key in current.keys():
                     base[key] = current[key]
-        base.update(fields)
+        base.update(normalized_fields)
         base["updated_at"] = now
         columns = [
             "guild_id",
@@ -4889,6 +4906,8 @@ class DatabaseService:
             "default_policy_json",
             "dm_reminder_template",
             "dm_kick_template",
+            "template_grace",
+            "template_tempban",
             "atrio_template",
             "template_inactivity_reason",
             "template_kick_reason",

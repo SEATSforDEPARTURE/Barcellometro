@@ -100,6 +100,32 @@ def test_inactivity_config_backward_compatibility_notify_channel_only(tmp_path) 
     asyncio.run(_run())
 
 
+def test_inactivity_config_template_aliases_are_normalized(tmp_path) -> None:
+    async def _run() -> None:
+        db = DatabaseService(str(tmp_path / "test.sqlite"))
+        await db.connect()
+        await db.initialize_schema()
+
+        await db.upsert_inactivity_config("1", template_grace="Grace {user}", template_tempban="Tempban {user}")
+        cfg = await db.get_inactivity_config("1")
+
+        assert cfg is not None
+        assert cfg["template_grace"] == "Grace {user}"
+        assert cfg["dm_reminder_template"] == "Grace {user}"
+        assert cfg["template_tempban"] == "Tempban {user}"
+        assert cfg["dm_kick_template"] == "Tempban {user}"
+
+        await db.upsert_inactivity_config("1", dm_reminder_template="Legacy reminder", dm_kick_template="Legacy kick")
+        cfg = await db.get_inactivity_config("1")
+        assert cfg is not None
+        assert cfg["template_grace"] == "Legacy reminder"
+        assert cfg["template_tempban"] == "Legacy kick"
+
+        await db.close()
+
+    asyncio.run(_run())
+
+
 def test_moderation_actions_lists_cover_tempban_grace_ban_and_kick(tmp_path) -> None:
     async def _run() -> None:
         db = DatabaseService(str(tmp_path / "test.sqlite"))

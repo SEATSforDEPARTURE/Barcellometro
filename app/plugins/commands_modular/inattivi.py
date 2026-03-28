@@ -340,13 +340,13 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), ban_days=DEFAULT_TEMPBAN_DAYS)
         await _send(interaction, subcommand_path="inactivity tempban limits_reset", lines=[("days", DEFAULT_TEMPBAN_DAYS), ("result", "reset")], kind="success")
 
-    @dms_group.command(name="template_reminder_set", description="Set the reminder DM template.")
+    @dms_group.command(name="template_grace_set", description="Set the DM template sent when a member enters inactivity grace.")
     @app_commands.describe(text=TEMPLATE_HELP)
-    async def inactivity_dms_template_reminder_set(interaction: discord.Interaction, text: str) -> None:
+    async def inactivity_dms_template_grace_set(interaction: discord.Interaction, text: str) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_reminder_template=text)
-        await _send(interaction, subcommand_path="inactivity dms template_reminder_set", lines=[("result", "updated")], kind="success")
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_grace=text)
+        await _send(interaction, subcommand_path="inactivity dms template_grace_set", lines=[("result", "updated")], kind="success")
 
     @dms_group.command(name="on", description="Enable inactivity reminder DMs.")
     async def inactivity_dms_on(interaction: discord.Interaction) -> None:
@@ -362,13 +362,14 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         await ctx.database.set_inactivity_dm_reminders_enabled(str(interaction.guild_id), False)
         await _send(interaction, subcommand_path="inactivity dms off", lines=[("result", "disabled"), ("dms", "off")], kind="success")
 
-    @dms_group.command(name="status", description="Show inactivity reminder DM status and delivery metrics.")
+    @dms_group.command(name="status", description="Show inactivity DM status and delivery metrics.")
     async def inactivity_dms_status(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         guild_id = str(interaction.guild_id)
         cfg = await _ensure_cfg(ctx, guild_id)
-        template = str(cfg.get("dm_reminder_template") or "")
+        template_grace = str(cfg.get("template_grace") or cfg.get("dm_reminder_template") or "")
+        template_tempban = str(cfg.get("template_tempban") or cfg.get("dm_kick_template") or "")
         stats = await ctx.database.get_inactivity_dm_delivery_stats(guild_id)
         recent_rows = await ctx.database.list_inactivity_dm_delivery_events(guild_id, limit=5)
         by_event = stats.get("by_event") or []
@@ -386,7 +387,8 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             subcommand_path="inactivity dms status",
             lines=[
                 ("dms", _bool_label(cfg.get("dm_reminders_enabled", 1))),
-                ("template_reminder", template or "not set"),
+                ("template_grace", template_grace or "not set"),
+                ("template_tempban", template_tempban or "not set"),
                 ("cooldown_days", int(cfg.get("reminder_cooldown_days", DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS)),
                 ("invite_url", cfg.get("invite_url") or "not set"),
                 ("dm_sent_ok", int(stats.get("ok", 0))),
@@ -400,26 +402,55 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             sections=[CommandEmbedSection(title="Recent DM deliveries", lines=recent_lines or ["No DM deliveries logged yet."])],
         )
 
-    @dms_group.command(name="template_reminder_show", description="Show the reminder DM template.")
-    async def inactivity_dms_template_reminder_show(interaction: discord.Interaction) -> None:
+    @dms_group.command(name="template_grace_show", description="Show the DM template sent when a member enters inactivity grace.")
+    async def inactivity_dms_template_grace_show(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
-        template = str(cfg.get("dm_reminder_template") or "")
+        template = str(cfg.get("template_grace") or cfg.get("dm_reminder_template") or "")
         preview = _render_template_preview(template) if template else "No custom template configured."
         await _send(
             interaction,
-            subcommand_path="inactivity dms template_reminder_show",
+            subcommand_path="inactivity dms template_grace_show",
             lines=[("template", template or "not set")],
             sections=[CommandEmbedSection(title="Preview", lines=[preview])],
         )
 
-    @dms_group.command(name="template_reminder_reset", description="Reset the reminder DM template.")
-    async def inactivity_dms_template_reminder_reset(interaction: discord.Interaction) -> None:
+    @dms_group.command(name="template_grace_reset", description="Reset the DM template sent when a member enters inactivity grace.")
+    async def inactivity_dms_template_grace_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_reminder_template=None)
-        await _send(interaction, subcommand_path="inactivity dms template_reminder_reset", lines=[("result", "reset")], kind="success")
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_grace=None)
+        await _send(interaction, subcommand_path="inactivity dms template_grace_reset", lines=[("result", "reset")], kind="success")
+
+    @dms_group.command(name="template_tempban_set", description="Set the DM template sent before automatic inactivity tempban.")
+    @app_commands.describe(text=TEMPLATE_HELP)
+    async def inactivity_dms_template_tempban_set(interaction: discord.Interaction, text: str) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_tempban=text)
+        await _send(interaction, subcommand_path="inactivity dms template_tempban_set", lines=[("result", "updated")], kind="success")
+
+    @dms_group.command(name="template_tempban_show", description="Show the DM template sent before automatic inactivity tempban.")
+    async def inactivity_dms_template_tempban_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
+        template = str(cfg.get("template_tempban") or cfg.get("dm_kick_template") or "")
+        preview = _render_template_preview(template) if template else "No custom template configured."
+        await _send(
+            interaction,
+            subcommand_path="inactivity dms template_tempban_show",
+            lines=[("template", template or "not set")],
+            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+        )
+
+    @dms_group.command(name="template_tempban_reset", description="Reset the DM template sent before automatic inactivity tempban.")
+    async def inactivity_dms_template_tempban_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_tempban=None)
+        await _send(interaction, subcommand_path="inactivity dms template_tempban_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="cooldown_set", description="Set the reminder DM cooldown.")
     @app_commands.describe(days="Number of days between reminder DMs.")

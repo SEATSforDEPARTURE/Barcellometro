@@ -197,13 +197,16 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `inactivity` | `dms` | `cooldown_show` | Show the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:371` |
 | `inactivity` | `dms` | `off` | Disable inactivity reminder DMs. | `app/plugins/commands_modular/inattivi.py:350` |
 | `inactivity` | `dms` | `on` | Enable inactivity reminder DMs. | `app/plugins/commands_modular/inattivi.py:343` |
-| `inactivity` | `dms` | `status` | Show inactivity reminder DM status and delivery metrics. | `app/plugins/commands_modular/inattivi.py:357` |
+| `inactivity` | `dms` | `status` | Show inactivity DM status and delivery metrics. | `app/plugins/commands_modular/inattivi.py:357` |
 | `inactivity` | `dms` | `invite_reset` | Reset the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:403` |
 | `inactivity` | `dms` | `invite_set` | Set the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:389` |
 | `inactivity` | `dms` | `invite_show` | Show the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:396` |
-| `inactivity` | `dms` | `template_reminder_reset` | Reset the reminder DM template. | `app/plugins/commands_modular/inattivi.py:356` |
-| `inactivity` | `dms` | `template_reminder_set` | Set the reminder DM template. | `app/plugins/commands_modular/inattivi.py:335` |
-| `inactivity` | `dms` | `template_reminder_show` | Show the reminder DM template. | `app/plugins/commands_modular/inattivi.py:342` |
+| `inactivity` | `dms` | `template_grace_reset` | Reset the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:356` |
+| `inactivity` | `dms` | `template_grace_set` | Set the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:335` |
+| `inactivity` | `dms` | `template_grace_show` | Show the DM template sent when a member enters inactivity grace. | `app/plugins/commands_modular/inattivi.py:342` |
+| `inactivity` | `dms` | `template_tempban_reset` | Reset the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:356` |
+| `inactivity` | `dms` | `template_tempban_set` | Set the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:335` |
+| `inactivity` | `dms` | `template_tempban_show` | Show the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:342` |
 | `inactivity` | `grace` | `limits_reset` | Reset the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:280` |
 | `inactivity` | `grace` | `limits_set` | Set the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:265` |
 | `inactivity` | `grace` | `limits_show` | Show the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:272` |
@@ -367,7 +370,6 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING missing_param_description** — `dmchannelsummary.barcello.today`: Parameter 'user2' is missing a description. (`app/plugins/commands_modular/barcello.py:1829`)
 - **WARNING missing_param_description** — `dmchannelsummary.barcello.yesterday`: Parameter 'user1' is missing a description. (`app/plugins/commands_modular/barcello.py:1841`)
 - **WARNING missing_param_description** — `dmchannelsummary.barcello.yesterday`: Parameter 'user2' is missing a description. (`app/plugins/commands_modular/barcello.py:1841`)
-- **WARNING missing_param_description** — `inactivity.dms.template_reminder_set`: Parameter 'text' is missing a description. (`app/plugins/commands_modular/inattivi.py:335`)
 - **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'da' is missing a description. (`app/plugins/commands_modular/resoconto.py:873`)
 - **WARNING missing_param_description** — `resocontocanale.aura.range`: Parameter 'a' is missing a description. (`app/plugins/commands_modular/resoconto.py:873`)
 - **WARNING missing_param_description** — `resocontocanale.aura.ultimi`: Parameter 'quantita' is missing a description. (`app/plugins/commands_modular/resoconto.py:841`)
@@ -394,7 +396,8 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 - **WARNING required_param** — `embed.description.template_service_set`: Parameter 'template' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/embed.py:870`)
 - **WARNING required_param** — `inactivity.dms.cooldown_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:364`)
 - **WARNING required_param** — `inactivity.dms.invite_set`: Parameter 'url' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:389`)
-- **WARNING required_param** — `inactivity.dms.template_reminder_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:335`)
+- **WARNING required_param** — `inactivity.dms.template_grace_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:335`)
+- **WARNING required_param** — `inactivity.dms.template_tempban_set`: Parameter 'text' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:335`)
 - **WARNING required_param** — `inactivity.grace.limits_set`: Parameter 'days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:265`)
 - **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'inactive_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:419`)
 - **WARNING required_param** — `inactivity.policy.default_set`: Parameter 'window_days' is required in a configuration-style command; verify it is indispensable. (`app/plugins/commands_modular/inattivi.py:420`)
