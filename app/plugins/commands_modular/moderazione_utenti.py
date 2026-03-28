@@ -164,7 +164,11 @@ def _render_users_dm_template_preview(template: str) -> str:
         "expires_at_utc": "2026-03-28 18:00 UTC",
         "expires_at_it": "28/03/2026 19:00",
         "reason": "Manual grace",
+        "reason_text": "Manual grace",
         "reason_line": "Reason: Manual grace. ",
+        "reasoning": "users_grace_dm",
+        "started_at_utc": "2026-03-28 16:00 UTC",
+        "started_at_it": "28/03/2026 17:00",
         "invite_url": "https://discord.gg/example",
         "invite_line": "Invite: https://discord.gg/example",
     }

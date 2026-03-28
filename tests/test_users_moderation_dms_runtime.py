@@ -216,3 +216,29 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
         assert database.log_users_dm_delivery.await_args_list[-1].kwargs["outcome"] == "success"
 
     asyncio.run(_run())
+
+
+def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_reason_text() -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.config["grace_template"] = "X {mention} {reason} {reason_text} {reason_line}{unknown_placeholder}"
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="grace",
+            duration_seconds=60,
+            expires_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+            reason="Motivo moderatore",
+        )
+
+        assert result == {"sent": True}
+        sent_embed = user.send.await_args.kwargs["embed"]
+        body = str(sent_embed.description)
+        assert "Motivo moderatore" in body
+        assert "{unknown_placeholder}" not in body
+
+    asyncio.run(_run())

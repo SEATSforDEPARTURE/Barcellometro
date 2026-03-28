@@ -246,3 +246,19 @@ Regole obbligatorie:
 - `status` deve rendere in modo esplicito: stato `on/off`, template `template_grace`, template `template_tempban`, cooldown, invite e metriche/log recenti quando disponibili.
 - naming legacy tipo `template_reminder_*` non deve comparire nella superficie slash pubblica, nella command map pubblica o nella documentazione utente corrente.
 - eventuali campi legacy interni (`dm_reminder_template`, `dm_kick_template`) restano ammessi solo come compatibilità dati/runtime e non devono essere pubblicizzati come comandi canonici.
+
+## 11. Contratto placeholder DM condiviso (`/users dms` e `/inactivity dms`)
+
+I sistemi DM di `users` e `inactivity` devono condividere una base comune di placeholder, con fallback sicuro quando un valore non è disponibile:
+
+- `{mention}`, `{user}`, `{username}`, `{display_name}`, `{user_id}`
+- `{server}`, `{guild_id}`
+- `{event_type}`
+- `{reason}`, `{reason_text}`, `{reason_line}`, `{reasoning}`
+- `{duration_seconds}`, `{duration_human}`
+- `{started_at_utc}`, `{started_at_it}`
+- `{expires_at_utc}`, `{expires_at_it}`
+- `{now_utc}`, `{now_it}`
+- `{invite_url}`, `{invite_line}`
+
+`/inactivity dms` aggiunge anche i placeholder dominio-specifici (`days_inactive`, `window_days`, `min_messages`, `message_count`, `grace_days`, `reminder_count`, `ban_days`, `rejoin_link`, `inactivity_text`, `event_state`, `event_cause`).

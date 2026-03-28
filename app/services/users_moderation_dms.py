@@ -6,8 +6,7 @@ from typing import Any
 import discord
 
 from app.services.database import DatabaseService
-from app.services.dm_time_placeholders import build_time_placeholder_payload
-from app.services.dm_user_placeholders import build_user_placeholder_payload
+from app.services.dm_template_placeholders import DM_BASE_SUPPORTED_PLACEHOLDERS, build_dm_base_placeholder_payload, render_dm_template
 from app.services.greetings_copy_service import get_greetings_title_parts
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 
@@ -20,26 +19,7 @@ DEFAULT_USERS_DM_TEMPBAN_TEMPLATE = (
     "Hi {user}, your manual grace period in {server} has expired and an automatic temporary ban "
     "has started for {duration_human}. {reason_line}{invite_line}"
 )
-USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
-    "mention",
-    "user",
-    "username",
-    "display_name",
-    "user_id",
-    "server",
-    "guild_id",
-    "event_type",
-    "duration_seconds",
-    "duration_human",
-    "now_utc",
-    "now_it",
-    "expires_at_utc",
-    "expires_at_it",
-    "reason",
-    "reason_line",
-    "invite_url",
-    "invite_line",
-)
+USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = DM_BASE_SUPPORTED_PLACEHOLDERS
 
 USERS_DM_SERVICE_NAME = "users"
 
@@ -268,20 +248,6 @@ class UsersModerationDmService:
         return str(cfg.get("grace_template") or DEFAULT_USERS_DM_GRACE_TEMPLATE)
 
     @staticmethod
-    def _duration_human(duration_seconds: int | None) -> str:
-        if duration_seconds is None or duration_seconds <= 0:
-            return "0m"
-        total = int(duration_seconds)
-        days, rem = divmod(total, 86400)
-        hours, rem = divmod(rem, 3600)
-        mins, _ = divmod(rem, 60)
-        if days > 0:
-            return f"{days}d {hours}h"
-        if hours > 0:
-            return f"{hours}h {mins}m"
-        return f"{max(1, mins)}m"
-
-    @staticmethod
     def _title_for_event(event_type: str) -> tuple[str, str]:
         emoji, text = get_greetings_title_parts(event_type)
         return text, emoji
@@ -299,24 +265,17 @@ class UsersModerationDmService:
         reason: str | None,
         invite_url: str,
     ) -> str:
-        safe_reason = str(reason or "").strip()
-        safe_invite = str(invite_url or "").strip()
         now = datetime.now(timezone.utc)
-        time_payload = build_time_placeholder_payload(now=now, expires_at=expires_at)
-        payload = {
-            **build_user_placeholder_payload(user),
-            **time_payload,
-            "server": guild.name,
-            "guild_id": str(guild.id),
-            "event_type": event_type,
-            "duration_seconds": int(duration_seconds or 0),
-            "duration_human": cls._duration_human(duration_seconds),
-            "reason": safe_reason,
-            "reason_line": f"Reason: {safe_reason}. " if safe_reason else "",
-            "invite_url": safe_invite,
-            "invite_line": f"Invite: {safe_invite}" if safe_invite else "",
-        }
-        try:
-            return template.format(**payload)
-        except Exception:
-            return template
+        payload = build_dm_base_placeholder_payload(
+            user=user,
+            guild=guild,
+            event_type=event_type,
+            now=now,
+            duration_seconds=duration_seconds,
+            reason=reason,
+            reasoning=f"users_{event_type}_dm",
+            started_at=now,
+            expires_at=expires_at,
+            invite_url=invite_url,
+        )
+        return render_dm_template(template, payload)
