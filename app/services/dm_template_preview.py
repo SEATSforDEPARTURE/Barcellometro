@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from string import Formatter
 from typing import Any
 
-from app.services.dm_template_placeholders import format_reason_text
+from app.services.dm_template_placeholders import build_reason_placeholders
 from app.services.member_flow_notifications import format_duration_human
 
 _UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
@@ -37,9 +37,14 @@ def build_dm_template_preview_payload(
     utc_now = now or datetime(2026, 3, 28, 16, 0, tzinfo=timezone.utc)
     safe_duration_seconds = max(0, _to_int(duration_seconds, 2 * 86400))
     expires_at = utc_now + timedelta(seconds=safe_duration_seconds)
+    safe_event_type = str(event_type or "").strip() or "tempban"
     safe_reason = str(reason or "").strip()
-    safe_reason_text = format_reason_text(safe_reason)
     safe_invite_url = str(invite_url or "").strip()
+    reason_payload = build_reason_placeholders(
+        reason=safe_reason,
+        reasoning="template_preview",
+        event_type=safe_event_type,
+    )
 
     payload: dict[str, Any] = {
         "mention": "<@1234567890>",
@@ -50,10 +55,7 @@ def build_dm_template_preview_payload(
         "server": "Barcellometro",
         "guild_id": "987654321",
         "event_type": safe_event_type,
-        "reason": safe_reason,
-        "reason_text": safe_reason_text,
-        "reason_line": f"Reason: {safe_reason}. " if safe_reason else "",
-        "reasoning": "template_preview",
+        **reason_payload,
         "duration_seconds": safe_duration_seconds,
         "duration_human": format_duration_human(safe_duration_seconds) or "0m",
         "started_at_utc": utc_now.strftime("%Y-%m-%d %H:%M UTC"),
@@ -68,12 +70,14 @@ def build_dm_template_preview_payload(
     }
     if extra_payload:
         payload.update(extra_payload)
-    payload["reason_line"] = build_reason_line(
-        reason=str(payload.get("reason") or "").strip(),
-        reasoning=str(payload.get("reasoning") or "").strip(),
-        event_type=str(payload.get("event_type") or "").strip(),
-        event_state=str(payload.get("event_state") or "").strip(),
-        event_cause=str(payload.get("event_cause") or "").strip(),
+    payload.update(
+        build_reason_placeholders(
+            reason=str(payload.get("reason") or "").strip(),
+            reasoning=str(payload.get("reasoning") or "").strip(),
+            event_type=str(payload.get("event_type") or "").strip(),
+            event_state=str(payload.get("event_state") or "").strip(),
+            event_cause=str(payload.get("event_cause") or "").strip(),
+        )
     )
     return payload
 
