@@ -47,7 +47,11 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert 'untempban_group = app_commands.Group(name="untempban"' in modular
     assert '@users_group.command(name="tempban"' in modular
     assert '@users_group.command(name="tempban_list"' in modular
-    assert 'name="grace"' in modular
+    assert 'grace_group = app_commands.Group(name="grace"' in modular
+    assert '@grace_group.command(name="assign"' in modular
+    assert '@grace_group.command(name="tempban_set"' in modular
+    assert '@grace_group.command(name="tempban_show"' in modular
+    assert '@grace_group.command(name="tempban_reset"' in modular
     assert 'ungrace_group = app_commands.Group(name="ungrace"' in modular
     assert '@users_group.command(name="grace_list"' in modular
     assert 'description="Revoke an active ban for one user."' in modular
@@ -652,7 +656,7 @@ def test_alias_batch_revocations_support_oggi_ieri_ultimi_intervallo_for_all_mod
     asyncio.run(_run())
 
 
-def test_users_tempban_and_grace_expose_quantity_unit_not_duration() -> None:
+def test_users_tempban_and_grace_assign_expose_quantity_unit_not_duration() -> None:
     users_group = discord.app_commands.Group(name="users", description="users")
     ctx = SimpleNamespace(
         database=Mock(),
@@ -663,7 +667,7 @@ def test_users_tempban_and_grace_expose_quantity_unit_not_duration() -> None:
     register_moderazione_utenti(users_group, ctx)
 
     tempban_command = _find_command(users_group, "tempban")
-    grace_command = _find_command(users_group, "grace")
+    grace_command = _find_command(users_group, "grace", "assign")
 
     tempban_params = [param.name for param in tempban_command.parameters]
     grace_params = [param.name for param in grace_command.parameters]
@@ -783,7 +787,7 @@ def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
         )
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "grace")
+        command = _find_command(users_group, "grace", "assign")
 
         guild = SimpleNamespace(id=1)
         target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
@@ -792,7 +796,7 @@ def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
             guild=guild,
             guild_id=1,
             user=moderator,
-            command=SimpleNamespace(qualified_name="users grace"),
+            command=SimpleNamespace(qualified_name="users grace assign"),
         )
         unit = discord.app_commands.Choice(name="settimane", value="settimane")
 
@@ -805,5 +809,45 @@ def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
         response_kwargs = send_standard_response.await_args.kwargs
         assert response_kwargs["subcommand_path"] == "users grace"
         assert ("duration", "14g") in response_kwargs["lines"]
+
+    asyncio.run(_run())
+
+
+def test_users_grace_tempban_set_show_reset() -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch = __import__("pytest").MonkeyPatch()
+        monkeypatch.setattr(
+            moderazione_utenti_module, "send_standard_response", send_standard_response
+        )
+        monkeypatch.setattr(
+            moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
+        )
+        database = SimpleNamespace(
+            set_setting=AsyncMock(),
+            get_setting=AsyncMock(side_effect=["10800", "0"]),
+        )
+        ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=None, barcello_service=None)
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        set_cmd = _find_command(users_group, "grace", "tempban_set")
+        show_cmd = _find_command(users_group, "grace", "tempban_show")
+        reset_cmd = _find_command(users_group, "grace", "tempban_reset")
+        interaction = SimpleNamespace(guild_id=1, guild=SimpleNamespace(id=1), user=SimpleNamespace(id=7), command=SimpleNamespace(qualified_name="users grace tempban_set"))
+
+        unit = discord.app_commands.Choice(name="ore", value="ore")
+        await set_cmd.callback(interaction, 3, unit)
+        await show_cmd.callback(interaction)
+        await reset_cmd.callback(interaction)
+
+        database.set_setting.assert_any_await("users.grace.tempban.default_seconds.1", "10800")
+        database.set_setting.assert_any_await("users.grace.tempban.default_seconds.1", "0")
+        assert send_standard_response.await_args_list[0].kwargs["subcommand_path"] == "users grace tempban_set"
+        assert ("default_tempban", "3h") in send_standard_response.await_args_list[0].kwargs["lines"]
+        assert send_standard_response.await_args_list[1].kwargs["subcommand_path"] == "users grace tempban_show"
+        assert ("default_tempban", "3h") in send_standard_response.await_args_list[1].kwargs["lines"]
+        assert send_standard_response.await_args_list[2].kwargs["subcommand_path"] == "users grace tempban_reset"
+        assert ("default_tempban", "0m") in send_standard_response.await_args_list[2].kwargs["lines"]
+        monkeypatch.undo()
 
     asyncio.run(_run())
