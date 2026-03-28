@@ -198,6 +198,11 @@ Questo mapping è centralizzato in `app/shared/discord/command_embeds.py` e vale
   - titolo: `🛠️ __**TEMPBAN_LIST**__`
   - description: `*...*`
   - primo field: `ℹ️ __**INFO**__`
+- `/users kick_list`, `/users ban_list`, `/users tempban_list`, `/users grace_list`
+  - elenco embed + `.txt` allegato: solo dati strutturati (mai copy narrativo greetings)
+  - campi minimi per entry: utente + data/ora evento in formato italiano `dd/mm/YYYY HH:MM` (Europe/Rome)
+  - `tempban_list`: include sempre anche la scadenza del tempban
+  - `grace_list`: include scadenza grace e, se configurato `users.grace.tempban.default_seconds > 0`, anche durata tempban post-grace e scadenza prevista del tempban successivo
 - `/admin retention on`
   - titolo: `🫛 __**RETENTION ON**__`
   - description: `*...*`
