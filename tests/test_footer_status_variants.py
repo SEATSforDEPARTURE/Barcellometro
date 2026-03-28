@@ -364,9 +364,9 @@ def test_footer_status_command_sends_single_embed_without_pagination_view() -> N
         assert "INFO" in info_field.name
         info_text = info_field.value.lower()
         assert "enabled: **off**" in info_text
-        assert "supported services: **15**" in info_text
+        assert "supported services: **16**" in info_text
         assert "services with custom template: **1**" in info_text
-        assert "services using default: **14**" in info_text
+        assert "services using default: **15**" in info_text
         assert "runtime rule" in info_text
 
         custom_field = next(field for field in embed.fields if "CUSTOM TEMPLATES" in field.name)
