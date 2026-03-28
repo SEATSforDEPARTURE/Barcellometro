@@ -101,7 +101,7 @@ def test_first_join_narrative_is_welcome_and_uses_user_mention() -> None:
 
     lowered = result.narrative.lower()
     assert "<@42>" in result.narrative
-    assert "benvenut" in lowered
+    assert "entra" in lowered
     assert "rientrat" not in lowered
     assert "torna" not in lowered
 
@@ -211,7 +211,7 @@ def test_render_event_copy_uses_mood_time_barcello_and_count_override(tmp_path) 
     assert result.time_bucket == "morning"
     assert result.count_tier == "t2"
     assert result.barcello_state == "rosso"
-    assert "override **teso** **morning** **rosso** **t2** **🔴 ALLERTA ROSSA** **41**" in result.narrative
+    assert "override teso morning rosso t2 🔴 ALLERTA ROSSA 41" in result.narrative
 
 
 def test_leave_narrative_inserts_periods_between_main_barcello_and_comment(tmp_path) -> None:
@@ -240,8 +240,8 @@ def test_leave_narrative_inserts_periods_between_main_barcello_and_comment(tmp_p
         )
     )
 
-    assert "*.* *In quel momento" in result.narrative
-    assert "*.* *Vediamo" in result.narrative
+    assert "volta.* *In quel momento" in result.narrative
+    assert "100/100).* *Vediamo" in result.narrative
     assert ".." not in result.narrative
     assert " ." not in result.narrative
 
@@ -287,7 +287,7 @@ def test_join_ban_kick_insert_period_before_closing_comment(tmp_path) -> None:
                 now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
             )
         )
-        assert "*.* *" in result.narrative
+        assert "* *" in result.narrative
         assert ".." not in result.narrative
         assert " ." not in result.narrative
 
@@ -318,7 +318,7 @@ def test_join_narrative_does_not_duplicate_existing_terminal_punctuation(tmp_pat
 
     assert ".." not in result.narrative
     assert " ." not in result.narrative
-    assert "***arriva su **Barcellometro**.*** *Che sia l'inizio" in result.narrative
+    assert "***arriva su Barcellometro.*** *Che sia l'inizio" in result.narrative
 
 
 def test_tempban_description_stays_fully_italic_and_starts_with_mention(tmp_path) -> None:
@@ -346,8 +346,8 @@ def test_tempban_description_stays_fully_italic_and_starts_with_mention(tmp_path
     )
     assert result.narrative.startswith("***@Fakuzzo***")
     assert not result.narrative.startswith(("👋", "🤝", "👢", "⛔", "⌛", "🕊️"))
-    assert "***10m***" in result.narrative
-    assert "10m***" in result.narrative
+    assert "***10m.***" in result.narrative
+    assert "10m.***" in result.narrative
     assert "10m**." not in result.narrative
 
 
@@ -551,7 +551,7 @@ def test_narrative_respects_fixed_slot_flow_and_markdown_emphasis() -> None:
     assert result.narrative.startswith("***<@42>***")
     assert not result.narrative.startswith(("🤝", "👋", "👢", "⛔", "⌛", "🕊️"))
     assert "***è stato bannato***" in result.narrative
-    assert "*.* *" in result.narrative
+    assert "* *" in result.narrative
 
 
 def test_leave_includes_barcello_reference_only_for_leave() -> None:
@@ -615,6 +615,24 @@ def test_example_config_join_has_explicit_first_and_repeat_copy() -> None:
     assert join_templates["first_occurrence"] != join_templates["repeat"]
 
 
+def test_grace_narrative_uses_entra_nel_periodo_di_grazia_wording() -> None:
+    service = _service()
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="grace",
+            duration_seconds=7 * 86400,
+            barcello_status={"color": "verde", "score": 84},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    lowered = result.narrative.lower()
+    assert "entra nel periodo di grazia" in lowered
+    assert "è stato graziato" not in lowered
+    assert "è stata graziata" not in lowered
+
+
 def test_example_config_documents_json_as_single_editorial_source() -> None:
     payload = json.loads(Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8"))
 
@@ -624,6 +642,23 @@ def test_example_config_documents_json_as_single_editorial_source() -> None:
     assert any("emoji + __**MAIUSCOLO**__" in line for line in purpose_lines)
     assert payload["docs"]["narrative_order"][0] == "opening"
     assert "solo leave" in payload["docs"]["narrative_order"][4]
+
+
+def test_example_config_closing_comments_are_varied_and_not_technical() -> None:
+    payload = json.loads(Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8"))
+    serialized = json.dumps(payload, ensure_ascii=False).lower()
+    for banned in (
+        "provvedimento registrato",
+        "rientro possibile alla scadenza",
+        "timeline aggiornata",
+        "operazione completata",
+    ):
+        assert banned not in serialized
+
+    for event_type in ("kick", "ban", "tempban", "grace", "inactive_kick", "inactive_tempban", "inactive_grace"):
+        closing = payload["event_templates"][event_type]["closing_comment"]
+        assert isinstance(closing, list)
+        assert len(closing) >= 3
 
 
 def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> None:
@@ -649,7 +684,60 @@ def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> 
         )
     )
 
-    assert "fallback kick **<@42>**" in result.narrative
+    assert "fallback kick <@42>" in result.narrative
+
+
+@pytest.mark.parametrize("event_type_key", ["join", "ban", "kick", "tempban", "grace"])
+def test_narrative_never_contains_spurious_bold_closures(event_type_key: str) -> None:
+    service = _service(occurrence_number=5)
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="GABBIETTA DORATA"),
+            user=SimpleNamespace(id=42, name="fakuzzo", display_name="Fakuzzo", mention="@Fakuzzo"),
+            event_type_key=event_type_key,
+            duration_seconds=60 if event_type_key in {"tempban", "grace"} else None,
+            barcello_status={"color": "rosso", "score": 42},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    assert "**." not in result.narrative
+    assert "****." not in result.narrative
+    assert " . " not in result.narrative
+
+
+def test_tempban_narrative_uses_non_technical_closing_and_no_spurious_bold() -> None:
+    service = _service()
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="GABBIETTA DORATA"),
+            user=SimpleNamespace(id=42, name="fakuzzo", display_name="Fakuzzo", mention="@Fakuzzo"),
+            event_type_key="tempban",
+            duration_seconds=60,
+            barcello_status={"color": "giallo", "score": 58},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    assert "***1m.***" in result.narrative
+    assert "1m**." not in result.narrative
+    assert "alla scadenza" not in result.narrative.lower()
+    assert "registrato" not in result.narrative.lower()
+
+
+@pytest.mark.parametrize("event_type_key", ["kick", "ban"])
+def test_kick_and_ban_closing_comments_are_not_technical(event_type_key: str) -> None:
+    service = _service(occurrence_number=3)
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="GABBIETTA DORATA"),
+            user=SimpleNamespace(id=42, name="fakuzzo", display_name="Fakuzzo", mention="@Fakuzzo"),
+            event_type_key=event_type_key,
+            barcello_status={"color": "rosso", "score": 30},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    lowered = result.narrative.lower()
+    assert "provvedimento registrato" not in lowered
+    assert "operazione completata" not in lowered
 
 
 def test_render_moderation_preview_bolds_primary_dynamic_placeholders_without_breaking_mentions() -> None:

@@ -69,6 +69,8 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
   - `event_templates[event_type_key]` contiene la baseline narrativa generale;
   - `first_occurrence` e `repeat` distinguono il primo ingresso dai rientri, e più in generale prima occorrenza vs successive;
   - `moods -> time -> barcello -> count` permette override sempre più specifici senza reintrodurre campi separati nell'embed.
+- Nei `event_templates` narrativi ogni slot può essere stringa o lista: le liste vengono variate in modo deterministico (seed su evento/mood/finestra/barcello/occorrenza) per aumentare varietà senza output casuale instabile.
+- Per i commenti finali è supportato anche `moods.<mood>.event_templates.<event_type>`: quando presente sovrascrive solo gli slot dichiarati (tipicamente `closing_comment`) mantenendo intatta la grammatica narrativa base.
 - Il resolver dei template segue una cascata precisa: override più specifici (`mood` + `time` + `barcello` + `count`) → override medi → `templates[...]` → `defaults.fallbacks[...]`.
 - La grammatica evento resta canonica e coerente col renderer live: `kick` / `inactive_kick` sono chiavi tecniche, ma le etichette e le frasi user-facing devono parlare di `allontanamento`, mai di `KICK`.
 - I flussi di moderazione del bot (`/mod users ...`) e la moderazione nativa Discord devono convergere nella stessa timeline canonica `member_flow_events`: il feed deve mostrare solo l'evento dedicato (`BAN`, `ALLONTANAMENTO`, `BAN TEMPORANEO`, `USCITA`) senza embed duplicati della stessa sequenza tecnica.

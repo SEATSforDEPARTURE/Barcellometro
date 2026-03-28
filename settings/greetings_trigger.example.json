@@ -85,7 +85,7 @@
       },
       "grace": {
         "default": [
-          "{mention} è stato graziato in {guild_name} per {duration}."
+          "{mention} entra nel periodo di grazia in {guild_name} per {duration}."
         ]
       },
       "inactive_kick": {
@@ -100,28 +100,36 @@
       },
       "inactive_grace": {
         "default": [
-          "{mention} è stato graziato in {guild_name} per inattività ({duration}, {inactivity_text})."
+          "{mention} entra nel periodo di grazia in {guild_name} per inattività ({duration}, {inactivity_text})."
         ]
       }
     }
   },
   "event_templates": {
-    "join": {
-      "first_occurrence": {
+      "join": {
+        "first_occurrence": {
         "opening": "{mention}",
         "action_phrase": "entra",
         "occurrence_phrase": "in {guild_name} per la",
         "detail_phrase": "{occurrence_number}° volta",
-        "closing_comment": "Benvenut*."
-      },
-      "repeat": {
+          "closing_comment": [
+            "Benvenut*.",
+            "Si parte.",
+            "Che sia un buon inizio."
+          ]
+        },
+        "repeat": {
         "opening": "{mention}",
         "action_phrase": "torna",
         "occurrence_phrase": "in {guild_name} per la",
         "detail_phrase": "{occurrence_number}° volta",
-        "closing_comment": "Bentornat*."
-      }
-    },
+          "closing_comment": [
+            "Bentornat*.",
+            "Il server se ne accorge.",
+            "Il clima cambia subito."
+          ]
+        }
+      },
     "leave": {
       "opening": "{mention}",
       "action_phrase": "ha lasciato",
@@ -130,54 +138,118 @@
       "barcello_phrase": "In quel momento il Barcello era {barcello_alert} ({barcello_score_text})",
       "closing_comment": "Vediamo se tornerà."
     },
-    "kick": {
-      "opening": "{mention}",
-      "action_phrase": "è stato espulso",
-      "occurrence_phrase": "da {guild_name} per la",
-      "detail_phrase": "{occurrence_number}° volta",
-      "closing_comment": "Provvedimento registrato."
+      "kick": {
+        "opening": "{mention}",
+        "action_phrase": "è stato espulso",
+        "occurrence_phrase": "da {guild_name} per la",
+        "detail_phrase": "{occurrence_number}° volta",
+        "closing_comment": [
+          "Aria pesante oggi.",
+          "Non era proprio il momento migliore.",
+          "Il Barcello prende nota."
+        ]
+      },
+      "ban": {
+        "opening": "{mention}",
+        "action_phrase": "è stato bannato",
+        "occurrence_phrase": "da {guild_name} per la",
+        "detail_phrase": "{occurrence_number}° volta",
+        "closing_comment": [
+          "Che peccato.",
+          "Il clima si fa strano.",
+          "Il server osserva in silenzio."
+        ]
+      },
+      "tempban": {
+        "opening": "{mention}",
+        "action_phrase": "è stato temporaneamente bannato",
+        "occurrence_phrase": "da {guild_name} per",
+        "detail_phrase": "{duration}",
+        "closing_comment": [
+          "Vediamo come evolve.",
+          "Chissà se durerà.",
+          "L’atmosfera non prometteva benissimo."
+        ]
+      },
+      "grace": {
+        "opening": "{mention}",
+        "action_phrase": "entra nel periodo di grazia",
+        "occurrence_phrase": "in {guild_name} per",
+        "detail_phrase": "{duration}",
+        "closing_comment": [
+          "Ora conta come si muove.",
+          "Un margine c’è, va giocato bene.",
+          "Il server resta in ascolto."
+        ]
+      },
+      "inactive_kick": {
+        "opening": "{mention}",
+        "action_phrase": "è stato espulso",
+        "occurrence_phrase": "da {guild_name} per inattività dopo",
+        "detail_phrase": "{inactivity_text}",
+        "closing_comment": [
+          "Silenzio lungo, conseguenze reali.",
+          "Il tempo fuori pesa.",
+          "Si chiude così, per ora."
+        ]
+      },
+      "inactive_tempban": {
+        "opening": "{mention}",
+        "action_phrase": "è stato temporaneamente bannato",
+        "occurrence_phrase": "da {guild_name} per inattività:",
+        "detail_phrase": "{duration} ({inactivity_text})",
+        "closing_comment": [
+          "Il clima resta sospeso.",
+          "Non è una porta chiusa, ma quasi.",
+          "Si vedrà più avanti."
+        ]
+      },
+      "inactive_grace": {
+        "opening": "{mention}",
+        "action_phrase": "entra nel periodo di grazia",
+        "occurrence_phrase": "in {guild_name} per inattività per",
+        "detail_phrase": "{duration} ({inactivity_text})",
+        "closing_comment": [
+          "È una finestra stretta, ma c’è.",
+          "Adesso serve continuità.",
+          "Il Barcello osserva i prossimi passi."
+        ]
+      }
     },
-    "ban": {
-      "opening": "{mention}",
-      "action_phrase": "è stato bannato",
-      "occurrence_phrase": "da {guild_name} per la",
-      "detail_phrase": "{occurrence_number}° volta",
-      "closing_comment": "Che peccato."
-    },
-    "tempban": {
-      "opening": "{mention}",
-      "action_phrase": "è stato temporaneamente bannato",
-      "occurrence_phrase": "da {guild_name} per",
-      "detail_phrase": "{duration}",
-      "closing_comment": "Rientro possibile alla scadenza."
-    },
-    "grace": {
-      "opening": "{mention}",
-      "action_phrase": "è stato graziato",
-      "occurrence_phrase": "in {guild_name} per",
-      "detail_phrase": "{duration}",
-      "closing_comment": "Occasione da non sprecare."
-    },
-    "inactive_kick": {
-      "opening": "{mention}",
-      "action_phrase": "è stato espulso",
-      "occurrence_phrase": "da {guild_name} per inattività dopo",
-      "detail_phrase": "{inactivity_text}",
-      "closing_comment": "Timeline aggiornata."
-    },
-    "inactive_tempban": {
-      "opening": "{mention}",
-      "action_phrase": "è stato temporaneamente bannato",
-      "occurrence_phrase": "da {guild_name} per inattività:",
-      "detail_phrase": "{duration} ({inactivity_text})",
-      "closing_comment": "Rientro possibile alla scadenza."
-    },
-    "inactive_grace": {
-      "opening": "{mention}",
-      "action_phrase": "è stato graziato",
-      "occurrence_phrase": "in {guild_name} per inattività per",
-      "detail_phrase": "{duration} ({inactivity_text})",
-      "closing_comment": "Ultimo margine disponibile."
+    "moods": {
+      "teso": {
+        "event_templates": {
+          "ban": {
+            "closing_comment": [
+              "Aria pesante oggi.",
+              "Il clima non perdona."
+            ]
+          },
+          "tempban": {
+            "closing_comment": [
+              "Il clima resta teso.",
+              "La stanza trattiene il fiato."
+            ]
+          }
+        }
+      },
+      "accogliente": {
+        "event_templates": {
+          "join": {
+            "first_occurrence": {
+              "closing_comment": [
+                "Benvenut*.",
+                "Che bello vederti qui."
+              ]
+            },
+            "repeat": {
+              "closing_comment": [
+                "Bentornat*.",
+                "Si respira meglio con questo rientro."
+              ]
+            }
+          }
+        }
+      }
     }
   }
-}

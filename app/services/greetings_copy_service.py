@@ -175,10 +175,10 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
         "kick": ["{mention} è stato allontanato da {server}{reason_suffix}."],
         "ban": ["{mention} è stato bannato da {server}{reason_suffix}."],
         "tempban": ["{mention} è stato escluso temporaneamente da {server} per {duration}{reason_suffix}."],
-        "grace": ["{mention} riceve un periodo di grazia nel server {server} per {duration}."],
+        "grace": ["{mention} entra nel periodo di grazia in {server} per {duration}."],
         "inactive_kick": ["{mention} viene allontanato da {server} per inattività ({inactivity_text})."],
         "inactive_tempban": ["{mention} riceve un ban temporaneo per inattività in {server} per {duration} ({inactivity_text})."],
-        "inactive_grace": ["{mention} entra in periodo di grazia per inattività su {server} per {duration} ({inactivity_text})."],
+        "inactive_grace": ["{mention} entra nel periodo di grazia per inattività su {server} per {duration} ({inactivity_text})."],
     },
     "moods": {
         "accogliente": {
@@ -343,9 +343,12 @@ class GreetingsCopyService:
             "barcello_score_text": score_text,
         }
 
-    def render_moderation_template(self, template: str | None, **context: Any) -> str:
+    def render_moderation_template(self, template: str | None, *, highlight_placeholders: bool = True, **context: Any) -> str:
         base = template or ""
-        formatted_context = {key: self._format_placeholder_value(key, value) for key, value in context.items()}
+        if highlight_placeholders:
+            formatted_context = {key: self._format_placeholder_value(key, value) for key, value in context.items()}
+        else:
+            formatted_context = {key: "" if value is None else str(value) for key, value in context.items()}
         try:
             return base.format(**formatted_context)
         except Exception as exc:  # noqa: BLE001
@@ -541,11 +544,28 @@ class GreetingsCopyService:
         contract = cfg.get("event_templates")
         if not isinstance(contract, dict):
             contract = cfg.get("narrative_contract")
+        mood_contract: dict[str, Any] = {}
+        moods_cfg = cfg.get("moods")
+        if isinstance(moods_cfg, dict):
+            selected_mood_cfg = moods_cfg.get(mood)
+            if isinstance(selected_mood_cfg, dict):
+                mood_event_templates = selected_mood_cfg.get("event_templates")
+                if isinstance(mood_event_templates, dict):
+                    mood_contract = mood_event_templates
         if isinstance(contract, dict):
             event_contract = contract.get(event_type_key)
             selected = self._resolve_contract_variant(event_contract, occurrence_number=occurrence_number)
+            mood_selected = self._resolve_contract_variant(mood_contract.get(event_type_key), occurrence_number=occurrence_number)
+            if isinstance(selected, dict) and isinstance(mood_selected, dict):
+                selected = self._deep_merge(selected, mood_selected)
+            elif isinstance(mood_selected, dict):
+                selected = mood_selected
             if isinstance(selected, dict):
-                return self._normalize_narrative_template(selected)
+                return self._normalize_narrative_template(
+                    selected,
+                    occurrence_number=occurrence_number,
+                    seed_parts=(event_type_key, mood, time_bucket, barcello_state, count_tier),
+                )
 
         legacy = self._select_template(
             cfg,
@@ -556,7 +576,11 @@ class GreetingsCopyService:
             count_tier=count_tier,
             occurrence_number=occurrence_number,
         )
-        return self._normalize_narrative_template({"event_phrase": legacy})
+        return self._normalize_narrative_template(
+            {"event_phrase": legacy},
+            occurrence_number=occurrence_number,
+            seed_parts=(event_type_key, mood, time_bucket, barcello_state, count_tier, "legacy"),
+        )
 
     def _resolve_contract_variant(self, value: Any, *, occurrence_number: int) -> Any:
         if not isinstance(value, dict):
@@ -569,38 +593,73 @@ class GreetingsCopyService:
             return value["default"]
         return value
 
-    def _normalize_narrative_template(self, value: dict[str, Any]) -> dict[str, str]:
+    def _normalize_narrative_template(
+        self,
+        value: dict[str, Any],
+        *,
+        occurrence_number: int,
+        seed_parts: tuple[str, ...],
+    ) -> dict[str, str]:
+        slot_seed = {
+            "opening": seed_parts + ("opening",),
+            "action_phrase": seed_parts + ("action_phrase",),
+            "occurrence_phrase": seed_parts + ("occurrence_phrase",),
+            "detail_phrase": seed_parts + ("detail_phrase",),
+            "barcello_phrase": seed_parts + ("barcello_phrase",),
+            "closing_comment": seed_parts + ("closing_comment",),
+        }
         return {
-            "opening": str(value.get("opening") or "{mention}"),
-            "action_phrase": str(value.get("action_phrase") or value.get("event_phrase") or ""),
-            "occurrence_phrase": str(value.get("occurrence_phrase") or ""),
-            "detail_phrase": str(value.get("detail_phrase") or ""),
-            "barcello_phrase": str(value.get("barcello_phrase") or ""),
-            "closing_comment": str(value.get("closing_comment") or ""),
+            "opening": self._resolve_template_value(value.get("opening") or "{mention}", seed_parts=slot_seed["opening"], occurrence_number=occurrence_number),
+            "action_phrase": self._resolve_template_value(
+                value.get("action_phrase") or value.get("event_phrase") or "",
+                seed_parts=slot_seed["action_phrase"],
+                occurrence_number=occurrence_number,
+            ),
+            "occurrence_phrase": self._resolve_template_value(
+                value.get("occurrence_phrase") or "",
+                seed_parts=slot_seed["occurrence_phrase"],
+                occurrence_number=occurrence_number,
+            ),
+            "detail_phrase": self._resolve_template_value(
+                value.get("detail_phrase") or "",
+                seed_parts=slot_seed["detail_phrase"],
+                occurrence_number=occurrence_number,
+            ),
+            "barcello_phrase": self._resolve_template_value(
+                value.get("barcello_phrase") or "",
+                seed_parts=slot_seed["barcello_phrase"],
+                occurrence_number=occurrence_number,
+            ),
+            "closing_comment": self._resolve_template_value(
+                value.get("closing_comment") or "",
+                seed_parts=slot_seed["closing_comment"],
+                occurrence_number=occurrence_number,
+            ),
         }
 
     def _render_narrative_markdown(self, template: dict[str, str], *, context: dict[str, Any], event_type_key: str) -> str:
         main_sentence_parts: list[str] = []
-        opening = self.render_moderation_template(template.get("opening"), **context).strip()
+        opening = self.render_moderation_template(template.get("opening"), highlight_placeholders=False, **context).strip()
         if opening:
             main_sentence_parts.append(self._to_bold_italic(opening))
-        action_phrase = self.render_moderation_template(template.get("action_phrase"), **context).strip()
+        action_phrase = self.render_moderation_template(template.get("action_phrase"), highlight_placeholders=False, **context).strip()
         if action_phrase:
             main_sentence_parts.append(self._to_bold_italic(action_phrase))
         for key in ("occurrence_phrase", "detail_phrase"):
-            rendered = self.render_moderation_template(template.get(key), **context).strip()
+            rendered = self.render_moderation_template(template.get(key), highlight_placeholders=False, **context).strip()
             if not rendered:
                 continue
-            main_sentence_parts.append(self._to_italic(rendered))
+            formatter = self._to_bold_italic if key == "detail_phrase" else self._to_italic
+            main_sentence_parts.append(formatter(rendered))
         body = " ".join(part for part in main_sentence_parts if part).strip()
         segments: list[str] = [body] if body else []
 
         if event_type_key == "leave":
-            barcello_phrase = self.render_moderation_template(template.get("barcello_phrase"), **context).strip()
+            barcello_phrase = self.render_moderation_template(template.get("barcello_phrase"), highlight_placeholders=False, **context).strip()
             if barcello_phrase:
                 segments.append(self._to_italic(barcello_phrase))
 
-        closing_comment = self.render_moderation_template(template.get("closing_comment"), **context).strip()
+        closing_comment = self.render_moderation_template(template.get("closing_comment"), highlight_placeholders=False, **context).strip()
         if closing_comment:
             segments.append(self._to_italic(closing_comment))
         return self._join_narrative_sentences(segments)
@@ -619,9 +678,19 @@ class GreetingsCopyService:
         for idx, segment in enumerate(normalized):
             current = segment
             if idx < len(normalized) - 1 and not GreetingsCopyService._has_terminal_sentence_punctuation(current):
-                current = f"{current}{GreetingsCopyService._to_italic('.')}"
+                current = GreetingsCopyService._append_terminal_period(current)
             joined_parts.append(current)
         return " ".join(joined_parts)
+
+    @staticmethod
+    def _append_terminal_period(text: str) -> str:
+        stripped = str(text or "").strip()
+        if not stripped:
+            return "."
+        for wrapper in ("***", "**", "*"):
+            if stripped.endswith(wrapper) and len(stripped) > len(wrapper):
+                return f"{stripped[:-len(wrapper)]}.{wrapper}"
+        return f"{stripped}."
 
     @staticmethod
     def _has_terminal_sentence_punctuation(text: str) -> bool:
