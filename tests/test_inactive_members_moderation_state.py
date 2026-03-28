@@ -13,6 +13,45 @@ if "aiosqlite" not in sys.modules:
 
 if "discord" not in sys.modules:
     discord_stub = types.ModuleType("discord")
+    class _FakeColour:
+        @staticmethod
+        def blurple():
+            return 0x5865F2
+
+        @staticmethod
+        def orange():
+            return 0xFAA61A
+
+    class _FakeEmbed:
+        def __init__(self, *, title=None, color=None, colour=None):
+            self.title = title
+            self.color = color if color is not None else colour
+            self.description = None
+            self.author = SimpleNamespace(name=None)
+            self.footer = SimpleNamespace(text=None)
+            self.image = SimpleNamespace(url=None)
+            self.thumbnail = SimpleNamespace(url=None)
+            self.fields: list[SimpleNamespace] = []
+
+        def add_field(self, *, name, value, inline=True):
+            self.fields.append(SimpleNamespace(name=name, value=value, inline=inline))
+
+        def set_author(self, *, name=None, icon_url=None):
+            _ = icon_url
+            self.author = SimpleNamespace(name=name)
+
+        def set_footer(self, *, text=None, icon_url=None):
+            _ = icon_url
+            self.footer = SimpleNamespace(text=text)
+
+        def set_image(self, *, url=None):
+            self.image = SimpleNamespace(url=url)
+
+        def set_thumbnail(self, *, url=None):
+            self.thumbnail = SimpleNamespace(url=url)
+
+    discord_stub.Colour = _FakeColour
+    discord_stub.Embed = _FakeEmbed
     discord_stub.Member = object
     discord_stub.Client = object
     discord_stub.Guild = object
@@ -76,6 +115,7 @@ def test_execute_kick_pipeline_uses_operation_id_and_hides_inactive_kick_when_te
             get_inactivity_user_state=AsyncMock(return_value={"last_reminder_at": None, "reminder_count": 0}),
             add_temp_ban=AsyncMock(),
             mark_user_kicked=AsyncMock(),
+            log_inactivity_dm_delivery=AsyncMock(),
         )
         member_flow_notifications = SimpleNamespace(
             log_action=AsyncMock(
@@ -263,7 +303,7 @@ def test_execute_reminders_logs_dm_delivery_outcomes() -> None:
             return_value=(
                 [candidate_ok, candidate_fail],
                 2,
-                {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7, "dm_reminder_template": "Ciao {user}"},
+                {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7, "template_grace": "Grace {user}"},
             )
         )
 
@@ -274,12 +314,14 @@ def test_execute_reminders_logs_dm_delivery_outcomes() -> None:
         sent_embed = member_ok.send.await_args.kwargs["embed"]
         assert sent_embed.title.startswith("🔔")
         assert "PROMEMORIA INATTIVITÀ" in sent_embed.title
-        assert "Ciao <@42>" in str(sent_embed.description)
+        assert "Grace <@42>" in str(sent_embed.description)
         assert sent_embed.author.name
         assert sent_embed.footer.text
         database.mark_user_reminded.assert_awaited_once()
         assert database.log_inactivity_dm_delivery.await_count == 2
+        event_types = [call.kwargs["event_type"] for call in database.log_inactivity_dm_delivery.await_args_list]
         outcomes = [call.kwargs["outcome"] for call in database.log_inactivity_dm_delivery.await_args_list]
+        assert event_types == ["grace", "grace"]
         assert outcomes == ["success", "fail"]
 
     asyncio.run(_run())
@@ -301,7 +343,12 @@ def test_execute_reminders_respects_cooldown_and_logs_skipped() -> None:
         now_iso = datetime.now(timezone.utc).isoformat()
         database = SimpleNamespace(
             get_inactivity_user_state=AsyncMock(return_value=None),
-            get_latest_inactivity_dm_delivery=AsyncMock(return_value={"sent_at": now_iso, "outcome": "success"}),
+            get_latest_inactivity_dm_delivery=AsyncMock(
+                side_effect=[
+                    {"sent_at": now_iso, "outcome": "success"},
+                    {"sent_at": (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(), "outcome": "success"},
+                ]
+            ),
             mark_user_reminded=AsyncMock(),
             log_inactivity_dm_delivery=AsyncMock(),
         )
@@ -322,7 +369,65 @@ def test_execute_reminders_respects_cooldown_and_logs_skipped() -> None:
         member.send.assert_not_awaited()
         database.mark_user_reminded.assert_not_awaited()
         database.log_inactivity_dm_delivery.assert_awaited_once()
+        assert database.get_latest_inactivity_dm_delivery.await_count == 2
         assert database.log_inactivity_dm_delivery.await_args.kwargs["outcome"] == "skipped"
         assert database.log_inactivity_dm_delivery.await_args.kwargs["error_summary"] == "cooldown"
+        assert database.log_inactivity_dm_delivery.await_args.kwargs["event_type"] == "grace"
+
+    asyncio.run(_run())
+
+
+def test_execute_kick_pipeline_uses_template_tempban_and_logs_tempban_dm_delivery() -> None:
+    async def _run() -> None:
+        sys.modules["discord"].Object = lambda id: SimpleNamespace(id=id)
+        member = SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            display_name="Dormiente",
+            send=AsyncMock(),
+            kick=AsyncMock(),
+        )
+        candidate = InactiveCandidate(
+            member=member,
+            last_message_ts=(datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+            last_channel_id=None,
+            last_message_id=None,
+            count_in_window=0,
+            days_inactive=40,
+            policy={"inactive_days": 30, "window_days": 30, "min_messages": 1, "mode": "OR"},
+        )
+        guild = SimpleNamespace(id=1, name="Barcellometro", ban=AsyncMock())
+        database = SimpleNamespace(
+            get_inactivity_user_state=AsyncMock(return_value={"last_reminder_at": None, "reminder_count": 1}),
+            add_temp_ban=AsyncMock(),
+            mark_user_kicked=AsyncMock(),
+            log_inactivity_dm_delivery=AsyncMock(),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        service.scan_inactive_members = AsyncMock(
+            return_value=(
+                [candidate],
+                1,
+                {
+                    "grace_days_after_reminder": 7,
+                    "ban_days": 3,
+                    "template_tempban": "Tempban {user} rientra: {rejoin_link}",
+                    "invite_url": "https://example.test/invite",
+                },
+            )
+        )
+
+        result = await service.execute_kick_pipeline("1", require_grace=False)
+
+        assert result["dm_ok"] == 1
+        assert result["kick_ok"] == 1
+        assert result["ban_ok"] == 1
+        sent_embed = member.send.await_args.kwargs["embed"]
+        assert "TEMPBAN INATTIVITÀ" in sent_embed.title
+        assert "Tempban <@42>" in str(sent_embed.description)
+        assert "https://example.test/invite" in str(sent_embed.description)
+        database.log_inactivity_dm_delivery.assert_awaited_once()
+        assert database.log_inactivity_dm_delivery.await_args.kwargs["event_type"] == "tempban"
+        assert database.log_inactivity_dm_delivery.await_args.kwargs["outcome"] == "success"
 
     asyncio.run(_run())
