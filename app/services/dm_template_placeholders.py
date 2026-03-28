@@ -90,10 +90,6 @@ class _SafePlaceholderDict(dict[str, Any]):
         return ""
 
 
-def _render_reason_line(reason_text: str) -> str:
-    return reason_text
-
-
 _AUTO_REASON_LINE_BY_REASONING: dict[str, str] = {
     "users_manual_grace_expired_tempban": "periodo di grazia manuale scaduto",
     "inactivity_grace_expired_tempban": "periodo di grazia per inattività scaduto",
@@ -135,6 +131,30 @@ def format_reason_text(reason: str | None) -> str:
     return f"La moderazione aggiunge: {safe_reason}"
 
 
+def build_reason_placeholders(
+    *,
+    reason: str | None = None,
+    reasoning: str | None = None,
+    event_type: str | None = None,
+    event_state: str | None = None,
+    event_cause: str | None = None,
+) -> dict[str, str]:
+    safe_reason = str(reason or "").strip()
+    safe_reasoning = str(reasoning or "").strip()
+    return {
+        "reason": safe_reason,
+        "reason_text": format_reason_text(safe_reason),
+        "reason_line": build_reason_line(
+            reason=safe_reason,
+            reasoning=safe_reasoning,
+            event_type=event_type,
+            event_state=event_state,
+            event_cause=event_cause,
+        ),
+        "reasoning": safe_reasoning,
+    }
+
+
 def build_dm_base_placeholder_payload(
     *,
     user: Any,
@@ -150,32 +170,24 @@ def build_dm_base_placeholder_payload(
     expires_at: datetime | None = None,
     invite_url: str | None = None,
 ) -> dict[str, Any]:
-    safe_reason = str(reason or "").strip()
-    reason_text = format_reason_text(safe_reason)
-    safe_reasoning = str(reasoning or "").strip()
+    reason_payload = build_reason_placeholders(
+        reason=reason,
+        reasoning=reasoning,
+        event_type=event_type,
+        event_state=event_state,
+        event_cause=event_cause,
+    )
     safe_invite_url = str(invite_url or "").strip()
     clean_duration_seconds = max(0, int(duration_seconds or 0))
     safe_started_at = started_at or now
     time_payload = build_time_placeholder_payload(now=now, started_at=safe_started_at, expires_at=expires_at)
-    reason_line = _render_reason_line(
-        build_reason_line(
-            reason=safe_reason,
-            reasoning=safe_reasoning,
-            event_type=event_type,
-            event_state=event_state,
-            event_cause=event_cause,
-        )
-    )
     return {
         **build_user_placeholder_payload(user),
         **time_payload,
         "server": str(getattr(guild, "name", "") or ""),
         "guild_id": str(getattr(guild, "id", "") or ""),
         "event_type": str(event_type or "").strip(),
-        "reason": safe_reason,
-        "reason_text": reason_text,
-        "reason_line": _render_reason_line(safe_reason),
-        "reasoning": safe_reasoning,
+        **reason_payload,
         "duration_seconds": clean_duration_seconds,
         "duration_human": format_duration_human(clean_duration_seconds) or "0m",
         "invite_url": safe_invite_url,
