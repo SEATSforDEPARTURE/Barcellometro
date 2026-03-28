@@ -579,29 +579,59 @@ class GreetingsCopyService:
         }
 
     def _render_narrative_markdown(self, template: dict[str, str], *, context: dict[str, Any], event_type_key: str) -> str:
-        opening_parts: list[str] = []
+        main_sentence_parts: list[str] = []
         opening = self.render_moderation_template(template.get("opening"), **context).strip()
         if opening:
-            opening_parts.append(self._to_bold_italic(opening))
+            main_sentence_parts.append(self._to_bold_italic(opening))
         action_phrase = self.render_moderation_template(template.get("action_phrase"), **context).strip()
         if action_phrase:
-            opening_parts.append(self._to_bold_italic(action_phrase))
-        for key in ("occurrence_phrase", "detail_phrase", "barcello_phrase"):
-            if key == "barcello_phrase" and event_type_key != "leave":
-                continue
+            main_sentence_parts.append(self._to_bold_italic(action_phrase))
+        for key in ("occurrence_phrase", "detail_phrase"):
             rendered = self.render_moderation_template(template.get(key), **context).strip()
             if not rendered:
                 continue
-            opening_parts.append(self._to_italic(rendered))
-        body = " ".join(part for part in opening_parts if part).strip()
+            main_sentence_parts.append(self._to_italic(rendered))
+        body = " ".join(part for part in main_sentence_parts if part).strip()
+        segments: list[str] = [body] if body else []
+
+        if event_type_key == "leave":
+            barcello_phrase = self.render_moderation_template(template.get("barcello_phrase"), **context).strip()
+            if barcello_phrase:
+                segments.append(self._to_italic(barcello_phrase))
+
         closing_comment = self.render_moderation_template(template.get("closing_comment"), **context).strip()
-        if not closing_comment:
-            return body
-        if body and body[-1] not in ".!?":
-            body = f"{body}."
-        if not body:
-            return self._to_italic(closing_comment)
-        return f"{body} {self._to_italic(closing_comment)}".strip()
+        if closing_comment:
+            segments.append(self._to_italic(closing_comment))
+        return self._join_narrative_sentences(segments)
+
+    @staticmethod
+    def _join_narrative_sentences(segments: list[str]) -> str:
+        normalized: list[str] = []
+        for segment in segments:
+            cleaned = str(segment or "").strip()
+            if cleaned:
+                normalized.append(cleaned)
+        if not normalized:
+            return ""
+
+        joined_parts: list[str] = []
+        for idx, segment in enumerate(normalized):
+            current = segment
+            if idx < len(normalized) - 1 and not GreetingsCopyService._has_terminal_sentence_punctuation(current):
+                current = f"{current}."
+            joined_parts.append(current)
+        return " ".join(joined_parts)
+
+    @staticmethod
+    def _has_terminal_sentence_punctuation(text: str) -> bool:
+        stripped = text.strip()
+        if not stripped:
+            return False
+        trailing_wrappers = "*_~`\"'”’)]}>"
+        stripped = stripped.rstrip(trailing_wrappers).rstrip()
+        if not stripped:
+            return False
+        return stripped[-1] in ".!?"
 
     @staticmethod
     def _to_italic(text: str) -> str:

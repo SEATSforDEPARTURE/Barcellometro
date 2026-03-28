@@ -213,6 +213,113 @@ def test_render_event_copy_uses_mood_time_barcello_and_count_override(tmp_path) 
     assert "override **teso** **morning** **rosso** **t2** **🔴 ALLERTA ROSSA** **41**" in result.narrative
 
 
+def test_leave_narrative_inserts_periods_between_main_barcello_and_comment(tmp_path) -> None:
+    payload = {
+        "event_templates": {
+            "leave": {
+                "repeat": {
+                    "opening": "{mention}",
+                    "action_phrase": "ha lasciato {server}",
+                    "occurrence_phrase": "per la {occurrence_number}° volta",
+                    "barcello_phrase": "In quel momento il Barcello era {barcello_alert} ({barcello_score_text})",
+                    "closing_comment": "Vediamo se tornerà.",
+                }
+            }
+        }
+    }
+    service = _service(tmp_path=tmp_path, occurrence_number=7, payload=payload)
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="GABBIETTA DORATA"),
+            user=SimpleNamespace(id=42, name="fakuzzo", display_name="Fakuzzo", mention="@Fakuzzo"),
+            event_type_key="leave",
+            barcello_status={"color": "verde", "score": 100},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert "volta*. *In quel momento" in result.narrative
+    assert "100/100**)*. *Vediamo" in result.narrative
+    assert ".." not in result.narrative
+    assert " ." not in result.narrative
+
+
+def test_join_ban_kick_insert_period_before_closing_comment(tmp_path) -> None:
+    payload = {
+        "event_templates": {
+            "join": {
+                "default": {
+                    "opening": "{mention}",
+                    "action_phrase": "entra su {server}",
+                    "closing_comment": "Bentornato tra noi",
+                }
+            },
+            "ban": {
+                "default": {
+                    "opening": "{mention}",
+                    "action_phrase": "è stato bannato da {server}",
+                    "closing_comment": "Decisione definitiva",
+                }
+            },
+            "kick": {
+                "default": {
+                    "opening": "{mention}",
+                    "action_phrase": "è stato allontanato da {server}",
+                    "closing_comment": "Forse tornerà",
+                }
+            },
+        }
+    }
+    service = _service(tmp_path=tmp_path, payload=payload)
+    guild = SimpleNamespace(id=1, name="Barcellometro")
+    user = SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>")
+
+    for event_type_key in ("join", "ban", "kick"):
+        result = asyncio.run(
+            service.render_event_copy(
+                guild=guild,
+                user=user,
+                event_type_key=event_type_key,
+                reason="motivo" if event_type_key in {"ban", "kick"} else None,
+                barcello_status={"color": "giallo", "score": 58},
+                now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+            )
+        )
+        assert ". *" in result.narrative
+        assert ".." not in result.narrative
+        assert " ." not in result.narrative
+
+
+def test_join_narrative_does_not_duplicate_existing_terminal_punctuation(tmp_path) -> None:
+    payload = {
+        "event_templates": {
+            "join": {
+                "default": {
+                    "opening": "{mention}",
+                    "action_phrase": "arriva su {server}.",
+                    "closing_comment": "Che sia l'inizio di una nuova era.",
+                }
+            }
+        }
+    }
+    service = _service(tmp_path=tmp_path, payload=payload)
+
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="join",
+            barcello_status={"color": "verde", "score": 90},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert ".." not in result.narrative
+    assert " ." not in result.narrative
+    assert "***arriva su **Barcellometro**.*** *Che sia l'inizio" in result.narrative
+
+
 def test_render_moderation_preview_renders_context_placeholders() -> None:
     service = _service()
     rendered, context = asyncio.run(
