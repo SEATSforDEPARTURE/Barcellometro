@@ -740,8 +740,8 @@ def register_moderazione_utenti(
     def _resolve_last_window(quantita: int, unita: str) -> tuple[TimeWindowResult | None, str | None]:
         return resolve_ultimi_window(quantita, unita, ctx.config)
 
-    def _resolve_range_batch_window(da: str, a: str) -> tuple[TimeWindowResult | None, str | None]:
-        return resolve_range_window(da, a, ctx.config)
+    def _resolve_range_batch_window(start_at: str, end_at: str) -> tuple[TimeWindowResult | None, str | None]:
+        return resolve_range_window(start_at, end_at, ctx.config)
 
     unban_group = app_commands.Group(name="unban", description="Revoke bans by user or time window.")
 
@@ -779,9 +779,10 @@ def register_moderazione_utenti(
         await _run_window_batch(interaction, mode="unban", reason=reason, window=window, subcommand_path="users unban last")
 
     @unban_group.command(name="range", description="Revoke bans created in an explicit range.")
-    @app_commands.describe(da="Start in DD/MM/YYYY HH:MM.", a="End in DD/MM/YYYY HH:MM.", reason="Optional reason override.")
-    async def users_unban_range(interaction: discord.Interaction, da: str, a: str, reason: str | None = None) -> None:
-        window, error = _resolve_range_batch_window(da, a)
+    @app_commands.describe(from_at="Start in DD/MM/YYYY HH:MM.", to="End in DD/MM/YYYY HH:MM.", reason="Optional reason override.")
+    @app_commands.rename(from_at="from")
+    async def users_unban_range(interaction: discord.Interaction, from_at: str, to: str, reason: str | None = None) -> None:
+        window, error = _resolve_range_batch_window(from_at, to)
         if window is None:
             await _send(interaction, subcommand_path="users unban range", lines=[("error", error or "Invalid range.")], kind="error")
             return
@@ -825,9 +826,10 @@ def register_moderazione_utenti(
         await _run_window_batch(interaction, mode="untempban", reason=reason, window=window, subcommand_path="users untempban last")
 
     @untempban_group.command(name="range", description="Revoke temporary bans created in an explicit range.")
-    @app_commands.describe(da="Start in DD/MM/YYYY HH:MM.", a="End in DD/MM/YYYY HH:MM.", reason="Optional reason override.")
-    async def users_untempban_range(interaction: discord.Interaction, da: str, a: str, reason: str | None = None) -> None:
-        window, error = _resolve_range_batch_window(da, a)
+    @app_commands.describe(from_at="Start in DD/MM/YYYY HH:MM.", to="End in DD/MM/YYYY HH:MM.", reason="Optional reason override.")
+    @app_commands.rename(from_at="from")
+    async def users_untempban_range(interaction: discord.Interaction, from_at: str, to: str, reason: str | None = None) -> None:
+        window, error = _resolve_range_batch_window(from_at, to)
         if window is None:
             await _send(interaction, subcommand_path="users untempban range", lines=[("error", error or "Invalid range.")], kind="error")
             return
@@ -858,7 +860,7 @@ def register_moderazione_utenti(
 
     grace_group = app_commands.Group(name="grace", description="Manual grace commands and follow-up tempban defaults.")
 
-    @grace_group.command(name="assign", description="Assign a manual grace period to a user.")
+    @grace_group.command(name="manual", description="Assign a manual grace period to a user.")
     @app_commands.describe(
         user="Member that receives the grace period.",
         quantity="Duration quantity (for example 10, 3, 7, 2).",
@@ -866,7 +868,7 @@ def register_moderazione_utenti(
         reason="Optional reason override.",
     )
     @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
-    async def users_grace_assign(
+    async def users_grace_manual(
         interaction: discord.Interaction,
         user: discord.Member,
         quantity: int,
@@ -890,6 +892,7 @@ def register_moderazione_utenti(
         await _send(
             interaction,
             subcommand_path="users grace tempban_set",
+            subtitle_args=[quantity, unit],
             lines=[("default_tempban", format_duration_human(stored)), ("result", "updated")],
             kind="success",
         )
@@ -959,9 +962,10 @@ def register_moderazione_utenti(
         await _run_window_batch(interaction, mode="ungrace", reason=reason, window=window, subcommand_path="users ungrace last")
 
     @ungrace_group.command(name="range", description="Revoke grace periods created in an explicit range.")
-    @app_commands.describe(da="Start in DD/MM/YYYY HH:MM.", a="End in DD/MM/YYYY HH:MM.", reason="Optional reason override.")
-    async def users_ungrace_range(interaction: discord.Interaction, da: str, a: str, reason: str | None = None) -> None:
-        window, error = _resolve_range_batch_window(da, a)
+    @app_commands.describe(from_at="Start in DD/MM/YYYY HH:MM.", to="End in DD/MM/YYYY HH:MM.", reason="Optional reason override.")
+    @app_commands.rename(from_at="from")
+    async def users_ungrace_range(interaction: discord.Interaction, from_at: str, to: str, reason: str | None = None) -> None:
+        window, error = _resolve_range_batch_window(from_at, to)
         if window is None:
             await _send(interaction, subcommand_path="users ungrace range", lines=[("error", error or "Invalid range.")], kind="error")
             return

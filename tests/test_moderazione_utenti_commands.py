@@ -48,7 +48,7 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert '@users_group.command(name="tempban"' in modular
     assert '@users_group.command(name="tempban_list"' in modular
     assert 'grace_group = app_commands.Group(name="grace"' in modular
-    assert '@grace_group.command(name="assign"' in modular
+    assert '@grace_group.command(name="manual"' in modular
     assert '@grace_group.command(name="tempban_set"' in modular
     assert '@grace_group.command(name="tempban_show"' in modular
     assert '@grace_group.command(name="tempban_reset"' in modular
@@ -169,6 +169,35 @@ def test_users_alias_tempban_and_grace_expose_quantity_unit_not_duration() -> No
     assert grace_params == ["user", "quantity", "unit", "reason"]
     assert "duration" not in tempban_params
     assert "duration" not in grace_params
+
+
+def test_users_unban_untempban_ungrace_range_use_from_to_parameters() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+    register_moderazione_utenti(users_group, ctx)
+
+    unban_range = _find_command(users_group, "unban", "range")
+    untempban_range = _find_command(users_group, "untempban", "range")
+    ungrace_range = _find_command(users_group, "ungrace", "range")
+
+    def _option_names(command: discord.app_commands.Command) -> list[str]:
+        return [str(param.display_name) for param in command.parameters]
+
+    assert _option_names(unban_range) == ["from", "to", "reason"]
+    assert _option_names(untempban_range) == ["from", "to", "reason"]
+    assert _option_names(ungrace_range) == ["from", "to", "reason"]
+
+
+def test_grace_alias_is_direct_command_without_assign_subcommand() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None)
+    aliases: list[discord.app_commands.Command | discord.app_commands.Group] = []
+    register_moderazione_utenti(users_group, ctx, alias_commands=aliases)
+
+    by_name = {command.name: command for command in aliases}
+    assert "grace" in by_name
+    assert not isinstance(by_name["grace"], discord.app_commands.Group)
+    assert [param.name for param in by_name["grace"].parameters] == ["user", "quantity", "unit", "reason"]
 
 def test_greetings_tree_has_no_preview_command() -> None:
     group = discord.app_commands.Group(name="greetings", description="x")
@@ -656,7 +685,7 @@ def test_alias_batch_revocations_support_oggi_ieri_ultimi_intervallo_for_all_mod
     asyncio.run(_run())
 
 
-def test_users_tempban_and_grace_assign_expose_quantity_unit_not_duration() -> None:
+def test_users_tempban_and_grace_manual_expose_quantity_unit_not_duration() -> None:
     users_group = discord.app_commands.Group(name="users", description="users")
     ctx = SimpleNamespace(
         database=Mock(),
@@ -667,7 +696,7 @@ def test_users_tempban_and_grace_assign_expose_quantity_unit_not_duration() -> N
     register_moderazione_utenti(users_group, ctx)
 
     tempban_command = _find_command(users_group, "tempban")
-    grace_command = _find_command(users_group, "grace", "assign")
+    grace_command = _find_command(users_group, "grace", "manual")
 
     tempban_params = [param.name for param in tempban_command.parameters]
     grace_params = [param.name for param in grace_command.parameters]
@@ -787,7 +816,7 @@ def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
         )
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "grace", "assign")
+        command = _find_command(users_group, "grace", "manual")
 
         guild = SimpleNamespace(id=1)
         target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
@@ -796,7 +825,7 @@ def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
             guild=guild,
             guild_id=1,
             user=moderator,
-            command=SimpleNamespace(qualified_name="users grace assign"),
+            command=SimpleNamespace(qualified_name="users grace manual"),
         )
         unit = discord.app_commands.Choice(name="settimane", value="settimane")
 
@@ -843,6 +872,7 @@ def test_users_grace_tempban_set_show_reset() -> None:
         database.set_setting.assert_any_await("users.grace.tempban.default_seconds.1", "10800")
         database.set_setting.assert_any_await("users.grace.tempban.default_seconds.1", "0")
         assert send_standard_response.await_args_list[0].kwargs["subcommand_path"] == "users grace tempban_set"
+        assert send_standard_response.await_args_list[0].kwargs["subtitle_args"] == [3, unit]
         assert ("default_tempban", "3h") in send_standard_response.await_args_list[0].kwargs["lines"]
         assert send_standard_response.await_args_list[1].kwargs["subcommand_path"] == "users grace tempban_show"
         assert ("default_tempban", "3h") in send_standard_response.await_args_list[1].kwargs["lines"]
