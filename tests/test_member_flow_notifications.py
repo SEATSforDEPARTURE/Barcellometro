@@ -518,14 +518,16 @@ def test_member_flow_operation_duplicate_keeps_backend_audit_but_hides_second_fe
 
 def test_source_contains_author_title_mapping_and_footer_service_name() -> None:
     source = Path("app/services/member_flow_notifications.py").read_text(encoding="utf-8")
-    assert 'embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))' in source
+    assert "embed = discord.Embed(" in source
+    assert "title=copy.event_label" in source
+    assert "description=copy.narrative[:4096]" in source
     assert '_ENTRY_LIKE_EVENT_TYPES = frozenset({"join", "grace", "inactive_grace"})' in source
     assert '"inactive_tempban",' in source
     assert 'attach_author_meta(' in source
     assert 'canonical_top_level_command="greetings"' in source
     assert 'embed.set_author(name="🚪 INGRESSI & USCITE")' not in source
     assert 'service_name="member_flow_notifications"' in source
-    assert 'embed.add_field(name="Evento"' not in source
+    assert '_GREETINGS_MODERATION_FIELD_NAME = "👇 __**LA MODERAZIONE AGGIUNGE**__"' in source
     assert 'timestamp=created_at' not in source
     assert 'set_footer(' not in source
     assert 'Oggi alle' not in source
@@ -579,10 +581,12 @@ def test_send_notification_renders_author_title_description_and_footer_from_cano
 
         payload = channel.sent[0]["embed"]
         assert payload.author.name == "servizio GREETINGS"
-        assert payload.title == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
+        assert payload.title == "💤 __**PRIMO BAN TEMPORANEO PER INATTIVITÀ**__"
         assert payload.description is not None
         assert payload.description == payload.description[:4096]
-        assert payload.fields == []
+        assert len(payload.fields) == 1
+        assert payload.fields[0].name == "👇 __**LA MODERAZIONE AGGIUNGE**__"
+        assert payload.fields[0].value == "Assenza prolungata"
         assert payload.thumbnail.url == "https://example.test/avatar.png"
         assert payload.timestamp is None
         assert 'Stato barcello "Barcellometro"' not in payload.description
@@ -592,7 +596,7 @@ def test_send_notification_renders_author_title_description_and_footer_from_cano
     asyncio.run(_run())
 
 
-def test_send_notification_appends_reason_block_inside_description_without_extra_fields(member_flow_module) -> None:
+def test_send_notification_renders_moderation_reason_in_single_structural_field(member_flow_module) -> None:
     class _Channel:
         def __init__(self) -> None:
             self.sent = []
@@ -639,15 +643,16 @@ def test_send_notification_appends_reason_block_inside_description_without_extra
 
         payload = channel.sent[0]["embed"]
         assert payload.description is not None
-        assert "**👇 La moderazione aggiunge:**" in payload.description
-        assert "Spam creativo" in payload.description
+        assert "Spam creativo" not in payload.description
         assert "Motivo tecnico non editoriale" not in payload.description
-        assert payload.fields == []
+        assert len(payload.fields) == 1
+        assert payload.fields[0].name == "👇 __**LA MODERAZIONE AGGIUNGE**__"
+        assert payload.fields[0].value == "Spam creativo"
 
     asyncio.run(_run())
 
 
-def test_send_notification_skips_reason_block_when_greetings_reason_is_missing(member_flow_module) -> None:
+def test_send_notification_skips_moderation_field_when_greetings_reason_is_missing(member_flow_module) -> None:
     class _Channel:
         def __init__(self) -> None:
             self.sent = []
@@ -694,7 +699,7 @@ def test_send_notification_skips_reason_block_when_greetings_reason_is_missing(m
 
         payload = channel.sent[0]["embed"]
         assert payload.description is not None
-        assert "**👇 La moderazione aggiunge:**" not in payload.description
+        assert "Ban tramite moderazione nativa Discord" not in payload.description
         assert payload.fields == []
 
     asyncio.run(_run())
@@ -708,7 +713,7 @@ def test_member_flow_renderer_source_mentions_final_author_title_layout() -> Non
     assert "embed.set_thumbnail(url=avatar_url)" in source
     assert 'title=copy.event_label' in source
     assert 'description=copy.narrative[:4096]' in source
-    assert 'embed.add_field(name="Evento"' not in source
+    assert '_GREETINGS_MODERATION_FIELD_NAME' in source
     assert 'Stato barcello "' not in source
     assert 'Oggi alle' not in source
 
@@ -768,7 +773,7 @@ def test_send_notification_uses_copy_service_values_and_join_copy(member_flow_mo
 
         embed = channel.sent[0]
         assert embed.author.name == "servizio GREETINGS"
-        assert embed.title == "**✨ PRIMO INGRESSO**"
+        assert embed.title == "✨ __**PRIMO INGRESSO**__"
         assert "benvenut" in embed.description.lower()
         assert "<@42>" in embed.description
         assert embed.footer.text == "Barcellometro dev"
@@ -889,7 +894,12 @@ def test_send_notification_uses_canonical_greetings_palette_by_event_type(member
         embed = channel.sent[0]
         assert embed.colour == expected_colour
         assert embed.author.name == "servizio GREETINGS"
-        assert embed.fields == []
+        if event_type in {"grace", "inactive_grace", "kick", "ban", "tempban", "inactive_kick", "inactive_tempban"}:
+            assert len(embed.fields) == 1
+            assert embed.fields[0].name == "👇 __**LA MODERAZIONE AGGIUNGE**__"
+            assert embed.fields[0].value == f"Evento {event_type}"
+        else:
+            assert embed.fields == []
 
     asyncio.run(_run())
 

@@ -534,16 +534,18 @@ Non introdurre renderer paralleli o embed manuali per aggirare questo standard.
 Il feed GREETINGS / `🚪 INGRESSI & USCITE` segue inoltre un contratto visivo fisso, distinto dagli embed comando standardizzati:
 
 - l'author live deve passare dalla pipeline standard (metadata canonici con top-level `greetings`, senza `set_author(...)` hardcoded);
-- il titolo dell'embed coincide con la label evento (`event_label`);
-- la narrativa occupa la `description` principale dell'embed;
+- il titolo dell'embed deve usare sempre il formato `emoji + __**MAIUSCOLO**__` (es. `🥾 __**TERZO ALLONTANAMENTO**__`);
+- il titolo dell'embed coincide con la label evento (`event_label`) prodotta dal copy service, nel formato UI standard definitivo;
+- la `description` è una narrativa breve (senza emoji iniziale), con testo in corsivo e placeholder rilevanti in grassetto;
+- la narrativa è governata da struttura fissa JSON (`narrative_contract`) e non da frasi assemblate liberamente dal renderer;
 - non esiste più il field separato `Evento`;
+- esiste un solo field strutturale opzionale per note moderative: `👇 __**LA MODERAZIONE AGGIUNGE**__`;
 - non esiste più un timestamp custom nel footer/testo tipo `Oggi alle ...`;
 - la thumbnail dell'embed deve usare l'avatar dell'utente quando disponibile;
-- i placeholder dinamici renderizzati nel testo finale restano evidenziati in **grassetto**;
 - la palette cromatica distingue ingressi/stati non terminali vs uscite/enforcement;
 - il payload visualizzato deve provenire dalla **timeline canonica** `member_flow_events`;
-- il file `settings/greetings_trigger.example.json` / relativo override runtime `settings/greetings_trigger.json` è la source of truth editoriale unica per frasi, fallback e override mood/time/barcello/count;
-- non esiste più un campo separato `Stato barcello "<server>"`: ogni riferimento al Barcello va integrato direttamente nella narrativa quando il template JSON lo rende naturale;
+- il file `settings/greetings_trigger.example.json` / relativo override runtime `settings/greetings_trigger.json` è la source of truth editoriale unica della grammatica narrativa;
+- lo stato Barcello va citato solo negli eventi `leave` e solo dentro la description narrativa (mai come field separato);
 - non è ammesso un doppio embed di uscita per la stessa sequenza tecnica (per esempio `inactive_kick` assorbito da `inactive_tempban`, oppure `leave` gateway successivo a una departure esplicita già visibile);
 - i label user-facing devono mostrare `ALLONTANAMENTO` / `ALLONTANAMENTO PER INATTIVITÀ` e non il termine raw `KICK`.
 

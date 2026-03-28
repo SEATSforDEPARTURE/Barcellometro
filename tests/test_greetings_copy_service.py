@@ -37,16 +37,16 @@ def _service(*, tmp_path=None, occurrence_number: int = 1, payload: dict | None 
 
 
 def test_format_greetings_event_label_covers_supported_keys() -> None:
-    assert format_greetings_event_label("join", 1) == "**✨ PRIMO INGRESSO**"
-    assert format_greetings_event_label("leave", 1) == "**👋 PRIMA USCITA**"
-    assert format_greetings_event_label("leave", 2) == "**👋 SECONDA USCITA**"
-    assert format_greetings_event_label("kick", 1) == "**🥾 PRIMO ALLONTANAMENTO**"
-    assert format_greetings_event_label("ban", 1) == "**🔨 PRIMO BAN**"
-    assert format_greetings_event_label("tempban", 1) == "**⏳ PRIMO BAN TEMPORANEO**"
-    assert format_greetings_event_label("grace", 1) == "**🛟 PRIMO PERIODO DI GRAZIA**"
-    assert format_greetings_event_label("inactive_kick", 1) == "**💤 PRIMO ALLONTANAMENTO PER INATTIVITÀ**"
-    assert format_greetings_event_label("inactive_tempban", 1) == "**💤 PRIMO BAN TEMPORANEO PER INATTIVITÀ**"
-    assert format_greetings_event_label("inactive_grace", 1) == "**🛟 PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**"
+    assert format_greetings_event_label("join", 1) == "✨ __**PRIMO INGRESSO**__"
+    assert format_greetings_event_label("leave", 1) == "👋 __**PRIMA USCITA**__"
+    assert format_greetings_event_label("leave", 2) == "👋 __**SECONDA USCITA**__"
+    assert format_greetings_event_label("kick", 1) == "🥾 __**PRIMO ALLONTANAMENTO**__"
+    assert format_greetings_event_label("ban", 1) == "🔨 __**PRIMO BAN**__"
+    assert format_greetings_event_label("tempban", 1) == "⏳ __**PRIMO BAN TEMPORANEO**__"
+    assert format_greetings_event_label("grace", 1) == "🛟 __**PRIMO PERIODO DI GRAZIA**__"
+    assert format_greetings_event_label("inactive_kick", 1) == "💤 __**PRIMO ALLONTANAMENTO PER INATTIVITÀ**__"
+    assert format_greetings_event_label("inactive_tempban", 1) == "💤 __**PRIMO BAN TEMPORANEO PER INATTIVITÀ**__"
+    assert format_greetings_event_label("inactive_grace", 1) == "🛟 __**PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**__"
     assert "KICK" not in format_greetings_event_label("kick", 3)
 
 
@@ -64,7 +64,7 @@ def test_render_event_copy_uses_second_occurrence_for_ordinals() -> None:
     )
 
     assert result.occurrence_number == 2
-    assert result.event_label == "**👋 SECONDA USCITA**"
+    assert result.event_label == "👋 __**SECONDA USCITA**__"
     assert service._test_database.count_calls == [("1", "42", "leave")]  # type: ignore[attr-defined]
 
 
@@ -150,8 +150,8 @@ def test_grace_manual_and_inactive_have_distinct_copy() -> None:
         )
     )
 
-    assert grace.event_label == "**🛟 PRIMO PERIODO DI GRAZIA**"
-    assert inactive_grace.event_label == "**🛟 PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**"
+    assert grace.event_label == "🛟 __**PRIMO PERIODO DI GRAZIA**__"
+    assert inactive_grace.event_label == "🛟 __**PRIMO PERIODO DI GRAZIA PER INATTIVITÀ**__"
     assert "inattività" not in grace.narrative.lower()
     assert "inattività" in inactive_grace.narrative.lower()
 
@@ -210,7 +210,7 @@ def test_render_event_copy_uses_mood_time_barcello_and_count_override(tmp_path) 
     assert result.time_bucket == "morning"
     assert result.count_tier == "t2"
     assert result.barcello_state == "rosso"
-    assert result.narrative == "override **teso** **morning** **rosso** **t2** **🔴 ALLERTA ROSSA** **41**"
+    assert "override **teso** **morning** **rosso** **t2** **🔴 ALLERTA ROSSA** **41**" in result.narrative
 
 
 def test_render_moderation_preview_renders_context_placeholders() -> None:
@@ -279,7 +279,7 @@ def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canoni
     )
 
     assert result.occurrence_number == 3
-    assert result.event_label == "**💤 TERZO BAN TEMPORANEO PER INATTIVITÀ**"
+    assert result.event_label == "💤 __**TERZO BAN TEMPORANEO PER INATTIVITÀ**__"
     assert "30 giorni" in result.narrative
 
 
@@ -295,7 +295,7 @@ def test_render_canonical_event_copy_reads_occurrence_and_inactivity_from_canoni
         ("inactive_grace", 7 * 86400, {"inactivity_text": "30 giorni"}),
     ],
 )
-def test_render_event_copy_appends_reason_block_for_supported_moderation_events(
+def test_render_event_copy_sets_moderation_note_for_supported_moderation_events(
     event_type_key: str,
     duration_seconds: int | None,
     metadata: dict | None,
@@ -315,8 +315,8 @@ def test_render_event_copy_appends_reason_block_for_supported_moderation_events(
         )
     )
 
-    assert "**👇 La moderazione aggiunge:**" in result.narrative
-    assert result.narrative.endswith("Motivo test")
+    assert result.moderation_note == "Motivo test"
+    assert "Motivo test" not in result.narrative
 
 
 def test_render_event_copy_skips_reason_block_when_reason_is_missing() -> None:
@@ -333,7 +333,7 @@ def test_render_event_copy_skips_reason_block_when_reason_is_missing() -> None:
         )
     )
 
-    assert "**👇 La moderazione aggiunge:**" not in result.narrative
+    assert result.moderation_note is None
 
 
 def test_render_canonical_event_copy_prefers_metadata_greetings_reason_for_final_block() -> None:
@@ -357,12 +357,9 @@ def test_render_canonical_event_copy_prefers_metadata_greetings_reason_for_final
         )
     )
 
-    assert "Spam creativo" in result.narrative
+    assert result.moderation_note == "Spam creativo"
+    assert "Spam creativo" not in result.narrative
     assert "Motivo tecnico interno" not in result.narrative
-    assert result.narrative.count("Spam creativo") == 1
-    narrative_body, reason_block = result.narrative.split("**👇 La moderazione aggiunge:**", 1)
-    assert "Spam creativo" not in narrative_body
-    assert "Spam creativo" in reason_block
 
 
 def test_default_narrative_does_not_auto_duplicate_event_emoji() -> None:
@@ -381,6 +378,46 @@ def test_default_narrative_does_not_auto_duplicate_event_emoji() -> None:
     assert "👋" not in result.narrative
 
 
+def test_narrative_respects_fixed_slot_flow_and_markdown_emphasis() -> None:
+    service = _service(occurrence_number=3)
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="ban",
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    assert result.narrative.startswith("***<@42>*** ")
+    assert not result.narrative.startswith(("✨", "👋", "🥾", "🔨", "⏳", "🛟", "💤"))
+    assert "**TERZO**" in result.narrative
+    assert "*è stato*" in result.narrative
+
+
+def test_leave_includes_barcello_reference_only_for_leave() -> None:
+    service = _service(occurrence_number=2)
+    leave = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="leave",
+            barcello_status={"color": "giallo", "score": 58},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    ban = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="Barcellometro"),
+            user=SimpleNamespace(id=42, name="new_user", display_name="New User", mention="<@42>"),
+            event_type_key="ban",
+            barcello_status={"color": "giallo", "score": 58},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    assert "ALLERTA GIALLA" in leave.narrative
+    assert "ALLERTA GIALLA" not in ban.narrative
+
+
 def test_example_config_loads_and_documents_core_placeholders() -> None:
     service = GreetingsCopyService(_FakeDatabase(), config_path="settings/greetings_trigger.example.json")
     cfg = service._load_cfg()  # type: ignore[attr-defined]
@@ -388,18 +425,12 @@ def test_example_config_loads_and_documents_core_placeholders() -> None:
     placeholders = cfg["docs"]["placeholders"]
     for key in (
         "mention",
-        "display_name",
-        "username",
         "guild_name",
         "reason",
         "duration",
-        "expires_at",
-        "event_label",
-        "occurrence_number",
-        "barcello_state",
-        "barcello_score",
-        "mood",
-        "time_bucket",
+        "occurrence_ordinal",
+        "barcello_alert",
+        "barcello_score_text",
     ):
         assert key in placeholders
 
@@ -418,12 +449,10 @@ def test_example_config_has_fallbacks_for_every_supported_event() -> None:
 def test_example_config_join_has_explicit_first_and_repeat_copy() -> None:
     payload = json.loads(Path("settings/greetings_trigger.example.json").read_text(encoding="utf-8"))
 
-    join_templates = payload["templates"]["join"]
-    assert join_templates["first_occurrence"]
-    assert join_templates["repeat"]
+    join_templates = payload["narrative_contract"]["join"]
+    assert join_templates["first_occurrence"]["opening"] == "{mention}"
+    assert join_templates["repeat"]["opening"] == "{mention}"
     assert join_templates["first_occurrence"] != join_templates["repeat"]
-    assert all("{mention}" in phrase for phrase in join_templates["first_occurrence"])
-    assert all("{mention}" in phrase for phrase in join_templates["repeat"])
 
 
 def test_example_config_documents_json_as_single_editorial_source() -> None:
@@ -431,10 +460,10 @@ def test_example_config_documents_json_as_single_editorial_source() -> None:
 
     purpose_lines = payload["docs"]["purpose"]
     assert any("Fonte ufficiale" in line for line in purpose_lines)
-    assert any("controlla solo il copy narrativo" in line for line in purpose_lines)
-    assert any("label evento nel titolo dell'embed" in line for line in purpose_lines)
-    assert payload["docs"]["placeholders"]["barcello_state"]["description"].endswith("va integrato nella frase.")
-    assert payload["docs"]["placeholders"]["event_label"]["description"] == "Label completa già formattata per il titolo dell'embed."
+    assert any("struttura fissa" in line for line in purpose_lines)
+    assert any("emoji + __**MAIUSCOLO**__" in line for line in purpose_lines)
+    assert payload["docs"]["narrative_order"][0] == "opening"
+    assert "solo leave" in payload["docs"]["narrative_order"][4]
 
 
 def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> None:
@@ -460,7 +489,7 @@ def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> 
         )
     )
 
-    assert result.narrative == "fallback kick **<@42>**"
+    assert "fallback kick **<@42>**" in result.narrative
 
 
 def test_render_moderation_preview_bolds_primary_dynamic_placeholders_without_breaking_mentions() -> None:

@@ -254,6 +254,7 @@ class GreetingsRenderResult:
     occurrence_number: int
     template_context: dict[str, Any]
     narrative: str
+    moderation_note: str | None
     mood: str
     time_bucket: str
     count_tier: str
@@ -356,15 +357,12 @@ class GreetingsCopyService:
         event_type_key: str,
         narrative: str,
         reason_block: str | None,
-    ) -> str:
+    ) -> tuple[str, str | None]:
         base_narrative = (narrative or "").strip()
         normalized_reason = self._normalize_reason(reason_block)
         if normalized_reason is None or event_type_key not in _REASON_BLOCK_EVENT_TYPES:
-            return base_narrative
-        reason_block_text = f"{_MODERATION_REASON_BLOCK_HEADER}\n{normalized_reason}"
-        if not base_narrative:
-            return reason_block_text
-        return f"{base_narrative}\n\n{reason_block_text}"
+            return base_narrative, None
+        return base_narrative, normalized_reason
 
     def _format_placeholder_value(self, placeholder: str, value: Any) -> Any:
         if value is None:
@@ -479,6 +477,7 @@ class GreetingsCopyService:
         selected_mood = mood or self._resolve_mood(cfg)
         time_bucket = self._get_time_bucket(current_now, cfg)
         count_tier = self._get_count_tier(max(1, int(occurrence_number)), cfg)
+        moderation_note = self._normalize_reason(reason_block if reason_block is not None else reason)
         context = self.build_template_context(
             user=user,
             guild=guild,
@@ -497,31 +496,121 @@ class GreetingsCopyService:
             barcello_color=normalized_barcello,
             barcello_score=barcello_score,
         )
-        template = self._select_template(
-            cfg,
-            key=event_type_key,
+        if moderation_note and event_type_key in _REASON_BLOCK_EVENT_TYPES:
+            context["reason"] = ""
+            context["reason_suffix"] = ""
+
+        narrative_template = self._select_narrative_template(
+            event_type_key=event_type_key,
+            cfg=cfg,
+            occurrence_number=max(1, int(occurrence_number)),
             mood=selected_mood,
             time_bucket=time_bucket,
             barcello_state=normalized_barcello,
             count_tier=count_tier,
-            occurrence_number=max(1, int(occurrence_number)),
         )
-        narrative = self.compose_final_narrative(
+        narrative, moderation_note = self.compose_final_narrative(
             event_type_key=event_type_key,
-            narrative=self.render_moderation_template(template, **context),
-            reason_block=reason_block if reason_block is not None else reason,
+            narrative=self._render_narrative_markdown(narrative_template, context=context, event_type_key=event_type_key),
+            reason_block=moderation_note,
         )
         return GreetingsRenderResult(
             event_label=format_greetings_event_label(event_type_key, max(1, int(occurrence_number))),
             occurrence_number=max(1, int(occurrence_number)),
             template_context=context,
             narrative=narrative,
+            moderation_note=moderation_note,
             mood=selected_mood,
             time_bucket=time_bucket,
             count_tier=count_tier,
             barcello_state=normalized_barcello,
-            raw_template=template,
+            raw_template=narrative_template,
         )
+
+    def _select_narrative_template(
+        self,
+        *,
+        event_type_key: str,
+        cfg: dict[str, Any],
+        occurrence_number: int,
+        mood: str,
+        time_bucket: str,
+        barcello_state: str,
+        count_tier: str,
+    ) -> dict[str, str]:
+        contract = cfg.get("narrative_contract")
+        if isinstance(contract, dict):
+            event_contract = contract.get(event_type_key)
+            selected = self._resolve_contract_variant(event_contract, occurrence_number=occurrence_number)
+            if isinstance(selected, dict):
+                return self._normalize_narrative_template(selected)
+
+        legacy = self._select_template(
+            cfg,
+            key=event_type_key,
+            mood=mood,
+            time_bucket=time_bucket,
+            barcello_state=barcello_state,
+            count_tier=count_tier,
+            occurrence_number=occurrence_number,
+        )
+        return self._normalize_narrative_template({"event_phrase": legacy})
+
+    def _resolve_contract_variant(self, value: Any, *, occurrence_number: int) -> Any:
+        if not isinstance(value, dict):
+            return value
+        if occurrence_number <= 1 and isinstance(value.get("first_occurrence"), dict):
+            return value["first_occurrence"]
+        if occurrence_number > 1 and isinstance(value.get("repeat"), dict):
+            return value["repeat"]
+        if isinstance(value.get("default"), dict):
+            return value["default"]
+        return value
+
+    def _normalize_narrative_template(self, value: dict[str, Any]) -> dict[str, str]:
+        return {
+            "opening": str(value.get("opening") or "{mention}"),
+            "event_phrase": str(value.get("event_phrase") or ""),
+            "occurrence_phrase": str(value.get("occurrence_phrase") or ""),
+            "detail_phrase": str(value.get("detail_phrase") or ""),
+            "barcello_phrase": str(value.get("barcello_phrase") or ""),
+            "closing_comment": str(value.get("closing_comment") or ""),
+        }
+
+    def _render_narrative_markdown(self, template: dict[str, str], *, context: dict[str, Any], event_type_key: str) -> str:
+        parts: list[str] = []
+        opening = self.render_moderation_template(template.get("opening"), **context).strip()
+        if opening:
+            parts.append(self._to_bold_italic(opening))
+        for key in ("event_phrase", "occurrence_phrase", "detail_phrase", "barcello_phrase", "closing_comment"):
+            if key == "barcello_phrase" and event_type_key != "leave":
+                continue
+            rendered = self.render_moderation_template(template.get(key), **context).strip()
+            if not rendered:
+                continue
+            parts.append(self._to_italic(rendered))
+        return " ".join(part for part in parts if part).strip()
+
+    @staticmethod
+    def _to_italic(text: str) -> str:
+        stripped = text.strip()
+        if not stripped:
+            return ""
+        if stripped.startswith("*") and stripped.endswith("*"):
+            return stripped
+        return f"*{stripped}*"
+
+    @staticmethod
+    def _to_bold_italic(text: str) -> str:
+        stripped = text.strip()
+        if not stripped:
+            return ""
+        if stripped.startswith("***") and stripped.endswith("***"):
+            return stripped
+        if stripped.startswith("**") and stripped.endswith("**") and len(stripped) >= 4:
+            core = stripped[2:-2].strip()
+            return f"***{core}***" if core else stripped
+        return f"***{stripped}***"
 
     async def render_canonical_event_copy(
         self,
@@ -867,4 +956,4 @@ def format_greetings_event_label(event_type_key: str, occurrence_number: int) ->
     emoji, label, gender = _EVENT_LABELS[event_type_key]
     mapping = _ORDINALS_UPPER_FEMININE if gender == "f" else _ORDINALS_UPPER_MASCULINE
     ordinal = mapping.get(occurrence, f"{occurrence}{'ª' if gender == 'f' else '°'}")
-    return f"**{emoji} {ordinal} {label}**"
+    return f"{emoji} __**{ordinal} {label}**__"

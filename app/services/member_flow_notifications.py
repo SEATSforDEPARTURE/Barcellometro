@@ -54,6 +54,7 @@ _EXIT_LIKE_EVENT_TYPES = frozenset(
         "inactive_tempban",
     }
 )
+_GREETINGS_MODERATION_FIELD_NAME = "👇 __**LA MODERAZIONE AGGIUNGE**__"
 
 
 def parse_duration_input(raw: str) -> int:
@@ -355,6 +356,13 @@ class MemberFlowNotificationsService:
             now=created_at,
         )
         embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))
+        moderation_note = getattr(copy, "moderation_note", None)
+        if moderation_note:
+            embed.add_field(
+                name=_GREETINGS_MODERATION_FIELD_NAME,
+                value=str(moderation_note)[:1024],
+                inline=False,
+            )
         # Layout canonico live: titolo = label evento, narrativa = body e author
         # derivato dal top-level canonico (non hardcoded).
         attach_author_meta(

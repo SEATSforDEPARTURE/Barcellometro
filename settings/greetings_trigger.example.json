@@ -1,251 +1,44 @@
 {
   "docs": {
-    "version": 2,
+    "version": 3,
     "purpose": [
-      "Fonte ufficiale dei testi narrativi del servizio GREETINGS / INGRESSI & USCITE.",
-      "Il layout live dell'embed resta fisso: questo file controlla solo il copy narrativo e la sua selezione.",
-      "Le emoji narrative nel testo sono volutamente diverse dall'emoji tecnica della label evento nel titolo dell'embed, per evitare duplicazioni stilistiche."
+      "Fonte ufficiale del copy GREETINGS: narrativa breve a struttura fissa.",
+      "Il renderer compone una singola description narrativa (non un elenco) partendo dagli slot del contratto.",
+      "Il titolo evento resta separato e usa sempre il formato emoji + __**MAIUSCOLO**__.",
+      "Il file mantiene il label evento nel titolo dell'embed e governa solo la grammatica narrativa della description."
     ],
-    "selection_order": [
-      "moods[mood].time[time_bucket].barcello[state].count[count_tier].templates[event_type_key]",
-      "moods[mood].time[time_bucket].barcello[state].templates[event_type_key]",
-      "moods[mood].time[time_bucket].count[count_tier].templates[event_type_key]",
-      "moods[mood].barcello[state].count[count_tier].templates[event_type_key]",
-      "moods[mood].count[count_tier].templates[event_type_key]",
-      "moods[mood].time[time_bucket].templates[event_type_key]",
-      "moods[mood].barcello[state].templates[event_type_key]",
-      "moods[mood].templates[event_type_key]",
-      "templates[event_type_key]",
-      "defaults.fallbacks[event_type_key]"
+    "narrative_order": [
+      "opening",
+      "event_phrase",
+      "occurrence_phrase",
+      "detail_phrase",
+      "barcello_phrase (solo leave)",
+      "closing_comment"
     ],
-    "occurrence_rules": {
-      "first_occurrence": "Usata quando occurrence_number == 1. Per join equivale al primo ingresso / benvenuto.",
-      "repeat": "Usata quando occurrence_number >= 2. Per join equivale a ritorno / rientro.",
-      "default": "Fallback generale se first_occurrence o repeat non sono presenti."
-    },
-    "event_type_keys": {
-      "join": "Ingresso utente. Distinguere sempre primo ingresso e ritorno.",
-      "leave": "Uscita spontanea.",
-      "kick": "Allontanamento manuale/moderazione.",
-      "ban": "Ban manuale/moderazione.",
-      "tempban": "Ban temporaneo manuale/moderazione.",
-      "grace": "Periodo di grazia manuale/moderazione.",
-      "inactive_kick": "Allontanamento per inattività.",
-      "inactive_tempban": "Ban temporaneo per inattività.",
-      "inactive_grace": "Periodo di grazia per inattività."
-    },
     "placeholders": {
       "mention": {
-        "description": "Mention Discord completa dell'utente; placeholder consigliato per join/leave/kick/ban.",
-        "rendering": "Nel testo finale viene resa in grassetto senza rompere la mention Discord.",
-        "example": "<@42>",
-        "notes": [
-          "Alias legacy concettuali: {tag}, {user_mention}."
-        ]
-      },
-      "display_name": {
-        "description": "Display name/nickname preferito dell'utente.",
-        "example": "New User",
-        "rendering": "I placeholder dinamici testuali dei greetings vengono evidenziati automaticamente in grassetto nel render finale."
-      },
-      "username": {
-        "description": "Username raw dell'utente.",
-        "example": "new_user"
-      },
-      "user": {
-        "description": "Alias legacy di {username} per compatibilità."
-      },
-      "user_id": {
-        "description": "ID Discord dell'utente come stringa.",
-        "example": "42"
+        "description": "Mention Discord completa dell'utente; deve comparire nello slot opening."
       },
       "guild_name": {
-        "description": "Nome del server Discord.",
-        "example": "Barcellometro"
-      },
-      "server": {
-        "description": "Alias legacy di {guild_name} per compatibilità."
-      },
-      "guild_id": {
-        "description": "ID del server Discord come stringa."
-      },
-      "moderator": {
-        "description": "Display name del moderatore o 'Sistema'."
-      },
-      "moderator_mention": {
-        "description": "Mention del moderatore, se disponibile."
-      },
-      "reason": {
-        "description": "Motivazione nuda dell'evento, senza prefissi. Se il renderer la riceve per un evento moderativo supportato, aggiunge in coda anche il blocco '**👇 La moderazione aggiunge:**'.",
-        "example": "spam creativo"
-      },
-      "reason_suffix": {
-        "description": "Versione pronta all'uso del motivo, es. ': spam creativo', oppure stringa vuota. Il blocco dedicato finale del reason viene comunque composto separatamente dal renderer."
-      },
-      "duration": {
-        "description": "Durata formattata in modo umano, es. '7g', '2h 30m'."
-      },
-      "duration_days": {
-        "description": "Durata approssimata in giorni interi, utile nei template legacy."
-      },
-      "expires_at": {
-        "description": "Data/ora di scadenza in formato UTC leggibile.",
-        "example": "28/03/2026 08:00 UTC"
-      },
-      "rejoin_link": {
-        "description": "Link di rientro/invito, se disponibile."
-      },
-      "days_inactive": {
-        "description": "Numero di giorni di inattività se noto."
-      },
-      "inactivity_text": {
-        "description": "Testo già pronto sull'inattività, es. '30 giorni'."
-      },
-      "event_type_key": {
-        "description": "Chiave tecnica dell'evento."
-      },
-      "event_label": {
-        "description": "Label completa già formattata per il titolo dell'embed.",
-        "example": "**✨ PRIMO INGRESSO**"
-      },
-      "event_label_text": {
-        "description": "Solo etichetta testuale dell'evento, senza ordinali né emoji.",
-        "example": "INGRESSO"
-      },
-      "occurrence_number": {
-        "description": "Numero di occorrenza canonico dell'evento per quell'utente.",
-        "example": "2"
+        "description": "Nome del server Discord."
       },
       "occurrence_ordinal": {
-        "description": "Ordinale user-facing coerente col genere dell'evento.",
-        "example": "SECONDA"
+        "description": "Ordinale evento in formato maiuscolo (es. TERZA)."
       },
-      "is_first_occurrence": {
-        "description": "Boolean tecnico: true solo alla prima occorrenza."
+      "reason": {
+        "description": "Motivo tecnico evento (non va duplicato nella description dei casi moderativi)."
       },
-      "is_returning": {
-        "description": "Boolean tecnico: true quando event_type_key == 'join' e occurrence_number >= 2."
+      "duration": {
+        "description": "Durata umana (es. 7g, 2h)."
       },
-      "mood": {
-        "description": "Mood greetings effettivo selezionato dal loader.",
-        "example": "accogliente"
-      },
-      "time_bucket": {
-        "description": "Bucket orario corrente.",
-        "example": "morning"
-      },
-      "count_tier": {
-        "description": "Tier di occorrenza calcolato dal loader.",
-        "example": "returning"
-      },
-      "barcello_state": {
-        "description": "Stato barcello normalizzato. Non è un campo separato nell'embed: va integrato nella frase.",
-        "example": "verde"
-      },
-      "barcello_color": {
-        "description": "Alias tecnico di {barcello_state} per compatibilità."
+      "inactivity_text": {
+        "description": "Dettaglio inattività (es. 30 giorni)."
       },
       "barcello_alert": {
-        "description": "Testo pronto dell'allerta barcello, es. '🟢 ALLERTA VERDE'."
-      },
-      "barcello_score": {
-        "description": "Punteggio barcello numerico senza '/100'.",
-        "example": "84"
+        "description": "Allerta Barcello formattata."
       },
       "barcello_score_text": {
-        "description": "Punteggio barcello formattato, es. '84/100'."
-      }
-    }
-  },
-  "defaults": {
-    "notes": [
-      "Questi fallback devono bastare da soli a coprire ogni event_type_key anche se mood/time/barcello non hanno match.",
-      "Quando possibile usare {mention} per il soggetto principale.",
-      "Lo stato barcello va citato solo se la frase lo rende naturale."
-    ],
-    "fallbacks": {
-      "join": {
-        "first_occurrence": [
-          "🌟 {mention} mette piede in {guild_name}: primo ingresso ufficiale, applausi ben dosati.",
-          "🎉 Benvenut* {mention} in {guild_name}: qui parte il tour guidato delle stranezze buone.",
-          "🪩 {mention} arriva in {guild_name} con energia fresca e curiosità da primo giorno.",
-          "🍀 {mention} entra in {guild_name}: che il debutto abbia inizio con stile leggero.",
-          "📬 {mention} è appena approdat* in {guild_name}; il citofono narrativo dice 'benvenut*'."
-        ],
-        "repeat": [
-          "🧭 {mention} torna in {guild_name}: riecco un volto noto che riprende il corridoio giusto.",
-          "🔁 {mention} rientra in {guild_name}; il server riconosce il passo e riapre le porte.",
-          "☕ {mention} è di nuovo in {guild_name}: sembra proprio aria di ritorno ben assestato.",
-          "🎈 {mention} torna a farsi vedere in {guild_name}, con il badge non ufficiale di habitué.",
-          "🛋️ {mention} rientra in {guild_name}: posto ritrovato, atmosfera pronta."
-        ],
-        "default": [
-          "🌈 {mention} passa da {guild_name}; il server aggiorna il registro con buon umore."
-        ]
-      },
-      "leave": {
-        "first_occurrence": [
-          "🧳 {mention} lascia {guild_name}: prima uscita registrata, valigia narrativa chiusa con cura.",
-          "🌤️ {mention} esce da {guild_name}; il corridoio resta in silenzio per un momento.",
-          "🚶 {mention} saluta {guild_name} e si allontana con passo misurato."
-        ],
-        "repeat": [
-          "🔄 {mention} lascia di nuovo {guild_name}: il portone ormai conosce la sequenza.",
-          "📉 {mention} si sfila ancora da {guild_name}; altra uscita annotata nel diario di bordo.",
-          "🧥 {mention} prende nuovamente la via dell'uscita da {guild_name}."
-        ],
-        "default": [
-          "🍃 {mention} si allontana da {guild_name}; il server lo nota e aggiorna il silenzio."
-        ]
-      },
-      "kick": {
-        "default": [
-          "🧹 {mention} viene allontanat* da {guild_name}{reason_suffix}.",
-          "🚪 Chiusura assistita per {mention} su {guild_name}{reason_suffix}.",
-          "📛 {mention} deve lasciare {guild_name}{reason_suffix}."
-        ]
-      },
-      "ban": {
-        "default": [
-          "🧱 {mention} riceve un ban da {guild_name}{reason_suffix}.",
-          "⛔ Accesso revocato a {mention} su {guild_name}{reason_suffix}.",
-          "📕 {mention} finisce nel capitolo 'ban' di {guild_name}{reason_suffix}."
-        ]
-      },
-      "tempban": {
-        "default": [
-          "⏲️ {mention} viene esclus* temporaneamente da {guild_name} per {duration}{reason_suffix}.",
-          "🗓️ Pausa forzata per {mention} su {guild_name}: durata {duration}{reason_suffix}.",
-          "🚧 {mention} resta fuori da {guild_name} per {duration}{reason_suffix}."
-        ]
-      },
-      "grace": {
-        "default": [
-          "🪶 {mention} ottiene un periodo di grazia su {guild_name} per {duration}.",
-          "🌤️ Per {mention} scatta una finestra di tregua su {guild_name}: {duration}.",
-          "🤝 {mention} riceve tempo extra su {guild_name} per {duration}."
-        ]
-      },
-      "inactive_kick": {
-        "default": [
-          "🌙 {mention} viene allontanat* da {guild_name} per inattività ({inactivity_text}).",
-          "🪫 Troppe ore ferme: {mention} esce da {guild_name} per inattività ({inactivity_text}).",
-          "📭 {mention} non si fa vedere da un po' e viene allontanat* da {guild_name} ({inactivity_text})."
-        ]
-      },
-      "inactive_tempban": {
-        "default": [
-          "🛌 {mention} riceve un ban temporaneo per inattività in {guild_name} per {duration} ({inactivity_text}).",
-          "⏳ Pausa per assenza prolungata: {mention} resta fuori da {guild_name} per {duration} ({inactivity_text}).",
-          "📆 {mention} viene sospes* temporaneamente per inattività su {guild_name}: {duration} ({inactivity_text})."
-        ]
-      },
-      "inactive_grace": {
-        "default": [
-          "🫶 {mention} entra in periodo di grazia per inattività su {guild_name} per {duration} ({inactivity_text}).",
-          "🧸 Per {mention} scatta una tregua morbida in {guild_name}: {duration} per inattività ({inactivity_text}).",
-          "📎 {mention} riceve un ultimo margine su {guild_name} per {duration}, vista l'inattività ({inactivity_text})."
-        ]
+        "description": "Score Barcello formattato (es. 58/100)."
       }
     }
   },
@@ -253,322 +46,157 @@
   "time_buckets": {
     "night": {
       "start": 0,
-      "end": 6,
-      "label": "notte fonda"
+      "end": 6
     },
     "morning": {
       "start": 6,
-      "end": 12,
-      "label": "mattina"
+      "end": 12
     },
     "afternoon": {
       "start": 12,
-      "end": 18,
-      "label": "pomeriggio"
+      "end": 18
     },
     "evening": {
       "start": 18,
-      "end": 24,
-      "label": "sera"
+      "end": 24
     }
   },
   "count_tiers": [
     {
       "min_occurrence": 1,
-      "label": "first_time"
+      "label": "t1"
     },
     {
       "min_occurrence": 2,
-      "label": "returning"
+      "label": "t2"
     },
     {
-      "min_occurrence": 4,
-      "label": "regular"
-    },
-    {
-      "min_occurrence": 8,
-      "label": "legend"
+      "min_occurrence": 3,
+      "label": "t3"
     }
   ],
-  "templates": {
-    "join": {
-      "first_occurrence": [
-        "🌟 {mention} debutta in {guild_name}: benvenut* tra le luci buone del server.",
-        "🎊 {mention} entra per la prima volta in {guild_name}; tappeto rosso emotivo, ma senza esagerare.",
-        "🪄 Primo ingresso per {mention} in {guild_name}: curiosità alta e corridoi già pronti.",
-        "🧡 {mention} arriva in {guild_name}; il benvenuto oggi ha un tono caldo e sinceramente simpatico."
-      ],
-      "repeat": [
-        "🧭 {mention} torna in {guild_name}: rientro confermato, orientamento già salvato.",
-        "🔁 {mention} rientra in {guild_name}; si riapre il capitolo del ritorno con una certa scioltezza.",
-        "☕ {mention} è di nuovo qui in {guild_name}: tazza simbolica pronta e posto ritrovato.",
-        "🪑 {mention} torna su {guild_name}; la sedia narrativa era rimasta occupata dal destino."
-      ],
-      "default": [
-        "🌈 {mention} fa capolino in {guild_name}; il server aggiorna la presenza con stile leggero."
-      ]
-    },
-    "leave": {
-      "first_occurrence": [
-        "🧳 {mention} lascia {guild_name}; prima uscita segnata con tono composto.",
-        "🌬️ {mention} si allontana da {guild_name}; il corridoio resta per un attimo più quieto."
-      ],
-      "repeat": [
-        "🔄 {mention} prende di nuovo l'uscita di {guild_name}; il portone lo annota senza fare drammi.",
-        "🧥 {mention} esce ancora da {guild_name}; ritorni e uscite qui hanno memoria lunga."
-      ],
-      "default": [
-        "🍃 {mention} saluta {guild_name} e lascia dietro di sé una scia di quiete ordinata."
-      ]
-    },
-    "kick": {
-      "default": [
-        "🧹 {mention} viene accompagnat* fuori da {guild_name}{reason_suffix}.",
-        "📛 {mention} viene allontanat* da {guild_name}{reason_suffix}.",
-        "🚪 Per {mention} si chiude la porta di {guild_name}{reason_suffix}."
-      ]
-    },
-    "ban": {
-      "default": [
-        "🧱 {mention} riceve un ban da {guild_name}{reason_suffix}.",
-        "⛔ {mention} non può più restare in {guild_name}{reason_suffix}.",
-        "📕 {guild_name} archivia {mention} alla voce ban{reason_suffix}."
-      ]
-    },
-    "tempban": {
-      "default": [
-        "⏲️ {mention} resta fuori da {guild_name} per {duration}{reason_suffix}.",
-        "🗓️ {mention} viene sospes* da {guild_name} per {duration}{reason_suffix}.",
-        "🚧 Per {mention} scatta una pausa da {guild_name}: {duration}{reason_suffix}."
-      ]
-    },
-    "grace": {
-      "default": [
-        "🪶 {mention} riceve un periodo di grazia su {guild_name} per {duration}.",
-        "🌤️ Tregua concessa a {mention} in {guild_name}: {duration}.",
-        "🤝 {mention} ottiene margine extra su {guild_name} per {duration}."
-      ]
-    },
-    "inactive_kick": {
-      "default": [
-        "🌙 {mention} viene allontanat* da {guild_name} per inattività ({inactivity_text}).",
-        "📭 {mention} era silenzios* da troppo e lascia {guild_name} per inattività ({inactivity_text}).",
-        "🪫 Energia sociale in pausa: {mention} esce da {guild_name} per inattività ({inactivity_text})."
-      ]
-    },
-    "inactive_tempban": {
-      "default": [
-        "🛌 {mention} riceve un ban temporaneo per inattività in {guild_name} per {duration} ({inactivity_text}).",
-        "⏳ Inattività prolungata: {mention} resta fuori da {guild_name} per {duration} ({inactivity_text}).",
-        "📆 {mention} viene sospes* per inattività su {guild_name}: {duration} ({inactivity_text})."
-      ]
-    },
-    "inactive_grace": {
-      "default": [
-        "🫶 {mention} entra in grazia per inattività su {guild_name} per {duration} ({inactivity_text}).",
-        "🧸 Ultimo margine morbido per {mention} in {guild_name}: {duration} ({inactivity_text}).",
-        "📎 {mention} riceve una finestra di recupero su {guild_name} per {duration} ({inactivity_text})."
-      ]
+  "defaults": {
+    "fallbacks": {
+      "join": {
+        "default": [
+          "{mention} entra in {guild_name}."
+        ]
+      },
+      "leave": {
+        "default": [
+          "{mention} lascia {guild_name}."
+        ]
+      },
+      "kick": {
+        "default": [
+          "{mention} viene allontanato da {guild_name}."
+        ]
+      },
+      "ban": {
+        "default": [
+          "{mention} è stato bannato da {guild_name}."
+        ]
+      },
+      "tempban": {
+        "default": [
+          "{mention} è stato escluso temporaneamente da {guild_name} per {duration}."
+        ]
+      },
+      "grace": {
+        "default": [
+          "{mention} riceve un periodo di grazia su {guild_name} per {duration}."
+        ]
+      },
+      "inactive_kick": {
+        "default": [
+          "{mention} viene allontanato da {guild_name} per inattività ({inactivity_text})."
+        ]
+      },
+      "inactive_tempban": {
+        "default": [
+          "{mention} riceve un ban temporaneo per inattività su {guild_name} per {duration} ({inactivity_text})."
+        ]
+      },
+      "inactive_grace": {
+        "default": [
+          "{mention} riceve un periodo di grazia per inattività su {guild_name} per {duration} ({inactivity_text})."
+        ]
+      }
     }
   },
-  "moods": {
-    "accogliente": {
-      "templates": {
-        "join": {
-          "first_occurrence": [
-            "🌞 {mention} arriva in {guild_name}: benvenut* in un angolo con barcello {barcello_state} e sorriso operativo.",
-            "🫖 Primo ingresso per {mention} in {guild_name}; si offre idealmente una tisana e un benvenuto vero."
-          ],
-          "repeat": [
-            "🏡 {mention} torna in {guild_name}; atmosfera morbida e corridoi già familiari.",
-            "🧶 {mention} rientra in {guild_name} mentre il clima resta disteso e facile da abitare."
-          ]
-        },
-        "leave": {
-          "default": [
-            "🍂 {mention} lascia {guild_name}; uscita gentile, senza strappi nel tessuto del server."
-          ]
-        }
+  "narrative_contract": {
+    "join": {
+      "first_occurrence": {
+        "opening": "{mention}",
+        "event_phrase": "entra in",
+        "occurrence_phrase": "{guild_name} per la",
+        "detail_phrase": "{occurrence_ordinal} volta",
+        "closing_comment": "Benvenut*."
       },
-      "time": {
-        "morning": {
-          "templates": {
-            "join": {
-              "first_occurrence": [
-                "🌅 Buongiorno {mention}: primo ingresso in {guild_name}, mattina perfetta per iniziare bene.",
-                "🥐 {mention} debutta in {guild_name} di mattina; profumo simbolico di cornetto e onboarding."
-              ],
-              "repeat": [
-                "☕ {mention} torna in {guild_name} di mattina; rientro con caffeina narrativa incorporata.",
-                "🌤️ Mattina di ritorno per {mention} in {guild_name}; il server riaccende le luci giuste."
-              ]
-            }
-          },
-          "barcello": {
-            "verde": {
-              "templates": {
-                "join": {
-                  "first_occurrence": [
-                    "🌱 {mention} entra in {guild_name} con barcello verde e score {barcello_score_text}: benvenut* a un debutto in clima ottimo.",
-                    "🍏 Primo ingresso per {mention} in {guild_name}; barcello verde, aria serena e un benvenuto che invita a restare."
-                  ],
-                  "repeat": [
-                    "🪴 {mention} torna in {guild_name} con barcello verde: rientro morbido e score su {barcello_score_text}.",
-                    "🫧 {mention} rientra in {guild_name} mentre il server respira tranquillo: barcello verde e passo leggero."
-                  ]
-                }
-              },
-              "count": {
-                "legend": {
-                  "templates": {
-                    "join": {
-                      "repeat": [
-                        "🏆 {mention} torna ancora in {guild_name}: ormai è rientro da leggenda, con barcello verde e score {barcello_score_text}.",
-                        "📚 {mention} rientra in {guild_name} da veterano del portone; barcello verde, memoria lunga, atmosfera comoda."
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "evening": {
-          "templates": {
-            "leave": {
-              "default": [
-                "🌆 {mention} chiude la giornata e lascia {guild_name}; uscita da sera con tono pacifico.",
-                "🛋️ {mention} saluta {guild_name} in fascia serale; il server abbassa appena la voce."
-              ]
-            }
-          }
-        }
-      },
-      "barcello": {
-        "giallo": {
-          "templates": {
-            "join": {
-              "first_occurrence": [
-                "🌤️ {mention} arriva in {guild_name} con barcello giallo: tutto bene, ma il server resta vigile con garbo.",
-                "🧡 Primo ingresso per {mention} in {guild_name}; barcello giallo, curiosità alta e cautela sorridente."
-              ],
-              "repeat": [
-                "🪁 {mention} torna in {guild_name} mentre il barcello è giallo: rientro lieve, antenne comunque alzate.",
-                "🎯 {mention} rientra in {guild_name}; clima un filo delicato, ma il passo resta tranquillo."
-              ]
-            }
-          }
-        }
-      },
-      "count": {
-        "first_time": {
-          "templates": {
-            "join": {
-              "first_occurrence": [
-                "🎀 {mention} inaugura il suo primo ingresso in {guild_name}: benvenut* ufficialmente a bordo.",
-                "📖 {mention} apre il capitolo uno in {guild_name}; sì, questo è proprio un benvenuto."
-              ]
-            }
-          }
-        },
-        "returning": {
-          "templates": {
-            "join": {
-              "repeat": [
-                "🔁 {mention} torna in {guild_name}; il server riconosce già il ritmo del rientro.",
-                "🪃 {mention} rientra in {guild_name}: secondo giro e confidenza già in crescita."
-              ]
-            }
-          }
-        }
+      "repeat": {
+        "opening": "{mention}",
+        "event_phrase": "torna in",
+        "occurrence_phrase": "{guild_name} per la",
+        "detail_phrase": "{occurrence_ordinal} volta",
+        "closing_comment": "Bentornat*."
       }
     },
-    "teso": {
-      "templates": {
-        "join": {
-          "first_occurrence": [
-            "⚠️ {mention} entra in {guild_name}; benvenuto sì, ma oggi il clima chiede attenzione.",
-            "🧭 Primo ingresso per {mention} in {guild_name}: il server osserva con cautela, senza perdere educazione."
-          ],
-          "repeat": [
-            "🪫 {mention} torna in {guild_name}, mentre il clima resta teso ma gestibile.",
-            "🎚️ {mention} rientra in {guild_name}; ritorno registrato, tensione ancora presente sullo sfondo."
-          ]
-        },
-        "leave": {
-          "repeat": [
-            "📌 {mention} esce di nuovo da {guild_name}; altra traiettoria annotata in un clima nervoso.",
-            "🧵 {mention} si allontana ancora da {guild_name}, mentre l'aria resta un po' tirata."
-          ]
-        }
-      },
-      "barcello": {
-        "rosso": {
-          "templates": {
-            "kick": {
-              "default": [
-                "🚨 Con clima già teso e barcello rosso, {mention} viene allontanat* da {guild_name}{reason_suffix}.",
-                "🧨 {mention} esce forzat* da {guild_name}{reason_suffix}; il barcello rosso non aiuta certo a distendere la scena."
-              ]
-            },
-            "ban": {
-              "default": [
-                "🪓 Barcello rosso, nervi corti: {mention} riceve un ban da {guild_name}{reason_suffix}.",
-                "📛 {mention} finisce bannat* da {guild_name}{reason_suffix}, mentre il clima resta decisamente teso."
-              ]
-            },
-            "tempban": {
-              "default": [
-                "🚧 Nel mezzo di un barcello rosso, {mention} resta fuori da {guild_name} per {duration}{reason_suffix}.",
-                "⛓️ {mention} riceve una sospensione temporanea da {guild_name}: {duration}{reason_suffix}, con clima tutt'altro che sereno."
-              ]
-            }
-          }
-        },
-        "nero": {
-          "templates": {
-            "inactive_tempban": {
-              "default": [
-                "🌑 In piena allerta nera, {mention} riceve un ban temporaneo per inattività in {guild_name}: {duration} ({inactivity_text}).",
-                "🛰️ Il server è in fase scura e {mention} resta fuori da {guild_name} per inattività: {duration} ({inactivity_text})."
-              ]
-            },
-            "inactive_grace": {
-              "default": [
-                "🕯️ Anche con clima cupo, {mention} ottiene una grazia per inattività su {guild_name}: {duration} ({inactivity_text})."
-              ]
-            }
-          }
-        }
-      },
-      "time": {
-        "night": {
-          "templates": {
-            "join": {
-              "first_occurrence": [
-                "🌃 {mention} arriva in {guild_name} di notte, proprio mentre il clima è teso: ingresso da maneggiare con tatto.",
-                "🕶️ Primo ingresso notturno per {mention} in {guild_name}; atmosfera stretta, ma il benvenuto non manca."
-              ],
-              "repeat": [
-                "🌘 {mention} rientra di notte in {guild_name}; il ritorno passa in un'aria ancora tirata.",
-                "🛎️ {mention} torna in {guild_name} a notte inoltrata, mentre il clima resta poco rilassato."
-              ]
-            }
-          }
-        }
-      },
-      "count": {
-        "returning": {
-          "templates": {
-            "join": {
-              "repeat": [
-                "🔄 {mention} torna in {guild_name}; rientro riconosciuto, ma il clima rimane da monitorare.",
-                "📍 {mention} rientra in {guild_name}: presenza nota, tensione pure."
-              ]
-            }
-          }
-        }
-      }
+    "leave": {
+      "opening": "{mention}",
+      "event_phrase": "ha lasciato",
+      "occurrence_phrase": "{guild_name} per la",
+      "detail_phrase": "{occurrence_ordinal} volta",
+      "barcello_phrase": "In quel momento il Barcello era {barcello_alert} ({barcello_score_text}).",
+      "closing_comment": "Vediamo se tornerà."
+    },
+    "kick": {
+      "opening": "{mention}",
+      "event_phrase": "è stato",
+      "occurrence_phrase": "allontanato dal server per la",
+      "detail_phrase": "{occurrence_ordinal} volta",
+      "closing_comment": "Decisione operativa registrata."
+    },
+    "ban": {
+      "opening": "{mention}",
+      "event_phrase": "è stato",
+      "occurrence_phrase": "bannato dal server per la",
+      "detail_phrase": "{occurrence_ordinal} volta",
+      "closing_comment": "Che peccato."
+    },
+    "tempban": {
+      "opening": "{mention}",
+      "event_phrase": "è stato",
+      "occurrence_phrase": "temporaneamente bannato per",
+      "detail_phrase": "{duration}",
+      "closing_comment": "Provvedimento temporaneo attivo."
+    },
+    "grace": {
+      "opening": "{mention}",
+      "event_phrase": "ha ricevuto",
+      "occurrence_phrase": "un periodo di grazia di",
+      "detail_phrase": "{duration}",
+      "closing_comment": "Occasione da non sprecare."
+    },
+    "inactive_kick": {
+      "opening": "{mention}",
+      "event_phrase": "è stato",
+      "occurrence_phrase": "allontanato per inattività dopo",
+      "detail_phrase": "{inactivity_text}",
+      "closing_comment": "Timeline aggiornata."
+    },
+    "inactive_tempban": {
+      "opening": "{mention}",
+      "event_phrase": "è stato",
+      "occurrence_phrase": "temporaneamente bannato per inattività:",
+      "detail_phrase": "{duration} ({inactivity_text})",
+      "closing_comment": "Rientro possibile alla scadenza."
+    },
+    "inactive_grace": {
+      "opening": "{mention}",
+      "event_phrase": "ha ricevuto",
+      "occurrence_phrase": "un periodo di grazia per inattività di",
+      "detail_phrase": "{duration} ({inactivity_text})",
+      "closing_comment": "Ultimo margine disponibile."
     }
   }
 }

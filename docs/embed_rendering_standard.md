@@ -14,6 +14,11 @@ Tutti gli embed standard del progetto devono convergere su questa struttura:
 4. **FIELDS**: sezioni importanti sempre come veri field (`emoji + __**TITOLO FIELD**__`, MAIUSCOLO).
 5. **FOOTER**: applicato dalla pipeline centralizzata.
 
+Nota GREETINGS (`🚪 INGRESSI & USCITE`):
+- description narrativa breve senza emoji iniziale, con testo in corsivo e placeholder chiave in grassetto;
+- struttura description guidata da `settings/greetings_trigger*.json` (`narrative_contract` a slot fissi);
+- unico field strutturale opzionale: `👇 __**LA MODERAZIONE AGGIUNGE**__`.
+
 Regole tassative:
 
 - i titoli sezione non devono stare nella `description` come testo libero;
