@@ -6,13 +6,14 @@ from typing import Any
 import discord
 
 from app.services.database import DatabaseService
+from app.services.dm_time_placeholders import build_time_placeholder_payload
 from app.services.dm_user_placeholders import build_user_placeholder_payload
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 
 DEFAULT_USERS_DM_COOLDOWN_DAYS = 14
 DEFAULT_USERS_DM_GRACE_TEMPLATE = (
     "Hi {user}, you have entered a manual grace period in {server}. "
-    "It will expire on {expires_at_utc}. {reason_line}{invite_line}"
+    "It will expire on {expires_at_utc} ({expires_at_it}). {reason_line}{invite_line}"
 )
 DEFAULT_USERS_DM_TEMPBAN_TEMPLATE = (
     "Hi {user}, your manual grace period in {server} has expired and an automatic temporary ban "
@@ -29,7 +30,10 @@ USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
     "event_type",
     "duration_seconds",
     "duration_human",
+    "now_utc",
+    "now_it",
     "expires_at_utc",
+    "expires_at_it",
     "reason",
     "reason_line",
     "invite_url",
@@ -297,15 +301,16 @@ class UsersModerationDmService:
     ) -> str:
         safe_reason = str(reason or "").strip()
         safe_invite = str(invite_url or "").strip()
-        expires = expires_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if expires_at else "n/a"
+        now = datetime.now(timezone.utc)
+        time_payload = build_time_placeholder_payload(now=now, expires_at=expires_at)
         payload = {
             **build_user_placeholder_payload(user),
+            **time_payload,
             "server": guild.name,
             "guild_id": str(guild.id),
             "event_type": event_type,
             "duration_seconds": int(duration_seconds or 0),
             "duration_human": cls._duration_human(duration_seconds),
-            "expires_at_utc": expires,
             "reason": safe_reason,
             "reason_line": f"Reason: {safe_reason}. " if safe_reason else "",
             "invite_url": safe_invite,

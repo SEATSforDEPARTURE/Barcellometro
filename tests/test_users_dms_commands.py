@@ -132,5 +132,7 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert sections[1].title == "Supported placeholders"
         assert sections[1].lines == [f"{{{name}}}" for name in USERS_DM_SUPPORTED_PLACEHOLDERS]
         assert "{mention}" in sections[1].lines
+        assert "{now_it}" in sections[1].lines
+        assert "{expires_at_it}" in sections[1].lines
 
     asyncio.run(_run())

@@ -51,6 +51,7 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 - Se un file runtime come `settings/barcello_trigger.json` contiene campi come `footer`, `fallback_footer` o simili, per output non-AI non va salvata alcuna frase tecnica finale equivalente; per output AI si usa solo `Dati elaborati con ...` quando esistono davvero contributor/provider/model da dichiarare.
 - Per il sottosistema `/inactivity dms` i comandi canonici documentati sono `template_grace_*` e `template_tempban_*`; chiavi legacy interne come `dm_reminder_template` / `dm_kick_template` restano solo di compatibilità storage/runtime e non fanno parte della surface slash pubblica.
 - I template DM di `/inactivity dms` e `/users dms` supportano esplicitamente `{mention}` (oltre ai placeholder storici come `{user}`, `{username}`, `{display_name}`), così il bot può taggare il destinatario direttamente nel DM.
+- Nei template DM moderativi sono supportate varianti temporali UTC + ora italiana quando il runtime possiede davvero il timestamp: `{now_utc}` / `{now_it}` e `{expires_at_utc}` / `{expires_at_it}`.
 
 ## Note specifiche per `settings/greetings_trigger.example.json`
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 import discord
 
+from app.services.dm_time_placeholders import build_time_placeholder_payload
 from app.services.dm_user_placeholders import build_user_placeholder_payload
 
 INACTIVITY_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
@@ -24,6 +26,10 @@ INACTIVITY_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
     "rejoin_link",
     "reason",
     "inactivity_text",
+    "now_utc",
+    "now_it",
+    "expires_at_utc",
+    "expires_at_it",
 )
 
 
@@ -38,9 +44,13 @@ def build_inactivity_dm_template_payload(
     reminder_count: int | None = None,
     reason: str | None = None,
     inactivity_text: str | None = None,
+    now: datetime | None = None,
+    expires_at: datetime | None = None,
 ) -> dict[str, Any]:
+    time_payload = build_time_placeholder_payload(now=now or datetime.now(timezone.utc), expires_at=expires_at)
     return {
         **build_user_placeholder_payload(member),
+        **time_payload,
         "username": member.display_name,
         "display_name": member.display_name,
         "server": guild.name,
