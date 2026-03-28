@@ -312,10 +312,9 @@ def test_execute_reminders_logs_dm_delivery_outcomes() -> None:
         assert result["dm_ok"] == 1
         assert result["dm_fail"] == 1
         sent_embed = member_ok.send.await_args.kwargs["embed"]
-        assert sent_embed.title.startswith("🔔")
-        assert "PROMEMORIA INATTIVITÀ" in sent_embed.title
+        assert sent_embed.title == "🕊️ __**GRAZIA**__"
         assert "Grace <@42> (<@42>)" in str(sent_embed.description)
-        assert sent_embed.author.name
+        assert sent_embed.author.name == "servizio INACTIVITY"
         assert sent_embed.footer.text
         database.mark_user_reminded.assert_awaited_once()
         assert database.log_inactivity_dm_delivery.await_count == 2
@@ -423,9 +422,10 @@ def test_execute_kick_pipeline_uses_template_tempban_and_logs_tempban_dm_deliver
         assert result["kick_ok"] == 1
         assert result["ban_ok"] == 1
         sent_embed = member.send.await_args.kwargs["embed"]
-        assert "TEMPBAN INATTIVITÀ" in sent_embed.title
+        assert sent_embed.title == "⌛ __**INTERDIZIONE TEMPORANEA**__"
         assert "Tempban <@42> (<@42>)" in str(sent_embed.description)
         assert "https://example.test/invite" in str(sent_embed.description)
+        assert sent_embed.author.name == "servizio INACTIVITY"
         database.log_inactivity_dm_delivery.assert_awaited_once()
         assert database.log_inactivity_dm_delivery.await_args.kwargs["event_type"] == "tempban"
         assert database.log_inactivity_dm_delivery.await_args.kwargs["outcome"] == "success"
