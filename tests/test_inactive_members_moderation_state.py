@@ -208,3 +208,72 @@ def test_run_due_unbans_uses_member_flow_audit_for_manual_grace_auto_actions() -
         database.log_moderation_action.assert_not_awaited()
 
     asyncio.run(_run())
+
+
+def test_execute_reminders_respects_dm_toggle_and_skips_sending() -> None:
+    async def _run() -> None:
+        guild = SimpleNamespace(id=1, name="Barcellometro")
+        database = SimpleNamespace(
+            get_inactivity_user_state=AsyncMock(return_value=None),
+            mark_user_reminded=AsyncMock(),
+            log_inactivity_dm_delivery=AsyncMock(),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        service.scan_inactive_members = AsyncMock(return_value=([], 0, {"dm_reminders_enabled": 0}))
+
+        result = await service.execute_reminders("1")
+
+        assert result["disabled"] is True
+        database.mark_user_reminded.assert_not_awaited()
+        database.log_inactivity_dm_delivery.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+def test_execute_reminders_logs_dm_delivery_outcomes() -> None:
+    async def _run() -> None:
+        member_ok = SimpleNamespace(id=42, mention="<@42>", display_name="Dormiente", send=AsyncMock())
+        member_fail = SimpleNamespace(id=43, mention="<@43>", display_name="Ghost", send=AsyncMock(side_effect=PermissionError("Forbidden")))
+        candidate_ok = InactiveCandidate(
+            member=member_ok,
+            last_message_ts=(datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+            last_channel_id=None,
+            last_message_id=None,
+            count_in_window=0,
+            days_inactive=40,
+            policy={"inactive_days": 30, "window_days": 30, "min_messages": 1, "mode": "OR"},
+        )
+        candidate_fail = InactiveCandidate(
+            member=member_fail,
+            last_message_ts=(datetime.now(timezone.utc) - timedelta(days=50)).isoformat(),
+            last_channel_id=None,
+            last_message_id=None,
+            count_in_window=0,
+            days_inactive=50,
+            policy={"inactive_days": 30, "window_days": 30, "min_messages": 1, "mode": "OR"},
+        )
+        guild = SimpleNamespace(id=1, name="Barcellometro")
+        database = SimpleNamespace(
+            get_inactivity_user_state=AsyncMock(return_value=None),
+            mark_user_reminded=AsyncMock(),
+            log_inactivity_dm_delivery=AsyncMock(),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        service.scan_inactive_members = AsyncMock(
+            return_value=(
+                [candidate_ok, candidate_fail],
+                2,
+                {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7, "dm_reminder_template": "Ciao {user}"},
+            )
+        )
+
+        result = await service.execute_reminders("1")
+
+        assert result["dm_ok"] == 1
+        assert result["dm_fail"] == 1
+        database.mark_user_reminded.assert_awaited_once()
+        assert database.log_inactivity_dm_delivery.await_count == 2
+        outcomes = [call.kwargs["outcome"] for call in database.log_inactivity_dm_delivery.await_args_list]
+        assert outcomes == ["success", "fail"]
+
+    asyncio.run(_run())

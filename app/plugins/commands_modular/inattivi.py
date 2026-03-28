@@ -117,6 +117,16 @@ def _render_template_preview(template: str) -> str:
         return f"[Template render error: {exc}]\n{template}"
 
 
+def _fmt_utc(ts: object) -> str:
+    if not ts:
+        return "n/a"
+    try:
+        parsed = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except Exception:
+        return str(ts)
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "inactivity", visual_top_level: str = "inactivity") -> None:
     autokick_group = app_commands.Group(name="autokick", description="Automatic inactivity enforcement")
     grace_group = app_commands.Group(name="grace", description="Grace period settings")
@@ -337,6 +347,57 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), dm_reminder_template=text)
         await _send(interaction, subcommand_path="inactivity dms template_reminder_set", lines=[("result", "updated")], kind="success")
+
+    @dms_group.command(name="on", description="Enable inactivity reminder DMs.")
+    async def inactivity_dms_on(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.set_inactivity_dm_reminders_enabled(str(interaction.guild_id), True)
+        await _send(interaction, subcommand_path="inactivity dms on", lines=[("result", "enabled"), ("dms", "on")], kind="success")
+
+    @dms_group.command(name="off", description="Disable inactivity reminder DMs.")
+    async def inactivity_dms_off(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.set_inactivity_dm_reminders_enabled(str(interaction.guild_id), False)
+        await _send(interaction, subcommand_path="inactivity dms off", lines=[("result", "disabled"), ("dms", "off")], kind="success")
+
+    @dms_group.command(name="status", description="Show inactivity reminder DM status and delivery metrics.")
+    async def inactivity_dms_status(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        guild_id = str(interaction.guild_id)
+        cfg = await _ensure_cfg(ctx, guild_id)
+        template = str(cfg.get("dm_reminder_template") or "")
+        stats = await ctx.database.get_inactivity_dm_delivery_stats(guild_id)
+        recent_rows = await ctx.database.list_inactivity_dm_delivery_events(guild_id, limit=5)
+        by_event = stats.get("by_event") or []
+        event_summary = ", ".join(f"{row['event_type']}={row['total']}" for row in by_event) if by_event else "none"
+        latest_success = stats.get("latest_success") or {}
+        latest_fail = stats.get("latest_fail") or {}
+        recent_lines = [
+            f"{_fmt_utc(row['sent_at'])} · user={row['user_id']} · event={row['event_type']} · outcome={row['outcome']}"
+            + (f" · reason={row['reason']}" if row["reason"] else "")
+            + (f" · error={row['error_summary']}" if row["error_summary"] else "")
+            for row in recent_rows
+        ]
+        await _send(
+            interaction,
+            subcommand_path="inactivity dms status",
+            lines=[
+                ("dms", _bool_label(cfg.get("dm_reminders_enabled", 1))),
+                ("template_reminder", template or "not set"),
+                ("cooldown_days", int(cfg.get("reminder_cooldown_days", DEFAULT_REMINDER_COOLDOWN_DAYS) or DEFAULT_REMINDER_COOLDOWN_DAYS)),
+                ("invite_url", cfg.get("invite_url") or "not set"),
+                ("dm_sent_ok", int(stats.get("ok", 0))),
+                ("dm_sent_fail", int(stats.get("fail", 0))),
+                ("dm_events_total", int(stats.get("total", 0))),
+                ("dm_events_by_type", event_summary),
+                ("last_success", f"user={latest_success.get('user_id', 'n/a')} at {_fmt_utc(latest_success.get('sent_at'))} reason={latest_success.get('reason') or 'n/a'}"),
+                ("last_fail", f"user={latest_fail.get('user_id', 'n/a')} at {_fmt_utc(latest_fail.get('sent_at'))} reason={latest_fail.get('reason') or 'n/a'} error={latest_fail.get('error_summary') or 'n/a'}"),
+            ],
+            sections=[CommandEmbedSection(title="Recent DM deliveries", lines=recent_lines or ["No DM deliveries logged yet."])],
+        )
 
     @dms_group.command(name="template_reminder_show", description="Show the reminder DM template.")
     async def inactivity_dms_template_reminder_show(interaction: discord.Interaction) -> None:

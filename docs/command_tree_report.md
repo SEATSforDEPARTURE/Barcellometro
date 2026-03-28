@@ -195,6 +195,9 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `inactivity` | `dms` | `cooldown_reset` | Reset the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:378` |
 | `inactivity` | `dms` | `cooldown_set` | Set the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:364` |
 | `inactivity` | `dms` | `cooldown_show` | Show the reminder DM cooldown. | `app/plugins/commands_modular/inattivi.py:371` |
+| `inactivity` | `dms` | `off` | Disable inactivity reminder DMs. | `app/plugins/commands_modular/inattivi.py:350` |
+| `inactivity` | `dms` | `on` | Enable inactivity reminder DMs. | `app/plugins/commands_modular/inattivi.py:343` |
+| `inactivity` | `dms` | `status` | Show inactivity reminder DM status and delivery metrics. | `app/plugins/commands_modular/inattivi.py:357` |
 | `inactivity` | `dms` | `invite_reset` | Reset the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:403` |
 | `inactivity` | `dms` | `invite_set` | Set the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:389` |
 | `inactivity` | `dms` | `invite_show` | Show the invite link used in inactivity DMs. | `app/plugins/commands_modular/inattivi.py:396` |

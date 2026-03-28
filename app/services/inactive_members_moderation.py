@@ -842,6 +842,9 @@ class InactiveMembersModerationService:
         guild = self._bot.get_guild(int(guild_id))
         if guild is None or not cfg:
             return {"dm_ok": 0, "dm_fail": 0, "errors": []}
+        if int(cfg.get("dm_reminders_enabled", 1) or 0) <= 0:
+            logger.info("inactive reminders disabled for guild=%s", guild_id)
+            return {"dm_ok": 0, "dm_fail": 0, "errors": [], "disabled": True}
         now = datetime.now(timezone.utc)
         template = cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
         ok = 0
@@ -865,6 +868,19 @@ class InactiveMembersModerationService:
             try:
                 await candidate.member.send(body)
                 await self._database.mark_user_reminded(guild_id, str(candidate.member.id), now.isoformat())
+                await self._database.log_inactivity_dm_delivery(
+                    guild_id=guild_id,
+                    user_id=str(candidate.member.id),
+                    event_type="reminder",
+                    reason=inactivity_text,
+                    sent_at=now.isoformat(),
+                    outcome="success",
+                    metadata={
+                        "source": "inactive_members_moderation",
+                        "days_inactive": candidate.days_inactive,
+                        "message_count": candidate.count_in_window,
+                    },
+                )
                 if self._member_flow_notifications is not None:
                     expires_at = now + timedelta(days=int(cfg.get("grace_days_after_reminder", 7)))
                     await self._member_flow_notifications.log_action(
@@ -886,6 +902,20 @@ class InactiveMembersModerationService:
             except Exception as exc:
                 fail += 1
                 errors.append(f"{candidate.member.id}: {exc.__class__.__name__}")
+                await self._database.log_inactivity_dm_delivery(
+                    guild_id=guild_id,
+                    user_id=str(candidate.member.id),
+                    event_type="reminder",
+                    reason=inactivity_text,
+                    sent_at=now.isoformat(),
+                    outcome="fail",
+                    error_summary=exc.__class__.__name__,
+                    metadata={
+                        "source": "inactive_members_moderation",
+                        "days_inactive": candidate.days_inactive,
+                        "message_count": candidate.count_in_window,
+                    },
+                )
         logger.info("inactive reminders guild=%s ok=%s fail=%s", guild_id, ok, fail)
         return {"dm_ok": ok, "dm_fail": fail, "errors": errors[:10]}
 
