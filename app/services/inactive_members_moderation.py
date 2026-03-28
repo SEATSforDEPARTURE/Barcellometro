@@ -228,6 +228,40 @@ class InactiveMembersModerationService:
                 logger.warning("inactive moderation: failed unban user=%s guild=%s", user_id, guild.id, exc_info=True)
         await self._run_due_manual_grace_tempbans(now_iso)
 
+    async def _log_moderation_action(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        action_type: str,
+        reason: str,
+        duration_seconds: int | None = None,
+        expires_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if self._member_flow_notifications is None:
+            await self._database.log_moderation_action(
+                guild_id=guild_id,
+                user_id=user_id,
+                moderator_id=None,
+                action_type=action_type,
+                reason=reason,
+                duration_seconds=duration_seconds,
+                expires_at=expires_at,
+                metadata=metadata,
+            )
+            return None
+        return await self._member_flow_notifications.log_action(
+            guild_id=guild_id,
+            user_id=user_id,
+            moderator_id=None,
+            action_type=action_type,
+            reason=reason,
+            duration_seconds=duration_seconds,
+            expires_at=expires_at,
+            metadata=metadata,
+        )
+
     @staticmethod
     def _users_grace_tempban_setting_key(guild_id: str) -> str:
         return f"users.grace.tempban.default_seconds.{guild_id}"
@@ -250,10 +284,9 @@ class InactiveMembersModerationService:
             guild = self._bot.get_guild(int(guild_id))
             if guild is None:
                 continue
-            await self._database.log_moderation_action(
+            await self._log_moderation_action(
                 guild_id=guild_id,
                 user_id=user_id,
-                moderator_id=None,
                 action_type="ungrace",
                 reason="Manual grace period expired",
                 metadata={"source": "users_grace_auto_expiry"},
@@ -268,10 +301,9 @@ class InactiveMembersModerationService:
                 continue
             expires_at = now + timedelta(seconds=duration_seconds)
             await self._database.add_temp_ban(guild_id, user_id, expires_at.isoformat(), "Automatic tempban after manual grace expiry")
-            await self._database.log_moderation_action(
+            await self._log_moderation_action(
                 guild_id=guild_id,
                 user_id=user_id,
-                moderator_id=None,
                 action_type="tempban",
                 reason="Automatic tempban after manual grace expiry",
                 duration_seconds=duration_seconds,
