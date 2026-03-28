@@ -10,13 +10,20 @@ from discord import app_commands
 
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.plugins.commands_modular.time_windows import rolling_window_timedelta
 from app.services.greetings_copy_service import GreetingsCopyService
-from app.services.member_flow_notifications import format_duration_human, parse_duration_input
+from app.services.member_flow_notifications import format_duration_human
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 
 logger = logging.getLogger(__name__)
 
 PERM = "users"
+WINDOW_UNIT_CHOICES = [
+    app_commands.Choice(name="minuti", value="minuti"),
+    app_commands.Choice(name="ore", value="ore"),
+    app_commands.Choice(name="giorni", value="giorni"),
+    app_commands.Choice(name="settimane", value="settimane"),
+]
 
 
 def _normalize_optional_reason(value: str | None) -> str | None:
@@ -326,10 +333,19 @@ def register_moderazione_utenti(
             kind="success",
         )
 
-    async def _tempban_impl(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
+    def _resolve_duration_seconds(quantity: int, unit: str) -> int:
+        return int(rolling_window_timedelta(quantity, unit).total_seconds())
+
+    async def _tempban_impl(
+        interaction: discord.Interaction,
+        user: discord.Member,
+        quantity: int,
+        unit: str,
+        reason: str | None = None,
+    ) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
-        duration_seconds = parse_duration_input(duration)
+        duration_seconds = _resolve_duration_seconds(quantity, unit)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
         explicit_reason = _normalize_optional_reason(reason)
         operation_id = str(uuid4())
@@ -362,7 +378,7 @@ def register_moderazione_utenti(
         await _send(
             interaction,
             subcommand_path="users tempban",
-            subtitle_args=[user, format_duration_human(duration_seconds)],
+            subtitle_args=[user, quantity, unit],
             lines=[
                 ("user", user.mention),
                 ("duration", format_duration_human(duration_seconds)),
@@ -388,10 +404,16 @@ def register_moderazione_utenti(
             prefix="users_tempban_list",
         )
 
-    async def _grace_impl(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
+    async def _grace_impl(
+        interaction: discord.Interaction,
+        user: discord.Member,
+        quantity: int,
+        unit: str,
+        reason: str | None = None,
+    ) -> None:
         if not await _ensure(interaction) or interaction.guild is None:
             return
-        duration_seconds = parse_duration_input(duration)
+        duration_seconds = _resolve_duration_seconds(quantity, unit)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
         await ctx.database.extend_user_grace(str(interaction.guild.id), str(user.id), datetime.now(timezone.utc).isoformat())
         explicit_reason = _normalize_optional_reason(reason)
@@ -492,18 +514,42 @@ def register_moderazione_utenti(
         )
 
     @users_group.command(name="tempban", description="Ban a user temporarily.")
-    @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
-    async def users_tempban(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
-        await _tempban_impl(interaction, user, duration, reason)
+    @app_commands.describe(
+        user="Member to ban temporarily.",
+        quantity="Duration quantity (for example 10, 3, 7, 2).",
+        unit="Duration unit.",
+        reason="Optional reason override.",
+    )
+    @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+    async def users_tempban(
+        interaction: discord.Interaction,
+        user: discord.Member,
+        quantity: int,
+        unit: app_commands.Choice[str],
+        reason: str | None = None,
+    ) -> None:
+        await _tempban_impl(interaction, user, quantity, unit.value, reason)
 
     @users_group.command(name="tempban_list", description="List active temporary bans.")
     async def users_tempban_list(interaction: discord.Interaction) -> None:
         await _tempban_list_impl(interaction)
 
     @users_group.command(name="grace", description="Assign a manual grace period to a user.")
-    @app_commands.describe(user="Member that receives the grace period.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
-    async def users_grace(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
-        await _grace_impl(interaction, user, duration, reason)
+    @app_commands.describe(
+        user="Member that receives the grace period.",
+        quantity="Duration quantity (for example 10, 3, 7, 2).",
+        unit="Duration unit.",
+        reason="Optional reason override.",
+    )
+    @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+    async def users_grace(
+        interaction: discord.Interaction,
+        user: discord.Member,
+        quantity: int,
+        unit: app_commands.Choice[str],
+        reason: str | None = None,
+    ) -> None:
+        await _grace_impl(interaction, user, quantity, unit.value, reason)
 
     @users_group.command(name="grace_list", description="List active grace periods.")
     async def users_grace_list(interaction: discord.Interaction) -> None:
@@ -542,14 +588,38 @@ def register_moderazione_utenti(
             )
 
         @app_commands.command(name="tempban", description="Alias of /users tempban.")
-        @app_commands.describe(user="Member to ban temporarily.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
-        async def tempban_alias(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
-            await _tempban_impl(interaction, user, duration, reason)
+        @app_commands.describe(
+            user="Member to ban temporarily.",
+            quantity="Duration quantity (for example 10, 3, 7, 2).",
+            unit="Duration unit.",
+            reason="Optional reason override.",
+        )
+        @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+        async def tempban_alias(
+            interaction: discord.Interaction,
+            user: discord.Member,
+            quantity: int,
+            unit: app_commands.Choice[str],
+            reason: str | None = None,
+        ) -> None:
+            await _tempban_impl(interaction, user, quantity, unit.value, reason)
 
         @app_commands.command(name="grace", description="Alias of /users grace.")
-        @app_commands.describe(user="Member that receives the grace period.", duration="Duration like 7d or 12h.", reason="Optional reason override.")
-        async def grace_alias(interaction: discord.Interaction, user: discord.Member, duration: str, reason: str | None = None) -> None:
-            await _grace_impl(interaction, user, duration, reason)
+        @app_commands.describe(
+            user="Member that receives the grace period.",
+            quantity="Duration quantity (for example 10, 3, 7, 2).",
+            unit="Duration unit.",
+            reason="Optional reason override.",
+        )
+        @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+        async def grace_alias(
+            interaction: discord.Interaction,
+            user: discord.Member,
+            quantity: int,
+            unit: app_commands.Choice[str],
+            reason: str | None = None,
+        ) -> None:
+            await _grace_impl(interaction, user, quantity, unit.value, reason)
 
         @app_commands.command(name="ungrace", description="Alias of /users ungrace.")
         @app_commands.describe(user="User whose grace period is revoked.", reason="Optional reason override.")

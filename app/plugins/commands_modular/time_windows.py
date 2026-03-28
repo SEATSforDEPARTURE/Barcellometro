@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 
 ROME_TZ = ZoneInfo("Europe/Rome")
+ROLLING_WINDOW_UNITS: tuple[str, ...] = ("minuti", "ore", "giorni", "settimane")
 
 
 @dataclass
@@ -32,6 +33,18 @@ def _normalize_requested_unit(unit: str | None) -> str:
         "settimane": "settimane",
     }
     return aliases.get(normalized, "minuti")
+
+
+def rolling_window_timedelta(quantity: int, unit: str | None) -> timedelta:
+    qty = max(1, int(quantity))
+    normalized_unit = _normalize_requested_unit(unit)
+    delta_map = {
+        "minuti": timedelta(minutes=qty),
+        "ore": timedelta(hours=qty),
+        "giorni": timedelta(days=qty),
+        "settimane": timedelta(weeks=qty),
+    }
+    return delta_map.get(normalized_unit, timedelta(minutes=qty))
 
 
 def _format_qty_unit(qty: int, singular: str, plural: str) -> str:
@@ -142,13 +155,7 @@ def resolve_ultimi_window(quantita: int, unita: str, config: Any) -> tuple[TimeW
         return None, "Specifica una quantità valida."
 
     now = datetime.now(ROME_TZ)
-    delta_map = {
-        "minuti": timedelta(minutes=quantita),
-        "ore": timedelta(hours=quantita),
-        "giorni": timedelta(days=quantita),
-        "settimane": timedelta(weeks=quantita),
-    }
-    start_dt = now - delta_map.get(unita, timedelta(minutes=quantita))
+    start_dt = now - rolling_window_timedelta(quantita, unita)
     return TimeWindowResult(
         start_dt=start_dt,
         end_dt=now,

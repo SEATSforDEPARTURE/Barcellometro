@@ -382,3 +382,131 @@ def test_mod_users_ungrace_revokes_grace_state(
         assert ("result", "grace revoked") in response_kwargs["lines"]
 
     asyncio.run(_run())
+
+
+def test_users_tempban_and_grace_expose_quantity_unit_not_duration() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(
+        database=Mock(),
+        footer=None,
+        member_flow_notifications=None,
+        barcello_service=None,
+    )
+    register_moderazione_utenti(users_group, ctx)
+
+    tempban_command = _find_command(users_group, "tempban")
+    grace_command = _find_command(users_group, "grace")
+
+    tempban_params = [param.name for param in tempban_command.parameters]
+    grace_params = [param.name for param in grace_command.parameters]
+
+    assert tempban_params == ["user", "quantity", "unit", "reason"]
+    assert grace_params == ["user", "quantity", "unit", "reason"]
+    assert "duration" not in tempban_params
+    assert "duration" not in grace_params
+
+
+def test_mod_users_tempban_converts_quantity_unit_to_duration_seconds(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(
+            moderazione_utenti_module, "send_standard_response", send_standard_response
+        )
+        monkeypatch.setattr(
+            moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
+        )
+
+        database = SimpleNamespace(add_temp_ban=AsyncMock())
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(return_value={"canonical_written": False, "canonical_visible": False}),
+            send_notification=AsyncMock(),
+            remember_departure_action=Mock(),
+        )
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=member_flow_notifications,
+            barcello_service=None,
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "tempban")
+
+        guild = SimpleNamespace(id=1, ban=AsyncMock())
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
+        moderator = SimpleNamespace(id=9)
+        interaction = SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            user=moderator,
+            command=SimpleNamespace(qualified_name="users tempban"),
+        )
+        unit = discord.app_commands.Choice(name="ore", value="ore")
+
+        await command.callback(interaction, target_user, 3, unit, "Motivo test")
+
+        guild.ban.assert_awaited_once_with(
+            target_user, reason="Motivo test", delete_message_seconds=0
+        )
+        database.add_temp_ban.assert_awaited_once()
+        notify_kwargs = member_flow_notifications.log_action.await_args.kwargs
+        assert notify_kwargs["action_type"] == "tempban"
+        assert notify_kwargs["duration_seconds"] == 3 * 60 * 60
+        response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["subcommand_path"] == "users tempban"
+        assert ("duration", "3h") in response_kwargs["lines"]
+
+    asyncio.run(_run())
+
+
+def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
+    monkeypatch,
+) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(
+            moderazione_utenti_module, "send_standard_response", send_standard_response
+        )
+        monkeypatch.setattr(
+            moderazione_utenti_module, "check_permission", AsyncMock(return_value=True)
+        )
+
+        database = SimpleNamespace(extend_user_grace=AsyncMock())
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(return_value={"canonical_written": False, "canonical_visible": False}),
+            send_notification=AsyncMock(),
+        )
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=member_flow_notifications,
+            barcello_service=None,
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        command = _find_command(users_group, "grace")
+
+        guild = SimpleNamespace(id=1)
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente")
+        moderator = SimpleNamespace(id=9)
+        interaction = SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            user=moderator,
+            command=SimpleNamespace(qualified_name="users grace"),
+        )
+        unit = discord.app_commands.Choice(name="settimane", value="settimane")
+
+        await command.callback(interaction, target_user, 2, unit, "Protezione test")
+
+        database.extend_user_grace.assert_awaited_once()
+        notify_kwargs = member_flow_notifications.log_action.await_args.kwargs
+        assert notify_kwargs["action_type"] == "grace"
+        assert notify_kwargs["duration_seconds"] == 2 * 7 * 24 * 60 * 60
+        response_kwargs = send_standard_response.await_args.kwargs
+        assert response_kwargs["subcommand_path"] == "users grace"
+        assert ("duration", "14g") in response_kwargs["lines"]
+
+    asyncio.run(_run())
