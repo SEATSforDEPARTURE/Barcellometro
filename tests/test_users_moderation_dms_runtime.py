@@ -79,14 +79,13 @@ def test_users_dm_manual_grace_renders_template_and_logs_success() -> None:
         assert result == {"sent": True}
         user.send.assert_awaited_once()
         sent_embed = user.send.await_args.kwargs["embed"]
-        assert sent_embed.title.startswith("🛡️")
-        assert "GRACE MANUALE ATTIVATO" in sent_embed.title
+        assert sent_embed.title == "🕊️ __**GRAZIA**__"
         assert "Manual grace reason" in str(sent_embed.description)
         assert "GRACE <@42> (<@42>)" in str(sent_embed.description)
         assert "https://discord.gg/server" in str(sent_embed.description)
         assert "2026-01-01 12:00 UTC" in str(sent_embed.description)
         assert "01/01/2026 13:00" in str(sent_embed.description)
-        assert sent_embed.author.name
+        assert sent_embed.author.name == "servizio USERS"
         assert sent_embed.footer.text
         assert db.logs[-1]["outcome"] == "success"
         assert db.logs[-1]["event_type"] == "grace"
@@ -207,11 +206,10 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
         guild.ban.assert_awaited_once()
         user.send.assert_awaited_once()
         dm_embed = user.send.await_args.kwargs["embed"]
-        assert dm_embed.title.startswith("🔨")
-        assert "BAN TEMPORANEO AUTOMATICO" in dm_embed.title
+        assert dm_embed.title == "⌛ __**INTERDIZIONE TEMPORANEA**__"
         assert "AUTO TEMPBAN <@42> (<@42>)" in str(dm_embed.description)
         assert "https://discord.gg/rejoin" in str(dm_embed.description)
-        assert dm_embed.author.name
+        assert dm_embed.author.name == "servizio USERS"
         assert dm_embed.footer.text
         assert database.log_users_dm_delivery.await_count >= 1
         assert database.log_users_dm_delivery.await_args_list[-1].kwargs["event_type"] == "tempban"

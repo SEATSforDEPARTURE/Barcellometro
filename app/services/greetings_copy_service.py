@@ -1085,7 +1085,7 @@ def format_greetings_event_label(event_type_key: str, occurrence_number: int) ->
     return build_greetings_title(event_type_key, occurrence_number)
 
 
-def build_greetings_title(event_type_key: str, occurrence_count: int, is_auto_inactivity: bool = False) -> str:
+def get_greetings_title_parts(event_type_key: str, *, is_auto_inactivity: bool = False) -> tuple[str, str]:
     normalized = str(event_type_key or "").strip().lower()
     if is_auto_inactivity and normalized == "tempban":
         normalized = "inactive_tempban"
@@ -1102,7 +1102,12 @@ def build_greetings_title(event_type_key: str, occurrence_count: int, is_auto_in
     }
     if normalized not in title_map:
         raise ValueError(f"Unsupported greetings event type: {event_type_key}")
-    emoji, text = title_map[normalized]
+    return title_map[normalized]
+
+
+def build_greetings_title(event_type_key: str, occurrence_count: int, is_auto_inactivity: bool = False) -> str:
+    _ = occurrence_count
+    emoji, text = get_greetings_title_parts(event_type_key, is_auto_inactivity=is_auto_inactivity)
     return f"{emoji} __**{text}**__"
 
 

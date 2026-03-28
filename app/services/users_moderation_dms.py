@@ -8,6 +8,7 @@ import discord
 from app.services.database import DatabaseService
 from app.services.dm_time_placeholders import build_time_placeholder_payload
 from app.services.dm_user_placeholders import build_user_placeholder_payload
+from app.services.greetings_copy_service import get_greetings_title_parts
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 
 DEFAULT_USERS_DM_COOLDOWN_DAYS = 14
@@ -40,7 +41,7 @@ USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
     "invite_line",
 )
 
-USERS_DM_SERVICE_NAME = "inactivity_moderation"
+USERS_DM_SERVICE_NAME = "users"
 
 
 class UsersModerationDmService:
@@ -188,7 +189,7 @@ class UsersModerationDmService:
         title, emoji = self._title_for_event(event_type)
         dm_embed = await build_standard_dm_embed(
             service_name=USERS_DM_SERVICE_NAME,
-            canonical_top_level_command="inattivi",
+            canonical_top_level_command="users",
             title=title,
             title_emoji=emoji,
             description=body,
@@ -282,9 +283,8 @@ class UsersModerationDmService:
 
     @staticmethod
     def _title_for_event(event_type: str) -> tuple[str, str]:
-        if event_type == "tempban":
-            return "Ban temporaneo automatico", "🔨"
-        return "Grace manuale attivato", "🛡️"
+        emoji, text = get_greetings_title_parts(event_type)
+        return text, emoji
 
     @classmethod
     def _render_template(

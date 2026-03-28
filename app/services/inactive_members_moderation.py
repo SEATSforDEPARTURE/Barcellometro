@@ -16,6 +16,7 @@ import discord
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
+from app.services.greetings_copy_service import get_greetings_title_parts
 from app.services.inactivity_dm_templates import build_inactivity_dm_template_payload
 from app.services.users_moderation_dms import UsersModerationDmService
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
@@ -25,6 +26,8 @@ from app.shared.discord.component_notices import send_standard_component_notice
 logger = logging.getLogger(__name__)
 ROME = ZoneInfo("Europe/Rome")
 USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
+INACTIVE_GRACE_TITLE_EMOJI, INACTIVE_GRACE_TITLE_TEXT = get_greetings_title_parts("inactive_grace")
+INACTIVE_TEMPBAN_TITLE_EMOJI, INACTIVE_TEMPBAN_TITLE_TEXT = get_greetings_title_parts("inactive_tempban")
 
 
 def _state_int(state: Any, key: str, default: int = 0) -> int:
@@ -935,10 +938,10 @@ class InactiveMembersModerationService:
                 expires_at=now + timedelta(days=int(cfg.get("grace_days_after_reminder", 7))),
             )
             reminder_embed = await build_standard_dm_embed(
-                service_name="inactivity_moderation",
+                service_name="inactivity",
                 canonical_top_level_command="inattivi",
-                title="Promemoria inattività",
-                title_emoji="🔔",
+                title=INACTIVE_GRACE_TITLE_TEXT,
+                title_emoji=INACTIVE_GRACE_TITLE_EMOJI,
                 description=body,
                 color=discord.Colour.blurple(),
             )
@@ -1058,10 +1061,10 @@ class InactiveMembersModerationService:
             )
             try:
                 tempban_embed = await build_standard_dm_embed(
-                    service_name="inactivity_moderation",
+                    service_name="inactivity",
                     canonical_top_level_command="inattivi",
-                    title="Tempban inattività",
-                    title_emoji="⛔",
+                    title=INACTIVE_TEMPBAN_TITLE_TEXT,
+                    title_emoji=INACTIVE_TEMPBAN_TITLE_EMOJI,
                     description=msg,
                     color=discord.Colour.orange(),
                 )
