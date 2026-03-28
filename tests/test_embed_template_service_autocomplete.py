@@ -34,6 +34,7 @@ _EXPECTED_CANONICAL_PUBLIC_SERVICES = [
     "database",
     "status",
     "ai",
+    "users",
 ]
 
 
@@ -61,6 +62,21 @@ def test_embed_template_services_autocomplete_excludes_legacy_keys() -> None:
     asyncio.run(_run())
 
 
+def test_author_template_service_set_autocomplete_includes_users_and_not_singular_user(embed_module) -> None:
+    bundle = register_embed_tree(embed_module)
+    set_command = find_command(bundle.author_group, "template_service_set")
+    autocomplete = set_command._params["service"].autocomplete
+    assert autocomplete is not None
+
+    async def _run() -> None:
+        choices = await autocomplete(SimpleNamespace(), "")
+        values = [choice.value for choice in choices]
+        assert "users" in values
+        assert "user" not in values
+
+    asyncio.run(_run())
+
+
 def test_embed_template_service_resolver_maps_legacy_aliases_to_public_keys() -> None:
     assert resolve_embed_template_public_service("audio_notes") == "audio"
     assert resolve_embed_template_public_service("barcello") == "triggers"
@@ -73,6 +89,8 @@ def test_embed_template_service_resolver_maps_legacy_aliases_to_public_keys() ->
     assert resolve_embed_template_public_service("campagne_prompt") == "campaigns"
     assert resolve_embed_template_public_service("domanda") == "qna"
     assert resolve_embed_template_public_service("inattivi") == "inactivity"
+    assert resolve_embed_template_public_service("utenti") == "users"
+    assert resolve_embed_template_public_service("mod_users") == "users"
     assert resolve_embed_template_public_service("audio notes") == "audio"
 
 

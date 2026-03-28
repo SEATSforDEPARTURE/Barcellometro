@@ -100,6 +100,11 @@ _PUBLIC_TOP_LEVEL_EMBED_SERVICES: tuple[PublicEmbedService, ...] = (
         label="AI",
         aliases=("model", "fallback_model", "ai_model"),
     ),
+    PublicEmbedService(
+        key="users",
+        label="USERS",
+        aliases=("utenti", "mod_users", "moderation_users", "users_moderation_dms"),
+    ),
 )
 
 

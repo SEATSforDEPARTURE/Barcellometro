@@ -59,9 +59,9 @@ def test_author_on_off_and_status_commands(embed_module, monkeypatch: pytest.Mon
         status_kwargs = send_standard.await_args.kwargs
         assert status_kwargs['subcommand_path'] == 'author status'
         assert ('enabled', 'on') in status_kwargs['lines']
-        assert ('supported services', 15) in status_kwargs['lines']
+        assert ('supported services', 16) in status_kwargs['lines']
         assert ('services with custom template', 1) in status_kwargs['lines']
-        assert ('services using default', 14) in status_kwargs['lines']
+        assert ('services using default', 15) in status_kwargs['lines']
         assert ('runtime rule', 'ON = runtime uses service custom author when configured; otherwise standard default') in status_kwargs['lines']
         custom_section = next(section for section in status_kwargs['sections'] if section.title == 'Custom Templates')
         assert ('dmchannelsummary', 'phrase, url') in custom_section.lines

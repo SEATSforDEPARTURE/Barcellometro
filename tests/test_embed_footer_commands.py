@@ -277,9 +277,9 @@ def test_footer_status_command_uses_embed_namespace_and_simplified_status_payloa
         kwargs = send_standard.await_args.kwargs
         assert kwargs['subcommand_path'] == 'footer status'
         assert ('enabled', 'off') in kwargs['lines']
-        assert ('supported services', 15) in kwargs['lines']
+        assert ('supported services', 16) in kwargs['lines']
         assert ('services with custom template', 1) in kwargs['lines']
-        assert ('services using default', 14) in kwargs['lines']
+        assert ('services using default', 15) in kwargs['lines']
         assert ('runtime rule', 'OFF = runtime always uses standard default footer even if custom is saved') in kwargs['lines']
         custom_section = next(section for section in kwargs['sections'] if section.title == 'Custom Templates')
         assert ('dmchannelsummary', 'phrase, thumbnail') in custom_section.lines
