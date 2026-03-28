@@ -18,14 +18,25 @@ def _format_it(dt: datetime | None) -> str:
     return dt.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
 
 
-def build_time_placeholder_payload(*, now: datetime, expires_at: datetime | None = None) -> dict[str, str]:
+def build_time_placeholder_payload(
+    *,
+    now: datetime,
+    started_at: datetime | None = None,
+    expires_at: datetime | None = None,
+) -> dict[str, str]:
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
+    if started_at is None:
+        started_at = now
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
     if expires_at is not None and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     return {
         "now_utc": _format_utc(now),
         "now_it": _format_it(now),
+        "started_at_utc": _format_utc(started_at),
+        "started_at_it": _format_it(started_at),
         "expires_at_utc": _format_utc(expires_at),
         "expires_at_it": _format_it(expires_at),
     }

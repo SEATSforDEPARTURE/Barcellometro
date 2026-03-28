@@ -431,3 +431,25 @@ def test_execute_kick_pipeline_uses_template_tempban_and_logs_tempban_dm_deliver
         assert database.log_inactivity_dm_delivery.await_args.kwargs["outcome"] == "success"
 
     asyncio.run(_run())
+
+
+def test_inactivity_template_render_drops_unresolved_placeholders_and_supports_reason_line() -> None:
+    service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(), member_flow_notifications=None)
+    member = SimpleNamespace(id=42, mention="<@42>", name="user-42", display_name="Dormiente")
+    guild = SimpleNamespace(id=1, name="Barcellometro")
+    rendered = service._render_template(
+        "DM {mention} {event_type} {reason_line}{invite_line}{missing_token}",
+        member=member,
+        guild=guild,
+        event_type="tempban",
+        days_inactive=30,
+        policy={"window_days": 30, "min_messages": 1},
+        cfg={"invite_url": "https://discord.gg/rejoin", "grace_days_after_reminder": 7, "ban_days": 7},
+        reason="Inattività prolungata",
+        reasoning="inactivity_grace_expired_tempban",
+        duration_seconds=3600,
+    )
+
+    assert "{missing_token}" not in rendered
+    assert "Reason: Inattività prolungata." in rendered
+    assert "Invite: https://discord.gg/rejoin" in rendered

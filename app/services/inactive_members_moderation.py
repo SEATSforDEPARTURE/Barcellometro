@@ -17,6 +17,7 @@ from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
 from app.services.greetings_copy_service import get_greetings_title_parts
+from app.services.dm_template_placeholders import render_dm_template
 from app.services.inactivity_dm_templates import build_inactivity_dm_template_payload
 from app.services.users_moderation_dms import UsersModerationDmService
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
@@ -825,31 +826,43 @@ class InactiveMembersModerationService:
         *,
         member: discord.Member,
         guild: discord.Guild,
+        event_type: str,
         days_inactive: int,
         policy: dict[str, Any],
         cfg: dict[str, Any],
         message_count: int | None = None,
         reminder_count: int | None = None,
         reason: str | None = None,
+        reasoning: str | None = None,
         inactivity_text: str | None = None,
+        event_state: str | None = None,
+        event_cause: str | None = None,
+        duration_seconds: int | None = None,
         now: datetime | None = None,
+        started_at: datetime | None = None,
         expires_at: datetime | None = None,
     ) -> str:
         base = template or ""
         payload = build_inactivity_dm_template_payload(
             member=member,
             guild=guild,
+            event_type=event_type,
             days_inactive=days_inactive,
             policy=policy,
             cfg=cfg,
             message_count=message_count,
             reminder_count=reminder_count,
             reason=reason,
+            reasoning=reasoning,
             inactivity_text=inactivity_text,
+            event_state=event_state,
+            event_cause=event_cause,
+            duration_seconds=duration_seconds,
             now=now,
+            started_at=started_at,
             expires_at=expires_at,
         )
-        return base.format(**payload)
+        return render_dm_template(base, payload)
 
     @staticmethod
     def _parse_iso_datetime(value: str | None) -> datetime | None:
@@ -929,12 +942,20 @@ class InactiveMembersModerationService:
                 grace_template,
                 member=candidate.member,
                 guild=guild,
+                event_type="grace",
                 days_inactive=candidate.days_inactive,
                 policy=candidate.policy,
                 cfg=cfg,
                 message_count=candidate.count_in_window,
                 reminder_count=_state_int(state, "reminder_count", 0),
+                reason=inactivity_text,
+                reasoning="inactivity_grace",
+                inactivity_text=inactivity_text,
+                event_state="grace_started",
+                event_cause="inactivity",
+                duration_seconds=int(cfg.get("grace_days_after_reminder", 7) or 7) * 86400,
                 now=now,
+                started_at=now,
                 expires_at=now + timedelta(days=int(cfg.get("grace_days_after_reminder", 7))),
             )
             reminder_embed = await build_standard_dm_embed(
@@ -1049,14 +1070,20 @@ class InactiveMembersModerationService:
                 tempban_template,
                 member=candidate.member,
                 guild=guild,
+                event_type="tempban",
                 days_inactive=candidate.days_inactive,
                 policy=candidate.policy,
                 cfg=cfg,
                 message_count=candidate.count_in_window,
                 reminder_count=reminder_count,
                 reason="Inattività prolungata",
+                reasoning="inactivity_grace_expired_tempban" if require_grace else "inactivity_direct_tempban",
                 inactivity_text=inactivity_text,
+                event_state="grace_expired" if require_grace else "manual_action",
+                event_cause="inactivity",
+                duration_seconds=ban_days * 86400,
                 now=now,
+                started_at=now,
                 expires_at=now + timedelta(days=ban_days),
             )
             try:
