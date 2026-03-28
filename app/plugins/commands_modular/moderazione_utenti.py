@@ -5,6 +5,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
@@ -44,6 +45,7 @@ WINDOW_ACTION_LABELS = {
     "ungrace": "grace",
 }
 USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
+ROME_TZ = ZoneInfo("Europe/Rome")
 
 
 def _users_grace_tempban_setting_key(guild_id: int | str) -> str:
@@ -113,6 +115,75 @@ def _render_departure_action_label(action_type: str) -> str:
         "inactive_kick": "allontanamento per inattività",
     }
     return labels.get(action_type, action_type)
+
+
+def _parse_iso_datetime(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_italian_datetime(value: object) -> str | None:
+    dt = _parse_iso_datetime(value)
+    if dt is None:
+        return None
+    return dt.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
+
+
+def _format_moderation_list_line(
+    row: dict | object,
+    *,
+    list_kind: str,
+    grace_post_tempban_seconds: int = 0,
+) -> str:
+    def _row_value(key: str) -> object:
+        if isinstance(row, dict):
+            return row.get(key)
+        return row[key]
+
+    user_id = str(_row_value("user_id") or "").strip()
+    user_label = f"<@{user_id}>" if user_id else "utente sconosciuto"
+    created_label = _format_italian_datetime(_row_value("created_at"))
+    expires_label = _format_italian_datetime(_row_value("expires_at"))
+    action_type = str(_row_value("action_type") or "").strip()
+
+    parts = [user_label]
+    if list_kind == "kick":
+        event_label = _render_departure_action_label(action_type or "kick")
+        parts.append(f"evento: {event_label}")
+        if created_label:
+            parts.append(f"avvenuto il {created_label}")
+    elif list_kind == "ban":
+        parts.append("evento: ban")
+        if created_label:
+            parts.append(f"avvenuto il {created_label}")
+    elif list_kind == "tempban":
+        parts.append("evento: tempban")
+        if created_label:
+            parts.append(f"avvenuto il {created_label}")
+        if expires_label:
+            parts.append(f"scade il {expires_label}")
+    elif list_kind == "grace":
+        parts.append("evento: grace")
+        if created_label:
+            parts.append(f"grace iniziato il {created_label}")
+        if expires_label:
+            parts.append(f"grace scade il {expires_label}")
+        if grace_post_tempban_seconds > 0:
+            parts.append(f"tempban successivo: {format_duration_human(grace_post_tempban_seconds)}")
+            expires_dt = _parse_iso_datetime(_row_value("expires_at"))
+            if expires_dt is not None:
+                post_tempban_expiry = (expires_dt + timedelta(seconds=grace_post_tempban_seconds)).astimezone(ROME_TZ)
+                parts.append(f"tempban previsto fino al {post_tempban_expiry.strftime('%d/%m/%Y %H:%M')}")
+
+    return f"• {' · '.join(parts)}"
 
 
 def register_moderazione_utenti(
@@ -262,10 +333,7 @@ def register_moderazione_utenti(
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_recent_kicked_users(str(interaction.guild_id))
-        lines = [
-            f"• <@{row['user_id']}> · {_render_departure_action_label(str(row['action_type'] or 'kick'))} · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}"
-            for row in rows
-        ]
+        lines = [_format_moderation_list_line(row, list_kind="kick") for row in rows]
         await _send_lines(
             interaction,
             ctx,
@@ -310,7 +378,7 @@ def register_moderazione_utenti(
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_active_bans(str(interaction.guild_id))
-        lines = [f"• <@{row['user_id']}> · ban · {str(row['created_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
+        lines = [_format_moderation_list_line(row, list_kind="ban") for row in rows]
         await _send_lines(
             interaction,
             ctx,
@@ -449,7 +517,7 @@ def register_moderazione_utenti(
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_active_tempbans(str(interaction.guild_id))
-        lines = [f"• <@{row['user_id']}> · {row['action_type'] or 'tempban'} · expires {str(row['expires_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
+        lines = [_format_moderation_list_line(row, list_kind="tempban") for row in rows]
         await _send_lines(
             interaction,
             ctx,
@@ -509,7 +577,15 @@ def register_moderazione_utenti(
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         rows = await ctx.database.list_active_grace_users(str(interaction.guild_id))
-        lines = [f"• <@{row['user_id']}> · {row['action_type']} · expires {str(row['expires_at'])[:16]} · {row['reason'] or 'n/a'}" for row in rows]
+        post_grace_tempban_seconds = await _get_users_grace_tempban_default_seconds(interaction.guild_id)
+        lines = [
+            _format_moderation_list_line(
+                row,
+                list_kind="grace",
+                grace_post_tempban_seconds=post_grace_tempban_seconds,
+            )
+            for row in rows
+        ]
         await _send_lines(
             interaction,
             ctx,

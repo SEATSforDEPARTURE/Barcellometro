@@ -653,3 +653,130 @@ def test_users_grace_tempban_set_show_reset() -> None:
         monkeypatch.undo()
 
     asyncio.run(_run())
+
+
+def test_moderation_list_formatter_uses_structured_italian_fields_only() -> None:
+    kick_line = moderazione_utenti_module._format_moderation_list_line(
+        {
+            "user_id": "42",
+            "action_type": "kick",
+            "created_at": "2026-03-28T17:17:00+00:00",
+            "reason": "È stato espulso da ... per la 1° volta",
+        },
+        list_kind="kick",
+    )
+    tempban_line = moderazione_utenti_module._format_moderation_list_line(
+        {
+            "user_id": "43",
+            "action_type": "tempban",
+            "created_at": "2026-03-28T17:17:00+00:00",
+            "expires_at": "2026-03-30T17:17:00+00:00",
+            "reason": "Che peccato.",
+        },
+        list_kind="tempban",
+    )
+    grace_line = moderazione_utenti_module._format_moderation_list_line(
+        {
+            "user_id": "44",
+            "action_type": "grace",
+            "created_at": "2026-03-28T17:17:00+00:00",
+            "expires_at": "2026-03-29T17:17:00+00:00",
+            "reason": "Provvedimento registrato.",
+        },
+        list_kind="grace",
+        grace_post_tempban_seconds=2 * 24 * 60 * 60,
+    )
+
+    assert "28/03/2026 18:17" in kick_line
+    assert "29/03/2026 19:17" in grace_line
+    assert "Che peccato" not in tempban_line
+    assert "Provvedimento registrato" not in grace_line
+    assert "espulso da" not in kick_line
+    assert "scade il 30/03/2026 19:17" in tempban_line
+    assert "grace scade il 29/03/2026 19:17" in grace_line
+    assert "tempban successivo: 2g" in grace_line
+    assert "tempban previsto fino al 31/03/2026 19:17" in grace_line
+
+
+def test_users_list_commands_render_structured_lines_and_no_narrative(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+        send_lines_mock = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "_send_lines", send_lines_mock)
+
+        database = SimpleNamespace(
+            list_recent_kicked_users=AsyncMock(
+                return_value=[
+                    {
+                        "user_id": "42",
+                        "action_type": "kick",
+                        "created_at": "2026-03-28T17:17:00+00:00",
+                        "reason": "è stato espulso da ... per la 1° volta",
+                    }
+                ]
+            ),
+            list_active_bans=AsyncMock(
+                return_value=[
+                    {
+                        "user_id": "43",
+                        "action_type": "ban",
+                        "created_at": "2026-03-28T17:17:00+00:00",
+                        "reason": "Provvedimento registrato.",
+                    }
+                ]
+            ),
+            list_active_tempbans=AsyncMock(
+                return_value=[
+                    {
+                        "user_id": "44",
+                        "action_type": "tempban",
+                        "created_at": "2026-03-28T17:17:00+00:00",
+                        "expires_at": "2026-03-30T17:17:00+00:00",
+                        "reason": "Che peccato.",
+                    }
+                ]
+            ),
+            list_active_grace_users=AsyncMock(
+                return_value=[
+                    {
+                        "user_id": "45",
+                        "action_type": "grace",
+                        "created_at": "2026-03-28T17:17:00+00:00",
+                        "expires_at": "2026-03-29T17:17:00+00:00",
+                        "reason": "Che peccato.",
+                    }
+                ]
+            ),
+            get_setting=AsyncMock(return_value=str(2 * 24 * 60 * 60)),
+        )
+        ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        interaction = SimpleNamespace(guild_id=1, guild=SimpleNamespace(id=1), user=SimpleNamespace(id=9))
+
+        await _find_command(users_group, "kick_list").callback(interaction)
+        await _find_command(users_group, "ban_list").callback(interaction)
+        await _find_command(users_group, "tempban_list").callback(interaction)
+        await _find_command(users_group, "grace_list").callback(interaction)
+
+        assert send_lines_mock.await_count == 4
+        kick_lines = send_lines_mock.await_args_list[0].kwargs["lines"]
+        ban_lines = send_lines_mock.await_args_list[1].kwargs["lines"]
+        tempban_lines = send_lines_mock.await_args_list[2].kwargs["lines"]
+        grace_lines = send_lines_mock.await_args_list[3].kwargs["lines"]
+
+        assert kick_lines == ["• <@42> · evento: allontanamento · avvenuto il 28/03/2026 18:17"]
+        assert ban_lines == ["• <@43> · evento: ban · avvenuto il 28/03/2026 18:17"]
+        assert tempban_lines == ["• <@44> · evento: tempban · avvenuto il 28/03/2026 18:17 · scade il 30/03/2026 19:17"]
+        assert (
+            grace_lines
+            == [
+                "• <@45> · evento: grace · grace iniziato il 28/03/2026 18:17 · grace scade il 29/03/2026 19:17 · tempban successivo: 2g · tempban previsto fino al 31/03/2026 19:17"
+            ]
+        )
+        for line in [*kick_lines, *ban_lines, *tempban_lines, *grace_lines]:
+            assert "Che peccato" not in line
+            assert "Provvedimento registrato" not in line
+            assert "espulso da" not in line
+
+    asyncio.run(_run())
