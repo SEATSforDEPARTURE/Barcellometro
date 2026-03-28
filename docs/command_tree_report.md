@@ -304,35 +304,27 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `triggers` | `phrases` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:615` |
 | `users` | `—` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:714` |
 | `users` | `—` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:718` |
-| `users` | `grace` | `manual` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `—` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_set` | Set the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_show` | Show the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_reset` | Disable the automatic tempban applied after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `—` | `grace_list` | List active grace periods. | `app/plugins/commands_modular/moderazione_utenti.py:858` |
-| `users` | `—` | `ieri` | Revoca le azioni create ieri. | `app/plugins/commands_modular/moderazione_utenti.py:935` |
-| `users` | `—` | `intervallo` | Revoca le azioni create in un intervallo esplicito. | `app/plugins/commands_modular/moderazione_utenti.py:955` |
 | `users` | `—` | `kick` | Remove a user from the server. | `app/plugins/commands_modular/moderazione_utenti.py:705` |
 | `users` | `—` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:709` |
-| `users` | `—` | `oggi` | Revoca le azioni create oggi. | `app/plugins/commands_modular/moderazione_utenti.py:930` |
 | `users` | `—` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:827` |
 | `users` | `—` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:837` |
-| `users` | `—` | `ultimi` | Revoca le azioni create nella finestra mobile. | `app/plugins/commands_modular/moderazione_utenti.py:941` |
 | `users` | `unban` | `last` | Revoke bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:750` |
 | `users` | `unban` | `range` | Revoke bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:764` |
 | `users` | `unban` | `today` | Revoke bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:739` |
-| `users` | `unban` | `user` | Revoke an active ban for one user. | `app/plugins/commands_modular/moderazione_utenti.py:731` |
 | `users` | `unban` | `yesterday` | Revoke bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:744` |
 | `users` | `ungrace` | `last` | Revoke grace periods created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:884` |
 | `users` | `ungrace` | `range` | Revoke grace periods created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:898` |
 | `users` | `ungrace` | `today` | Revoke grace periods created today. | `app/plugins/commands_modular/moderazione_utenti.py:873` |
-| `users` | `ungrace` | `user` | Revoke an active grace period for one user. | `app/plugins/commands_modular/moderazione_utenti.py:865` |
 | `users` | `ungrace` | `yesterday` | Revoke grace periods created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:878` |
 | `users` | `untempban` | `last` | Revoke temporary bans created in the last rolling window. | `app/plugins/commands_modular/moderazione_utenti.py:796` |
 | `users` | `untempban` | `range` | Revoke temporary bans created in an explicit range. | `app/plugins/commands_modular/moderazione_utenti.py:810` |
 | `users` | `untempban` | `today` | Revoke temporary bans created today. | `app/plugins/commands_modular/moderazione_utenti.py:785` |
-| `users` | `untempban` | `user` | Revoke an active temporary ban for one user. | `app/plugins/commands_modular/moderazione_utenti.py:777` |
 | `users` | `untempban` | `yesterday` | Revoke temporary bans created yesterday. | `app/plugins/commands_modular/moderazione_utenti.py:790` |
-| `users` | `—` | `user` |  | `app/plugins/commands_modular/moderazione_utenti.py:913` |
 | `voice_ingest` | `—` | `join` | Join a voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:24` |
 | `voice_ingest` | `—` | `leave` | Leave the current voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:48` |
 
