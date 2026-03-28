@@ -105,9 +105,10 @@ def _policy_summary(policy: dict[str, object]) -> str:
 def _render_template_preview(template: str) -> str:
     payload = build_dm_template_preview_payload(
         event_type="tempban",
-        reason="Inactivity",
+        reason="Inattività prolungata",
         duration_seconds=7 * 86400,
         extra_payload={
+            "reasoning": "inactivity_grace_expired_tempban",
             "days_inactive": 39,
             "window_days": 30,
             "min_messages": 1,
@@ -116,8 +117,8 @@ def _render_template_preview(template: str) -> str:
             "reminder_count": 1,
             "ban_days": 7,
             "rejoin_link": "https://discord.gg/example",
-            "inactivity_text": "has been inactive for 39 days",
-            "event_state": "grace_started",
+            "inactivity_text": "è stato inattivo per 39 giorni",
+            "event_state": "grace_expired",
             "event_cause": "inactivity",
         },
     )

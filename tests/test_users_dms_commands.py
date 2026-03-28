@@ -170,6 +170,9 @@ def test_users_tempban_preview_is_safe_and_resolves_ban_days(users_module) -> No
     assert "Template render error" not in preview
     assert "{ban_days}" not in preview
     assert "{user}" not in preview
+    assert "periodo di grazia manuale scaduto" in preview
+    assert "Reason:" not in preview
+    assert "Manual grace expired" not in preview
     assert "2" in preview
 
 
