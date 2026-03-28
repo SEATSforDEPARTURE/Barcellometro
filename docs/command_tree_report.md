@@ -307,7 +307,22 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `triggers` | `phrases` | `template_user_show` | Show a user-specific phrase template | `app/plugins/commands_modular/triggers.py:615` |
 | `users` | `—` | `ban` | Ban a user permanently. | `app/plugins/commands_modular/moderazione_utenti.py:714` |
 | `users` | `—` | `ban_list` | List active permanent bans. | `app/plugins/commands_modular/moderazione_utenti.py:718` |
-| `users` | `—` | `grace` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `on` | Enable USERS DMs for manual grace and auto-tempban. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `off` | Disable USERS DMs for manual grace and auto-tempban. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `status` | Show USERS DM status and delivery metrics. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `template_grace_set` | Set the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `template_grace_show` | Show the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `template_grace_reset` | Reset the DM template for manual grace entry. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `template_tempban_set` | Set the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `template_tempban_show` | Show the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `template_tempban_reset` | Reset the DM template for auto-tempban after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `cooldown_set` | Set the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `cooldown_show` | Show the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `cooldown_reset` | Reset the DM cooldown for USERS contexts. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `invite_set` | Set the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `invite_show` | Show the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `dms` | `invite_reset` | Reset the invite link used in USERS DMs. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `grace` | `manual` | Assign a manual grace period to a user. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_set` | Set the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_show` | Show the default tempban applied when a manual grace expires. | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `users` | `grace` | `tempban_reset` | Disable the automatic tempban applied after manual grace. | `app/plugins/commands_modular/moderazione_utenti.py` |

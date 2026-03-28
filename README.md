@@ -168,6 +168,11 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/users tempban nick_or_id:<user_id_o_nickname> quantity:<n> unit:<minutes|hours|days|weeks> [reason:<text>]`
 - `/users tempban_list`
 - `/users grace manual nick_or_id:<user_id_o_nickname> quantity:<n> unit:<minutes|hours|days|weeks> [reason:<text>]`
+- `/users dms on|off|status`
+- `/users dms template_grace_set|template_grace_show|template_grace_reset`
+- `/users dms template_tempban_set|template_tempban_show|template_tempban_reset`
+- `/users dms cooldown_set|cooldown_show|cooldown_reset`
+- `/users dms invite_set|invite_show|invite_reset`
 - `/users grace tempban_set quantity:<n> unit:<minuti|ore|giorni|settimane>`
 - `/users grace tempban_show`
 - `/users grace tempban_reset`
@@ -209,6 +214,7 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/inactivity autokick on|off|status`
 - `/inactivity grace on|off|status|limits_set|limits_show|limits_reset`
 - `/inactivity tempban on|off|status|limits_set|limits_show|limits_reset`
+- `/inactivity dms on|off|status`
 - `/inactivity dms template_reminder_set|template_reminder_show|template_reminder_reset`
 - `/inactivity dms cooldown_set|cooldown_show|cooldown_reset`
 - `/inactivity dms invite_set|invite_show|invite_reset`
