@@ -706,6 +706,35 @@ class DatabaseService:
             CREATE INDEX IF NOT EXISTS idx_inactivity_dm_delivery_log_guild_outcome
             ON inactivity_dm_delivery_log (guild_id, outcome, sent_at DESC);
 
+            CREATE TABLE IF NOT EXISTS users_dm_config (
+                guild_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                grace_template TEXT NULL,
+                tempban_template TEXT NULL,
+                cooldown_days INTEGER NOT NULL DEFAULT 14,
+                invite_url TEXT NULL,
+                updated_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS users_dm_delivery_log (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                reason TEXT NULL,
+                sent_at TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail')),
+                error_summary TEXT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_users_dm_delivery_log_guild_sent
+            ON users_dm_delivery_log (guild_id, sent_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_users_dm_delivery_log_guild_outcome
+            ON users_dm_delivery_log (guild_id, outcome, sent_at DESC);
+
             CREATE TABLE IF NOT EXISTS daily_report_pagination_state (
                 message_id TEXT PRIMARY KEY,
                 channel_id TEXT NOT NULL,
@@ -884,6 +913,8 @@ class DatabaseService:
         await self._ensure_daily_report_pagination_state_columns()
         await self._ensure_inactivity_config_columns()
         await self._ensure_inactivity_dm_delivery_log_schema()
+        await self._ensure_users_dm_config_schema()
+        await self._ensure_users_dm_delivery_log_schema()
         await self._ensure_moderation_actions_columns()
         await self._ensure_member_flow_event_types()
         await self._conn.commit()
@@ -937,6 +968,67 @@ class DatabaseService:
             """
             CREATE INDEX IF NOT EXISTS idx_inactivity_dm_delivery_log_guild_outcome
             ON inactivity_dm_delivery_log (guild_id, outcome, sent_at DESC)
+            """
+        )
+
+    async def _ensure_users_dm_config_schema(self) -> None:
+        assert self._conn is not None
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users_dm_config (
+                guild_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                grace_template TEXT NULL,
+                tempban_template TEXT NULL,
+                cooldown_days INTEGER NOT NULL DEFAULT 14,
+                invite_url TEXT NULL,
+                updated_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        columns = await self.fetchall("PRAGMA table_info(users_dm_config)")
+        existing = {row["name"] for row in columns}
+        missing = {
+            "enabled": "INTEGER NOT NULL DEFAULT 1",
+            "grace_template": "TEXT NULL",
+            "tempban_template": "TEXT NULL",
+            "cooldown_days": "INTEGER NOT NULL DEFAULT 14",
+            "invite_url": "TEXT NULL",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+            "created_at": "TEXT NOT NULL DEFAULT ''",
+        }
+        for name, col_def in missing.items():
+            if name not in existing:
+                await self._conn.execute(f"ALTER TABLE users_dm_config ADD COLUMN {name} {col_def}")
+
+    async def _ensure_users_dm_delivery_log_schema(self) -> None:
+        assert self._conn is not None
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users_dm_delivery_log (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                reason TEXT NULL,
+                sent_at TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN ('success', 'fail')),
+                error_summary TEXT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        await self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_users_dm_delivery_log_guild_sent
+            ON users_dm_delivery_log (guild_id, sent_at DESC)
+            """
+        )
+        await self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_users_dm_delivery_log_guild_outcome
+            ON users_dm_delivery_log (guild_id, outcome, sent_at DESC)
             """
         )
 
@@ -4872,6 +4964,154 @@ class DatabaseService:
             """
             SELECT user_id, event_type, reason, sent_at, outcome, error_summary
             FROM inactivity_dm_delivery_log
+            WHERE guild_id = ?
+            ORDER BY sent_at DESC
+            LIMIT ?
+            """,
+            (guild_id, capped),
+        )
+
+    async def get_users_dm_config(self, guild_id: str) -> Optional[aiosqlite.Row]:
+        return await self.fetchone("SELECT * FROM users_dm_config WHERE guild_id = ?", (guild_id,))
+
+    async def upsert_users_dm_config(self, guild_id: str, **fields: Any) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        current = await self.get_users_dm_config(guild_id)
+        base: dict[str, Any] = {
+            "enabled": 1,
+            "grace_template": None,
+            "tempban_template": None,
+            "cooldown_days": 14,
+            "invite_url": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if current:
+            for key in base:
+                if key in current.keys():
+                    base[key] = current[key]
+        base.update(fields)
+        base["updated_at"] = now
+        columns = [
+            "guild_id",
+            "enabled",
+            "grace_template",
+            "tempban_template",
+            "cooldown_days",
+            "invite_url",
+            "updated_at",
+            "created_at",
+        ]
+        values = [guild_id] + [base[col] for col in columns[1:]]
+        placeholders = ", ".join("?" for _ in columns)
+        update_cols = ", ".join(f"{col}=excluded.{col}" for col in columns[1:-1])
+        await self.execute(
+            f"INSERT INTO users_dm_config ({', '.join(columns)}) VALUES ({placeholders}) ON CONFLICT(guild_id) DO UPDATE SET {update_cols}",
+            tuple(values),
+        )
+
+    async def set_users_dm_enabled(self, guild_id: str, enabled: bool) -> None:
+        await self.upsert_users_dm_config(guild_id, enabled=1 if enabled else 0)
+
+    async def log_users_dm_delivery(
+        self,
+        *,
+        guild_id: str,
+        user_id: str,
+        event_type: str,
+        outcome: str,
+        reason: str | None = None,
+        sent_at: str | None = None,
+        error_summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        now = sent_at or datetime.now(timezone.utc).isoformat()
+        row_id = str(uuid.uuid4())
+        payload = json.dumps(metadata or {}, ensure_ascii=False)
+        await self.execute(
+            """
+            INSERT INTO users_dm_delivery_log (
+                id, guild_id, user_id, event_type, reason, sent_at, outcome, error_summary, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (row_id, guild_id, user_id, event_type, reason, now, outcome, error_summary, payload),
+        )
+        return row_id
+
+    async def get_latest_users_dm_delivery(
+        self,
+        guild_id: str,
+        user_id: str,
+        event_type: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT user_id, event_type, sent_at, outcome, reason, error_summary
+            FROM users_dm_delivery_log
+            WHERE guild_id = ? AND user_id = ? AND event_type = ?
+            ORDER BY sent_at DESC
+            LIMIT 1
+            """,
+            (guild_id, user_id, event_type),
+        )
+
+    async def get_users_dm_delivery_stats(self, guild_id: str) -> dict[str, Any]:
+        totals = await self.fetchone(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS ok,
+                SUM(CASE WHEN outcome = 'fail' THEN 1 ELSE 0 END) AS fail
+            FROM users_dm_delivery_log
+            WHERE guild_id = ?
+            """,
+            (guild_id,),
+        )
+        by_event = await self.fetchall(
+            """
+            SELECT event_type, COUNT(*) AS total
+            FROM users_dm_delivery_log
+            WHERE guild_id = ?
+            GROUP BY event_type
+            ORDER BY total DESC, event_type ASC
+            """,
+            (guild_id,),
+        )
+        latest_success = await self.fetchone(
+            """
+            SELECT user_id, event_type, reason, sent_at
+            FROM users_dm_delivery_log
+            WHERE guild_id = ? AND outcome = 'success'
+            ORDER BY sent_at DESC
+            LIMIT 1
+            """,
+            (guild_id,),
+        )
+        latest_fail = await self.fetchone(
+            """
+            SELECT user_id, event_type, reason, sent_at, error_summary
+            FROM users_dm_delivery_log
+            WHERE guild_id = ? AND outcome = 'fail'
+            ORDER BY sent_at DESC
+            LIMIT 1
+            """,
+            (guild_id,),
+        )
+        return {
+            "total": int((totals["total"] if totals else 0) or 0),
+            "ok": int((totals["ok"] if totals else 0) or 0),
+            "fail": int((totals["fail"] if totals else 0) or 0),
+            "by_event": [{"event_type": str(row["event_type"]), "total": int(row["total"] or 0)} for row in by_event],
+            "latest_success": dict(latest_success) if latest_success else None,
+            "latest_fail": dict(latest_fail) if latest_fail else None,
+        }
+
+    async def list_users_dm_delivery_events(self, guild_id: str, *, limit: int = 10) -> list[aiosqlite.Row]:
+        capped = max(1, min(int(limit), 50))
+        return await self.fetchall(
+            """
+            SELECT user_id, event_type, reason, sent_at, outcome, error_summary
+            FROM users_dm_delivery_log
             WHERE guild_id = ?
             ORDER BY sent_at DESC
             LIMIT ?
