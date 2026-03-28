@@ -503,14 +503,14 @@ class GreetingsCopyService:
             context["reason"] = ""
             context["reason_suffix"] = ""
 
-        if self._is_manual_grace_expired_auto_tempban(event_type_key=event_type_key, metadata=metadata):
+        if self._is_grace_expired_auto_tempban(event_type_key=event_type_key, metadata=metadata):
             moderation_note = None
             narrative_template = {
                 "opening": "{mention}",
                 "action_phrase": "è stato temporaneamente bannato",
                 "occurrence_phrase": "da {guild_name} per {duration} per la",
                 "detail_phrase": "{occurrence_number}° volta",
-                "closing_comment": "perché il periodo di grazia è scaduto",
+                "closing_comment": "perché il periodo di grazia è scaduto.",
             }
         else:
             narrative_template = self._select_narrative_template(
@@ -812,10 +812,12 @@ class GreetingsCopyService:
         return self._normalize_reason(canonical_event.get("reason"))
 
     @staticmethod
-    def _is_manual_grace_expired_auto_tempban(*, event_type_key: str, metadata: dict[str, Any]) -> bool:
-        if str(event_type_key or "").strip().lower() != "tempban":
+    def _is_grace_expired_auto_tempban(*, event_type_key: str, metadata: dict[str, Any]) -> bool:
+        normalized_event_type = str(event_type_key or "").strip().lower()
+        if normalized_event_type not in {"tempban", "inactive_tempban"}:
             return False
-        return str(metadata.get("greetings_origin") or "").strip().lower() == "manual_grace_expired_auto_tempban"
+        origin = str(metadata.get("greetings_origin") or "").strip().lower()
+        return origin in {"manual_grace_expired_auto_tempban", "inactive_grace_expired_auto_tempban"}
 
     @staticmethod
     def _normalize_reason(value: Any) -> str | None:

@@ -740,10 +740,39 @@ def test_tempban_after_manual_grace_expiry_uses_special_narrative_without_modera
 
     assert result.event_label == "⌛ __**INTERDIZIONE TEMPORANEA**__"
     assert "periodo di grazia è scaduto" in result.narrative.lower()
+    normalized_end = result.narrative.rstrip("*_~` \n\t")
+    assert normalized_end.endswith(".")
+    assert ".." not in result.narrative
     assert "3° volta" in result.narrative
     assert "2g" in result.narrative
     assert result.moderation_note is None
 
+
+
+
+def test_inactive_tempban_after_inactivity_grace_expiry_uses_same_special_narrative() -> None:
+    service = _service(occurrence_number=10)
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="GABBIETTA DORATA"),
+            user=SimpleNamespace(id=42, name="fakuzzo", display_name="Fakuzzo", mention="@Fakuzzo"),
+            event_type_key="inactive_tempban",
+            reason="Inattività prolungata",
+            duration_seconds=2 * 86400,
+            metadata={"greetings_origin": "inactive_grace_expired_auto_tempban", "greetings_reason": ""},
+            barcello_status={"color": "giallo", "score": 58},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert result.event_label == "⌛ __**INTERDIZIONE TEMPORANEA**__"
+    assert "periodo di grazia è scaduto" in result.narrative.lower()
+    assert "10° volta" in result.narrative
+    assert "2g" in result.narrative
+    assert result.moderation_note is None
+    normalized_end = result.narrative.rstrip("*_~` \n\t")
+    assert normalized_end.endswith(".")
+    assert ".." not in result.narrative
 
 @pytest.mark.parametrize("event_type_key", ["kick", "ban"])
 def test_kick_and_ban_closing_comments_are_not_technical(event_type_key: str) -> None:

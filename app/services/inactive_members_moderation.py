@@ -1213,6 +1213,7 @@ class InactiveMembersModerationService:
                                 "greetings_reason": reason_text,
                                 "days_inactive": candidate.days_inactive,
                                 "inactivity_text": inactivity_text,
+                                **({"greetings_origin": "inactive_grace_expired_auto_tempban", "greetings_reason": ""} if require_grace else {}),
                             },
                         )
                         if result.get("canonical_written") and result.get("canonical_visible"):
@@ -1229,6 +1230,7 @@ class InactiveMembersModerationService:
                                     "greetings_reason": reason_text,
                                     "days_inactive": candidate.days_inactive,
                                     "inactivity_text": inactivity_text,
+                                    **({"greetings_origin": "inactive_grace_expired_auto_tempban", "greetings_reason": ""} if require_grace else {}),
                                 },
                                 canonical_event=result.get("canonical_event"),
                             )
