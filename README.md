@@ -165,14 +165,18 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/users kick_list`
 - `/users ban user:<utente> [reason:<testo>]`
 - `/users ban_list`
-- `/users tempban user:<utente> duration:<durata> [reason:<testo>]`
+- `/users tempban user:<utente> quantity:<n> unit:<minuti|ore|giorni|settimane> [reason:<testo>]`
 - `/users tempban_list`
-- `/users grace user:<utente> duration:<durata> [reason:<testo>]`
+- `/users grace user:<utente> quantity:<n> unit:<minuti|ore|giorni|settimane> [reason:<testo>]`
 - `/users grace_list`
-- `/users unban nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
-- `/users untempban nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
-- `/users ungrace nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
-- Alias top-level: `/kick`, `/ban`, `/tempban`, `/grace` → alias reali dei corrispondenti `/users ...`.
+- `/users unban user nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
+- `/users untempban user nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
+- `/users ungrace user nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
+- Batch revoche temporali (stessa convenzione cross-progetto):
+  - inglese: `today`, `yesterday`, `last quantity:<n> unit:<minutes|hours|days|weeks>`, `range da:<DD/MM/YYYY HH:MM> a:<DD/MM/YYYY HH:MM>`
+  - italiano: `oggi`, `ieri`, `ultimi quantita:<n> unita:<minuti|ore|giorni|settimane>`, `intervallo da:<DD/MM/YYYY HH:MM> a:<DD/MM/YYYY HH:MM>`
+  - disponibili sotto: `/users unban ...`, `/users untempban ...`, `/users ungrace ...`
+- Alias top-level reali: `/kick`, `/ban`, `/unban`, `/tempban`, `/untempban`, `/grace`, `/ungrace`.
 
 ### Greetings / inactivity
 - `/greetings on [channel]`
