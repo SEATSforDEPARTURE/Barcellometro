@@ -125,6 +125,8 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         assert sections[1].title == "Supported placeholders"
         assert sections[1].lines == [f"{{{name}}}" for name in INACTIVITY_DM_SUPPORTED_PLACEHOLDERS]
         assert "{mention}" in sections[1].lines
+        assert "{now_it}" in sections[1].lines
+        assert "{expires_at_it}" in sections[1].lines
 
     asyncio.run(_run())
 

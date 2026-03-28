@@ -829,6 +829,8 @@ class InactiveMembersModerationService:
         reminder_count: int | None = None,
         reason: str | None = None,
         inactivity_text: str | None = None,
+        now: datetime | None = None,
+        expires_at: datetime | None = None,
     ) -> str:
         base = template or ""
         payload = build_inactivity_dm_template_payload(
@@ -841,6 +843,8 @@ class InactiveMembersModerationService:
             reminder_count=reminder_count,
             reason=reason,
             inactivity_text=inactivity_text,
+            now=now,
+            expires_at=expires_at,
         )
         return base.format(**payload)
 
@@ -927,6 +931,8 @@ class InactiveMembersModerationService:
                 cfg=cfg,
                 message_count=candidate.count_in_window,
                 reminder_count=_state_int(state, "reminder_count", 0),
+                now=now,
+                expires_at=now + timedelta(days=int(cfg.get("grace_days_after_reminder", 7))),
             )
             reminder_embed = await build_standard_dm_embed(
                 service_name="inactivity_moderation",
@@ -1047,6 +1053,8 @@ class InactiveMembersModerationService:
                 reminder_count=reminder_count,
                 reason="Inattività prolungata",
                 inactivity_text=inactivity_text,
+                now=now,
+                expires_at=now + timedelta(days=ban_days),
             )
             try:
                 tempban_embed = await build_standard_dm_embed(

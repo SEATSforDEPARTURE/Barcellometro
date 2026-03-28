@@ -112,6 +112,10 @@ def _render_template_preview(template: str) -> str:
         "rejoin_link": "https://discord.gg/example",
         "reason": "Inactivity",
         "inactivity_text": "has been inactive for 39 days",
+        "now_utc": "2026-03-28 16:00 UTC",
+        "now_it": "28/03/2026 17:00",
+        "expires_at_utc": "2026-04-04 16:00 UTC",
+        "expires_at_it": "04/04/2026 18:00",
     }
     try:
         return template.format(**sample)

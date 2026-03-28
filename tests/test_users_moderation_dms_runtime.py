@@ -20,8 +20,8 @@ class _FakeDb:
             "enabled": enabled,
             "cooldown_days": cooldown_days,
             "invite_url": invite_url,
-            "grace_template": "GRACE {mention} ({user}) {duration_human} {expires_at_utc} {reason_line}{invite_line}",
-            "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {expires_at_utc} {reason_line}{invite_line}",
+            "grace_template": "GRACE {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {reason_line}{invite_line}",
+            "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {reason_line}{invite_line}",
         }
         self.latest: dict[tuple[str, str, str], dict[str, str]] = {}
         self.logs: list[dict[str, object]] = []
@@ -84,6 +84,8 @@ def test_users_dm_manual_grace_renders_template_and_logs_success() -> None:
         assert "Manual grace reason" in str(sent_embed.description)
         assert "GRACE <@42> (<@42>)" in str(sent_embed.description)
         assert "https://discord.gg/server" in str(sent_embed.description)
+        assert "2026-01-01 12:00 UTC" in str(sent_embed.description)
+        assert "01/01/2026 13:00" in str(sent_embed.description)
         assert sent_embed.author.name
         assert sent_embed.footer.text
         assert db.logs[-1]["outcome"] == "success"

@@ -53,7 +53,7 @@ USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
 USERS_DM_TEMPLATE_HELP = (
     "Supported placeholders: "
     + ", ".join(f"{{{name}}}" for name in USERS_DM_SUPPORTED_PLACEHOLDERS)
-    + ". Example: {mention}, {expires_at_utc}."
+    + ". Example: {mention}, {expires_at_utc}, {expires_at_it}."
 )
 ROME_TZ = ZoneInfo("Europe/Rome")
 
@@ -159,7 +159,10 @@ def _render_users_dm_template_preview(template: str) -> str:
         "event_type": "grace",
         "duration_seconds": 7200,
         "duration_human": "2h 0m",
+        "now_utc": "2026-03-28 16:00 UTC",
+        "now_it": "28/03/2026 17:00",
         "expires_at_utc": "2026-03-28 18:00 UTC",
+        "expires_at_it": "28/03/2026 19:00",
         "reason": "Manual grace",
         "reason_line": "Reason: Manual grace. ",
         "invite_url": "https://discord.gg/example",
