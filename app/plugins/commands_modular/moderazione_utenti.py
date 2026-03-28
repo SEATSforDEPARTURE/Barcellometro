@@ -22,6 +22,7 @@ from app.plugins.commands_modular.time_windows import (
 )
 from app.services.greetings_copy_service import GreetingsCopyService
 from app.services.member_flow_notifications import format_duration_human
+from app.services.dm_template_preview import build_dm_template_preview_payload, render_dm_template_preview
 from app.services.users_moderation_dms import (
     DEFAULT_USERS_DM_COOLDOWN_DAYS,
     USERS_DM_SUPPORTED_PLACEHOLDERS,
@@ -150,34 +151,12 @@ def _format_italian_datetime(value: object) -> str | None:
 
 
 def _render_users_dm_template_preview(template: str) -> str:
-    sample = {
-        "mention": "<@1234567890>",
-        "user": "@ExampleUser",
-        "username": "ExampleUser",
-        "display_name": "Example",
-        "user_id": "1234567890",
-        "server": "Barcellometro",
-        "guild_id": "987654321",
-        "event_type": "grace",
-        "duration_seconds": 7200,
-        "duration_human": "2h 0m",
-        "now_utc": "2026-03-28 16:00 UTC",
-        "now_it": "28/03/2026 17:00",
-        "expires_at_utc": "2026-03-28 18:00 UTC",
-        "expires_at_it": "28/03/2026 19:00",
-        "reason": "Manual grace",
-        "reason_text": "Manual grace",
-        "reason_line": "Reason: Manual grace. ",
-        "reasoning": "users_grace_dm",
-        "started_at_utc": "2026-03-28 16:00 UTC",
-        "started_at_it": "28/03/2026 17:00",
-        "invite_url": "https://discord.gg/example",
-        "invite_line": "Invite: https://discord.gg/example",
-    }
-    try:
-        return template.format(**sample)
-    except Exception as exc:  # noqa: BLE001
-        return f"[Template render error: {exc}]\n{template}"
+    payload = build_dm_template_preview_payload(
+        event_type="tempban",
+        reason="Manual grace expired",
+        duration_seconds=2 * 86400,
+    )
+    return render_dm_template_preview(template, payload)
 
 
 def _fmt_utc(ts: object) -> str:

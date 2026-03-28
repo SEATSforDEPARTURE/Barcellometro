@@ -308,3 +308,26 @@ def test_inactivity_dms_cooldown_set_uses_quantity_and_unit_parameters(inattivi_
     param_names = [param.name for param in cooldown_set.parameters]
     assert param_names == ["quantity", "unit"]
     assert "days" not in param_names
+
+
+def test_inactivity_tempban_preview_is_safe_and_resolves_ban_days(inattivi_module) -> None:
+    template = "Ban di {ban_days} giorni per {user}. {reason_line}{invite_line}"
+    preview = inattivi_module._render_template_preview(template)
+    assert "Template render error" not in preview
+    assert "{ban_days}" not in preview
+    assert "{user}" not in preview
+    assert "7" in preview
+
+
+def test_preview_behavior_is_consistent_between_users_and_inactivity(import_fresh) -> None:
+    users_module = import_fresh("app.plugins.commands_modular.moderazione_utenti")
+    inattivi_module = import_fresh("app.plugins.commands_modular.inattivi")
+    template = "Hi {user} {unknown_placeholder}"
+    users_preview = users_module._render_users_dm_template_preview(template)
+    inactivity_preview = inattivi_module._render_template_preview(template)
+    assert "Template render error" not in users_preview
+    assert "Template render error" not in inactivity_preview
+    assert "{unknown_placeholder}" not in users_preview
+    assert "{unknown_placeholder}" not in inactivity_preview
+    assert users_preview.startswith("Hi @ExampleUser")
+    assert inactivity_preview.startswith("Hi @ExampleUser")

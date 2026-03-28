@@ -162,3 +162,19 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert reset_map["cooldown_disabled"] == "yes"
 
     asyncio.run(_run())
+
+
+def test_users_tempban_preview_is_safe_and_resolves_ban_days(users_module) -> None:
+    template = "Tempban di {ban_days} giorni per {user}. {reason_line}{invite_line}"
+    preview = users_module._render_users_dm_template_preview(template)
+    assert "Template render error" not in preview
+    assert "{ban_days}" not in preview
+    assert "{user}" not in preview
+    assert "2" in preview
+
+
+def test_users_preview_unknown_placeholder_does_not_crash(users_module) -> None:
+    preview = users_module._render_users_dm_template_preview("Hello {user} {unknown_placeholder}")
+    assert "Template render error" not in preview
+    assert "{unknown_placeholder}" not in preview
+    assert "ExampleUser" in preview

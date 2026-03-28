@@ -12,6 +12,7 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import rolling_window_timedelta
 from app.services.inactivity_dm_templates import INACTIVITY_DM_SUPPORTED_PLACEHOLDERS
+from app.services.dm_template_preview import build_dm_template_preview_payload, render_dm_template_preview
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, build_command_embeds, send_command_embeds, send_standard_response
 
 PERM = "inactivity"
@@ -102,45 +103,25 @@ def _policy_summary(policy: dict[str, object]) -> str:
 
 
 def _render_template_preview(template: str) -> str:
-    sample = {
-        "mention": "<@1234567890>",
-        "user": "@ExampleUser",
-        "username": "ExampleUser",
-        "display_name": "Example",
-        "user_id": "1234567890",
-        "server": "Barcellometro",
-        "guild_id": "987654321",
-        "days_inactive": 39,
-        "window_days": 30,
-        "min_messages": 1,
-        "message_count": 0,
-        "grace_days": 7,
-        "reminder_count": 1,
-        "ban_days": 7,
-        "reason": "Inactivity",
-        "reason_text": "Inactivity",
-        "reason_line": "Reason: Inactivity. ",
-        "reasoning": "inactivity_grace",
-        "duration_seconds": 604800,
-        "duration_human": "7d",
-        "started_at_utc": "2026-03-28 16:00 UTC",
-        "started_at_it": "28/03/2026 17:00",
-        "invite_url": "https://discord.gg/example",
-        "invite_line": "Invite: https://discord.gg/example",
-        "rejoin_link": "https://discord.gg/example",
-        "inactivity_text": "has been inactive for 39 days",
-        "event_type": "grace",
-        "event_state": "grace_started",
-        "event_cause": "inactivity",
-        "now_utc": "2026-03-28 16:00 UTC",
-        "now_it": "28/03/2026 17:00",
-        "expires_at_utc": "2026-04-04 16:00 UTC",
-        "expires_at_it": "04/04/2026 18:00",
-    }
-    try:
-        return template.format(**sample)
-    except Exception as exc:  # noqa: BLE001
-        return f"[Template render error: {exc}]\n{template}"
+    payload = build_dm_template_preview_payload(
+        event_type="tempban",
+        reason="Inactivity",
+        duration_seconds=7 * 86400,
+        extra_payload={
+            "days_inactive": 39,
+            "window_days": 30,
+            "min_messages": 1,
+            "message_count": 0,
+            "grace_days": 7,
+            "reminder_count": 1,
+            "ban_days": 7,
+            "rejoin_link": "https://discord.gg/example",
+            "inactivity_text": "has been inactive for 39 days",
+            "event_state": "grace_started",
+            "event_cause": "inactivity",
+        },
+    )
+    return render_dm_template_preview(template, payload)
 
 
 def _fmt_utc(ts: object) -> str:
