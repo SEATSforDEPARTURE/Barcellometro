@@ -21,6 +21,7 @@ class _FakeDatabase:
             "total": 2,
             "ok": 1,
             "fail": 1,
+            "skipped": 0,
             "by_event": [{"event_type": "reminder", "total": 2}],
             "latest_success": {"user_id": "11", "sent_at": "2026-01-01T10:00:00+00:00", "reason": "ok"},
             "latest_fail": {"user_id": "12", "sent_at": "2026-01-01T11:00:00+00:00", "reason": "fail", "error_summary": "Forbidden"},
@@ -105,6 +106,7 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         assert as_map["invite_url"] == "not set"
         assert as_map["dm_sent_ok"] == 1
         assert as_map["dm_sent_fail"] == 1
+        assert as_map["dm_sent_skipped"] == 0
         assert as_map["dm_events_by_type"] == "reminder=2"
         assert "user=11" in as_map["last_success"]
         assert "user=12" in as_map["last_fail"]

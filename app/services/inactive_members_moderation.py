@@ -853,19 +853,50 @@ class InactiveMembersModerationService:
         inactive, _, cfg = await self.scan_inactive_members(guild_id)
         guild = self._bot.get_guild(int(guild_id))
         if guild is None or not cfg:
-            return {"dm_ok": 0, "dm_fail": 0, "errors": []}
+            return {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": []}
         if int(cfg.get("dm_reminders_enabled", 1) or 0) <= 0:
             logger.info("inactive reminders disabled for guild=%s", guild_id)
-            return {"dm_ok": 0, "dm_fail": 0, "errors": [], "disabled": True}
+            return {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": [], "disabled": True}
         now = datetime.now(timezone.utc)
         template = cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
+        cooldown_days = max(1, int(cfg.get("reminder_cooldown_days", 14) or 14))
         ok = 0
         fail = 0
+        skipped = 0
         errors: list[str] = []
         for candidate in inactive:
             state = await self._database.get_inactivity_user_state(guild_id, str(candidate.member.id))
-            if state and state["last_reminder_at"]:
-                continue
+            latest_delivery_lookup = getattr(self._database, "get_latest_inactivity_dm_delivery", None)
+            latest_delivery = (
+                await latest_delivery_lookup(guild_id, str(candidate.member.id), "reminder")
+                if latest_delivery_lookup is not None
+                else None
+            )
+            if latest_delivery and latest_delivery["sent_at"] and str(latest_delivery["outcome"] or "").lower() == "success":
+                try:
+                    last_sent = datetime.fromisoformat(str(latest_delivery["sent_at"]).replace("Z", "+00:00"))
+                    if last_sent.tzinfo is None:
+                        last_sent = last_sent.replace(tzinfo=timezone.utc)
+                    if now - last_sent < timedelta(days=cooldown_days):
+                        skipped += 1
+                        await self._database.log_inactivity_dm_delivery(
+                            guild_id=guild_id,
+                            user_id=str(candidate.member.id),
+                            event_type="reminder",
+                            reason="cooldown",
+                            sent_at=now.isoformat(),
+                            outcome="skipped",
+                            error_summary="cooldown",
+                            metadata={
+                                "source": "inactive_members_moderation",
+                                "days_inactive": candidate.days_inactive,
+                                "message_count": candidate.count_in_window,
+                                "cooldown_days": cooldown_days,
+                            },
+                        )
+                        continue
+                except Exception:
+                    logger.debug("inactive reminder cooldown parse failed", exc_info=True)
             inactivity_text = f"è stato inattivo per {candidate.days_inactive} giorni"
             body = self._render_template(
                 template,
@@ -957,7 +988,7 @@ class InactiveMembersModerationService:
                         },
                     )
         logger.info("inactive reminders guild=%s ok=%s fail=%s", guild_id, ok, fail)
-        return {"dm_ok": ok, "dm_fail": fail, "errors": errors[:10]}
+        return {"dm_ok": ok, "dm_fail": fail, "dm_skipped": skipped, "errors": errors[:10]}
 
     async def execute_kick_pipeline(self, guild_id: str, *, require_grace: bool) -> dict[str, Any]:
         inactive, _, cfg = await self.scan_inactive_members(guild_id)

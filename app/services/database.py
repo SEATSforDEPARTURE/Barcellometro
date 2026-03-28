@@ -4952,7 +4952,8 @@ class DatabaseService:
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS ok,
-                SUM(CASE WHEN outcome = 'fail' THEN 1 ELSE 0 END) AS fail
+                SUM(CASE WHEN outcome = 'fail' THEN 1 ELSE 0 END) AS fail,
+                SUM(CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END) AS skipped
             FROM inactivity_dm_delivery_log
             WHERE guild_id = ?
             """,
@@ -4992,10 +4993,28 @@ class DatabaseService:
             "total": int((totals["total"] if totals else 0) or 0),
             "ok": int((totals["ok"] if totals else 0) or 0),
             "fail": int((totals["fail"] if totals else 0) or 0),
+            "skipped": int((totals["skipped"] if totals else 0) or 0),
             "by_event": [{"event_type": str(row["event_type"]), "total": int(row["total"] or 0)} for row in by_event],
             "latest_success": dict(latest_success) if latest_success else None,
             "latest_fail": dict(latest_fail) if latest_fail else None,
         }
+
+    async def get_latest_inactivity_dm_delivery(
+        self,
+        guild_id: str,
+        user_id: str,
+        event_type: str,
+    ) -> Optional[aiosqlite.Row]:
+        return await self.fetchone(
+            """
+            SELECT user_id, event_type, sent_at, outcome, reason, error_summary
+            FROM inactivity_dm_delivery_log
+            WHERE guild_id = ? AND user_id = ? AND event_type = ?
+            ORDER BY sent_at DESC
+            LIMIT 1
+            """,
+            (guild_id, user_id, event_type),
+        )
 
     async def list_inactivity_dm_delivery_events(self, guild_id: str, *, limit: int = 10) -> list[aiosqlite.Row]:
         capped = max(1, min(int(limit), 50))
