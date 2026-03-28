@@ -16,6 +16,7 @@ import discord
 from app.services.discord_embed_utils import FIELD_MAX, safe_add_field, safe_set_description
 from app.services.database import DatabaseService
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
+from app.services.inactivity_dm_templates import build_inactivity_dm_template_payload
 from app.services.users_moderation_dms import UsersModerationDmService
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
@@ -830,24 +831,18 @@ class InactiveMembersModerationService:
         inactivity_text: str | None = None,
     ) -> str:
         base = template or ""
-        return base.format(
-            user=member.mention,
-            username=member.display_name,
-            display_name=member.display_name,
-            user_id=member.id,
-            server=guild.name,
-            guild_id=guild.id,
+        payload = build_inactivity_dm_template_payload(
+            member=member,
+            guild=guild,
             days_inactive=days_inactive,
-            window_days=policy.get("window_days", 30),
-            min_messages=policy.get("min_messages", 1),
-            message_count=message_count if message_count is not None else 0,
-            grace_days=cfg.get("grace_days_after_reminder", 7),
-            reminder_count=reminder_count if reminder_count is not None else 0,
-            ban_days=cfg.get("ban_days", 7),
-            rejoin_link=cfg.get("invite_url") or "",
-            reason=reason or "",
-            inactivity_text=inactivity_text or f"è stato inattivo per {days_inactive} giorni",
+            policy=policy,
+            cfg=cfg,
+            message_count=message_count,
+            reminder_count=reminder_count,
+            reason=reason,
+            inactivity_text=inactivity_text,
         )
+        return base.format(**payload)
 
     @staticmethod
     def _parse_iso_datetime(value: str | None) -> datetime | None:

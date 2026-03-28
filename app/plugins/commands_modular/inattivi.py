@@ -10,6 +10,7 @@ from discord import app_commands
 from app.plugins.commands_modular.placeholders import describe_placeholders
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
+from app.services.inactivity_dm_templates import INACTIVITY_DM_SUPPORTED_PLACEHOLDERS
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, build_command_embeds, send_command_embeds, send_standard_response
 
 PERM = "inactivity"
@@ -400,7 +401,13 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
                 ("last_success", f"user={latest_success.get('user_id', 'n/a')} at {_fmt_utc(latest_success.get('sent_at'))} reason={latest_success.get('reason') or 'n/a'}"),
                 ("last_fail", f"user={latest_fail.get('user_id', 'n/a')} at {_fmt_utc(latest_fail.get('sent_at'))} reason={latest_fail.get('reason') or 'n/a'} error={latest_fail.get('error_summary') or 'n/a'}"),
             ],
-            sections=[CommandEmbedSection(title="Recent DM deliveries", lines=recent_lines or ["No DM deliveries logged yet."])],
+            sections=[
+                CommandEmbedSection(title="Recent DM deliveries", lines=recent_lines or ["No DM deliveries logged yet."]),
+                CommandEmbedSection(
+                    title="Supported placeholders",
+                    lines=[f"{{{name}}}" for name in INACTIVITY_DM_SUPPORTED_PLACEHOLDERS],
+                ),
+            ],
         )
 
     @dms_group.command(name="template_grace_show", description="Show the DM template sent when a member enters inactivity grace.")
