@@ -295,9 +295,12 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `users` | `—` | `kick_list` | List recent user removals. | `app/plugins/commands_modular/moderazione_utenti.py:444` |
 | `users` | `—` | `tempban` | Ban a user temporarily. | `app/plugins/commands_modular/moderazione_utenti.py:486` |
 | `users` | `—` | `tempban_list` | List active temporary bans. | `app/plugins/commands_modular/moderazione_utenti.py:490` |
-| `users` | `—` | `unban` | Revoke an active ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:470` |
-| `users` | `—` | `ungrace` | Revoke an active grace period for a user. | `app/plugins/commands_modular/moderazione_utenti.py:503` |
-| `users` | `—` | `untempban` | Revoke an active temporary ban for a user. | `app/plugins/commands_modular/moderazione_utenti.py:475` |
+| `users` | `unban` | `user` | Revoke an active ban for one user. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `unban` | `today/yesterday/last/range` | Batch revoke active bans inside a time window (also `oggi/ieri/ultimi/intervallo`). | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `untempban` | `user` | Revoke an active temporary ban for one user. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `untempban` | `today/yesterday/last/range` | Batch revoke active temporary bans inside a time window (also `oggi/ieri/ultimi/intervallo`). | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `ungrace` | `user` | Revoke an active grace period for one user. | `app/plugins/commands_modular/moderazione_utenti.py` |
+| `users` | `ungrace` | `today/yesterday/last/range` | Batch revoke active grace states inside a time window (also `oggi/ieri/ultimi/intervallo`). | `app/plugins/commands_modular/moderazione_utenti.py` |
 | `voice_ingest` | `—` | `join` | Join a voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:23` |
 | `voice_ingest` | `—` | `leave` | Leave the current voice channel manually. | `app/plugins/commands_modular/voice_ingest.py:47` |
 

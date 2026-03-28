@@ -43,14 +43,14 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert '@users_group.command(name="kick_list"' in modular
     assert '@users_group.command(name="ban"' in modular
     assert '@users_group.command(name="ban_list"' in modular
-    assert '@users_group.command(name="unban"' in modular
-    assert '@users_group.command(name="untempban"' in modular
+    assert 'unban_group = app_commands.Group(name="unban"' in modular
+    assert 'untempban_group = app_commands.Group(name="untempban"' in modular
     assert '@users_group.command(name="tempban"' in modular
     assert '@users_group.command(name="tempban_list"' in modular
     assert 'name="grace"' in modular
-    assert '@users_group.command(name="ungrace"' in modular
+    assert 'ungrace_group = app_commands.Group(name="ungrace"' in modular
     assert '@users_group.command(name="grace_list"' in modular
-    assert 'description="Revoke an active ban for a user."' in modular
+    assert 'description="Revoke an active ban for one user."' in modular
     assert 'description="Remove a user from the server."' in modular
     assert 'description="List recent user removals."' in modular
 
@@ -190,7 +190,7 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
         )
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "unban")
+        command = _find_command(users_group, "unban", "user")
 
         guild = SimpleNamespace(id=1, unban=AsyncMock())
         moderator = SimpleNamespace(id=9)
@@ -198,7 +198,7 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
             guild=guild,
             guild_id=1,
             user=moderator,
-            command=SimpleNamespace(qualified_name="users unban"),
+            command=SimpleNamespace(qualified_name="users unban user"),
         )
 
         await command.callback(interaction, "42")
@@ -219,7 +219,7 @@ def test_mod_users_unban_executes_discord_unban_and_clears_backend_state(
         response_kwargs = send_standard_response.await_args.kwargs
         assert response_kwargs["top_level"] == "users"
         assert response_kwargs["visual_top_level"] == "users"
-        assert response_kwargs["subcommand_path"] == "users unban"
+        assert response_kwargs["subcommand_path"] == "users unban user"
         assert response_kwargs["kind"] == "success"
         assert ("result", "ban revocato") in response_kwargs["lines"]
 
@@ -259,7 +259,7 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
         )
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "unban")
+        command = _find_command(users_group, "unban", "user")
 
         not_found = discord.NotFound(
             Mock(status=404, reason="Not Found"),
@@ -271,7 +271,7 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
             guild=guild,
             guild_id=1,
             user=moderator,
-            command=SimpleNamespace(qualified_name="users unban"),
+            command=SimpleNamespace(qualified_name="users unban user"),
         )
 
         with caplog.at_level("INFO"):
@@ -293,7 +293,7 @@ def test_mod_users_unban_handles_unknown_ban_without_crashing(
         response_kwargs = send_standard_response.await_args.kwargs
         assert response_kwargs["top_level"] == "users"
         assert response_kwargs["visual_top_level"] == "users"
-        assert response_kwargs["subcommand_path"] == "users unban"
+        assert response_kwargs["subcommand_path"] == "users unban user"
         assert response_kwargs["kind"] == "success"
         assert ("result", "nessun ban attivo trovato su Discord") in response_kwargs["lines"]
         assert ("sync", "stati locali riallineati") in response_kwargs["lines"]
@@ -334,7 +334,7 @@ def test_mod_users_untempban_uses_canonical_unban_flow_with_tempban_message(
         )
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "untempban")
+        command = _find_command(users_group, "untempban", "user")
 
         guild = SimpleNamespace(id=1, unban=AsyncMock())
         moderator = SimpleNamespace(id=9)
@@ -342,7 +342,7 @@ def test_mod_users_untempban_uses_canonical_unban_flow_with_tempban_message(
             guild=guild,
             guild_id=1,
             user=moderator,
-            command=SimpleNamespace(qualified_name="users untempban"),
+            command=SimpleNamespace(qualified_name="users untempban user"),
         )
 
         await command.callback(interaction, "42")
@@ -352,7 +352,7 @@ def test_mod_users_untempban_uses_canonical_unban_flow_with_tempban_message(
         guild.unban.assert_awaited_once_with(target_user, reason="Revoca ban manuale")
         database.clear_user_ban_state.assert_awaited_once_with("1", "42")
         response_kwargs = send_standard_response.await_args.kwargs
-        assert response_kwargs["subcommand_path"] == "users untempban"
+        assert response_kwargs["subcommand_path"] == "users untempban user"
         assert ("result", "temporary ban revoked") in response_kwargs["lines"]
 
     asyncio.run(_run())
@@ -383,7 +383,7 @@ def test_mod_users_ungrace_revokes_grace_state(
         )
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "ungrace")
+        command = _find_command(users_group, "ungrace", "user")
 
         guild = SimpleNamespace(id=1)
         moderator = SimpleNamespace(id=9)
@@ -391,14 +391,14 @@ def test_mod_users_ungrace_revokes_grace_state(
             guild=guild,
             guild_id=1,
             user=moderator,
-            command=SimpleNamespace(qualified_name="users ungrace"),
+            command=SimpleNamespace(qualified_name="users ungrace user"),
         )
 
         await command.callback(interaction, "Dormiente")
 
         database.revoke_user_grace_state.assert_awaited_once()
         response_kwargs = send_standard_response.await_args.kwargs
-        assert response_kwargs["subcommand_path"] == "users ungrace"
+        assert response_kwargs["subcommand_path"] == "users ungrace user"
         assert ("result", "grace revoked") in response_kwargs["lines"]
 
     asyncio.run(_run())
@@ -426,10 +426,10 @@ def test_mod_users_unban_resolves_known_nick(
         ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=member_flow_notifications, barcello_service=None)
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "unban")
+        command = _find_command(users_group, "unban", "user")
 
         guild = SimpleNamespace(id=1, unban=AsyncMock())
-        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban"))
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban user"))
 
         await command.callback(interaction, "Dormiente")
 
@@ -457,10 +457,10 @@ def test_mod_users_unban_reports_missing_target_for_unknown_nick(
         ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=None, barcello_service=None)
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "unban")
+        command = _find_command(users_group, "unban", "user")
 
         guild = SimpleNamespace(id=1, unban=AsyncMock())
-        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban"))
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban user"))
 
         await command.callback(interaction, "Sconosciuto")
 
@@ -492,10 +492,10 @@ def test_mod_users_unban_reports_ambiguous_known_nick(
         ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=None, barcello_service=None)
         users_group = discord.app_commands.Group(name="users", description="users")
         register_moderazione_utenti(users_group, ctx)
-        command = _find_command(users_group, "unban")
+        command = _find_command(users_group, "unban", "user")
 
         guild = SimpleNamespace(id=1, unban=AsyncMock())
-        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban"))
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users unban user"))
 
         await command.callback(interaction, "Dormiente")
 
@@ -505,6 +505,56 @@ def test_mod_users_unban_reports_ambiguous_known_nick(
         assert response_kwargs["kind"] == "error"
         assert "Nickname ambiguo" in lines["error"]
         assert "Specifica l'ID utente." == lines["hint"]
+
+    asyncio.run(_run())
+
+
+def test_mod_users_batch_revocations_support_today_yesterday_last_range_for_all_modes(monkeypatch) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        guild = SimpleNamespace(id=1, unban=AsyncMock())
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users test"))
+
+        for mode in ("unban", "untempban", "ungrace"):
+            database = SimpleNamespace(
+                clear_user_ban_state=AsyncMock(),
+                revoke_user_grace_state=AsyncMock(),
+                fetch_user_display_name=AsyncMock(return_value="Dormiente"),
+                list_active_bans=AsyncMock(return_value=[{"user_id": "42"}]),
+                list_active_tempbans=AsyncMock(return_value=[{"user_id": "42"}]),
+                list_active_grace_users=AsyncMock(return_value=[{"user_id": "42"}]),
+            )
+            ctx = SimpleNamespace(database=database, footer=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+            users_group = discord.app_commands.Group(name="users", description="users")
+            register_moderazione_utenti(users_group, ctx)
+            mode_group = _find_command(users_group, mode)
+
+            await _find_command(mode_group, "today").callback(interaction, "batch")
+            await _find_command(mode_group, "yesterday").callback(interaction, "batch")
+
+            unit = discord.app_commands.Choice(name="hours", value="ore")
+            await _find_command(mode_group, "last").callback(interaction, 2, unit, "batch")
+            await _find_command(mode_group, "range").callback(interaction, "20/03/2026 10:00", "21/03/2026 10:00", "batch")
+
+            paths = [call.kwargs["subcommand_path"] for call in send_standard_response.await_args_list[-4:]]
+            assert paths == [
+                f"users {mode} today",
+                f"users {mode} yesterday",
+                f"users {mode} last",
+                f"users {mode} range",
+            ]
+            if mode == "ungrace":
+                assert database.revoke_user_grace_state.await_count == 4
+                assert database.list_active_grace_users.await_count == 4
+            elif mode == "untempban":
+                assert database.clear_user_ban_state.await_count == 4
+                assert database.list_active_tempbans.await_count == 4
+            else:
+                assert database.clear_user_ban_state.await_count == 4
+                assert database.list_active_bans.await_count == 4
 
     asyncio.run(_run())
 
@@ -531,7 +581,7 @@ def test_users_tempban_and_grace_expose_quantity_unit_not_duration() -> None:
     assert "duration" not in grace_params
 
 
-def test_users_unban_untempban_ungrace_expose_nick_or_id_parameter() -> None:
+def test_users_unban_untempban_ungrace_user_expose_nick_or_id_parameter() -> None:
     users_group = discord.app_commands.Group(name="users", description="users")
     ctx = SimpleNamespace(
         database=Mock(),
@@ -540,13 +590,24 @@ def test_users_unban_untempban_ungrace_expose_nick_or_id_parameter() -> None:
         barcello_service=None,
     )
     register_moderazione_utenti(users_group, ctx)
-    unban_command = _find_command(users_group, "unban")
-    untempban_command = _find_command(users_group, "untempban")
-    ungrace_command = _find_command(users_group, "ungrace")
+    unban_command = _find_command(users_group, "unban", "user")
+    untempban_command = _find_command(users_group, "untempban", "user")
+    ungrace_command = _find_command(users_group, "ungrace", "user")
 
     assert [param.name for param in unban_command.parameters] == ["nick_or_id", "reason"]
     assert [param.name for param in untempban_command.parameters] == ["nick_or_id", "reason"]
     assert [param.name for param in ungrace_command.parameters] == ["nick_or_id", "reason"]
+
+
+def test_users_unban_untempban_ungrace_groups_include_temporal_variants() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+    register_moderazione_utenti(users_group, ctx)
+
+    expected = {"user", "today", "yesterday", "last", "range", "oggi", "ieri", "ultimi", "intervallo"}
+    assert {cmd.name for cmd in _find_command(users_group, "unban").commands} == expected
+    assert {cmd.name for cmd in _find_command(users_group, "untempban").commands} == expected
+    assert {cmd.name for cmd in _find_command(users_group, "ungrace").commands} == expected
 
 
 def test_mod_users_tempban_converts_quantity_unit_to_duration_seconds(
