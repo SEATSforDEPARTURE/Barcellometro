@@ -49,7 +49,7 @@ def build_dm_template_preview_payload(
         "user_id": "1234567890",
         "server": "Barcellometro",
         "guild_id": "987654321",
-        "event_type": str(event_type or "").strip() or "tempban",
+        "event_type": safe_event_type,
         "reason": safe_reason,
         "reason_text": safe_reason_text,
         "reason_line": f"Reason: {safe_reason}. " if safe_reason else "",
@@ -68,6 +68,13 @@ def build_dm_template_preview_payload(
     }
     if extra_payload:
         payload.update(extra_payload)
+    payload["reason_line"] = build_reason_line(
+        reason=str(payload.get("reason") or "").strip(),
+        reasoning=str(payload.get("reasoning") or "").strip(),
+        event_type=str(payload.get("event_type") or "").strip(),
+        event_state=str(payload.get("event_state") or "").strip(),
+        event_cause=str(payload.get("event_cause") or "").strip(),
+    )
     return payload
 
 

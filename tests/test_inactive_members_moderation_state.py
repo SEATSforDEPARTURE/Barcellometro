@@ -495,7 +495,8 @@ def test_inactivity_template_render_drops_unresolved_placeholders_and_supports_r
 
     assert "{missing_token}" not in rendered
     assert rendered.startswith("_") and rendered.endswith("_")
-    assert "Reason: ***Inattività prolungata***." in rendered
+    assert "periodo di grazia per inattività scaduto" in rendered
+    assert "Reason:" not in rendered
     assert "Invite: ***https://discord.gg/rejoin***" in rendered
     assert "***<@42>***" in rendered
     assert "***tempban***" in rendered

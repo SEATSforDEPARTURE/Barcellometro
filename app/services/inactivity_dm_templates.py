@@ -54,6 +54,8 @@ def build_inactivity_dm_template_payload(
         duration_seconds=duration_seconds,
         reason=reason,
         reasoning=reasoning,
+        event_state=event_state,
+        event_cause=event_cause,
         started_at=started_at or utc_now,
         expires_at=expires_at,
         invite_url=invite_url,

@@ -63,6 +63,9 @@ class UsersModerationDmService:
         duration_seconds: int | None = None,
         expires_at: datetime | None = None,
         reason: str | None = None,
+        reasoning: str | None = None,
+        event_state: str | None = None,
+        event_cause: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         guild_id = str(guild.id)
@@ -101,6 +104,9 @@ class UsersModerationDmService:
             duration_seconds=duration_seconds,
             expires_at=expires_at,
             reason=reason,
+            reasoning=reasoning,
+            event_state=event_state,
+            event_cause=event_cause,
             metadata=metadata,
         )
 
@@ -113,6 +119,9 @@ class UsersModerationDmService:
         duration_seconds: int | None = None,
         expires_at: datetime | None = None,
         reason: str | None = None,
+        reasoning: str | None = None,
+        event_state: str | None = None,
+        event_cause: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         guild_id = str(guild.id)
@@ -170,6 +179,9 @@ class UsersModerationDmService:
             duration_seconds=duration_seconds,
             expires_at=expires_at,
             reason=reason,
+            reasoning=reasoning,
+            event_state=event_state,
+            event_cause=event_cause,
             invite_url=str(cfg.get("invite_url") or "").strip(),
         )
         title, emoji = self._title_for_event(event_type)
@@ -269,6 +281,9 @@ class UsersModerationDmService:
         duration_seconds: int | None,
         expires_at: datetime | None,
         reason: str | None,
+        reasoning: str | None,
+        event_state: str | None,
+        event_cause: str | None,
         invite_url: str,
     ) -> str:
         now = datetime.now(timezone.utc)
@@ -279,7 +294,9 @@ class UsersModerationDmService:
             now=now,
             duration_seconds=duration_seconds,
             reason=reason,
-            reasoning=f"users_{event_type}_dm",
+            reasoning=reasoning or f"users_{event_type}_dm",
+            event_state=event_state,
+            event_cause=event_cause,
             started_at=now,
             expires_at=expires_at,
             invite_url=invite_url,

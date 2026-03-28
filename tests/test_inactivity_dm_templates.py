@@ -51,7 +51,7 @@ def test_inactivity_payload_includes_reason_and_invite_line_aliases() -> None:
     assert payload["reason_text"] == "La moderazione aggiunge: Inattività prolungata"
     assert payload["reason_line"] == "Reason: ***Inattività prolungata***. "
     assert payload["invite_url"] == "https://discord.gg/rejoin"
-    assert payload["invite_line"] == "Invite: ***https://discord.gg/rejoin***"
+    assert payload["invite_line"] == " Invite: ***https://discord.gg/rejoin***"
     assert payload["rejoin_link"] == "https://discord.gg/rejoin"
     assert payload["duration_seconds"] == 259200
     assert payload["event_type"] == "tempban"

@@ -83,7 +83,7 @@ def test_users_dm_manual_grace_renders_template_and_logs_success() -> None:
         assert sent_embed.title == "🕊️ __**GRAZIA**__"
         description = str(sent_embed.description)
         assert description.startswith("_") and description.endswith("_")
-        assert "***Manual grace reason***" in description
+        assert "Manual grace reason" in description
         assert "GRACE ***<@42>*** (***<@42>***)" in description
         assert "***https://discord.gg/server***" in description
         assert "***2026-01-01 12:00 UTC***" in description
@@ -218,7 +218,7 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
                     "cooldown_seconds": 14 * 86400,
                     "invite_url": "https://discord.gg/rejoin",
                     "grace_template": "GRACE {user}",
-                    "tempban_template": "AUTO TEMPBAN {mention} ({user}) {duration_human} {invite_line}",
+                    "tempban_template": "AUTO TEMPBAN {mention} ({user}) {duration_human} {reason_line} {invite_line}",
                 }
             ),
             get_latest_users_dm_delivery=AsyncMock(return_value=None),
@@ -239,6 +239,8 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
         description = str(dm_embed.description)
         assert description.startswith("_") and description.endswith("_")
         assert "AUTO TEMPBAN ***<@42>*** (***<@42>***)" in description
+        assert "periodo di grazia manuale scaduto" in description
+        assert "Reason:" not in description
         assert "***https://discord.gg/rejoin***" in description
         assert dm_embed.author.name == "servizio USERS"
         assert dm_embed.footer.text

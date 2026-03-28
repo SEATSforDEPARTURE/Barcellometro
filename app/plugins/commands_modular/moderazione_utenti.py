@@ -153,8 +153,9 @@ def _format_italian_datetime(value: object) -> str | None:
 def _render_users_dm_template_preview(template: str) -> str:
     payload = build_dm_template_preview_payload(
         event_type="tempban",
-        reason="Manual grace expired",
+        reason="Automatic tempban after manual grace expiry",
         duration_seconds=2 * 86400,
+        extra_payload={"reasoning": "users_manual_grace_expired_tempban"},
     )
     return render_dm_template_preview(template, payload)
 
