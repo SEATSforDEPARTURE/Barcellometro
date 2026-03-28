@@ -234,7 +234,7 @@ La superficie slash canonica del sottosistema `/inactivity dms` è **solo** ques
 - `/inactivity dms template_tempban_set` (parametro: `text`)
 - `/inactivity dms template_tempban_show`
 - `/inactivity dms template_tempban_reset`
-- `/inactivity dms cooldown_set` (parametro: `days`)
+- `/inactivity dms cooldown_set` (parametri: `quantity`, `unit`)
 - `/inactivity dms cooldown_show`
 - `/inactivity dms cooldown_reset`
 - `/inactivity dms invite_set` (parametro: `url`)
@@ -246,6 +246,7 @@ Regole obbligatorie:
 - `status` deve rendere in modo esplicito: stato `on/off`, template `template_grace`, template `template_tempban`, cooldown, invite e metriche/log recenti quando disponibili.
 - naming legacy tipo `template_reminder_*` non deve comparire nella superficie slash pubblica, nella command map pubblica o nella documentazione utente corrente.
 - eventuali campi legacy interni (`dm_reminder_template`, `dm_kick_template`) restano ammessi solo come compatibilità dati/runtime e non devono essere pubblicizzati come comandi canonici.
+- il cooldown DM usa il contratto quantity+unit (secondi, minuti, ore, giorni, settimane) e `0` significa esplicitamente **disattivato**.
 
 ## 11. Contratto placeholder DM condiviso (`/users dms` e `/inactivity dms`)
 

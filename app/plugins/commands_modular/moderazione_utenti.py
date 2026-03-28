@@ -33,12 +33,14 @@ logger = logging.getLogger(__name__)
 
 PERM = "users"
 WINDOW_UNIT_CHOICES = [
+    app_commands.Choice(name="secondi", value="secondi"),
     app_commands.Choice(name="minuti", value="minuti"),
     app_commands.Choice(name="ore", value="ore"),
     app_commands.Choice(name="giorni", value="giorni"),
     app_commands.Choice(name="settimane", value="settimane"),
 ]
 WINDOW_UNIT_CHOICES_EN = [
+    app_commands.Choice(name="seconds", value="secondi"),
     app_commands.Choice(name="minutes", value="minuti"),
     app_commands.Choice(name="hours", value="ore"),
     app_commands.Choice(name="days", value="giorni"),
@@ -186,6 +188,30 @@ def _fmt_utc(ts: object) -> str:
     except Exception:
         return str(ts)
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _resolve_cooldown_seconds_from_users_cfg(cfg: dict[str, object]) -> int:
+    if cfg.get("cooldown_seconds") is not None:
+        return max(0, int(cfg.get("cooldown_seconds") or 0))
+    return max(0, int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS) * 86400)
+
+
+def _cooldown_seconds_to_quantity_unit(total_seconds: int) -> tuple[int, str]:
+    seconds = max(0, int(total_seconds))
+    if seconds == 0:
+        return 0, "secondi"
+    for unit, factor in (("settimane", 7 * 24 * 3600), ("giorni", 24 * 3600), ("ore", 3600), ("minuti", 60)):
+        if seconds % factor == 0:
+            return seconds // factor, unit
+    return seconds, "secondi"
+
+
+def _format_cooldown_label(total_seconds: int) -> str:
+    seconds = max(0, int(total_seconds))
+    if seconds == 0:
+        return "disabled (0 seconds)"
+    quantity, unit = _cooldown_seconds_to_quantity_unit(seconds)
+    return f"{quantity} {unit}"
 
 
 def _format_moderation_list_line(
@@ -1120,8 +1146,9 @@ def register_moderazione_utenti(
                 ("dms", "on" if bool(cfg.get("enabled", 1)) else "off"),
                 ("template_grace", cfg.get("grace_template") or "not set"),
                 ("template_tempban", cfg.get("tempban_template") or "not set"),
-                ("cooldown", f"{int(cfg.get('cooldown_days', DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS)} days"),
-                ("cooldown_days", int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS)),
+                ("cooldown", _format_cooldown_label(_resolve_cooldown_seconds_from_users_cfg(cfg))),
+                ("cooldown_seconds", _resolve_cooldown_seconds_from_users_cfg(cfg)),
+                ("cooldown_disabled", "yes" if _resolve_cooldown_seconds_from_users_cfg(cfg) == 0 else "no"),
                 ("invite_url", cfg.get("invite_url") or "not set"),
                 ("dm_sent_ok", int(stats.get("ok", 0))),
                 ("dm_sent_fail", int(stats.get("fail", 0))),
@@ -1199,26 +1226,60 @@ def register_moderazione_utenti(
         await _send(interaction, subcommand_path="users dms template_tempban_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="cooldown_set", description="Set the DM cooldown for USERS contexts.")
-    @app_commands.describe(days="Number of days between DMs in the same USERS context.")
-    async def users_dms_cooldown_set(interaction: discord.Interaction, days: app_commands.Range[int, 1, 365]) -> None:
+    @app_commands.describe(quantity="Cooldown quantity.", unit="Cooldown unit.")
+    @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+    async def users_dms_cooldown_set(
+        interaction: discord.Interaction,
+        quantity: app_commands.Range[int, 0, 1000000],
+        unit: app_commands.Choice[str],
+    ) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), cooldown_days=int(days))
-        await _send(interaction, subcommand_path="users dms cooldown_set", lines=[("days", int(days)), ("result", "updated")], kind="success")
+        cooldown_seconds = int(rolling_window_timedelta(int(quantity), unit.value).total_seconds()) if int(quantity) > 0 else 0
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), cooldown_seconds=cooldown_seconds)
+        await _send(
+            interaction,
+            subcommand_path="users dms cooldown_set",
+            subtitle_args=[quantity, unit],
+            lines=[
+                ("cooldown", _format_cooldown_label(cooldown_seconds)),
+                ("cooldown_seconds", cooldown_seconds),
+                ("cooldown_disabled", "yes" if cooldown_seconds == 0 else "no"),
+                ("result", "updated"),
+            ],
+            kind="success",
+        )
 
     @dms_group.command(name="cooldown_show", description="Show the DM cooldown for USERS contexts.")
     async def users_dms_cooldown_show(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
-        await _send(interaction, subcommand_path="users dms cooldown_show", lines=[("days", int(cfg.get("cooldown_days", DEFAULT_USERS_DM_COOLDOWN_DAYS) or DEFAULT_USERS_DM_COOLDOWN_DAYS))])
+        cooldown_seconds = _resolve_cooldown_seconds_from_users_cfg(cfg)
+        quantity, unit = _cooldown_seconds_to_quantity_unit(cooldown_seconds)
+        await _send(
+            interaction,
+            subcommand_path="users dms cooldown_show",
+            lines=[
+                ("cooldown", _format_cooldown_label(cooldown_seconds)),
+                ("quantity", quantity),
+                ("unit", unit),
+                ("cooldown_seconds", cooldown_seconds),
+                ("cooldown_disabled", "yes" if cooldown_seconds == 0 else "no"),
+            ],
+        )
 
     @dms_group.command(name="cooldown_reset", description="Reset the DM cooldown for USERS contexts.")
     async def users_dms_cooldown_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), cooldown_days=DEFAULT_USERS_DM_COOLDOWN_DAYS)
-        await _send(interaction, subcommand_path="users dms cooldown_reset", lines=[("days", DEFAULT_USERS_DM_COOLDOWN_DAYS), ("result", "reset")], kind="success")
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), cooldown_seconds=0)
+        await _send(
+            interaction,
+            subcommand_path="users dms cooldown_reset",
+            lines=[("cooldown", "disabled (0 seconds)"), ("cooldown_seconds", 0), ("cooldown_disabled", "yes"), ("result", "reset_to_disabled")],
+            kind="success",
+        )
 
     @dms_group.command(name="invite_set", description="Set the invite link used in USERS DMs.")
     @app_commands.describe(url="Invite URL included in USERS DMs.")

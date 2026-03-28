@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 
 ROME_TZ = ZoneInfo("Europe/Rome")
-ROLLING_WINDOW_UNITS: tuple[str, ...] = ("minuti", "ore", "giorni", "settimane")
+ROLLING_WINDOW_UNITS: tuple[str, ...] = ("secondi", "minuti", "ore", "giorni", "settimane")
 
 
 @dataclass
@@ -23,14 +23,26 @@ class TimeWindowResult:
 def _normalize_requested_unit(unit: str | None) -> str:
     normalized = str(unit or "").strip().lower()
     aliases = {
+        "secondo": "secondi",
+        "secondi": "secondi",
+        "second": "secondi",
+        "seconds": "secondi",
         "minuto": "minuti",
         "minuti": "minuti",
+        "minute": "minuti",
+        "minutes": "minuti",
         "ora": "ore",
         "ore": "ore",
+        "hour": "ore",
+        "hours": "ore",
         "giorno": "giorni",
         "giorni": "giorni",
+        "day": "giorni",
+        "days": "giorni",
         "settimana": "settimane",
         "settimane": "settimane",
+        "week": "settimane",
+        "weeks": "settimane",
     }
     return aliases.get(normalized, "minuti")
 
@@ -39,6 +51,7 @@ def rolling_window_timedelta(quantity: int, unit: str | None) -> timedelta:
     qty = max(1, int(quantity))
     normalized_unit = _normalize_requested_unit(unit)
     delta_map = {
+        "secondi": timedelta(seconds=qty),
         "minuti": timedelta(minutes=qty),
         "ore": timedelta(hours=qty),
         "giorni": timedelta(days=qty),

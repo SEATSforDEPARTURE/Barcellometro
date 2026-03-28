@@ -15,6 +15,7 @@ class _FakeDatabase:
         self.config: dict[str, object] = {
             "enabled": 1,
             "cooldown_days": 14,
+            "cooldown_seconds": 14 * 86400,
             "invite_url": None,
             "grace_template": None,
             "tempban_template": None,
@@ -105,7 +106,12 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         await _find_command(users_group, "dms", "template_tempban_set").callback(interaction, "Tempban {user}")
         await _find_command(users_group, "dms", "template_tempban_show").callback(interaction)
         await _find_command(users_group, "dms", "template_tempban_reset").callback(interaction)
-        await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 21)
+        await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 30, discord.app_commands.Choice(name="secondi", value="secondi"))
+        await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 5, discord.app_commands.Choice(name="minuti", value="minuti"))
+        await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 2, discord.app_commands.Choice(name="ore", value="ore"))
+        await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 3, discord.app_commands.Choice(name="giorni", value="giorni"))
+        await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 1, discord.app_commands.Choice(name="settimane", value="settimane"))
+        await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 0, discord.app_commands.Choice(name="secondi", value="secondi"))
         await _find_command(users_group, "dms", "cooldown_show").callback(interaction)
         await _find_command(users_group, "dms", "cooldown_reset").callback(interaction)
         await _find_command(users_group, "dms", "invite_set").callback(interaction, "https://discord.gg/test")
@@ -120,8 +126,9 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert as_map["dms"] == "off"
         assert as_map["template_grace"] == "not set"
         assert as_map["template_tempban"] == "not set"
-        assert as_map["cooldown"] == "14 days"
-        assert as_map["cooldown_days"] == 14
+        assert as_map["cooldown"] == "disabled (0 seconds)"
+        assert as_map["cooldown_seconds"] == 0
+        assert as_map["cooldown_disabled"] == "yes"
         assert as_map["invite_url"] == "not set"
         assert as_map["dm_sent_ok"] == 1
         assert as_map["dm_sent_fail"] == 1
@@ -135,5 +142,23 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert "{mention}" in sections[1].lines
         assert "{now_it}" in sections[1].lines
         assert "{expires_at_it}" in sections[1].lines
+
+        cooldown_set_calls = [call for call in send_response.await_args_list if call.kwargs.get("subcommand_path") == "users dms cooldown_set"]
+        assert len(cooldown_set_calls) == 6
+        assert cooldown_set_calls[0].kwargs["lines"][1] == ("cooldown_seconds", 30)
+        assert cooldown_set_calls[1].kwargs["lines"][1] == ("cooldown_seconds", 300)
+        assert cooldown_set_calls[2].kwargs["lines"][1] == ("cooldown_seconds", 7200)
+        assert cooldown_set_calls[3].kwargs["lines"][1] == ("cooldown_seconds", 259200)
+        assert cooldown_set_calls[4].kwargs["lines"][1] == ("cooldown_seconds", 604800)
+        assert cooldown_set_calls[5].kwargs["lines"][0] == ("cooldown", "disabled (0 seconds)")
+
+        cooldown_show_call = next(call for call in send_response.await_args_list if call.kwargs.get("subcommand_path") == "users dms cooldown_show")
+        show_map = {key: value for key, value in cooldown_show_call.kwargs["lines"]}
+        assert show_map["cooldown_disabled"] == "yes"
+
+        cooldown_reset_call = next(call for call in send_response.await_args_list if call.kwargs.get("subcommand_path") == "users dms cooldown_reset")
+        reset_map = {key: value for key, value in cooldown_reset_call.kwargs["lines"]}
+        assert reset_map["cooldown_seconds"] == 0
+        assert reset_map["cooldown_disabled"] == "yes"
 
     asyncio.run(_run())

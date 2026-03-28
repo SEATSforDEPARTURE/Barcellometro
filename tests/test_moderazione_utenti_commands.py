@@ -252,6 +252,17 @@ def test_users_unban_untempban_ungrace_range_use_from_to_parameters() -> None:
     assert _option_names(ungrace_range) == ["from", "to", "reason"]
 
 
+def test_users_dms_cooldown_set_uses_quantity_and_unit_parameters() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+    register_moderazione_utenti(users_group, ctx)
+
+    cooldown_set = _find_command(users_group, "dms", "cooldown_set")
+    param_names = [param.name for param in cooldown_set.parameters]
+    assert param_names == ["quantity", "unit"]
+    assert "days" not in param_names
+
+
 def test_grace_alias_is_direct_command_without_assign_subcommand() -> None:
     users_group = discord.app_commands.Group(name="users", description="users")
     ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None)

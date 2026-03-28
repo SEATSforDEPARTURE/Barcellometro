@@ -16,6 +16,7 @@ class _FakeDatabase:
         self.config: dict[str, object] = {
             "dm_reminders_enabled": 1,
             "reminder_cooldown_days": 14,
+            "reminder_cooldown_seconds": 14 * 86400,
             "invite_url": None,
             "template_grace": None,
             "template_tempban": None,
@@ -110,8 +111,9 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         assert as_map["dms"] == "off"
         assert as_map["template_grace"] == "not set"
         assert as_map["template_tempban"] == "not set"
-        assert as_map["cooldown"] == "14 days"
-        assert as_map["cooldown_days"] == 14
+        assert as_map["cooldown"] == "2 settimane"
+        assert as_map["cooldown_seconds"] == 14 * 86400
+        assert as_map["cooldown_disabled"] == "no"
         assert as_map["invite_url"] == "not set"
         assert as_map["dm_sent_ok"] == 1
         assert as_map["dm_sent_fail"] == 1
@@ -188,6 +190,49 @@ def test_inactivity_dms_template_grace_and_tempban_set_show_reset(inattivi_modul
     asyncio.run(_run())
 
 
+def test_inactivity_dms_cooldown_set_supports_all_units_and_disable(inattivi_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        db = _FakeDatabase()
+        send_response = AsyncMock()
+        monkeypatch.setattr(inattivi_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(inattivi_module, "send_standard_response", send_response)
+
+        ctx = SimpleNamespace(database=db, footer=None, author=None)
+        inactivity_group = discord.app_commands.Group(name="inactivity", description="inactivity")
+        inattivi_module.register_inattivi(inactivity_group, ctx)
+        interaction = SimpleNamespace(guild_id=123, guild=None)
+
+        await _find_command(inactivity_group, "dms", "cooldown_set").callback(interaction, 30, discord.app_commands.Choice(name="secondi", value="secondi"))
+        await _find_command(inactivity_group, "dms", "cooldown_set").callback(interaction, 5, discord.app_commands.Choice(name="minuti", value="minuti"))
+        await _find_command(inactivity_group, "dms", "cooldown_set").callback(interaction, 2, discord.app_commands.Choice(name="ore", value="ore"))
+        await _find_command(inactivity_group, "dms", "cooldown_set").callback(interaction, 3, discord.app_commands.Choice(name="giorni", value="giorni"))
+        await _find_command(inactivity_group, "dms", "cooldown_set").callback(interaction, 1, discord.app_commands.Choice(name="settimane", value="settimane"))
+        await _find_command(inactivity_group, "dms", "cooldown_set").callback(interaction, 0, discord.app_commands.Choice(name="secondi", value="secondi"))
+        await _find_command(inactivity_group, "dms", "cooldown_show").callback(interaction)
+        await _find_command(inactivity_group, "dms", "cooldown_reset").callback(interaction)
+
+        cooldown_set_calls = [call for call in send_response.await_args_list if call.kwargs.get("subcommand_path") == "inactivity dms cooldown_set"]
+        assert len(cooldown_set_calls) == 6
+        assert cooldown_set_calls[0].kwargs["lines"][1] == ("cooldown_seconds", 30)
+        assert cooldown_set_calls[1].kwargs["lines"][1] == ("cooldown_seconds", 300)
+        assert cooldown_set_calls[2].kwargs["lines"][1] == ("cooldown_seconds", 7200)
+        assert cooldown_set_calls[3].kwargs["lines"][1] == ("cooldown_seconds", 259200)
+        assert cooldown_set_calls[4].kwargs["lines"][1] == ("cooldown_seconds", 604800)
+        assert cooldown_set_calls[5].kwargs["lines"][0] == ("cooldown", "disabled (0 seconds)")
+
+        show_call = next(call for call in send_response.await_args_list if call.kwargs.get("subcommand_path") == "inactivity dms cooldown_show")
+        show_map = {key: value for key, value in show_call.kwargs["lines"]}
+        assert show_map["cooldown_seconds"] == 0
+        assert show_map["cooldown_disabled"] == "yes"
+
+        reset_call = next(call for call in send_response.await_args_list if call.kwargs.get("subcommand_path") == "inactivity dms cooldown_reset")
+        reset_map = {key: value for key, value in reset_call.kwargs["lines"]}
+        assert reset_map["cooldown_seconds"] == 0
+        assert reset_map["cooldown_disabled"] == "yes"
+
+    asyncio.run(_run())
+
+
 def test_inactivity_dms_status_falls_back_to_legacy_templates(inattivi_module, monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         db = _FakeDatabase()
@@ -253,3 +298,13 @@ def test_command_standards_pin_inactivity_dms_surface_and_legacy_policy() -> Non
     assert "/inactivity dms template_tempban_set" in standards
     assert "`template_reminder_*`" in standards
     assert "`dm_reminder_template`, `dm_kick_template`" in standards
+
+
+def test_inactivity_dms_cooldown_set_uses_quantity_and_unit_parameters(inattivi_module) -> None:
+    inactivity_group = discord.app_commands.Group(name="inactivity", description="inactivity")
+    ctx = SimpleNamespace(database=_FakeDatabase(), footer=None, author=None)
+    inattivi_module.register_inattivi(inactivity_group, ctx)
+    cooldown_set = _find_command(inactivity_group, "dms", "cooldown_set")
+    param_names = [param.name for param in cooldown_set.parameters]
+    assert param_names == ["quantity", "unit"]
+    assert "days" not in param_names
