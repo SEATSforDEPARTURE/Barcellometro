@@ -161,26 +161,40 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/privacy status [voice_channel]`
 
 ### Users / moderation
-- `/users kick user:<utente> [reason:<testo>]`
+- `/users kick nick_or_id:<user_id_o_nickname> [reason:<text>]`
 - `/users kick_list`
-- `/users ban user:<utente> [reason:<testo>]`
+- `/users ban nick_or_id:<user_id_o_nickname> [reason:<text>]`
 - `/users ban_list`
-- `/users tempban user:<utente> quantity:<n> unit:<minuti|ore|giorni|settimane> [reason:<testo>]`
+- `/users tempban nick_or_id:<user_id_o_nickname> quantity:<n> unit:<minutes|hours|days|weeks> [reason:<text>]`
 - `/users tempban_list`
-- `/users grace assign user:<utente> quantity:<n> unit:<minuti|ore|giorni|settimane> [reason:<testo>]`
+- `/users grace manual nick_or_id:<user_id_o_nickname> quantity:<n> unit:<minutes|hours|days|weeks> [reason:<text>]`
 - `/users grace tempban_set quantity:<n> unit:<minuti|ore|giorni|settimane>`
 - `/users grace tempban_show`
 - `/users grace tempban_reset`
 - `/users grace_list`
-- `/users unban user nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
-- `/users untempban user nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
-- `/users ungrace user nick_or_id:<ultimo_nick_o_id_utente> [reason:<testo>]`
-- Batch revoche temporali (stessa convenzione cross-progetto):
-  - inglese: `today`, `yesterday`, `last quantity:<n> unit:<minutes|hours|days|weeks>`, `range da:<DD/MM/YYYY HH:MM> a:<DD/MM/YYYY HH:MM>`
-  - italiano: `oggi`, `ieri`, `ultimi quantita:<n> unita:<minuti|ore|giorni|settimane>`, `intervallo da:<DD/MM/YYYY HH:MM> a:<DD/MM/YYYY HH:MM>`
-  - disponibili sotto: `/users unban ...`, `/users untempban ...`, `/users ungrace ...`
+- `/users unban today reason:<text>`
+- `/users unban yesterday reason:<text>`
+- `/users unban last quantity:<n> unit:<minutes|hours|days|weeks> reason:<text>`
+- `/users unban range from:<DD/MM/YYYY HH:MM> to:<DD/MM/YYYY HH:MM> reason:<text>`
+- `/users untempban today reason:<text>`
+- `/users untempban yesterday reason:<text>`
+- `/users untempban last quantity:<n> unit:<minutes|hours|days|weeks> reason:<text>`
+- `/users untempban range from:<DD/MM/YYYY HH:MM> to:<DD/MM/YYYY HH:MM> reason:<text>`
+- `/users ungrace today reason:<text>`
+- `/users ungrace yesterday reason:<text>`
+- `/users ungrace last quantity:<n> unit:<minutes|hours|days|weeks> reason:<text>`
+- `/users ungrace range from:<DD/MM/YYYY HH:MM> to:<DD/MM/YYYY HH:MM> reason:<text>`
 - Alias top-level reali: `/kick`, `/ban`, `/unban`, `/tempban`, `/untempban`, `/grace`, `/ungrace`.
-- Scadenza grace manuale: quando `/users grace assign` (o alias `/grace`) scade, il servizio revoca automaticamente il grace e applica un tempban automatico solo se il default configurato con `grace tempban_set` è maggiore di `0` secondi.
+- Alias italiani:
+  - `/kick nick_o_id:<...> motivo:<...>`
+  - `/ban nick_o_id:<...> motivo:<...>`
+  - `/tempban nick_o_id:<...> quantità:<n> unità:<minuti|ore|giorni|settimane> motivo:<...>`
+  - `/grace nick_o_id:<...> quantità:<n> unità:<minuti|ore|giorni|settimane> motivo:<...>`
+  - `/unban oggi|ieri motivo:<...>`
+  - `/unban ultimi quantità:<n> unità:<minuti|ore|giorni|settimane> motivo:<...>`
+  - `/unban range da:<DD/MM/YYYY HH:MM> a:<DD/MM/YYYY HH:MM> motivo:<...>`
+  - stessa convenzione per `/untempban ...` e `/ungrace ...`
+- Scadenza grace manuale: quando `/users grace manual` (o alias `/grace`) scade, il servizio revoca automaticamente il grace e applica un tempban automatico solo se il default configurato con `grace tempban_set` è maggiore di `0` secondi.
 
 ### Greetings / inactivity
 - `/greetings on [channel]`

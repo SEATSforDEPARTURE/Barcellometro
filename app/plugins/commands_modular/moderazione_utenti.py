@@ -833,15 +833,7 @@ def register_moderazione_utenti(
     def _resolve_range_batch_window(start_at: str, end_at: str) -> tuple[TimeWindowResult | None, str | None]:
         return resolve_range_window(start_at, end_at, ctx.config)
 
-    unban_group = app_commands.Group(name="unban", description="Revoke bans by user or time window.")
-
-    @unban_group.command(name="user", description="Revoke an active ban for one user.")
-    @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
-    async def users_unban_user(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
-        user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="unban")
-        if user is None:
-            return
-        await _unban_impl(interaction, user, reason, subcommand_path="users unban user")
+    unban_group = app_commands.Group(name="unban", description="Revoke bans by time window.")
 
     @unban_group.command(name="today", description="Revoke bans created today.")
     @app_commands.describe(reason="Optional reason override.")
@@ -880,15 +872,7 @@ def register_moderazione_utenti(
 
     users_group.add_command(unban_group)
 
-    untempban_group = app_commands.Group(name="untempban", description="Revoke temporary bans by user or time window.")
-
-    @untempban_group.command(name="user", description="Revoke an active temporary ban for one user.")
-    @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
-    async def users_untempban_user(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
-        user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="untempban")
-        if user is None:
-            return
-        await _unban_impl(interaction, user, reason, subcommand_path="users untempban user", success_result="temporary ban revoked")
+    untempban_group = app_commands.Group(name="untempban", description="Revoke temporary bans by time window.")
 
     @untempban_group.command(name="today", description="Revoke temporary bans created today.")
     @app_commands.describe(reason="Optional reason override.")
@@ -1022,15 +1006,7 @@ def register_moderazione_utenti(
     async def users_grace_list(interaction: discord.Interaction) -> None:
         await _grace_list_impl(interaction)
 
-    ungrace_group = app_commands.Group(name="ungrace", description="Revoke grace periods by user or time window.")
-
-    @ungrace_group.command(name="user", description="Revoke an active grace period for one user.")
-    @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
-    async def users_ungrace_user(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
-        user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode="ungrace")
-        if user is None:
-            return
-        await _ungrace_impl(interaction, user, reason, subcommand_path="users ungrace user")
+    ungrace_group = app_commands.Group(name="ungrace", description="Revoke grace periods by time window.")
 
     @ungrace_group.command(name="today", description="Revoke grace periods created today.")
     @app_commands.describe(reason="Optional reason override.")
@@ -1073,79 +1049,63 @@ def register_moderazione_utenti(
         def _build_alias_revocation_group(name: str, mode: str, description: str) -> app_commands.Group:
             group = app_commands.Group(name=name, description=description)
 
-            @group.command(name="user", description="Alias of /users {mode} user.".format(mode=mode))
-            @app_commands.describe(nick_or_id="Last known nickname or user ID.", reason="Optional reason override.")
-            async def _alias_user(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
-                user = await _resolve_moderation_user(interaction, nick_or_id=nick_or_id, mode=mode)
-                if user is None:
-                    return
-                if mode == "ungrace":
-                    await _ungrace_impl(interaction, user, reason, subcommand_path=f"{name} user")
-                    return
-                await _unban_impl(
-                    interaction,
-                    user,
-                    reason,
-                    subcommand_path=f"{name} user",
-                    success_result="temporary ban revoked" if mode == "untempban" else "ban revocato",
-                )
-
             @group.command(name="oggi", description="Revoca le azioni create oggi.")
-            @app_commands.describe(reason="Motivazione opzionale.")
-            async def _alias_today(interaction: discord.Interaction, reason: str | None = None) -> None:
-                await _run_window_batch(interaction, mode=mode, reason=reason, window=resolve_oggi_window(), subcommand_path=f"{name} oggi")
+            @app_commands.describe(motivo="Motivazione opzionale.")
+            async def _alias_today(interaction: discord.Interaction, motivo: str | None = None) -> None:
+                await _run_window_batch(interaction, mode=mode, reason=motivo, window=resolve_oggi_window(), subcommand_path=f"{name} oggi")
 
             @group.command(name="ieri", description="Revoca le azioni create ieri.")
-            @app_commands.describe(reason="Motivazione opzionale.")
-            async def _alias_yesterday(interaction: discord.Interaction, reason: str | None = None) -> None:
-                await _run_window_batch(interaction, mode=mode, reason=reason, window=resolve_ieri_window(), subcommand_path=f"{name} ieri")
+            @app_commands.describe(motivo="Motivazione opzionale.")
+            async def _alias_yesterday(interaction: discord.Interaction, motivo: str | None = None) -> None:
+                await _run_window_batch(interaction, mode=mode, reason=motivo, window=resolve_ieri_window(), subcommand_path=f"{name} ieri")
 
             @group.command(name="ultimi", description="Revoca le azioni create nella finestra mobile.")
-            @app_commands.describe(quantita="Quantità.", unita="Unità.", reason="Motivazione opzionale.")
-            @app_commands.choices(unita=WINDOW_UNIT_CHOICES)
+            @app_commands.describe(quantità="Quantità.", unità="Unità.", motivo="Motivazione opzionale.")
+            @app_commands.rename(quantità="quantity", unità="unit")
+            @app_commands.choices(unità=WINDOW_UNIT_CHOICES)
             async def _alias_last(
                 interaction: discord.Interaction,
-                quantita: int,
-                unita: app_commands.Choice[str],
-                reason: str | None = None,
+                quantità: int,
+                unità: app_commands.Choice[str],
+                motivo: str | None = None,
             ) -> None:
-                window, error = _resolve_last_window(quantita, unita.value)
+                window, error = _resolve_last_window(quantità, unità.value)
                 if window is None:
                     await _send(interaction, subcommand_path=f"{name} ultimi", lines=[("error", error or "Finestra non valida.")], kind="error")
                     return
-                await _run_window_batch(interaction, mode=mode, reason=reason, window=window, subcommand_path=f"{name} ultimi")
+                await _run_window_batch(interaction, mode=mode, reason=motivo, window=window, subcommand_path=f"{name} ultimi")
 
-            @group.command(name="intervallo", description="Revoca le azioni create in un intervallo esplicito.")
-            @app_commands.describe(da="Inizio DD/MM/YYYY HH:MM.", a="Fine DD/MM/YYYY HH:MM.", reason="Motivazione opzionale.")
-            async def _alias_range(interaction: discord.Interaction, da: str, a: str, reason: str | None = None) -> None:
+            @group.command(name="range", description="Revoca le azioni create in un intervallo esplicito.")
+            @app_commands.describe(da="Inizio DD/MM/YYYY HH:MM.", a="Fine DD/MM/YYYY HH:MM.", motivo="Motivazione opzionale.")
+            async def _alias_range(interaction: discord.Interaction, da: str, a: str, motivo: str | None = None) -> None:
                 window, error = _resolve_range_batch_window(da, a)
                 if window is None:
                     await _send(
                         interaction,
-                        subcommand_path=f"{name} intervallo",
+                        subcommand_path=f"{name} range",
                         lines=[("error", error or "Intervallo non valido.")],
                         kind="error",
                     )
                     return
-                await _run_window_batch(interaction, mode=mode, reason=reason, window=window, subcommand_path=f"{name} intervallo")
+                await _run_window_batch(interaction, mode=mode, reason=motivo, window=window, subcommand_path=f"{name} range")
 
             return group
 
         @app_commands.command(name="kick", description="Alias of /users kick.")
-        @app_commands.describe(nick_or_id="Member ID, mention, or nickname.", reason="Optional reason override.")
-        async def kick_alias(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
-            user = await _resolve_live_member(interaction, nick_or_id=nick_or_id, mode="kick")
+        @app_commands.describe(nick_o_id="ID membro, mention o nickname.", motivo="Motivo opzionale.")
+        async def kick_alias(interaction: discord.Interaction, nick_o_id: str, motivo: str | None = None) -> None:
+            user = await _resolve_live_member(interaction, nick_or_id=nick_o_id, mode="kick")
             if user is None:
                 return
-            await _kick_impl(interaction, user, reason)
+            await _kick_impl(interaction, user, motivo)
 
         @app_commands.command(name="ban", description="Alias of /users ban.")
-        @app_commands.describe(nick_or_id="Member ID, mention, or nickname.", reason="Optional reason override.")
-        async def ban_alias(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
-            user = await _resolve_live_member(interaction, nick_or_id=nick_or_id, mode="ban")
+        @app_commands.describe(nick_o_id="ID membro, mention o nickname.", motivo="Motivo opzionale.")
+        async def ban_alias(interaction: discord.Interaction, nick_o_id: str, motivo: str | None = None) -> None:
+            user = await _resolve_live_member(interaction, nick_or_id=nick_o_id, mode="ban")
             if user is None:
                 return
-            await _ban_impl(interaction, user, reason)
+            await _ban_impl(interaction, user, motivo)
 
         unban_alias_group = _build_alias_revocation_group(
             name="unban",
@@ -1161,43 +1121,45 @@ def register_moderazione_utenti(
 
         @app_commands.command(name="tempban", description="Alias of /users tempban.")
         @app_commands.describe(
-            nick_or_id="Member ID, mention, or nickname.",
-            quantity="Duration quantity (for example 10, 3, 7, 2).",
-            unit="Duration unit.",
-            reason="Optional reason override.",
+            nick_o_id="ID membro, mention o nickname.",
+            quantità="Quantità durata (esempio 10, 3, 7, 2).",
+            unità="Unità durata.",
+            motivo="Motivo opzionale.",
         )
-        @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+        @app_commands.rename(quantità="quantity", unità="unit")
+        @app_commands.choices(unità=WINDOW_UNIT_CHOICES)
         async def tempban_alias(
             interaction: discord.Interaction,
-            nick_or_id: str,
-            quantity: int,
-            unit: app_commands.Choice[str],
-            reason: str | None = None,
+            nick_o_id: str,
+            quantità: int,
+            unità: app_commands.Choice[str],
+            motivo: str | None = None,
         ) -> None:
-            user = await _resolve_live_member(interaction, nick_or_id=nick_or_id, mode="tempban")
+            user = await _resolve_live_member(interaction, nick_or_id=nick_o_id, mode="tempban")
             if user is None:
                 return
-            await _tempban_impl(interaction, user, quantity, unit.value, reason)
+            await _tempban_impl(interaction, user, quantità, unità.value, motivo)
 
         @app_commands.command(name="grace", description="Alias of /users grace.")
         @app_commands.describe(
-            nick_or_id="Member ID, mention, or nickname.",
-            quantity="Duration quantity (for example 10, 3, 7, 2).",
-            unit="Duration unit.",
-            reason="Optional reason override.",
+            nick_o_id="ID membro, mention o nickname.",
+            quantità="Quantità durata (esempio 10, 3, 7, 2).",
+            unità="Unità durata.",
+            motivo="Motivo opzionale.",
         )
-        @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+        @app_commands.rename(quantità="quantity", unità="unit")
+        @app_commands.choices(unità=WINDOW_UNIT_CHOICES)
         async def grace_alias(
             interaction: discord.Interaction,
-            nick_or_id: str,
-            quantity: int,
-            unit: app_commands.Choice[str],
-            reason: str | None = None,
+            nick_o_id: str,
+            quantità: int,
+            unità: app_commands.Choice[str],
+            motivo: str | None = None,
         ) -> None:
-            user = await _resolve_live_member(interaction, nick_or_id=nick_or_id, mode="grace")
+            user = await _resolve_live_member(interaction, nick_or_id=nick_o_id, mode="grace")
             if user is None:
                 return
-            await _grace_impl(interaction, user, quantity, unit.value, reason)
+            await _grace_impl(interaction, user, quantità, unità.value, motivo)
 
         ungrace_alias_group = _build_alias_revocation_group(
             name="ungrace",
