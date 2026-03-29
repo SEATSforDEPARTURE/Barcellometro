@@ -7,6 +7,7 @@ from typing import Any
 
 from app.services.dm_time_placeholders import build_time_placeholder_payload
 from app.services.dm_user_placeholders import build_user_placeholder_payload
+from app.services.greetings_copy_service import format_moderation_note_section
 from app.services.member_flow_notifications import format_duration_human
 
 DM_BASE_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
@@ -21,6 +22,8 @@ DM_BASE_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
     "reason",
     "reason_text",
     "reason_line",
+    "moderation_context_line",
+    "moderation_note_section",
     "reasoning",
     "duration_seconds",
     "duration_human",
@@ -94,6 +97,7 @@ _AUTO_REASON_LINE_BY_REASONING: dict[str, str] = {
     "users_manual_grace_expired_tempban": "periodo di grazia manuale scaduto",
     "inactivity_grace_expired_tempban": "periodo di grazia per inattività scaduto",
 }
+_MANUAL_TEMPBAN_CONTEXT = "interdizione temporanea applicata manualmente dai moderatori"
 
 
 def build_reason_line(
@@ -131,6 +135,28 @@ def format_reason_text(reason: str | None) -> str:
     return f"La moderazione aggiunge: {safe_reason}"
 
 
+def build_moderation_context_line(
+    *,
+    reasoning: str | None = None,
+    event_type: str | None = None,
+    event_state: str | None = None,
+    event_cause: str | None = None,
+) -> str:
+    safe_reasoning = str(reasoning or "").strip().lower()
+    if safe_reasoning in _AUTO_REASON_LINE_BY_REASONING:
+        return _AUTO_REASON_LINE_BY_REASONING[safe_reasoning]
+    if safe_reasoning in {"users_manual_tempban_direct", "users_tempban_dm"}:
+        return _MANUAL_TEMPBAN_CONTEXT
+    safe_event_type = str(event_type or "").strip().lower()
+    if safe_event_type != "tempban":
+        return ""
+    safe_event_state = str(event_state or "").strip().lower()
+    safe_event_cause = str(event_cause or "").strip().lower()
+    if safe_event_state == "grace_expired" and safe_event_cause == "inactivity":
+        return _AUTO_REASON_LINE_BY_REASONING["inactivity_grace_expired_tempban"]
+    return ""
+
+
 def build_reason_placeholders(
     *,
     reason: str | None = None,
@@ -141,6 +167,12 @@ def build_reason_placeholders(
 ) -> dict[str, str]:
     safe_reason = str(reason or "").strip()
     safe_reasoning = str(reasoning or "").strip()
+    moderation_context_line = build_moderation_context_line(
+        reasoning=safe_reasoning,
+        event_type=event_type,
+        event_state=event_state,
+        event_cause=event_cause,
+    )
     return {
         "reason": safe_reason,
         "reason_text": format_reason_text(safe_reason),
@@ -151,6 +183,8 @@ def build_reason_placeholders(
             event_state=event_state,
             event_cause=event_cause,
         ),
+        "moderation_context_line": moderation_context_line,
+        "moderation_note_section": format_moderation_note_section(safe_reason),
         "reasoning": safe_reasoning,
     }
 
@@ -199,7 +233,7 @@ def render_dm_template(template: str, payload: dict[str, Any]) -> str:
     base = str(template or "")
     styled_payload: dict[str, Any] = {}
     for key, value in payload.items():
-        if key in {"reason_line", "invite_line"}:
+        if key in {"reason_line", "invite_line", "moderation_context_line", "moderation_note_section"}:
             styled_payload[key] = str(value or "")
             continue
         if key in _DM_IMPORTANT_PLACEHOLDERS:
