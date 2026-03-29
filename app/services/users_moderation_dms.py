@@ -14,14 +14,14 @@ DEFAULT_USERS_DM_COOLDOWN_DAYS = 14
 DEFAULT_USERS_DM_COOLDOWN_SECONDS = DEFAULT_USERS_DM_COOLDOWN_DAYS * 86400
 DEFAULT_USERS_DM_GRACE_TEMPLATE = (
     "Hi {user}, you have entered a manual grace period in {server}. "
-    "It will expire on {expires_at_utc} ({expires_at_it}). {reason_line}{invite_line}"
+    "It will expire on {expires_at_utc} ({expires_at_it}). {moderation_note_section}{invite_line}"
 )
 DEFAULT_USERS_DM_TEMPBAN_TEMPLATE = (
     "Hi {user}, your manual grace period in {server} has expired and an automatic temporary ban "
-    "has started for {duration_human}. {reason_line}{invite_line}"
+    "has started for {duration_human}. {moderation_context_line}{moderation_note_section}{invite_line}"
 )
-DEFAULT_USERS_DM_KICK_TEMPLATE = "Hi {user}, you have been kicked from {server}. {reason_line}{invite_line}"
-DEFAULT_USERS_DM_BAN_TEMPLATE = "Hi {user}, you have been banned from {server}. {reason_line}{invite_line}"
+DEFAULT_USERS_DM_KICK_TEMPLATE = "Hi {user}, you have been kicked from {server}. {moderation_note_section}{invite_line}"
+DEFAULT_USERS_DM_BAN_TEMPLATE = "Hi {user}, you have been banned from {server}. {moderation_note_section}{invite_line}"
 USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = DM_BASE_SUPPORTED_PLACEHOLDERS
 
 USERS_DM_SERVICE_NAME = "users"

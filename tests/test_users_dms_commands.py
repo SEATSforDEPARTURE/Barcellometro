@@ -153,6 +153,8 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert "{now_it}" in sections[1].lines
         assert "{expires_at_it}" in sections[1].lines
         assert "{reason_text}" in sections[1].lines
+        assert "{moderation_context_line}" in sections[1].lines
+        assert "{moderation_note_section}" in sections[1].lines
 
         cooldown_set_calls = [call for call in send_response.await_args_list if call.kwargs.get("subcommand_path") == "users dms cooldown_set"]
         assert len(cooldown_set_calls) == 6
@@ -176,26 +178,34 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
 
 
 def test_users_tempban_preview_is_safe_and_resolves_ban_days(users_module) -> None:
-    template = "Tempban di {ban_days} giorni per {user}. {reason_line}{invite_line}"
+    template = "Tempban di {ban_days} giorni per {user}. {moderation_context_line}{moderation_note_section}{invite_line}"
     preview = users_module._render_users_dm_template_preview(template)
     assert "Template render error" not in preview
     assert "{ban_days}" not in preview
     assert "{user}" not in preview
     assert "periodo di grazia manuale scaduto" in preview
-    assert "Reason:" not in preview
-    assert "Manual grace expired" not in preview
+    assert "👇 LA MODERAZIONE AGGIUNGE" not in preview
     assert "2" in preview
 
 
 def test_users_kick_and_ban_preview_are_safe(users_module) -> None:
-    kick_preview = users_module._render_users_dm_template_preview("Kick {user} {reason_line}", event_type="kick")
-    ban_preview = users_module._render_users_dm_template_preview("Ban {user} {reason_line}", event_type="ban")
+    kick_preview = users_module._render_users_dm_template_preview("Kick {user} {moderation_note_section}", event_type="kick")
+    ban_preview = users_module._render_users_dm_template_preview("Ban {user} {moderation_note_section}", event_type="ban")
     assert "Template render error" not in kick_preview
     assert "Template render error" not in ban_preview
     assert "ExampleUser" in kick_preview
+    assert "👇 LA MODERAZIONE AGGIUNGE" in kick_preview
     assert "Repeated abusive language" in kick_preview
     assert "ExampleUser" in ban_preview
+    assert "👇 LA MODERAZIONE AGGIUNGE" in ban_preview
     assert "Severe harassment" in ban_preview
+
+
+def test_users_grace_preview_shows_moderation_note_section(users_module) -> None:
+    preview = users_module._render_users_dm_template_preview("Grace {user}\n{moderation_note_section}", event_type="grace")
+    assert "ExampleUser" in preview
+    assert "👇 LA MODERAZIONE AGGIUNGE" in preview
+    assert "Final warning before temporary ban" in preview
 
 
 def test_users_preview_unknown_placeholder_does_not_crash(users_module) -> None:

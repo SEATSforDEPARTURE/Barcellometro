@@ -117,8 +117,16 @@ _REASON_BLOCK_EVENT_TYPES = frozenset(
     }
 )
 
+MODERATION_NOTE_SECTION_HEADER = "👇 LA MODERAZIONE AGGIUNGE"
 _MODERATION_REASON_BLOCK_HEADER = "**👇 La moderazione aggiunge:**"
 _REASON_PLACEHOLDER_VALUES = frozenset({"none", "null", "n/a", "na", "-", "—"})
+
+
+def format_moderation_note_section(reason: str | None) -> str:
+    safe_reason = str(reason or "").strip()
+    if not safe_reason:
+        return ""
+    return f"{MODERATION_NOTE_SECTION_HEADER}\n{safe_reason}"
 
 _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
     "docs": {

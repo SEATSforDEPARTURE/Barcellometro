@@ -197,7 +197,7 @@ def _render_users_dm_template_preview(template: str, *, event_type: str = "tempb
     preview_presets: dict[str, dict[str, object]] = {
         "tempban": {
             "event_type": "tempban",
-            "reason": "Automatic tempban after manual grace expiry",
+            "reason": "",
             "duration_seconds": 2 * 86400,
             "extra_payload": {"reasoning": "users_manual_grace_expired_tempban"},
         },

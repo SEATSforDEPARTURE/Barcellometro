@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict)
 
+from app.services.greetings_copy_service import MODERATION_NOTE_SECTION_HEADER
 from app.services.inactive_members_moderation import InactiveMembersModerationService
 from app.services.users_moderation_dms import UsersModerationDmService
 
@@ -21,10 +22,10 @@ class _FakeDb:
             "cooldown_days": max(0, cooldown_seconds // 86400),
             "cooldown_seconds": cooldown_seconds,
             "invite_url": invite_url,
-            "grace_template": "GRACE {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {reason_line}{invite_line}",
-            "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {reason_line}{invite_line}",
-            "kick_template": "KICK {mention} ({user}) {reason_line}{invite_line}",
-            "ban_template": "BAN {mention} ({user}) {reason_line}{invite_line}",
+            "grace_template": "GRACE {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {moderation_note_section}{invite_line}",
+            "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {moderation_context_line} {moderation_note_section}{invite_line}",
+            "kick_template": "KICK {mention} ({user}) {moderation_note_section}{invite_line}",
+            "ban_template": "BAN {mention} ({user}) {moderation_note_section}{invite_line}",
         }
         self.latest: dict[tuple[str, str, str], dict[str, str]] = {}
         self.logs: list[dict[str, object]] = []
@@ -220,7 +221,7 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
                     "cooldown_seconds": 14 * 86400,
                     "invite_url": "https://discord.gg/rejoin",
                     "grace_template": "GRACE {user}",
-                    "tempban_template": "AUTO TEMPBAN {mention} ({user}) {duration_human} {reason_line} {invite_line}",
+                    "tempban_template": "AUTO TEMPBAN {mention} ({user}) {duration_human} {moderation_context_line} {moderation_note_section}{invite_line}",
                 }
             ),
             get_latest_users_dm_delivery=AsyncMock(return_value=None),
@@ -253,10 +254,10 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
     asyncio.run(_run())
 
 
-def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_reason_text() -> None:
+def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_moderation_note_section() -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.config["grace_template"] = "X {mention} {reason} {reason_text} {reason_line}{unknown_placeholder}"
+        db.config["grace_template"] = "X {mention} {moderation_note_section}{unknown_placeholder}"
         user = _FakeUser(42)
         guild = _FakeGuild(user)
         service = UsersModerationDmService(db)
@@ -274,8 +275,8 @@ def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_reason_text
         sent_embed = user.send.await_args.kwargs["embed"]
         body = str(sent_embed.description)
         assert body.startswith("_") and body.endswith("_")
-        assert "***La moderazione aggiunge: Motivo moderatore***" in body
-        assert "La moderazione aggiunge:" in body
+        assert "👇 LA MODERAZIONE AGGIUNGE" in body
+        assert "Motivo moderatore" in body
         assert "{unknown_placeholder}" not in body
 
     asyncio.run(_run())
@@ -284,7 +285,7 @@ def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_reason_text
 def test_users_dm_render_reason_text_is_empty_when_reason_missing() -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.config["grace_template"] = "X {mention} {reason_text}{unknown_placeholder}"
+        db.config["grace_template"] = "X {mention} {moderation_note_section}{unknown_placeholder}"
         user = _FakeUser(42)
         guild = _FakeGuild(user)
         service = UsersModerationDmService(db)
@@ -302,7 +303,7 @@ def test_users_dm_render_reason_text_is_empty_when_reason_missing() -> None:
         sent_embed = user.send.await_args.kwargs["embed"]
         body = str(sent_embed.description)
         assert "{unknown_placeholder}" not in body
-        assert "La moderazione aggiunge:" not in body
+        assert "👇 LA MODERAZIONE AGGIUNGE" not in body
         assert "None" not in body
 
     asyncio.run(_run())
@@ -334,8 +335,10 @@ def test_users_dm_kick_and_ban_use_dedicated_templates() -> None:
         kick_body = str(user.send.await_args_list[0].kwargs["embed"].description)
         ban_body = str(user.send.await_args_list[1].kwargs["embed"].description)
         assert "KICK ***<@42>*** (***<@42>***)" in kick_body
+        assert "👇 LA MODERAZIONE AGGIUNGE" in kick_body
         assert "Repeated abusive language" in kick_body
         assert "BAN ***<@42>*** (***<@42>***)" in ban_body
+        assert "👇 LA MODERAZIONE AGGIUNGE" in ban_body
         assert "Severe harassment" in ban_body
         assert db.logs[-2]["event_type"] == "kick"
         assert db.logs[-1]["event_type"] == "ban"
@@ -343,10 +346,36 @@ def test_users_dm_kick_and_ban_use_dedicated_templates() -> None:
     asyncio.run(_run())
 
 
-def test_users_dm_tempban_reason_line_distinguishes_direct_and_auto_cases() -> None:
+def test_users_dm_manual_tempban_with_reason_renders_moderation_note_section() -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.config["tempban_template"] = "TEMPBAN {reason_line}"
+        db.config["tempban_template"] = "TEMPBAN {moderation_context_line}\n{moderation_note_section}"
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="tempban",
+            duration_seconds=1800,
+            expires_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+            reason="Spam raid",
+            reasoning="users_manual_tempban_direct",
+        )
+        assert result == {"sent": True}
+        body = str(user.send.await_args.kwargs["embed"].description)
+        assert "interdizione temporanea applicata manualmente dai moderatori" in body
+        assert "👇 LA MODERAZIONE AGGIUNGE" in body
+        assert "Spam raid" in body
+
+    asyncio.run(_run())
+
+
+def test_users_dm_tempban_moderation_context_line_distinguishes_direct_and_auto_cases() -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.config["tempban_template"] = "TEMPBAN {moderation_context_line}"
         user = _FakeUser(42)
         guild = _FakeGuild(user)
         service = UsersModerationDmService(db)
@@ -379,10 +408,33 @@ def test_users_dm_tempban_reason_line_distinguishes_direct_and_auto_cases() -> N
         direct_body = str(user.send.await_args_list[0].kwargs["embed"].description)
         auto_manual_body = str(user.send.await_args_list[1].kwargs["embed"].description)
         auto_inactivity_body = str(user.send.await_args_list[2].kwargs["embed"].description)
-        assert "Spam raid" in direct_body
-        assert "periodo di grazia" not in direct_body
+        assert "interdizione temporanea applicata manualmente dai moderatori" in direct_body
         assert "periodo di grazia manuale scaduto" in auto_manual_body
         assert "periodo di grazia per inattività scaduto" in auto_inactivity_body
+
+    asyncio.run(_run())
+
+
+def test_users_dm_moderation_note_section_header_matches_greetings_standard() -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.config["kick_template"] = "KICK {moderation_note_section}"
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="kick",
+            reason="cattivissimoh",
+        )
+
+        assert result == {"sent": True}
+        body = str(user.send.await_args.kwargs["embed"].description)
+        assert MODERATION_NOTE_SECTION_HEADER == "👇 LA MODERAZIONE AGGIUNGE"
+        assert MODERATION_NOTE_SECTION_HEADER in body
+        assert "cattivissimoh" in body
 
     asyncio.run(_run())
 
