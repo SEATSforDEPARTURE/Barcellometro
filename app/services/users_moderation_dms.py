@@ -20,6 +20,8 @@ DEFAULT_USERS_DM_TEMPBAN_TEMPLATE = (
     "Hi {user}, your manual grace period in {server} has expired and an automatic temporary ban "
     "has started for {duration_human}. {reason_line}{invite_line}"
 )
+DEFAULT_USERS_DM_KICK_TEMPLATE = "Hi {user}, you have been kicked from {server}. {reason_line}{invite_line}"
+DEFAULT_USERS_DM_BAN_TEMPLATE = "Hi {user}, you have been banned from {server}. {reason_line}{invite_line}"
 USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = DM_BASE_SUPPORTED_PLACEHOLDERS
 
 USERS_DM_SERVICE_NAME = "users"
@@ -37,6 +39,8 @@ class UsersModerationDmService:
                 "enabled": 0,
                 "grace_template": None,
                 "tempban_template": None,
+                "kick_template": None,
+                "ban_template": None,
                 "cooldown_days": DEFAULT_USERS_DM_COOLDOWN_DAYS,
                 "cooldown_seconds": DEFAULT_USERS_DM_COOLDOWN_SECONDS,
                 "invite_url": None,
@@ -46,6 +50,8 @@ class UsersModerationDmService:
             "enabled": 1,
             "grace_template": None,
             "tempban_template": None,
+            "kick_template": None,
+            "ban_template": None,
             "cooldown_days": DEFAULT_USERS_DM_COOLDOWN_DAYS,
             "cooldown_seconds": DEFAULT_USERS_DM_COOLDOWN_SECONDS,
             "invite_url": None,
@@ -263,6 +269,10 @@ class UsersModerationDmService:
     def _template_for_event(cfg: dict[str, Any], event_type: str) -> str:
         if event_type == "tempban":
             return str(cfg.get("tempban_template") or DEFAULT_USERS_DM_TEMPBAN_TEMPLATE)
+        if event_type == "kick":
+            return str(cfg.get("kick_template") or DEFAULT_USERS_DM_KICK_TEMPLATE)
+        if event_type == "ban":
+            return str(cfg.get("ban_template") or DEFAULT_USERS_DM_BAN_TEMPLATE)
         return str(cfg.get("grace_template") or DEFAULT_USERS_DM_GRACE_TEMPLATE)
 
     @staticmethod

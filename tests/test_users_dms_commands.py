@@ -19,6 +19,8 @@ class _FakeDatabase:
             "invite_url": None,
             "grace_template": None,
             "tempban_template": None,
+            "kick_template": None,
+            "ban_template": None,
         }
         self.set_enabled_calls: list[tuple[str, bool]] = []
         self.stats_payload = {
@@ -106,6 +108,12 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         await _find_command(users_group, "dms", "template_tempban_set").callback(interaction, "Tempban {user}")
         await _find_command(users_group, "dms", "template_tempban_show").callback(interaction)
         await _find_command(users_group, "dms", "template_tempban_reset").callback(interaction)
+        await _find_command(users_group, "dms", "template_kick_set").callback(interaction, "Kick {user}")
+        await _find_command(users_group, "dms", "template_kick_show").callback(interaction)
+        await _find_command(users_group, "dms", "template_kick_reset").callback(interaction)
+        await _find_command(users_group, "dms", "template_ban_set").callback(interaction, "Ban {user}")
+        await _find_command(users_group, "dms", "template_ban_show").callback(interaction)
+        await _find_command(users_group, "dms", "template_ban_reset").callback(interaction)
         await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 30, discord.app_commands.Choice(name="secondi", value="secondi"))
         await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 5, discord.app_commands.Choice(name="minuti", value="minuti"))
         await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 2, discord.app_commands.Choice(name="ore", value="ore"))
@@ -126,6 +134,8 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         assert as_map["dms"] == "off"
         assert as_map["template_grace"] == "not set"
         assert as_map["template_tempban"] == "not set"
+        assert as_map["template_kick"] == "not set"
+        assert as_map["template_ban"] == "not set"
         assert as_map["cooldown"] == "disabled (0 seconds)"
         assert as_map["cooldown_seconds"] == 0
         assert as_map["cooldown_disabled"] == "yes"
@@ -175,6 +185,17 @@ def test_users_tempban_preview_is_safe_and_resolves_ban_days(users_module) -> No
     assert "Reason:" not in preview
     assert "Manual grace expired" not in preview
     assert "2" in preview
+
+
+def test_users_kick_and_ban_preview_are_safe(users_module) -> None:
+    kick_preview = users_module._render_users_dm_template_preview("Kick {user} {reason_line}", event_type="kick")
+    ban_preview = users_module._render_users_dm_template_preview("Ban {user} {reason_line}", event_type="ban")
+    assert "Template render error" not in kick_preview
+    assert "Template render error" not in ban_preview
+    assert "ExampleUser" in kick_preview
+    assert "Repeated abusive language" in kick_preview
+    assert "ExampleUser" in ban_preview
+    assert "Severe harassment" in ban_preview
 
 
 def test_users_preview_unknown_placeholder_does_not_crash(users_module) -> None:
