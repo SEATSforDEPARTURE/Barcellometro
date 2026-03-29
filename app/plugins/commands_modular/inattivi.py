@@ -158,6 +158,23 @@ def _format_cooldown_label(total_seconds: int) -> str:
     return f"{quantity} {unit}"
 
 
+def _normalize_embed_color(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
+    if value.startswith("#"):
+        candidate = value[1:]
+    elif value.lower().startswith("0x"):
+        candidate = value[2:]
+    else:
+        candidate = value
+    if len(candidate) != 6 or any(ch not in "0123456789abcdefABCDEF" for ch in candidate):
+        return None
+    return f"#{candidate.upper()}"
+
+
 def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext, *, top_level: str = "inactivity", visual_top_level: str = "inactivity") -> None:
     autokick_group = app_commands.Group(name="autokick", description="Automatic inactivity enforcement")
     grace_group = app_commands.Group(name="grace", description="Grace period settings")
@@ -372,11 +389,20 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         await _send(interaction, subcommand_path="inactivity tempban limits_reset", lines=[("days", DEFAULT_TEMPBAN_DAYS), ("result", "reset")], kind="success")
 
     @dms_group.command(name="template_grace_set", description="Set the DM template sent when a member enters inactivity grace.")
-    @app_commands.describe(text=TEMPLATE_HELP)
-    async def inactivity_dms_template_grace_set(interaction: discord.Interaction, text: str) -> None:
+    @app_commands.describe(text=TEMPLATE_HELP, embed_color="Optional embed color (#RRGGBB, RRGGBB, 0xRRGGBB).")
+    async def inactivity_dms_template_grace_set(interaction: discord.Interaction, text: str, embed_color: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_grace=text)
+        parsed_embed_color: str | None = None
+        if embed_color is not None:
+            parsed_embed_color = _normalize_embed_color(embed_color)
+            if parsed_embed_color is None:
+                await _send(interaction, subcommand_path="inactivity dms template_grace_set", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+                return
+        payload = {"template_grace": text}
+        if embed_color is not None:
+            payload["template_grace_embed_color"] = parsed_embed_color
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), **payload)
         await _send(interaction, subcommand_path="inactivity dms template_grace_set", lines=[("result", "updated")], kind="success")
 
     @dms_group.command(name="on", description="Enable inactivity reminder DMs.")
@@ -419,7 +445,9 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             lines=[
                 ("dms", _bool_label(cfg.get("dm_reminders_enabled", 1))),
                 ("template_grace", template_grace or "not set"),
+                ("template_grace_embed_color", cfg.get("template_grace_embed_color") or "not set"),
                 ("template_tempban", template_tempban or "not set"),
+                ("template_tempban_embed_color", cfg.get("template_tempban_embed_color") or "not set"),
                 ("cooldown", _format_cooldown_label(_resolve_inactivity_cooldown_seconds(cfg))),
                 ("cooldown_seconds", _resolve_inactivity_cooldown_seconds(cfg)),
                 ("cooldown_disabled", "yes" if _resolve_inactivity_cooldown_seconds(cfg) == 0 else "no"),
@@ -451,7 +479,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         await _send(
             interaction,
             subcommand_path="inactivity dms template_grace_show",
-            lines=[("template", template or "not set")],
+            lines=[("template", template or "not set"), ("embed_color", cfg.get("template_grace_embed_color") or "not set")],
             sections=[CommandEmbedSection(title="Preview", lines=[preview])],
         )
 
@@ -459,15 +487,24 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
     async def inactivity_dms_template_grace_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_grace=None)
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_grace=None, template_grace_embed_color=None)
         await _send(interaction, subcommand_path="inactivity dms template_grace_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="template_tempban_set", description="Set the DM template sent before automatic inactivity tempban.")
-    @app_commands.describe(text=TEMPLATE_HELP)
-    async def inactivity_dms_template_tempban_set(interaction: discord.Interaction, text: str) -> None:
+    @app_commands.describe(text=TEMPLATE_HELP, embed_color="Optional embed color (#RRGGBB, RRGGBB, 0xRRGGBB).")
+    async def inactivity_dms_template_tempban_set(interaction: discord.Interaction, text: str, embed_color: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_tempban=text)
+        parsed_embed_color: str | None = None
+        if embed_color is not None:
+            parsed_embed_color = _normalize_embed_color(embed_color)
+            if parsed_embed_color is None:
+                await _send(interaction, subcommand_path="inactivity dms template_tempban_set", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+                return
+        payload = {"template_tempban": text}
+        if embed_color is not None:
+            payload["template_tempban_embed_color"] = parsed_embed_color
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), **payload)
         await _send(interaction, subcommand_path="inactivity dms template_tempban_set", lines=[("result", "updated")], kind="success")
 
     @dms_group.command(name="template_tempban_show", description="Show the DM template sent before automatic inactivity tempban.")
@@ -480,7 +517,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         await _send(
             interaction,
             subcommand_path="inactivity dms template_tempban_show",
-            lines=[("template", template or "not set")],
+            lines=[("template", template or "not set"), ("embed_color", cfg.get("template_tempban_embed_color") or "not set")],
             sections=[CommandEmbedSection(title="Preview", lines=[preview])],
         )
 
@@ -488,7 +525,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
     async def inactivity_dms_template_tempban_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_tempban=None)
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_tempban=None, template_tempban_embed_color=None)
         await _send(interaction, subcommand_path="inactivity dms template_tempban_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="cooldown_set", description="Set the reminder DM cooldown.")

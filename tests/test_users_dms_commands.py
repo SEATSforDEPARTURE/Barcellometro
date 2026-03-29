@@ -22,6 +22,10 @@ class _FakeDatabase:
             "tempban_template": None,
             "kick_template": None,
             "ban_template": None,
+            "grace_embed_color": None,
+            "tempban_embed_color": None,
+            "kick_embed_color": None,
+            "ban_embed_color": None,
         }
         self.set_enabled_calls: list[tuple[str, bool]] = []
         self.stats_payload = {
@@ -103,16 +107,16 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
 
         await _find_command(users_group, "dms", "on").callback(interaction)
         await _find_command(users_group, "dms", "off").callback(interaction)
-        await _find_command(users_group, "dms", "template_grace_set").callback(interaction, "Grace {user}")
+        await _find_command(users_group, "dms", "template_grace_set").callback(interaction, "Grace {user}", "#112233")
         await _find_command(users_group, "dms", "template_grace_show").callback(interaction)
         await _find_command(users_group, "dms", "template_grace_reset").callback(interaction)
-        await _find_command(users_group, "dms", "template_tempban_set").callback(interaction, "Tempban {user}")
+        await _find_command(users_group, "dms", "template_tempban_set").callback(interaction, "Tempban {user}", "0x445566")
         await _find_command(users_group, "dms", "template_tempban_show").callback(interaction)
         await _find_command(users_group, "dms", "template_tempban_reset").callback(interaction)
-        await _find_command(users_group, "dms", "template_kick_set").callback(interaction, "Kick {user}")
+        await _find_command(users_group, "dms", "template_kick_set").callback(interaction, "Kick {user}", "778899")
         await _find_command(users_group, "dms", "template_kick_show").callback(interaction)
         await _find_command(users_group, "dms", "template_kick_reset").callback(interaction)
-        await _find_command(users_group, "dms", "template_ban_set").callback(interaction, "Ban {user}")
+        await _find_command(users_group, "dms", "template_ban_set").callback(interaction, "Ban {user}", "#AABBCC")
         await _find_command(users_group, "dms", "template_ban_show").callback(interaction)
         await _find_command(users_group, "dms", "template_ban_reset").callback(interaction)
         await _find_command(users_group, "dms", "cooldown_set").callback(interaction, 30, discord.app_commands.Choice(name="secondi", value="secondi"))
@@ -134,9 +138,13 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
         as_map = {key: value for key, value in status_lines}
         assert as_map["dms"] == "off"
         assert as_map["template_grace"] == "not set"
+        assert as_map["template_grace_embed_color"] == "not set"
         assert as_map["template_tempban"] == "not set"
+        assert as_map["template_tempban_embed_color"] == "not set"
         assert as_map["template_kick"] == "not set"
+        assert as_map["template_kick_embed_color"] == "not set"
         assert as_map["template_ban"] == "not set"
+        assert as_map["template_ban_embed_color"] == "not set"
         assert as_map["cooldown"] == "disabled (0 seconds)"
         assert as_map["cooldown_seconds"] == 0
         assert as_map["cooldown_disabled"] == "yes"
@@ -240,5 +248,23 @@ def test_users_template_show_includes_greetings_moderation_note_section_when_rea
         assert sections[0].title == "Preview"
         assert sections[1].title == _GREETINGS_MODERATION_FIELD_NAME
         assert sections[1].lines == ["Repeated abusive language"]
+
+    asyncio.run(_run())
+
+
+def test_users_template_set_rejects_invalid_embed_color(users_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        db = _FakeDatabase()
+        send_response = AsyncMock()
+        monkeypatch.setattr(users_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(users_module, "send_standard_response", send_response)
+        ctx = SimpleNamespace(database=db, footer=None, author=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+        users_group = discord.app_commands.Group(name="users", description="users")
+        users_module.register_moderazione_utenti(users_group, ctx)
+        interaction = SimpleNamespace(guild_id=123, guild=SimpleNamespace(id=123), user=SimpleNamespace(id=1))
+
+        await _find_command(users_group, "dms", "template_grace_set").callback(interaction, "Grace {user}", "not-a-color")
+        assert db.config["grace_template"] is None
+        assert send_response.await_args.kwargs["kind"] == "error"
 
     asyncio.run(_run())

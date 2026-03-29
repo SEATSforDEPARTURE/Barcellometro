@@ -49,6 +49,10 @@ class UsersModerationDmService:
                 "tempban_template": None,
                 "kick_template": None,
                 "ban_template": None,
+                "grace_embed_color": None,
+                "tempban_embed_color": None,
+                "kick_embed_color": None,
+                "ban_embed_color": None,
                 "cooldown_days": DEFAULT_USERS_DM_COOLDOWN_DAYS,
                 "cooldown_seconds": DEFAULT_USERS_DM_COOLDOWN_SECONDS,
                 "invite_url": None,
@@ -60,6 +64,10 @@ class UsersModerationDmService:
             "tempban_template": None,
             "kick_template": None,
             "ban_template": None,
+            "grace_embed_color": None,
+            "tempban_embed_color": None,
+            "kick_embed_color": None,
+            "ban_embed_color": None,
             "cooldown_days": DEFAULT_USERS_DM_COOLDOWN_DAYS,
             "cooldown_seconds": DEFAULT_USERS_DM_COOLDOWN_SECONDS,
             "invite_url": None,
@@ -78,6 +86,7 @@ class UsersModerationDmService:
         expires_at: datetime | None = None,
         reason: str | None = None,
         reasoning: str | None = None,
+        reason_is_human: bool = True,
         event_state: str | None = None,
         event_cause: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -119,6 +128,7 @@ class UsersModerationDmService:
             expires_at=expires_at,
             reason=reason,
             reasoning=reasoning,
+            reason_is_human=reason_is_human,
             event_state=event_state,
             event_cause=event_cause,
             metadata=metadata,
@@ -134,6 +144,7 @@ class UsersModerationDmService:
         expires_at: datetime | None = None,
         reason: str | None = None,
         reasoning: str | None = None,
+        reason_is_human: bool = True,
         event_state: str | None = None,
         event_cause: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -205,9 +216,9 @@ class UsersModerationDmService:
             title=title,
             title_emoji=emoji,
             description=body,
-            color=discord.Colour.orange() if event_type == "tempban" else discord.Colour.blurple(),
+            color=self._color_for_event(cfg, event_type),
         )
-        self._add_moderation_note_field(dm_embed, reason)
+        self._add_moderation_note_field(dm_embed, reason if reason_is_human else None)
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             await user.send(embed=dm_embed)
@@ -332,3 +343,28 @@ class UsersModerationDmService:
             value=safe_reason[:1024],
             inline=False,
         )
+
+    @staticmethod
+    def _color_for_event(cfg: dict[str, Any], event_type: str) -> discord.Colour:
+        fallback = discord.Colour.orange() if event_type == "tempban" else discord.Colour.blurple()
+        key = f"{str(event_type or '').strip().lower()}_embed_color"
+        parsed = UsersModerationDmService._parse_embed_color(cfg.get(key))
+        if parsed is None:
+            return fallback
+        return discord.Colour(parsed)
+
+    @staticmethod
+    def _parse_embed_color(raw: Any) -> int | None:
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        if value.startswith("#"):
+            value = value[1:]
+        elif value.lower().startswith("0x"):
+            value = value[2:]
+        if len(value) != 6 or any(ch not in "0123456789abcdefABCDEF" for ch in value):
+            return None
+        try:
+            return int(value, 16)
+        except ValueError:
+            return None
