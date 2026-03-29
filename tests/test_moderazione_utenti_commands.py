@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -468,6 +469,36 @@ def test_users_moderation_commands_use_nick_or_id_for_live_targets() -> None:
     assert [param.name for param in by_name["ban"].parameters] == ["nick_o_id", "motivo"]
     assert [param.name for param in by_name["tempban"].parameters] == ["nick_o_id", "quantità", "unità", "motivo"]
     assert [param.name for param in by_name["grace"].parameters] == ["nick_o_id", "quantità", "unità", "motivo"]
+
+
+def test_users_live_target_signatures_accept_member_or_string_id() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None)
+    aliases: list[discord.app_commands.Command] = []
+    register_moderazione_utenti(users_group, ctx, alias_commands=aliases)
+
+    expected = "discord.Member"
+    assert str(inspect.signature(_find_command(users_group, "kick").callback).parameters["nick_or_id"].annotation) == expected
+    assert str(inspect.signature(_find_command(users_group, "ban").callback).parameters["nick_or_id"].annotation) == expected
+    assert str(inspect.signature(_find_command(users_group, "tempban").callback).parameters["nick_or_id"].annotation) == expected
+    assert str(inspect.signature(_find_command(users_group, "grace", "manual").callback).parameters["nick_or_id"].annotation) == expected
+
+    by_name = {command.name: command for command in aliases}
+    assert str(inspect.signature(by_name["kick"].callback).parameters["nick_o_id"].annotation) == expected
+    assert str(inspect.signature(by_name["ban"].callback).parameters["nick_o_id"].annotation) == expected
+    assert str(inspect.signature(by_name["tempban"].callback).parameters["nick_o_id"].annotation) == expected
+    assert str(inspect.signature(by_name["grace"].callback).parameters["nick_o_id"].annotation) == expected
+
+
+def test_resolve_target_user_supports_member_and_manual_id() -> None:
+    member = Mock(spec=discord.Member)
+    member.id = 123
+    guild = SimpleNamespace(get_member=Mock(return_value=member))
+
+    assert moderazione_utenti_module.resolve_target_user(member, guild) is member
+    assert moderazione_utenti_module.resolve_target_user("123", guild) is member
+    assert moderazione_utenti_module.resolve_target_user("<@123>", guild) is member
+    assert moderazione_utenti_module.resolve_target_user("not-an-id", guild) is None
 
 
 def test_mod_users_kick_unknown_target_returns_controlled_error(monkeypatch) -> None:
