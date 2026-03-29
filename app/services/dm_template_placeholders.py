@@ -7,7 +7,6 @@ from typing import Any
 
 from app.services.dm_time_placeholders import build_time_placeholder_payload
 from app.services.dm_user_placeholders import build_user_placeholder_payload
-from app.services.greetings_copy_service import format_moderation_note_section
 from app.services.member_flow_notifications import format_duration_human
 
 DM_BASE_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
@@ -98,6 +97,16 @@ _AUTO_REASON_LINE_BY_REASONING: dict[str, str] = {
     "inactivity_grace_expired_tempban": "periodo di grazia per inattività scaduto",
 }
 _MANUAL_TEMPBAN_CONTEXT = "interdizione temporanea applicata manualmente dai moderatori"
+_MANUAL_CONTEXT_BY_REASONING: dict[str, str] = {
+    "users_grace_dm": "periodo di grazia assegnato manualmente dai moderatori",
+    "users_kick_dm": "espulsione applicata manualmente dai moderatori",
+    "users_ban_dm": "interdizione permanente applicata manualmente dai moderatori",
+}
+_MANUAL_CONTEXT_BY_EVENT_TYPE: dict[str, str] = {
+    "grace": "periodo di grazia assegnato manualmente dai moderatori",
+    "kick": "espulsione applicata manualmente dai moderatori",
+    "ban": "interdizione permanente applicata manualmente dai moderatori",
+}
 
 
 def build_reason_line(
@@ -145,9 +154,13 @@ def build_moderation_context_line(
     safe_reasoning = str(reasoning or "").strip().lower()
     if safe_reasoning in _AUTO_REASON_LINE_BY_REASONING:
         return _AUTO_REASON_LINE_BY_REASONING[safe_reasoning]
+    if safe_reasoning in _MANUAL_CONTEXT_BY_REASONING:
+        return _MANUAL_CONTEXT_BY_REASONING[safe_reasoning]
     if safe_reasoning in {"users_manual_tempban_direct", "users_tempban_dm"}:
         return _MANUAL_TEMPBAN_CONTEXT
     safe_event_type = str(event_type or "").strip().lower()
+    if safe_event_type in _MANUAL_CONTEXT_BY_EVENT_TYPE:
+        return _MANUAL_CONTEXT_BY_EVENT_TYPE[safe_event_type]
     if safe_event_type != "tempban":
         return ""
     safe_event_state = str(event_state or "").strip().lower()
@@ -184,7 +197,7 @@ def build_reason_placeholders(
             event_cause=event_cause,
         ),
         "moderation_context_line": moderation_context_line,
-        "moderation_note_section": format_moderation_note_section(safe_reason),
+        "moderation_note_section": "",
         "reasoning": safe_reasoning,
     }
 

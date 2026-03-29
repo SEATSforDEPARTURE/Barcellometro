@@ -10,7 +10,8 @@ from unittest.mock import AsyncMock
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict)
 
-from app.services.greetings_copy_service import MODERATION_NOTE_SECTION_HEADER
+from app.services.member_flow_notifications import _GREETINGS_MODERATION_FIELD_NAME
+from app.services.dm_template_placeholders import build_moderation_context_line
 from app.services.inactive_members_moderation import InactiveMembersModerationService
 from app.services.users_moderation_dms import UsersModerationDmService
 
@@ -22,10 +23,10 @@ class _FakeDb:
             "cooldown_days": max(0, cooldown_seconds // 86400),
             "cooldown_seconds": cooldown_seconds,
             "invite_url": invite_url,
-            "grace_template": "GRACE {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {moderation_note_section}{invite_line}",
-            "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {moderation_context_line} {moderation_note_section}{invite_line}",
-            "kick_template": "KICK {mention} ({user}) {moderation_note_section}{invite_line}",
-            "ban_template": "BAN {mention} ({user}) {moderation_note_section}{invite_line}",
+            "grace_template": "GRACE {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {moderation_context_line}",
+            "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {moderation_context_line}",
+            "kick_template": "KICK {mention} ({user}) {moderation_context_line}",
+            "ban_template": "BAN {mention} ({user}) {moderation_context_line}",
         }
         self.latest: dict[tuple[str, str, str], dict[str, str]] = {}
         self.logs: list[dict[str, object]] = []
@@ -86,13 +87,15 @@ def test_users_dm_manual_grace_renders_template_and_logs_success() -> None:
         assert sent_embed.title == "🕊️ __**GRAZIA**__"
         description = str(sent_embed.description)
         assert description.startswith("_") and description.endswith("_")
-        assert "Manual grace reason" in description
+        assert "Manual grace reason" not in description
+        assert "periodo di grazia assegnato manualmente dai moderatori" in description
         assert "GRACE ***<@42>*** (***<@42>***)" in description
-        assert "***https://discord.gg/server***" in description
         assert "***2026-01-01 12:00 UTC***" in description
         assert "***01/01/2026 13:00***" in description
         assert sent_embed.author.name == "servizio USERS"
         assert sent_embed.footer.text
+        assert sent_embed.fields[0].name == _GREETINGS_MODERATION_FIELD_NAME
+        assert sent_embed.fields[0].value == "Manual grace reason"
         assert db.logs[-1]["outcome"] == "success"
         assert db.logs[-1]["event_type"] == "grace"
 
@@ -221,7 +224,7 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
                     "cooldown_seconds": 14 * 86400,
                     "invite_url": "https://discord.gg/rejoin",
                     "grace_template": "GRACE {user}",
-                    "tempban_template": "AUTO TEMPBAN {mention} ({user}) {duration_human} {moderation_context_line} {moderation_note_section}{invite_line}",
+                    "tempban_template": "AUTO TEMPBAN {mention} ({user}) {duration_human} {moderation_context_line}",
                 }
             ),
             get_latest_users_dm_delivery=AsyncMock(return_value=None),
@@ -244,7 +247,6 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
         assert "AUTO TEMPBAN ***<@42>*** (***<@42>***)" in description
         assert "periodo di grazia manuale scaduto" in description
         assert "Reason:" not in description
-        assert "***https://discord.gg/rejoin***" in description
         assert dm_embed.author.name == "servizio USERS"
         assert dm_embed.footer.text
         assert database.log_users_dm_delivery.await_count >= 1
@@ -254,10 +256,10 @@ def test_auto_tempban_after_manual_grace_uses_tempban_template_and_logs() -> Non
     asyncio.run(_run())
 
 
-def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_moderation_note_section() -> None:
+def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_body_clean() -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.config["grace_template"] = "X {mention} {moderation_note_section}{unknown_placeholder}"
+        db.config["grace_template"] = "X {mention} {unknown_placeholder}"
         user = _FakeUser(42)
         guild = _FakeGuild(user)
         service = UsersModerationDmService(db)
@@ -275,9 +277,10 @@ def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_moderation_
         sent_embed = user.send.await_args.kwargs["embed"]
         body = str(sent_embed.description)
         assert body.startswith("_") and body.endswith("_")
-        assert "👇 LA MODERAZIONE AGGIUNGE" in body
-        assert "Motivo moderatore" in body
+        assert "👇 LA MODERAZIONE AGGIUNGE" not in body
         assert "{unknown_placeholder}" not in body
+        assert sent_embed.fields[0].name == _GREETINGS_MODERATION_FIELD_NAME
+        assert sent_embed.fields[0].value == "Motivo moderatore"
 
     asyncio.run(_run())
 
@@ -285,7 +288,7 @@ def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_moderation_
 def test_users_dm_render_reason_text_is_empty_when_reason_missing() -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.config["grace_template"] = "X {mention} {moderation_note_section}{unknown_placeholder}"
+        db.config["grace_template"] = "X {mention} {unknown_placeholder}"
         user = _FakeUser(42)
         guild = _FakeGuild(user)
         service = UsersModerationDmService(db)
@@ -305,6 +308,7 @@ def test_users_dm_render_reason_text_is_empty_when_reason_missing() -> None:
         assert "{unknown_placeholder}" not in body
         assert "👇 LA MODERAZIONE AGGIUNGE" not in body
         assert "None" not in body
+        assert sent_embed.fields == []
 
     asyncio.run(_run())
 
@@ -335,21 +339,25 @@ def test_users_dm_kick_and_ban_use_dedicated_templates() -> None:
         kick_body = str(user.send.await_args_list[0].kwargs["embed"].description)
         ban_body = str(user.send.await_args_list[1].kwargs["embed"].description)
         assert "KICK ***<@42>*** (***<@42>***)" in kick_body
-        assert "👇 LA MODERAZIONE AGGIUNGE" in kick_body
-        assert "Repeated abusive language" in kick_body
+        assert "👇 LA MODERAZIONE AGGIUNGE" not in kick_body
         assert "BAN ***<@42>*** (***<@42>***)" in ban_body
-        assert "👇 LA MODERAZIONE AGGIUNGE" in ban_body
-        assert "Severe harassment" in ban_body
+        assert "👇 LA MODERAZIONE AGGIUNGE" not in ban_body
+        kick_fields = user.send.await_args_list[0].kwargs["embed"].fields
+        ban_fields = user.send.await_args_list[1].kwargs["embed"].fields
+        assert kick_fields[0].name == _GREETINGS_MODERATION_FIELD_NAME
+        assert kick_fields[0].value == "Repeated abusive language"
+        assert ban_fields[0].name == _GREETINGS_MODERATION_FIELD_NAME
+        assert ban_fields[0].value == "Severe harassment"
         assert db.logs[-2]["event_type"] == "kick"
         assert db.logs[-1]["event_type"] == "ban"
 
     asyncio.run(_run())
 
 
-def test_users_dm_manual_tempban_with_reason_renders_moderation_note_section() -> None:
+def test_users_dm_manual_tempban_with_reason_renders_moderation_note_field() -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.config["tempban_template"] = "TEMPBAN {moderation_context_line}\n{moderation_note_section}"
+        db.config["tempban_template"] = "TEMPBAN {moderation_context_line}"
         user = _FakeUser(42)
         guild = _FakeGuild(user)
         service = UsersModerationDmService(db)
@@ -366,8 +374,10 @@ def test_users_dm_manual_tempban_with_reason_renders_moderation_note_section() -
         assert result == {"sent": True}
         body = str(user.send.await_args.kwargs["embed"].description)
         assert "interdizione temporanea applicata manualmente dai moderatori" in body
-        assert "👇 LA MODERAZIONE AGGIUNGE" in body
-        assert "Spam raid" in body
+        assert "👇 LA MODERAZIONE AGGIUNGE" not in body
+        field = user.send.await_args.kwargs["embed"].fields[0]
+        assert field.name == _GREETINGS_MODERATION_FIELD_NAME
+        assert field.value == "Spam raid"
 
     asyncio.run(_run())
 
@@ -415,10 +425,10 @@ def test_users_dm_tempban_moderation_context_line_distinguishes_direct_and_auto_
     asyncio.run(_run())
 
 
-def test_users_dm_moderation_note_section_header_matches_greetings_standard() -> None:
+def test_users_dm_moderation_note_field_title_matches_greetings_standard() -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.config["kick_template"] = "KICK {moderation_note_section}"
+        db.config["kick_template"] = "KICK"
         user = _FakeUser(42)
         guild = _FakeGuild(user)
         service = UsersModerationDmService(db)
@@ -431,10 +441,10 @@ def test_users_dm_moderation_note_section_header_matches_greetings_standard() ->
         )
 
         assert result == {"sent": True}
-        body = str(user.send.await_args.kwargs["embed"].description)
-        assert MODERATION_NOTE_SECTION_HEADER == "👇 LA MODERAZIONE AGGIUNGE"
-        assert MODERATION_NOTE_SECTION_HEADER in body
-        assert "cattivissimoh" in body
+        field = user.send.await_args.kwargs["embed"].fields[0]
+        assert _GREETINGS_MODERATION_FIELD_NAME == "👇 __**LA MODERAZIONE AGGIUNGE**__"
+        assert field.name == _GREETINGS_MODERATION_FIELD_NAME
+        assert field.value == "cattivissimoh"
 
     asyncio.run(_run())
 
@@ -462,3 +472,20 @@ def test_users_dm_send_for_event_by_user_id_fetches_user_when_member_missing() -
         assert db.logs[-1]["outcome"] == "success"
 
     asyncio.run(_run())
+
+
+def test_users_moderation_context_line_mapping_covers_required_cases() -> None:
+    assert build_moderation_context_line(reasoning="users_grace_dm", event_type="grace") == "periodo di grazia assegnato manualmente dai moderatori"
+    assert build_moderation_context_line(reasoning="users_manual_grace_expired_tempban", event_type="tempban") == "periodo di grazia manuale scaduto"
+    assert build_moderation_context_line(reasoning="users_manual_tempban_direct", event_type="tempban") == "interdizione temporanea applicata manualmente dai moderatori"
+    assert (
+        build_moderation_context_line(
+            reasoning="inactivity_grace_expired_tempban",
+            event_type="tempban",
+            event_state="grace_expired",
+            event_cause="inactivity",
+        )
+        == "periodo di grazia per inattività scaduto"
+    )
+    assert build_moderation_context_line(reasoning="users_kick_dm", event_type="kick") == "espulsione applicata manualmente dai moderatori"
+    assert build_moderation_context_line(reasoning="users_ban_dm", event_type="ban") == "interdizione permanente applicata manualmente dai moderatori"

@@ -327,7 +327,7 @@ def test_preview_behavior_is_consistent_between_users_and_inactivity(import_fres
     users_module = import_fresh("app.plugins.commands_modular.moderazione_utenti")
     inattivi_module = import_fresh("app.plugins.commands_modular.inattivi")
     template = "Hi {user} {unknown_placeholder}"
-    users_preview = users_module._render_users_dm_template_preview(template)
+    users_preview, _ = users_module._render_users_dm_template_preview(template)
     inactivity_preview = inattivi_module._render_template_preview(template)
     assert "Template render error" not in users_preview
     assert "Template render error" not in inactivity_preview
