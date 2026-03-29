@@ -289,6 +289,31 @@ def test_users_dm_render_safely_drops_unknown_placeholders_and_keeps_body_clean(
     asyncio.run(_run())
 
 
+def test_users_dm_never_adds_moderation_note_when_reason_is_not_human() -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+        auto_reason = "<@42> è stato bannato da <@9> per la 1° volta. Il server osserva in silenzio."
+
+        result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="ban",
+            reason=auto_reason,
+            reason_is_human=False,
+        )
+
+        assert result == {"sent": True}
+        user.send.assert_awaited_once()
+        sent_embed = user.send.await_args.kwargs["embed"]
+        assert all(field.name != _GREETINGS_MODERATION_FIELD_NAME for field in sent_embed.fields)
+        assert auto_reason not in str(sent_embed.description)
+
+    asyncio.run(_run())
+
+
 def test_users_dm_render_reason_text_is_empty_when_reason_missing() -> None:
     async def _run() -> None:
         db = _FakeDb()

@@ -836,6 +836,98 @@ def test_mod_users_dm_delivery_status_mapping_in_response(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_mod_users_manual_without_reason_marks_dm_reason_as_non_human_for_all_actions(monkeypatch) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        class _FakeGreetingsCopyService:
+            def __init__(self, *args, **kwargs) -> None:
+                _ = args, kwargs
+
+            async def render_event_copy(self, **kwargs):
+                event_type = kwargs.get("event_type_key", "unknown")
+                return SimpleNamespace(narrative=f"AUTO {event_type} NARRATIVE")
+
+        monkeypatch.setattr(moderazione_utenti_module, "GreetingsCopyService", _FakeGreetingsCopyService)
+
+        dm_service = SimpleNamespace(send_for_event=AsyncMock(return_value={"sent": True}), send_for_event_by_user_id=AsyncMock())
+        monkeypatch.setattr(moderazione_utenti_module, "UsersModerationDmService", Mock(return_value=dm_service))
+
+        ctx = SimpleNamespace(
+            database=SimpleNamespace(add_temp_ban=AsyncMock(), extend_user_grace=AsyncMock()),
+            footer=None,
+            member_flow_notifications=SimpleNamespace(
+                log_action=AsyncMock(return_value={"canonical_written": False, "canonical_visible": False}),
+                send_notification=AsyncMock(),
+                remember_departure_action=Mock(),
+                forget_departure_action=Mock(),
+            ),
+            barcello_service=None,
+            bot=SimpleNamespace(),
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente", kick=AsyncMock())
+        guild = SimpleNamespace(id=1, ban=AsyncMock(), get_member=Mock(return_value=target_user), fetch_member=AsyncMock())
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users moderation"))
+        hour = discord.app_commands.Choice(name="ore", value="ore")
+        day = discord.app_commands.Choice(name="giorni", value="giorni")
+
+        await _find_command(users_group, "kick").callback(interaction, "42", None)
+        await _find_command(users_group, "ban").callback(interaction, "42", None)
+        await _find_command(users_group, "tempban").callback(interaction, "42", 1, hour, None)
+        await _find_command(users_group, "grace", "manual").callback(interaction, "42", 2, day, None)
+
+        assert dm_service.send_for_event.await_count == 4
+        for call, event_type in zip(dm_service.send_for_event.await_args_list, ("kick", "ban", "tempban", "grace"), strict=True):
+            kwargs = call.kwargs
+            assert kwargs["event_type"] == event_type
+            assert kwargs["reason"] is None
+            assert kwargs["reason_is_human"] is False
+
+    asyncio.run(_run())
+
+
+def test_mod_users_manual_ban_with_explicit_reason_marks_dm_reason_as_human(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", AsyncMock())
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        dm_service = SimpleNamespace(send_for_event=AsyncMock(return_value={"sent": True}), send_for_event_by_user_id=AsyncMock())
+        monkeypatch.setattr(moderazione_utenti_module, "UsersModerationDmService", Mock(return_value=dm_service))
+
+        ctx = SimpleNamespace(
+            database=SimpleNamespace(),
+            footer=None,
+            member_flow_notifications=SimpleNamespace(
+                log_action=AsyncMock(return_value={"canonical_written": False, "canonical_visible": False}),
+                send_notification=AsyncMock(),
+                remember_departure_action=Mock(),
+                forget_departure_action=Mock(),
+            ),
+            barcello_service=None,
+            bot=SimpleNamespace(),
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente", kick=AsyncMock())
+        guild = SimpleNamespace(id=1, ban=AsyncMock(), get_member=Mock(return_value=target_user), fetch_member=AsyncMock())
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users ban"))
+
+        await _find_command(users_group, "ban").callback(interaction, "42", "Motivo umano esplicito")
+
+        dm_kwargs = dm_service.send_for_event.await_args.kwargs
+        assert dm_kwargs["event_type"] == "ban"
+        assert dm_kwargs["reason"] == "Motivo umano esplicito"
+        assert dm_kwargs["reason_is_human"] is True
+
+    asyncio.run(_run())
+
+
 def test_mod_users_manual_commands_send_dm_before_moderation_action(monkeypatch) -> None:
     async def _run() -> None:
         send_standard_response = AsyncMock()
