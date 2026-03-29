@@ -463,7 +463,8 @@ def register_moderazione_utenti(
             guild=interaction.guild,
             user=user,
             event_type="kick",
-            reason=resolved_reason,
+            reason=explicit_reason,
+            reason_is_human=bool(explicit_reason),
             metadata={"source": "users_kick_manual", "operation_id": operation_id},
         )
         _remember_departure(interaction.guild, user, "kick")
@@ -515,7 +516,8 @@ def register_moderazione_utenti(
             guild=interaction.guild,
             user=user,
             event_type="ban",
-            reason=resolved_reason,
+            reason=explicit_reason,
+            reason_is_human=bool(explicit_reason),
             metadata={"source": "users_ban_manual", "operation_id": operation_id},
         )
         _remember_departure(interaction.guild, user, "ban")
@@ -662,7 +664,8 @@ def register_moderazione_utenti(
             event_type="tempban",
             duration_seconds=duration_seconds,
             expires_at=expires_at,
-            reason=resolved_reason,
+            reason=explicit_reason,
+            reason_is_human=bool(explicit_reason),
             reasoning="users_manual_tempban_direct",
             metadata={"source": "users_tempban_manual", "operation_id": operation_id},
         )
@@ -751,7 +754,8 @@ def register_moderazione_utenti(
             event_type="grace",
             duration_seconds=duration_seconds,
             expires_at=expires_at,
-            reason=resolved_reason,
+            reason=explicit_reason,
+            reason_is_human=bool(explicit_reason),
             metadata={"source": "users_grace_manual"},
         )
         await _send(
