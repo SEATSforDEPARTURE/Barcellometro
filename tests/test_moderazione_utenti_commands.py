@@ -471,13 +471,13 @@ def test_users_moderation_commands_use_nick_or_id_for_live_targets() -> None:
     assert [param.name for param in by_name["grace"].parameters] == ["nick_o_id", "quantità", "unità", "motivo"]
 
 
-def test_users_live_target_signatures_accept_member_or_string_id() -> None:
+def test_users_live_target_signatures_accept_raw_string_target() -> None:
     users_group = discord.app_commands.Group(name="users", description="users")
     ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None)
     aliases: list[discord.app_commands.Command] = []
     register_moderazione_utenti(users_group, ctx, alias_commands=aliases)
 
-    expected = "discord.Member"
+    expected = "str"
     assert str(inspect.signature(_find_command(users_group, "kick").callback).parameters["nick_or_id"].annotation) == expected
     assert str(inspect.signature(_find_command(users_group, "ban").callback).parameters["nick_or_id"].annotation) == expected
     assert str(inspect.signature(_find_command(users_group, "tempban").callback).parameters["nick_or_id"].annotation) == expected
@@ -495,10 +495,39 @@ def test_resolve_target_user_supports_member_and_manual_id() -> None:
     member.id = 123
     guild = SimpleNamespace(get_member=Mock(return_value=member))
 
-    assert moderazione_utenti_module.resolve_target_user(member, guild) is member
     assert moderazione_utenti_module.resolve_target_user("123", guild) is member
     assert moderazione_utenti_module.resolve_target_user("<@123>", guild) is member
     assert moderazione_utenti_module.resolve_target_user("not-an-id", guild) is None
+
+
+def test_users_live_target_commands_expose_member_autocomplete() -> None:
+    users_group = discord.app_commands.Group(name="users", description="users")
+    ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None)
+    aliases: list[discord.app_commands.Command] = []
+    register_moderazione_utenti(users_group, ctx, alias_commands=aliases)
+
+    assert _find_command(users_group, "kick")._params["nick_or_id"].autocomplete is not None
+    assert _find_command(users_group, "ban")._params["nick_or_id"].autocomplete is not None
+    assert _find_command(users_group, "tempban")._params["nick_or_id"].autocomplete is not None
+    assert _find_command(users_group, "grace", "manual")._params["nick_or_id"].autocomplete is not None
+
+    by_name = {command.name: command for command in aliases}
+    assert by_name["kick"]._params["nick_o_id"].autocomplete is not None
+    assert by_name["ban"]._params["nick_o_id"].autocomplete is not None
+    assert by_name["tempban"]._params["nick_o_id"].autocomplete is not None
+    assert by_name["grace"]._params["nick_o_id"].autocomplete is not None
+
+
+def test_users_member_autocomplete_returns_member_ids() -> None:
+    async def _run() -> None:
+        member = SimpleNamespace(id=42, display_name="Dormiente", nick="Dormi", global_name="Dorm", name="DormienteUser")
+        interaction = SimpleNamespace(guild=SimpleNamespace(members=[member]))
+        choices = await moderazione_utenti_module._autocomplete_live_member(interaction, "dorm")
+        assert choices
+        assert choices[0].value == "42"
+        assert "ID 42" in choices[0].name
+
+    asyncio.run(_run())
 
 
 def test_mod_users_kick_unknown_target_returns_controlled_error(monkeypatch) -> None:

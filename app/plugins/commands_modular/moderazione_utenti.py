@@ -86,9 +86,7 @@ class _ResolvedModerationUser:
 _MENTION_RE = re.compile(r"^<@!?(\d+)>$")
 
 
-def resolve_target_user(value: discord.Member | str, guild: discord.Guild) -> discord.Member | None:
-    if isinstance(value, discord.Member):
-        return value
+def resolve_target_user(value: str, guild: discord.Guild) -> discord.Member | None:
     raw_value = str(value or "").strip()
     if not raw_value:
         return None
@@ -100,6 +98,34 @@ def resolve_target_user(value: discord.Member | str, guild: discord.Guild) -> di
     except (TypeError, ValueError):
         return None
     return guild.get_member(user_id)
+
+
+async def _autocomplete_live_member(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    guild = interaction.guild
+    if guild is None:
+        return []
+    query = _normalize_lookup_key(current)
+    choices: list[app_commands.Choice[str]] = []
+    for member in list(getattr(guild, "members", []) or []):
+        display = str(getattr(member, "display_name", "") or "").strip()
+        nick = str(getattr(member, "nick", "") or "").strip()
+        global_name = str(getattr(member, "global_name", "") or "").strip()
+        username = str(getattr(member, "name", "") or "").strip()
+        member_id = str(getattr(member, "id", "") or "").strip()
+        if not member_id:
+            continue
+        haystack = " ".join([display, nick, global_name, username, member_id])
+        if query and query not in _normalize_lookup_key(haystack):
+            continue
+        label_base = display or nick or global_name or username or member_id
+        label = f"{label_base} (ID {member_id})"
+        choices.append(app_commands.Choice(name=label[:100], value=member_id))
+        if len(choices) >= 25:
+            break
+    return choices
 
 
 async def _send_lines(
@@ -953,11 +979,11 @@ def register_moderazione_utenti(
     async def _resolve_live_member(
         interaction: discord.Interaction,
         *,
-        nick_or_id: discord.Member | str,
+        nick_or_id: str,
         mode: str,
     ) -> discord.Member | None:
         raw_value = str(nick_or_id or "").strip()
-        if isinstance(nick_or_id, str) and not raw_value:
+        if not raw_value:
             await _send(
                 interaction,
                 subcommand_path=f"users {mode}",
@@ -979,7 +1005,7 @@ def register_moderazione_utenti(
         if resolved is not None:
             return resolved
 
-        if isinstance(nick_or_id, str) and re.fullmatch(r"\d+", raw_value):
+        if re.fullmatch(r"\d+", raw_value):
             member: discord.Member | None = None
             if hasattr(guild, "fetch_member"):
                 try:
@@ -1034,7 +1060,8 @@ def register_moderazione_utenti(
 
     @users_group.command(name="kick", description="Remove a user from the server.")
     @app_commands.describe(nick_or_id="Member ID, mention, or nickname.", reason="Optional reason override.")
-    async def users_kick(interaction: discord.Interaction, nick_or_id: discord.Member, reason: str | None = None) -> None:
+    @app_commands.autocomplete(nick_or_id=_autocomplete_live_member)
+    async def users_kick(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
         user = await _resolve_live_member(interaction, nick_or_id=nick_or_id, mode="kick")
         if user is None:
             return
@@ -1046,7 +1073,8 @@ def register_moderazione_utenti(
 
     @users_group.command(name="ban", description="Ban a user permanently.")
     @app_commands.describe(nick_or_id="Member ID, mention, or nickname.", reason="Optional reason override.")
-    async def users_ban(interaction: discord.Interaction, nick_or_id: discord.Member, reason: str | None = None) -> None:
+    @app_commands.autocomplete(nick_or_id=_autocomplete_live_member)
+    async def users_ban(interaction: discord.Interaction, nick_or_id: str, reason: str | None = None) -> None:
         user = await _resolve_live_member(interaction, nick_or_id=nick_or_id, mode="ban")
         if user is None:
             return
@@ -1148,9 +1176,10 @@ def register_moderazione_utenti(
         reason="Optional reason override.",
     )
     @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+    @app_commands.autocomplete(nick_or_id=_autocomplete_live_member)
     async def users_tempban(
         interaction: discord.Interaction,
-        nick_or_id: discord.Member,
+        nick_or_id: str,
         quantity: int,
         unit: app_commands.Choice[str],
         reason: str | None = None,
@@ -1434,9 +1463,10 @@ def register_moderazione_utenti(
         reason="Optional reason override.",
     )
     @app_commands.choices(unit=WINDOW_UNIT_CHOICES)
+    @app_commands.autocomplete(nick_or_id=_autocomplete_live_member)
     async def users_grace_manual(
         interaction: discord.Interaction,
-        nick_or_id: discord.Member,
+        nick_or_id: str,
         quantity: int,
         unit: app_commands.Choice[str],
         reason: str | None = None,
@@ -1582,7 +1612,8 @@ def register_moderazione_utenti(
 
         @app_commands.command(name="kick", description="Alias of /users kick.")
         @app_commands.describe(nick_o_id="ID membro, mention o nickname.", motivo="Motivo opzionale.")
-        async def kick_alias(interaction: discord.Interaction, nick_o_id: discord.Member, motivo: str | None = None) -> None:
+        @app_commands.autocomplete(nick_o_id=_autocomplete_live_member)
+        async def kick_alias(interaction: discord.Interaction, nick_o_id: str, motivo: str | None = None) -> None:
             user = await _resolve_live_member(interaction, nick_or_id=nick_o_id, mode="kick")
             if user is None:
                 return
@@ -1590,7 +1621,8 @@ def register_moderazione_utenti(
 
         @app_commands.command(name="ban", description="Alias of /users ban.")
         @app_commands.describe(nick_o_id="ID membro, mention o nickname.", motivo="Motivo opzionale.")
-        async def ban_alias(interaction: discord.Interaction, nick_o_id: discord.Member, motivo: str | None = None) -> None:
+        @app_commands.autocomplete(nick_o_id=_autocomplete_live_member)
+        async def ban_alias(interaction: discord.Interaction, nick_o_id: str, motivo: str | None = None) -> None:
             user = await _resolve_live_member(interaction, nick_or_id=nick_o_id, mode="ban")
             if user is None:
                 return
@@ -1617,9 +1649,10 @@ def register_moderazione_utenti(
         )
         @app_commands.rename(quantità="quantity", unità="unit")
         @app_commands.choices(unità=WINDOW_UNIT_CHOICES)
+        @app_commands.autocomplete(nick_o_id=_autocomplete_live_member)
         async def tempban_alias(
             interaction: discord.Interaction,
-            nick_o_id: discord.Member,
+            nick_o_id: str,
             quantità: int,
             unità: app_commands.Choice[str],
             motivo: str | None = None,
@@ -1638,9 +1671,10 @@ def register_moderazione_utenti(
         )
         @app_commands.rename(quantità="quantity", unità="unit")
         @app_commands.choices(unità=WINDOW_UNIT_CHOICES)
+        @app_commands.autocomplete(nick_o_id=_autocomplete_live_member)
         async def grace_alias(
             interaction: discord.Interaction,
-            nick_o_id: discord.Member,
+            nick_o_id: str,
             quantità: int,
             unità: app_commands.Choice[str],
             motivo: str | None = None,
