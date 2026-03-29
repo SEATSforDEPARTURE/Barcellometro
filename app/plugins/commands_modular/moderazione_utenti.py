@@ -416,6 +416,13 @@ def register_moderazione_utenti(
         explicit_reason = _normalize_optional_reason(reason)
         resolved_reason = explicit_reason or await _default_reason("kick", user=user, guild=interaction.guild, moderator=interaction.user)
         operation_id = str(uuid4())
+        dm_result = await users_dm_service.send_for_event(
+            guild=interaction.guild,
+            user=user,
+            event_type="kick",
+            reason=resolved_reason,
+            metadata={"source": "users_kick_manual", "operation_id": operation_id},
+        )
         _remember_departure(interaction.guild, user, "kick")
         try:
             await user.kick(reason=resolved_reason)
@@ -430,13 +437,6 @@ def register_moderazione_utenti(
             greetings_reason=explicit_reason,
             moderator=interaction.user,
             metadata={"operation_id": operation_id},
-        )
-        dm_result = await users_dm_service.send_for_event_by_user_id(
-            guild=interaction.guild,
-            user_id=str(user.id),
-            event_type="kick",
-            reason=resolved_reason,
-            metadata={"source": "users_kick_manual", "operation_id": operation_id},
         )
         await _send(
             interaction,
@@ -468,6 +468,13 @@ def register_moderazione_utenti(
         explicit_reason = _normalize_optional_reason(reason)
         resolved_reason = explicit_reason or await _default_reason("ban", user=user, guild=interaction.guild, moderator=interaction.user)
         operation_id = str(uuid4())
+        dm_result = await users_dm_service.send_for_event(
+            guild=interaction.guild,
+            user=user,
+            event_type="ban",
+            reason=resolved_reason,
+            metadata={"source": "users_ban_manual", "operation_id": operation_id},
+        )
         _remember_departure(interaction.guild, user, "ban")
         try:
             await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
@@ -482,13 +489,6 @@ def register_moderazione_utenti(
             greetings_reason=explicit_reason,
             moderator=interaction.user,
             metadata={"operation_id": operation_id},
-        )
-        dm_result = await users_dm_service.send_for_event_by_user_id(
-            guild=interaction.guild,
-            user_id=str(user.id),
-            event_type="ban",
-            reason=resolved_reason,
-            metadata={"source": "users_ban_manual", "operation_id": operation_id},
         )
         await _send(
             interaction,
@@ -613,6 +613,16 @@ def register_moderazione_utenti(
             duration_seconds=duration_seconds,
             expires_at=expires_at,
         )
+        dm_result = await users_dm_service.send_for_event(
+            guild=interaction.guild,
+            user=user,
+            event_type="tempban",
+            duration_seconds=duration_seconds,
+            expires_at=expires_at,
+            reason=resolved_reason,
+            reasoning="users_manual_tempban_direct",
+            metadata={"source": "users_tempban_manual", "operation_id": operation_id},
+        )
         _remember_departure(interaction.guild, user, "tempban")
         try:
             await interaction.guild.ban(user, reason=resolved_reason, delete_message_seconds=0)
@@ -630,16 +640,6 @@ def register_moderazione_utenti(
             duration_seconds=duration_seconds,
             expires_at=expires_at,
             metadata={"operation_id": operation_id},
-        )
-        dm_result = await users_dm_service.send_for_event_by_user_id(
-            guild=interaction.guild,
-            user_id=str(user.id),
-            event_type="tempban",
-            duration_seconds=duration_seconds,
-            expires_at=expires_at,
-            reason=resolved_reason,
-            reasoning="users_manual_tempban_direct",
-            metadata={"source": "users_tempban_manual", "operation_id": operation_id},
         )
         await _send(
             interaction,

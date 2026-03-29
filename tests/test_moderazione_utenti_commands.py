@@ -695,10 +695,7 @@ def test_mod_users_actions_include_dm_delivery_line_and_invoke_dm_service(monkey
         monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
         monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
 
-        dm_service = SimpleNamespace(
-            send_for_event=AsyncMock(return_value={"sent": True}),
-            send_for_event_by_user_id=AsyncMock(return_value={"sent": False, "skipped": "cooldown"}),
-        )
+        dm_service = SimpleNamespace(send_for_event=AsyncMock(return_value={"sent": True}), send_for_event_by_user_id=AsyncMock())
         dm_cls = Mock(return_value=dm_service)
         monkeypatch.setattr(moderazione_utenti_module, "UsersModerationDmService", dm_cls)
 
@@ -740,16 +737,16 @@ def test_mod_users_actions_include_dm_delivery_line_and_invoke_dm_service(monkey
         await _find_command(users_group, "tempban").callback(interaction, "42", 1, hour, "Tempban test")
         await _find_command(users_group, "grace", "manual").callback(interaction, "42", 2, day, "Grace test")
 
-        assert dm_service.send_for_event_by_user_id.await_count == 3
-        assert dm_service.send_for_event.await_count == 1
+        assert dm_service.send_for_event_by_user_id.await_count == 0
+        assert dm_service.send_for_event.await_count == 4
 
         kick_kwargs = send_standard_response.await_args_list[0].kwargs
         ban_kwargs = send_standard_response.await_args_list[1].kwargs
         tempban_kwargs = send_standard_response.await_args_list[2].kwargs
         grace_kwargs = send_standard_response.await_args_list[3].kwargs
-        assert ("dm", "skipped (cooldown)") in kick_kwargs["lines"]
-        assert ("dm", "skipped (cooldown)") in ban_kwargs["lines"]
-        assert ("dm", "skipped (cooldown)") in tempban_kwargs["lines"]
+        assert ("dm", "delivered") in kick_kwargs["lines"]
+        assert ("dm", "delivered") in ban_kwargs["lines"]
+        assert ("dm", "delivered") in tempban_kwargs["lines"]
         assert ("dm", "delivered") in grace_kwargs["lines"]
 
     asyncio.run(_run())
@@ -762,8 +759,7 @@ def test_mod_users_dm_delivery_status_mapping_in_response(monkeypatch) -> None:
         monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
 
         dm_service = SimpleNamespace(
-            send_for_event=AsyncMock(),
-            send_for_event_by_user_id=AsyncMock(
+            send_for_event=AsyncMock(
                 side_effect=[
                     {"sent": True},
                     {"sent": True, "fallback": "text"},
@@ -772,6 +768,7 @@ def test_mod_users_dm_delivery_status_mapping_in_response(monkeypatch) -> None:
                     {"sent": False, "skipped": "user_unavailable"},
                 ]
             ),
+            send_for_event_by_user_id=AsyncMock(),
         )
         monkeypatch.setattr(moderazione_utenti_module, "UsersModerationDmService", Mock(return_value=dm_service))
 
@@ -805,6 +802,73 @@ def test_mod_users_dm_delivery_status_mapping_in_response(monkeypatch) -> None:
             "failed (Forbidden)",
             "skipped (disabled)",
             "skipped (user_unavailable)",
+        ]
+
+    asyncio.run(_run())
+
+
+def test_mod_users_manual_commands_send_dm_before_moderation_action(monkeypatch) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        call_order: list[str] = []
+
+        async def _send_for_event(**kwargs):
+            event_type = str(kwargs["event_type"])
+            call_order.append(f"dm:{event_type}")
+            return {"sent": True}
+
+        async def _kick(*args, **kwargs):
+            _ = args, kwargs
+            call_order.append("kick")
+
+        async def _ban(*args, **kwargs):
+            _ = args, kwargs
+            call_order.append("ban")
+
+        dm_service = SimpleNamespace(send_for_event=AsyncMock(side_effect=_send_for_event), send_for_event_by_user_id=AsyncMock())
+        monkeypatch.setattr(moderazione_utenti_module, "UsersModerationDmService", Mock(return_value=dm_service))
+
+        database = SimpleNamespace(add_temp_ban=AsyncMock())
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(return_value={"canonical_written": False, "canonical_visible": False}),
+            send_notification=AsyncMock(),
+            remember_departure_action=Mock(),
+            forget_departure_action=Mock(),
+        )
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=member_flow_notifications,
+            barcello_service=None,
+            bot=SimpleNamespace(),
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente", kick=AsyncMock(side_effect=_kick))
+        guild = SimpleNamespace(id=1, ban=AsyncMock(side_effect=_ban), get_member=Mock(return_value=target_user), fetch_member=AsyncMock())
+        interaction = SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            user=SimpleNamespace(id=9),
+            command=SimpleNamespace(qualified_name="users moderation"),
+        )
+        unit = discord.app_commands.Choice(name="ore", value="ore")
+
+        await _find_command(users_group, "kick").callback(interaction, "42", "Kick test")
+        await _find_command(users_group, "ban").callback(interaction, "42", "Ban test")
+        await _find_command(users_group, "tempban").callback(interaction, "42", 1, unit, "Tempban test")
+
+        assert call_order == [
+            "dm:kick",
+            "kick",
+            "dm:ban",
+            "ban",
+            "dm:tempban",
+            "ban",
         ]
 
     asyncio.run(_run())
