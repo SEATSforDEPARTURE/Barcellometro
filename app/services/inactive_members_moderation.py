@@ -314,11 +314,12 @@ class InactiveMembersModerationService:
                     event_type="tempban",
                     duration_seconds=duration_seconds,
                     expires_at=expires_at,
-                    reason="Automatic tempban after manual grace expiry",
+                    reason=None,
+                    reason_is_human=False,
                     reasoning="users_manual_grace_expired_tempban",
                     metadata={"source": "users_grace_auto_tempban"},
                 )
-                await guild.ban(discord.Object(id=int(user_id)), reason="Automatic tempban after manual grace expiry", delete_message_seconds=0)
+                await guild.ban(discord.Object(id=int(user_id)), reason=None, delete_message_seconds=0)
             except Exception:
                 if self._member_flow_notifications is not None:
                     forget = getattr(self._member_flow_notifications, "forget_departure_action", None)
@@ -326,12 +327,12 @@ class InactiveMembersModerationService:
                         forget(guild_id, user_id)
                 logger.warning("users grace auto-tempban failed user=%s guild=%s", user_id, guild_id, exc_info=True)
                 continue
-            await self._database.add_temp_ban(guild_id, user_id, expires_at.isoformat(), "Automatic tempban after manual grace expiry")
+            await self._database.add_temp_ban(guild_id, user_id, expires_at.isoformat(), None)
             result = await self._log_moderation_action(
                 guild_id=guild_id,
                 user_id=user_id,
                 action_type="tempban",
-                reason="Automatic tempban after manual grace expiry",
+                reason=None,
                 duration_seconds=duration_seconds,
                 expires_at=expires_at.isoformat(),
                 metadata={
@@ -877,6 +878,22 @@ class InactiveMembersModerationService:
         except Exception:
             return None
 
+    @staticmethod
+    def _resolve_inactivity_dm_color(raw_color: Any, fallback: discord.Colour) -> discord.Colour:
+        value = str(raw_color or "").strip()
+        if not value:
+            return fallback
+        if value.startswith("#"):
+            value = value[1:]
+        elif value.lower().startswith("0x"):
+            value = value[2:]
+        if len(value) != 6 or any(ch not in "0123456789abcdefABCDEF" for ch in value):
+            return fallback
+        try:
+            return discord.Colour(int(value, 16))
+        except ValueError:
+            return fallback
+
     async def _latest_grace_dm_delivery(self, guild_id: str, user_id: str) -> Any | None:
         latest_delivery_lookup = getattr(self._database, "get_latest_inactivity_dm_delivery", None)
         if latest_delivery_lookup is None:
@@ -952,7 +969,7 @@ class InactiveMembersModerationService:
                 cfg=cfg,
                 message_count=candidate.count_in_window,
                 reminder_count=_state_int(state, "reminder_count", 0),
-                reason=inactivity_text,
+                reason=None,
                 reasoning="inactivity_grace",
                 inactivity_text=inactivity_text,
                 event_state="grace_started",
@@ -968,7 +985,7 @@ class InactiveMembersModerationService:
                 title=INACTIVE_GRACE_TITLE_TEXT,
                 title_emoji=INACTIVE_GRACE_TITLE_EMOJI,
                 description=body,
-                color=discord.Colour.blurple(),
+                color=self._resolve_inactivity_dm_color(cfg.get("template_grace_embed_color"), discord.Colour.blurple()),
             )
             try:
                 await candidate.member.send(embed=reminder_embed)
@@ -993,12 +1010,12 @@ class InactiveMembersModerationService:
                         user_id=str(candidate.member.id),
                         moderator_id=None,
                         action_type="inactive_grace",
-                        reason="Reminder inattività inviato",
+                        reason=None,
                         duration_seconds=int(cfg.get("grace_days_after_reminder", 7)) * 86400,
                         expires_at=expires_at.isoformat(),
                         metadata={
                             "source": "inactive_members_moderation",
-                            "greetings_reason": inactivity_text,
+                            "greetings_reason": "",
                             "days_inactive": candidate.days_inactive,
                             "inactivity_text": inactivity_text,
                         },
@@ -1080,7 +1097,7 @@ class InactiveMembersModerationService:
                 cfg=cfg,
                 message_count=candidate.count_in_window,
                 reminder_count=reminder_count,
-                reason="Inattività prolungata",
+                reason=None,
                 reasoning="inactivity_grace_expired_tempban" if require_grace else "inactivity_direct_tempban",
                 inactivity_text=inactivity_text,
                 event_state="grace_expired" if require_grace else "manual_action",
@@ -1097,7 +1114,7 @@ class InactiveMembersModerationService:
                     title=INACTIVE_TEMPBAN_TITLE_TEXT,
                     title_emoji=INACTIVE_TEMPBAN_TITLE_EMOJI,
                     description=msg,
-                    color=discord.Colour.orange(),
+                    color=self._resolve_inactivity_dm_color(cfg.get("template_tempban_embed_color"), discord.Colour.orange()),
                 )
                 await candidate.member.send(embed=tempban_embed)
                 await self._database.log_inactivity_dm_delivery(
@@ -1208,13 +1225,13 @@ class InactiveMembersModerationService:
                             user_id=str(user_id),
                             moderator_id=None,
                             action_type="inactive_tempban",
-                            reason=reason_text,
+                            reason=None,
                             duration_seconds=ban_days * 86400,
                             expires_at=unban_at,
                             metadata={
                                 "source": "inactive_members_moderation",
                                 "operation_id": operation_id,
-                                "greetings_reason": reason_text,
+                                "greetings_reason": "",
                                 "days_inactive": candidate.days_inactive,
                                 "inactivity_text": inactivity_text,
                                 **({"greetings_origin": "inactive_grace_expired_auto_tempban", "greetings_reason": ""} if require_grace else {}),
@@ -1225,13 +1242,13 @@ class InactiveMembersModerationService:
                                 guild=guild,
                                 user=candidate.member,
                                 action_type="inactive_tempban",
-                                reason=reason_text,
+                                reason=None,
                                 duration_seconds=ban_days * 86400,
                                 expires_at=expires_at,
                                 metadata={
                                     "source": "inactive_members_moderation",
                                     "operation_id": operation_id,
-                                    "greetings_reason": reason_text,
+                                    "greetings_reason": "",
                                     "days_inactive": candidate.days_inactive,
                                     "inactivity_text": inactivity_text,
                                     **({"greetings_origin": "inactive_grace_expired_auto_tempban", "greetings_reason": ""} if require_grace else {}),

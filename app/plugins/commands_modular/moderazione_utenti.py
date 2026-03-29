@@ -70,6 +70,23 @@ def _normalize_optional_reason(value: str | None) -> str | None:
     return text or None
 
 
+def _normalize_embed_color(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
+    if value.startswith("#"):
+        candidate = value[1:]
+    elif value.lower().startswith("0x"):
+        candidate = value[2:]
+    else:
+        candidate = value
+    if len(candidate) != 6 or any(ch not in "0123456789abcdefABCDEF" for ch in candidate):
+        return None
+    return f"#{candidate.upper()}"
+
+
 def _normalize_lookup_key(value: str | None) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
@@ -1233,9 +1250,13 @@ def register_moderazione_utenti(
             lines=[
                 ("dms", "on" if bool(cfg.get("enabled", 1)) else "off"),
                 ("template_grace", cfg.get("grace_template") or "not set"),
+                ("template_grace_embed_color", cfg.get("grace_embed_color") or "not set"),
                 ("template_tempban", cfg.get("tempban_template") or "not set"),
+                ("template_tempban_embed_color", cfg.get("tempban_embed_color") or "not set"),
                 ("template_kick", cfg.get("kick_template") or "not set"),
+                ("template_kick_embed_color", cfg.get("kick_embed_color") or "not set"),
                 ("template_ban", cfg.get("ban_template") or "not set"),
+                ("template_ban_embed_color", cfg.get("ban_embed_color") or "not set"),
                 ("cooldown", _format_cooldown_label(_resolve_cooldown_seconds_from_users_cfg(cfg))),
                 ("cooldown_seconds", _resolve_cooldown_seconds_from_users_cfg(cfg)),
                 ("cooldown_disabled", "yes" if _resolve_cooldown_seconds_from_users_cfg(cfg) == 0 else "no"),
@@ -1258,11 +1279,20 @@ def register_moderazione_utenti(
         )
 
     @dms_group.command(name="template_grace_set", description="Set the DM template for manual grace entry.")
-    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP)
-    async def users_dms_template_grace_set(interaction: discord.Interaction, text: str) -> None:
+    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP, embed_color="Optional embed color (#RRGGBB, RRGGBB, 0xRRGGBB).")
+    async def users_dms_template_grace_set(interaction: discord.Interaction, text: str, embed_color: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), grace_template=text)
+        parsed_embed_color: str | None = None
+        if embed_color is not None:
+            parsed_embed_color = _normalize_embed_color(embed_color)
+            if parsed_embed_color is None:
+                await _send(interaction, subcommand_path="users dms template_grace_set", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+                return
+        payload = {"grace_template": text}
+        if embed_color is not None:
+            payload["grace_embed_color"] = parsed_embed_color
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), **payload)
         await _send(interaction, subcommand_path="users dms template_grace_set", lines=[("result", "updated")], kind="success")
 
     @dms_group.command(name="template_grace_show", description="Show the DM template for manual grace entry.")
@@ -1278,7 +1308,7 @@ def register_moderazione_utenti(
         await _send(
             interaction,
             subcommand_path="users dms template_grace_show",
-            lines=[("template_grace", template or "not set")],
+            lines=[("template_grace", template or "not set"), ("embed_color", cfg.get("grace_embed_color") or "not set")],
             sections=preview_sections,
         )
 
@@ -1286,15 +1316,24 @@ def register_moderazione_utenti(
     async def users_dms_template_grace_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), grace_template=None)
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), grace_template=None, grace_embed_color=None)
         await _send(interaction, subcommand_path="users dms template_grace_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="template_tempban_set", description="Set the DM template for auto-tempban after manual grace.")
-    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP)
-    async def users_dms_template_tempban_set(interaction: discord.Interaction, text: str) -> None:
+    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP, embed_color="Optional embed color (#RRGGBB, RRGGBB, 0xRRGGBB).")
+    async def users_dms_template_tempban_set(interaction: discord.Interaction, text: str, embed_color: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), tempban_template=text)
+        parsed_embed_color: str | None = None
+        if embed_color is not None:
+            parsed_embed_color = _normalize_embed_color(embed_color)
+            if parsed_embed_color is None:
+                await _send(interaction, subcommand_path="users dms template_tempban_set", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+                return
+        payload = {"tempban_template": text}
+        if embed_color is not None:
+            payload["tempban_embed_color"] = parsed_embed_color
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), **payload)
         await _send(interaction, subcommand_path="users dms template_tempban_set", lines=[("result", "updated")], kind="success")
 
     @dms_group.command(name="template_tempban_show", description="Show the DM template for auto-tempban after manual grace.")
@@ -1310,7 +1349,7 @@ def register_moderazione_utenti(
         await _send(
             interaction,
             subcommand_path="users dms template_tempban_show",
-            lines=[("template_tempban", template or "not set")],
+            lines=[("template_tempban", template or "not set"), ("embed_color", cfg.get("tempban_embed_color") or "not set")],
             sections=preview_sections,
         )
 
@@ -1318,15 +1357,24 @@ def register_moderazione_utenti(
     async def users_dms_template_tempban_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), tempban_template=None)
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), tempban_template=None, tempban_embed_color=None)
         await _send(interaction, subcommand_path="users dms template_tempban_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="template_kick_set", description="Set the DM template for kick events.")
-    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP)
-    async def users_dms_template_kick_set(interaction: discord.Interaction, text: str) -> None:
+    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP, embed_color="Optional embed color (#RRGGBB, RRGGBB, 0xRRGGBB).")
+    async def users_dms_template_kick_set(interaction: discord.Interaction, text: str, embed_color: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), kick_template=text)
+        parsed_embed_color: str | None = None
+        if embed_color is not None:
+            parsed_embed_color = _normalize_embed_color(embed_color)
+            if parsed_embed_color is None:
+                await _send(interaction, subcommand_path="users dms template_kick_set", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+                return
+        payload = {"kick_template": text}
+        if embed_color is not None:
+            payload["kick_embed_color"] = parsed_embed_color
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), **payload)
         await _send(interaction, subcommand_path="users dms template_kick_set", lines=[("result", "updated")], kind="success")
 
     @dms_group.command(name="template_kick_show", description="Show the DM template for kick events.")
@@ -1342,7 +1390,7 @@ def register_moderazione_utenti(
         await _send(
             interaction,
             subcommand_path="users dms template_kick_show",
-            lines=[("template_kick", template or "not set")],
+            lines=[("template_kick", template or "not set"), ("embed_color", cfg.get("kick_embed_color") or "not set")],
             sections=preview_sections,
         )
 
@@ -1350,15 +1398,24 @@ def register_moderazione_utenti(
     async def users_dms_template_kick_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), kick_template=None)
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), kick_template=None, kick_embed_color=None)
         await _send(interaction, subcommand_path="users dms template_kick_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="template_ban_set", description="Set the DM template for ban events.")
-    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP)
-    async def users_dms_template_ban_set(interaction: discord.Interaction, text: str) -> None:
+    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP, embed_color="Optional embed color (#RRGGBB, RRGGBB, 0xRRGGBB).")
+    async def users_dms_template_ban_set(interaction: discord.Interaction, text: str, embed_color: str | None = None) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), ban_template=text)
+        parsed_embed_color: str | None = None
+        if embed_color is not None:
+            parsed_embed_color = _normalize_embed_color(embed_color)
+            if parsed_embed_color is None:
+                await _send(interaction, subcommand_path="users dms template_ban_set", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+                return
+        payload = {"ban_template": text}
+        if embed_color is not None:
+            payload["ban_embed_color"] = parsed_embed_color
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), **payload)
         await _send(interaction, subcommand_path="users dms template_ban_set", lines=[("result", "updated")], kind="success")
 
     @dms_group.command(name="template_ban_show", description="Show the DM template for ban events.")
@@ -1374,7 +1431,7 @@ def register_moderazione_utenti(
         await _send(
             interaction,
             subcommand_path="users dms template_ban_show",
-            lines=[("template_ban", template or "not set")],
+            lines=[("template_ban", template or "not set"), ("embed_color", cfg.get("ban_embed_color") or "not set")],
             sections=preview_sections,
         )
 
@@ -1382,7 +1439,7 @@ def register_moderazione_utenti(
     async def users_dms_template_ban_reset(interaction: discord.Interaction) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
-        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), ban_template=None)
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), ban_template=None, ban_embed_color=None)
         await _send(interaction, subcommand_path="users dms template_ban_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="cooldown_set", description="Set the DM cooldown for USERS contexts.")

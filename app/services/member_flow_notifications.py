@@ -239,6 +239,8 @@ class MemberFlowNotificationsService:
         # osservata o eseguita dal runtime; `member_flow_events` è invece la
         # timeline canonica letta dai GREETINGS per rendering, conteggi e dedupe.
         metadata_dict = dict(metadata or {})
+        if "reason_is_human" not in metadata_dict:
+            metadata_dict["reason_is_human"] = bool(normalize_reason(reason)) and moderator_id is not None
         action_id = await self._database.log_moderation_action(
             guild_id=guild_id,
             user_id=user_id,
@@ -360,7 +362,10 @@ class MemberFlowNotificationsService:
         embed = discord.Embed(title=copy.event_label, description=copy.narrative[:4096], colour=self._colour_for_event_type(str(canonical_payload.get("event_type_key") or action_type)))
         moderation_note = normalize_reason(getattr(copy, "moderation_note", None))
         event_type_key = str(canonical_payload.get("event_type_key") or action_type or "").strip().lower()
-        if moderation_note and event_type_key != "inactive_tempban":
+        canonical_metadata_value = canonical_payload.get("metadata")
+        canonical_metadata = canonical_metadata_value if isinstance(canonical_metadata_value, dict) else {}
+        reason_is_human = bool(canonical_metadata.get("reason_is_human"))
+        if moderation_note and reason_is_human and event_type_key != "inactive_tempban":
             embed.add_field(
                 name=_GREETINGS_MODERATION_FIELD_NAME,
                 value=str(moderation_note)[:1024],

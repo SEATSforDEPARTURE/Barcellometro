@@ -22,6 +22,8 @@ class _FakeDatabase:
             "template_tempban": None,
             "dm_reminder_template": None,
             "dm_kick_template": None,
+            "template_grace_embed_color": None,
+            "template_tempban_embed_color": None,
         }
         self.set_dm_enabled_calls: list[tuple[str, bool]] = []
         self.stats_payload = {
@@ -110,7 +112,9 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         as_map = {key: value for key, value in status_lines}
         assert as_map["dms"] == "off"
         assert as_map["template_grace"] == "not set"
+        assert as_map["template_grace_embed_color"] == "not set"
         assert as_map["template_tempban"] == "not set"
+        assert as_map["template_tempban_embed_color"] == "not set"
         assert as_map["cooldown"] == "2 settimane"
         assert as_map["cooldown_seconds"] == 14 * 86400
         assert as_map["cooldown_disabled"] == "no"
@@ -175,18 +179,39 @@ def test_inactivity_dms_template_grace_and_tempban_set_show_reset(inattivi_modul
         inattivi_module.register_inattivi(inactivity_group, ctx)
 
         interaction = SimpleNamespace(guild_id=123, guild=None)
-        await _find_command(inactivity_group, "dms", "template_grace_set").callback(interaction, "Grace {user}")
+        await _find_command(inactivity_group, "dms", "template_grace_set").callback(interaction, "Grace {user}", "#123456")
         await _find_command(inactivity_group, "dms", "template_grace_show").callback(interaction)
         await _find_command(inactivity_group, "dms", "template_grace_reset").callback(interaction)
-        await _find_command(inactivity_group, "dms", "template_tempban_set").callback(interaction, "Tempban {user}")
+        await _find_command(inactivity_group, "dms", "template_tempban_set").callback(interaction, "Tempban {user}", "0xABCDEF")
         await _find_command(inactivity_group, "dms", "template_tempban_show").callback(interaction)
         await _find_command(inactivity_group, "dms", "template_tempban_reset").callback(interaction)
 
         assert db.config["template_grace"] is None
         assert db.config["template_tempban"] is None
+        assert db.config["template_grace_embed_color"] is None
+        assert db.config["template_tempban_embed_color"] is None
         sent_paths = [call.kwargs["subcommand_path"] for call in send_response.await_args_list]
         assert "inactivity dms template_grace_show" in sent_paths
         assert "inactivity dms template_tempban_show" in sent_paths
+
+    asyncio.run(_run())
+
+
+def test_inactivity_dms_template_set_rejects_invalid_embed_color(inattivi_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        db = _FakeDatabase()
+        send_response = AsyncMock()
+        monkeypatch.setattr(inattivi_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(inattivi_module, "send_standard_response", send_response)
+
+        ctx = SimpleNamespace(database=db, footer=None, author=None)
+        inactivity_group = discord.app_commands.Group(name="inactivity", description="inactivity")
+        inattivi_module.register_inattivi(inactivity_group, ctx)
+        interaction = SimpleNamespace(guild_id=123, guild=None)
+
+        await _find_command(inactivity_group, "dms", "template_tempban_set").callback(interaction, "Tempban {user}", "invalid")
+        assert db.config["template_tempban"] is None
+        assert send_response.await_args.kwargs["kind"] == "error"
 
     asyncio.run(_run())
 

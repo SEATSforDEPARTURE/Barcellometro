@@ -635,6 +635,7 @@ def test_send_notification_renders_moderation_reason_in_single_structural_field(
                 "metadata": {
                     "occurrence_number": 1,
                     "greetings_reason": "Spam creativo",
+                    "reason_is_human": True,
                 },
             },
         )
@@ -1135,7 +1136,7 @@ def test_send_notification_uses_canonical_greetings_palette_by_event_type(member
                 "event_type_key": event_type,
                 "reason": f"Evento {event_type}",
                 "visible_in_greetings": True,
-                "metadata": {"occurrence_number": 1},
+                "metadata": {"occurrence_number": 1, "reason_is_human": True},
             },
         )
 

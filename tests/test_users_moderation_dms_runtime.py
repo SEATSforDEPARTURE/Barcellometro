@@ -27,6 +27,10 @@ class _FakeDb:
             "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {moderation_context_line}",
             "kick_template": "KICK {mention} ({user}) {moderation_context_line}",
             "ban_template": "BAN {mention} ({user}) {moderation_context_line}",
+            "grace_embed_color": None,
+            "tempban_embed_color": None,
+            "kick_embed_color": None,
+            "ban_embed_color": None,
         }
         self.latest: dict[tuple[str, str, str], dict[str, str]] = {}
         self.logs: list[dict[str, object]] = []
@@ -378,6 +382,49 @@ def test_users_dm_manual_tempban_with_reason_renders_moderation_note_field() -> 
         field = user.send.await_args.kwargs["embed"].fields[0]
         assert field.name == _GREETINGS_MODERATION_FIELD_NAME
         assert field.value == "Spam raid"
+
+    asyncio.run(_run())
+
+
+def test_users_dm_auto_tempban_never_adds_moderation_note_field() -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="tempban",
+            duration_seconds=1800,
+            expires_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+            reason="Automatic tempban after manual grace expiry",
+            reason_is_human=False,
+            reasoning="users_manual_grace_expired_tempban",
+        )
+        assert result == {"sent": True}
+        assert user.send.await_args.kwargs["embed"].fields == []
+
+    asyncio.run(_run())
+
+
+def test_users_dm_uses_configured_embed_color_for_event() -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.config["tempban_embed_color"] = "#123ABC"
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="tempban",
+            reason="Spam raid",
+            reasoning="users_manual_tempban_direct",
+        )
+        assert user.send.await_args.kwargs["embed"].colour.value == 0x123ABC
 
     asyncio.run(_run())
 
