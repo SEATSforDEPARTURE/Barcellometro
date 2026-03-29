@@ -21,7 +21,7 @@ from app.plugins.commands_modular.time_windows import (
     rolling_window_timedelta,
 )
 from app.services.greetings_copy_service import GreetingsCopyService
-from app.services.member_flow_notifications import format_duration_human
+from app.services.member_flow_notifications import _GREETINGS_MODERATION_FIELD_NAME, format_duration_human
 from app.services.dm_template_preview import build_dm_template_preview_payload, render_dm_template_preview
 from app.services.users_moderation_dms import (
     DEFAULT_USERS_DM_COOLDOWN_DAYS,
@@ -192,7 +192,7 @@ def _format_italian_datetime(value: object) -> str | None:
     return dt.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
 
 
-def _render_users_dm_template_preview(template: str, *, event_type: str = "tempban") -> str:
+def _render_users_dm_template_preview(template: str, *, event_type: str = "tempban") -> tuple[str, str]:
     safe_event_type = str(event_type or "").strip().lower() or "tempban"
     preview_presets: dict[str, dict[str, object]] = {
         "tempban": {
@@ -218,7 +218,7 @@ def _render_users_dm_template_preview(template: str, *, event_type: str = "tempb
         },
     }
     payload = build_dm_template_preview_payload(**preview_presets.get(safe_event_type, preview_presets["tempban"]))
-    return render_dm_template_preview(template, payload)
+    return render_dm_template_preview(template, payload), str(payload.get("reason") or "").strip()
 
 
 def _fmt_utc(ts: object) -> str:
@@ -1271,12 +1271,15 @@ def register_moderazione_utenti(
             return
         cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
         template = str(cfg.get("grace_template") or "")
-        preview = _render_users_dm_template_preview(template, event_type="grace") if template else "No custom template configured."
+        preview, preview_reason = _render_users_dm_template_preview(template, event_type="grace") if template else ("No custom template configured.", "")
+        preview_sections = [CommandEmbedSection(title="Preview", lines=[preview])]
+        if preview_reason:
+            preview_sections.append(CommandEmbedSection(title=_GREETINGS_MODERATION_FIELD_NAME, lines=[preview_reason]))
         await _send(
             interaction,
             subcommand_path="users dms template_grace_show",
             lines=[("template_grace", template or "not set")],
-            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+            sections=preview_sections,
         )
 
     @dms_group.command(name="template_grace_reset", description="Reset the DM template for manual grace entry.")
@@ -1300,12 +1303,15 @@ def register_moderazione_utenti(
             return
         cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
         template = str(cfg.get("tempban_template") or "")
-        preview = _render_users_dm_template_preview(template, event_type="tempban") if template else "No custom template configured."
+        preview, preview_reason = _render_users_dm_template_preview(template, event_type="tempban") if template else ("No custom template configured.", "")
+        preview_sections = [CommandEmbedSection(title="Preview", lines=[preview])]
+        if preview_reason:
+            preview_sections.append(CommandEmbedSection(title=_GREETINGS_MODERATION_FIELD_NAME, lines=[preview_reason]))
         await _send(
             interaction,
             subcommand_path="users dms template_tempban_show",
             lines=[("template_tempban", template or "not set")],
-            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+            sections=preview_sections,
         )
 
     @dms_group.command(name="template_tempban_reset", description="Reset the DM template for auto-tempban after manual grace.")
@@ -1329,12 +1335,15 @@ def register_moderazione_utenti(
             return
         cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
         template = str(cfg.get("kick_template") or "")
-        preview = _render_users_dm_template_preview(template, event_type="kick") if template else "No custom template configured."
+        preview, preview_reason = _render_users_dm_template_preview(template, event_type="kick") if template else ("No custom template configured.", "")
+        preview_sections = [CommandEmbedSection(title="Preview", lines=[preview])]
+        if preview_reason:
+            preview_sections.append(CommandEmbedSection(title=_GREETINGS_MODERATION_FIELD_NAME, lines=[preview_reason]))
         await _send(
             interaction,
             subcommand_path="users dms template_kick_show",
             lines=[("template_kick", template or "not set")],
-            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+            sections=preview_sections,
         )
 
     @dms_group.command(name="template_kick_reset", description="Reset the DM template for kick events.")
@@ -1358,12 +1367,15 @@ def register_moderazione_utenti(
             return
         cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
         template = str(cfg.get("ban_template") or "")
-        preview = _render_users_dm_template_preview(template, event_type="ban") if template else "No custom template configured."
+        preview, preview_reason = _render_users_dm_template_preview(template, event_type="ban") if template else ("No custom template configured.", "")
+        preview_sections = [CommandEmbedSection(title="Preview", lines=[preview])]
+        if preview_reason:
+            preview_sections.append(CommandEmbedSection(title=_GREETINGS_MODERATION_FIELD_NAME, lines=[preview_reason]))
         await _send(
             interaction,
             subcommand_path="users dms template_ban_show",
             lines=[("template_ban", template or "not set")],
-            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+            sections=preview_sections,
         )
 
     @dms_group.command(name="template_ban_reset", description="Reset the DM template for ban events.")

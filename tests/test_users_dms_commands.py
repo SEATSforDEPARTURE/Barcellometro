@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import discord
 import pytest
 
+from app.services.member_flow_notifications import _GREETINGS_MODERATION_FIELD_NAME
 from app.services.users_moderation_dms import USERS_DM_SUPPORTED_PLACEHOLDERS
 
 
@@ -179,37 +180,65 @@ def test_users_dms_on_off_status_and_settings(users_module, monkeypatch: pytest.
 
 def test_users_tempban_preview_is_safe_and_resolves_ban_days(users_module) -> None:
     template = "Tempban di {ban_days} giorni per {user}. {moderation_context_line}{moderation_note_section}{invite_line}"
-    preview = users_module._render_users_dm_template_preview(template)
+    preview, preview_reason = users_module._render_users_dm_template_preview(template)
     assert "Template render error" not in preview
     assert "{ban_days}" not in preview
     assert "{user}" not in preview
     assert "periodo di grazia manuale scaduto" in preview
     assert "👇 LA MODERAZIONE AGGIUNGE" not in preview
+    assert preview_reason == ""
     assert "2" in preview
 
 
 def test_users_kick_and_ban_preview_are_safe(users_module) -> None:
-    kick_preview = users_module._render_users_dm_template_preview("Kick {user} {moderation_note_section}", event_type="kick")
-    ban_preview = users_module._render_users_dm_template_preview("Ban {user} {moderation_note_section}", event_type="ban")
+    kick_preview, kick_reason = users_module._render_users_dm_template_preview("Kick {user} {moderation_note_section}", event_type="kick")
+    ban_preview, ban_reason = users_module._render_users_dm_template_preview("Ban {user} {moderation_note_section}", event_type="ban")
     assert "Template render error" not in kick_preview
     assert "Template render error" not in ban_preview
     assert "ExampleUser" in kick_preview
-    assert "👇 LA MODERAZIONE AGGIUNGE" in kick_preview
-    assert "Repeated abusive language" in kick_preview
+    assert "👇 LA MODERAZIONE AGGIUNGE" not in kick_preview
+    assert "Repeated abusive language" not in kick_preview
+    assert kick_reason == "Repeated abusive language"
     assert "ExampleUser" in ban_preview
-    assert "👇 LA MODERAZIONE AGGIUNGE" in ban_preview
-    assert "Severe harassment" in ban_preview
+    assert "👇 LA MODERAZIONE AGGIUNGE" not in ban_preview
+    assert "Severe harassment" not in ban_preview
+    assert ban_reason == "Severe harassment"
 
 
 def test_users_grace_preview_shows_moderation_note_section(users_module) -> None:
-    preview = users_module._render_users_dm_template_preview("Grace {user}\n{moderation_note_section}", event_type="grace")
+    preview, preview_reason = users_module._render_users_dm_template_preview("Grace {user}\n{moderation_note_section}", event_type="grace")
     assert "ExampleUser" in preview
-    assert "👇 LA MODERAZIONE AGGIUNGE" in preview
-    assert "Final warning before temporary ban" in preview
+    assert "👇 LA MODERAZIONE AGGIUNGE" not in preview
+    assert "Final warning before temporary ban" not in preview
+    assert preview_reason == "Final warning before temporary ban"
 
 
 def test_users_preview_unknown_placeholder_does_not_crash(users_module) -> None:
-    preview = users_module._render_users_dm_template_preview("Hello {user} {unknown_placeholder}")
+    preview, preview_reason = users_module._render_users_dm_template_preview("Hello {user} {unknown_placeholder}")
     assert "Template render error" not in preview
     assert "{unknown_placeholder}" not in preview
     assert "ExampleUser" in preview
+    assert preview_reason == ""
+
+
+def test_users_template_show_includes_greetings_moderation_note_section_when_reason_is_present(users_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        db = _FakeDatabase()
+        db.config["kick_template"] = "Kick {user} {moderation_note_section}"
+        send_response = AsyncMock()
+        monkeypatch.setattr(users_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(users_module, "send_standard_response", send_response)
+        ctx = SimpleNamespace(database=db, footer=None, author=None, member_flow_notifications=None, barcello_service=None, config=SimpleNamespace())
+        users_group = discord.app_commands.Group(name="users", description="users")
+        users_module.register_moderazione_utenti(users_group, ctx)
+        interaction = SimpleNamespace(guild_id=123, guild=SimpleNamespace(id=123), user=SimpleNamespace(id=1))
+
+        await _find_command(users_group, "dms", "template_kick_show").callback(interaction)
+
+        call = send_response.await_args
+        sections = call.kwargs["sections"]
+        assert sections[0].title == "Preview"
+        assert sections[1].title == _GREETINGS_MODERATION_FIELD_NAME
+        assert sections[1].lines == ["Repeated abusive language"]
+
+    asyncio.run(_run())

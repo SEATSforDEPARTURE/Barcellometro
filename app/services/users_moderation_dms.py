@@ -8,20 +8,28 @@ import discord
 from app.services.database import DatabaseService
 from app.services.dm_template_placeholders import DM_BASE_SUPPORTED_PLACEHOLDERS, build_dm_base_placeholder_payload, render_dm_template
 from app.services.greetings_copy_service import get_greetings_title_parts
+from app.services.member_flow_notifications import _GREETINGS_MODERATION_FIELD_NAME
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
 
 DEFAULT_USERS_DM_COOLDOWN_DAYS = 14
 DEFAULT_USERS_DM_COOLDOWN_SECONDS = DEFAULT_USERS_DM_COOLDOWN_DAYS * 86400
 DEFAULT_USERS_DM_GRACE_TEMPLATE = (
-    "Hi {user}, you have entered a manual grace period in {server}. "
-    "It will expire on {expires_at_utc} ({expires_at_it}). {moderation_note_section}{invite_line}"
+    "Ciao {mention}. 👀 Ti volevo avvisare che sei entrato in un periodo di grazia nel server {server} "
+    "per {moderation_context_line}. Il periodo durerà {duration_human} e terminerà alla seguente data e ora italiana: "
+    "📅 {expires_at_it}."
 )
 DEFAULT_USERS_DM_TEMPBAN_TEMPLATE = (
-    "Hi {user}, your manual grace period in {server} has expired and an automatic temporary ban "
-    "has started for {duration_human}. {moderation_context_line}{moderation_note_section}{invite_line}"
+    "Ciao {mention}. 👀 Ti volevo avvisare che sei stato temporaneamente rimosso dal server {server} "
+    "per {moderation_context_line}. Il periodo di interdizione durerà {duration_human} e scadrà alla seguente data e ora italiana: "
+    "📅 {expires_at_it}. Se vorrai rientrare, potrai farlo utilizzando questo link: {invite_url}"
 )
-DEFAULT_USERS_DM_KICK_TEMPLATE = "Hi {user}, you have been kicked from {server}. {moderation_note_section}{invite_line}"
-DEFAULT_USERS_DM_BAN_TEMPLATE = "Hi {user}, you have been banned from {server}. {moderation_note_section}{invite_line}"
+DEFAULT_USERS_DM_KICK_TEMPLATE = (
+    "Ciao {mention}. 👀 Ti volevo avvisare che sei stato espulso dal server {server} per {moderation_context_line}. "
+    "Se vorrai rientrare, potrai farlo utilizzando questo link: {invite_url}"
+)
+DEFAULT_USERS_DM_BAN_TEMPLATE = (
+    "Ciao {mention}. 👀 Ti volevo avvisare che sei stato bannato dal server {server} per {moderation_context_line}."
+)
 USERS_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = DM_BASE_SUPPORTED_PLACEHOLDERS
 
 USERS_DM_SERVICE_NAME = "users"
@@ -199,6 +207,7 @@ class UsersModerationDmService:
             description=body,
             color=discord.Colour.orange() if event_type == "tempban" else discord.Colour.blurple(),
         )
+        self._add_moderation_note_field(dm_embed, reason)
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             await user.send(embed=dm_embed)
@@ -312,3 +321,14 @@ class UsersModerationDmService:
             invite_url=invite_url,
         )
         return render_dm_template(template, payload)
+
+    @staticmethod
+    def _add_moderation_note_field(embed: discord.Embed, reason_text: str | None) -> None:
+        safe_reason = str(reason_text or "").strip()
+        if not safe_reason:
+            return
+        embed.add_field(
+            name=_GREETINGS_MODERATION_FIELD_NAME,
+            value=safe_reason[:1024],
+            inline=False,
+        )
