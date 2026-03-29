@@ -301,6 +301,8 @@ def test_users_dm_config_and_delivery_log_tracks_stats_and_recent_events(tmp_pat
             enabled=1,
             grace_template="Grace {user}",
             tempban_template="Tempban {user}",
+            kick_template="Kick {user}",
+            ban_template="Ban {user}",
             cooldown_days=21,
             invite_url="https://discord.gg/example",
         )
@@ -309,6 +311,8 @@ def test_users_dm_config_and_delivery_log_tracks_stats_and_recent_events(tmp_pat
         assert int(cfg["enabled"]) == 1
         assert int(cfg["cooldown_days"]) == 21
         assert int(cfg["cooldown_seconds"]) == 21 * 86400
+        assert cfg["kick_template"] == "Kick {user}"
+        assert cfg["ban_template"] == "Ban {user}"
         assert cfg["invite_url"] == "https://discord.gg/example"
 
         await db.log_users_dm_delivery(

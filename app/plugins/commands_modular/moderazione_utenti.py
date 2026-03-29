@@ -150,13 +150,32 @@ def _format_italian_datetime(value: object) -> str | None:
     return dt.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
 
 
-def _render_users_dm_template_preview(template: str) -> str:
-    payload = build_dm_template_preview_payload(
-        event_type="tempban",
-        reason="Automatic tempban after manual grace expiry",
-        duration_seconds=2 * 86400,
-        extra_payload={"reasoning": "users_manual_grace_expired_tempban"},
-    )
+def _render_users_dm_template_preview(template: str, *, event_type: str = "tempban") -> str:
+    safe_event_type = str(event_type or "").strip().lower() or "tempban"
+    preview_presets: dict[str, dict[str, object]] = {
+        "tempban": {
+            "event_type": "tempban",
+            "reason": "Automatic tempban after manual grace expiry",
+            "duration_seconds": 2 * 86400,
+            "extra_payload": {"reasoning": "users_manual_grace_expired_tempban"},
+        },
+        "kick": {
+            "event_type": "kick",
+            "reason": "Repeated abusive language",
+            "duration_seconds": 0,
+        },
+        "ban": {
+            "event_type": "ban",
+            "reason": "Severe harassment",
+            "duration_seconds": 0,
+        },
+        "grace": {
+            "event_type": "grace",
+            "reason": "Final warning before temporary ban",
+            "duration_seconds": 2 * 86400,
+        },
+    }
+    payload = build_dm_template_preview_payload(**preview_presets.get(safe_event_type, preview_presets["tempban"]))
     return render_dm_template_preview(template, payload)
 
 
@@ -379,6 +398,13 @@ def register_moderazione_utenti(
             moderator=interaction.user,
             metadata={"operation_id": operation_id},
         )
+        await users_dm_service.send_for_event(
+            guild=interaction.guild,
+            user=user,
+            event_type="kick",
+            reason=resolved_reason,
+            metadata={"source": "users_kick_manual", "operation_id": operation_id},
+        )
         await _send(
             interaction,
             subcommand_path="users kick",
@@ -423,6 +449,13 @@ def register_moderazione_utenti(
             greetings_reason=explicit_reason,
             moderator=interaction.user,
             metadata={"operation_id": operation_id},
+        )
+        await users_dm_service.send_for_event(
+            guild=interaction.guild,
+            user=user,
+            event_type="ban",
+            reason=resolved_reason,
+            metadata={"source": "users_ban_manual", "operation_id": operation_id},
         )
         await _send(
             interaction,
@@ -564,6 +597,16 @@ def register_moderazione_utenti(
             duration_seconds=duration_seconds,
             expires_at=expires_at,
             metadata={"operation_id": operation_id},
+        )
+        await users_dm_service.send_for_event(
+            guild=interaction.guild,
+            user=user,
+            event_type="tempban",
+            duration_seconds=duration_seconds,
+            expires_at=expires_at,
+            reason=resolved_reason,
+            reasoning="users_manual_tempban_direct",
+            metadata={"source": "users_tempban_manual", "operation_id": operation_id},
         )
         await _send(
             interaction,
@@ -1126,6 +1169,8 @@ def register_moderazione_utenti(
                 ("dms", "on" if bool(cfg.get("enabled", 1)) else "off"),
                 ("template_grace", cfg.get("grace_template") or "not set"),
                 ("template_tempban", cfg.get("tempban_template") or "not set"),
+                ("template_kick", cfg.get("kick_template") or "not set"),
+                ("template_ban", cfg.get("ban_template") or "not set"),
                 ("cooldown", _format_cooldown_label(_resolve_cooldown_seconds_from_users_cfg(cfg))),
                 ("cooldown_seconds", _resolve_cooldown_seconds_from_users_cfg(cfg)),
                 ("cooldown_disabled", "yes" if _resolve_cooldown_seconds_from_users_cfg(cfg) == 0 else "no"),
@@ -1161,7 +1206,7 @@ def register_moderazione_utenti(
             return
         cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
         template = str(cfg.get("grace_template") or "")
-        preview = _render_users_dm_template_preview(template) if template else "No custom template configured."
+        preview = _render_users_dm_template_preview(template, event_type="grace") if template else "No custom template configured."
         await _send(
             interaction,
             subcommand_path="users dms template_grace_show",
@@ -1190,7 +1235,7 @@ def register_moderazione_utenti(
             return
         cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
         template = str(cfg.get("tempban_template") or "")
-        preview = _render_users_dm_template_preview(template) if template else "No custom template configured."
+        preview = _render_users_dm_template_preview(template, event_type="tempban") if template else "No custom template configured."
         await _send(
             interaction,
             subcommand_path="users dms template_tempban_show",
@@ -1204,6 +1249,64 @@ def register_moderazione_utenti(
             return
         await ctx.database.upsert_users_dm_config(str(interaction.guild_id), tempban_template=None)
         await _send(interaction, subcommand_path="users dms template_tempban_reset", lines=[("result", "reset")], kind="success")
+
+    @dms_group.command(name="template_kick_set", description="Set the DM template for kick events.")
+    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP)
+    async def users_dms_template_kick_set(interaction: discord.Interaction, text: str) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), kick_template=text)
+        await _send(interaction, subcommand_path="users dms template_kick_set", lines=[("result", "updated")], kind="success")
+
+    @dms_group.command(name="template_kick_show", description="Show the DM template for kick events.")
+    async def users_dms_template_kick_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
+        template = str(cfg.get("kick_template") or "")
+        preview = _render_users_dm_template_preview(template, event_type="kick") if template else "No custom template configured."
+        await _send(
+            interaction,
+            subcommand_path="users dms template_kick_show",
+            lines=[("template_kick", template or "not set")],
+            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+        )
+
+    @dms_group.command(name="template_kick_reset", description="Reset the DM template for kick events.")
+    async def users_dms_template_kick_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), kick_template=None)
+        await _send(interaction, subcommand_path="users dms template_kick_reset", lines=[("result", "reset")], kind="success")
+
+    @dms_group.command(name="template_ban_set", description="Set the DM template for ban events.")
+    @app_commands.describe(text=USERS_DM_TEMPLATE_HELP)
+    async def users_dms_template_ban_set(interaction: discord.Interaction, text: str) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), ban_template=text)
+        await _send(interaction, subcommand_path="users dms template_ban_set", lines=[("result", "updated")], kind="success")
+
+    @dms_group.command(name="template_ban_show", description="Show the DM template for ban events.")
+    async def users_dms_template_ban_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_users_dm_cfg(str(interaction.guild_id))
+        template = str(cfg.get("ban_template") or "")
+        preview = _render_users_dm_template_preview(template, event_type="ban") if template else "No custom template configured."
+        await _send(
+            interaction,
+            subcommand_path="users dms template_ban_show",
+            lines=[("template_ban", template or "not set")],
+            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+        )
+
+    @dms_group.command(name="template_ban_reset", description="Reset the DM template for ban events.")
+    async def users_dms_template_ban_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_users_dm_config(str(interaction.guild_id), ban_template=None)
+        await _send(interaction, subcommand_path="users dms template_ban_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="cooldown_set", description="Set the DM cooldown for USERS contexts.")
     @app_commands.describe(quantity="Cooldown quantity.", unit="Cooldown unit.")

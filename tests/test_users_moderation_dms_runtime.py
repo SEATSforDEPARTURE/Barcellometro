@@ -23,6 +23,8 @@ class _FakeDb:
             "invite_url": invite_url,
             "grace_template": "GRACE {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {reason_line}{invite_line}",
             "tempban_template": "TEMPBAN {mention} ({user}) {duration_human} {now_it} {expires_at_utc} {expires_at_it} {reason_line}{invite_line}",
+            "kick_template": "KICK {mention} ({user}) {reason_line}{invite_line}",
+            "ban_template": "BAN {mention} ({user}) {reason_line}{invite_line}",
         }
         self.latest: dict[tuple[str, str, str], dict[str, str]] = {}
         self.logs: list[dict[str, object]] = []
@@ -302,5 +304,84 @@ def test_users_dm_render_reason_text_is_empty_when_reason_missing() -> None:
         assert "{unknown_placeholder}" not in body
         assert "La moderazione aggiunge:" not in body
         assert "None" not in body
+
+    asyncio.run(_run())
+
+
+def test_users_dm_kick_and_ban_use_dedicated_templates() -> None:
+    async def _run() -> None:
+        db = _FakeDb(invite_url="https://discord.gg/server")
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        kick_result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="kick",
+            reason="Repeated abusive language",
+        )
+        ban_result = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="ban",
+            reason="Severe harassment",
+        )
+
+        assert kick_result == {"sent": True}
+        assert ban_result == {"sent": True}
+        assert user.send.await_count == 2
+        kick_body = str(user.send.await_args_list[0].kwargs["embed"].description)
+        ban_body = str(user.send.await_args_list[1].kwargs["embed"].description)
+        assert "KICK ***<@42>*** (***<@42>***)" in kick_body
+        assert "Repeated abusive language" in kick_body
+        assert "BAN ***<@42>*** (***<@42>***)" in ban_body
+        assert "Severe harassment" in ban_body
+        assert db.logs[-2]["event_type"] == "kick"
+        assert db.logs[-1]["event_type"] == "ban"
+
+    asyncio.run(_run())
+
+
+def test_users_dm_tempban_reason_line_distinguishes_direct_and_auto_cases() -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.config["tempban_template"] = "TEMPBAN {reason_line}"
+        user = _FakeUser(42)
+        guild = _FakeGuild(user)
+        service = UsersModerationDmService(db)
+
+        direct = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="tempban",
+            reason="Spam raid",
+            reasoning="users_manual_tempban_direct",
+        )
+        auto_manual = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="tempban",
+            reason=None,
+            reasoning="users_manual_grace_expired_tempban",
+        )
+        auto_inactivity = await service.send_for_event(
+            guild=guild,
+            user=user,
+            event_type="tempban",
+            reason=None,
+            reasoning="inactivity_grace_expired_tempban",
+        )
+
+        assert direct == {"sent": True}
+        assert auto_manual == {"sent": True}
+        assert auto_inactivity == {"sent": True}
+        direct_body = str(user.send.await_args_list[0].kwargs["embed"].description)
+        auto_manual_body = str(user.send.await_args_list[1].kwargs["embed"].description)
+        auto_inactivity_body = str(user.send.await_args_list[2].kwargs["embed"].description)
+        assert "Spam raid" in direct_body
+        assert "periodo di grazia" not in direct_body
+        assert "periodo di grazia manuale scaduto" in auto_manual_body
+        assert "periodo di grazia per inattività scaduto" in auto_inactivity_body
 
     asyncio.run(_run())
