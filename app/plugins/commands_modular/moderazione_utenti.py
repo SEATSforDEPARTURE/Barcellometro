@@ -287,7 +287,10 @@ def register_moderazione_utenti(
     alias_commands: list[app_commands.Command] | None = None,
 ) -> None:
     greetings_copy_service = GreetingsCopyService(ctx.database, barcello_service=getattr(ctx, "barcello_service", None))
-    users_dm_service = UsersModerationDmService(ctx.database)
+    users_dm_service = UsersModerationDmService(
+        ctx.database,
+        bot=getattr(ctx, "bot", None) or getattr(ctx, "client", None),
+    )
 
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, PERM, ctx)
@@ -313,6 +316,20 @@ def register_moderazione_utenti(
             kind=kind,
             footer_service=ctx.footer if footer_service is None else footer_service,
         )
+
+    def _render_dm_delivery_status(dm_result: dict[str, object] | None) -> str:
+        payload = dm_result or {}
+        if bool(payload.get("sent")):
+            if str(payload.get("fallback") or "").strip().lower() == "text":
+                return "delivered (text fallback)"
+            return "delivered"
+        skipped = str(payload.get("skipped") or "").strip()
+        if skipped == "error":
+            error_name = str(payload.get("error") or "error").strip() or "error"
+            return f"failed ({error_name})"
+        if skipped:
+            return f"skipped ({skipped})"
+        return "failed (unknown)"
 
     async def _default_reason(
         action_type: str,
@@ -414,9 +431,9 @@ def register_moderazione_utenti(
             moderator=interaction.user,
             metadata={"operation_id": operation_id},
         )
-        await users_dm_service.send_for_event(
+        dm_result = await users_dm_service.send_for_event_by_user_id(
             guild=interaction.guild,
-            user=user,
+            user_id=str(user.id),
             event_type="kick",
             reason=resolved_reason,
             metadata={"source": "users_kick_manual", "operation_id": operation_id},
@@ -425,7 +442,7 @@ def register_moderazione_utenti(
             interaction,
             subcommand_path="users kick",
             subtitle_args=[user],
-            lines=[("user", user.mention), ("result", "allontanato"), ("reason", resolved_reason)],
+            lines=[("user", user.mention), ("result", "allontanato"), ("reason", resolved_reason), ("dm", _render_dm_delivery_status(dm_result))],
             kind="success",
         )
 
@@ -466,9 +483,9 @@ def register_moderazione_utenti(
             moderator=interaction.user,
             metadata={"operation_id": operation_id},
         )
-        await users_dm_service.send_for_event(
+        dm_result = await users_dm_service.send_for_event_by_user_id(
             guild=interaction.guild,
-            user=user,
+            user_id=str(user.id),
             event_type="ban",
             reason=resolved_reason,
             metadata={"source": "users_ban_manual", "operation_id": operation_id},
@@ -477,7 +494,7 @@ def register_moderazione_utenti(
             interaction,
             subcommand_path="users ban",
             subtitle_args=[user],
-            lines=[("user", user.mention), ("result", "banned"), ("reason", resolved_reason)],
+            lines=[("user", user.mention), ("result", "banned"), ("reason", resolved_reason), ("dm", _render_dm_delivery_status(dm_result))],
             kind="success",
         )
 
@@ -614,9 +631,9 @@ def register_moderazione_utenti(
             expires_at=expires_at,
             metadata={"operation_id": operation_id},
         )
-        await users_dm_service.send_for_event(
+        dm_result = await users_dm_service.send_for_event_by_user_id(
             guild=interaction.guild,
-            user=user,
+            user_id=str(user.id),
             event_type="tempban",
             duration_seconds=duration_seconds,
             expires_at=expires_at,
@@ -633,6 +650,7 @@ def register_moderazione_utenti(
                 ("duration", format_duration_human(duration_seconds)),
                 ("expires_at", expires_at.strftime("%d/%m/%Y %H:%M UTC")),
                 ("reason", resolved_reason),
+                ("dm", _render_dm_delivery_status(dm_result)),
             ],
             kind="success",
         )
@@ -684,7 +702,7 @@ def register_moderazione_utenti(
             duration_seconds=duration_seconds,
             expires_at=expires_at,
         )
-        await users_dm_service.send_for_event(
+        dm_result = await users_dm_service.send_for_event(
             guild=interaction.guild,
             user=user,
             event_type="grace",
@@ -702,6 +720,7 @@ def register_moderazione_utenti(
                 ("duration", format_duration_human(duration_seconds)),
                 ("protected_until", expires_at.strftime("%d/%m/%Y %H:%M UTC")),
                 ("reason", resolved_reason),
+                ("dm", _render_dm_delivery_status(dm_result)),
             ],
             kind="success",
         )

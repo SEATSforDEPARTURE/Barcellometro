@@ -385,3 +385,28 @@ def test_users_dm_tempban_reason_line_distinguishes_direct_and_auto_cases() -> N
         assert "periodo di grazia per inattività scaduto" in auto_inactivity_body
 
     asyncio.run(_run())
+
+
+def test_users_dm_send_for_event_by_user_id_fetches_user_when_member_missing() -> None:
+    async def _run() -> None:
+        db = _FakeDb(invite_url="https://discord.gg/server")
+        fetched_user = _FakeUser(777)
+        guild = _FakeGuild(user=None)
+        bot = SimpleNamespace(fetch_user=AsyncMock(return_value=fetched_user))
+        service = UsersModerationDmService(db, bot=bot)
+
+        result = await service.send_for_event_by_user_id(
+            guild=guild,
+            user_id="777",
+            event_type="ban",
+            reason="Severe harassment",
+            metadata={"source": "test"},
+        )
+
+        assert result == {"sent": True}
+        bot.fetch_user.assert_awaited_once_with(777)
+        fetched_user.send.assert_awaited_once()
+        assert db.logs[-1]["event_type"] == "ban"
+        assert db.logs[-1]["outcome"] == "success"
+
+    asyncio.run(_run())
