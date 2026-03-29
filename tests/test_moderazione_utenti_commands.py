@@ -689,6 +689,127 @@ def test_mod_users_grace_converts_quantity_unit_to_duration_seconds(
     asyncio.run(_run())
 
 
+def test_mod_users_actions_include_dm_delivery_line_and_invoke_dm_service(monkeypatch) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        dm_service = SimpleNamespace(
+            send_for_event=AsyncMock(return_value={"sent": True}),
+            send_for_event_by_user_id=AsyncMock(return_value={"sent": False, "skipped": "cooldown"}),
+        )
+        dm_cls = Mock(return_value=dm_service)
+        monkeypatch.setattr(moderazione_utenti_module, "UsersModerationDmService", dm_cls)
+
+        database = SimpleNamespace(add_temp_ban=AsyncMock(), extend_user_grace=AsyncMock())
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(return_value={"canonical_written": False, "canonical_visible": False}),
+            send_notification=AsyncMock(),
+            remember_departure_action=Mock(),
+        )
+        ctx = SimpleNamespace(
+            database=database,
+            footer=None,
+            member_flow_notifications=member_flow_notifications,
+            barcello_service=None,
+            bot=SimpleNamespace(),
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        dm_cls.assert_called_once_with(database, bot=ctx.bot)
+
+        target_user = SimpleNamespace(
+            id=42,
+            mention="<@42>",
+            name="Dormiente",
+            kick=AsyncMock(),
+        )
+        guild = SimpleNamespace(id=1, ban=AsyncMock(), get_member=Mock(return_value=target_user), fetch_member=AsyncMock())
+        interaction = SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            user=SimpleNamespace(id=9),
+            command=SimpleNamespace(qualified_name="users moderation"),
+        )
+        hour = discord.app_commands.Choice(name="ore", value="ore")
+        day = discord.app_commands.Choice(name="giorni", value="giorni")
+
+        await _find_command(users_group, "kick").callback(interaction, "42", "Kick test")
+        await _find_command(users_group, "ban").callback(interaction, "42", "Ban test")
+        await _find_command(users_group, "tempban").callback(interaction, "42", 1, hour, "Tempban test")
+        await _find_command(users_group, "grace", "manual").callback(interaction, "42", 2, day, "Grace test")
+
+        assert dm_service.send_for_event_by_user_id.await_count == 3
+        assert dm_service.send_for_event.await_count == 1
+
+        kick_kwargs = send_standard_response.await_args_list[0].kwargs
+        ban_kwargs = send_standard_response.await_args_list[1].kwargs
+        tempban_kwargs = send_standard_response.await_args_list[2].kwargs
+        grace_kwargs = send_standard_response.await_args_list[3].kwargs
+        assert ("dm", "skipped (cooldown)") in kick_kwargs["lines"]
+        assert ("dm", "skipped (cooldown)") in ban_kwargs["lines"]
+        assert ("dm", "skipped (cooldown)") in tempban_kwargs["lines"]
+        assert ("dm", "delivered") in grace_kwargs["lines"]
+
+    asyncio.run(_run())
+
+
+def test_mod_users_dm_delivery_status_mapping_in_response(monkeypatch) -> None:
+    async def _run() -> None:
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+
+        dm_service = SimpleNamespace(
+            send_for_event=AsyncMock(),
+            send_for_event_by_user_id=AsyncMock(
+                side_effect=[
+                    {"sent": True},
+                    {"sent": True, "fallback": "text"},
+                    {"sent": False, "skipped": "error", "error": "Forbidden"},
+                    {"sent": False, "skipped": "disabled"},
+                    {"sent": False, "skipped": "user_unavailable"},
+                ]
+            ),
+        )
+        monkeypatch.setattr(moderazione_utenti_module, "UsersModerationDmService", Mock(return_value=dm_service))
+
+        ctx = SimpleNamespace(
+            database=SimpleNamespace(),
+            footer=None,
+            member_flow_notifications=SimpleNamespace(
+                log_action=AsyncMock(return_value={"canonical_written": False, "canonical_visible": False}),
+                send_notification=AsyncMock(),
+                remember_departure_action=Mock(),
+                forget_departure_action=Mock(),
+            ),
+            barcello_service=None,
+            bot=SimpleNamespace(),
+        )
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+        kick_cmd = _find_command(users_group, "kick")
+
+        target_user = SimpleNamespace(id=42, mention="<@42>", name="Dormiente", kick=AsyncMock())
+        guild = SimpleNamespace(id=1, get_member=Mock(return_value=target_user), fetch_member=AsyncMock())
+        interaction = SimpleNamespace(guild=guild, guild_id=1, user=SimpleNamespace(id=9), command=SimpleNamespace(qualified_name="users kick"))
+
+        for idx in range(5):
+            await kick_cmd.callback(interaction, "42", f"Kick test {idx}")
+
+        dm_values = [{key: value for key, value in call.kwargs["lines"]}["dm"] for call in send_standard_response.await_args_list]
+        assert dm_values == [
+            "delivered",
+            "delivered (text fallback)",
+            "failed (Forbidden)",
+            "skipped (disabled)",
+            "skipped (user_unavailable)",
+        ]
+
+    asyncio.run(_run())
+
+
 def test_users_grace_tempban_set_show_reset() -> None:
     async def _run() -> None:
         send_standard_response = AsyncMock()
