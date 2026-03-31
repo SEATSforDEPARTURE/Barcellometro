@@ -1,0 +1,33 @@
+#!/bin/bash
+set -e
+
+echo "== START UPDATE =="
+echo
+
+cd /home/criccy/Barcellometro2 || {
+  echo "❌ ERRORE: cartella non trovata"
+  exit 1
+}
+
+echo "== CURRENT BRANCH =="
+git branch --show-current
+echo
+
+echo "== GIT PULL (LIVE) =="
+echo
+
+git pull 2>&1
+STATUS=$?
+
+echo
+echo "== END GIT PULL =="
+
+if [ $STATUS -ne 0 ]; then
+  echo
+  echo "❌ ERRORE DURANTE GIT PULL"
+  exit 1
+fi
+
+echo
+echo "✅ UPDATE COMPLETATO"
+exit 0
