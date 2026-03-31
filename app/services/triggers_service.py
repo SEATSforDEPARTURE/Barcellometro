@@ -15,7 +15,11 @@ from typing import Any, Literal
 
 import discord
 
-from app.core.config_paths import BARCELLO_TRIGGER_JSON
+from app.core.config_paths import (
+    BARCELLO_TRIGGER_EXAMPLE_JSON,
+    BARCELLO_TRIGGER_JSON,
+    resolve_config_path,
+)
 from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.command_embeds import build_command_embed, send_standard_response
 from app.shared.discord.report_embeds import build_report_cover_embed
@@ -94,6 +98,7 @@ class TriggerEngineService:
         self._barcello_moods_missing_warned = False
         self._barcello_trigger_cfg: dict[str, Any] | None = None
         self._barcello_trigger_cfg_mtime: float | None = None
+        self._barcello_trigger_cfg_resolved_path: str | None = None
         self._barcello_trigger_cfg_path = BARCELLO_TRIGGER_JSON
         self._barcello_trigger_cfg_missing_warned = False
         self._barcello_window_override_cache: dict[str, int] = {}
@@ -1137,27 +1142,34 @@ class TriggerEngineService:
 
     def _load_barcello_trigger_cfg_cached(self) -> dict[str, Any]:
         path = self._barcello_trigger_cfg_path
-        try:
-            mtime = os.stat(path).st_mtime
-            self._barcello_trigger_cfg_missing_warned = False
-        except FileNotFoundError:
-            if self._barcello_trigger_cfg is None:
-                cfg = load_json_file(path)
-                self._barcello_trigger_cfg = cfg
-                self._refresh_barcello_window_override_cache(cfg)
-                return cfg
-            if not self._barcello_trigger_cfg_missing_warned:
-                logger.warning("barcello trigger config missing path=%s, using last valid config", path)
-                self._barcello_trigger_cfg_missing_warned = True
-            return self._barcello_trigger_cfg
+        resolved_path, _ = resolve_config_path(path, example_path=BARCELLO_TRIGGER_EXAMPLE_JSON)
+        if resolved_path is None:
+            if self._barcello_trigger_cfg is not None:
+                if not self._barcello_trigger_cfg_missing_warned:
+                    logger.warning("barcello trigger config missing path=%s, using last valid config", path)
+                    self._barcello_trigger_cfg_missing_warned = True
+                return self._barcello_trigger_cfg
+            return {}
 
-        if self._barcello_trigger_cfg is None or self._barcello_trigger_cfg_mtime != mtime:
-            cfg = load_json_file(path)
+        self._barcello_trigger_cfg_missing_warned = False
+        resolved_path_str = str(resolved_path)
+        mtime = os.stat(resolved_path).st_mtime
+
+        needs_reload = (
+            self._barcello_trigger_cfg is None
+            or self._barcello_trigger_cfg_mtime != mtime
+            or self._barcello_trigger_cfg_resolved_path != resolved_path_str
+        )
+        if needs_reload:
+            cfg = load_json_file(path, example_path=BARCELLO_TRIGGER_EXAMPLE_JSON)
+            if not cfg:
+                cfg = load_json_file(BARCELLO_TRIGGER_EXAMPLE_JSON)
             if not cfg and self._barcello_trigger_cfg is not None:
                 logger.warning("barcello trigger config invalid/empty path=%s, keeping last valid config", path)
                 return self._barcello_trigger_cfg
             self._barcello_trigger_cfg = cfg
             self._barcello_trigger_cfg_mtime = mtime
+            self._barcello_trigger_cfg_resolved_path = resolved_path_str
             self._refresh_barcello_window_override_cache(cfg)
         return self._barcello_trigger_cfg or {}
 

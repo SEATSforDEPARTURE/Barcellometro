@@ -52,109 +52,109 @@
   },
   "templates": {
     "INIT": [
-      "📌 Il barcello è {new} ora.",
-      "📌 Update barcello: ora è {new}.",
-      "📌 Stato barcello aggiornato: {new}."
+      "Il barcello è {new} ora.",
+      "Update barcello: ora è {new}.",
+      "Stato barcello aggiornato: {new}."
     ],
     "VERDE_FIRST_TODAY": [
-      "🟢 Clima migliorato! Il Barcy torna {new}.",
-      "🟢 Si respira aria migliore. Il Barcy è di nuovo {new}.",
-      "🟢 Tornati in zona chill. Il Barcy {new}."
+      "Clima migliorato! Il Barcy torna {new}.",
+      "Si respira aria migliore. Il Barcy è di nuovo {new}.",
+      "Tornati in zona chill. Il Barcy {new}."
     ],
     "GIALLO_FIRST_TODAY": [
-      "🟡 Sento odore di barcello... 🫛",
-      "🟡 Mmm… La situa si ingiallisce.",
-      "🟡 Occhio, il Barcy sta maturando."
+      "Sento odore di barcello... 🫛",
+      "Mmm… La situa si ingiallisce.",
+      "Occhio, il Barcy sta maturando."
     ],
     "ROSSO_FIRST_TODAY": [
-      "🔴 Allerta rossa! Il barcello matura da {old} a {new}",
-      "🔴 Houston abbiamo un problema. Da {old} il Barcy passa a {new}",
-      "🔴 Situazione calda. Il Barcy passa da {old} a {new}"
+      "Allerta rossa! Il barcello matura da {old} a {new}",
+      "Houston abbiamo un problema. Da {old} il Barcy passa a {new}",
+      "Situazione calda. Il Barcy passa da {old} a {new}"
     ],
     "NERO_FIRST_TODAY": [
-      "⚫ ALLERTA NERA! Il barcello è marcito SUBITO da {old} a {new}",
-      "⚫ La situazione è nera. Da {old} a {new} di colpo",
-      "⚫ Rega è crollato tutto. Il Barcy passa da {old} a {new}"
+      "ALLERTA NERA! Il barcello è marcito SUBITO da {old} a {new}",
+      "La situazione è nera. Da {old} a {new} di colpo",
+      "Rega è crollato tutto. Il Barcy passa da {old} a {new}"
     ],
     "VERDE->GIALLO": [
-      "🟡 Sento odore di barcello... 🫛",
-      "🟡 La situa si sta ingiallendo.",
-      "🟡 Il Barcy è in modalità sospetta…"
+      "Sento odore di barcello... 🫛",
+      "La situa si sta ingiallendo.",
+      "Il Barcy è in modalità sospetta…"
     ],
     "VERDE->ROSSO": [
-      "🔴 Allerta rossa! Il barcello matura da {old} a {new}",
-      "🔴 La situa sta degenerando. Il Barcy passa da {old} a {new}",
-      "🔴 Qui si va sul pesante. Il Barcy passa subito da {old} a {new}"
+      "Allerta rossa! Il barcello matura da {old} a {new}",
+      "La situa sta degenerando. Il Barcy passa da {old} a {new}",
+      "Qui si va sul pesante. Il Barcy passa subito da {old} a {new}"
     ],
     "VERDE->NERO": [
-      "⚫ ALLERTA NERA! Il barcello è marcito SUBITO da {old} a {new}",
-      "⚫ Sta collassato tutto. Il Barcy è passato da {old} a {new}",
-      "⚫ Non mi piace per niente. Il Barcy è {new} di colpo"
+      "ALLERTA NERA! Il barcello è marcito SUBITO da {old} a {new}",
+      "Sta collassato tutto. Il Barcy è passato da {old} a {new}",
+      "Non mi piace per niente. Il Barcy è {new} di colpo"
     ],
     "GIALLO->VERDE": [
-      "🟢 Clima migliorato! Il Barcy torna {new}.",
-      "🟢 Ok, si rientra nel verde.",
-      "🟢 Bravi, avete ringalluzzito il Barcy: {new}."
+      "Clima migliorato! Il Barcy torna {new}.",
+      "Ok, si rientra nel verde.",
+      "Bravi, avete ringalluzzito il Barcy: {new}."
     ],
     "GIALLO->ROSSO": [
-      "🔴 Il barcello sta arrossendo. Passa da {old} a {new}... Aiuto",
-      "🔴 Sta salendo la tensione. Il Barcy passa da {old} a {new}",
-      "🔴 Qui si arrossisce male"
+      "Il barcello sta arrossendo. Passa da {old} a {new}... Aiuto",
+      "Sta salendo la tensione. Il Barcy passa da {old} a {new}",
+      "Qui si arrossisce male"
     ],
     "GIALLO->NERO": [
-      "⚫ ALLERTA NERA! Il barcello ha skippato l'arrossimento e passa da {old} a {new}",
-      "⚫ Skippone letale. Da {old} il Barcy è passato a {new}",
-      "⚫ È precipitato tutto senza preavviso. Il Barcy è passato a {new}"
+      "ALLERTA NERA! Il barcello ha skippato l'arrossimento e passa da {old} a {new}",
+      "Skippone letale. Da {old} il Barcy è passato a {new}",
+      "È precipitato tutto senza preavviso. Il Barcy è passato a {new}"
     ],
     "ROSSO->VERDE": [
-      "🟢 Forte miglioramento del Barcy! Passa da {old} a {new} subito! Adoro.",
-      "🟢 Recupero clamoroso. Da {old} è passato a {new}.",
-      "🟢 Avete salvato il Barcy al volo. È tornato {new}."
+      "Forte miglioramento del Barcy! Passa da {old} a {new} subito! Adoro.",
+      "Recupero clamoroso. Da {old} è passato a {new}.",
+      "Avete salvato il Barcy al volo. È tornato {new}."
     ],
     "ROSSO->GIALLO": [
-      "🟡 La situa si sbollisce! Il Barcy passa da {old} a {new} per fortuna...",
-      "🟡 Ok, la situa rientra un filo. Passa da {old} a {new}.",
-      "🟡 Meno male, il Barcy si sta raffreddando. È tornato {new}."
+      "La situa si sbollisce! Il Barcy passa da {old} a {new} per fortuna...",
+      "Ok, la situa rientra un filo. Passa da {old} a {new}.",
+      "Meno male, il Barcy si sta raffreddando. È tornato {new}."
     ],
     "ROSSO->NERO": [
-      "⚫ ALLERTA NERA! Il barcello marcisce inevitabilmente e passa da {old} a {new}! Ahia",
-      "⚫ È finita malissimo. Il Barcy passa da {old} a {new}",
-      "⚫ Qui si è rotto tutto. Il Barcy è diventato {new}"
+      "ALLERTA NERA! Il barcello marcisce inevitabilmente e passa da {old} a {new}! Ahia",
+      "È finita malissimo. Il Barcy passa da {old} a {new}",
+      "Qui si è rotto tutto. Il Barcy è diventato {new}"
     ],
     "NERO->VERDE": [
-      "🟢 Il Barcy è tornato splendido splendente subito. Da {old} è ora {new}, che bellezza.",
-      "🟢 Miracolo. Dal {old} al {new}.",
-      "🟢 Ritorno pazzesco del Barcy. Il Barcy passa da {old} a {new} fortunatamente."
+      "Il Barcy è tornato splendido splendente subito. Da {old} è ora {new}, che bellezza.",
+      "Miracolo. Dal {old} al {new}.",
+      "Ritorno pazzesco del Barcy. Il Barcy passa da {old} a {new} fortunatamente."
     ],
     "NERO->GIALLO": [
-      "🟡 La situazione migliora ma sempre un po' critica. Da {old} è ora {new}. Si può fare di più.",
-      "🟡 Ok, un passo avanti. Si sbollisce e da {old} torna {new}.",
-      "🟡 Si risale, ma non cantiamo vittoria."
+      "La situazione migliora ma sempre un po' critica. Da {old} è ora {new}. Si può fare di più.",
+      "Ok, un passo avanti. Si sbollisce e da {old} torna {new}.",
+      "Si risale, ma non cantiamo vittoria."
     ],
     "NERO->ROSSO": [
-      "🔴 Lo stato del Barcy migliora ma resta critica: Da {old} è ora {new}. Meglio di niente...",
-      "🔴 Meglio, ma siamo ancora messi male. Da {old} è passato a {new}.",
-      "🔴 Si risale dal nero, ma occhio. Il Barcy è passato da {old} è passato a {new}."
+      "Lo stato del Barcy migliora ma resta critica: Da {old} è ora {new}. Meglio di niente...",
+      "Meglio, ma siamo ancora messi male. Da {old} è passato a {new}.",
+      "Si risale dal nero, ma occhio. Il Barcy è passato da {old} è passato a {new}."
     ],
     "WORSEN": [
-      "⚠️ Il barcello sta peggiorando: da {old} è ora {new}",
-      "⚠️ Si sta mettendo male: da {old} il Barcy passa da {new}",
-      "⚠️ Clima in discesa: il Barcy è ora {new}"
+      "Il barcello sta peggiorando: da {old} è ora {new}",
+      "Si sta mettendo male: da {old} il Barcy passa da {new}",
+      "Clima in discesa: il Barcy è ora {new}"
     ],
     "IMPROVE": [
-      "✅ Il barcello sta migliorando: da {old} il Barcy è ora {new}.",
-      "✅ Si respira meglio: da {old} il Barcy passa a {new}",
-      "✅ Recupero climatico: ora il Barcy è {new}."
+      "Il barcello sta migliorando: da {old} il Barcy è ora {new}.",
+      "Si respira meglio: da {old} il Barcy passa a {new}",
+      "Recupero climatico: ora il Barcy è {new}."
     ],
     "MOD_PING_ROSSO": [
-      "👮 Moderazione richiesta in stato ROSSO. {mod_mention}",
-      "👮 Stato ROSSO rilevato: serve un check staff. {mod_mention}",
-      "👮 Barcy ROSSO, date un occhio qui. {mod_mention}"
+      "Moderazione richiesta in stato ROSSO. {mod_mention}",
+      "Stato ROSSO rilevato: serve un check staff. {mod_mention}",
+      "Barcy ROSSO, date un occhio qui. {mod_mention}"
     ],
     "MOD_PING_NERO": [
-      "👮 Moderazione urgente: stato NERO. {mod_mention}",
-      "👮 Stato NERO rilevato, intervento immediato. {mod_mention}",
-      "👮 Barcy NERO, servono mod ora. {mod_mention}"
+      "Moderazione urgente: stato NERO. {mod_mention}",
+      "Stato NERO rilevato, intervento immediato. {mod_mention}",
+      "Barcy NERO, servono mod ora. {mod_mention}"
     ]
   },
   "moods": {
@@ -163,28 +163,28 @@
         "night": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Ragazze, è tardi… restiamo morbide. Il Barcy vira {new}.",
-              "🟡 Notte calma pls: niente caos. Il Barcy si fa {new}.",
-              "🟡 È notte… e già si sente tensione. Barcy {new}."
+              "Ragazze, è tardi… restiamo morbide. Il Barcy vira {new}.",
+              "Notte calma pls: niente caos. Il Barcy si fa {new}.",
+              "È notte… e già si sente tensione. Barcy {new}."
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Ragazze, è tardi… restiamo morbide. Il Barcy vira {new}.",
-              "🟡 Notte calma pls: niente caos. Il Barcy si fa {new}.",
-              "🟡 È notte… e già si sente tensione. Barcy {new}."
+              "Ragazze, è tardi… restiamo morbide. Il Barcy vira {new}.",
+              "Notte calma pls: niente caos. Il Barcy si fa {new}.",
+              "È notte… e già si sente tensione. Barcy {new}."
             ]
           }
         },
         "morning": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Buongiorno… e già mi fate ingiallire? Barcy {new}.",
-              "🟡 Caffè e… barcello {new}. Piano piano, eh.",
-              "🟡 Mattina iniziata frizzante: Barcy vira {new}."
+              "Buongiorno… e già mi fate ingiallire? Barcy {new}.",
+              "Caffè e… barcello {new}. Piano piano, eh.",
+              "Mattina iniziata frizzante: Barcy vira {new}."
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Buongiorno… e già mi fate ingiallire? Barcy {new}.",
-              "🟡 Caffè e… barcello {new}. Piano piano, eh.",
-              "🟡 Mattina iniziata frizzante: Barcy vira {new}."
+              "Buongiorno… e già mi fate ingiallire? Barcy {new}.",
+              "Caffè e… barcello {new}. Piano piano, eh.",
+              "Mattina iniziata frizzante: Barcy vira {new}."
             ]
           }
         }
@@ -193,48 +193,48 @@
         "t2": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 Secondo rosso oggi… respirate un attimo.",
-              "🔴 Ancora rosso. State tirando troppo la corda oggi.",
-              "🔴 Di nuovo tensione: secondo rosso della giornata."
+              "Secondo rosso oggi… respirate un attimo.",
+              "Ancora rosso. State tirando troppo la corda oggi.",
+              "Di nuovo tensione: secondo rosso della giornata."
             ],
             "VERDE->NERO": [
-              "⚫ Secondo nero oggi… ok basta, stop.",
-              "⚫ Nero di nuovo. Seconda volta oggi e non va bene.",
-              "⚫ Altro nero oggi. Serve una pausa vera."
+              "Secondo nero oggi… ok basta, stop.",
+              "Nero di nuovo. Seconda volta oggi e non va bene.",
+              "Altro nero oggi. Serve una pausa vera."
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Secondo rosso oggi… respirate un attimo.",
-              "🔴 Ancora rosso. State tirando troppo la corda oggi.",
-              "🔴 Di nuovo tensione: secondo rosso della giornata."
+              "Secondo rosso oggi… respirate un attimo.",
+              "Ancora rosso. State tirando troppo la corda oggi.",
+              "Di nuovo tensione: secondo rosso della giornata."
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Secondo nero oggi… ok basta, stop.",
-              "⚫ Nero di nuovo. Seconda volta oggi e non va bene.",
-              "⚫ Altro nero oggi. Serve una pausa vera."
+              "Secondo nero oggi… ok basta, stop.",
+              "Nero di nuovo. Seconda volta oggi e non va bene.",
+              "Altro nero oggi. Serve una pausa vera."
             ]
           }
         },
         "t3": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 Terzo rosso oggi. Il Barcy è stanco.",
-              "🔴 Siamo di nuovo al limite: terzo rosso della giornata.",
-              "🔴 La pazienza è quasi finita. Rosso per la terza volta oggi."
+              "Terzo rosso oggi. Il Barcy è stanco.",
+              "Siamo di nuovo al limite: terzo rosso della giornata.",
+              "La pazienza è quasi finita. Rosso per la terza volta oggi."
             ],
             "VERDE->NERO": [
-              "⚫ Terzo nero oggi… questo è serio.",
-              "⚫ Nero per la terza volta oggi. Non si scherza più.",
-              "⚫ Terzo crollo nel nero oggi. Fermiamoci."
+              "Terzo nero oggi… questo è serio.",
+              "Nero per la terza volta oggi. Non si scherza più.",
+              "Terzo crollo nel nero oggi. Fermiamoci."
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Terzo rosso oggi. Il Barcy è stanco.",
-              "🔴 Siamo di nuovo al limite: terzo rosso della giornata.",
-              "🔴 La pazienza è quasi finita. Rosso per la terza volta oggi."
+              "Terzo rosso oggi. Il Barcy è stanco.",
+              "Siamo di nuovo al limite: terzo rosso della giornata.",
+              "La pazienza è quasi finita. Rosso per la terza volta oggi."
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Terzo nero oggi… questo è serio.",
-              "⚫ Nero per la terza volta oggi. Non si scherza più.",
-              "⚫ Terzo crollo nel nero oggi. Fermiamoci."
+              "Terzo nero oggi… questo è serio.",
+              "Nero per la terza volta oggi. Non si scherza più.",
+              "Terzo crollo nel nero oggi. Fermiamoci."
             ]
           }
         }
@@ -245,14 +245,14 @@
         "night": {
           "templates": {
             "GIALLO->ROSSO": [
-              "🔴 Di notte si doveva dormire… invece rosso. {old}→{new}",
-              "🔴 Notte e già si litiga? Rosso",
-              "🔴 Un’altra notte rossa… raga no"
+              "Di notte si doveva dormire… invece rosso. {old}→{new}",
+              "Notte e già si litiga? Rosso",
+              "Un’altra notte rossa… raga no"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Di notte si doveva dormire… invece rosso. {old}→{new}",
-              "🔴 Notte e già si litiga? Rosso",
-              "🔴 Un’altra notte rossa… raga no"
+              "Di notte si doveva dormire… invece rosso. {old}→{new}",
+              "Notte e già si litiga? Rosso",
+              "Un’altra notte rossa… raga no"
             ]
           }
         }
@@ -261,48 +261,48 @@
         "t2": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 *Seconda volta oggi.* Io sto per impazzire.",
-              "🔴 Secondo rosso oggi: state testando il Barcy.",
-              "🔴 Eccoci di nuovo… secondo rosso oggi."
+              "*Seconda volta oggi.* Io sto per impazzire.",
+              "Secondo rosso oggi: state testando il Barcy.",
+              "Eccoci di nuovo… secondo rosso oggi."
             ],
             "VERDE->NERO": [
-              "⚫ *Seconda volta oggi nel nero.* È troppo.",
-              "⚫ Nero di nuovo, seconda volta oggi. Stop.",
-              "⚫ Secondo nero oggi. Qui si fa male qualcuno."
+              "*Seconda volta oggi nel nero.* È troppo.",
+              "Nero di nuovo, seconda volta oggi. Stop.",
+              "Secondo nero oggi. Qui si fa male qualcuno."
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 *Seconda volta oggi.* Io sto per impazzire.",
-              "🔴 Secondo rosso oggi: state testando il Barcy.",
-              "🔴 Eccoci di nuovo… secondo rosso oggi."
+              "*Seconda volta oggi.* Io sto per impazzire.",
+              "Secondo rosso oggi: state testando il Barcy.",
+              "Eccoci di nuovo… secondo rosso oggi."
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ *Seconda volta oggi nel nero.* È troppo.",
-              "⚫ Nero di nuovo, seconda volta oggi. Stop.",
-              "⚫ Secondo nero oggi. Qui si fa male qualcuno."
+              "*Seconda volta oggi nel nero.* È troppo.",
+              "Nero di nuovo, seconda volta oggi. Stop.",
+              "Secondo nero oggi. Qui si fa male qualcuno."
             ]
           }
         },
         "t3": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 Terzo rosso oggi. Io sto urlando dentro.",
-              "🔴 Terzo rosso della giornata. È diventato un episodio.",
-              "🔴 Rosso per la terza volta oggi. Ok, basta."
+              "Terzo rosso oggi. Io sto urlando dentro.",
+              "Terzo rosso della giornata. È diventato un episodio.",
+              "Rosso per la terza volta oggi. Ok, basta."
             ],
             "VERDE->NERO": [
-              "⚫ Terzo nero oggi. Questo è un disastro.",
-              "⚫ Nero per la terza volta oggi. Mi viene da piangere.",
-              "⚫ Terza caduta nel nero oggi. Pausa, adesso."
+              "Terzo nero oggi. Questo è un disastro.",
+              "Nero per la terza volta oggi. Mi viene da piangere.",
+              "Terza caduta nel nero oggi. Pausa, adesso."
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Terzo rosso oggi. Io sto urlando dentro.",
-              "🔴 Terzo rosso della giornata. È diventato un episodio.",
-              "🔴 Rosso per la terza volta oggi. Ok, basta."
+              "Terzo rosso oggi. Io sto urlando dentro.",
+              "Terzo rosso della giornata. È diventato un episodio.",
+              "Rosso per la terza volta oggi. Ok, basta."
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Terzo nero oggi. Questo è un disastro.",
-              "⚫ Nero per la terza volta oggi. Mi viene da piangere.",
-              "⚫ Terza caduta nel nero oggi. Pausa, adesso."
+              "Terzo nero oggi. Questo è un disastro.",
+              "Nero per la terza volta oggi. Mi viene da piangere.",
+              "Terza caduta nel nero oggi. Pausa, adesso."
             ]
           }
         }
@@ -313,408 +313,408 @@
         "night": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Ok ma… io urlo dentro. Barcy vira {new}. 💅",
-              "🟡 Si sente la svolta: {new}. 💅",
-              "🟡 Ok, si ingiallisce. {new}. 💅",
-              "🟡 Ci risiamo: {new}. 💅",
-              "🟡 Vibes strane nell’aria… {new}. 💅"
+              "Ok ma… io urlo dentro. Barcy vira {new}. 💅",
+              "Si sente la svolta: {new}. 💅",
+              "Ok, si ingiallisce. {new}. 💅",
+              "Ci risiamo: {new}. 💅",
+              "Vibes strane nell’aria… {new}. 💅"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Ok ma… io urlo dentro. 💅",
-              "🟡 Prima sfumatura gialla di oggi: {new}. 💅",
-              "🟡 Oggi si parte così: {new}. 💅",
-              "🟡 Segnalo: prima volta oggi in {new}. 💅",
-              "🟡 Ok, first yellow: {new}. 💅"
+              "Primo giallo oggi qui. Ok ma… io urlo dentro. 💅",
+              "Prima sfumatura gialla di oggi: {new}. 💅",
+              "Oggi si parte così: {new}. 💅",
+              "Segnalo: prima volta oggi in {new}. 💅",
+              "Ok, first yellow: {new}. 💅"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}. 💅",
-              "🟢 Vibe pulita: {new}. 💅",
-              "🟢 Oggi iniziamo verdi e me lo godo. 💅",
-              "🟢 Ok, green mode attivo: {new}. 💅",
-              "🟢 Respiriamo: {new}. 💅"
+              "Si parte bene: Barcy {new}. 💅",
+              "Vibe pulita: {new}. 💅",
+              "Oggi iniziamo verdi e me lo godo. 💅",
+              "Ok, green mode attivo: {new}. 💅",
+              "Respiriamo: {new}. 💅"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Stop, mi sento male. 💅",
-              "🔴 Ok raga, rosso: {old}→{new}. 💅",
-              "🔴 Tensione alta: Barcy {new}. 💅",
-              "🔴 Primo rosso oggi qui. Calma. 💅",
-              "🔴 Eccolo: rosso. {new}. 💅"
+              "Prima allerta rossa oggi. Stop, mi sento male. 💅",
+              "Ok raga, rosso: {old}→{new}. 💅",
+              "Tensione alta: Barcy {new}. 💅",
+              "Primo rosso oggi qui. Calma. 💅",
+              "Eccolo: rosso. {new}. 💅"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Questo è CINEMA. 💅",
-              "⚫ Siamo nel nero: {old}→{new}. Stop. 💅",
-              "⚫ Ok no, nero. Reset subito. 💅",
-              "⚫ Prima volta oggi nel buio: {new}. 💅",
-              "⚫ Nero today… non ci credo. 💅"
+              "Primo nero oggi. Questo è CINEMA. 💅",
+              "Siamo nel nero: {old}→{new}. Stop. 💅",
+              "Ok no, nero. Reset subito. 💅",
+              "Prima volta oggi nel buio: {new}. 💅",
+              "Nero today… non ci credo. 💅"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Io non ce la faccio, vi giuro. {old}→{new}. 💅",
-              "🔴 Ok, si scalda male: {new}. 💅",
-              "🔴 Tono su: {old}→{new}. 💅",
-              "🔴 Eccoci: rosso. {new}. 💅",
-              "🔴 Brutta curva: {new}. 💅"
+              "Dal giallo al rosso. Io non ce la faccio, vi giuro. {old}→{new}. 💅",
+              "Ok, si scalda male: {new}. 💅",
+              "Tono su: {old}→{new}. 💅",
+              "Eccoci: rosso. {new}. 💅",
+              "Brutta curva: {new}. 💅"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Io non ce la faccio, vi giuro. {old}→{new}. 💅",
-              "⚫ Skippone nel buio: {new}. 💅",
-              "⚫ Ok basta, nero: {new}. 💅",
-              "⚫ Non era il caso: {old}→{new}. 💅",
-              "⚫ Nero in arrivo… anzi, arrivato. 💅"
+              "Dal giallo al nero… Io non ce la faccio, vi giuro. {old}→{new}. 💅",
+              "Skippone nel buio: {new}. 💅",
+              "Ok basta, nero: {new}. 💅",
+              "Non era il caso: {old}→{new}. 💅",
+              "Nero in arrivo… anzi, arrivato. 💅"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}. 💅",
-              "🟡 Ok, meno peggio: {new}. 💅",
-              "🟡 Rientro parziale: {new}. 💅",
-              "🟡 Si scende di un gradino: {new}. 💅",
-              "🟡 Almeno non è più rosso: {new}. 💅"
+              "Si sbollisce un filo: {old}→{new}. 💅",
+              "Ok, meno peggio: {new}. 💅",
+              "Rientro parziale: {new}. 💅",
+              "Si scende di un gradino: {new}. 💅",
+              "Almeno non è più rosso: {new}. 💅"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}. 💅",
-              "🟢 Ok, sistemato: {new}. 💅",
-              "🟢 Vibe ripulita: Barcy {new}. 💅",
-              "🟢 Ci siamo: verde. 💅",
-              "🟢 Finalmente respiro: {new}. 💅"
+              "Rientro nel verde: {new}. 💅",
+              "Ok, sistemato: {new}. 💅",
+              "Vibe ripulita: Barcy {new}. 💅",
+              "Ci siamo: verde. 💅",
+              "Finalmente respiro: {new}. 💅"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}. 💅",
-              "🔴 Ok, un passo su: {new}. 💅",
-              "🔴 Meno buio, più fuoco: {new}. 💅",
-              "🔴 Risalita ma occhio: {new}. 💅",
-              "🔴 Dal nero al rosso… comunque male. 💅"
+              "Fuori dal nero ma ancora pesante: {old}→{new}. 💅",
+              "Ok, un passo su: {new}. 💅",
+              "Meno buio, più fuoco: {new}. 💅",
+              "Risalita ma occhio: {new}. 💅",
+              "Dal nero al rosso… comunque male. 💅"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}. 💅",
-              "🟡 Ok, giallo: delicatezza. 💅",
-              "🟡 Meno disastro: {new}. 💅",
-              "🟡 Fuori dal nero, ma piano. 💅",
-              "🟡 Un passo verso la luce: {new}. 💅"
+              "Si risale un filo: {old}→{new}. 💅",
+              "Ok, giallo: delicatezza. 💅",
+              "Meno disastro: {new}. 💅",
+              "Fuori dal nero, ma piano. 💅",
+              "Un passo verso la luce: {new}. 💅"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}. 💅",
-              "🟢 Dal nero al verde… ok, bravi. 💅",
-              "🟢 Resurrezione: Barcy {new}. 💅",
-              "🟢 Rientro top: {new}. 💅",
-              "🟢 Questa è la svolta: {new}. 💅"
+              "Miracolo: {old}→{new}. 💅",
+              "Dal nero al verde… ok, bravi. 💅",
+              "Resurrezione: Barcy {new}. 💅",
+              "Rientro top: {new}. 💅",
+              "Questa è la svolta: {new}. 💅"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}. 💅",
-              "🟢 Ok, verde diretto: {new}. 💅",
-              "🟢 Salvato tutto: {new}. 💅",
-              "🟢 Da bomba a chill: {new}. 💅",
-              "🟢 Grande rientro: {new}. 💅"
+              "Recupero clamoroso: {old}→{new}. 💅",
+              "Ok, verde diretto: {new}. 💅",
+              "Salvato tutto: {new}. 💅",
+              "Da bomba a chill: {new}. 💅",
+              "Grande rientro: {new}. 💅"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}. 💅",
-              "⚫ Ok no, nero. Questo è CINEMA. 💅",
-              "⚫ Crollo totale: {new}. 💅",
-              "⚫ Dal rosso al buio: {new}. 💅",
-              "⚫ Nero. Stop. 💅"
+              "Peggiora ancora: {old}→{new}. 💅",
+              "Ok no, nero. Questo è CINEMA. 💅",
+              "Crollo totale: {new}. 💅",
+              "Dal rosso al buio: {new}. 💅",
+              "Nero. Stop. 💅"
             ]
           }
         },
         "morning": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Io non ce la faccio, vi giuro. Barcy vira {new}. 💅",
-              "🟡 Si sente la svolta: {new}. 💅",
-              "🟡 Ok, si ingiallisce. {new}. 💅",
-              "🟡 Ci risiamo: {new}. 💅",
-              "🟡 Vibes strane nell’aria… {new}. 💅"
+              "Io non ce la faccio, vi giuro. Barcy vira {new}. 💅",
+              "Si sente la svolta: {new}. 💅",
+              "Ok, si ingiallisce. {new}. 💅",
+              "Ci risiamo: {new}. 💅",
+              "Vibes strane nell’aria… {new}. 💅"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Stop, mi sento male. 💅",
-              "🟡 Prima sfumatura gialla di oggi: {new}. 💅",
-              "🟡 Oggi si parte così: {new}. 💅",
-              "🟡 Segnalo: prima volta oggi in {new}. 💅",
-              "🟡 Ok, first yellow: {new}. 💅"
+              "Primo giallo oggi qui. Stop, mi sento male. 💅",
+              "Prima sfumatura gialla di oggi: {new}. 💅",
+              "Oggi si parte così: {new}. 💅",
+              "Segnalo: prima volta oggi in {new}. 💅",
+              "Ok, first yellow: {new}. 💅"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}. 💅",
-              "🟢 Vibe pulita: {new}. 💅",
-              "🟢 Oggi iniziamo verdi e me lo godo. 💅",
-              "🟢 Ok, green mode attivo: {new}. 💅",
-              "🟢 Respiriamo: {new}. 💅"
+              "Si parte bene: Barcy {new}. 💅",
+              "Vibe pulita: {new}. 💅",
+              "Oggi iniziamo verdi e me lo godo. 💅",
+              "Ok, green mode attivo: {new}. 💅",
+              "Respiriamo: {new}. 💅"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Ok ma… io urlo dentro. 💅",
-              "🔴 Ok raga, rosso: {old}→{new}. 💅",
-              "🔴 Tensione alta: Barcy {new}. 💅",
-              "🔴 Primo rosso oggi qui. Calma. 💅",
-              "🔴 Eccolo: rosso. {new}. 💅"
+              "Prima allerta rossa oggi. Ok ma… io urlo dentro. 💅",
+              "Ok raga, rosso: {old}→{new}. 💅",
+              "Tensione alta: Barcy {new}. 💅",
+              "Primo rosso oggi qui. Calma. 💅",
+              "Eccolo: rosso. {new}. 💅"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Io non ce la faccio, vi giuro. 💅",
-              "⚫ Siamo nel nero: {old}→{new}. Stop. 💅",
-              "⚫ Ok no, nero. Reset subito. 💅",
-              "⚫ Prima volta oggi nel buio: {new}. 💅",
-              "⚫ Nero today… non ci credo. 💅"
+              "Primo nero oggi. Io non ce la faccio, vi giuro. 💅",
+              "Siamo nel nero: {old}→{new}. Stop. 💅",
+              "Ok no, nero. Reset subito. 💅",
+              "Prima volta oggi nel buio: {new}. 💅",
+              "Nero today… non ci credo. 💅"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Io non ce la faccio, vi giuro. {old}→{new}. 💅",
-              "🔴 Ok, si scalda male: {new}. 💅",
-              "🔴 Tono su: {old}→{new}. 💅",
-              "🔴 Eccoci: rosso. {new}. 💅",
-              "🔴 Brutta curva: {new}. 💅"
+              "Dal giallo al rosso. Io non ce la faccio, vi giuro. {old}→{new}. 💅",
+              "Ok, si scalda male: {new}. 💅",
+              "Tono su: {old}→{new}. 💅",
+              "Eccoci: rosso. {new}. 💅",
+              "Brutta curva: {new}. 💅"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Questo è CINEMA. {old}→{new}. 💅",
-              "⚫ Skippone nel buio: {new}. 💅",
-              "⚫ Ok basta, nero: {new}. 💅",
-              "⚫ Non era il caso: {old}→{new}. 💅",
-              "⚫ Nero in arrivo… anzi, arrivato. 💅"
+              "Dal giallo al nero… Questo è CINEMA. {old}→{new}. 💅",
+              "Skippone nel buio: {new}. 💅",
+              "Ok basta, nero: {new}. 💅",
+              "Non era il caso: {old}→{new}. 💅",
+              "Nero in arrivo… anzi, arrivato. 💅"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}. 💅",
-              "🟡 Ok, meno peggio: {new}. 💅",
-              "🟡 Rientro parziale: {new}. 💅",
-              "🟡 Si scende di un gradino: {new}. 💅",
-              "🟡 Almeno non è più rosso: {new}. 💅"
+              "Si sbollisce un filo: {old}→{new}. 💅",
+              "Ok, meno peggio: {new}. 💅",
+              "Rientro parziale: {new}. 💅",
+              "Si scende di un gradino: {new}. 💅",
+              "Almeno non è più rosso: {new}. 💅"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}. 💅",
-              "🟢 Ok, sistemato: {new}. 💅",
-              "🟢 Vibe ripulita: Barcy {new}. 💅",
-              "🟢 Ci siamo: verde. 💅",
-              "🟢 Finalmente respiro: {new}. 💅"
+              "Rientro nel verde: {new}. 💅",
+              "Ok, sistemato: {new}. 💅",
+              "Vibe ripulita: Barcy {new}. 💅",
+              "Ci siamo: verde. 💅",
+              "Finalmente respiro: {new}. 💅"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}. 💅",
-              "🔴 Ok, un passo su: {new}. 💅",
-              "🔴 Meno buio, più fuoco: {new}. 💅",
-              "🔴 Risalita ma occhio: {new}. 💅",
-              "🔴 Dal nero al rosso… comunque male. 💅"
+              "Fuori dal nero ma ancora pesante: {old}→{new}. 💅",
+              "Ok, un passo su: {new}. 💅",
+              "Meno buio, più fuoco: {new}. 💅",
+              "Risalita ma occhio: {new}. 💅",
+              "Dal nero al rosso… comunque male. 💅"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}. 💅",
-              "🟡 Ok, giallo: delicatezza. 💅",
-              "🟡 Meno disastro: {new}. 💅",
-              "🟡 Fuori dal nero, ma piano. 💅",
-              "🟡 Un passo verso la luce: {new}. 💅"
+              "Si risale un filo: {old}→{new}. 💅",
+              "Ok, giallo: delicatezza. 💅",
+              "Meno disastro: {new}. 💅",
+              "Fuori dal nero, ma piano. 💅",
+              "Un passo verso la luce: {new}. 💅"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}. 💅",
-              "🟢 Dal nero al verde… ok, bravi. 💅",
-              "🟢 Resurrezione: Barcy {new}. 💅",
-              "🟢 Rientro top: {new}. 💅",
-              "🟢 Questa è la svolta: {new}. 💅"
+              "Miracolo: {old}→{new}. 💅",
+              "Dal nero al verde… ok, bravi. 💅",
+              "Resurrezione: Barcy {new}. 💅",
+              "Rientro top: {new}. 💅",
+              "Questa è la svolta: {new}. 💅"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}. 💅",
-              "🟢 Ok, verde diretto: {new}. 💅",
-              "🟢 Salvato tutto: {new}. 💅",
-              "🟢 Da bomba a chill: {new}. 💅",
-              "🟢 Grande rientro: {new}. 💅"
+              "Recupero clamoroso: {old}→{new}. 💅",
+              "Ok, verde diretto: {new}. 💅",
+              "Salvato tutto: {new}. 💅",
+              "Da bomba a chill: {new}. 💅",
+              "Grande rientro: {new}. 💅"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}. 💅",
-              "⚫ Ok no, nero. Io non ce la faccio, vi giuro. 💅",
-              "⚫ Crollo totale: {new}. 💅",
-              "⚫ Dal rosso al buio: {new}. 💅",
-              "⚫ Nero. Stop. 💅"
+              "Peggiora ancora: {old}→{new}. 💅",
+              "Ok no, nero. Io non ce la faccio, vi giuro. 💅",
+              "Crollo totale: {new}. 💅",
+              "Dal rosso al buio: {new}. 💅",
+              "Nero. Stop. 💅"
             ]
           }
         },
         "afternoon": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Questo è CINEMA. Barcy vira {new}. 💅",
-              "🟡 Si sente la svolta: {new}. 💅",
-              "🟡 Ok, si ingiallisce. {new}. 💅",
-              "🟡 Ci risiamo: {new}. 💅",
-              "🟡 Vibes strane nell’aria… {new}. 💅"
+              "Questo è CINEMA. Barcy vira {new}. 💅",
+              "Si sente la svolta: {new}. 💅",
+              "Ok, si ingiallisce. {new}. 💅",
+              "Ci risiamo: {new}. 💅",
+              "Vibes strane nell’aria… {new}. 💅"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Io non ce la faccio, vi giuro. 💅",
-              "🟡 Prima sfumatura gialla di oggi: {new}. 💅",
-              "🟡 Oggi si parte così: {new}. 💅",
-              "🟡 Segnalo: prima volta oggi in {new}. 💅",
-              "🟡 Ok, first yellow: {new}. 💅"
+              "Primo giallo oggi qui. Io non ce la faccio, vi giuro. 💅",
+              "Prima sfumatura gialla di oggi: {new}. 💅",
+              "Oggi si parte così: {new}. 💅",
+              "Segnalo: prima volta oggi in {new}. 💅",
+              "Ok, first yellow: {new}. 💅"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}. 💅",
-              "🟢 Vibe pulita: {new}. 💅",
-              "🟢 Oggi iniziamo verdi e me lo godo. 💅",
-              "🟢 Ok, green mode attivo: {new}. 💅",
-              "🟢 Respiriamo: {new}. 💅"
+              "Si parte bene: Barcy {new}. 💅",
+              "Vibe pulita: {new}. 💅",
+              "Oggi iniziamo verdi e me lo godo. 💅",
+              "Ok, green mode attivo: {new}. 💅",
+              "Respiriamo: {new}. 💅"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Stop, mi sento male. 💅",
-              "🔴 Ok raga, rosso: {old}→{new}. 💅",
-              "🔴 Tensione alta: Barcy {new}. 💅",
-              "🔴 Primo rosso oggi qui. Calma. 💅",
-              "🔴 Eccolo: rosso. {new}. 💅"
+              "Prima allerta rossa oggi. Stop, mi sento male. 💅",
+              "Ok raga, rosso: {old}→{new}. 💅",
+              "Tensione alta: Barcy {new}. 💅",
+              "Primo rosso oggi qui. Calma. 💅",
+              "Eccolo: rosso. {new}. 💅"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Stop, mi sento male. 💅",
-              "⚫ Siamo nel nero: {old}→{new}. Stop. 💅",
-              "⚫ Ok no, nero. Reset subito. 💅",
-              "⚫ Prima volta oggi nel buio: {new}. 💅",
-              "⚫ Nero today… non ci credo. 💅"
+              "Primo nero oggi. Stop, mi sento male. 💅",
+              "Siamo nel nero: {old}→{new}. Stop. 💅",
+              "Ok no, nero. Reset subito. 💅",
+              "Prima volta oggi nel buio: {new}. 💅",
+              "Nero today… non ci credo. 💅"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Ok ma… io urlo dentro. {old}→{new}. 💅",
-              "🔴 Ok, si scalda male: {new}. 💅",
-              "🔴 Tono su: {old}→{new}. 💅",
-              "🔴 Eccoci: rosso. {new}. 💅",
-              "🔴 Brutta curva: {new}. 💅"
+              "Dal giallo al rosso. Ok ma… io urlo dentro. {old}→{new}. 💅",
+              "Ok, si scalda male: {new}. 💅",
+              "Tono su: {old}→{new}. 💅",
+              "Eccoci: rosso. {new}. 💅",
+              "Brutta curva: {new}. 💅"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Raga… ma che è, un reality? {old}→{new}. 💅",
-              "⚫ Skippone nel buio: {new}. 💅",
-              "⚫ Ok basta, nero: {new}. 💅",
-              "⚫ Non era il caso: {old}→{new}. 💅",
-              "⚫ Nero in arrivo… anzi, arrivato. 💅"
+              "Dal giallo al nero… Raga… ma che è, un reality? {old}→{new}. 💅",
+              "Skippone nel buio: {new}. 💅",
+              "Ok basta, nero: {new}. 💅",
+              "Non era il caso: {old}→{new}. 💅",
+              "Nero in arrivo… anzi, arrivato. 💅"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}. 💅",
-              "🟡 Ok, meno peggio: {new}. 💅",
-              "🟡 Rientro parziale: {new}. 💅",
-              "🟡 Si scende di un gradino: {new}. 💅",
-              "🟡 Almeno non è più rosso: {new}. 💅"
+              "Si sbollisce un filo: {old}→{new}. 💅",
+              "Ok, meno peggio: {new}. 💅",
+              "Rientro parziale: {new}. 💅",
+              "Si scende di un gradino: {new}. 💅",
+              "Almeno non è più rosso: {new}. 💅"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}. 💅",
-              "🟢 Ok, sistemato: {new}. 💅",
-              "🟢 Vibe ripulita: Barcy {new}. 💅",
-              "🟢 Ci siamo: verde. 💅",
-              "🟢 Finalmente respiro: {new}. 💅"
+              "Rientro nel verde: {new}. 💅",
+              "Ok, sistemato: {new}. 💅",
+              "Vibe ripulita: Barcy {new}. 💅",
+              "Ci siamo: verde. 💅",
+              "Finalmente respiro: {new}. 💅"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}. 💅",
-              "🔴 Ok, un passo su: {new}. 💅",
-              "🔴 Meno buio, più fuoco: {new}. 💅",
-              "🔴 Risalita ma occhio: {new}. 💅",
-              "🔴 Dal nero al rosso… comunque male. 💅"
+              "Fuori dal nero ma ancora pesante: {old}→{new}. 💅",
+              "Ok, un passo su: {new}. 💅",
+              "Meno buio, più fuoco: {new}. 💅",
+              "Risalita ma occhio: {new}. 💅",
+              "Dal nero al rosso… comunque male. 💅"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}. 💅",
-              "🟡 Ok, giallo: delicatezza. 💅",
-              "🟡 Meno disastro: {new}. 💅",
-              "🟡 Fuori dal nero, ma piano. 💅",
-              "🟡 Un passo verso la luce: {new}. 💅"
+              "Si risale un filo: {old}→{new}. 💅",
+              "Ok, giallo: delicatezza. 💅",
+              "Meno disastro: {new}. 💅",
+              "Fuori dal nero, ma piano. 💅",
+              "Un passo verso la luce: {new}. 💅"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}. 💅",
-              "🟢 Dal nero al verde… ok, bravi. 💅",
-              "🟢 Resurrezione: Barcy {new}. 💅",
-              "🟢 Rientro top: {new}. 💅",
-              "🟢 Questa è la svolta: {new}. 💅"
+              "Miracolo: {old}→{new}. 💅",
+              "Dal nero al verde… ok, bravi. 💅",
+              "Resurrezione: Barcy {new}. 💅",
+              "Rientro top: {new}. 💅",
+              "Questa è la svolta: {new}. 💅"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}. 💅",
-              "🟢 Ok, verde diretto: {new}. 💅",
-              "🟢 Salvato tutto: {new}. 💅",
-              "🟢 Da bomba a chill: {new}. 💅",
-              "🟢 Grande rientro: {new}. 💅"
+              "Recupero clamoroso: {old}→{new}. 💅",
+              "Ok, verde diretto: {new}. 💅",
+              "Salvato tutto: {new}. 💅",
+              "Da bomba a chill: {new}. 💅",
+              "Grande rientro: {new}. 💅"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}. 💅",
-              "⚫ Ok no, nero. Ok ma… io urlo dentro. 💅",
-              "⚫ Crollo totale: {new}. 💅",
-              "⚫ Dal rosso al buio: {new}. 💅",
-              "⚫ Nero. Stop. 💅"
+              "Peggiora ancora: {old}→{new}. 💅",
+              "Ok no, nero. Ok ma… io urlo dentro. 💅",
+              "Crollo totale: {new}. 💅",
+              "Dal rosso al buio: {new}. 💅",
+              "Nero. Stop. 💅"
             ]
           }
         },
         "evening": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Raga… ma che è, un reality? Barcy vira {new}. 💅",
-              "🟡 Si sente la svolta: {new}. 💅",
-              "🟡 Ok, si ingiallisce. {new}. 💅",
-              "🟡 Ci risiamo: {new}. 💅",
-              "🟡 Vibes strane nell’aria… {new}. 💅"
+              "Raga… ma che è, un reality? Barcy vira {new}. 💅",
+              "Si sente la svolta: {new}. 💅",
+              "Ok, si ingiallisce. {new}. 💅",
+              "Ci risiamo: {new}. 💅",
+              "Vibes strane nell’aria… {new}. 💅"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Stop, mi sento male. 💅",
-              "🟡 Prima sfumatura gialla di oggi: {new}. 💅",
-              "🟡 Oggi si parte così: {new}. 💅",
-              "🟡 Segnalo: prima volta oggi in {new}. 💅",
-              "🟡 Ok, first yellow: {new}. 💅"
+              "Primo giallo oggi qui. Stop, mi sento male. 💅",
+              "Prima sfumatura gialla di oggi: {new}. 💅",
+              "Oggi si parte così: {new}. 💅",
+              "Segnalo: prima volta oggi in {new}. 💅",
+              "Ok, first yellow: {new}. 💅"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}. 💅",
-              "🟢 Vibe pulita: {new}. 💅",
-              "🟢 Oggi iniziamo verdi e me lo godo. 💅",
-              "🟢 Ok, green mode attivo: {new}. 💅",
-              "🟢 Respiriamo: {new}. 💅"
+              "Si parte bene: Barcy {new}. 💅",
+              "Vibe pulita: {new}. 💅",
+              "Oggi iniziamo verdi e me lo godo. 💅",
+              "Ok, green mode attivo: {new}. 💅",
+              "Respiriamo: {new}. 💅"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Questo è CINEMA. 💅",
-              "🔴 Ok raga, rosso: {old}→{new}. 💅",
-              "🔴 Tensione alta: Barcy {new}. 💅",
-              "🔴 Primo rosso oggi qui. Calma. 💅",
-              "🔴 Eccolo: rosso. {new}. 💅"
+              "Prima allerta rossa oggi. Questo è CINEMA. 💅",
+              "Ok raga, rosso: {old}→{new}. 💅",
+              "Tensione alta: Barcy {new}. 💅",
+              "Primo rosso oggi qui. Calma. 💅",
+              "Eccolo: rosso. {new}. 💅"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Io non ce la faccio, vi giuro. 💅",
-              "⚫ Siamo nel nero: {old}→{new}. Stop. 💅",
-              "⚫ Ok no, nero. Reset subito. 💅",
-              "⚫ Prima volta oggi nel buio: {new}. 💅",
-              "⚫ Nero today… non ci credo. 💅"
+              "Primo nero oggi. Io non ce la faccio, vi giuro. 💅",
+              "Siamo nel nero: {old}→{new}. Stop. 💅",
+              "Ok no, nero. Reset subito. 💅",
+              "Prima volta oggi nel buio: {new}. 💅",
+              "Nero today… non ci credo. 💅"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Stop, mi sento male. {old}→{new}. 💅",
-              "🔴 Ok, si scalda male: {new}. 💅",
-              "🔴 Tono su: {old}→{new}. 💅",
-              "🔴 Eccoci: rosso. {new}. 💅",
-              "🔴 Brutta curva: {new}. 💅"
+              "Dal giallo al rosso. Stop, mi sento male. {old}→{new}. 💅",
+              "Ok, si scalda male: {new}. 💅",
+              "Tono su: {old}→{new}. 💅",
+              "Eccoci: rosso. {new}. 💅",
+              "Brutta curva: {new}. 💅"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Ok ma… io urlo dentro. {old}→{new}. 💅",
-              "⚫ Skippone nel buio: {new}. 💅",
-              "⚫ Ok basta, nero: {new}. 💅",
-              "⚫ Non era il caso: {old}→{new}. 💅",
-              "⚫ Nero in arrivo… anzi, arrivato. 💅"
+              "Dal giallo al nero… Ok ma… io urlo dentro. {old}→{new}. 💅",
+              "Skippone nel buio: {new}. 💅",
+              "Ok basta, nero: {new}. 💅",
+              "Non era il caso: {old}→{new}. 💅",
+              "Nero in arrivo… anzi, arrivato. 💅"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}. 💅",
-              "🟡 Ok, meno peggio: {new}. 💅",
-              "🟡 Rientro parziale: {new}. 💅",
-              "🟡 Si scende di un gradino: {new}. 💅",
-              "🟡 Almeno non è più rosso: {new}. 💅"
+              "Si sbollisce un filo: {old}→{new}. 💅",
+              "Ok, meno peggio: {new}. 💅",
+              "Rientro parziale: {new}. 💅",
+              "Si scende di un gradino: {new}. 💅",
+              "Almeno non è più rosso: {new}. 💅"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}. 💅",
-              "🟢 Ok, sistemato: {new}. 💅",
-              "🟢 Vibe ripulita: Barcy {new}. 💅",
-              "🟢 Ci siamo: verde. 💅",
-              "🟢 Finalmente respiro: {new}. 💅"
+              "Rientro nel verde: {new}. 💅",
+              "Ok, sistemato: {new}. 💅",
+              "Vibe ripulita: Barcy {new}. 💅",
+              "Ci siamo: verde. 💅",
+              "Finalmente respiro: {new}. 💅"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}. 💅",
-              "🔴 Ok, un passo su: {new}. 💅",
-              "🔴 Meno buio, più fuoco: {new}. 💅",
-              "🔴 Risalita ma occhio: {new}. 💅",
-              "🔴 Dal nero al rosso… comunque male. 💅"
+              "Fuori dal nero ma ancora pesante: {old}→{new}. 💅",
+              "Ok, un passo su: {new}. 💅",
+              "Meno buio, più fuoco: {new}. 💅",
+              "Risalita ma occhio: {new}. 💅",
+              "Dal nero al rosso… comunque male. 💅"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}. 💅",
-              "🟡 Ok, giallo: delicatezza. 💅",
-              "🟡 Meno disastro: {new}. 💅",
-              "🟡 Fuori dal nero, ma piano. 💅",
-              "🟡 Un passo verso la luce: {new}. 💅"
+              "Si risale un filo: {old}→{new}. 💅",
+              "Ok, giallo: delicatezza. 💅",
+              "Meno disastro: {new}. 💅",
+              "Fuori dal nero, ma piano. 💅",
+              "Un passo verso la luce: {new}. 💅"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}. 💅",
-              "🟢 Dal nero al verde… ok, bravi. 💅",
-              "🟢 Resurrezione: Barcy {new}. 💅",
-              "🟢 Rientro top: {new}. 💅",
-              "🟢 Questa è la svolta: {new}. 💅"
+              "Miracolo: {old}→{new}. 💅",
+              "Dal nero al verde… ok, bravi. 💅",
+              "Resurrezione: Barcy {new}. 💅",
+              "Rientro top: {new}. 💅",
+              "Questa è la svolta: {new}. 💅"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}. 💅",
-              "🟢 Ok, verde diretto: {new}. 💅",
-              "🟢 Salvato tutto: {new}. 💅",
-              "🟢 Da bomba a chill: {new}. 💅",
-              "🟢 Grande rientro: {new}. 💅"
+              "Recupero clamoroso: {old}→{new}. 💅",
+              "Ok, verde diretto: {new}. 💅",
+              "Salvato tutto: {new}. 💅",
+              "Da bomba a chill: {new}. 💅",
+              "Grande rientro: {new}. 💅"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}. 💅",
-              "⚫ Ok no, nero. Ok ma… io urlo dentro. 💅",
-              "⚫ Crollo totale: {new}. 💅",
-              "⚫ Dal rosso al buio: {new}. 💅",
-              "⚫ Nero. Stop. 💅"
+              "Peggiora ancora: {old}→{new}. 💅",
+              "Ok no, nero. Ok ma… io urlo dentro. 💅",
+              "Crollo totale: {new}. 💅",
+              "Dal rosso al buio: {new}. 💅",
+              "Nero. Stop. 💅"
             ]
           }
         }
@@ -723,72 +723,72 @@
         "t2": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 2º rosso oggi. Raga… ma che è, un reality? 💅",
-              "🔴 2 volte rosso oggi… basta punzecchiamenti. 💅",
-              "🔴 Rosso di nuovo (2º oggi). Riprendete fiato. 💅",
-              "🔴 Ok, 2º rosso oggi. Non sto bene. 💅",
-              "🔴 2º rosso: oggi state facendo troppo. 💅"
+              "2º rosso oggi. Raga… ma che è, un reality? 💅",
+              "2 volte rosso oggi… basta punzecchiamenti. 💅",
+              "Rosso di nuovo (2º oggi). Riprendete fiato. 💅",
+              "Ok, 2º rosso oggi. Non sto bene. 💅",
+              "2º rosso: oggi state facendo troppo. 💅"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 2º rosso oggi. Ok ma… io urlo dentro. 💅",
-              "🔴 2 volte rosso oggi… basta punzecchiamenti. 💅",
-              "🔴 Rosso di nuovo (2º oggi). Riprendete fiato. 💅",
-              "🔴 Ok, 2º rosso oggi. Non sto bene. 💅",
-              "🔴 2º rosso: oggi state facendo troppo. 💅"
+              "2º rosso oggi. Ok ma… io urlo dentro. 💅",
+              "2 volte rosso oggi… basta punzecchiamenti. 💅",
+              "Rosso di nuovo (2º oggi). Riprendete fiato. 💅",
+              "Ok, 2º rosso oggi. Non sto bene. 💅",
+              "2º rosso: oggi state facendo troppo. 💅"
             ]
           }
         },
         "t3": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 3º rosso oggi. Io non ce la faccio, vi giuro. 💅",
-              "🔴 3 volte rosso oggi… basta punzecchiamenti. 💅",
-              "🔴 Rosso di nuovo (3º oggi). Riprendete fiato. 💅",
-              "🔴 Ok, 3º rosso oggi. Non sto bene. 💅",
-              "🔴 3º rosso: oggi state facendo troppo. 💅"
+              "3º rosso oggi. Io non ce la faccio, vi giuro. 💅",
+              "3 volte rosso oggi… basta punzecchiamenti. 💅",
+              "Rosso di nuovo (3º oggi). Riprendete fiato. 💅",
+              "Ok, 3º rosso oggi. Non sto bene. 💅",
+              "3º rosso: oggi state facendo troppo. 💅"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 3º rosso oggi. Io non ce la faccio, vi giuro. 💅",
-              "🔴 3 volte rosso oggi… basta punzecchiamenti. 💅",
-              "🔴 Rosso di nuovo (3º oggi). Riprendete fiato. 💅",
-              "🔴 Ok, 3º rosso oggi. Non sto bene. 💅",
-              "🔴 3º rosso: oggi state facendo troppo. 💅"
+              "3º rosso oggi. Io non ce la faccio, vi giuro. 💅",
+              "3 volte rosso oggi… basta punzecchiamenti. 💅",
+              "Rosso di nuovo (3º oggi). Riprendete fiato. 💅",
+              "Ok, 3º rosso oggi. Non sto bene. 💅",
+              "3º rosso: oggi state facendo troppo. 💅"
             ]
           }
         },
         "n2": {
           "templates": {
             "VERDE->NERO": [
-              "⚫ 2º nero oggi. Ok ma… io urlo dentro. Stop. 💅",
-              "⚫ Nero ancora (2º oggi). Reset totale. 💅",
-              "⚫ 2 volte nel nero oggi… pausa vera. 💅",
-              "⚫ Ok, 2º nero oggi. Basta. 💅",
-              "⚫ 2º nero: oggi è pesante. 💅"
+              "2º nero oggi. Ok ma… io urlo dentro. Stop. 💅",
+              "Nero ancora (2º oggi). Reset totale. 💅",
+              "2 volte nel nero oggi… pausa vera. 💅",
+              "Ok, 2º nero oggi. Basta. 💅",
+              "2º nero: oggi è pesante. 💅"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ 2º nero oggi. Stop, mi sento male. Stop. 💅",
-              "⚫ Nero ancora (2º oggi). Reset totale. 💅",
-              "⚫ 2 volte nel nero oggi… pausa vera. 💅",
-              "⚫ Ok, 2º nero oggi. Basta. 💅",
-              "⚫ 2º nero: oggi è pesante. 💅"
+              "2º nero oggi. Stop, mi sento male. Stop. 💅",
+              "Nero ancora (2º oggi). Reset totale. 💅",
+              "2 volte nel nero oggi… pausa vera. 💅",
+              "Ok, 2º nero oggi. Basta. 💅",
+              "2º nero: oggi è pesante. 💅"
             ]
           }
         },
         "n3": {
           "templates": {
             "VERDE->NERO": [
-              "⚫ 3º nero oggi. Stop, mi sento male. Stop. 💅",
-              "⚫ Nero ancora (3º oggi). Reset totale. 💅",
-              "⚫ 3 volte nel nero oggi… pausa vera. 💅",
-              "⚫ Ok, 3º nero oggi. Basta. 💅",
-              "⚫ 3º nero: oggi è pesante. 💅"
+              "3º nero oggi. Stop, mi sento male. Stop. 💅",
+              "Nero ancora (3º oggi). Reset totale. 💅",
+              "3 volte nel nero oggi… pausa vera. 💅",
+              "Ok, 3º nero oggi. Basta. 💅",
+              "3º nero: oggi è pesante. 💅"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ 3º nero oggi. Io non ce la faccio, vi giuro. Stop. 💅",
-              "⚫ Nero ancora (3º oggi). Reset totale. 💅",
-              "⚫ 3 volte nel nero oggi… pausa vera. 💅",
-              "⚫ Ok, 3º nero oggi. Basta. 💅",
-              "⚫ 3º nero: oggi è pesante. 💅"
+              "3º nero oggi. Io non ce la faccio, vi giuro. Stop. 💅",
+              "Nero ancora (3º oggi). Reset totale. 💅",
+              "3 volte nel nero oggi… pausa vera. 💅",
+              "Ok, 3º nero oggi. Basta. 💅",
+              "3º nero: oggi è pesante. 💅"
             ]
           }
         }
@@ -799,408 +799,408 @@
         "night": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Sì sì, bellissimo. Barcy vira {new}. 😏",
-              "🟡 Si sente la svolta: {new}. 😏",
-              "🟡 Ok, si ingiallisce. {new}. 😏",
-              "🟡 Ci risiamo: {new}. 😏",
-              "🟡 Vibes strane nell’aria… {new}. 😏"
+              "Sì sì, bellissimo. Barcy vira {new}. 😏",
+              "Si sente la svolta: {new}. 😏",
+              "Ok, si ingiallisce. {new}. 😏",
+              "Ci risiamo: {new}. 😏",
+              "Vibes strane nell’aria… {new}. 😏"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Sì sì, bellissimo. 😏",
-              "🟡 Prima sfumatura gialla di oggi: {new}. 😏",
-              "🟡 Oggi si parte così: {new}. 😏",
-              "🟡 Segnalo: prima volta oggi in {new}. 😏",
-              "🟡 Ok, first yellow: {new}. 😏"
+              "Primo giallo oggi qui. Sì sì, bellissimo. 😏",
+              "Prima sfumatura gialla di oggi: {new}. 😏",
+              "Oggi si parte così: {new}. 😏",
+              "Segnalo: prima volta oggi in {new}. 😏",
+              "Ok, first yellow: {new}. 😏"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}. 😏",
-              "🟢 Vibe pulita: {new}. 😏",
-              "🟢 Oggi iniziamo verdi e me lo godo. 😏",
-              "🟢 Ok, green mode attivo: {new}. 😏",
-              "🟢 Respiriamo: {new}. 😏"
+              "Si parte bene: Barcy {new}. 😏",
+              "Vibe pulita: {new}. 😏",
+              "Oggi iniziamo verdi e me lo godo. 😏",
+              "Ok, green mode attivo: {new}. 😏",
+              "Respiriamo: {new}. 😏"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Ottimo, proprio quello che ci voleva. 😏",
-              "🔴 Ok raga, rosso: {old}→{new}. 😏",
-              "🔴 Tensione alta: Barcy {new}. 😏",
-              "🔴 Primo rosso oggi qui. Calma. 😏",
-              "🔴 Eccolo: rosso. {new}. 😏"
+              "Prima allerta rossa oggi. Ottimo, proprio quello che ci voleva. 😏",
+              "Ok raga, rosso: {old}→{new}. 😏",
+              "Tensione alta: Barcy {new}. 😏",
+              "Primo rosso oggi qui. Calma. 😏",
+              "Eccolo: rosso. {new}. 😏"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Ah, che gioia. 😏",
-              "⚫ Siamo nel nero: {old}→{new}. Stop. 😏",
-              "⚫ Ok no, nero. Reset subito. 😏",
-              "⚫ Prima volta oggi nel buio: {new}. 😏",
-              "⚫ Nero today… non ci credo. 😏"
+              "Primo nero oggi. Ah, che gioia. 😏",
+              "Siamo nel nero: {old}→{new}. Stop. 😏",
+              "Ok no, nero. Reset subito. 😏",
+              "Prima volta oggi nel buio: {new}. 😏",
+              "Nero today… non ci credo. 😏"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Ma certo, perché no. {old}→{new}. 😏",
-              "🔴 Ok, si scalda male: {new}. 😏",
-              "🔴 Tono su: {old}→{new}. 😏",
-              "🔴 Eccoci: rosso. {new}. 😏",
-              "🔴 Brutta curva: {new}. 😏"
+              "Dal giallo al rosso. Ma certo, perché no. {old}→{new}. 😏",
+              "Ok, si scalda male: {new}. 😏",
+              "Tono su: {old}→{new}. 😏",
+              "Eccoci: rosso. {new}. 😏",
+              "Brutta curva: {new}. 😏"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Sì sì, bellissimo. {old}→{new}. 😏",
-              "⚫ Skippone nel buio: {new}. 😏",
-              "⚫ Ok basta, nero: {new}. 😏",
-              "⚫ Non era il caso: {old}→{new}. 😏",
-              "⚫ Nero in arrivo… anzi, arrivato. 😏"
+              "Dal giallo al nero… Sì sì, bellissimo. {old}→{new}. 😏",
+              "Skippone nel buio: {new}. 😏",
+              "Ok basta, nero: {new}. 😏",
+              "Non era il caso: {old}→{new}. 😏",
+              "Nero in arrivo… anzi, arrivato. 😏"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}. 😏",
-              "🟡 Ok, meno peggio: {new}. 😏",
-              "🟡 Rientro parziale: {new}. 😏",
-              "🟡 Si scende di un gradino: {new}. 😏",
-              "🟡 Almeno non è più rosso: {new}. 😏"
+              "Si sbollisce un filo: {old}→{new}. 😏",
+              "Ok, meno peggio: {new}. 😏",
+              "Rientro parziale: {new}. 😏",
+              "Si scende di un gradino: {new}. 😏",
+              "Almeno non è più rosso: {new}. 😏"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}. 😏",
-              "🟢 Ok, sistemato: {new}. 😏",
-              "🟢 Vibe ripulita: Barcy {new}. 😏",
-              "🟢 Ci siamo: verde. 😏",
-              "🟢 Finalmente respiro: {new}. 😏"
+              "Rientro nel verde: {new}. 😏",
+              "Ok, sistemato: {new}. 😏",
+              "Vibe ripulita: Barcy {new}. 😏",
+              "Ci siamo: verde. 😏",
+              "Finalmente respiro: {new}. 😏"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}. 😏",
-              "🔴 Ok, un passo su: {new}. 😏",
-              "🔴 Meno buio, più fuoco: {new}. 😏",
-              "🔴 Risalita ma occhio: {new}. 😏",
-              "🔴 Dal nero al rosso… comunque male. 😏"
+              "Fuori dal nero ma ancora pesante: {old}→{new}. 😏",
+              "Ok, un passo su: {new}. 😏",
+              "Meno buio, più fuoco: {new}. 😏",
+              "Risalita ma occhio: {new}. 😏",
+              "Dal nero al rosso… comunque male. 😏"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}. 😏",
-              "🟡 Ok, giallo: delicatezza. 😏",
-              "🟡 Meno disastro: {new}. 😏",
-              "🟡 Fuori dal nero, ma piano. 😏",
-              "🟡 Un passo verso la luce: {new}. 😏"
+              "Si risale un filo: {old}→{new}. 😏",
+              "Ok, giallo: delicatezza. 😏",
+              "Meno disastro: {new}. 😏",
+              "Fuori dal nero, ma piano. 😏",
+              "Un passo verso la luce: {new}. 😏"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}. 😏",
-              "🟢 Dal nero al verde… ok, bravi. 😏",
-              "🟢 Resurrezione: Barcy {new}. 😏",
-              "🟢 Rientro top: {new}. 😏",
-              "🟢 Questa è la svolta: {new}. 😏"
+              "Miracolo: {old}→{new}. 😏",
+              "Dal nero al verde… ok, bravi. 😏",
+              "Resurrezione: Barcy {new}. 😏",
+              "Rientro top: {new}. 😏",
+              "Questa è la svolta: {new}. 😏"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}. 😏",
-              "🟢 Ok, verde diretto: {new}. 😏",
-              "🟢 Salvato tutto: {new}. 😏",
-              "🟢 Da bomba a chill: {new}. 😏",
-              "🟢 Grande rientro: {new}. 😏"
+              "Recupero clamoroso: {old}→{new}. 😏",
+              "Ok, verde diretto: {new}. 😏",
+              "Salvato tutto: {new}. 😏",
+              "Da bomba a chill: {new}. 😏",
+              "Grande rientro: {new}. 😏"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}. 😏",
-              "⚫ Ok no, nero. Perfetto, andiamo così. 😏",
-              "⚫ Crollo totale: {new}. 😏",
-              "⚫ Dal rosso al buio: {new}. 😏",
-              "⚫ Nero. Stop. 😏"
+              "Peggiora ancora: {old}→{new}. 😏",
+              "Ok no, nero. Perfetto, andiamo così. 😏",
+              "Crollo totale: {new}. 😏",
+              "Dal rosso al buio: {new}. 😏",
+              "Nero. Stop. 😏"
             ]
           }
         },
         "morning": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Ottimo, proprio quello che ci voleva. Barcy vira {new}. 😏",
-              "🟡 Si sente la svolta: {new}. 😏",
-              "🟡 Ok, si ingiallisce. {new}. 😏",
-              "🟡 Ci risiamo: {new}. 😏",
-              "🟡 Vibes strane nell’aria… {new}. 😏"
+              "Ottimo, proprio quello che ci voleva. Barcy vira {new}. 😏",
+              "Si sente la svolta: {new}. 😏",
+              "Ok, si ingiallisce. {new}. 😏",
+              "Ci risiamo: {new}. 😏",
+              "Vibes strane nell’aria… {new}. 😏"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Ma certo, perché no. 😏",
-              "🟡 Prima sfumatura gialla di oggi: {new}. 😏",
-              "🟡 Oggi si parte così: {new}. 😏",
-              "🟡 Segnalo: prima volta oggi in {new}. 😏",
-              "🟡 Ok, first yellow: {new}. 😏"
+              "Primo giallo oggi qui. Ma certo, perché no. 😏",
+              "Prima sfumatura gialla di oggi: {new}. 😏",
+              "Oggi si parte così: {new}. 😏",
+              "Segnalo: prima volta oggi in {new}. 😏",
+              "Ok, first yellow: {new}. 😏"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}. 😏",
-              "🟢 Vibe pulita: {new}. 😏",
-              "🟢 Oggi iniziamo verdi e me lo godo. 😏",
-              "🟢 Ok, green mode attivo: {new}. 😏",
-              "🟢 Respiriamo: {new}. 😏"
+              "Si parte bene: Barcy {new}. 😏",
+              "Vibe pulita: {new}. 😏",
+              "Oggi iniziamo verdi e me lo godo. 😏",
+              "Ok, green mode attivo: {new}. 😏",
+              "Respiriamo: {new}. 😏"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Ottimo, proprio quello che ci voleva. 😏",
-              "🔴 Ok raga, rosso: {old}→{new}. 😏",
-              "🔴 Tensione alta: Barcy {new}. 😏",
-              "🔴 Primo rosso oggi qui. Calma. 😏",
-              "🔴 Eccolo: rosso. {new}. 😏"
+              "Prima allerta rossa oggi. Ottimo, proprio quello che ci voleva. 😏",
+              "Ok raga, rosso: {old}→{new}. 😏",
+              "Tensione alta: Barcy {new}. 😏",
+              "Primo rosso oggi qui. Calma. 😏",
+              "Eccolo: rosso. {new}. 😏"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Perfetto, andiamo così. 😏",
-              "⚫ Siamo nel nero: {old}→{new}. Stop. 😏",
-              "⚫ Ok no, nero. Reset subito. 😏",
-              "⚫ Prima volta oggi nel buio: {new}. 😏",
-              "⚫ Nero today… non ci credo. 😏"
+              "Primo nero oggi. Perfetto, andiamo così. 😏",
+              "Siamo nel nero: {old}→{new}. Stop. 😏",
+              "Ok no, nero. Reset subito. 😏",
+              "Prima volta oggi nel buio: {new}. 😏",
+              "Nero today… non ci credo. 😏"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Sì sì, bellissimo. {old}→{new}. 😏",
-              "🔴 Ok, si scalda male: {new}. 😏",
-              "🔴 Tono su: {old}→{new}. 😏",
-              "🔴 Eccoci: rosso. {new}. 😏",
-              "🔴 Brutta curva: {new}. 😏"
+              "Dal giallo al rosso. Sì sì, bellissimo. {old}→{new}. 😏",
+              "Ok, si scalda male: {new}. 😏",
+              "Tono su: {old}→{new}. 😏",
+              "Eccoci: rosso. {new}. 😏",
+              "Brutta curva: {new}. 😏"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Perfetto, andiamo così. {old}→{new}. 😏",
-              "⚫ Skippone nel buio: {new}. 😏",
-              "⚫ Ok basta, nero: {new}. 😏",
-              "⚫ Non era il caso: {old}→{new}. 😏",
-              "⚫ Nero in arrivo… anzi, arrivato. 😏"
+              "Dal giallo al nero… Perfetto, andiamo così. {old}→{new}. 😏",
+              "Skippone nel buio: {new}. 😏",
+              "Ok basta, nero: {new}. 😏",
+              "Non era il caso: {old}→{new}. 😏",
+              "Nero in arrivo… anzi, arrivato. 😏"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}. 😏",
-              "🟡 Ok, meno peggio: {new}. 😏",
-              "🟡 Rientro parziale: {new}. 😏",
-              "🟡 Si scende di un gradino: {new}. 😏",
-              "🟡 Almeno non è più rosso: {new}. 😏"
+              "Si sbollisce un filo: {old}→{new}. 😏",
+              "Ok, meno peggio: {new}. 😏",
+              "Rientro parziale: {new}. 😏",
+              "Si scende di un gradino: {new}. 😏",
+              "Almeno non è più rosso: {new}. 😏"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}. 😏",
-              "🟢 Ok, sistemato: {new}. 😏",
-              "🟢 Vibe ripulita: Barcy {new}. 😏",
-              "🟢 Ci siamo: verde. 😏",
-              "🟢 Finalmente respiro: {new}. 😏"
+              "Rientro nel verde: {new}. 😏",
+              "Ok, sistemato: {new}. 😏",
+              "Vibe ripulita: Barcy {new}. 😏",
+              "Ci siamo: verde. 😏",
+              "Finalmente respiro: {new}. 😏"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}. 😏",
-              "🔴 Ok, un passo su: {new}. 😏",
-              "🔴 Meno buio, più fuoco: {new}. 😏",
-              "🔴 Risalita ma occhio: {new}. 😏",
-              "🔴 Dal nero al rosso… comunque male. 😏"
+              "Fuori dal nero ma ancora pesante: {old}→{new}. 😏",
+              "Ok, un passo su: {new}. 😏",
+              "Meno buio, più fuoco: {new}. 😏",
+              "Risalita ma occhio: {new}. 😏",
+              "Dal nero al rosso… comunque male. 😏"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}. 😏",
-              "🟡 Ok, giallo: delicatezza. 😏",
-              "🟡 Meno disastro: {new}. 😏",
-              "🟡 Fuori dal nero, ma piano. 😏",
-              "🟡 Un passo verso la luce: {new}. 😏"
+              "Si risale un filo: {old}→{new}. 😏",
+              "Ok, giallo: delicatezza. 😏",
+              "Meno disastro: {new}. 😏",
+              "Fuori dal nero, ma piano. 😏",
+              "Un passo verso la luce: {new}. 😏"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}. 😏",
-              "🟢 Dal nero al verde… ok, bravi. 😏",
-              "🟢 Resurrezione: Barcy {new}. 😏",
-              "🟢 Rientro top: {new}. 😏",
-              "🟢 Questa è la svolta: {new}. 😏"
+              "Miracolo: {old}→{new}. 😏",
+              "Dal nero al verde… ok, bravi. 😏",
+              "Resurrezione: Barcy {new}. 😏",
+              "Rientro top: {new}. 😏",
+              "Questa è la svolta: {new}. 😏"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}. 😏",
-              "🟢 Ok, verde diretto: {new}. 😏",
-              "🟢 Salvato tutto: {new}. 😏",
-              "🟢 Da bomba a chill: {new}. 😏",
-              "🟢 Grande rientro: {new}. 😏"
+              "Recupero clamoroso: {old}→{new}. 😏",
+              "Ok, verde diretto: {new}. 😏",
+              "Salvato tutto: {new}. 😏",
+              "Da bomba a chill: {new}. 😏",
+              "Grande rientro: {new}. 😏"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}. 😏",
-              "⚫ Ok no, nero. Sì sì, bellissimo. 😏",
-              "⚫ Crollo totale: {new}. 😏",
-              "⚫ Dal rosso al buio: {new}. 😏",
-              "⚫ Nero. Stop. 😏"
+              "Peggiora ancora: {old}→{new}. 😏",
+              "Ok no, nero. Sì sì, bellissimo. 😏",
+              "Crollo totale: {new}. 😏",
+              "Dal rosso al buio: {new}. 😏",
+              "Nero. Stop. 😏"
             ]
           }
         },
         "afternoon": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Ah, che gioia. Barcy vira {new}. 😏",
-              "🟡 Si sente la svolta: {new}. 😏",
-              "🟡 Ok, si ingiallisce. {new}. 😏",
-              "🟡 Ci risiamo: {new}. 😏",
-              "🟡 Vibes strane nell’aria… {new}. 😏"
+              "Ah, che gioia. Barcy vira {new}. 😏",
+              "Si sente la svolta: {new}. 😏",
+              "Ok, si ingiallisce. {new}. 😏",
+              "Ci risiamo: {new}. 😏",
+              "Vibes strane nell’aria… {new}. 😏"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Ma certo, perché no. 😏",
-              "🟡 Prima sfumatura gialla di oggi: {new}. 😏",
-              "🟡 Oggi si parte così: {new}. 😏",
-              "🟡 Segnalo: prima volta oggi in {new}. 😏",
-              "🟡 Ok, first yellow: {new}. 😏"
+              "Primo giallo oggi qui. Ma certo, perché no. 😏",
+              "Prima sfumatura gialla di oggi: {new}. 😏",
+              "Oggi si parte così: {new}. 😏",
+              "Segnalo: prima volta oggi in {new}. 😏",
+              "Ok, first yellow: {new}. 😏"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}. 😏",
-              "🟢 Vibe pulita: {new}. 😏",
-              "🟢 Oggi iniziamo verdi e me lo godo. 😏",
-              "🟢 Ok, green mode attivo: {new}. 😏",
-              "🟢 Respiriamo: {new}. 😏"
+              "Si parte bene: Barcy {new}. 😏",
+              "Vibe pulita: {new}. 😏",
+              "Oggi iniziamo verdi e me lo godo. 😏",
+              "Ok, green mode attivo: {new}. 😏",
+              "Respiriamo: {new}. 😏"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Ottimo, proprio quello che ci voleva. 😏",
-              "🔴 Ok raga, rosso: {old}→{new}. 😏",
-              "🔴 Tensione alta: Barcy {new}. 😏",
-              "🔴 Primo rosso oggi qui. Calma. 😏",
-              "🔴 Eccolo: rosso. {new}. 😏"
+              "Prima allerta rossa oggi. Ottimo, proprio quello che ci voleva. 😏",
+              "Ok raga, rosso: {old}→{new}. 😏",
+              "Tensione alta: Barcy {new}. 😏",
+              "Primo rosso oggi qui. Calma. 😏",
+              "Eccolo: rosso. {new}. 😏"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Ah, che gioia. 😏",
-              "⚫ Siamo nel nero: {old}→{new}. Stop. 😏",
-              "⚫ Ok no, nero. Reset subito. 😏",
-              "⚫ Prima volta oggi nel buio: {new}. 😏",
-              "⚫ Nero today… non ci credo. 😏"
+              "Primo nero oggi. Ah, che gioia. 😏",
+              "Siamo nel nero: {old}→{new}. Stop. 😏",
+              "Ok no, nero. Reset subito. 😏",
+              "Prima volta oggi nel buio: {new}. 😏",
+              "Nero today… non ci credo. 😏"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Sì sì, bellissimo. {old}→{new}. 😏",
-              "🔴 Ok, si scalda male: {new}. 😏",
-              "🔴 Tono su: {old}→{new}. 😏",
-              "🔴 Eccoci: rosso. {new}. 😏",
-              "🔴 Brutta curva: {new}. 😏"
+              "Dal giallo al rosso. Sì sì, bellissimo. {old}→{new}. 😏",
+              "Ok, si scalda male: {new}. 😏",
+              "Tono su: {old}→{new}. 😏",
+              "Eccoci: rosso. {new}. 😏",
+              "Brutta curva: {new}. 😏"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Ma certo, perché no. {old}→{new}. 😏",
-              "⚫ Skippone nel buio: {new}. 😏",
-              "⚫ Ok basta, nero: {new}. 😏",
-              "⚫ Non era il caso: {old}→{new}. 😏",
-              "⚫ Nero in arrivo… anzi, arrivato. 😏"
+              "Dal giallo al nero… Ma certo, perché no. {old}→{new}. 😏",
+              "Skippone nel buio: {new}. 😏",
+              "Ok basta, nero: {new}. 😏",
+              "Non era il caso: {old}→{new}. 😏",
+              "Nero in arrivo… anzi, arrivato. 😏"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}. 😏",
-              "🟡 Ok, meno peggio: {new}. 😏",
-              "🟡 Rientro parziale: {new}. 😏",
-              "🟡 Si scende di un gradino: {new}. 😏",
-              "🟡 Almeno non è più rosso: {new}. 😏"
+              "Si sbollisce un filo: {old}→{new}. 😏",
+              "Ok, meno peggio: {new}. 😏",
+              "Rientro parziale: {new}. 😏",
+              "Si scende di un gradino: {new}. 😏",
+              "Almeno non è più rosso: {new}. 😏"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}. 😏",
-              "🟢 Ok, sistemato: {new}. 😏",
-              "🟢 Vibe ripulita: Barcy {new}. 😏",
-              "🟢 Ci siamo: verde. 😏",
-              "🟢 Finalmente respiro: {new}. 😏"
+              "Rientro nel verde: {new}. 😏",
+              "Ok, sistemato: {new}. 😏",
+              "Vibe ripulita: Barcy {new}. 😏",
+              "Ci siamo: verde. 😏",
+              "Finalmente respiro: {new}. 😏"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}. 😏",
-              "🔴 Ok, un passo su: {new}. 😏",
-              "🔴 Meno buio, più fuoco: {new}. 😏",
-              "🔴 Risalita ma occhio: {new}. 😏",
-              "🔴 Dal nero al rosso… comunque male. 😏"
+              "Fuori dal nero ma ancora pesante: {old}→{new}. 😏",
+              "Ok, un passo su: {new}. 😏",
+              "Meno buio, più fuoco: {new}. 😏",
+              "Risalita ma occhio: {new}. 😏",
+              "Dal nero al rosso… comunque male. 😏"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}. 😏",
-              "🟡 Ok, giallo: delicatezza. 😏",
-              "🟡 Meno disastro: {new}. 😏",
-              "🟡 Fuori dal nero, ma piano. 😏",
-              "🟡 Un passo verso la luce: {new}. 😏"
+              "Si risale un filo: {old}→{new}. 😏",
+              "Ok, giallo: delicatezza. 😏",
+              "Meno disastro: {new}. 😏",
+              "Fuori dal nero, ma piano. 😏",
+              "Un passo verso la luce: {new}. 😏"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}. 😏",
-              "🟢 Dal nero al verde… ok, bravi. 😏",
-              "🟢 Resurrezione: Barcy {new}. 😏",
-              "🟢 Rientro top: {new}. 😏",
-              "🟢 Questa è la svolta: {new}. 😏"
+              "Miracolo: {old}→{new}. 😏",
+              "Dal nero al verde… ok, bravi. 😏",
+              "Resurrezione: Barcy {new}. 😏",
+              "Rientro top: {new}. 😏",
+              "Questa è la svolta: {new}. 😏"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}. 😏",
-              "🟢 Ok, verde diretto: {new}. 😏",
-              "🟢 Salvato tutto: {new}. 😏",
-              "🟢 Da bomba a chill: {new}. 😏",
-              "🟢 Grande rientro: {new}. 😏"
+              "Recupero clamoroso: {old}→{new}. 😏",
+              "Ok, verde diretto: {new}. 😏",
+              "Salvato tutto: {new}. 😏",
+              "Da bomba a chill: {new}. 😏",
+              "Grande rientro: {new}. 😏"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}. 😏",
-              "⚫ Ok no, nero. Ah, che gioia. 😏",
-              "⚫ Crollo totale: {new}. 😏",
-              "⚫ Dal rosso al buio: {new}. 😏",
-              "⚫ Nero. Stop. 😏"
+              "Peggiora ancora: {old}→{new}. 😏",
+              "Ok no, nero. Ah, che gioia. 😏",
+              "Crollo totale: {new}. 😏",
+              "Dal rosso al buio: {new}. 😏",
+              "Nero. Stop. 😏"
             ]
           }
         },
         "evening": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Ah, che gioia. Barcy vira {new}. 😏",
-              "🟡 Si sente la svolta: {new}. 😏",
-              "🟡 Ok, si ingiallisce. {new}. 😏",
-              "🟡 Ci risiamo: {new}. 😏",
-              "🟡 Vibes strane nell’aria… {new}. 😏"
+              "Ah, che gioia. Barcy vira {new}. 😏",
+              "Si sente la svolta: {new}. 😏",
+              "Ok, si ingiallisce. {new}. 😏",
+              "Ci risiamo: {new}. 😏",
+              "Vibes strane nell’aria… {new}. 😏"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Ottimo, proprio quello che ci voleva. 😏",
-              "🟡 Prima sfumatura gialla di oggi: {new}. 😏",
-              "🟡 Oggi si parte così: {new}. 😏",
-              "🟡 Segnalo: prima volta oggi in {new}. 😏",
-              "🟡 Ok, first yellow: {new}. 😏"
+              "Primo giallo oggi qui. Ottimo, proprio quello che ci voleva. 😏",
+              "Prima sfumatura gialla di oggi: {new}. 😏",
+              "Oggi si parte così: {new}. 😏",
+              "Segnalo: prima volta oggi in {new}. 😏",
+              "Ok, first yellow: {new}. 😏"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}. 😏",
-              "🟢 Vibe pulita: {new}. 😏",
-              "🟢 Oggi iniziamo verdi e me lo godo. 😏",
-              "🟢 Ok, green mode attivo: {new}. 😏",
-              "🟢 Respiriamo: {new}. 😏"
+              "Si parte bene: Barcy {new}. 😏",
+              "Vibe pulita: {new}. 😏",
+              "Oggi iniziamo verdi e me lo godo. 😏",
+              "Ok, green mode attivo: {new}. 😏",
+              "Respiriamo: {new}. 😏"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Sì sì, bellissimo. 😏",
-              "🔴 Ok raga, rosso: {old}→{new}. 😏",
-              "🔴 Tensione alta: Barcy {new}. 😏",
-              "🔴 Primo rosso oggi qui. Calma. 😏",
-              "🔴 Eccolo: rosso. {new}. 😏"
+              "Prima allerta rossa oggi. Sì sì, bellissimo. 😏",
+              "Ok raga, rosso: {old}→{new}. 😏",
+              "Tensione alta: Barcy {new}. 😏",
+              "Primo rosso oggi qui. Calma. 😏",
+              "Eccolo: rosso. {new}. 😏"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Ottimo, proprio quello che ci voleva. 😏",
-              "⚫ Siamo nel nero: {old}→{new}. Stop. 😏",
-              "⚫ Ok no, nero. Reset subito. 😏",
-              "⚫ Prima volta oggi nel buio: {new}. 😏",
-              "⚫ Nero today… non ci credo. 😏"
+              "Primo nero oggi. Ottimo, proprio quello che ci voleva. 😏",
+              "Siamo nel nero: {old}→{new}. Stop. 😏",
+              "Ok no, nero. Reset subito. 😏",
+              "Prima volta oggi nel buio: {new}. 😏",
+              "Nero today… non ci credo. 😏"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Perfetto, andiamo così. {old}→{new}. 😏",
-              "🔴 Ok, si scalda male: {new}. 😏",
-              "🔴 Tono su: {old}→{new}. 😏",
-              "🔴 Eccoci: rosso. {new}. 😏",
-              "🔴 Brutta curva: {new}. 😏"
+              "Dal giallo al rosso. Perfetto, andiamo così. {old}→{new}. 😏",
+              "Ok, si scalda male: {new}. 😏",
+              "Tono su: {old}→{new}. 😏",
+              "Eccoci: rosso. {new}. 😏",
+              "Brutta curva: {new}. 😏"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Ottimo, proprio quello che ci voleva. {old}→{new}. 😏",
-              "⚫ Skippone nel buio: {new}. 😏",
-              "⚫ Ok basta, nero: {new}. 😏",
-              "⚫ Non era il caso: {old}→{new}. 😏",
-              "⚫ Nero in arrivo… anzi, arrivato. 😏"
+              "Dal giallo al nero… Ottimo, proprio quello che ci voleva. {old}→{new}. 😏",
+              "Skippone nel buio: {new}. 😏",
+              "Ok basta, nero: {new}. 😏",
+              "Non era il caso: {old}→{new}. 😏",
+              "Nero in arrivo… anzi, arrivato. 😏"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}. 😏",
-              "🟡 Ok, meno peggio: {new}. 😏",
-              "🟡 Rientro parziale: {new}. 😏",
-              "🟡 Si scende di un gradino: {new}. 😏",
-              "🟡 Almeno non è più rosso: {new}. 😏"
+              "Si sbollisce un filo: {old}→{new}. 😏",
+              "Ok, meno peggio: {new}. 😏",
+              "Rientro parziale: {new}. 😏",
+              "Si scende di un gradino: {new}. 😏",
+              "Almeno non è più rosso: {new}. 😏"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}. 😏",
-              "🟢 Ok, sistemato: {new}. 😏",
-              "🟢 Vibe ripulita: Barcy {new}. 😏",
-              "🟢 Ci siamo: verde. 😏",
-              "🟢 Finalmente respiro: {new}. 😏"
+              "Rientro nel verde: {new}. 😏",
+              "Ok, sistemato: {new}. 😏",
+              "Vibe ripulita: Barcy {new}. 😏",
+              "Ci siamo: verde. 😏",
+              "Finalmente respiro: {new}. 😏"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}. 😏",
-              "🔴 Ok, un passo su: {new}. 😏",
-              "🔴 Meno buio, più fuoco: {new}. 😏",
-              "🔴 Risalita ma occhio: {new}. 😏",
-              "🔴 Dal nero al rosso… comunque male. 😏"
+              "Fuori dal nero ma ancora pesante: {old}→{new}. 😏",
+              "Ok, un passo su: {new}. 😏",
+              "Meno buio, più fuoco: {new}. 😏",
+              "Risalita ma occhio: {new}. 😏",
+              "Dal nero al rosso… comunque male. 😏"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}. 😏",
-              "🟡 Ok, giallo: delicatezza. 😏",
-              "🟡 Meno disastro: {new}. 😏",
-              "🟡 Fuori dal nero, ma piano. 😏",
-              "🟡 Un passo verso la luce: {new}. 😏"
+              "Si risale un filo: {old}→{new}. 😏",
+              "Ok, giallo: delicatezza. 😏",
+              "Meno disastro: {new}. 😏",
+              "Fuori dal nero, ma piano. 😏",
+              "Un passo verso la luce: {new}. 😏"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}. 😏",
-              "🟢 Dal nero al verde… ok, bravi. 😏",
-              "🟢 Resurrezione: Barcy {new}. 😏",
-              "🟢 Rientro top: {new}. 😏",
-              "🟢 Questa è la svolta: {new}. 😏"
+              "Miracolo: {old}→{new}. 😏",
+              "Dal nero al verde… ok, bravi. 😏",
+              "Resurrezione: Barcy {new}. 😏",
+              "Rientro top: {new}. 😏",
+              "Questa è la svolta: {new}. 😏"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}. 😏",
-              "🟢 Ok, verde diretto: {new}. 😏",
-              "🟢 Salvato tutto: {new}. 😏",
-              "🟢 Da bomba a chill: {new}. 😏",
-              "🟢 Grande rientro: {new}. 😏"
+              "Recupero clamoroso: {old}→{new}. 😏",
+              "Ok, verde diretto: {new}. 😏",
+              "Salvato tutto: {new}. 😏",
+              "Da bomba a chill: {new}. 😏",
+              "Grande rientro: {new}. 😏"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}. 😏",
-              "⚫ Ok no, nero. Ma certo, perché no. 😏",
-              "⚫ Crollo totale: {new}. 😏",
-              "⚫ Dal rosso al buio: {new}. 😏",
-              "⚫ Nero. Stop. 😏"
+              "Peggiora ancora: {old}→{new}. 😏",
+              "Ok no, nero. Ma certo, perché no. 😏",
+              "Crollo totale: {new}. 😏",
+              "Dal rosso al buio: {new}. 😏",
+              "Nero. Stop. 😏"
             ]
           }
         }
@@ -1209,72 +1209,72 @@
         "t2": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 2º rosso oggi. Ottimo, proprio quello che ci voleva. 😏",
-              "🔴 2 volte rosso oggi… basta punzecchiamenti. 😏",
-              "🔴 Rosso di nuovo (2º oggi). Riprendete fiato. 😏",
-              "🔴 Ok, 2º rosso oggi. Non sto bene. 😏",
-              "🔴 2º rosso: oggi state facendo troppo. 😏"
+              "2º rosso oggi. Ottimo, proprio quello che ci voleva. 😏",
+              "2 volte rosso oggi… basta punzecchiamenti. 😏",
+              "Rosso di nuovo (2º oggi). Riprendete fiato. 😏",
+              "Ok, 2º rosso oggi. Non sto bene. 😏",
+              "2º rosso: oggi state facendo troppo. 😏"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 2º rosso oggi. Ottimo, proprio quello che ci voleva. 😏",
-              "🔴 2 volte rosso oggi… basta punzecchiamenti. 😏",
-              "🔴 Rosso di nuovo (2º oggi). Riprendete fiato. 😏",
-              "🔴 Ok, 2º rosso oggi. Non sto bene. 😏",
-              "🔴 2º rosso: oggi state facendo troppo. 😏"
+              "2º rosso oggi. Ottimo, proprio quello che ci voleva. 😏",
+              "2 volte rosso oggi… basta punzecchiamenti. 😏",
+              "Rosso di nuovo (2º oggi). Riprendete fiato. 😏",
+              "Ok, 2º rosso oggi. Non sto bene. 😏",
+              "2º rosso: oggi state facendo troppo. 😏"
             ]
           }
         },
         "t3": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 3º rosso oggi. Sì sì, bellissimo. 😏",
-              "🔴 3 volte rosso oggi… basta punzecchiamenti. 😏",
-              "🔴 Rosso di nuovo (3º oggi). Riprendete fiato. 😏",
-              "🔴 Ok, 3º rosso oggi. Non sto bene. 😏",
-              "🔴 3º rosso: oggi state facendo troppo. 😏"
+              "3º rosso oggi. Sì sì, bellissimo. 😏",
+              "3 volte rosso oggi… basta punzecchiamenti. 😏",
+              "Rosso di nuovo (3º oggi). Riprendete fiato. 😏",
+              "Ok, 3º rosso oggi. Non sto bene. 😏",
+              "3º rosso: oggi state facendo troppo. 😏"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 3º rosso oggi. Ottimo, proprio quello che ci voleva. 😏",
-              "🔴 3 volte rosso oggi… basta punzecchiamenti. 😏",
-              "🔴 Rosso di nuovo (3º oggi). Riprendete fiato. 😏",
-              "🔴 Ok, 3º rosso oggi. Non sto bene. 😏",
-              "🔴 3º rosso: oggi state facendo troppo. 😏"
+              "3º rosso oggi. Ottimo, proprio quello che ci voleva. 😏",
+              "3 volte rosso oggi… basta punzecchiamenti. 😏",
+              "Rosso di nuovo (3º oggi). Riprendete fiato. 😏",
+              "Ok, 3º rosso oggi. Non sto bene. 😏",
+              "3º rosso: oggi state facendo troppo. 😏"
             ]
           }
         },
         "n2": {
           "templates": {
             "VERDE->NERO": [
-              "⚫ 2º nero oggi. Perfetto, andiamo così. Stop. 😏",
-              "⚫ Nero ancora (2º oggi). Reset totale. 😏",
-              "⚫ 2 volte nel nero oggi… pausa vera. 😏",
-              "⚫ Ok, 2º nero oggi. Basta. 😏",
-              "⚫ 2º nero: oggi è pesante. 😏"
+              "2º nero oggi. Perfetto, andiamo così. Stop. 😏",
+              "Nero ancora (2º oggi). Reset totale. 😏",
+              "2 volte nel nero oggi… pausa vera. 😏",
+              "Ok, 2º nero oggi. Basta. 😏",
+              "2º nero: oggi è pesante. 😏"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ 2º nero oggi. Ottimo, proprio quello che ci voleva. Stop. 😏",
-              "⚫ Nero ancora (2º oggi). Reset totale. 😏",
-              "⚫ 2 volte nel nero oggi… pausa vera. 😏",
-              "⚫ Ok, 2º nero oggi. Basta. 😏",
-              "⚫ 2º nero: oggi è pesante. 😏"
+              "2º nero oggi. Ottimo, proprio quello che ci voleva. Stop. 😏",
+              "Nero ancora (2º oggi). Reset totale. 😏",
+              "2 volte nel nero oggi… pausa vera. 😏",
+              "Ok, 2º nero oggi. Basta. 😏",
+              "2º nero: oggi è pesante. 😏"
             ]
           }
         },
         "n3": {
           "templates": {
             "VERDE->NERO": [
-              "⚫ 3º nero oggi. Ottimo, proprio quello che ci voleva. Stop. 😏",
-              "⚫ Nero ancora (3º oggi). Reset totale. 😏",
-              "⚫ 3 volte nel nero oggi… pausa vera. 😏",
-              "⚫ Ok, 3º nero oggi. Basta. 😏",
-              "⚫ 3º nero: oggi è pesante. 😏"
+              "3º nero oggi. Ottimo, proprio quello che ci voleva. Stop. 😏",
+              "Nero ancora (3º oggi). Reset totale. 😏",
+              "3 volte nel nero oggi… pausa vera. 😏",
+              "Ok, 3º nero oggi. Basta. 😏",
+              "3º nero: oggi è pesante. 😏"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ 3º nero oggi. Perfetto, andiamo così. Stop. 😏",
-              "⚫ Nero ancora (3º oggi). Reset totale. 😏",
-              "⚫ 3 volte nel nero oggi… pausa vera. 😏",
-              "⚫ Ok, 3º nero oggi. Basta. 😏",
-              "⚫ 3º nero: oggi è pesante. 😏"
+              "3º nero oggi. Perfetto, andiamo così. Stop. 😏",
+              "Nero ancora (3º oggi). Reset totale. 😏",
+              "3 volte nel nero oggi… pausa vera. 😏",
+              "Ok, 3º nero oggi. Basta. 😏",
+              "3º nero: oggi è pesante. 😏"
             ]
           }
         }
@@ -1285,408 +1285,408 @@
         "night": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Fermi tutti. Barcy vira {new}.⚡",
-              "🟡 Si sente la svolta: {new}.⚡",
-              "🟡 Ok, si ingiallisce. {new}.⚡",
-              "🟡 Ci risiamo: {new}.⚡",
-              "🟡 Vibes strane nell’aria… {new}.⚡"
+              "Fermi tutti. Barcy vira {new}.⚡",
+              "Si sente la svolta: {new}.⚡",
+              "Ok, si ingiallisce. {new}.⚡",
+              "Ci risiamo: {new}.⚡",
+              "Vibes strane nell’aria… {new}.⚡"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Ok basta, reset.⚡",
-              "🟡 Prima sfumatura gialla di oggi: {new}.⚡",
-              "🟡 Oggi si parte così: {new}.⚡",
-              "🟡 Segnalo: prima volta oggi in {new}.⚡",
-              "🟡 Ok, first yellow: {new}.⚡"
+              "Primo giallo oggi qui. Ok basta, reset.⚡",
+              "Prima sfumatura gialla di oggi: {new}.⚡",
+              "Oggi si parte così: {new}.⚡",
+              "Segnalo: prima volta oggi in {new}.⚡",
+              "Ok, first yellow: {new}.⚡"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}.⚡",
-              "🟢 Vibe pulita: {new}.⚡",
-              "🟢 Oggi iniziamo verdi e me lo godo.⚡",
-              "🟢 Ok, green mode attivo: {new}.⚡",
-              "🟢 Respiriamo: {new}.⚡"
+              "Si parte bene: Barcy {new}.⚡",
+              "Vibe pulita: {new}.⚡",
+              "Oggi iniziamo verdi e me lo godo.⚡",
+              "Ok, green mode attivo: {new}.⚡",
+              "Respiriamo: {new}.⚡"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Ok basta, reset.⚡",
-              "🔴 Ok raga, rosso: {old}→{new}.⚡",
-              "🔴 Tensione alta: Barcy {new}.⚡",
-              "🔴 Primo rosso oggi qui. Calma.⚡",
-              "🔴 Eccolo: rosso. {new}.⚡"
+              "Prima allerta rossa oggi. Ok basta, reset.⚡",
+              "Ok raga, rosso: {old}→{new}.⚡",
+              "Tensione alta: Barcy {new}.⚡",
+              "Primo rosso oggi qui. Calma.⚡",
+              "Eccolo: rosso. {new}.⚡"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Fermi tutti.⚡",
-              "⚫ Siamo nel nero: {old}→{new}. Stop.⚡",
-              "⚫ Ok no, nero. Reset subito.⚡",
-              "⚫ Prima volta oggi nel buio: {new}.⚡",
-              "⚫ Nero today… non ci credo.⚡"
+              "Primo nero oggi. Fermi tutti.⚡",
+              "Siamo nel nero: {old}→{new}. Stop.⚡",
+              "Ok no, nero. Reset subito.⚡",
+              "Prima volta oggi nel buio: {new}.⚡",
+              "Nero today… non ci credo.⚡"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. No no no, così non va. {old}→{new}.⚡",
-              "🔴 Ok, si scalda male: {new}.⚡",
-              "🔴 Tono su: {old}→{new}.⚡",
-              "🔴 Eccoci: rosso. {new}.⚡",
-              "🔴 Brutta curva: {new}.⚡"
+              "Dal giallo al rosso. No no no, così non va. {old}→{new}.⚡",
+              "Ok, si scalda male: {new}.⚡",
+              "Tono su: {old}→{new}.⚡",
+              "Eccoci: rosso. {new}.⚡",
+              "Brutta curva: {new}.⚡"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Ok basta, reset. {old}→{new}.⚡",
-              "⚫ Skippone nel buio: {new}.⚡",
-              "⚫ Ok basta, nero: {new}.⚡",
-              "⚫ Non era il caso: {old}→{new}.⚡",
-              "⚫ Nero in arrivo… anzi, arrivato.⚡"
+              "Dal giallo al nero… Ok basta, reset. {old}→{new}.⚡",
+              "Skippone nel buio: {new}.⚡",
+              "Ok basta, nero: {new}.⚡",
+              "Non era il caso: {old}→{new}.⚡",
+              "Nero in arrivo… anzi, arrivato.⚡"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}.⚡",
-              "🟡 Ok, meno peggio: {new}.⚡",
-              "🟡 Rientro parziale: {new}.⚡",
-              "🟡 Si scende di un gradino: {new}.⚡",
-              "🟡 Almeno non è più rosso: {new}.⚡"
+              "Si sbollisce un filo: {old}→{new}.⚡",
+              "Ok, meno peggio: {new}.⚡",
+              "Rientro parziale: {new}.⚡",
+              "Si scende di un gradino: {new}.⚡",
+              "Almeno non è più rosso: {new}.⚡"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}.⚡",
-              "🟢 Ok, sistemato: {new}.⚡",
-              "🟢 Vibe ripulita: Barcy {new}.⚡",
-              "🟢 Ci siamo: verde.⚡",
-              "🟢 Finalmente respiro: {new}.⚡"
+              "Rientro nel verde: {new}.⚡",
+              "Ok, sistemato: {new}.⚡",
+              "Vibe ripulita: Barcy {new}.⚡",
+              "Ci siamo: verde.⚡",
+              "Finalmente respiro: {new}.⚡"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}.⚡",
-              "🔴 Ok, un passo su: {new}.⚡",
-              "🔴 Meno buio, più fuoco: {new}.⚡",
-              "🔴 Risalita ma occhio: {new}.⚡",
-              "🔴 Dal nero al rosso… comunque male.⚡"
+              "Fuori dal nero ma ancora pesante: {old}→{new}.⚡",
+              "Ok, un passo su: {new}.⚡",
+              "Meno buio, più fuoco: {new}.⚡",
+              "Risalita ma occhio: {new}.⚡",
+              "Dal nero al rosso… comunque male.⚡"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}.⚡",
-              "🟡 Ok, giallo: delicatezza.⚡",
-              "🟡 Meno disastro: {new}.⚡",
-              "🟡 Fuori dal nero, ma piano.⚡",
-              "🟡 Un passo verso la luce: {new}.⚡"
+              "Si risale un filo: {old}→{new}.⚡",
+              "Ok, giallo: delicatezza.⚡",
+              "Meno disastro: {new}.⚡",
+              "Fuori dal nero, ma piano.⚡",
+              "Un passo verso la luce: {new}.⚡"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}.⚡",
-              "🟢 Dal nero al verde… ok, bravi.⚡",
-              "🟢 Resurrezione: Barcy {new}.⚡",
-              "🟢 Rientro top: {new}.⚡",
-              "🟢 Questa è la svolta: {new}.⚡"
+              "Miracolo: {old}→{new}.⚡",
+              "Dal nero al verde… ok, bravi.⚡",
+              "Resurrezione: Barcy {new}.⚡",
+              "Rientro top: {new}.⚡",
+              "Questa è la svolta: {new}.⚡"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}.⚡",
-              "🟢 Ok, verde diretto: {new}.⚡",
-              "🟢 Salvato tutto: {new}.⚡",
-              "🟢 Da bomba a chill: {new}.⚡",
-              "🟢 Grande rientro: {new}.⚡"
+              "Recupero clamoroso: {old}→{new}.⚡",
+              "Ok, verde diretto: {new}.⚡",
+              "Salvato tutto: {new}.⚡",
+              "Da bomba a chill: {new}.⚡",
+              "Grande rientro: {new}.⚡"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}.⚡",
-              "⚫ Ok no, nero. Stop. Adesso.⚡",
-              "⚫ Crollo totale: {new}.⚡",
-              "⚫ Dal rosso al buio: {new}.⚡",
-              "⚫ Nero. Stop.⚡"
+              "Peggiora ancora: {old}→{new}.⚡",
+              "Ok no, nero. Stop. Adesso.⚡",
+              "Crollo totale: {new}.⚡",
+              "Dal rosso al buio: {new}.⚡",
+              "Nero. Stop.⚡"
             ]
           }
         },
         "morning": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Ok basta, reset. Barcy vira {new}.⚡",
-              "🟡 Si sente la svolta: {new}.⚡",
-              "🟡 Ok, si ingiallisce. {new}.⚡",
-              "🟡 Ci risiamo: {new}.⚡",
-              "🟡 Vibes strane nell’aria… {new}.⚡"
+              "Ok basta, reset. Barcy vira {new}.⚡",
+              "Si sente la svolta: {new}.⚡",
+              "Ok, si ingiallisce. {new}.⚡",
+              "Ci risiamo: {new}.⚡",
+              "Vibes strane nell’aria… {new}.⚡"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Stop. Adesso.⚡",
-              "🟡 Prima sfumatura gialla di oggi: {new}.⚡",
-              "🟡 Oggi si parte così: {new}.⚡",
-              "🟡 Segnalo: prima volta oggi in {new}.⚡",
-              "🟡 Ok, first yellow: {new}.⚡"
+              "Primo giallo oggi qui. Stop. Adesso.⚡",
+              "Prima sfumatura gialla di oggi: {new}.⚡",
+              "Oggi si parte così: {new}.⚡",
+              "Segnalo: prima volta oggi in {new}.⚡",
+              "Ok, first yellow: {new}.⚡"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}.⚡",
-              "🟢 Vibe pulita: {new}.⚡",
-              "🟢 Oggi iniziamo verdi e me lo godo.⚡",
-              "🟢 Ok, green mode attivo: {new}.⚡",
-              "🟢 Respiriamo: {new}.⚡"
+              "Si parte bene: Barcy {new}.⚡",
+              "Vibe pulita: {new}.⚡",
+              "Oggi iniziamo verdi e me lo godo.⚡",
+              "Ok, green mode attivo: {new}.⚡",
+              "Respiriamo: {new}.⚡"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. Stop. Adesso.⚡",
-              "🔴 Ok raga, rosso: {old}→{new}.⚡",
-              "🔴 Tensione alta: Barcy {new}.⚡",
-              "🔴 Primo rosso oggi qui. Calma.⚡",
-              "🔴 Eccolo: rosso. {new}.⚡"
+              "Prima allerta rossa oggi. Stop. Adesso.⚡",
+              "Ok raga, rosso: {old}→{new}.⚡",
+              "Tensione alta: Barcy {new}.⚡",
+              "Primo rosso oggi qui. Calma.⚡",
+              "Eccolo: rosso. {new}.⚡"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Mi state facendo salire il sangue.⚡",
-              "⚫ Siamo nel nero: {old}→{new}. Stop.⚡",
-              "⚫ Ok no, nero. Reset subito.⚡",
-              "⚫ Prima volta oggi nel buio: {new}.⚡",
-              "⚫ Nero today… non ci credo.⚡"
+              "Primo nero oggi. Mi state facendo salire il sangue.⚡",
+              "Siamo nel nero: {old}→{new}. Stop.⚡",
+              "Ok no, nero. Reset subito.⚡",
+              "Prima volta oggi nel buio: {new}.⚡",
+              "Nero today… non ci credo.⚡"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Stop. Adesso. {old}→{new}.⚡",
-              "🔴 Ok, si scalda male: {new}.⚡",
-              "🔴 Tono su: {old}→{new}.⚡",
-              "🔴 Eccoci: rosso. {new}.⚡",
-              "🔴 Brutta curva: {new}.⚡"
+              "Dal giallo al rosso. Stop. Adesso. {old}→{new}.⚡",
+              "Ok, si scalda male: {new}.⚡",
+              "Tono su: {old}→{new}.⚡",
+              "Eccoci: rosso. {new}.⚡",
+              "Brutta curva: {new}.⚡"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Fermi tutti. {old}→{new}.⚡",
-              "⚫ Skippone nel buio: {new}.⚡",
-              "⚫ Ok basta, nero: {new}.⚡",
-              "⚫ Non era il caso: {old}→{new}.⚡",
-              "⚫ Nero in arrivo… anzi, arrivato.⚡"
+              "Dal giallo al nero… Fermi tutti. {old}→{new}.⚡",
+              "Skippone nel buio: {new}.⚡",
+              "Ok basta, nero: {new}.⚡",
+              "Non era il caso: {old}→{new}.⚡",
+              "Nero in arrivo… anzi, arrivato.⚡"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}.⚡",
-              "🟡 Ok, meno peggio: {new}.⚡",
-              "🟡 Rientro parziale: {new}.⚡",
-              "🟡 Si scende di un gradino: {new}.⚡",
-              "🟡 Almeno non è più rosso: {new}.⚡"
+              "Si sbollisce un filo: {old}→{new}.⚡",
+              "Ok, meno peggio: {new}.⚡",
+              "Rientro parziale: {new}.⚡",
+              "Si scende di un gradino: {new}.⚡",
+              "Almeno non è più rosso: {new}.⚡"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}.⚡",
-              "🟢 Ok, sistemato: {new}.⚡",
-              "🟢 Vibe ripulita: Barcy {new}.⚡",
-              "🟢 Ci siamo: verde.⚡",
-              "🟢 Finalmente respiro: {new}.⚡"
+              "Rientro nel verde: {new}.⚡",
+              "Ok, sistemato: {new}.⚡",
+              "Vibe ripulita: Barcy {new}.⚡",
+              "Ci siamo: verde.⚡",
+              "Finalmente respiro: {new}.⚡"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}.⚡",
-              "🔴 Ok, un passo su: {new}.⚡",
-              "🔴 Meno buio, più fuoco: {new}.⚡",
-              "🔴 Risalita ma occhio: {new}.⚡",
-              "🔴 Dal nero al rosso… comunque male.⚡"
+              "Fuori dal nero ma ancora pesante: {old}→{new}.⚡",
+              "Ok, un passo su: {new}.⚡",
+              "Meno buio, più fuoco: {new}.⚡",
+              "Risalita ma occhio: {new}.⚡",
+              "Dal nero al rosso… comunque male.⚡"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}.⚡",
-              "🟡 Ok, giallo: delicatezza.⚡",
-              "🟡 Meno disastro: {new}.⚡",
-              "🟡 Fuori dal nero, ma piano.⚡",
-              "🟡 Un passo verso la luce: {new}.⚡"
+              "Si risale un filo: {old}→{new}.⚡",
+              "Ok, giallo: delicatezza.⚡",
+              "Meno disastro: {new}.⚡",
+              "Fuori dal nero, ma piano.⚡",
+              "Un passo verso la luce: {new}.⚡"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}.⚡",
-              "🟢 Dal nero al verde… ok, bravi.⚡",
-              "🟢 Resurrezione: Barcy {new}.⚡",
-              "🟢 Rientro top: {new}.⚡",
-              "🟢 Questa è la svolta: {new}.⚡"
+              "Miracolo: {old}→{new}.⚡",
+              "Dal nero al verde… ok, bravi.⚡",
+              "Resurrezione: Barcy {new}.⚡",
+              "Rientro top: {new}.⚡",
+              "Questa è la svolta: {new}.⚡"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}.⚡",
-              "🟢 Ok, verde diretto: {new}.⚡",
-              "🟢 Salvato tutto: {new}.⚡",
-              "🟢 Da bomba a chill: {new}.⚡",
-              "🟢 Grande rientro: {new}.⚡"
+              "Recupero clamoroso: {old}→{new}.⚡",
+              "Ok, verde diretto: {new}.⚡",
+              "Salvato tutto: {new}.⚡",
+              "Da bomba a chill: {new}.⚡",
+              "Grande rientro: {new}.⚡"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}.⚡",
-              "⚫ Ok no, nero. Stop. Adesso.⚡",
-              "⚫ Crollo totale: {new}.⚡",
-              "⚫ Dal rosso al buio: {new}.⚡",
-              "⚫ Nero. Stop.⚡"
+              "Peggiora ancora: {old}→{new}.⚡",
+              "Ok no, nero. Stop. Adesso.⚡",
+              "Crollo totale: {new}.⚡",
+              "Dal rosso al buio: {new}.⚡",
+              "Nero. Stop.⚡"
             ]
           }
         },
         "afternoon": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Stop. Adesso. Barcy vira {new}.⚡",
-              "🟡 Si sente la svolta: {new}.⚡",
-              "🟡 Ok, si ingiallisce. {new}.⚡",
-              "🟡 Ci risiamo: {new}.⚡",
-              "🟡 Vibes strane nell’aria… {new}.⚡"
+              "Stop. Adesso. Barcy vira {new}.⚡",
+              "Si sente la svolta: {new}.⚡",
+              "Ok, si ingiallisce. {new}.⚡",
+              "Ci risiamo: {new}.⚡",
+              "Vibes strane nell’aria… {new}.⚡"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Fermi tutti.⚡",
-              "🟡 Prima sfumatura gialla di oggi: {new}.⚡",
-              "🟡 Oggi si parte così: {new}.⚡",
-              "🟡 Segnalo: prima volta oggi in {new}.⚡",
-              "🟡 Ok, first yellow: {new}.⚡"
+              "Primo giallo oggi qui. Fermi tutti.⚡",
+              "Prima sfumatura gialla di oggi: {new}.⚡",
+              "Oggi si parte così: {new}.⚡",
+              "Segnalo: prima volta oggi in {new}.⚡",
+              "Ok, first yellow: {new}.⚡"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}.⚡",
-              "🟢 Vibe pulita: {new}.⚡",
-              "🟢 Oggi iniziamo verdi e me lo godo.⚡",
-              "🟢 Ok, green mode attivo: {new}.⚡",
-              "🟢 Respiriamo: {new}.⚡"
+              "Si parte bene: Barcy {new}.⚡",
+              "Vibe pulita: {new}.⚡",
+              "Oggi iniziamo verdi e me lo godo.⚡",
+              "Ok, green mode attivo: {new}.⚡",
+              "Respiriamo: {new}.⚡"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. No no no, così non va.⚡",
-              "🔴 Ok raga, rosso: {old}→{new}.⚡",
-              "🔴 Tensione alta: Barcy {new}.⚡",
-              "🔴 Primo rosso oggi qui. Calma.⚡",
-              "🔴 Eccolo: rosso. {new}.⚡"
+              "Prima allerta rossa oggi. No no no, così non va.⚡",
+              "Ok raga, rosso: {old}→{new}.⚡",
+              "Tensione alta: Barcy {new}.⚡",
+              "Primo rosso oggi qui. Calma.⚡",
+              "Eccolo: rosso. {new}.⚡"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Ok basta, reset.⚡",
-              "⚫ Siamo nel nero: {old}→{new}. Stop.⚡",
-              "⚫ Ok no, nero. Reset subito.⚡",
-              "⚫ Prima volta oggi nel buio: {new}.⚡",
-              "⚫ Nero today… non ci credo.⚡"
+              "Primo nero oggi. Ok basta, reset.⚡",
+              "Siamo nel nero: {old}→{new}. Stop.⚡",
+              "Ok no, nero. Reset subito.⚡",
+              "Prima volta oggi nel buio: {new}.⚡",
+              "Nero today… non ci credo.⚡"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Stop. Adesso. {old}→{new}.⚡",
-              "🔴 Ok, si scalda male: {new}.⚡",
-              "🔴 Tono su: {old}→{new}.⚡",
-              "🔴 Eccoci: rosso. {new}.⚡",
-              "🔴 Brutta curva: {new}.⚡"
+              "Dal giallo al rosso. Stop. Adesso. {old}→{new}.⚡",
+              "Ok, si scalda male: {new}.⚡",
+              "Tono su: {old}→{new}.⚡",
+              "Eccoci: rosso. {new}.⚡",
+              "Brutta curva: {new}.⚡"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… No no no, così non va. {old}→{new}.⚡",
-              "⚫ Skippone nel buio: {new}.⚡",
-              "⚫ Ok basta, nero: {new}.⚡",
-              "⚫ Non era il caso: {old}→{new}.⚡",
-              "⚫ Nero in arrivo… anzi, arrivato.⚡"
+              "Dal giallo al nero… No no no, così non va. {old}→{new}.⚡",
+              "Skippone nel buio: {new}.⚡",
+              "Ok basta, nero: {new}.⚡",
+              "Non era il caso: {old}→{new}.⚡",
+              "Nero in arrivo… anzi, arrivato.⚡"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}.⚡",
-              "🟡 Ok, meno peggio: {new}.⚡",
-              "🟡 Rientro parziale: {new}.⚡",
-              "🟡 Si scende di un gradino: {new}.⚡",
-              "🟡 Almeno non è più rosso: {new}.⚡"
+              "Si sbollisce un filo: {old}→{new}.⚡",
+              "Ok, meno peggio: {new}.⚡",
+              "Rientro parziale: {new}.⚡",
+              "Si scende di un gradino: {new}.⚡",
+              "Almeno non è più rosso: {new}.⚡"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}.⚡",
-              "🟢 Ok, sistemato: {new}.⚡",
-              "🟢 Vibe ripulita: Barcy {new}.⚡",
-              "🟢 Ci siamo: verde.⚡",
-              "🟢 Finalmente respiro: {new}.⚡"
+              "Rientro nel verde: {new}.⚡",
+              "Ok, sistemato: {new}.⚡",
+              "Vibe ripulita: Barcy {new}.⚡",
+              "Ci siamo: verde.⚡",
+              "Finalmente respiro: {new}.⚡"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}.⚡",
-              "🔴 Ok, un passo su: {new}.⚡",
-              "🔴 Meno buio, più fuoco: {new}.⚡",
-              "🔴 Risalita ma occhio: {new}.⚡",
-              "🔴 Dal nero al rosso… comunque male.⚡"
+              "Fuori dal nero ma ancora pesante: {old}→{new}.⚡",
+              "Ok, un passo su: {new}.⚡",
+              "Meno buio, più fuoco: {new}.⚡",
+              "Risalita ma occhio: {new}.⚡",
+              "Dal nero al rosso… comunque male.⚡"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}.⚡",
-              "🟡 Ok, giallo: delicatezza.⚡",
-              "🟡 Meno disastro: {new}.⚡",
-              "🟡 Fuori dal nero, ma piano.⚡",
-              "🟡 Un passo verso la luce: {new}.⚡"
+              "Si risale un filo: {old}→{new}.⚡",
+              "Ok, giallo: delicatezza.⚡",
+              "Meno disastro: {new}.⚡",
+              "Fuori dal nero, ma piano.⚡",
+              "Un passo verso la luce: {new}.⚡"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}.⚡",
-              "🟢 Dal nero al verde… ok, bravi.⚡",
-              "🟢 Resurrezione: Barcy {new}.⚡",
-              "🟢 Rientro top: {new}.⚡",
-              "🟢 Questa è la svolta: {new}.⚡"
+              "Miracolo: {old}→{new}.⚡",
+              "Dal nero al verde… ok, bravi.⚡",
+              "Resurrezione: Barcy {new}.⚡",
+              "Rientro top: {new}.⚡",
+              "Questa è la svolta: {new}.⚡"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}.⚡",
-              "🟢 Ok, verde diretto: {new}.⚡",
-              "🟢 Salvato tutto: {new}.⚡",
-              "🟢 Da bomba a chill: {new}.⚡",
-              "🟢 Grande rientro: {new}.⚡"
+              "Recupero clamoroso: {old}→{new}.⚡",
+              "Ok, verde diretto: {new}.⚡",
+              "Salvato tutto: {new}.⚡",
+              "Da bomba a chill: {new}.⚡",
+              "Grande rientro: {new}.⚡"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}.⚡",
-              "⚫ Ok no, nero. No no no, così non va.⚡",
-              "⚫ Crollo totale: {new}.⚡",
-              "⚫ Dal rosso al buio: {new}.⚡",
-              "⚫ Nero. Stop.⚡"
+              "Peggiora ancora: {old}→{new}.⚡",
+              "Ok no, nero. No no no, così non va.⚡",
+              "Crollo totale: {new}.⚡",
+              "Dal rosso al buio: {new}.⚡",
+              "Nero. Stop.⚡"
             ]
           }
         },
         "evening": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Stop. Adesso. Barcy vira {new}.⚡",
-              "🟡 Si sente la svolta: {new}.⚡",
-              "🟡 Ok, si ingiallisce. {new}.⚡",
-              "🟡 Ci risiamo: {new}.⚡",
-              "🟡 Vibes strane nell’aria… {new}.⚡"
+              "Stop. Adesso. Barcy vira {new}.⚡",
+              "Si sente la svolta: {new}.⚡",
+              "Ok, si ingiallisce. {new}.⚡",
+              "Ci risiamo: {new}.⚡",
+              "Vibes strane nell’aria… {new}.⚡"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Primo giallo oggi qui. Fermi tutti.⚡",
-              "🟡 Prima sfumatura gialla di oggi: {new}.⚡",
-              "🟡 Oggi si parte così: {new}.⚡",
-              "🟡 Segnalo: prima volta oggi in {new}.⚡",
-              "🟡 Ok, first yellow: {new}.⚡"
+              "Primo giallo oggi qui. Fermi tutti.⚡",
+              "Prima sfumatura gialla di oggi: {new}.⚡",
+              "Oggi si parte così: {new}.⚡",
+              "Segnalo: prima volta oggi in {new}.⚡",
+              "Ok, first yellow: {new}.⚡"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Si parte bene: Barcy {new}.⚡",
-              "🟢 Vibe pulita: {new}.⚡",
-              "🟢 Oggi iniziamo verdi e me lo godo.⚡",
-              "🟢 Ok, green mode attivo: {new}.⚡",
-              "🟢 Respiriamo: {new}.⚡"
+              "Si parte bene: Barcy {new}.⚡",
+              "Vibe pulita: {new}.⚡",
+              "Oggi iniziamo verdi e me lo godo.⚡",
+              "Ok, green mode attivo: {new}.⚡",
+              "Respiriamo: {new}.⚡"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima allerta rossa oggi. No no no, così non va.⚡",
-              "🔴 Ok raga, rosso: {old}→{new}.⚡",
-              "🔴 Tensione alta: Barcy {new}.⚡",
-              "🔴 Primo rosso oggi qui. Calma.⚡",
-              "🔴 Eccolo: rosso. {new}.⚡"
+              "Prima allerta rossa oggi. No no no, così non va.⚡",
+              "Ok raga, rosso: {old}→{new}.⚡",
+              "Tensione alta: Barcy {new}.⚡",
+              "Primo rosso oggi qui. Calma.⚡",
+              "Eccolo: rosso. {new}.⚡"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Primo nero oggi. Stop. Adesso.⚡",
-              "⚫ Siamo nel nero: {old}→{new}. Stop.⚡",
-              "⚫ Ok no, nero. Reset subito.⚡",
-              "⚫ Prima volta oggi nel buio: {new}.⚡",
-              "⚫ Nero today… non ci credo.⚡"
+              "Primo nero oggi. Stop. Adesso.⚡",
+              "Siamo nel nero: {old}→{new}. Stop.⚡",
+              "Ok no, nero. Reset subito.⚡",
+              "Prima volta oggi nel buio: {new}.⚡",
+              "Nero today… non ci credo.⚡"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso. Mi state facendo salire il sangue. {old}→{new}.⚡",
-              "🔴 Ok, si scalda male: {new}.⚡",
-              "🔴 Tono su: {old}→{new}.⚡",
-              "🔴 Eccoci: rosso. {new}.⚡",
-              "🔴 Brutta curva: {new}.⚡"
+              "Dal giallo al rosso. Mi state facendo salire il sangue. {old}→{new}.⚡",
+              "Ok, si scalda male: {new}.⚡",
+              "Tono su: {old}→{new}.⚡",
+              "Eccoci: rosso. {new}.⚡",
+              "Brutta curva: {new}.⚡"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero… Stop. Adesso. {old}→{new}.⚡",
-              "⚫ Skippone nel buio: {new}.⚡",
-              "⚫ Ok basta, nero: {new}.⚡",
-              "⚫ Non era il caso: {old}→{new}.⚡",
-              "⚫ Nero in arrivo… anzi, arrivato.⚡"
+              "Dal giallo al nero… Stop. Adesso. {old}→{new}.⚡",
+              "Skippone nel buio: {new}.⚡",
+              "Ok basta, nero: {new}.⚡",
+              "Non era il caso: {old}→{new}.⚡",
+              "Nero in arrivo… anzi, arrivato.⚡"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sbollisce un filo: {old}→{new}.⚡",
-              "🟡 Ok, meno peggio: {new}.⚡",
-              "🟡 Rientro parziale: {new}.⚡",
-              "🟡 Si scende di un gradino: {new}.⚡",
-              "🟡 Almeno non è più rosso: {new}.⚡"
+              "Si sbollisce un filo: {old}→{new}.⚡",
+              "Ok, meno peggio: {new}.⚡",
+              "Rientro parziale: {new}.⚡",
+              "Si scende di un gradino: {new}.⚡",
+              "Almeno non è più rosso: {new}.⚡"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro nel verde: {new}.⚡",
-              "🟢 Ok, sistemato: {new}.⚡",
-              "🟢 Vibe ripulita: Barcy {new}.⚡",
-              "🟢 Ci siamo: verde.⚡",
-              "🟢 Finalmente respiro: {new}.⚡"
+              "Rientro nel verde: {new}.⚡",
+              "Ok, sistemato: {new}.⚡",
+              "Vibe ripulita: Barcy {new}.⚡",
+              "Ci siamo: verde.⚡",
+              "Finalmente respiro: {new}.⚡"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora pesante: {old}→{new}.⚡",
-              "🔴 Ok, un passo su: {new}.⚡",
-              "🔴 Meno buio, più fuoco: {new}.⚡",
-              "🔴 Risalita ma occhio: {new}.⚡",
-              "🔴 Dal nero al rosso… comunque male.⚡"
+              "Fuori dal nero ma ancora pesante: {old}→{new}.⚡",
+              "Ok, un passo su: {new}.⚡",
+              "Meno buio, più fuoco: {new}.⚡",
+              "Risalita ma occhio: {new}.⚡",
+              "Dal nero al rosso… comunque male.⚡"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo: {old}→{new}.⚡",
-              "🟡 Ok, giallo: delicatezza.⚡",
-              "🟡 Meno disastro: {new}.⚡",
-              "🟡 Fuori dal nero, ma piano.⚡",
-              "🟡 Un passo verso la luce: {new}.⚡"
+              "Si risale un filo: {old}→{new}.⚡",
+              "Ok, giallo: delicatezza.⚡",
+              "Meno disastro: {new}.⚡",
+              "Fuori dal nero, ma piano.⚡",
+              "Un passo verso la luce: {new}.⚡"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: {old}→{new}.⚡",
-              "🟢 Dal nero al verde… ok, bravi.⚡",
-              "🟢 Resurrezione: Barcy {new}.⚡",
-              "🟢 Rientro top: {new}.⚡",
-              "🟢 Questa è la svolta: {new}.⚡"
+              "Miracolo: {old}→{new}.⚡",
+              "Dal nero al verde… ok, bravi.⚡",
+              "Resurrezione: Barcy {new}.⚡",
+              "Rientro top: {new}.⚡",
+              "Questa è la svolta: {new}.⚡"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero clamoroso: {old}→{new}.⚡",
-              "🟢 Ok, verde diretto: {new}.⚡",
-              "🟢 Salvato tutto: {new}.⚡",
-              "🟢 Da bomba a chill: {new}.⚡",
-              "🟢 Grande rientro: {new}.⚡"
+              "Recupero clamoroso: {old}→{new}.⚡",
+              "Ok, verde diretto: {new}.⚡",
+              "Salvato tutto: {new}.⚡",
+              "Da bomba a chill: {new}.⚡",
+              "Grande rientro: {new}.⚡"
             ],
             "ROSSO->NERO": [
-              "⚫ Peggiora ancora: {old}→{new}.⚡",
-              "⚫ Ok no, nero. No no no, così non va.⚡",
-              "⚫ Crollo totale: {new}.⚡",
-              "⚫ Dal rosso al buio: {new}.⚡",
-              "⚫ Nero. Stop.⚡"
+              "Peggiora ancora: {old}→{new}.⚡",
+              "Ok no, nero. No no no, così non va.⚡",
+              "Crollo totale: {new}.⚡",
+              "Dal rosso al buio: {new}.⚡",
+              "Nero. Stop.⚡"
             ]
           }
         }
@@ -1695,72 +1695,72 @@
         "t2": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 2º rosso oggi. Stop. Adesso.⚡",
-              "🔴 2 volte rosso oggi… basta punzecchiamenti.⚡",
-              "🔴 Rosso di nuovo (2º oggi). Riprendete fiato.⚡",
-              "🔴 Ok, 2º rosso oggi. Non sto bene.⚡",
-              "🔴 2º rosso: oggi state facendo troppo.⚡"
+              "2º rosso oggi. Stop. Adesso.⚡",
+              "2 volte rosso oggi… basta punzecchiamenti.⚡",
+              "Rosso di nuovo (2º oggi). Riprendete fiato.⚡",
+              "Ok, 2º rosso oggi. Non sto bene.⚡",
+              "2º rosso: oggi state facendo troppo.⚡"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 2º rosso oggi. Mi state facendo salire il sangue.⚡",
-              "🔴 2 volte rosso oggi… basta punzecchiamenti.⚡",
-              "🔴 Rosso di nuovo (2º oggi). Riprendete fiato.⚡",
-              "🔴 Ok, 2º rosso oggi. Non sto bene.⚡",
-              "🔴 2º rosso: oggi state facendo troppo.⚡"
+              "2º rosso oggi. Mi state facendo salire il sangue.⚡",
+              "2 volte rosso oggi… basta punzecchiamenti.⚡",
+              "Rosso di nuovo (2º oggi). Riprendete fiato.⚡",
+              "Ok, 2º rosso oggi. Non sto bene.⚡",
+              "2º rosso: oggi state facendo troppo.⚡"
             ]
           }
         },
         "t3": {
           "templates": {
             "VERDE->ROSSO": [
-              "🔴 3º rosso oggi. Ok basta, reset.⚡",
-              "🔴 3 volte rosso oggi… basta punzecchiamenti.⚡",
-              "🔴 Rosso di nuovo (3º oggi). Riprendete fiato.⚡",
-              "🔴 Ok, 3º rosso oggi. Non sto bene.⚡",
-              "🔴 3º rosso: oggi state facendo troppo.⚡"
+              "3º rosso oggi. Ok basta, reset.⚡",
+              "3 volte rosso oggi… basta punzecchiamenti.⚡",
+              "Rosso di nuovo (3º oggi). Riprendete fiato.⚡",
+              "Ok, 3º rosso oggi. Non sto bene.⚡",
+              "3º rosso: oggi state facendo troppo.⚡"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 3º rosso oggi. Stop. Adesso.⚡",
-              "🔴 3 volte rosso oggi… basta punzecchiamenti.⚡",
-              "🔴 Rosso di nuovo (3º oggi). Riprendete fiato.⚡",
-              "🔴 Ok, 3º rosso oggi. Non sto bene.⚡",
-              "🔴 3º rosso: oggi state facendo troppo.⚡"
+              "3º rosso oggi. Stop. Adesso.⚡",
+              "3 volte rosso oggi… basta punzecchiamenti.⚡",
+              "Rosso di nuovo (3º oggi). Riprendete fiato.⚡",
+              "Ok, 3º rosso oggi. Non sto bene.⚡",
+              "3º rosso: oggi state facendo troppo.⚡"
             ]
           }
         },
         "n2": {
           "templates": {
             "VERDE->NERO": [
-              "⚫ 2º nero oggi. No no no, così non va. Stop.⚡",
-              "⚫ Nero ancora (2º oggi). Reset totale.⚡",
-              "⚫ 2 volte nel nero oggi… pausa vera.⚡",
-              "⚫ Ok, 2º nero oggi. Basta.⚡",
-              "⚫ 2º nero: oggi è pesante.⚡"
+              "2º nero oggi. No no no, così non va. Stop.⚡",
+              "Nero ancora (2º oggi). Reset totale.⚡",
+              "2 volte nel nero oggi… pausa vera.⚡",
+              "Ok, 2º nero oggi. Basta.⚡",
+              "2º nero: oggi è pesante.⚡"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ 2º nero oggi. No no no, così non va. Stop.⚡",
-              "⚫ Nero ancora (2º oggi). Reset totale.⚡",
-              "⚫ 2 volte nel nero oggi… pausa vera.⚡",
-              "⚫ Ok, 2º nero oggi. Basta.⚡",
-              "⚫ 2º nero: oggi è pesante.⚡"
+              "2º nero oggi. No no no, così non va. Stop.⚡",
+              "Nero ancora (2º oggi). Reset totale.⚡",
+              "2 volte nel nero oggi… pausa vera.⚡",
+              "Ok, 2º nero oggi. Basta.⚡",
+              "2º nero: oggi è pesante.⚡"
             ]
           }
         },
         "n3": {
           "templates": {
             "VERDE->NERO": [
-              "⚫ 3º nero oggi. No no no, così non va. Stop.⚡",
-              "⚫ Nero ancora (3º oggi). Reset totale.⚡",
-              "⚫ 3 volte nel nero oggi… pausa vera.⚡",
-              "⚫ Ok, 3º nero oggi. Basta.⚡",
-              "⚫ 3º nero: oggi è pesante.⚡"
+              "3º nero oggi. No no no, così non va. Stop.⚡",
+              "Nero ancora (3º oggi). Reset totale.⚡",
+              "3 volte nel nero oggi… pausa vera.⚡",
+              "Ok, 3º nero oggi. Basta.⚡",
+              "3º nero: oggi è pesante.⚡"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ 3º nero oggi. Mi state facendo salire il sangue. Stop.⚡",
-              "⚫ Nero ancora (3º oggi). Reset totale.⚡",
-              "⚫ 3 volte nel nero oggi… pausa vera.⚡",
-              "⚫ Ok, 3º nero oggi. Basta.⚡",
-              "⚫ 3º nero: oggi è pesante.⚡"
+              "3º nero oggi. Mi state facendo salire il sangue. Stop.⚡",
+              "Nero ancora (3º oggi). Reset totale.⚡",
+              "3 volte nel nero oggi… pausa vera.⚡",
+              "Ok, 3º nero oggi. Basta.⚡",
+              "3º nero: oggi è pesante.⚡"
             ]
           }
         }
@@ -1775,100 +1775,100 @@
         "chill": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Dal ‘coccodè’ dolce alle beccatine… calma. {new}. 🐔",
-              "🟡 Piume che si alzano: niente provocazioni. {new}. 🐔",
-              "🟡 State iniziando a beccarvi: abbassate. {new}. 🐔",
-              "🟡 Ok polle, niente zizzania in coop. {new}. 🐔"
+              "Dal ‘coccodè’ dolce alle beccatine… calma. {new}. 🐔",
+              "Piume che si alzano: niente provocazioni. {new}. 🐔",
+              "State iniziando a beccarvi: abbassate. {new}. 🐔",
+              "Ok polle, niente zizzania in coop. {new}. 🐔"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Prime beccate leggere… polle, calma. {new}. 🐔",
-              "🟡 Piume un po’ arruffate, evitiamo il pollodramma. {new}. 🐔",
-              "🟡 Si sente un ‘coccodè’ pungente… toni bassi. {new}. 🐔",
-              "🟡 State beccando a caso: focus e gentilezza. {new}. 🐔"
+              "Prime beccate leggere… polle, calma. {new}. 🐔",
+              "Piume un po’ arruffate, evitiamo il pollodramma. {new}. 🐔",
+              "Si sente un ‘coccodè’ pungente… toni bassi. {new}. 🐔",
+              "State beccando a caso: focus e gentilezza. {new}. 🐔"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Polle educate e piume lisce. Si razzola bene. {new}. 🐔",
-              "🟢 Oggi le galline fanno le brave, niente beccate. {new}. 🐔",
-              "🟢 Clima da pollaio felice: chioccii soft e zero drama. {new}. 🐔",
-              "🟢 Ok polle, restiamo in coop mode. {new}. 🐔"
+              "Polle educate e piume lisce. Si razzola bene. {new}. 🐔",
+              "Oggi le galline fanno le brave, niente beccate. {new}. 🐔",
+              "Clima da pollaio felice: chioccii soft e zero drama. {new}. 🐔",
+              "Ok polle, restiamo in coop mode. {new}. 🐔"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Prima rissa da pollaio oggi. Stop beccate. {old}→{new}. 🐔",
-              "🔴 Qui volano piume… polle, riprendetevi. {new}. 🐔",
-              "🔴 Beccate pesanti, rischio ‘pollo fritto’. {old}→{new}. 🐔",
-              "🔴 State facendo le galline cattive: reset. {new}. 🐔"
+              "Prima rissa da pollaio oggi. Stop beccate. {old}→{new}. 🐔",
+              "Qui volano piume… polle, riprendetevi. {new}. 🐔",
+              "Beccate pesanti, rischio ‘pollo fritto’. {old}→{new}. 🐔",
+              "State facendo le galline cattive: reset. {new}. 🐔"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Buio nel pollaio. Gabbia chiusa, basta casino. {old}→{new}. 🐔",
-              "⚫ Avete trasformato le polle in avvoltoi… pausa. {new}. 🐔",
-              "⚫ Qui non è più pollaio, è mattatoio. Stop. {old}→{new}. 🐔",
-              "⚫ Piume ovunque e toni fuori controllo. {new}. 🐔"
+              "Buio nel pollaio. Gabbia chiusa, basta casino. {old}→{new}. 🐔",
+              "Avete trasformato le polle in avvoltoi… pausa. {new}. 🐔",
+              "Qui non è più pollaio, è mattatoio. Stop. {old}→{new}. 🐔",
+              "Piume ovunque e toni fuori controllo. {new}. 🐔"
             ],
             "VERDE->ROSSO": [
-              "🔴 Escalation da pollaio in 3 secondi. {old}→{new}. 🐔",
-              "🔴 Da vibe pulita a rissa di galline… no. {old}→{new}. 🐔",
-              "🔴 Beccate cattive, volano piume. {new}. 🐔",
-              "🔴 Polle, fermatevi prima che bruci tutto. {new}. 🐔"
+              "Escalation da pollaio in 3 secondi. {old}→{new}. 🐔",
+              "Da vibe pulita a rissa di galline… no. {old}→{new}. 🐔",
+              "Beccate cattive, volano piume. {new}. 🐔",
+              "Polle, fermatevi prima che bruci tutto. {new}. 🐔"
             ],
             "VERDE->NERO": [
-              "⚫ Da verde al blackout: pollodramma estremo. {old}→{new}. 🐔",
-              "⚫ Avete buttato giù il pollaio con le beccate. {new}. 🐔",
-              "⚫ Qui è degenerato malissimo. {old}→{new}. 🐔",
-              "⚫ Stop totale, gabbia chiusa. {new}. 🐔"
+              "Da verde al blackout: pollodramma estremo. {old}→{new}. 🐔",
+              "Avete buttato giù il pollaio con le beccate. {new}. 🐔",
+              "Qui è degenerato malissimo. {old}→{new}. 🐔",
+              "Stop totale, gabbia chiusa. {new}. 🐔"
             ],
             "GIALLO->VERDE": [
-              "🟢 Brave polle, beccate finite. Si torna a razzolare bene. {new}. 🐔",
-              "🟢 Piume lisce di nuovo, chill ripristinato. {new}. 🐔",
-              "🟢 Ok, pollodramma disinnescato. {new}. 🐔",
-              "🟢 Coop mode on, continuate così. {new}. 🐔"
+              "Brave polle, beccate finite. Si torna a razzolare bene. {new}. 🐔",
+              "Piume lisce di nuovo, chill ripristinato. {new}. 🐔",
+              "Ok, pollodramma disinnescato. {new}. 🐔",
+              "Coop mode on, continuate così. {new}. 🐔"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Da beccatine a beccate pesanti… eh no. {old}→{new}. 🐔",
-              "🔴 Polle, state facendo la rissa. {new}. 🐔",
-              "🔴 Piume che volano, toni che tagliano. {old}→{new}. 🐔",
-              "🔴 Basta punzecchiamenti, state degenerando. {new}. 🐔"
+              "Da beccatine a beccate pesanti… eh no. {old}→{new}. 🐔",
+              "Polle, state facendo la rissa. {new}. 🐔",
+              "Piume che volano, toni che tagliano. {old}→{new}. 🐔",
+              "Basta punzecchiamenti, state degenerando. {new}. 🐔"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al buio: pollaio impazzito. {old}→{new}. 🐔",
-              "⚫ Beccate fuori controllo, stop immediato. {new}. 🐔",
-              "⚫ Qui è collassato tutto. {old}→{new}. 🐔",
-              "⚫ Gabbia chiusa, basta drama. {new}. 🐔"
+              "Dal giallo al buio: pollaio impazzito. {old}→{new}. 🐔",
+              "Beccate fuori controllo, stop immediato. {new}. 🐔",
+              "Qui è collassato tutto. {old}→{new}. 🐔",
+              "Gabbia chiusa, basta drama. {new}. 🐔"
             ],
             "ROSSO->VERDE": [
-              "🟢 Rientro pulito, piume rimesse a posto. {old}→{new}. 🐔",
-              "🟢 Da rissa a coop mode: polle promosse. {new}. 🐔",
-              "🟢 Ok, avete disinnescato la beccata. {old}→{new}. 🐔",
-              "🟢 Pollodramma archiviato, avanti così. {new}. 🐔"
+              "Rientro pulito, piume rimesse a posto. {old}→{new}. 🐔",
+              "Da rissa a coop mode: polle promosse. {new}. 🐔",
+              "Ok, avete disinnescato la beccata. {old}→{new}. 🐔",
+              "Pollodramma archiviato, avanti così. {new}. 🐔"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Meno piume per aria… ma non ricadiamo. {old}→{new}. 🐔",
-              "🟡 Rientra un filo la rissa, toni più soft. {new}. 🐔",
-              "🟡 Ok, beccate rallentate. {old}→{new}. 🐔",
-              "🟡 Respiriamo e stop punzecchiamenti. {new}. 🐔"
+              "Meno piume per aria… ma non ricadiamo. {old}→{new}. 🐔",
+              "Rientra un filo la rissa, toni più soft. {new}. 🐔",
+              "Ok, beccate rallentate. {old}→{new}. 🐔",
+              "Respiriamo e stop punzecchiamenti. {new}. 🐔"
             ],
             "ROSSO->NERO": [
-              "⚫ Dal rosso al nero: pollaio in fiamme. {old}→{new}. 🐔",
-              "⚫ Rissa totale, qui si chiude. {new}. 🐔",
-              "⚫ Avete spaccato tutto con le beccate. {old}→{new}. 🐔",
-              "⚫ Stop e silenzio, basta. {new}. 🐔"
+              "Dal rosso al nero: pollaio in fiamme. {old}→{new}. 🐔",
+              "Rissa totale, qui si chiude. {new}. 🐔",
+              "Avete spaccato tutto con le beccate. {old}→{new}. 🐔",
+              "Stop e silenzio, basta. {new}. 🐔"
             ],
             "NERO->VERDE": [
-              "🟢 Miracolo: pollaio ripulito e piume a posto. {old}→{new}. 🐔",
-              "🟢 Da buio totale a coop: polle, bravi. {new}. 🐔",
-              "🟢 Reset riuscito, si razzola bene. {old}→{new}. 🐔",
-              "🟢 Ok, ripartiamo senza beccate. {new}. 🐔"
+              "Miracolo: pollaio ripulito e piume a posto. {old}→{new}. 🐔",
+              "Da buio totale a coop: polle, bravi. {new}. 🐔",
+              "Reset riuscito, si razzola bene. {old}→{new}. 🐔",
+              "Ok, ripartiamo senza beccate. {new}. 🐔"
             ],
             "NERO->GIALLO": [
-              "🟡 Si vede un filo di luce… piano polle. {old}→{new}. 🐔",
-              "🟡 Ok, meno buio, ma niente beccate. {new}. 🐔",
-              "🟡 Rientro timido: piume giù e toni soft. {old}→{new}. 🐔",
-              "🟡 Calma e ricostruiamo il pollaio. {new}. 🐔"
+              "Si vede un filo di luce… piano polle. {old}→{new}. 🐔",
+              "Ok, meno buio, ma niente beccate. {new}. 🐔",
+              "Rientro timido: piume giù e toni soft. {old}→{new}. 🐔",
+              "Calma e ricostruiamo il pollaio. {new}. 🐔"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora rissa. {old}→{new}. 🐔",
-              "🔴 Ok, un pelo meglio… ma state ancora beccando. {new}. 🐔",
-              "🔴 Toni ancora pesanti, polle. {old}→{new}. 🐔",
-              "🔴 Non è finita: niente provocazioni. {new}. 🐔"
+              "Fuori dal nero ma ancora rissa. {old}→{new}. 🐔",
+              "Ok, un pelo meglio… ma state ancora beccando. {new}. 🐔",
+              "Toni ancora pesanti, polle. {old}→{new}. 🐔",
+              "Non è finita: niente provocazioni. {new}. 🐔"
             ]
           }
         }
@@ -1881,100 +1881,100 @@
         "chill": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Da call chill a chi parla sopra… occhio. {new}. 🐄",
-              "🟡 Pascolo meno morbido: toni su. {new}. 🐄",
-              "🟡 Iniziano i “no ma ascolta” in loop. Piano. {new}. 🐄",
-              "🟡 Una alla volta, polle. {new}. 🐄"
+              "Da call chill a chi parla sopra… occhio. {new}. 🐄",
+              "Pascolo meno morbido: toni su. {new}. 🐄",
+              "Iniziano i “no ma ascolta” in loop. Piano. {new}. 🐄",
+              "Una alla volta, polle. {new}. 🐄"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 In call iniziano le frizioni… una alla volta. {new}. 🐄",
-              "🟡 Pascolo un po’ spinoso: interrompersi meno. {new}. 🐄",
-              "🟡 Si pascola male: toni che salgono in voice. {new}. 🐄",
-              "🟡 Troppe polle che parlano sopra: rallentate. {new}. 🐄"
+              "In call iniziano le frizioni… una alla volta. {new}. 🐄",
+              "Pascolo un po’ spinoso: interrompersi meno. {new}. 🐄",
+              "Si pascola male: toni che salgono in voice. {new}. 🐄",
+              "Troppe polle che parlano sopra: rallentate. {new}. 🐄"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Chiamata serena, pascolo morbido tra polle e verificate. {new}. 🐄",
-              "🟢 Si pascola bene: voci chill e zero scazzi. {new}. 🐄",
-              "🟢 Oggi qui si razzola male ma con rispetto 😌 {new}. 🐄",
-              "🟢 Clima tranquillo in voice, continuate così. {new}. 🐄"
+              "Chiamata serena, pascolo morbido tra polle e verificate. {new}. 🐄",
+              "Si pascola bene: voci chill e zero scazzi. {new}. 🐄",
+              "Oggi qui si razzola male ma con rispetto 😌 {new}. 🐄",
+              "Clima tranquillo in voice, continuate così. {new}. 🐄"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Call rovente. Uno parla, gli altri ascoltano. {old}→{new}. 🐄",
-              "🔴 Qui si pascola malissimo: toni aggressivi in voice. {new}. 🐄",
-              "🔴 State trasformando la call in arena. {old}→{new}. 🐄",
-              "🔴 Stop sovrapposizioni e frecciatine. {new}. 🐄"
+              "Call rovente. Uno parla, gli altri ascoltano. {old}→{new}. 🐄",
+              "Qui si pascola malissimo: toni aggressivi in voice. {new}. 🐄",
+              "State trasformando la call in arena. {old}→{new}. 🐄",
+              "Stop sovrapposizioni e frecciatine. {new}. 🐄"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Nero in call. Pascolo devastato, pausa subito. {old}→{new}. 🐄",
-              "⚫ Qui è degenerato in voice, serve reset. {new}. 🐄",
-              "⚫ Pascolo tossico: mute mentale e respirate. {old}→{new}. 🐄",
-              "⚫ Basta, la call sta facendo danni. {new}. 🐄"
+              "Nero in call. Pascolo devastato, pausa subito. {old}→{new}. 🐄",
+              "Qui è degenerato in voice, serve reset. {new}. 🐄",
+              "Pascolo tossico: mute mentale e respirate. {old}→{new}. 🐄",
+              "Basta, la call sta facendo danni. {new}. 🐄"
             ],
             "VERDE->ROSSO": [
-              "🔴 Escalation in call: frenate ora. {old}→{new}. 🐄",
-              "🔴 Da pascolo sereno a pascolo di guerra. {old}→{new}. 🐄",
-              "🔴 State litigando in voice, basta. {new}. 🐄",
-              "🔴 Stop toni, stop sovrapposizioni. {new}. 🐄"
+              "Escalation in call: frenate ora. {old}→{new}. 🐄",
+              "Da pascolo sereno a pascolo di guerra. {old}→{new}. 🐄",
+              "State litigando in voice, basta. {new}. 🐄",
+              "Stop toni, stop sovrapposizioni. {new}. 🐄"
             ],
             "VERDE->NERO": [
-              "⚫ Da verde a nero… call esplosa. {old}→{new}. 🐄",
-              "⚫ Pascolo distrutto: serve silenzio e reset. {new}. 🐄",
-              "⚫ Qui è successo “il peggio” in voice. {old}→{new}. 🐄",
-              "⚫ Stop, chiudiamo la deriva. {new}. 🐄"
+              "Da verde a nero… call esplosa. {old}→{new}. 🐄",
+              "Pascolo distrutto: serve silenzio e reset. {new}. 🐄",
+              "Qui è successo “il peggio” in voice. {old}→{new}. 🐄",
+              "Stop, chiudiamo la deriva. {new}. 🐄"
             ],
             "GIALLO->VERDE": [
-              "🟢 Rientro in chill: call ordinata, bravi. {new}. 🐄",
-              "🟢 Pascolo di nuovo morbido, si parla bene. {new}. 🐄",
-              "🟢 Ok, frizioni spente. {new}. 🐄",
-              "🟢 Così sì: una alla volta e rispetto. {new}. 🐄"
+              "Rientro in chill: call ordinata, bravi. {new}. 🐄",
+              "Pascolo di nuovo morbido, si parla bene. {new}. 🐄",
+              "Ok, frizioni spente. {new}. 🐄",
+              "Così sì: una alla volta e rispetto. {new}. 🐄"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal giallo al rosso: call che scotta. {old}→{new}. 🐄",
-              "🔴 Toni su in voice, frenate. {new}. 🐄",
-              "🔴 Pascolo cattivo: frecciatine e overlap. {old}→{new}. 🐄",
-              "🔴 Stop, state rovinando la chiamata. {new}. 🐄"
+              "Dal giallo al rosso: call che scotta. {old}→{new}. 🐄",
+              "Toni su in voice, frenate. {new}. 🐄",
+              "Pascolo cattivo: frecciatine e overlap. {old}→{new}. 🐄",
+              "Stop, state rovinando la chiamata. {new}. 🐄"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero: call implosa. {old}→{new}. 🐄",
-              "⚫ Pascolo nerissimo: pausa e reset. {new}. 🐄",
-              "⚫ Qui si pascola malissimo davvero. {old}→{new}. 🐄",
-              "⚫ Basta, fermate tutto. {new}. 🐄"
+              "Dal giallo al nero: call implosa. {old}→{new}. 🐄",
+              "Pascolo nerissimo: pausa e reset. {new}. 🐄",
+              "Qui si pascola malissimo davvero. {old}→{new}. 🐄",
+              "Basta, fermate tutto. {new}. 🐄"
             ],
             "ROSSO->VERDE": [
-              "🟢 Rientro pulito: da arena a call chill. {old}→{new}. 🐄",
-              "🟢 Avete salvato la chiamata, gg. {new}. 🐄",
-              "🟢 Ok, pascolo ripristinato. {old}→{new}. 🐄",
-              "🟢 Così si pascola: rispetto e turni. {new}. 🐄"
+              "Rientro pulito: da arena a call chill. {old}→{new}. 🐄",
+              "Avete salvato la chiamata, gg. {new}. 🐄",
+              "Ok, pascolo ripristinato. {old}→{new}. 🐄",
+              "Così si pascola: rispetto e turni. {new}. 🐄"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si raffredda un po’ la call… non ricadiamo. {old}→{new}. 🐄",
-              "🟡 Meno overlap, meglio. {new}. 🐄",
-              "🟡 Ok, rientra la tensione, ma piano. {old}→{new}. 🐄",
-              "🟡 Restiamo ordinati in voice. {new}. 🐄"
+              "Si raffredda un po’ la call… non ricadiamo. {old}→{new}. 🐄",
+              "Meno overlap, meglio. {new}. 🐄",
+              "Ok, rientra la tensione, ma piano. {old}→{new}. 🐄",
+              "Restiamo ordinati in voice. {new}. 🐄"
             ],
             "ROSSO->NERO": [
-              "⚫ Dal rosso al nero: call distruttiva. {old}→{new}. 🐄",
-              "⚫ Pascolo bruciato: stop immediato. {new}. 🐄",
-              "⚫ Qui si è rotto tutto in voice. {old}→{new}. 🐄",
-              "⚫ Basta, reset. {new}. 🐄"
+              "Dal rosso al nero: call distruttiva. {old}→{new}. 🐄",
+              "Pascolo bruciato: stop immediato. {new}. 🐄",
+              "Qui si è rotto tutto in voice. {old}→{new}. 🐄",
+              "Basta, reset. {new}. 🐄"
             ],
             "NERO->VERDE": [
-              "🟢 Dal nero al verde: call ripulita, bravi. {old}→{new}. 🐄",
-              "🟢 Pascolo di nuovo safe, si pascola bene. {new}. 🐄",
-              "🟢 Reset riuscito, gg in voice. {old}→{new}. 🐄",
-              "🟢 Ok, torniamo a chiacchierare bene. {new}. 🐄"
+              "Dal nero al verde: call ripulita, bravi. {old}→{new}. 🐄",
+              "Pascolo di nuovo safe, si pascola bene. {new}. 🐄",
+              "Reset riuscito, gg in voice. {old}→{new}. 🐄",
+              "Ok, torniamo a chiacchierare bene. {new}. 🐄"
             ],
             "NERO->GIALLO": [
-              "🟡 Si risale un filo… ma la call è fragile. {old}→{new}. 🐄",
-              "🟡 Ok, un passo avanti: turni e calma. {new}. 🐄",
-              "🟡 Pascolo meno nero, ma attenzione. {old}→{new}. 🐄",
-              "🟡 Piano con le parole in voice. {new}. 🐄"
+              "Si risale un filo… ma la call è fragile. {old}→{new}. 🐄",
+              "Ok, un passo avanti: turni e calma. {new}. 🐄",
+              "Pascolo meno nero, ma attenzione. {old}→{new}. 🐄",
+              "Piano con le parole in voice. {new}. 🐄"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora velenosa la call. {old}→{new}. 🐄",
-              "🔴 Meglio di niente, ma toni ancora su. {new}. 🐄",
-              "🔴 Pascolo ancora cattivo, state attenti. {old}→{new}. 🐄",
-              "🔴 Non riaccendete la bomba in call. {new}. 🐄"
+              "Fuori dal nero ma ancora velenosa la call. {old}→{new}. 🐄",
+              "Meglio di niente, ma toni ancora su. {new}. 🐄",
+              "Pascolo ancora cattivo, state attenti. {old}→{new}. 🐄",
+              "Non riaccendete la bomba in call. {new}. 🐄"
             ]
           }
         }
@@ -1987,100 +1987,100 @@
         "chill": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Da chill a scazzo leggero… occhio. {new}. 🛋️",
-              "🟡 Si sta alzando il tono nello sfogo. {new}. 🛋️",
-              "🟡 Confidenza alta, ma niente frecciatine. {new}. 🛋️",
-              "🟡 Raga piano, non facciamola diventare pesante. {new}. 🛋️"
+              "Da chill a scazzo leggero… occhio. {new}. 🛋️",
+              "Si sta alzando il tono nello sfogo. {new}. 🛋️",
+              "Confidenza alta, ma niente frecciatine. {new}. 🛋️",
+              "Raga piano, non facciamola diventare pesante. {new}. 🛋️"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 Eh, si sente nervosetto… cricetine, piano coi toni. {new}. 🛋️",
-              "🟡 Confidenza sì, ma non iniziamo a pungerci. {new}. 🛋️",
-              "🟡 Sfogo ok, però senza scaricare addosso agli altri. {new}. 🛋️",
-              "🟡 State scivolando nello scazzo. Respiriamo. {new}. 🛋️"
+              "Eh, si sente nervosetto… cricetine, piano coi toni. {new}. 🛋️",
+              "Confidenza sì, ma non iniziamo a pungerci. {new}. 🛋️",
+              "Sfogo ok, però senza scaricare addosso agli altri. {new}. 🛋️",
+              "State scivolando nello scazzo. Respiriamo. {new}. 🛋️"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Cricetine in confidenza, chiacchiera pulita. {new}. 🛋️",
-              "🟢 Vibe intima e safe, sfoghi ok. {new}. 🛋️",
-              "🟢 Si sta bene: coccole e verità senza ferire. {new}. 🛋️",
-              "🟢 Green pieno, continuate a parlarvi bene. {new}. 🛋️"
+              "Cricetine in confidenza, chiacchiera pulita. {new}. 🛋️",
+              "Vibe intima e safe, sfoghi ok. {new}. 🛋️",
+              "Si sta bene: coccole e verità senza ferire. {new}. 🛋️",
+              "Green pieno, continuate a parlarvi bene. {new}. 🛋️"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Raga no, qui stiamo esagerando. {old}→{new}. 🛋️",
-              "🔴 Confidenza ≠ cattiveria. Frenate. {new}. 🛋️",
-              "🔴 Toni troppo pesanti nello sfogo. {old}→{new}. 🛋️",
-              "🔴 State andando di brutto, abbassate. {new}. 🛋️"
+              "Raga no, qui stiamo esagerando. {old}→{new}. 🛋️",
+              "Confidenza ≠ cattiveria. Frenate. {new}. 🛋️",
+              "Toni troppo pesanti nello sfogo. {old}→{new}. 🛋️",
+              "State andando di brutto, abbassate. {new}. 🛋️"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Ok basta, qui è diventata una merda. Stop. {old}→{new}. 🛋️",
-              "⚫ Confidenza sì ma così vi fate male. Reset. {new}. 🛋️",
-              "⚫ Nero pieno: toni fuori controllo. Pausa. {old}→{new}. 🛋️",
-              "⚫ Chiudiamo lo scazzo prima che esploda tutto. {new}. 🛋️"
+              "Ok basta, qui è diventata una merda. Stop. {old}→{new}. 🛋️",
+              "Confidenza sì ma così vi fate male. Reset. {new}. 🛋️",
+              "Nero pieno: toni fuori controllo. Pausa. {old}→{new}. 🛋️",
+              "Chiudiamo lo scazzo prima che esploda tutto. {new}. 🛋️"
             ],
             "VERDE->ROSSO": [
-              "🔴 Escalation secca. Stop parole a caso. {old}→{new}. 🛋️",
-              "🔴 Da intimo a velenoso… no. {old}→{new}. 🛋️",
-              "🔴 State facendo male con la confidenza. {new}. 🛋️",
-              "🔴 Abbassate subito, raga. {new}. 🛋️"
+              "Escalation secca. Stop parole a caso. {old}→{new}. 🛋️",
+              "Da intimo a velenoso… no. {old}→{new}. 🛋️",
+              "State facendo male con la confidenza. {new}. 🛋️",
+              "Abbassate subito, raga. {new}. 🛋️"
             ],
             "VERDE->NERO": [
-              "⚫ Da verde a nero… che disastro. {old}→{new}. 🛋️",
-              "⚫ Confidenza finita male, stop. {new}. 🛋️",
-              "⚫ Qui è esploso lo sfogo. Pausa ora. {old}→{new}. 🛋️",
-              "⚫ Basta, reset totale. {new}. 🛋️"
+              "Da verde a nero… che disastro. {old}→{new}. 🛋️",
+              "Confidenza finita male, stop. {new}. 🛋️",
+              "Qui è esploso lo sfogo. Pausa ora. {old}→{new}. 🛋️",
+              "Basta, reset totale. {new}. 🛋️"
             ],
             "GIALLO->VERDE": [
-              "🟢 Ok, rientro. Ci voleva. {new}. 🛋️",
-              "🟢 Bravi, sfogo gestito senza farvi male. {new}. 🛋️",
-              "🟢 Tornata la vibe safe tra cricetine. {new}. 🛋️",
-              "🟢 Così sì, confidenza buona. {new}. 🛋️"
+              "Ok, rientro. Ci voleva. {new}. 🛋️",
+              "Bravi, sfogo gestito senza farvi male. {new}. 🛋️",
+              "Tornata la vibe safe tra cricetine. {new}. 🛋️",
+              "Così sì, confidenza buona. {new}. 🛋️"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal nervoso allo scazzo serio. Frenate. {old}→{new}. 🛋️",
-              "🔴 Raga state andando pesante. {new}. 🛋️",
-              "🔴 Frecciatine e nervi: stop. {old}→{new}. 🛋️",
-              "🔴 Abbassate i toni, subito. {new}. 🛋️"
+              "Dal nervoso allo scazzo serio. Frenate. {old}→{new}. 🛋️",
+              "Raga state andando pesante. {new}. 🛋️",
+              "Frecciatine e nervi: stop. {old}→{new}. 🛋️",
+              "Abbassate i toni, subito. {new}. 🛋️"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero: vi state facendo male. {old}→{new}. 🛋️",
-              "⚫ Qui è degenerata male. Pausa. {new}. 🛋️",
-              "⚫ Scazzo totale, stop e reset. {old}→{new}. 🛋️",
-              "⚫ Basta così, chiudiamola qui. {new}. 🛋️"
+              "Dal giallo al nero: vi state facendo male. {old}→{new}. 🛋️",
+              "Qui è degenerata male. Pausa. {new}. 🛋️",
+              "Scazzo totale, stop e reset. {old}→{new}. 🛋️",
+              "Basta così, chiudiamola qui. {new}. 🛋️"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero top. Vi voglio bene, cricetine. {old}→{new}. 🛋️",
-              "🟢 Da scazzo a pace: gg. {new}. 🛋️",
-              "🟢 Ok, rientro safe. {old}→{new}. 🛋️",
-              "🟢 Così si fa, confidenza sana. {new}. 🛋️"
+              "Recupero top. Vi voglio bene, cricetine. {old}→{new}. 🛋️",
+              "Da scazzo a pace: gg. {new}. 🛋️",
+              "Ok, rientro safe. {old}→{new}. 🛋️",
+              "Così si fa, confidenza sana. {new}. 🛋️"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sgonfia lo scazzo… ma cauti. {old}→{new}. 🛋️",
-              "🟡 Ok, meno pesante. Non riaccendiamo. {new}. 🛋️",
-              "🟡 Rientra un filo, respiriamo. {old}→{new}. 🛋️",
-              "🟡 Stateci attenti con le parole. {new}. 🛋️"
+              "Si sgonfia lo scazzo… ma cauti. {old}→{new}. 🛋️",
+              "Ok, meno pesante. Non riaccendiamo. {new}. 🛋️",
+              "Rientra un filo, respiriamo. {old}→{new}. 🛋️",
+              "Stateci attenti con le parole. {new}. 🛋️"
             ],
             "ROSSO->NERO": [
-              "⚫ Dal rosso al nero… raga no. {old}→{new}. 🛋️",
-              "⚫ Qui si è rotto tutto. Pausa. {new}. 🛋️",
-              "⚫ Scazzo totale, stop immediato. {old}→{new}. 🛋️",
-              "⚫ Basta, ci si calma e poi si riparla. {new}. 🛋️"
+              "Dal rosso al nero… raga no. {old}→{new}. 🛋️",
+              "Qui si è rotto tutto. Pausa. {new}. 🛋️",
+              "Scazzo totale, stop immediato. {old}→{new}. 🛋️",
+              "Basta, ci si calma e poi si riparla. {new}. 🛋️"
             ],
             "NERO->VERDE": [
-              "🟢 Dal nero al verde… miracolo e maturità. {old}→{new}. 🛋️",
-              "🟢 Ok, ripulito tutto. Confidenza salva. {new}. 🛋️",
-              "🟢 Reset riuscito, cricetine. {old}→{new}. 🛋️",
-              "🟢 Rientro safe, avanti. {new}. 🛋️"
+              "Dal nero al verde… miracolo e maturità. {old}→{new}. 🛋️",
+              "Ok, ripulito tutto. Confidenza salva. {new}. 🛋️",
+              "Reset riuscito, cricetine. {old}→{new}. 🛋️",
+              "Rientro safe, avanti. {new}. 🛋️"
             ],
             "NERO->GIALLO": [
-              "🟡 Un passo fuori dal buio… piano raga. {old}→{new}. 🛋️",
-              "🟡 Ok, si risale, ma parole misurate. {new}. 🛋️",
-              "🟡 Meno nero, ma lo scazzo è lì. {old}→{new}. 🛋️",
-              "🟡 Cauti, non riapriamo la ferita. {new}. 🛋️"
+              "Un passo fuori dal buio… piano raga. {old}→{new}. 🛋️",
+              "Ok, si risale, ma parole misurate. {new}. 🛋️",
+              "Meno nero, ma lo scazzo è lì. {old}→{new}. 🛋️",
+              "Cauti, non riapriamo la ferita. {new}. 🛋️"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora teso. {old}→{new}. 🛋️",
-              "🔴 Meglio, ma non abbastanza. Calma. {new}. 🛋️",
-              "🔴 State ancora sul filo: niente frecciatine. {old}→{new}. 🛋️",
-              "🔴 Non ricadiamo nel disastro, raga. {new}. 🛋️"
+              "Fuori dal nero ma ancora teso. {old}→{new}. 🛋️",
+              "Meglio, ma non abbastanza. Calma. {new}. 🛋️",
+              "State ancora sul filo: niente frecciatine. {old}→{new}. 🛋️",
+              "Non ricadiamo nel disastro, raga. {new}. 🛋️"
             ]
           }
         }
@@ -2093,100 +2093,100 @@
         "chill": {
           "templates": {
             "VERDE->GIALLO": [
-              "🟡 Da call chill a scazzo leggero… occhio. {new}. 🎭",
-              "🟡 Toni che salgono al microfono. {new}. 🎭",
-              "🟡 Confidenza alta, ma niente frecciatine in voice. {new}. 🎭",
-              "🟡 Raga una alla volta, state overlapando. {new}. 🎭"
+              "Da call chill a scazzo leggero… occhio. {new}. 🎭",
+              "Toni che salgono al microfono. {new}. 🎭",
+              "Confidenza alta, ma niente frecciatine in voice. {new}. 🎭",
+              "Raga una alla volta, state overlapando. {new}. 🎭"
             ],
             "GIALLO_FIRST_TODAY": [
-              "🟡 In call sale il nervo… una alla volta. {new}. 🎭",
-              "🟡 Sfogo sì, ma non trasformiamolo in processo. {new}. 🎭",
-              "🟡 Toni un po’ troppo accesi al microfono. {new}. 🎭",
-              "🟡 Raga calma, state parlando sopra. {new}. 🎭"
+              "In call sale il nervo… una alla volta. {new}. 🎭",
+              "Sfogo sì, ma non trasformiamolo in processo. {new}. 🎭",
+              "Toni un po’ troppo accesi al microfono. {new}. 🎭",
+              "Raga calma, state parlando sopra. {new}. 🎭"
             ],
             "VERDE_FIRST_TODAY": [
-              "🟢 Call tra cricetine, sfoghi ok e vibe safe. {new}. 🎭",
-              "🟢 Microfoni aperti ma cuore leggero. {new}. 🎭",
-              "🟢 Si parla di tutto senza ferire. GG. {new}. 🎭",
-              "🟢 Chiamata pulita, confidenza gestita bene. {new}. 🎭"
+              "Call tra cricetine, sfoghi ok e vibe safe. {new}. 🎭",
+              "Microfoni aperti ma cuore leggero. {new}. 🎭",
+              "Si parla di tutto senza ferire. GG. {new}. 🎭",
+              "Chiamata pulita, confidenza gestita bene. {new}. 🎭"
             ],
             "ROSSO_FIRST_TODAY": [
-              "🔴 Call pesante. Stop accuse e tagliamo i toni. {old}→{new}. 🎭",
-              "🔴 Confidenza sta diventando cattiveria in voice. {new}. 🎭",
-              "🔴 Qui si stanno dicendo cose grosse. Frenate. {old}→{new}. 🎭",
-              "🔴 State esplodendo in chiamata, basta. {new}. 🎭"
+              "Call pesante. Stop accuse e tagliamo i toni. {old}→{new}. 🎭",
+              "Confidenza sta diventando cattiveria in voice. {new}. 🎭",
+              "Qui si stanno dicendo cose grosse. Frenate. {old}→{new}. 🎭",
+              "State esplodendo in chiamata, basta. {new}. 🎭"
             ],
             "NERO_FIRST_TODAY": [
-              "⚫ Ok basta, in call è un disastro. Pausa. {old}→{new}. 🎭",
-              "⚫ Qui sono successe le peggio cose. Reset subito. {new}. 🎭",
-              "⚫ Nero totale: parole che fanno male. Stop. {old}→{new}. 🎭",
-              "⚫ Chiudiamo i microfoni e respiriamo. {new}. 🎭"
+              "Ok basta, in call è un disastro. Pausa. {old}→{new}. 🎭",
+              "Qui sono successe le peggio cose. Reset subito. {new}. 🎭",
+              "Nero totale: parole che fanno male. Stop. {old}→{new}. 🎭",
+              "Chiudiamo i microfoni e respiriamo. {new}. 🎭"
             ],
             "VERDE->ROSSO": [
-              "🔴 Escalation in chiamata. Stop subito. {old}→{new}. 🎭",
-              "🔴 Da sfogo safe a veleno in voice… no. {old}→{new}. 🎭",
-              "🔴 State andando troppo pesante al microfono. {new}. 🎭",
-              "🔴 Frenate raga, prima che esploda tutto. {new}. 🎭"
+              "Escalation in chiamata. Stop subito. {old}→{new}. 🎭",
+              "Da sfogo safe a veleno in voice… no. {old}→{new}. 🎭",
+              "State andando troppo pesante al microfono. {new}. 🎭",
+              "Frenate raga, prima che esploda tutto. {new}. 🎭"
             ],
             "VERDE->NERO": [
-              "⚫ Da verde a nero… call esplosa male. {old}→{new}. 🎭",
-              "⚫ Peggio scenario: confidenza + voice = disastro. Stop. {new}. 🎭",
-              "⚫ Qui è successo ‘il peggio’ in diretta. Pausa ora. {old}→{new}. 🎭",
-              "⚫ Chiudiamo tutto e resettiamo. {new}. 🎭"
+              "Da verde a nero… call esplosa male. {old}→{new}. 🎭",
+              "Peggio scenario: confidenza + voice = disastro. Stop. {new}. 🎭",
+              "Qui è successo ‘il peggio’ in diretta. Pausa ora. {old}→{new}. 🎭",
+              "Chiudiamo tutto e resettiamo. {new}. 🎭"
             ],
             "GIALLO->VERDE": [
-              "🟢 Ok rientro: call di nuovo safe. {new}. 🎭",
-              "🟢 Bravi, sfogo gestito senza ferite. {new}. 🎭",
-              "🟢 Tornata la vibe buona in voice. {new}. 🎭",
-              "🟢 Così sì, confidenza sana anche al microfono. {new}. 🎭"
+              "Ok rientro: call di nuovo safe. {new}. 🎭",
+              "Bravi, sfogo gestito senza ferite. {new}. 🎭",
+              "Tornata la vibe buona in voice. {new}. 🎭",
+              "Così sì, confidenza sana anche al microfono. {new}. 🎭"
             ],
             "GIALLO->ROSSO": [
-              "🔴 Dal nervo allo scazzo serio in call. Frenate. {old}→{new}. 🎭",
-              "🔴 Raga state esagerando al microfono. {new}. 🎭",
-              "🔴 Accuse e toni su: stop. {old}→{new}. 🎭",
-              "🔴 Basta overlap e frecciate. {new}. 🎭"
+              "Dal nervo allo scazzo serio in call. Frenate. {old}→{new}. 🎭",
+              "Raga state esagerando al microfono. {new}. 🎭",
+              "Accuse e toni su: stop. {old}→{new}. 🎭",
+              "Basta overlap e frecciate. {new}. 🎭"
             ],
             "GIALLO->NERO": [
-              "⚫ Dal giallo al nero: call devastante. {old}→{new}. 🎭",
-              "⚫ Qui si sta facendo male davvero. Stop. {new}. 🎭",
-              "⚫ Scazzo totale in voice, reset. {old}→{new}. 🎭",
-              "⚫ Chiudiamo i microfoni, basta. {new}. 🎭"
+              "Dal giallo al nero: call devastante. {old}→{new}. 🎭",
+              "Qui si sta facendo male davvero. Stop. {new}. 🎭",
+              "Scazzo totale in voice, reset. {old}→{new}. 🎭",
+              "Chiudiamo i microfoni, basta. {new}. 🎭"
             ],
             "ROSSO->VERDE": [
-              "🟢 Recupero enorme: da call tossica a safe. {old}→{new}. 🎭",
-              "🟢 Pace fatta in voice, gg cricetine. {new}. 🎭",
-              "🟢 Ok, rientro completo. {old}→{new}. 🎭",
-              "🟢 Confidenza salva, chiamata salvata. {new}. 🎭"
+              "Recupero enorme: da call tossica a safe. {old}→{new}. 🎭",
+              "Pace fatta in voice, gg cricetine. {new}. 🎭",
+              "Ok, rientro completo. {old}→{new}. 🎭",
+              "Confidenza salva, chiamata salvata. {new}. 🎭"
             ],
             "ROSSO->GIALLO": [
-              "🟡 Si sgonfia lo scazzo… non ricadiamo. {old}→{new}. 🎭",
-              "🟡 Ok, meno pesante in call. Piano. {new}. 🎭",
-              "🟡 Rientra un filo, ma attenzione al microfono. {old}→{new}. 🎭",
-              "🟡 Stateci attenti con le parole, raga. {new}. 🎭"
+              "Si sgonfia lo scazzo… non ricadiamo. {old}→{new}. 🎭",
+              "Ok, meno pesante in call. Piano. {new}. 🎭",
+              "Rientra un filo, ma attenzione al microfono. {old}→{new}. 🎭",
+              "Stateci attenti con le parole, raga. {new}. 🎭"
             ],
             "ROSSO->NERO": [
-              "⚫ Dal rosso al nero… call rotta. Stop. {old}→{new}. 🎭",
-              "⚫ Qui è collassato tutto in voice. Pausa. {new}. 🎭",
-              "⚫ Parole troppo grosse, reset immediato. {old}→{new}. 🎭",
-              "⚫ Chiudiamo, ci calmiano e poi si riparla. {new}. 🎭"
+              "Dal rosso al nero… call rotta. Stop. {old}→{new}. 🎭",
+              "Qui è collassato tutto in voice. Pausa. {new}. 🎭",
+              "Parole troppo grosse, reset immediato. {old}→{new}. 🎭",
+              "Chiudiamo, ci calmiano e poi si riparla. {new}. 🎭"
             ],
             "NERO->VERDE": [
-              "🟢 Dal nero al verde… maturità in call. {old}→{new}. 🎭",
-              "🟢 Ok, ripulito tutto. Chiamata safe di nuovo. {new}. 🎭",
-              "🟢 Reset riuscito, cricetine. {old}→{new}. 🎭",
-              "🟢 Rientro completo, avanti. {new}. 🎭"
+              "Dal nero al verde… maturità in call. {old}→{new}. 🎭",
+              "Ok, ripulito tutto. Chiamata safe di nuovo. {new}. 🎭",
+              "Reset riuscito, cricetine. {old}→{new}. 🎭",
+              "Rientro completo, avanti. {new}. 🎭"
             ],
             "NERO->GIALLO": [
-              "🟡 Un passo fuori dal buio… piano in call. {old}→{new}. 🎭",
-              "🟡 Ok, si risale, ma toni misurati al microfono. {new}. 🎭",
-              "🟡 Meno nero, ma lo scazzo è lì. {old}→{new}. 🎭",
-              "🟡 Cauti, non riapriamo tutto in voice. {new}. 🎭"
+              "Un passo fuori dal buio… piano in call. {old}→{new}. 🎭",
+              "Ok, si risale, ma toni misurati al microfono. {new}. 🎭",
+              "Meno nero, ma lo scazzo è lì. {old}→{new}. 🎭",
+              "Cauti, non riapriamo tutto in voice. {new}. 🎭"
             ],
             "NERO->ROSSO": [
-              "🔴 Fuori dal nero ma ancora teso in call. {old}→{new}. 🎭",
-              "🔴 Meglio, ma toni ancora su. Calma. {new}. 🎭",
-              "🔴 Siete ancora sul filo: niente frecciate al microfono. {old}→{new}. 🎭",
-              "🔴 Non ricadiamo nel disastro, raga. {new}. 🎭"
+              "Fuori dal nero ma ancora teso in call. {old}→{new}. 🎭",
+              "Meglio, ma toni ancora su. Calma. {new}. 🎭",
+              "Siete ancora sul filo: niente frecciate al microfono. {old}→{new}. 🎭",
+              "Non ricadiamo nel disastro, raga. {new}. 🎭"
             ]
           }
         }
