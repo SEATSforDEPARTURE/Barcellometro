@@ -2849,6 +2849,12 @@ class TriggerEngineService:
         def as_utc(dt_local: datetime) -> datetime:
             return dt_local.astimezone(timezone.utc)
 
+        def single_day_window_from_local_day(day_start_local: datetime) -> tuple[datetime, datetime]:
+            """Return a fixed 24h UTC window anchored to the requested local day."""
+            start_utc = as_utc(day_start_local)
+            end_utc = start_utc + timedelta(days=1)
+            return start_utc, end_utc
+
         def finalize(start: datetime, end: datetime, label: str) -> tuple[datetime, datetime, str]:
             logger.info(
                 "qna time_range label=%s start=%s end=%s",
@@ -2872,13 +2878,14 @@ class TriggerEngineService:
             return finalize(now_utc - timedelta(days=days), now_utc, f"ultimi {days} giorni")
         if "l'altro ieri" in q or "l’altro ieri" in q:
             day_start = today_start - timedelta(days=2)
-            return finalize(as_utc(day_start), as_utc(day_start + timedelta(days=1)), "l'altro ieri")
+            start_utc, end_utc = single_day_window_from_local_day(day_start)
+            return finalize(start_utc, end_utc, "l'altro ieri")
         if (m := re.search(r"\b(\d{1,2})\s+giorni?\s+fa\b", q)):
             days = min(30, max(1, int(m.group(1))))
             day_start = today_start - timedelta(days=days)
-            day_end = day_start + timedelta(days=1)
             suffix = "giorno" if days == 1 else "giorni"
-            return finalize(as_utc(day_start), as_utc(day_end), f"{days} {suffix} fa")
+            start_utc, end_utc = single_day_window_from_local_day(day_start)
+            return finalize(start_utc, end_utc, f"{days} {suffix} fa")
         if "scorsa settimana" in q:
             week_start = today_start - timedelta(days=today_start.weekday(), weeks=1)
             return finalize(as_utc(week_start), as_utc(week_start + timedelta(days=7)), "scorsa settimana")
