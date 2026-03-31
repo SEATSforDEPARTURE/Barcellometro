@@ -43,6 +43,7 @@ cp settings/barcello_trigger.example.json settings/barcello_trigger.json
 
 - `ENTITLEMENTS_CONFIG_PATH` deve puntare a `settings/entitlements.json` se vuoi usare override locali.
 - I servizi Aura, Trigger e Greetings leggono i runtime file in `settings/*.json` e, quando previsto, fanno fallback automatico al corrispondente `settings/*.example.json`.
+- In particolare il trigger Barcello usa sempre `settings/barcello_trigger.example.json` come default completo quando `settings/barcello_trigger.json` manca o non è caricabile (es. JSON non valido).
 - Per evitare path duplicati nel codice Python, i riferimenti centralizzati stanno in `app/core/config_paths.py`.
 - Il namespace canonico per la configurazione di rendering centralizzata è `/embed`, non `/admin footer`: footer e author sono domini distinti ma centralizzati e seguono la precedenza `override servizio > globale > fallback`.
 - Il fallback author per servizio resta sempre `emoji servizio + nome servizio`; il reset deve tornare a questo fallback di dominio quando non esistono override o template globali.
