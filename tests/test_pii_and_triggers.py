@@ -51,12 +51,16 @@ def test_infer_time_range_days_ago_is_single_day_window(triggers_module) -> None
     start_dt, end_dt, label = _service(triggers_module).infer_time_range("Cosa ha detto 2 giorni fa?")
     assert label == "2 giorni fa"
     assert end_dt - start_dt == timedelta(days=1)
+    rome = ZoneInfo("Europe/Rome")
+    assert start_dt.astimezone(rome).date() == (datetime.now(rome) - timedelta(days=2)).date()
 
 
 def test_infer_time_range_altro_ieri_is_single_day_window(triggers_module) -> None:
     start_dt, end_dt, label = _service(triggers_module).infer_time_range("Cosa ha detto l'altro ieri?")
     assert label == "l'altro ieri"
     assert end_dt - start_dt == timedelta(days=1)
+    rome = ZoneInfo("Europe/Rome")
+    assert start_dt.astimezone(rome).date() == (datetime.now(rome) - timedelta(days=2)).date()
 
 
 def test_infer_time_range_hours_ago_window(triggers_module) -> None:
