@@ -32,6 +32,51 @@ NEGATIVE_KEYWORDS = [
     "tossico",
 ]
 
+PROFANITY_KEYWORDS = [
+    "cazzo",
+    "merda",
+    "stronzo",
+    "vaffanculo",
+    "porca",
+    "minchia",
+    "fanculo",
+]
+
+INSULT_KEYWORDS = [
+    "ridicolo",
+    "idiota",
+    "stupido",
+    "scemo",
+    "patetico",
+    "fallito",
+    "imbecille",
+]
+
+CALMING_KEYWORDS = [
+    "calma",
+    "tranquilli",
+    "non litigate",
+    "pace",
+    "respiriamo",
+    "chiudiamola qui",
+    "basta litigare",
+]
+
+VENTING_PATTERNS = [
+    r"\bio\b.*\b(sto|sono)\b.*\b(incazzat|nervos|esaust|stanch|arrabbiat)",
+    r"\bche giornat[ae]\b",
+    r"\bmi gira(no)?\b",
+]
+
+SECOND_PERSON_PATTERNS = [
+    r"\btu\b",
+    r"\bsei\b",
+    r"\bstai\b",
+    r"\bfai\b",
+    r"\bdici\b",
+    r"\bti\b",
+]
+
 DEFAULT_SCORE_WEIGHTS = {
     "msg_rate": {"threshold": 5, "scale": 2, "cap": 30},
     "caps": {"threshold": 0.3, "scale": 50, "cap": 20},
@@ -139,6 +184,17 @@ class BarcelloService:
         color = await self.get_color(score)
 
         trend = await self._compute_trend(guild_id, channel_id, window_minutes, window_end_ts, score)
+        previous = await self._database.get_barcello_snapshot_before(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            window_minutes=window_minutes,
+            window_end_ts=window_end_ts,
+        )
+        previous_metrics = json.loads(previous["metrics_json"]) if previous else {}
+        metrics["persistence_of_conflict_vs_previous_window"] = round(
+            float(metrics.get("direct_conflict_index", 0.0)) - float(previous_metrics.get("direct_conflict_index", 0.0)),
+            3,
+        )
         advice = self._build_advice(metrics, score)
 
         result = BarcelloResult(
@@ -163,6 +219,22 @@ class BarcelloService:
             metrics_json=json.dumps(metrics),
             computed_ts=computed_ts,
         )
+        if hasattr(self._database, "put_barcello_window_analysis"):
+            await self._database.put_barcello_window_analysis(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                window_end_ts=window_end_ts,
+                window_minutes=window_minutes,
+                metrics_json=json.dumps(metrics),
+                reasons_json=json.dumps(reasons),
+            )
+        if hasattr(self._database, "put_barcello_message_classifications"):
+            await self._database.put_barcello_message_classifications(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                window_end_ts=window_end_ts,
+                items_json=json.dumps(metrics.get("message_classifications", [])),
+            )
         self._metrics["last_compute_ts"] = computed_ts
         last_scores = self._metrics["last_score_by_channel"]
         last_scores_key = f"{guild_id}:{channel_id}"
@@ -194,7 +266,9 @@ class BarcelloService:
         return {
             "score": result.score,
             "color": result.color,
-            "reason": None,
+            "reason": self._main_reason_key(result.reasons),
+            "metrics": result.metrics,
+            "trend": result.trend,
         }
 
     async def compute_pair(
@@ -421,10 +495,11 @@ class BarcelloService:
         if not previous:
             return None
         prev_score = int(previous["score"])
-        return self._build_trend(score, prev_score)
+        dominant_driver = self._extract_dominant_driver(json.loads(previous["reasons_json"]))
+        return self._build_trend(score, prev_score, dominant_driver=dominant_driver)
 
     @staticmethod
-    def _build_trend(score: int, prev_score: int) -> dict[str, Any]:
+    def _build_trend(score: int, prev_score: int, *, dominant_driver: str = "") -> dict[str, Any]:
         delta = score - prev_score
         if abs(delta) < 5:
             direction = "stable"
@@ -432,7 +507,7 @@ class BarcelloService:
             direction = "improving"
         else:
             direction = "worsening"
-        return {"direction": direction, "delta": delta}
+        return {"direction": direction, "delta": delta, "dominant_driver": dominant_driver}
 
     def _cache_result(self, cache_key: tuple[str, str, int, str], result: BarcelloResult) -> None:
         expires = datetime.now(timezone.utc).timestamp() + self._cache_ttl
@@ -472,70 +547,70 @@ class BarcelloService:
 
     def _compute_metrics(self, messages: list[Any], window_minutes: int) -> dict[str, Any]:
         message_count = len(messages)
+        timestamps: list[datetime] = []
+        authors: list[str] = []
+        classifications: list[dict[str, Any]] = []
         total_letters = 0
         uppercase_letters = 0
-        negativity_hits = 0
         mention_count = 0
-        authors: list[str] = []
-        timestamps: list[datetime] = []
-        contrast_hits = 0
-        challenge_hits = 0
-        playful_hits = 0
-        passive_aggressive_hits = 0
-        sarcasm_marker_hits = 0
-
-        contrast_patterns = [
-            r"\bma\b",
-            r"\bper[òo]\b",
-            r"\bcomunque\b",
-            r"\bno\b",
-            r"in realt[àa]",
-        ]
-        contrast_regex = re.compile("|".join(contrast_patterns))
-        challenge_regex = re.compile(r"\b(perch[eéè]|perché)\b")
-        playful_emojis = ["😂", "🤣", "😅", "😆", "😊", "😜", "😝", "😹", "😸", "😺", "😻", "🤪", "😉"]
-        passive_aggressive_emojis = ["🙃", "😒", "😤", "😏", "😑", "😐", "🙄", "😬", "😶‍🌫️"]
-        sarcasm_markers = ["/s", "ironia", "sarcasmo", "scherzo", "scherzavo"]
+        reply_count = 0
+        directed_conflict_count = 0
+        venting_count = 0
+        deescalation_count = 0
+        hostility_sum = 0.0
+        calming_sum = 0.0
+        aggressive_directed = 0
+        directed_pairs: dict[tuple[str, str], int] = {}
 
         for message in messages:
+            author_id = str(self._mget(message, "author_id") or "unknown")
             content = (self._mget(message, "content", "") or "").strip()
+            ts = self._parse_ts(self._mget(message, "ts"))
+            mentions = self._parse_mentions(message, content)
+            reply_to_id = str(self._mget(message, "reply_to_author_id") or "").strip()
+            if reply_to_id:
+                reply_count += 1
+            mention_count += len(mentions)
             total_letters += sum(1 for ch in content if ch.isalpha())
             uppercase_letters += sum(1 for ch in content if ch.isalpha() and ch.isupper())
-            content_lower = content.lower()
-            negativity_hits += sum(content_lower.count(keyword) for keyword in NEGATIVE_KEYWORDS)
-            contrast_hits += len(contrast_regex.findall(content_lower))
-            if "?" in content_lower:
-                if "??" in content_lower:
-                    challenge_hits += content_lower.count("??")
-                if "tu" in content_lower:
-                    challenge_hits += 1
-                if challenge_regex.search(content_lower):
-                    challenge_hits += 1
-            sarcasm_marker_hits += sum(content_lower.count(marker) for marker in sarcasm_markers)
-            playful_hits += sum(content.count(emoji) for emoji in playful_emojis)
-            passive_aggressive_hits += sum(content.count(emoji) for emoji in passive_aggressive_emojis)
 
-            mentions_raw = self._mget(message, "mentions_json")
-            if mentions_raw:
-                try:
-                    mentions = json.loads(mentions_raw)
-                    if isinstance(mentions, list):
-                        mention_count += len(mentions)
-                except json.JSONDecodeError:
-                    logger.debug("Invalid mentions JSON in message payload")
-                    mention_count += content.count("<@")
-            else:
-                mention_count += content.count("<@")
+            classification = self._classify_message(
+                content=content,
+                author_id=author_id,
+                mentions=mentions,
+                reply_to_id=reply_to_id,
+            )
+            classifications.append(classification)
+            hostility_sum += float(classification["conflict_score"])
+            calming_sum += float(classification["calming_score"])
+            if classification["classification_label"] == "directed_conflict":
+                directed_conflict_count += 1
+            if classification["classification_label"] == "venting":
+                venting_count += 1
+            if classification["classification_label"] == "deescalation":
+                deescalation_count += 1
+            if float(classification["aggression_score"]) > 0.55 and float(classification["directedness_score"]) > 0.6:
+                aggressive_directed += 1
+                target_id = str(classification.get("primary_target_id") or "")
+                if target_id:
+                    directed_pairs[(author_id, target_id)] = directed_pairs.get((author_id, target_id), 0) + 1
 
-            authors.append(self._mget(message, "author_id") or "unknown")
-            timestamps.append(self._parse_ts(self._mget(message, "ts")))
+            timestamps.append(ts)
+            authors.append(author_id)
 
         duration_minutes = max(window_minutes, 1)
-        msg_per_min = message_count / duration_minutes if duration_minutes else 0
-        caps_ratio = (uppercase_letters / total_letters) if total_letters else 0
-        mention_per_min = mention_count / duration_minutes if duration_minutes else 0
+        msg_per_min = message_count / duration_minutes
+        caps_ratio = (uppercase_letters / total_letters) if total_letters else 0.0
+        mention_per_min = mention_count / duration_minutes
+        unique_users = len(set(authors))
+        reply_density = (reply_count / message_count) if message_count else 0.0
+        hostility_index = (hostility_sum / message_count) if message_count else 0.0
+        venting_index = (venting_count / message_count) if message_count else 0.0
+        direct_conflict_index = (directed_conflict_count / message_count) if message_count else 0.0
+        calming_index = (calming_sum / message_count) if message_count else 0.0
+        proportion_of_deescalation = (deescalation_count / message_count) if message_count else 0.0
+        reciprocal_conflict_pairs = self._count_reciprocal_pairs(directed_pairs)
 
-        reply_war = self._detect_reply_war(authors, timestamps)
         author_counts: dict[str, int] = {}
         for author in authors:
             author_counts[author] = author_counts.get(author, 0) + 1
@@ -555,38 +630,36 @@ class BarcelloService:
                 if 0 <= index < duration_minutes:
                     buckets[index] += 1
             max_msgs_per_minute = max(buckets) if buckets else 0
-            mean_msgs = msg_per_min
             if buckets:
                 std_msgs_per_minute = statistics.pstdev(buckets)
-            if mean_msgs > 0:
-                burst_ratio = max_msgs_per_minute / mean_msgs
-
-        contrast_per_msg = contrast_hits / message_count if message_count else 0
-        challenge_per_msg = challenge_hits / message_count if message_count else 0
-        playful_emoji_ratio = playful_hits / message_count if message_count else 0
-        passive_aggressive_emoji_ratio = passive_aggressive_hits / message_count if message_count else 0
-        sarcasm_marker_hits_per_msg = sarcasm_marker_hits / message_count if message_count else 0
+            if msg_per_min > 0:
+                burst_ratio = max_msgs_per_minute / msg_per_min
 
         return {
             "message_count": message_count,
+            "unique_users": unique_users,
             "window_minutes": window_minutes,
             "msg_per_min": round(msg_per_min, 2),
             "caps_ratio": round(caps_ratio, 3),
-            "negativity_hits": negativity_hits,
             "mention_count": mention_count,
             "mention_per_min": round(mention_per_min, 2),
-            "reply_war": reply_war,
+            "reply_density": round(reply_density, 3),
+            "hostility_index": round(hostility_index, 3),
+            "venting_index": round(venting_index, 3),
+            "direct_conflict_index": round(direct_conflict_index, 3),
+            "calming_index": round(calming_index, 3),
+            "proportion_of_directed_conflict": round(direct_conflict_index, 3),
+            "proportion_of_venting": round(venting_index, 3),
+            "proportion_of_deescalation": round(proportion_of_deescalation, 3),
+            "reciprocal_conflict_pairs": reciprocal_conflict_pairs,
+            "aggressive_directed_count": aggressive_directed,
             "top1_author_share": round(top1_author_share, 3),
             "top3_author_share": round(top3_author_share, 3),
             "max_msgs_per_minute": max_msgs_per_minute,
             "std_msgs_per_minute": round(std_msgs_per_minute, 2),
             "burst_ratio": round(burst_ratio, 2),
-            "contrast_per_msg": round(contrast_per_msg, 3),
-            "challenge_per_msg": round(challenge_per_msg, 3),
-            "playful_emoji_ratio": round(playful_emoji_ratio, 3),
-            "passive_aggressive_emoji_ratio": round(passive_aggressive_emoji_ratio, 3),
-            "sarcasm_marker_hits": round(sarcasm_marker_hits_per_msg, 3),
-            "sarcasm_marker_hits_raw": sarcasm_marker_hits,
+            "reply_war": reciprocal_conflict_pairs > 0,
+            "message_classifications": classifications,
         }
 
     def _compute_pair_metrics(
@@ -648,174 +721,152 @@ class BarcelloService:
         }
 
     def _score_from_metrics(self, metrics: dict[str, Any], score_config: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+        del score_config
         penalties: list[dict[str, Any]] = []
-        msg_per_min = metrics["msg_per_min"]
-        caps_ratio = metrics["caps_ratio"]
-        negativity_hits = metrics["negativity_hits"]
-        mention_per_min = metrics["mention_per_min"]
-        reply_war = metrics["reply_war"]
-        top1_author_share = metrics.get("top1_author_share", 0)
-        top3_author_share = metrics.get("top3_author_share", 0)
-        burst_ratio = metrics.get("burst_ratio", 0)
-        contrast_per_msg = metrics.get("contrast_per_msg", 0)
-        challenge_per_msg = metrics.get("challenge_per_msg", 0)
-        playful_ratio = metrics.get("playful_emoji_ratio", 0)
-        passive_ratio = metrics.get("passive_aggressive_emoji_ratio", 0)
-        sarcasm_hits_raw = metrics.get("sarcasm_marker_hits_raw", 0)
+        msg_per_min = float(metrics.get("msg_per_min") or 0.0)
+        hostility_index = float(metrics.get("hostility_index") or 0.0)
+        direct_conflict_index = float(metrics.get("direct_conflict_index") or 0.0)
+        venting_index = float(metrics.get("venting_index") or 0.0)
+        calming_index = float(metrics.get("calming_index") or 0.0)
+        reply_density = float(metrics.get("reply_density") or 0.0)
+        caps_ratio = float(metrics.get("caps_ratio") or 0.0)
+        aggressive_directed_count = int(metrics.get("aggressive_directed_count") or 0)
+        reciprocal_conflict_pairs = int(metrics.get("reciprocal_conflict_pairs") or 0)
 
-        rules = score_config["rules"]
-        weights = score_config["weights"]
-        mitigation_cfg = score_config["mitigation"]
+        if direct_conflict_index > 0:
+            penalties.append({"key": "directed_conflict", "label": "Attacchi diretti", "weight": int(round(42 * direct_conflict_index + 6 * aggressive_directed_count)), "summary": f"indice {direct_conflict_index:.2f}"})
+        if reciprocal_conflict_pairs > 0:
+            penalties.append({"key": "reciprocal_conflict", "label": "Conflitto reciproco multiutente", "weight": min(24, 12 * reciprocal_conflict_pairs), "summary": f"{reciprocal_conflict_pairs} coppie"})
+        if hostility_index > 0.22:
+            penalties.append({"key": "hostility", "label": "Ostilità diffusa", "weight": int(round(28 * hostility_index)), "summary": f"indice {hostility_index:.2f}"})
+        if caps_ratio > 0.45 and hostility_index > 0.2:
+            penalties.append({"key": "heated_style", "label": "Linguaggio acceso", "weight": int(round(12 * min(caps_ratio, 1.0))), "summary": f"caps {caps_ratio:.2f}"})
+        if msg_per_min > 5 and (hostility_index > 0.2 or direct_conflict_index > 0.15 or reply_density > 0.55):
+            penalties.append({"key": "hostile_spike", "label": "Picco attività con ostilità", "weight": int(round(10 + (msg_per_min - 5))), "summary": f"{msg_per_min:.1f} msg/min"})
+        if venting_index > 0:
+            penalties.append({"key": "venting", "label": "Sfogo personale diffuso", "weight": int(round(8 * venting_index)), "summary": f"indice {venting_index:.2f}"})
+        if calming_index > 0:
+            penalties.append({"key": "deescalation_bonus", "label": "Segnali calmanti", "weight": -int(round(18 * calming_index)), "summary": f"indice {calming_index:.2f}"})
+        if msg_per_min > 3 and hostility_index < 0.1 and direct_conflict_index == 0:
+            penalties.append({"key": "healthy_activity_bonus", "label": "Chat attiva ed equilibrata", "weight": -8, "summary": f"{msg_per_min:.1f} msg/min"})
 
-        msg_cfg = rules["msg_rate"]
-        caps_cfg = rules["caps"]
-        negativity_cfg = rules["negativity"]
-        mention_cfg = rules["mentions"]
-        reply_cfg = rules["reply_war"]
-        top1_cfg = rules["top1_author_share"]
-        top3_cfg = rules["top3_author_share"]
-        burst_cfg = rules["burst_ratio"]
-        contrast_cfg = rules["contrast_per_msg"]
-        challenge_cfg = rules["challenge_per_msg"]
-
-        msg_penalty = min(max(msg_per_min - msg_cfg["threshold"], 0) * msg_cfg["scale"], msg_cfg["cap"])
-        msg_penalty *= float(weights.get("msg_rate", 1.0))
-        if msg_penalty:
-            penalties.append(
-                {
-                    "key": "density",
-                    "label": "Alta densità messaggi",
-                    "weight": int(msg_penalty),
-                    "summary": f"{msg_per_min} msg/min",
-                }
-            )
-
-        caps_penalty = min(max(caps_ratio - caps_cfg["threshold"], 0) * caps_cfg["scale"], caps_cfg["cap"])
-        caps_penalty *= float(weights.get("caps", 1.0))
-        if caps_penalty:
-            penalties.append(
-                {
-                    "key": "caps",
-                    "label": "Uso eccessivo di MAIUSCOLE",
-                    "weight": int(round(caps_penalty)),
-                    "summary": f"caps ratio {caps_ratio}",
-                }
-            )
-
-        negativity_penalty = min(negativity_hits * negativity_cfg["per_hit"], negativity_cfg["cap"])
-        negativity_penalty *= float(weights.get("negativity", 1.0))
-        if negativity_penalty:
-            penalties.append(
-                {
-                    "key": "negativity",
-                    "label": "Toni negativi",
-                    "weight": int(negativity_penalty),
-                    "summary": f"{negativity_hits} hit",
-                }
-            )
-
-        mention_penalty = min(
-            max(mention_per_min - mention_cfg["threshold"], 0) * mention_cfg["scale"],
-            mention_cfg["cap"],
-        )
-        mention_penalty *= float(weights.get("mentions", 1.0))
-        if mention_penalty:
-            penalties.append(
-                {
-                    "key": "mentions",
-                    "label": "Molte menzioni",
-                    "weight": int(round(mention_penalty)),
-                    "summary": f"{mention_per_min} mention/min",
-                }
-            )
-
-        reply_war_penalty = reply_cfg["penalty"] if reply_war else 0
-        if reply_war_penalty:
-            penalties.append(
-                {
-                    "key": "reply_war",
-                    "label": "Botta e risposta acceso",
-                    "weight": reply_war_penalty,
-                    "summary": "concentrato tra pochi utenti",
-                }
-            )
-
-        if top1_author_share > top1_cfg["threshold"]:
-            top1_weight = float(weights.get("top3", 1.0))
-            penalties.append(
-                {
-                    "key": "top1_author_share",
-                    "label": "Concentrazione su un autore",
-                    "weight": int(round(top1_cfg["penalty"] * top1_weight)),
-                    "summary": f"{top1_author_share:.2f} top1",
-                }
-            )
-
-        if top3_author_share > top3_cfg["threshold"]:
-            top3_weight = float(weights.get("top3", 1.0))
-            penalties.append(
-                {
-                    "key": "top3_author_share",
-                    "label": "Concentrazione su pochi autori",
-                    "weight": int(round(top3_cfg["penalty"] * top3_weight)),
-                    "summary": f"{top3_author_share:.2f} top3",
-                }
-            )
-
-        if burst_ratio > burst_cfg["threshold"]:
-            burst_penalty = burst_cfg["penalty"]
-            if burst_ratio > burst_cfg.get("max_threshold", burst_cfg["threshold"]):
-                burst_penalty = burst_cfg.get("max_penalty", burst_penalty)
-            burst_penalty = int(round(burst_penalty * float(weights.get("burst", 1.0))))
-            penalties.append(
-                {
-                    "key": "burst_ratio",
-                    "label": "Burst di messaggi",
-                    "weight": burst_penalty,
-                    "summary": f"ratio {burst_ratio:.2f}",
-                }
-            )
-
-        if contrast_per_msg > contrast_cfg["threshold"]:
-            contrast_penalty = int(round(contrast_cfg["penalty"] * float(weights.get("contrast", 1.0))))
-            penalties.append(
-                {
-                    "key": "contrast_per_msg",
-                    "label": "Frizione lessicale",
-                    "weight": contrast_penalty,
-                    "summary": f"{contrast_per_msg:.2f} per msg",
-                }
-            )
-
-        if challenge_per_msg > challenge_cfg["threshold"]:
-            challenge_penalty = int(round(challenge_cfg["penalty"] * float(weights.get("challenge", 1.0))))
-            penalties.append(
-                {
-                    "key": "challenge_per_msg",
-                    "label": "Domande sfidanti",
-                    "weight": challenge_penalty,
-                    "summary": f"{challenge_per_msg:.2f} per msg",
-                }
-            )
-
-        is_playful = (
-            (playful_ratio >= 0.65 or sarcasm_hits_raw >= 3)
-            and passive_ratio <= 0.35
-            and negativity_hits == 0
-        )
-        if is_playful:
-            msg_penalty *= float(mitigation_cfg.get("msg_rate_factor", 0.8))
-            caps_penalty *= float(mitigation_cfg.get("caps_factor", 0.7))
-            for item in penalties:
-                if item["key"] == "density":
-                    item["weight"] = int(round(msg_penalty))
-                if item["key"] == "caps":
-                    item["weight"] = int(round(caps_penalty))
-
-        penalties.sort(key=lambda item: item["weight"], reverse=True)
-        total_penalty = sum(item["weight"] for item in penalties)
+        penalties.sort(key=lambda item: abs(int(item["weight"])), reverse=True)
+        total_penalty = sum(int(item["weight"]) for item in penalties)
         score = self._clamp_score(100 - total_penalty)
         return penalties, score
+
+    def _parse_mentions(self, message: Any, content: str) -> list[str]:
+        mentions_raw = self._mget(message, "mentions_json")
+        if mentions_raw:
+            try:
+                parsed = json.loads(mentions_raw)
+                if isinstance(parsed, list):
+                    return [str(item) for item in parsed]
+            except json.JSONDecodeError:
+                logger.debug("Invalid mentions JSON in message payload")
+        return re.findall(r"<@!?(\d+)>", content)
+
+    def _classify_message(self, *, content: str, author_id: str, mentions: list[str], reply_to_id: str) -> dict[str, Any]:
+        text = content.lower()
+        profanity_hits = sum(text.count(word) for word in PROFANITY_KEYWORDS)
+        insult_hits = sum(text.count(word) for word in INSULT_KEYWORDS)
+        calming_hits = sum(text.count(word) for word in CALMING_KEYWORDS)
+        venting_hits = sum(1 for pattern in VENTING_PATTERNS if re.search(pattern, text))
+        second_person_hits = sum(1 for pattern in SECOND_PERSON_PATTERNS if re.search(pattern, text))
+        repeated_punctuation = content.count("!!") + content.count("??")
+        caps_ratio = self._caps_ratio(content)
+        has_direct_target = bool(mentions or reply_to_id or second_person_hits > 0)
+        target_type = "none"
+        primary_target_id = ""
+        if mentions:
+            target_type = "user"
+            primary_target_id = mentions[0]
+        elif reply_to_id:
+            target_type = "user"
+            primary_target_id = reply_to_id
+        elif second_person_hits > 0:
+            target_type = "generic"
+        if "ragazzi" in text or "raga" in text or "voi" in text:
+            target_type = "group"
+
+        toxicity_score = min(1.0, 0.22 * profanity_hits + 0.3 * insult_hits)
+        aggression_score = min(1.0, toxicity_score + (0.3 if repeated_punctuation else 0.0) + (0.25 if caps_ratio > 0.35 else 0.0))
+        directedness_score = min(1.0, (0.55 if has_direct_target else 0.0) + (0.2 if second_person_hits else 0.0))
+        profanity_score = min(1.0, 0.28 * profanity_hits)
+        venting_score = min(1.0, 0.5 * venting_hits + (0.15 if "io" in text and not has_direct_target else 0.0))
+        calming_score = min(1.0, 0.45 * calming_hits)
+        conflict_score = min(1.0, (aggression_score * 0.6) + (directedness_score * 0.4))
+
+        label = "neutral"
+        if calming_score >= 0.35:
+            label = "deescalation"
+        elif conflict_score >= 0.45 and directedness_score >= 0.6 and (aggression_score >= 0.3 or insult_hits > 0 or profanity_hits > 0):
+            label = "directed_conflict"
+        elif aggression_score >= 0.35 and directedness_score < 0.45:
+            label = "heated_non_conflict"
+        elif venting_score >= 0.4 and directedness_score < 0.4:
+            label = "venting"
+        elif "grazie" in text or "brav" in text:
+            label = "positive"
+
+        result = {
+            "author_id": author_id,
+            "target_type": target_type,
+            "primary_target_id": primary_target_id,
+            "toxicity_score": round(toxicity_score, 3),
+            "aggression_score": round(aggression_score, 3),
+            "directedness_score": round(directedness_score, 3),
+            "profanity_score": round(profanity_score, 3),
+            "venting_score": round(venting_score, 3),
+            "calming_score": round(calming_score, 3),
+            "conflict_score": round(conflict_score, 3),
+            "classification_label": label,
+        }
+        return self._maybe_ai_fallback(result, content)
+
+    def _maybe_ai_fallback(self, classification: dict[str, Any], content: str) -> dict[str, Any]:
+        del content
+        conflict_score = float(classification.get("conflict_score") or 0.0)
+        venting_score = float(classification.get("venting_score") or 0.0)
+        if 0.35 <= conflict_score <= 0.55 and 0.25 <= venting_score <= 0.55:
+            classification["ai_fallback_candidate"] = True
+        else:
+            classification["ai_fallback_candidate"] = False
+        return classification
+
+    @staticmethod
+    def _caps_ratio(content: str) -> float:
+        total_letters = sum(1 for ch in content if ch.isalpha())
+        if total_letters == 0:
+            return 0.0
+        uppercase_letters = sum(1 for ch in content if ch.isalpha() and ch.isupper())
+        return uppercase_letters / total_letters
+
+    @staticmethod
+    def _count_reciprocal_pairs(directed_pairs: dict[tuple[str, str], int]) -> int:
+        count = 0
+        seen: set[tuple[str, str]] = set()
+        for pair, value in directed_pairs.items():
+            reverse = (pair[1], pair[0])
+            if pair in seen or reverse in seen:
+                continue
+            if value >= 1 and directed_pairs.get(reverse, 0) >= 1:
+                count += 1
+                seen.add(pair)
+                seen.add(reverse)
+        return count
+
+    @staticmethod
+    def _main_reason_key(reasons: list[dict[str, Any]]) -> str | None:
+        if not reasons:
+            return None
+        return str(reasons[0].get("key") or "")
+
+    @staticmethod
+    def _extract_dominant_driver(reasons: list[dict[str, Any]]) -> str:
+        if not reasons:
+            return ""
+        return str(reasons[0].get("key") or "")
 
     def _build_advice(self, metrics: dict[str, Any], score: int) -> list[str]:
         advice: list[str] = []
@@ -823,8 +874,10 @@ class BarcelloService:
             advice.append("Rallentare il ritmo e evitare botta e risposta.")
         if metrics["mention_per_min"] > 1:
             advice.append("Evitare callout e menzioni a caldo.")
-        if metrics["negativity_hits"] > 0:
+        if metrics.get("direct_conflict_index", 0) > 0.15:
             advice.append("Abbassare i toni e chiarire in privato se necessario.")
+        elif metrics.get("venting_index", 0) > 0.2:
+            advice.append("Valorizzare ascolto e de-escalation senza personalizzare i toni.")
         return advice[:3]
 
     @staticmethod

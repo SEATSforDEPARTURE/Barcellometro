@@ -1039,6 +1039,7 @@ class TriggerEngineService:
                     state=stored_color,
                     delta_score=0 if prev_score is None else score - prev_score,
                     recovery_type=recovery_type,
+                    status=status,
                 ),
             ]
             embed.add_field(
@@ -1722,15 +1723,29 @@ class TriggerEngineService:
         state: str,
         delta_score: int,
         recovery_type: str,
+        status: Optional[dict[str, object]] = None,
     ) -> str:
         del delta_score
         current_state = (state or "").upper()
+        status = status or {}
+        metrics = status.get("metrics") if isinstance(status.get("metrics"), dict) else {}
+        reason_key = str(status.get("reason") or "")
+        msg_per_min = float((metrics or {}).get("msg_per_min") or 0.0)
         if recovery_type == "passive":
             if current_state == "VERDE":
-                return "• Il clima si è **stabilizzato per assenza di attività**: attenzione, potrebbe riaccendersi appena riparte la chat."
+                return "• Recupero **passivo** per assenza di interazioni: il clima è più calmo ma va consolidato quando la chat riparte."
             if current_state == "GIALLO":
                 return "• La tensione si è **attenuata per mancanza di interazioni**: serve stabilità anche quando la chat tornerà attiva."
             return "• Il calo di attività ha **raffreddato temporaneamente** la situazione: ma il rischio resta alto."
+
+        if reason_key == "healthy_activity_bonus":
+            return f"• Recupero **attivo** con chat viva ma più **equilibrata** (**{msg_per_min:.1f} msg/min**) e senza attacchi diretti."
+        if reason_key in {"directed_conflict", "reciprocal_conflict"}:
+            return "• Driver principale: aumento di **attacchi diretti** tra utenti e segnali di escalation reciproca."
+        if reason_key == "venting":
+            return "• Si nota **nervosismo diffuso ma non diretto**: monitorare senza sovra-penalizzare lo sfogo personale."
+        if reason_key == "deescalation_bonus":
+            return "• Presenza di segnali **calmanti**: la chat sta assorbendo il conflitto in modo costruttivo."
 
         if current_state == "VERDE":
             return "• La conversazione sta **migliorando** rispetto alla finestra precedente: continuate così, state tenendo il clima sereno."

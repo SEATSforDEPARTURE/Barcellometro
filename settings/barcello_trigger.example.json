@@ -4,6 +4,12 @@
   "cooldown_minutes": 10,
   "min_score_delta_for_notify": 4,
   "mood_default": "chill",
+  "analysis": {
+    "ai_fallback_enabled": false,
+    "ai_ambiguity_min": 0.35,
+    "ai_ambiguity_max": 0.55,
+    "max_messages_per_window": 25
+  },
   "time_buckets": {
     "night": {
       "start": 0,

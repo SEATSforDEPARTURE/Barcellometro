@@ -279,6 +279,24 @@ def test_render_barcello_trend_comment_worsening_improving_stable() -> None:
     assert "mancanza di interazioni" in passive
 
 
+def test_render_barcello_trend_comment_driver_specific_causes() -> None:
+    service, _db, _channel = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "GIALLO", "score": 50})
+    direct = service._render_barcello_trend_comment(
+        state="ROSSO",
+        delta_score=-8,
+        recovery_type="active",
+        status={"reason": "directed_conflict", "metrics": {"msg_per_min": 7.1}},
+    )
+    active_recovery = service._render_barcello_trend_comment(
+        state="VERDE",
+        delta_score=9,
+        recovery_type="active",
+        status={"reason": "healthy_activity_bonus", "metrics": {"msg_per_min": 6.2}},
+    )
+    assert "attacchi diretti" in direct
+    assert "Recupero **attivo**" in active_recovery
+
+
 def test_recovery_type_active_trend_contains_migliorando_and_no_passive_phrase() -> None:
     service, db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
     db.fetchone = AsyncMock(side_effect=[{"count": 18}, {"count": 20}])
@@ -297,7 +315,7 @@ def test_recovery_type_passive_trend_mentions_low_activity() -> None:
     assert out["notified"] is True
     trend_field = next(field for field in channel.sent[0].fields if "TREND" in str(field.name or ""))
     value = str(trend_field.value or "")
-    assert "assenza di attività" in value
+    assert "Recupero **passivo**" in value
 
 
 def test_recovery_description_is_bold_and_contextual() -> None:
