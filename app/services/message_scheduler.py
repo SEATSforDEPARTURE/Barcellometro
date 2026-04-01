@@ -774,9 +774,21 @@ class MessageSchedulerService:
         }
 
     async def _get_quiet_settings(self) -> QuietSettings:
-        enabled_raw = await self._get_setting_with_default("messages_quiet_enabled", "1" if QUIET_DEFAULT_ENABLED else "0")
-        start = await self._get_setting_with_default("messages_quiet_start", QUIET_DEFAULT_START)
-        end = await self._get_setting_with_default("messages_quiet_end", QUIET_DEFAULT_END)
+        enabled_raw = await self._get_setting_with_fallback(
+            primary_key="messages_quiet_enabled",
+            legacy_key="messages_quiet_hours_enabled",
+            default="1" if QUIET_DEFAULT_ENABLED else "0",
+        )
+        start = await self._get_setting_with_fallback(
+            primary_key="messages_quiet_start",
+            legacy_key="messages_quiet_hours_start",
+            default=QUIET_DEFAULT_START,
+        )
+        end = await self._get_setting_with_fallback(
+            primary_key="messages_quiet_end",
+            legacy_key="messages_quiet_hours_end",
+            default=QUIET_DEFAULT_END,
+        )
         return QuietSettings(
             enabled=enabled_raw.lower() in {"1", "true", "yes", "y"},
             start=start,
@@ -802,6 +814,18 @@ class MessageSchedulerService:
             await self._database.set_setting(key, default)
             return default
         return stored
+
+    async def _get_setting_with_fallback(self, *, primary_key: str, legacy_key: str, default: str) -> str:
+        primary_value = await self._database.get_setting(primary_key)
+        if primary_value is not None:
+            return primary_value
+
+        legacy_value = await self._database.get_setting(legacy_key)
+        if legacy_value is not None:
+            return legacy_value
+
+        await self._database.set_setting(primary_key, default)
+        return default
 
     async def _get_barcello_color(self, guild_id: str, channel_id: str) -> tuple[str, Optional[int], str, Optional[str]]:
         if self._barcello_service is None:
