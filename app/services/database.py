@@ -1539,6 +1539,26 @@ class DatabaseService:
             (guild_id, channel_id, window_minutes, window_end_ts),
         )
 
+    async def get_barcello_snapshots_before(
+        self,
+        guild_id: str,
+        channel_id: str,
+        window_minutes: int,
+        window_end_ts: str,
+        *,
+        limit: int = 48,
+    ) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT window_end_ts, score
+            FROM barcello_snapshots
+            WHERE guild_id = ? AND channel_id = ? AND window_minutes = ? AND window_end_ts < ?
+            ORDER BY window_end_ts DESC
+            LIMIT ?
+            """,
+            (guild_id, channel_id, window_minutes, window_end_ts, int(max(1, limit))),
+        )
+
     async def put_barcello_snapshot(
         self,
         *,

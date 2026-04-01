@@ -468,43 +468,117 @@ def register_barcello(
             return mapping.get(value, None), None
         return None, None
 
-    def _render_trend(direction: str | None, delta: int | None) -> str:
-        if direction == "improving":
-            base = "In miglioramento."
-        elif direction == "worsening":
-            base = "In peggioramento."
-        else:
-            base = "Stabile."
-        if delta is None:
-            return base
-        return f"{base} (Δ {delta:+d})."
+    def _choose_barcello_trend_driver(
+        *,
+        color_label: str,
+        direction: str | None,
+        trend: dict[str, Any] | None,
+        metrics: dict[str, Any],
+    ) -> str:
+        driver = str((trend or {}).get("dominant_driver") or "").lower()
+        if driver in {
+            "active_recovery",
+            "passive_recovery",
+            "directed_conflict",
+            "venting",
+            "deescalation",
+            "playful_activity",
+            "stable_balance",
+            "rising_tension",
+            "escalation",
+        }:
+            return driver
 
-    def _build_trend_reason(reasons: list[dict[str, Any]], direction: str | None) -> str:
-        if not reasons:
-            return "Perché: il tono resta abbastanza uniforme e senza scosse."
-        key = str(reasons[0].get("key", "")).lower()
-        label = str(reasons[0].get("label", "")).lower()
-        if "reply_war" in key or "botta" in label:
-            return "Perché: si è innescata una botta e risposta che scalda il clima."
-        if "burst" in key or "densit" in label:
-            return "Perché: tanti messaggi tutti insieme fanno salire la tensione."
-        if "top1" in key or "top3" in key or "concentrazione" in label:
-            return "Perché: si parla in pochi e ci si punzecchia più facilmente."
-        if "challenge" in key or "domande" in label:
-            return "Perché: ci sono domande un po’ sfidanti che accendono il tono."
-        if "contrast" in key or "frizione" in label:
-            return "Perché: si percepisce attrito nelle parole e rischio fraintendimenti."
-        if "caps" in key or "maiuscole" in label:
-            return "Perché: il tono sembra acceso e serve più calma."
-        if "negativity" in key or "negativi" in label:
-            return "Perché: il tono è pungente e ci si risponde di pancia."
-        if "mentions" in key or "menzion" in label:
-            return "Perché: troppe chiamate dirette alzano la tensione."
+        direct = float(metrics.get("direct_conflict_index") or 0.0)
+        venting = float(metrics.get("venting_index") or 0.0)
+        calming = float(metrics.get("calming_index") or 0.0)
+        hostility = float(metrics.get("hostility_index") or 0.0)
+        playful = float(metrics.get("playful_index") or 0.0) + float(metrics.get("affectionate_index") or 0.0)
+        intensity = min(1.0, (0.55 * min(float(metrics.get("msg_per_min") or 0.0) / 8.0, 1.0)) + (0.45 * min(float(metrics.get("burst_ratio") or 0.0) / 3.0, 1.0)))
+        msg_current = int(metrics.get("message_count_current_window") or metrics.get("message_count") or 0)
+        msg_previous = int(metrics.get("message_count_previous_window") or 0)
+
+        if color_label == "nero" and (direct >= 0.4 or hostility >= 0.45):
+            return "escalation"
+        if direct >= 0.28:
+            return "directed_conflict"
+        if calming >= 0.12 and direction == "improving":
+            return "deescalation"
         if direction == "improving":
-            return "Perché: il tono sta diventando più morbido."
+            if msg_previous > 0 and msg_current <= max(2, int(msg_previous * 0.6)):
+                return "passive_recovery"
+            return "active_recovery"
+        if color_label == "giallo" and venting >= 0.16:
+            return "venting"
+        if direction == "worsening" and hostility >= 0.2:
+            return "rising_tension"
+        if color_label == "verde" and intensity >= 0.3 and direct < 0.2 and playful >= 0.18:
+            return "playful_activity"
+        if direction is None:
+            return ""
+        return "stable_balance"
+
+    def _render_barcello_trend_comment(
+        *,
+        color_label: str,
+        direction: str | None,
+        dominant_driver: str,
+    ) -> str:
+        if dominant_driver == "escalation":
+            if color_label == "nero":
+                return "• La conversazione è in forte **peggioramento**: l’**escalation** è evidente e serve un reset netto dei toni."
+            return "• La conversazione è in **peggioramento**: si vedono segnali di **escalation** e conviene interromperla subito."
+        if dominant_driver == "directed_conflict":
+            if color_label == "nero":
+                return "• Il Barcy è al limite: i segnali di **attacco diretto** sono forti e il clima è ormai compromesso."
+            return "• La conversazione sta **peggiorando**: aumentano i segnali di **attacco diretto** tra utenti."
+        if dominant_driver == "deescalation":
+            return "• Il clima sta **migliorando**: si vedono segnali di **de-escalation** che stanno rimettendo ordine nella conversazione."
+        if dominant_driver == "passive_recovery":
+            return "• Il clima si è **stabilizzato** soprattutto per **assenza di attività**: il recupero è reale, ma va confermato quando la chat riparte."
+        if dominant_driver == "active_recovery":
+            return "• La conversazione sta **migliorando**: la chat è ancora attiva, ma con toni più **equilibrati** e meno **attrito diretto**."
+        if dominant_driver == "venting":
+            if color_label == "rosso":
+                return "• Il clima è più pesante: cresce lo **sfogo** e serve attenzione per non farlo diventare **conflitto** aperto."
+            return "• Si nota più **nervosismo**, ma per ora prevalgono sfoghi non diretti: meglio non trasformarli in **attrito**."
+        if dominant_driver == "playful_activity":
+            return "• La conversazione resta **vivace** ma sostanzialmente **sana**: l’attività è alta, ma senza attriti rilevanti."
+        if dominant_driver == "rising_tension":
+            return "• La conversazione sta **peggiorando**: cresce la **tensione** e conviene abbassare i toni prima di salire ancora."
+        if dominant_driver == "stable_balance":
+            return "• La situazione è **stabile** rispetto alla finestra precedente: mantenete questo equilibrio per non far oscillare il Barcy."
         if direction == "worsening":
-            return "Perché: il tono si sta irrigidendo."
-        return "Perché: il clima resta simile senza scossoni."
+            return "• Il clima sta **cambiando** rispetto a prima: tenete d’occhio i toni per evitare nuovi scatti del Barcy."
+        if direction == "improving":
+            return "• Il clima sta **migliorando**: continuate con toni **equilibrati** per consolidare il recupero."
+        return "• La conversazione mostra segnali **misti**: serve equilibrio per non far salire la **tensione**."
+
+    def _render_barcello_trend_value(
+        *,
+        result: Any,
+        trend: dict[str, Any] | None,
+        window_minutes: int,
+    ) -> str:
+        direction, _ = normalize_trend(trend)
+        if direction not in {"improving", "worsening", "stable"}:
+            direction = None
+        color_label = (result.color or "nero").lower()
+        metrics = dict(getattr(result, "metrics", {}) or {})
+        metrics["message_count_current_window"] = int((trend or {}).get("message_count_current_window") or metrics.get("message_count") or 0)
+        metrics["message_count_previous_window"] = int((trend or {}).get("message_count_previous_window") or 0)
+        dominant_driver = _choose_barcello_trend_driver(
+            color_label=color_label,
+            direction=direction,
+            trend=trend,
+            metrics=metrics,
+        )
+        minutes_since_state = int((trend or {}).get("minutes_since_same_state") or 0)
+        if minutes_since_state <= 0:
+            fallback_minutes = int(window_minutes or metrics.get("window_minutes") or 30)
+            minutes_since_state = max(1, fallback_minutes)
+        timing_line = f"• L'ultima volta in questo stato è stata **{minutes_since_state} minuti fa**."
+        return "\n".join([timing_line, _render_barcello_trend_comment(color_label=color_label, direction=direction, dominant_driver=dominant_driver)])
 
     def _format_motivations(reasons: list[dict[str, Any]]) -> list[str]:
         lines: list[str] = []
@@ -756,7 +830,6 @@ def register_barcello(
         embed_color: int,
         reasons_text: str,
         trend_text: str,
-        trend_reason: str | None = None,
         personal_advice: list[str],
         mod_advice: list[str],
         affinity_bullets: list[str] | None = None,
@@ -775,8 +848,6 @@ def register_barcello(
                 _add_section(embed, name=format_standard_field_name("Motivazioni", emoji="🔥"), value=_with_spacing(reasons_text))
         if output_flags.get("show_trend"):
             trend_value = trend_text if trend_text else render_trend_value(result.trend)
-            if trend_reason and not _is_effectively_empty_text(trend_reason):
-                trend_value = f"{trend_value}\n{trend_reason}"
             _add_section(embed, name=format_standard_field_name("Trend", emoji="📈"), value=_with_spacing(trend_value))
         if output_flags.get("show_advice"):
             if pair_mode and pair_mode_profile == "role3":
@@ -1265,9 +1336,11 @@ def register_barcello(
                 )
 
             reasons_text = _bullets_to_text(_format_motivations(result.reasons))
-            trend_direction, trend_delta = normalize_trend(result.trend)
-            trend_text = render_trend(trend_direction, trend_delta)
-            trend_reason = _build_trend_reason(result.reasons, trend_direction) if result.trend else ""
+            trend_text = _render_barcello_trend_value(
+                result=result,
+                trend=result.trend if isinstance(result.trend, dict) else None,
+                window_minutes=window_minutes,
+            )
             advice_candidates = [item.strip() for item in (result.advice or []) if str(item).strip()]
             color_label = (result.color or "nero").lower()
             affinity_bullets: list[str] = []
@@ -1282,7 +1355,6 @@ def register_barcello(
                 contact_points_bullets = []
                 reasons_text = ""
                 trend_text = ""
-                trend_reason = ""
             elif pair_mode and pair_mode_profile == "role3":
                 fallback_personal = _fallback_pair_personal_advice(result.metrics)
                 affinity_bullets = _fallback_pair_affinity(result.metrics)
@@ -1548,7 +1620,12 @@ def register_barcello(
                                         reasons_text = _bullets_to_text(motivation_lines)
                                     ai_trend_reason = normalize_bullets(ai_payload.get("trend_reason"))
                                     if ai_trend_reason:
-                                        trend_reason = "Perché: " + " ".join(clean_bullets(ai_trend_reason))
+                                        ai_trend_line = " ".join(clean_bullets(ai_trend_reason))
+                                        if ai_trend_line:
+                                            trend_lines = [line for line in trend_text.splitlines() if line.strip()]
+                                            if len(trend_lines) >= 2:
+                                                trend_lines[1] = trend_lines[1] + f" {ai_trend_line}"
+                                                trend_text = "\n".join(trend_lines[:2])
                                     if pair_mode and pair_mode_profile == "role3":
                                         ai_advice = ai_payload.get("pair_advice_bullets")
                                         ai_affinity = ai_payload.get("affinity_bullets")
@@ -1631,7 +1708,6 @@ def register_barcello(
                 embed_color=details_color,
                 reasons_text=reasons_text,
                 trend_text=trend_text,
-                trend_reason=trend_reason,
                 personal_advice=personal_advice,
                 mod_advice=mod_advice,
                 affinity_bullets=affinity_bullets,

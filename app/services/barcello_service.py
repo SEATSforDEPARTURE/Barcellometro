@@ -200,7 +200,7 @@ class BarcelloService:
         reasons, score = self._score_from_metrics(metrics, score_config)
         color = await self.get_color(score)
 
-        trend = await self._compute_trend(guild_id, channel_id, window_minutes, window_end_ts, score)
+        trend = await self._compute_trend(guild_id, channel_id, window_minutes, window_end_ts, score, metrics)
         previous = await self._database.get_barcello_snapshot_before(
             guild_id=guild_id,
             channel_id=channel_id,
@@ -502,6 +502,7 @@ class BarcelloService:
         window_minutes: int,
         window_end_ts: str,
         score: int,
+        current_metrics: dict[str, Any],
     ) -> Optional[dict[str, Any]]:
         previous = await self._database.get_barcello_snapshot_before(
             guild_id=guild_id,
@@ -512,11 +513,55 @@ class BarcelloService:
         if not previous:
             return None
         prev_score = int(previous["score"])
-        dominant_driver = self._extract_dominant_driver(json.loads(previous["reasons_json"]))
-        return self._build_trend(score, prev_score, dominant_driver=dominant_driver)
+        previous_metrics_raw = previous["metrics_json"] if "metrics_json" in previous.keys() else ""
+        previous_metrics = json.loads(previous_metrics_raw) if previous_metrics_raw else {}
+        direction = self._build_trend(score, prev_score)["direction"]
+        current_color = await self.get_color(score)
+        prev_color = await self.get_color(prev_score)
+        dominant_driver = self._choose_dominant_driver(
+            current_metrics=current_metrics,
+            previous_metrics=previous_metrics,
+            direction=direction,
+            current_color=current_color,
+        )
+        recovery_type = self._choose_recovery_type(
+            direction=direction,
+            current_metrics=current_metrics,
+            previous_metrics=previous_metrics,
+        )
+        minutes_since_same_state = await self._minutes_since_last_same_color(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            window_minutes=window_minutes,
+            window_end_ts=window_end_ts,
+            current_color=current_color,
+            fallback_minutes=window_minutes,
+        )
+        return self._build_trend(
+            score,
+            prev_score,
+            dominant_driver=dominant_driver,
+            stored_color=current_color,
+            prev_color=prev_color,
+            recovery_type=recovery_type,
+            message_count_current_window=int(current_metrics.get("message_count") or 0),
+            message_count_previous_window=int(previous_metrics.get("message_count") or 0),
+            minutes_since_same_state=minutes_since_same_state,
+        )
 
     @staticmethod
-    def _build_trend(score: int, prev_score: int, *, dominant_driver: str = "") -> dict[str, Any]:
+    def _build_trend(
+        score: int,
+        prev_score: int,
+        *,
+        dominant_driver: str = "",
+        stored_color: str = "",
+        prev_color: str = "",
+        recovery_type: str = "",
+        message_count_current_window: int = 0,
+        message_count_previous_window: int = 0,
+        minutes_since_same_state: int = 0,
+    ) -> dict[str, Any]:
         delta = score - prev_score
         if abs(delta) < 5:
             direction = "stable"
@@ -524,7 +569,50 @@ class BarcelloService:
             direction = "improving"
         else:
             direction = "worsening"
-        return {"direction": direction, "delta": delta, "dominant_driver": dominant_driver}
+        return {
+            "direction": direction,
+            "delta": delta,
+            "delta_score": delta,
+            "dominant_driver": dominant_driver,
+            "stored_color": stored_color,
+            "prev_color": prev_color,
+            "recovery_type": recovery_type,
+            "message_count_current_window": int(message_count_current_window or 0),
+            "message_count_previous_window": int(message_count_previous_window or 0),
+            "minutes_since_same_state": int(max(0, minutes_since_same_state or 0)),
+        }
+
+    async def _minutes_since_last_same_color(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        window_minutes: int,
+        window_end_ts: str,
+        current_color: str,
+        fallback_minutes: int,
+    ) -> int:
+        history = []
+        if hasattr(self._database, "get_barcello_snapshots_before"):
+            history = await self._database.get_barcello_snapshots_before(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                window_minutes=window_minutes,
+                window_end_ts=window_end_ts,
+                limit=72,
+            )
+        if not history:
+            return int(max(1, fallback_minutes))
+        current_dt = self._parse_ts(window_end_ts)
+        for row in history:
+            candidate_score = int(row["score"])
+            candidate_color = await self.get_color(candidate_score)
+            if candidate_color != current_color:
+                continue
+            candidate_dt = self._parse_ts(row["window_end_ts"])
+            delta_minutes = int(max(1, round((current_dt - candidate_dt).total_seconds() / 60.0)))
+            return delta_minutes
+        return int(max(1, fallback_minutes))
 
     def _cache_result(self, cache_key: tuple[str, str, int, str], result: BarcelloResult) -> None:
         expires = datetime.now(timezone.utc).timestamp() + self._cache_ttl
@@ -549,6 +637,7 @@ class BarcelloService:
             snapshot["window_minutes"],
             window_end_ts,
             score,
+            metrics,
         )
         advice = self._build_advice(metrics, score)
         return BarcelloResult(
@@ -1090,6 +1179,58 @@ class BarcelloService:
         if not reasons:
             return ""
         return str(reasons[0].get("key") or "")
+
+    @staticmethod
+    def _choose_recovery_type(
+        *,
+        direction: str,
+        current_metrics: dict[str, Any],
+        previous_metrics: dict[str, Any],
+    ) -> str:
+        if direction != "improving":
+            return ""
+        msg_current = int(current_metrics.get("message_count") or 0)
+        msg_prev = int(previous_metrics.get("message_count") or 0)
+        if msg_current <= max(2, int(msg_prev * 0.6)):
+            return "passive_recovery"
+        return "active_recovery"
+
+    @staticmethod
+    def _choose_dominant_driver(
+        *,
+        current_metrics: dict[str, Any],
+        previous_metrics: dict[str, Any],
+        direction: str,
+        current_color: str,
+    ) -> str:
+        direct = float(current_metrics.get("direct_conflict_index") or 0.0)
+        venting = float(current_metrics.get("venting_index") or 0.0)
+        calming = float(current_metrics.get("calming_index") or 0.0)
+        hostility = float(current_metrics.get("hostility_index") or 0.0)
+        intensity = float(current_metrics.get("intensity_index") or 0.0)
+        playful = float(current_metrics.get("playful_index") or 0.0)
+        affectionate = float(current_metrics.get("affectionate_index") or 0.0)
+        persistence = float(current_metrics.get("persistence_of_conflict_vs_previous_window") or 0.0)
+        msg_current = int(current_metrics.get("message_count") or 0)
+        msg_prev = int(previous_metrics.get("message_count") or 0)
+
+        if current_color == "nero" and (direct >= 0.42 or persistence > 0.1):
+            return "escalation"
+        if direct >= 0.3:
+            return "directed_conflict"
+        if direction == "improving" and calming >= 0.12 and direct < 0.24:
+            return "deescalation"
+        if direction == "improving":
+            if msg_current <= max(2, int(msg_prev * 0.6)):
+                return "passive_recovery"
+            return "active_recovery"
+        if direction == "worsening" and (hostility >= 0.22 or persistence > 0.04):
+            return "rising_tension"
+        if venting >= 0.18 and direct < 0.26:
+            return "venting"
+        if (playful + affectionate) >= 0.18 and intensity >= 0.35 and direct < 0.2 and hostility < 0.2:
+            return "playful_activity"
+        return "stable_balance"
 
     def _build_advice(self, metrics: dict[str, Any], score: int) -> list[str]:
         advice: list[str] = []

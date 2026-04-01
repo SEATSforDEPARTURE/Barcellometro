@@ -48,9 +48,12 @@ def test_clamp_score() -> None:
 
 
 def test_trend_computation() -> None:
-    assert BarcelloService._build_trend(70, 60) == {"direction": "improving", "delta": 10, "dominant_driver": ""}
-    assert BarcelloService._build_trend(60, 62) == {"direction": "stable", "delta": -2, "dominant_driver": ""}
-    assert BarcelloService._build_trend(40, 55) == {"direction": "worsening", "delta": -15, "dominant_driver": ""}
+    assert BarcelloService._build_trend(70, 60)["direction"] == "improving"
+    assert BarcelloService._build_trend(70, 60)["delta"] == 10
+    assert BarcelloService._build_trend(60, 62)["direction"] == "stable"
+    assert BarcelloService._build_trend(60, 62)["delta"] == -2
+    assert BarcelloService._build_trend(40, 55)["direction"] == "worsening"
+    assert BarcelloService._build_trend(40, 55)["delta"] == -15
 
 
 def test_activity_spike_non_hostile_does_not_drop_to_rosso() -> None:
