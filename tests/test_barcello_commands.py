@@ -22,16 +22,17 @@ class _FakeTree:
 
 
 class _FakeEntitlements:
-    def __init__(self, *, allowed: bool = True, profile: str = "base") -> None:
+    def __init__(self, *, allowed: bool = True, profile: str = "base", output: dict[str, object] | None = None) -> None:
         self.allowed = allowed
         self.profile = profile
+        self.output = output or {}
 
     async def get_command_profile_config(self, user, command_name: str) -> dict[str, object]:
         return {
             "allowed": self.allowed,
             "messages": {"dm_text": "Serve almeno PLUS per usare /barcello."},
             "capabilities": [],
-            "output": {},
+            "output": self.output,
         }
 
     async def resolve_profile_with_role_id(self, user) -> tuple[str, int | None]:
@@ -41,11 +42,17 @@ class _FakeEntitlements:
         return False
 
 
-def _ctx_for_result(result: BarcelloResult, *, allowed: bool = True, profile: str = "base") -> SimpleNamespace:
+def _ctx_for_result(
+    result: BarcelloResult,
+    *,
+    allowed: bool = True,
+    profile: str = "base",
+    output: dict[str, object] | None = None,
+) -> SimpleNamespace:
     trigger_engine = SimpleNamespace(run_barcello_trigger_now=AsyncMock(return_value={"evaluated": True, "notified": True, "reason": "ok"}))
     return SimpleNamespace(
         footer=None,
-        entitlements=_FakeEntitlements(allowed=allowed, profile=profile),
+        entitlements=_FakeEntitlements(allowed=allowed, profile=profile, output=output),
         barcello_service=SimpleNamespace(
             compute_channel=AsyncMock(return_value=result),
             compute_channel_range=AsyncMock(return_value=result),
@@ -441,5 +448,75 @@ def test_alias_and_canonical_report_commands_share_the_same_report_pipeline(
         second_end = second_call.kwargs.get("end_ts", second_call.args[3])
         assert first_start == second_start
         assert first_end == second_end
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("color", "driver", "direction", "expected_tokens"),
+    [
+        ("verde", "active_recovery", "improving", ["**migliorando**", "**equilibrati**"]),
+        ("verde", "passive_recovery", "improving", ["**assenza di attività**"]),
+        ("verde", "playful_activity", "stable", ["**vivace**", "**sana**"]),
+        ("giallo", "venting", "worsening", ["**nervosismo**"]),
+        ("giallo", "stable_balance", "stable", ["**stabile**"]),
+        ("rosso", "directed_conflict", "worsening", ["**attacco diretto**"]),
+        ("rosso", "deescalation", "improving", ["**de-escalation**"]),
+        ("nero", "escalation", "worsening", ["**escalation**"]),
+        ("giallo", "rising_tension", "worsening", ["**tensione**"]),
+        ("verde", "unknown", "mystery", ["segnali **misti**"]),
+    ],
+)
+def test_trend_section_is_two_bullets_and_uses_driver_catalog(
+    barcello_module,
+    monkeypatch: pytest.MonkeyPatch,
+    color: str,
+    driver: str,
+    direction: str,
+    expected_tokens: list[str],
+) -> None:
+    async def _run() -> None:
+        result = BarcelloResult(
+            score=75,
+            color=color,
+            window_start_ts="2026-03-21T10:00:00+00:00",
+            window_end_ts="2026-03-21T10:30:00+00:00",
+            metrics={"message_count": 42, "cache_hit": False, "msg_per_min": 3.0, "burst_ratio": 1.2},
+            trend={
+                "direction": direction,
+                "delta": 6 if direction == "improving" else -6 if direction == "worsening" else 0,
+                "dominant_driver": driver,
+                "minutes_since_same_state": 17,
+                "message_count_current_window": 42,
+                "message_count_previous_window": 40,
+            },
+        )
+        ctx = _ctx_for_result(
+            result,
+            output={"show_trend": True, "show_motivation": False, "show_advice": False, "show_mod_metrics": False},
+        )
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        monkeypatch.setattr(barcello_module, "send_standard_response", AsyncMock())
+        send_dm_or_followup = AsyncMock(return_value=True)
+        monkeypatch.setattr(barcello_module, "send_dm_or_followup", send_dm_or_followup)
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "get_setting", AsyncMock(return_value="30"))
+
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _group_command(barcello_alias_group, "oggi").callback
+        await callback(_interaction(qualified_name="barcello oggi"))
+
+        embeds = send_dm_or_followup.await_args.kwargs["embeds"]
+        details_embed = embeds[1]
+        trend_field = next(field for field in details_embed.fields if "TREND" in field.name.upper())
+        trend_lines = [line for line in trend_field.value.splitlines() if line.strip()]
+        assert len(trend_lines) == 2
+        assert trend_lines[0] == "• L'ultima volta in questo stato è stata **17 minuti fa**."
+        for token in expected_tokens:
+            assert token in trend_lines[1]
+        assert any("PUNTI SALUTE" in field.name.upper() for field in embeds[0].fields)
 
     asyncio.run(_run())
