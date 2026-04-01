@@ -7,6 +7,7 @@ def test_ai_model_choices_include_campaign_and_audio_tasks() -> None:
     assert 'app_commands.Choice(name="campaign_prompt", value="campaign_prompt")' in source
     assert 'app_commands.Choice(name="transcription", value="transcription")' in source
     assert 'app_commands.Choice(name="translation", value="translation")' in source
+    assert 'app_commands.Choice(name="climate_analysis", value="climate_analysis")' in source
 
 
 def test_ai_commands_are_registered_under_canonical_ai_namespace() -> None:

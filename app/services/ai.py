@@ -22,6 +22,7 @@ class AiService:
         "audio_summary",
         "qa",
         "analysis",
+        "climate_analysis",
         "transcription",
         "translation",
         "campaign_editorial",
@@ -45,6 +46,7 @@ class AiService:
             "last_test_error": None,
             "last_used_task": None,
             "last_used_model": None,
+            "last_used_models": [],
         }
 
     async def load_settings(self) -> None:
@@ -186,6 +188,7 @@ class AiService:
             result = await self._run_model(provider, model, system, prompt, effective_timeout)
             self._metrics["last_used_task"] = task
             self._metrics["last_used_model"] = model_cfg
+            self._metrics["last_used_models"] = [model_cfg]
             text = self._extract_text(result)
             return text or None
         except Exception as exc:
@@ -225,6 +228,7 @@ class AiService:
             result = await self._run_model(provider_fb, model_fb, fallback_system, fallback_prompt, fallback_timeout)
             self._metrics["last_used_task"] = task
             self._metrics["last_used_model"] = fallback_cfg
+            self._metrics["last_used_models"] = [model_cfg, fallback_cfg]
             text = self._extract_text(result)
             return text or None
 
@@ -293,6 +297,7 @@ class AiService:
 
             self._metrics["last_used_task"] = task
             self._metrics["last_used_model"] = model_cfg
+            self._metrics["last_used_models"] = [model_cfg]
             text = self._extract_text(result)
             return text or None
         except Exception as exc:
@@ -341,6 +346,7 @@ class AiService:
 
             self._metrics["last_used_task"] = task
             self._metrics["last_used_model"] = fallback_cfg
+            self._metrics["last_used_models"] = [model_cfg, fallback_cfg]
             text = self._extract_text(result)
             return text or None
 
@@ -391,6 +397,21 @@ class AiService:
             return model.split(":")[0]
         return model
 
+    def get_runtime_model_contributors(self, task: str) -> list[str]:
+        if self._metrics.get("last_used_task") != task:
+            return []
+        used_models = self._metrics.get("last_used_models") or []
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for model_cfg in used_models:
+            provider, model = parse_model_string(str(model_cfg))
+            display_name = model.split(":")[0] if provider == "ollama" else model
+            if not display_name or display_name in seen:
+                continue
+            seen.add(display_name)
+            deduped.append(display_name)
+        return deduped
+
     async def generate_text(self, task: str, prompt: str, system: str | None = None) -> str:
         text = await self.ask_for_task(task, prompt, system or "")
         if text is None:
@@ -404,6 +425,7 @@ class AiService:
             "audio_summary": "openai:gpt-4o-mini",
             "qa": "openai:gpt-4o-mini",
             "analysis": "openai:gpt-4o-mini",
+            "climate_analysis": "openai:gpt-4o-mini",
             "transcription": "openai:gpt-4o-transcribe",
             "translation": "openai:gpt-4o-mini",
             "campaign_editorial": "openai:gpt-4o-mini",
@@ -427,6 +449,7 @@ class AiService:
             "audio_summary": "ollama:qwen2.5:1.5b",
             "qa": "ollama:qwen2.5:1.5b",
             "analysis": "ollama:qwen2.5:1.5b",
+            "climate_analysis": "ollama:qwen2.5:1.5b",
             "transcription": "openai:gpt-4o-transcribe",
             "translation": "openai:gpt-4o-mini",
             "campaign_editorial": "ollama:qwen2.5:1.5b",

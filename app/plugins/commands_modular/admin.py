@@ -20,6 +20,7 @@ AI_TASK_CHOICES = [
     app_commands.Choice(name="audio_summary", value="audio_summary"),
     app_commands.Choice(name="qa", value="qa"),
     app_commands.Choice(name="analysis", value="analysis"),
+    app_commands.Choice(name="climate_analysis", value="climate_analysis"),
     app_commands.Choice(name="transcription", value="transcription"),
     app_commands.Choice(name="translation", value="translation"),
     app_commands.Choice(name="campaign_editorial", value="campaign_editorial"),

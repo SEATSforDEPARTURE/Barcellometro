@@ -23,7 +23,7 @@ def get_recommended_models() -> list[SuggestedModel]:
             label="gpt-4o-mini",
             description="Economico e versatile per summary, QA e campagne prompt",
             provider="openai",
-            task_tags=("summary", "server_summary", "audio_summary", "qa", "analysis", "translation", "campaign_prompt"),
+            task_tags=("summary", "server_summary", "audio_summary", "qa", "analysis", "climate_analysis", "translation", "campaign_prompt"),
             source="recommended_openai",
         ),
         SuggestedModel(
@@ -31,7 +31,7 @@ def get_recommended_models() -> list[SuggestedModel]:
             label="gpt-4o",
             description="Qualità più alta per task complessi e output migliori",
             provider="openai",
-            task_tags=("qa", "analysis", "campaign_prompt"),
+            task_tags=("qa", "analysis", "climate_analysis", "campaign_prompt"),
             source="recommended_openai",
         ),
         SuggestedModel(
@@ -47,7 +47,7 @@ def get_recommended_models() -> list[SuggestedModel]:
             label="gpt-4.1-mini",
             description="Alternativa veloce per task testuali, se disponibile nel progetto",
             provider="openai",
-            task_tags=("summary", "server_summary", "qa", "analysis", "translation"),
+            task_tags=("summary", "server_summary", "qa", "analysis", "climate_analysis", "translation"),
             source="recommended_openai",
         ),
         SuggestedModel(
@@ -63,7 +63,7 @@ def get_recommended_models() -> list[SuggestedModel]:
             label="llama3.2:3b",
             description="Locale più qualitativo per testi e campagne prompt",
             provider="ollama",
-            task_tags=("summary", "qa", "analysis", "campaign_prompt", "campaign_editorial"),
+            task_tags=("summary", "qa", "analysis", "climate_analysis", "campaign_prompt", "campaign_editorial"),
             source="recommended_ollama",
         ),
         SuggestedModel(
@@ -71,7 +71,7 @@ def get_recommended_models() -> list[SuggestedModel]:
             label="qwen2.5:3b",
             description="Locale bilanciato, migliore del 1.5b se la VPS regge",
             provider="ollama",
-            task_tags=("summary", "server_summary", "qa", "analysis", "campaign_editorial"),
+            task_tags=("summary", "server_summary", "qa", "analysis", "climate_analysis", "campaign_editorial"),
             source="recommended_ollama",
         ),
     ]
@@ -88,6 +88,7 @@ def _task_priority_values(task: str | None) -> list[str]:
         "translation": ["openai:gpt-4o-mini", "ollama:qwen2.5:1.5b", "openai:gpt-4.1-mini"],
         "qa": ["openai:gpt-4o-mini", "openai:gpt-4o", "ollama:llama3.2:3b"],
         "analysis": ["openai:gpt-4o-mini", "openai:gpt-4o", "ollama:llama3.2:3b"],
+        "climate_analysis": ["ollama:llama3.2:3b", "openai:gpt-4o-mini", "openai:gpt-4o"],
     }
     return priorities.get(task or "", ["openai:gpt-4o-mini", "ollama:qwen2.5:1.5b", "ollama:llama3.2:3b"])
 
@@ -153,7 +154,7 @@ async def build_model_autocomplete_choices(task: str | None, current: str) -> li
             label=value.removeprefix("ollama:"),
             description="Modello Ollama installato localmente",
             provider="ollama",
-            task_tags=("summary", "server_summary", "audio_summary", "qa", "analysis", "transcription", "translation", "campaign_editorial", "campaign_prompt"),
+            task_tags=("summary", "server_summary", "audio_summary", "qa", "analysis", "climate_analysis", "transcription", "translation", "campaign_editorial", "campaign_prompt"),
             source="installed_ollama",
         )
         for value in installed_values
@@ -170,6 +171,8 @@ async def build_model_autocomplete_choices(task: str | None, current: str) -> li
         for model in deduped.values()
         if not query or query in model.value.lower() or query in model.label.lower()
     ]
+    if task:
+        filtered = [model for model in filtered if task in model.task_tags or model.value in _task_priority_values(task)]
 
     priorities = _task_priority_values(task)
     priority_index = {value: idx for idx, value in enumerate(priorities)}
