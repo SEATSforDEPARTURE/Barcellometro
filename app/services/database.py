@@ -313,6 +313,26 @@ class DatabaseService:
                 profile TEXT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS barcello_window_analysis (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                window_end_ts TEXT NOT NULL,
+                window_minutes INTEGER NOT NULL,
+                metrics_json TEXT NOT NULL,
+                reasons_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, channel_id, window_end_ts, window_minutes)
+            );
+
+            CREATE TABLE IF NOT EXISTS barcello_message_classifications (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                window_end_ts TEXT NOT NULL,
+                items_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, channel_id, window_end_ts)
+            );
+
 
             CREATE TABLE IF NOT EXISTS daily_reports (
                 guild_id TEXT NOT NULL,
@@ -1587,6 +1607,49 @@ class DatabaseService:
                 score_pred,
                 profile,
             ),
+        )
+
+    async def put_barcello_window_analysis(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        window_end_ts: str,
+        window_minutes: int,
+        metrics_json: str,
+        reasons_json: str,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO barcello_window_analysis (
+                guild_id, channel_id, window_end_ts, window_minutes, metrics_json, reasons_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, window_end_ts, window_minutes) DO UPDATE SET
+                metrics_json = excluded.metrics_json,
+                reasons_json = excluded.reasons_json
+            """,
+            (guild_id, channel_id, window_end_ts, window_minutes, metrics_json, reasons_json),
+        )
+
+    async def put_barcello_message_classifications(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        window_end_ts: str,
+        items_json: str,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO barcello_message_classifications (
+                guild_id, channel_id, window_end_ts, items_json
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, window_end_ts) DO UPDATE SET
+                items_json = excluded.items_json
+            """,
+            (guild_id, channel_id, window_end_ts, items_json),
         )
 
     async def list_barcello_feedback(self, days: int = 30) -> list[aiosqlite.Row]:
