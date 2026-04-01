@@ -20,6 +20,7 @@ if "httpx" not in sys.modules:
     sys.modules["httpx"] = httpx_stub
 
 from app.services.ingest import EventEnvelope
+from app.services.footer import get_footer_meta
 from app.services.triggers_service import TriggerEngineService
 
 
@@ -42,7 +43,7 @@ class _FakeBot:
         return self._channel
 
 
-def _base_service(prev_state: dict, status: dict, *, cfg: dict | None = None):
+def _base_service(prev_state: dict, status: dict, *, cfg: dict | None = None, ai_service: Mock | None = None):
     database = Mock()
     database.get_trigger_enabled = AsyncMock(return_value=True)
     database.fetchone = AsyncMock(side_effect=[{"count": 25}, {"count": 25}])
@@ -60,8 +61,12 @@ def _base_service(prev_state: dict, status: dict, *, cfg: dict | None = None):
 
     barcello = Mock()
     barcello.get_current_status = AsyncMock(return_value=status)
+    barcello.get_color = AsyncMock(side_effect=lambda score: "VERDE" if int(score) >= 61 else ("GIALLO" if int(score) >= 41 else "ROSSO"))
 
-    service = TriggerEngineService(database, barcello, Mock(), Mock(), community_insights=Mock())
+    ai = ai_service or Mock()
+    if not hasattr(ai, "is_enabled"):
+        ai.is_enabled = Mock(return_value=False)
+    service = TriggerEngineService(database, barcello, Mock(), ai, community_insights=Mock())
     service._load_barcello_trigger_cfg_cached = Mock(return_value=cfg or {
         "window_minutes": 60,
         "min_messages": 1,
@@ -79,7 +84,7 @@ def _base_service(prev_state: dict, status: dict, *, cfg: dict | None = None):
     })
     channel = _make_fake_messageable()
     service._bot = _FakeBot(channel)
-    return service, database, channel
+    return service, database, channel, ai
 
 
 def test_giallo_to_verde_not_notified_without_recovery() -> None:
@@ -90,7 +95,7 @@ def test_giallo_to_verde_not_notified_without_recovery() -> None:
         "candidate_color": "VERDE",
         "candidate_since_ts": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
     }
-    service, _db, channel = _base_service(prev, {"color": "VERDE", "score": 70})
+    service, _db, channel, _ai = _base_service(prev, {"color": "VERDE", "score": 70})
     asyncio.run(service._evaluate_barcello_channel("1", "2"))
     assert channel.sent == []
 
@@ -103,7 +108,7 @@ def test_verde_to_giallo_blocked_without_fresh_activity() -> None:
         "candidate_color": "GIALLO",
         "candidate_since_ts": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
     }
-    service, _db, channel = _base_service(prev, {"color": "GIALLO", "score": 60})
+    service, _db, channel, _ai = _base_service(prev, {"color": "GIALLO", "score": 60})
     service._get_recent_barcello_activity = AsyncMock(return_value={"count": 1, "authors": 1, "last_message_ts": datetime.now(timezone.utc).isoformat()})
     asyncio.run(service._evaluate_barcello_channel("1", "2"))
     assert channel.sent == []
@@ -111,7 +116,7 @@ def test_verde_to_giallo_blocked_without_fresh_activity() -> None:
 
 def test_recovery_armed_on_rosso_transition() -> None:
     prev = {"last_color": "GIALLO", "last_score": 55, "recovery_armed": 0}
-    service, db, _channel = _base_service(prev, {"color": "ROSSO", "score": 25})
+    service, db, _channel, _ai = _base_service(prev, {"color": "ROSSO", "score": 25})
     asyncio.run(service._evaluate_barcello_channel("1", "2"))
     assert db.update_barcello_recovery_state.await_count >= 1
 
@@ -125,21 +130,21 @@ def test_recovery_verde_notified_only_if_armed() -> None:
         "candidate_color": "VERDE",
         "candidate_since_ts": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
     }
-    service, _db, channel = _base_service(prev, {"color": "VERDE", "score": 80})
+    service, _db, channel, _ai = _base_service(prev, {"color": "VERDE", "score": 80})
     asyncio.run(service._evaluate_barcello_channel("1", "2", allow_recovery=True, reason="recovery_loop"))
     assert len(channel.sent) == 1
 
 
 def test_cooldown_blocks_notification() -> None:
     prev = {"last_color": "GIALLO", "last_score": 50, "recovery_armed": 0}
-    service, db, channel = _base_service(prev, {"color": "ROSSO", "score": 20})
+    service, db, channel, _ai = _base_service(prev, {"color": "ROSSO", "score": 20})
     db.get_barcello_last_notified = AsyncMock(return_value=datetime.now(timezone.utc).isoformat())
     asyncio.run(service._evaluate_barcello_channel("1", "2"))
     assert channel.sent == []
 
 
 def test_on_event_schedules_barcello_eval() -> None:
-    service, _db, _channel = _base_service({"last_color": "VERDE", "last_score": 90}, {"color": "VERDE", "score": 90})
+    service, _db, _channel, _ai = _base_service({"last_color": "VERDE", "last_score": 90}, {"color": "VERDE", "score": 90})
     service._handle_phrases = AsyncMock()
     service._schedule_barcello_eval = AsyncMock()
     env = EventEnvelope(
@@ -160,7 +165,7 @@ def test_on_event_schedules_barcello_eval() -> None:
 
 
 def test_run_barcello_trigger_now_uses_evaluate_flow() -> None:
-    service, _db, channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "ROSSO", "score": 20})
+    service, _db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "ROSSO", "score": 20})
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", window_minutes=15))
     assert out["evaluated"] is True
     assert out["reason"] == "ok"
@@ -169,7 +174,7 @@ def test_run_barcello_trigger_now_uses_evaluate_flow() -> None:
 
 
 def test_run_barcello_trigger_now_force_publish_sends_even_without_transition() -> None:
-    service, _db, channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 71})
+    service, _db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 71})
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["evaluated"] is True
     assert out["notified"] is True
@@ -188,7 +193,7 @@ def test_run_barcello_trigger_now_force_publish_sends_even_without_transition() 
 
 def test_run_barcello_trigger_now_rosso_has_inline_mod_mention_and_no_moderation_field() -> None:
     prev = {"last_color": "GIALLO", "last_score": 55, "recovery_armed": 0}
-    service, _db, channel = _base_service(prev, {"color": "ROSSO", "score": 25})
+    service, _db, channel, _ai = _base_service(prev, {"color": "ROSSO", "score": 25})
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["notified"] is True
     embed = channel.sent[0]
@@ -198,7 +203,7 @@ def test_run_barcello_trigger_now_rosso_has_inline_mod_mention_and_no_moderation
 
 
 def test_run_barcello_trigger_now_verde_does_not_add_mod_mention() -> None:
-    service, _db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
+    service, _db, channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["notified"] is True
     embed = channel.sent[0]
@@ -215,7 +220,7 @@ def test_run_barcello_trigger_now_rosso_without_mod_role_does_not_add_placeholde
         "templates": {"GIALLO->ROSSO": "Qui si arrossisce male"},
     }
     prev = {"last_color": "GIALLO", "last_score": 55, "recovery_armed": 0}
-    service, _db, channel = _base_service(prev, {"color": "ROSSO", "score": 25}, cfg=cfg)
+    service, _db, channel, _ai = _base_service(prev, {"color": "ROSSO", "score": 25}, cfg=cfg)
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["notified"] is True
     embed = channel.sent[0]
@@ -224,7 +229,7 @@ def test_run_barcello_trigger_now_rosso_without_mod_role_does_not_add_placeholde
 
 
 def test_run_barcello_trigger_now_trend_field_is_always_present_with_two_bullets() -> None:
-    service, _db, channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 71})
+    service, _db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 71})
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["notified"] is True
     embed = channel.sent[0]
@@ -239,7 +244,7 @@ def test_run_barcello_trigger_now_trend_field_is_always_present_with_two_bullets
 def test_run_barcello_trigger_now_trend_field_contains_last_same_state_reference() -> None:
     now = datetime.now(timezone.utc)
     prev = {"last_color": "ROSSO", "last_score": 25, "recovery_armed": 0}
-    service, db, channel = _base_service(prev, {"color": "ROSSO", "score": 25})
+    service, db, channel, _ai = _base_service(prev, {"color": "ROSSO", "score": 25})
     db.get_trigger_state = AsyncMock(
         return_value={
             "date": now.date().isoformat(),
@@ -258,7 +263,7 @@ def test_run_barcello_trigger_now_trend_field_contains_last_same_state_reference
 
 
 def test_render_barcello_trend_comment_worsening_improving_stable() -> None:
-    service, _db, _channel = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "GIALLO", "score": 50})
+    service, _db, _channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "GIALLO", "score": 50})
     worsening = service._render_barcello_trend_comment(
         state="ROSSO",
         delta_score=-12,
@@ -280,7 +285,7 @@ def test_render_barcello_trend_comment_worsening_improving_stable() -> None:
 
 
 def test_render_barcello_trend_comment_driver_specific_causes() -> None:
-    service, _db, _channel = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "GIALLO", "score": 50})
+    service, _db, _channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "GIALLO", "score": 50})
     direct = service._render_barcello_trend_comment(
         state="ROSSO",
         delta_score=-8,
@@ -298,7 +303,7 @@ def test_render_barcello_trend_comment_driver_specific_causes() -> None:
 
 
 def test_recovery_type_active_trend_contains_migliorando_and_no_passive_phrase() -> None:
-    service, db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
+    service, db, channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
     db.fetchone = AsyncMock(side_effect=[{"count": 18}, {"count": 20}])
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["notified"] is True
@@ -309,7 +314,7 @@ def test_recovery_type_active_trend_contains_migliorando_and_no_passive_phrase()
 
 
 def test_recovery_type_passive_trend_mentions_low_activity() -> None:
-    service, db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
+    service, db, channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
     db.fetchone = AsyncMock(side_effect=[{"count": 1}, {"count": 30}])
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["notified"] is True
@@ -319,7 +324,7 @@ def test_recovery_type_passive_trend_mentions_low_activity() -> None:
 
 
 def test_recovery_description_is_bold_and_contextual() -> None:
-    service, db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
+    service, db, channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
     db.fetchone = AsyncMock(side_effect=[{"count": 2}, {"count": 25}])
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["notified"] is True
@@ -329,7 +334,7 @@ def test_recovery_description_is_bold_and_contextual() -> None:
 
 
 def test_run_barcello_trigger_now_pair_mode_uses_compute_pair() -> None:
-    service, _db, _channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 70})
+    service, _db, _channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 70})
     service._barcello.compute_pair = AsyncMock(return_value=SimpleNamespace(score=24, color="rosso"))
     service._barcello.get_current_status = AsyncMock(return_value={"color": "VERDE", "score": 80})
     asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True, user1_id="11", user2_id="22"))
@@ -338,7 +343,7 @@ def test_run_barcello_trigger_now_pair_mode_uses_compute_pair() -> None:
 
 
 def test_run_barcello_trigger_now_returns_disabled_when_trigger_off() -> None:
-    service, db, _channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "ROSSO", "score": 20})
+    service, db, _channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "ROSSO", "score": 20})
     db.get_trigger_enabled = AsyncMock(return_value=False)
     service._evaluate_barcello_channel = AsyncMock()
     out = asyncio.run(service.run_barcello_trigger_now("1", "2"))
@@ -347,7 +352,7 @@ def test_run_barcello_trigger_now_returns_disabled_when_trigger_off() -> None:
 
 
 def test_insights_loop_kept_in_polling_mode() -> None:
-    service, _db, _channel = _base_service({"last_color": "VERDE", "last_score": 90}, {"color": "VERDE", "score": 90})
+    service, _db, _channel, _ai = _base_service({"last_color": "VERDE", "last_score": 90}, {"color": "VERDE", "score": 90})
     called = {"count": 0}
 
     async def _once():
@@ -360,3 +365,58 @@ def test_insights_loop_kept_in_polling_mode() -> None:
     except asyncio.CancelledError:
         pass
     assert called["count"] == 1
+
+
+def test_barcello_climate_ai_uses_dedicated_task_and_sets_footer_contributors() -> None:
+    ai = Mock()
+    ai.is_enabled = Mock(return_value=True)
+    ai.ask_for_task = AsyncMock(return_value='{"climate":"conflict","confidence":0.9}')
+    ai.get_runtime_model_contributors = Mock(return_value=["llama3.2", "gpt-4o-mini"])
+    cfg = {
+        "window_minutes": 60,
+        "min_messages": 1,
+        "analysis": {"ai_fallback_enabled": True, "ai_ambiguity_min": 0.2, "ai_ambiguity_max": 0.6, "max_messages_per_window": 10},
+        "event_driven": {"minor_state_confirm_seconds": 180},
+        "cooldown_minutes": {"minor": 20, "major": 8, "recovery": 60},
+        "recovery": {"enabled": True, "poll_seconds": 300, "min_quiet_minutes": 12},
+        "templates": {"VERDE->GIALLO": "x"},
+    }
+    status = {"color": "GIALLO", "score": 58, "metrics": {"hostility_index": 0.4, "direct_conflict_index": 0.2, "venting_index": 0.3}}
+    service, db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, status, cfg=cfg, ai_service=ai)
+    db.fetch_messages_in_range = AsyncMock(return_value=[{"author_id": "u1", "content": "msg1"}, {"author_id": "u2", "content": "msg2"}, {"author_id": "u3", "content": "msg3"}])
+    service._get_recent_barcello_activity = AsyncMock(return_value={"count": 8, "authors": 4, "last_message_ts": datetime.now(timezone.utc).isoformat()})
+
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+
+    assert out["notified"] is True
+    ai.ask_for_task.assert_awaited()
+    assert ai.ask_for_task.await_args.args[0] == "climate_analysis"
+    meta = get_footer_meta(channel.sent[0])
+    assert meta is not None
+    assert meta.contributors == ["llama3.2", "gpt-4o-mini"]
+
+
+def test_barcello_climate_ai_not_used_keeps_footer_without_contributors() -> None:
+    ai = Mock()
+    ai.is_enabled = Mock(return_value=True)
+    ai.ask_for_task = AsyncMock(return_value='{"climate":"neutral","confidence":0.9}')
+    ai.get_runtime_model_contributors = Mock(return_value=["llama3.2"])
+    cfg = {
+        "window_minutes": 60,
+        "min_messages": 1,
+        "analysis": {"ai_fallback_enabled": True, "ai_ambiguity_min": 0.7, "ai_ambiguity_max": 0.8, "max_messages_per_window": 10},
+        "event_driven": {"minor_state_confirm_seconds": 180},
+        "cooldown_minutes": {"minor": 20, "major": 8, "recovery": 60},
+        "recovery": {"enabled": True, "poll_seconds": 300, "min_quiet_minutes": 12},
+        "templates": {"VERDE->GIALLO": "x"},
+    }
+    status = {"color": "GIALLO", "score": 58, "metrics": {"hostility_index": 0.4}}
+    service, _db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, status, cfg=cfg, ai_service=ai)
+
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+
+    assert out["notified"] is True
+    ai.ask_for_task.assert_not_awaited()
+    meta = get_footer_meta(channel.sent[0])
+    assert meta is not None
+    assert meta.contributors == []

@@ -57,6 +57,7 @@ class _FakeClient:
 def test_supported_tasks_include_campaign_tasks() -> None:
     assert "campaign_editorial" in AiService.SUPPORTED_MODEL_TASKS
     assert "campaign_prompt" in AiService.SUPPORTED_MODEL_TASKS
+    assert "climate_analysis" in AiService.SUPPORTED_MODEL_TASKS
 
 
 def test_load_maps_include_campaign_tasks_and_fallback() -> None:
@@ -67,8 +68,28 @@ def test_load_maps_include_campaign_tasks_and_fallback() -> None:
         fallback = await service._load_fallback_model_map()
         assert "campaign_editorial" in models
         assert "campaign_prompt" in models
+        assert "climate_analysis" in models
         assert "campaign_editorial" in fallback
         assert "campaign_prompt" in fallback
+        assert "climate_analysis" in fallback
+
+    asyncio.run(_run())
+
+
+def test_runtime_model_contributors_include_primary_and_fallback() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "openai:gpt-4o-mini", "climate_analysis": "ollama:llama3.2:3b"}
+        service._fallback_model_map = {"climate_analysis": "openai:gpt-4o-mini"}
+        service._ollama.generate_text = AsyncMock(side_effect=[RuntimeError("boom"), "ok-fallback"])
+        service._client = _FakeClient()
+
+        out = await service.ask_for_task("climate_analysis", "q", "sys")
+
+        assert out == "ok"
+        assert service.get_runtime_model_contributors("climate_analysis") == ["llama3.2", "gpt-4o-mini"]
 
     asyncio.run(_run())
 

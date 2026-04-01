@@ -23,6 +23,7 @@ from app.core.config_paths import (
 from app.services.footer import FooterService, attach_footer_meta
 from app.shared.discord.command_embeds import build_command_embed, send_standard_response
 from app.shared.discord.report_embeds import build_report_cover_embed
+from app.services.ai_utils import parse_model_string
 
 from app.services.barcello_service import BarcelloService
 from app.services.barcello_window_defaults import resolve_window_minutes
@@ -856,6 +857,16 @@ class TriggerEngineService:
                 channel_id=channel_id,
                 window_minutes=window_minutes_effective,
             )
+        ai_footer_contributors: list[str] = []
+        if not pair_mode:
+            status, ai_footer_contributors = await self._maybe_apply_climate_ai_analysis(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                status=status,
+                cfg=config,
+                window_start_ts=window_start.isoformat(),
+                window_end_ts=window_end.isoformat(),
+            )
         raw_color = self._normalize_barcello_color(status.get("color"))
         if raw_color is None:
             return False
@@ -1047,7 +1058,12 @@ class TriggerEngineService:
                 value="\n".join(trend_lines),
                 inline=False,
             )
-            attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
+            attach_footer_meta(
+                embed,
+                service_name="triggers",
+                contributors=ai_footer_contributors,
+                used_local_processing=True,
+            )
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable):
                 await channel.send(embed=embed)
@@ -1078,6 +1094,97 @@ class TriggerEngineService:
             {"date": day_key, "counts": counts, "last_entered_ts": last_entered_ts},
         )
         return did_notify
+
+    async def _maybe_apply_climate_ai_analysis(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        status: dict[str, object],
+        cfg: dict[str, Any],
+        window_start_ts: str,
+        window_end_ts: str,
+    ) -> tuple[dict[str, object], list[str]]:
+        analysis_cfg = cfg.get("analysis") if isinstance(cfg.get("analysis"), dict) else {}
+        ai_enabled = bool(analysis_cfg.get("ai_fallback_enabled", False))
+        if not ai_enabled or self._ai is None or not self._ai.is_enabled():
+            return status, []
+
+        metrics = status.get("metrics") if isinstance(status.get("metrics"), dict) else {}
+        hostility_index = float(metrics.get("hostility_index") or 0.0)
+        ambiguity_min = float(analysis_cfg.get("ai_ambiguity_min") or 0.35)
+        ambiguity_max = float(analysis_cfg.get("ai_ambiguity_max") or 0.55)
+        if not (ambiguity_min <= hostility_index <= ambiguity_max):
+            return status, []
+
+        max_messages = int(analysis_cfg.get("max_messages_per_window") or 25)
+        rows = await self._database.fetch_messages_in_range(
+            channel_id=channel_id,
+            start_ts=window_start_ts,
+            end_ts=window_end_ts,
+            limit=max(5, max_messages),
+        )
+        samples: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            content = str(row.get("content") or "").strip()
+            if not content:
+                continue
+            author = str(row.get("author_id") or "user")
+            samples.append(f"{author}: {content}")
+        if len(samples) < 3:
+            return status, []
+        transcript = "\n".join(samples[:max_messages])
+        payload = json.dumps(
+            {
+                "task": "climate_analysis",
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+                "metrics": {
+                    "hostility_index": round(hostility_index, 3),
+                    "direct_conflict_index": round(float(metrics.get("direct_conflict_index") or 0.0), 3),
+                    "venting_index": round(float(metrics.get("venting_index") or 0.0), 3),
+                },
+                "messages": transcript,
+                "instruction": (
+                    "Classifica il clima conversazionale. "
+                    "Rispondi solo JSON: {\"climate\":\"conflict|venting|deescalation|neutral\",\"confidence\":0..1}."
+                ),
+            },
+            ensure_ascii=False,
+        )
+        ai_result = await self._ask_ai_json(payload, task="climate_analysis")
+        if not isinstance(ai_result, dict):
+            return status, []
+        climate = str(ai_result.get("climate") or "").strip().lower()
+        confidence = float(ai_result.get("confidence") or 0.0)
+        if climate not in {"conflict", "venting", "deescalation", "neutral"} or confidence < 0.55:
+            return status, []
+
+        score = int(status.get("score") or 0)
+        adjustments = {"conflict": -8, "venting": -3, "deescalation": 6, "neutral": 0}
+        adjusted_score = max(0, min(100, score + adjustments.get(climate, 0)))
+        new_status = dict(status)
+        new_status["score"] = adjusted_score
+        new_status["color"] = await self._barcello.get_color(adjusted_score)
+        new_status["reason"] = f"ai_climate_{climate}"
+        new_status["ai_climate"] = {"climate": climate, "confidence": round(confidence, 3)}
+        contributors = self._resolve_ai_runtime_contributors("climate_analysis")
+        return new_status, contributors
+
+    def _resolve_ai_runtime_contributors(self, task: str) -> list[str]:
+        if self._ai is None:
+            return []
+        if hasattr(self._ai, "get_runtime_model_contributors"):
+            contributors = self._ai.get_runtime_model_contributors(task)
+            if isinstance(contributors, list):
+                return [str(item).strip() for item in contributors if str(item).strip()]
+        model_cfg = self._ai.get_runtime_model(task)
+        if not model_cfg:
+            return []
+        provider, model = parse_model_string(model_cfg)
+        return [model.split(":")[0] if provider == "ollama" else model]
 
     async def _get_recent_barcello_activity(self, channel_id: str, fresh_minutes: int) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
@@ -3384,10 +3491,10 @@ class TriggerEngineService:
         )
         return obj
 
-    async def _ask_ai_json(self, payload: str) -> dict[str, object] | None:
-        if self._ai is None or not self._ai.is_enabled() or self._ai.client() is None:
+    async def _ask_ai_json(self, payload: str, *, task: str = "summary") -> dict[str, object] | None:
+        if self._ai is None or not self._ai.is_enabled():
             return None
-        text = await self._ai.ask_for_task("summary", payload, "Rispondi SOLO con JSON valido, senza markdown e senza testo aggiuntivo.")
+        text = await self._ai.ask_for_task(task, payload, "Rispondi SOLO con JSON valido, senza markdown e senza testo aggiuntivo.")
         text = text or ""
         try:
             return json.loads(text)

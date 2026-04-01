@@ -52,3 +52,11 @@ def test_build_model_autocomplete_choices_deduplicates_values() -> None:
     choices = asyncio.run(build_model_autocomplete_choices("summary", "gpt-4o-mini"))
     values = [choice.value for choice in choices]
     assert len(values) == len(set(values))
+
+
+def test_build_model_autocomplete_choices_supports_climate_analysis_task() -> None:
+    choices = asyncio.run(build_model_autocomplete_choices("climate_analysis", ""))
+    values = [choice.value for choice in choices]
+    assert "ollama:llama3.2:3b" in values
+    assert "openai:gpt-4o-mini" in values
+    assert "openai:gpt-4o" in values
