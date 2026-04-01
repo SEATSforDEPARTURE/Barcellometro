@@ -370,7 +370,7 @@ def test_insights_loop_kept_in_polling_mode() -> None:
 def test_barcello_climate_ai_uses_dedicated_task_and_sets_footer_contributors() -> None:
     ai = Mock()
     ai.is_enabled = Mock(return_value=True)
-    ai.ask_for_task = AsyncMock(return_value='{"climate":"conflict","confidence":0.9}')
+    ai.ask_for_task = AsyncMock(return_value='{"label":"directed_conflict","toxicity":0.7,"aggression":0.8,"directedness":0.9,"profanity":0.5,"venting":0.1,"calming":0.0,"conflict":0.88,"target_type":"user","confidence":0.92,"reason_code":"attack_with_target"}')
     ai.get_runtime_model_contributors = Mock(return_value=["llama3.2", "gpt-4o-mini"])
     cfg = {
         "window_minutes": 60,
@@ -399,7 +399,7 @@ def test_barcello_climate_ai_uses_dedicated_task_and_sets_footer_contributors() 
 def test_barcello_climate_ai_not_used_keeps_footer_without_contributors() -> None:
     ai = Mock()
     ai.is_enabled = Mock(return_value=True)
-    ai.ask_for_task = AsyncMock(return_value='{"climate":"neutral","confidence":0.9}')
+    ai.ask_for_task = AsyncMock(return_value='{"label":"neutral","toxicity":0.0,"aggression":0.0,"directedness":0.0,"profanity":0.0,"venting":0.0,"calming":0.0,"conflict":0.0,"target_type":"none","confidence":0.9,"reason_code":"neutral_no_target"}')
     ai.get_runtime_model_contributors = Mock(return_value=["llama3.2"])
     cfg = {
         "window_minutes": 60,

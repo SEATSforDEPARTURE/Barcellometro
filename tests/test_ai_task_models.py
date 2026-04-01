@@ -259,3 +259,26 @@ def test_ask_for_task_extends_timeout_for_campaign_prompt_ollama() -> None:
         assert timeout_used == 120.0
 
     asyncio.run(_run())
+
+def test_ask_for_task_with_validator_uses_fallback_on_invalid_primary_json() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "openai:gpt-4o-mini", "climate_analysis": "openai:gpt-4o-mini"}
+        service._fallback_model_map = {"climate_analysis": "ollama:qwen2.5:1.5b"}
+        service._client = _FakeClient()
+        service._client.responses.create = AsyncMock(return_value=types.SimpleNamespace(output_text="not-json"))
+        service._ollama.generate_text = AsyncMock(return_value='{"label":"neutral","toxicity":0.0,"aggression":0.0,"directedness":0.0,"profanity":0.0,"venting":0.0,"calming":0.0,"conflict":0.0,"target_type":"none","confidence":0.8,"reason_code":"neutral_no_target"}')
+
+        out = await service.ask_for_task_with_validator(
+            "climate_analysis",
+            "q",
+            "sys",
+            validator=lambda text: text.strip().startswith("{"),
+        )
+
+        assert out is not None
+        assert service.get_runtime_model_contributors("climate_analysis") == ["gpt-4o-mini", "qwen2.5"]
+
+    asyncio.run(_run())
