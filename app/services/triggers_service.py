@@ -797,6 +797,7 @@ class TriggerEngineService:
                 )
         window_end = datetime.now(timezone.utc)
         window_start = window_end - timedelta(minutes=window_minutes_effective)
+        previous_window_start = window_start - timedelta(minutes=window_minutes_effective)
         count_row = await self._database.fetchone(
                 """
                 SELECT COUNT(*) AS count
@@ -810,7 +811,22 @@ class TriggerEngineService:
                 """,
                 (channel_id, window_start.isoformat(), window_end.isoformat()),
             )
-        message_count = int(count_row["count"]) if count_row else 0
+        message_count_current_window = int(count_row["count"]) if count_row else 0
+        previous_count_row = await self._database.fetchone(
+            """
+            SELECT COUNT(*) AS count
+            FROM messages AS m
+            LEFT JOIN users AS u ON u.user_id = m.author_id
+            WHERE m.channel_id = ?
+              AND m.ts >= ?
+              AND m.ts <= ?
+              AND COALESCE(m.is_deleted, 0) = 0
+              AND COALESCE(u.is_bot, 0) = 0
+            """,
+            (channel_id, previous_window_start.isoformat(), window_start.isoformat()),
+        )
+        message_count_previous_window = int(previous_count_row["count"]) if previous_count_row else 0
+        message_count = message_count_current_window
         if message_count < min_messages and not allow_recovery and not force_publish:
             logger.debug(
                 "barcello skip low activity channel=%s count=%s min_messages=%s reason=%s",
@@ -849,6 +865,11 @@ class TriggerEngineService:
         prev_score = int(prev.get("last_score")) if prev and prev.get("last_score") is not None else None
         stable_color = self._apply_hysteresis(prev_color, raw_color, score)
         stored_color = stable_color or ""
+        recovery_type = self._determine_barcello_recovery_type(
+            cfg=config,
+            message_count_current_window=message_count_current_window,
+            message_count_previous_window=message_count_previous_window,
+        )
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
 
@@ -989,6 +1010,12 @@ class TriggerEngineService:
             state_count_today=state_count_today,
             last_in_state_human=last_in_state_human,
         )
+        main_msg = self._decorate_barcello_transition_message(
+            previous_state=prev_color,
+            current_state=stored_color,
+            main_msg=main_msg,
+            recovery_type=recovery_type,
+        )
         mod_mention = ""
         if stored_color in {"ROSSO", "NERO"} and prev_color != stored_color:
             mod_role_id = str(config.get("mod_role_id") or "").strip()
@@ -1007,12 +1034,11 @@ class TriggerEngineService:
             salute_value = self._render_trigger_health_bar(score=score, color=stored_color)
             embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
             trend_lines = [
-                f"• L'ultima volta in questo stato è stata {last_in_state_human} fa.",
+                f"• L'ultima volta in questo stato è stata **{last_in_state_human} fa**.",
                 self._render_barcello_trend_comment(
-                    previous_state=prev_color,
-                    current_state=stored_color,
-                    previous_score=prev_score,
-                    current_score=score,
+                    state=stored_color,
+                    delta_score=0 if prev_score is None else score - prev_score,
+                    recovery_type=recovery_type,
                 ),
             ]
             embed.add_field(
@@ -1653,44 +1679,64 @@ class TriggerEngineService:
             return render_key("IMPROVE") or f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
         return render_key("SAME") or f"Barcello aggiornato: {new_score}."
 
-    def _render_barcello_trend_comment(
+    def _determine_barcello_recovery_type(
+        self,
+        *,
+        cfg: dict[str, object],
+        message_count_current_window: int,
+        message_count_previous_window: int,
+    ) -> str:
+        threshold_low_activity = int(((cfg.get("recovery") or {}).get("threshold_low_activity") or 2))
+        if message_count_current_window <= threshold_low_activity:
+            return "passive"
+        previous = max(0, int(message_count_previous_window))
+        if previous > 0 and message_count_current_window < (previous * 0.3):
+            return "passive"
+        return "active"
+
+    def _decorate_barcello_transition_message(
         self,
         *,
         previous_state: str | None,
         current_state: str,
-        previous_score: int | None,
-        current_score: int,
+        main_msg: str,
+        recovery_type: str,
     ) -> str:
+        if previous_state is None:
+            return main_msg
         severity_rank = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
-        prev_rank = severity_rank.get(previous_state or "", severity_rank.get(current_state, 0))
+        prev_rank = severity_rank.get(previous_state, 0)
         cur_rank = severity_rank.get(current_state, 0)
-        score_delta = 0 if previous_score is None else int(current_score) - int(previous_score)
+        if cur_rank >= prev_rank:
+            return main_msg
+        state_label = f"**{current_state}**"
+        if recovery_type == "passive":
+            intro = f"Rientro nel verde: {state_label}. 🌿" if current_state == "VERDE" else f"Rientro in {state_label}. 🌿"
+            return f"{intro}\nIl clima si è **stabilizzato** per assenza di tensioni."
+        intro = f"Rientro nel verde: {state_label}. 📈" if current_state == "VERDE" else f"Rientro in {state_label}. 📈"
+        return f"{intro}\nIl clima sta **migliorando** con una conversazione attiva."
 
-        if cur_rank < prev_rank or score_delta >= 4:
+    def _render_barcello_trend_comment(
+        self,
+        *,
+        state: str,
+        delta_score: int,
+        recovery_type: str,
+    ) -> str:
+        del delta_score
+        current_state = (state or "").upper()
+        if recovery_type == "passive":
             if current_state == "VERDE":
-                return "• La conversazione sta migliorando rispetto alla finestra precedente: continuate così, state tenendo il clima sereno."
+                return "• Il clima si è **stabilizzato per assenza di attività**: attenzione, potrebbe riaccendersi appena riparte la chat."
             if current_state == "GIALLO":
-                return "• La conversazione sta migliorando rispetto alla finestra precedente: restate calme e consolidate il rientro."
-            if current_state == "ROSSO":
-                return "• La conversazione sta migliorando rispetto alla finestra precedente: non riaccendete i toni e chiudete i punti aperti."
-            return "• La conversazione sta migliorando rispetto alla finestra precedente: fate un passo indietro e stabilizzate subito il confronto."
-
-        if cur_rank > prev_rank or score_delta <= -4:
-            if current_state == "VERDE":
-                return "• La conversazione è leggermente peggiorata rispetto a prima: continuate con calma per non perdere il buon clima."
-            if current_state == "GIALLO":
-                return "• La conversazione è leggermente peggiorata rispetto a prima: abbassate un filo i toni per non far maturare il Barcy."
-            if current_state == "ROSSO":
-                return "• La conversazione sta peggiorando rispetto alla finestra precedente: meglio rallentare subito e riportare il focus sui fatti."
-            return "• La conversazione è precipitata rispetto alla finestra precedente: fermate l’escalation e fate un reset netto dei toni."
+                return "• La tensione si è **attenuata per mancanza di interazioni**: serve stabilità anche quando la chat tornerà attiva."
+            return "• Il calo di attività ha **raffreddato temporaneamente** la situazione: ma il rischio resta alto."
 
         if current_state == "VERDE":
-            return "• La conversazione resta stabile rispetto alla finestra precedente: mantenete questo ritmo sereno."
+            return "• La conversazione sta **migliorando** rispetto alla finestra precedente: continuate così, state tenendo il clima sereno."
         if current_state == "GIALLO":
-            return "• La conversazione resta stabile rispetto alla finestra precedente: tenete i toni bassi per tornare presto nel verde."
-        if current_state == "ROSSO":
-            return "• La conversazione resta stabile rispetto alla finestra precedente: servono messaggi più brevi e centrati per invertire il trend."
-        return "• La conversazione resta stabile rispetto alla finestra precedente: fermate le punzecchiature e raffreddate subito il confronto."
+            return "• La conversazione è **più equilibrata** rispetto a prima: mantenete questo ritmo per non far salire il Barcy."
+        return "• La conversazione sta **peggiorando** rispetto alla finestra precedente: abbassate i toni subito."
 
     def _build_barcello_status_embed_description(
         self,

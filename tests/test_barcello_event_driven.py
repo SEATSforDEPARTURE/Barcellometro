@@ -45,7 +45,7 @@ class _FakeBot:
 def _base_service(prev_state: dict, status: dict, *, cfg: dict | None = None):
     database = Mock()
     database.get_trigger_enabled = AsyncMock(return_value=True)
-    database.fetchone = AsyncMock(return_value={"count": 25})
+    database.fetchone = AsyncMock(side_effect=[{"count": 25}, {"count": 25}])
     database.get_barcello_trigger_state = AsyncMock(return_value=prev_state)
     database.update_barcello_candidate_state = AsyncMock()
     database.update_barcello_recovery_state = AsyncMock()
@@ -232,7 +232,7 @@ def test_run_barcello_trigger_now_trend_field_is_always_present_with_two_bullets
     assert len(trend_fields) == 1
     trend_lines = [line for line in str(trend_fields[0].value or "").splitlines() if line.strip()]
     assert len(trend_lines) == 2
-    assert trend_lines[0].startswith("• L'ultima volta in questo stato è stata ")
+    assert trend_lines[0].startswith("• L'ultima volta in questo stato è stata **")
     assert trend_lines[1].startswith("• ")
 
 
@@ -254,32 +254,60 @@ def test_run_barcello_trigger_now_trend_field_contains_last_same_state_reference
     trend_fields = [field for field in embed.fields if "TREND" in str(field.name or "")]
     assert len(trend_fields) == 1
     trend_value = str(trend_fields[0].value or "")
-    assert "• L'ultima volta in questo stato è stata 7 minuti fa." in trend_value
+    assert "• L'ultima volta in questo stato è stata **7 minuti fa**." in trend_value
 
 
 def test_render_barcello_trend_comment_worsening_improving_stable() -> None:
     service, _db, _channel = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "GIALLO", "score": 50})
     worsening = service._render_barcello_trend_comment(
-        previous_state="GIALLO",
-        current_state="ROSSO",
-        previous_score=50,
-        current_score=38,
+        state="ROSSO",
+        delta_score=-12,
+        recovery_type="active",
     )
     improving = service._render_barcello_trend_comment(
-        previous_state="ROSSO",
-        current_state="GIALLO",
-        previous_score=30,
-        current_score=44,
+        state="VERDE",
+        delta_score=14,
+        recovery_type="active",
     )
-    stable = service._render_barcello_trend_comment(
-        previous_state="GIALLO",
-        current_state="GIALLO",
-        previous_score=50,
-        current_score=51,
+    passive = service._render_barcello_trend_comment(
+        state="GIALLO",
+        delta_score=1,
+        recovery_type="passive",
     )
-    assert "peggiorando" in worsening or "precipitata" in worsening
+    assert "peggiorando" in worsening
     assert "migliorando" in improving
-    assert "resta stabile" in stable
+    assert "mancanza di interazioni" in passive
+
+
+def test_recovery_type_active_trend_contains_migliorando_and_no_passive_phrase() -> None:
+    service, db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
+    db.fetchone = AsyncMock(side_effect=[{"count": 18}, {"count": 20}])
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    trend_field = next(field for field in channel.sent[0].fields if "TREND" in str(field.name or ""))
+    value = str(trend_field.value or "")
+    assert "migliorando" in value
+    assert "assenza di attività" not in value
+
+
+def test_recovery_type_passive_trend_mentions_low_activity() -> None:
+    service, db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
+    db.fetchone = AsyncMock(side_effect=[{"count": 1}, {"count": 30}])
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    trend_field = next(field for field in channel.sent[0].fields if "TREND" in str(field.name or ""))
+    value = str(trend_field.value or "")
+    assert "assenza di attività" in value
+
+
+def test_recovery_description_is_bold_and_contextual() -> None:
+    service, db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
+    db.fetchone = AsyncMock(side_effect=[{"count": 2}, {"count": 25}])
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    description = str(channel.sent[0].description or "")
+    assert "Rientro nel verde: **VERDE**. 🌿" in description
+    assert "**stabilizzato**" in description
 
 
 def test_run_barcello_trigger_now_pair_mode_uses_compute_pair() -> None:
