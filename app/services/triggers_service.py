@@ -975,9 +975,14 @@ class TriggerEngineService:
             logger.info("barcello recovery armed guild=%s channel=%s from=%s", guild_id, channel_id, stored_color)
 
         daily_state = await self._database.get_trigger_state(guild_id, channel_id, "barcello_daily")
-        day_key = datetime.now(ROME_TZ).date().isoformat()
-        if str(daily_state.get("date") or "") != day_key:
-            daily_state = {"date": day_key, "counts": {}, "last_entered_ts": {}}
+        # Usa lo stesso riferimento temporale del trigger corrente (``now``) per
+        # evitare mismatch di data tra timezone diverse (UTC vs Europe/Rome) e
+        # perdere lo storico ``last_entered_ts`` valido pochi minuti prima.
+        day_key_rome = now.astimezone(ROME_TZ).date().isoformat()
+        day_key_utc = now.date().isoformat()
+        stored_day_key = str(daily_state.get("date") or "")
+        if stored_day_key not in {day_key_rome, day_key_utc}:
+            daily_state = {"date": day_key_rome, "counts": {}, "last_entered_ts": {}}
         counts = daily_state.get("counts") if isinstance(daily_state.get("counts"), dict) else {}
         last_entered_ts = daily_state.get("last_entered_ts") if isinstance(daily_state.get("last_entered_ts"), dict) else {}
 
@@ -1093,7 +1098,7 @@ class TriggerEngineService:
             guild_id,
             channel_id,
             "barcello_daily",
-            {"date": day_key, "counts": counts, "last_entered_ts": last_entered_ts},
+            {"date": day_key_rome, "counts": counts, "last_entered_ts": last_entered_ts},
         )
         return did_notify
 
