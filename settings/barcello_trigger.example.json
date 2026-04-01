@@ -145,18 +145,9 @@
       "Il barcello sta migliorando: da {old} il Barcy è ora {new}.",
       "Si respira meglio: da {old} il Barcy passa a {new}",
       "Recupero climatico: ora il Barcy è {new}."
-    ],
-    "MOD_PING_ROSSO": [
-      "Moderazione richiesta in stato ROSSO. {mod_mention}",
-      "Stato ROSSO rilevato: serve un check staff. {mod_mention}",
-      "Barcy ROSSO, date un occhio qui. {mod_mention}"
-    ],
-    "MOD_PING_NERO": [
-      "Moderazione urgente: stato NERO. {mod_mention}",
-      "Stato NERO rilevato, intervento immediato. {mod_mention}",
-      "Barcy NERO, servono mod ora. {mod_mention}"
     ]
   },
+  "mod_role_id_note": "Per transizioni a ROSSO/NERO il bot aggiunge solo il mention <@&mod_role_id> in coda al testo principale, senza field Moderazione.",
   "moods": {
     "chill": {
       "time": {

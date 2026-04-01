@@ -74,7 +74,8 @@ def _base_service(prev_state: dict, status: dict, *, cfg: dict | None = None):
         },
         "cooldown_minutes": {"minor": 20, "major": 8, "recovery": 60},
         "recovery": {"enabled": True, "poll_seconds": 300, "min_quiet_minutes": 12},
-        "templates": {"VERDE->GIALLO": "x", "GIALLO->ROSSO": "x", "GIALLO->VERDE": "x"},
+        "mod_role_id": "999",
+        "templates": {"VERDE->GIALLO": "x", "GIALLO->ROSSO": "Qui si arrossisce male", "GIALLO->VERDE": "x"},
     })
     channel = _make_fake_messageable()
     service._bot = _FakeBot(channel)
@@ -185,7 +186,57 @@ def test_run_barcello_trigger_now_force_publish_sends_even_without_transition() 
     assert "**(" in str(salute_field.value or "") and "/100)**" in str(salute_field.value or "")
 
 
-def test_run_barcello_trigger_now_trend_field_is_named_trend_when_present() -> None:
+def test_run_barcello_trigger_now_rosso_has_inline_mod_mention_and_no_moderation_field() -> None:
+    prev = {"last_color": "GIALLO", "last_score": 55, "recovery_armed": 0}
+    service, _db, channel = _base_service(prev, {"color": "ROSSO", "score": 25})
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    embed = channel.sent[0]
+    assert str(embed.description or "").endswith("Qui si arrossisce male <@&999>*")
+    field_names = [str(field.name or "") for field in embed.fields]
+    assert not any("MODERAZIONE" in name.upper() for name in field_names)
+
+
+def test_run_barcello_trigger_now_verde_does_not_add_mod_mention() -> None:
+    service, _db, channel = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    embed = channel.sent[0]
+    assert "<@&999>" not in str(embed.description or "")
+
+
+def test_run_barcello_trigger_now_rosso_without_mod_role_does_not_add_placeholder_text() -> None:
+    cfg = {
+        "window_minutes": 60,
+        "min_messages": 1,
+        "event_driven": {"minor_state_confirm_seconds": 180},
+        "cooldown_minutes": {"minor": 20, "major": 8, "recovery": 60},
+        "recovery": {"enabled": True, "poll_seconds": 300, "min_quiet_minutes": 12},
+        "templates": {"GIALLO->ROSSO": "Qui si arrossisce male"},
+    }
+    prev = {"last_color": "GIALLO", "last_score": 55, "recovery_armed": 0}
+    service, _db, channel = _base_service(prev, {"color": "ROSSO", "score": 25}, cfg=cfg)
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    embed = channel.sent[0]
+    assert "Qui si arrossisce male" in str(embed.description or "")
+    assert "<@&" not in str(embed.description or "")
+
+
+def test_run_barcello_trigger_now_trend_field_is_always_present_with_two_bullets() -> None:
+    service, _db, channel = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 71})
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    embed = channel.sent[0]
+    trend_fields = [field for field in embed.fields if "TREND" in str(field.name or "")]
+    assert len(trend_fields) == 1
+    trend_lines = [line for line in str(trend_fields[0].value or "").splitlines() if line.strip()]
+    assert len(trend_lines) == 2
+    assert trend_lines[0].startswith("• L'ultima volta in questo stato è stata ")
+    assert trend_lines[1].startswith("• ")
+
+
+def test_run_barcello_trigger_now_trend_field_contains_last_same_state_reference() -> None:
     now = datetime.now(timezone.utc)
     prev = {"last_color": "ROSSO", "last_score": 25, "recovery_armed": 0}
     service, db, channel = _base_service(prev, {"color": "ROSSO", "score": 25})
@@ -203,13 +254,32 @@ def test_run_barcello_trigger_now_trend_field_is_named_trend_when_present() -> N
     trend_fields = [field for field in embed.fields if "TREND" in str(field.name or "")]
     assert len(trend_fields) == 1
     trend_value = str(trend_fields[0].value or "")
-    assert "• È la" in trend_value
-    assert "**2ª volta**" in trend_value
-    assert "**ROSSA**" in trend_value
-    assert "• L'ultima è stata" in trend_value
-    assert "**7 minuti**" in trend_value
-    assert "in stato" not in trend_value
-    assert "Ultima:" not in trend_value
+    assert "• L'ultima volta in questo stato è stata 7 minuti fa." in trend_value
+
+
+def test_render_barcello_trend_comment_worsening_improving_stable() -> None:
+    service, _db, _channel = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "GIALLO", "score": 50})
+    worsening = service._render_barcello_trend_comment(
+        previous_state="GIALLO",
+        current_state="ROSSO",
+        previous_score=50,
+        current_score=38,
+    )
+    improving = service._render_barcello_trend_comment(
+        previous_state="ROSSO",
+        current_state="GIALLO",
+        previous_score=30,
+        current_score=44,
+    )
+    stable = service._render_barcello_trend_comment(
+        previous_state="GIALLO",
+        current_state="GIALLO",
+        previous_score=50,
+        current_score=51,
+    )
+    assert "peggiorando" in worsening or "precipitata" in worsening
+    assert "migliorando" in improving
+    assert "resta stabile" in stable
 
 
 def test_run_barcello_trigger_now_pair_mode_uses_compute_pair() -> None:
