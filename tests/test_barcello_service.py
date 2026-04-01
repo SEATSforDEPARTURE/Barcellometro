@@ -81,7 +81,7 @@ def test_direct_attack_with_mentions_has_strong_impact() -> None:
     metrics = service._compute_metrics(messages, window_minutes=8)
     reasons, score = service._score_from_metrics(metrics, score_config={})
     assert metrics["direct_conflict_index"] > 0.4
-    assert any(r["key"] in {"directed_conflict", "reciprocal_conflict"} for r in reasons)
+    assert any(r["key"] in {"directed_conflict_penalty", "escalation_penalty"} for r in reasons)
     assert score < 45
 
 
