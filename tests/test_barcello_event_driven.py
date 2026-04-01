@@ -302,6 +302,93 @@ def test_render_barcello_trend_comment_driver_specific_causes() -> None:
     assert "Recupero **attivo**" in active_recovery
 
 
+def test_render_barcello_trend_comment_yellow_low_vs_high_severity() -> None:
+    service, _db, _channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "GIALLO", "score": 56})
+    yellow_low = service._render_barcello_trend_comment(
+        state="GIALLO",
+        delta_score=-2,
+        recovery_type="active",
+        status={"score": 56, "reason": "venting", "metrics": {}},
+    )
+    yellow_high = service._render_barcello_trend_comment(
+        state="GIALLO",
+        delta_score=-10,
+        recovery_type="active",
+        status={"score": 42, "reason": "venting", "metrics": {}},
+    )
+    assert yellow_low != yellow_high
+    assert "leggero **nervosismo**" in yellow_low
+    assert "vicino al **peggioramento**" in yellow_high
+
+
+def test_render_barcello_trend_comment_red_low_vs_high_severity() -> None:
+    service, _db, _channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "ROSSO", "score": 38})
+    red_low = service._render_barcello_trend_comment(
+        state="ROSSO",
+        delta_score=-4,
+        recovery_type="active",
+        status={"score": 38, "reason": "directed_conflict", "metrics": {}},
+    )
+    red_high = service._render_barcello_trend_comment(
+        state="ROSSO",
+        delta_score=-12,
+        recovery_type="active",
+        status={"score": 23, "reason": "directed_conflict", "metrics": {}},
+    )
+    assert red_low != red_high
+    assert "già critica" in red_low
+    assert "molto **compromesso**" in red_high
+
+
+def test_render_barcello_trend_comment_green_fragile_vs_stable() -> None:
+    service, _db, _channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 89})
+    green_stable = service._render_barcello_trend_comment(
+        state="VERDE",
+        delta_score=5,
+        recovery_type="active",
+        status={"score": 89, "reason": "healthy_activity_bonus", "metrics": {}},
+    )
+    green_fragile = service._render_barcello_trend_comment(
+        state="VERDE",
+        delta_score=2,
+        recovery_type="active",
+        status={"score": 62, "reason": "healthy_activity_bonus", "metrics": {}},
+    )
+    assert green_stable != green_fragile
+    assert "**stabile**" in green_stable
+    assert "resta **delicato**" in green_fragile
+
+
+def test_render_barcello_trend_comment_black_extreme_vs_initial() -> None:
+    service, _db, _channel, _ai = _base_service({"last_color": "ROSSO", "last_score": 36}, {"color": "NERO", "score": 16})
+    black_initial = service._render_barcello_trend_comment(
+        state="NERO",
+        delta_score=-8,
+        recovery_type="active",
+        status={"score": 16, "reason": "directed_conflict", "metrics": {}},
+    )
+    black_extreme = service._render_barcello_trend_comment(
+        state="NERO",
+        delta_score=-20,
+        recovery_type="active",
+        status={"score": 5, "reason": "directed_conflict", "metrics": {}},
+    )
+    assert black_initial != black_extreme
+    assert "molto **critico**" in black_initial
+    assert "Situazione **estrema**" in black_extreme
+
+
+def test_compute_barcello_severity_thresholds() -> None:
+    assert TriggerEngineService._compute_barcello_severity(score=85, color="VERDE") == "low"
+    assert TriggerEngineService._compute_barcello_severity(score=62, color="VERDE") == "high"
+    assert TriggerEngineService._compute_barcello_severity(score=56, color="GIALLO") == "low"
+    assert TriggerEngineService._compute_barcello_severity(score=42, color="GIALLO") == "high"
+    assert TriggerEngineService._compute_barcello_severity(score=36, color="ROSSO") == "low"
+    assert TriggerEngineService._compute_barcello_severity(score=22, color="ROSSO") == "high"
+    assert TriggerEngineService._compute_barcello_severity(score=16, color="NERO") == "low"
+    assert TriggerEngineService._compute_barcello_severity(score=3, color="NERO") == "high"
+
+
 def test_recovery_type_active_trend_contains_migliorando_and_no_passive_phrase() -> None:
     service, db, channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 75})
     db.fetchone = AsyncMock(side_effect=[{"count": 18}, {"count": 20}])

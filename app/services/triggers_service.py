@@ -79,6 +79,30 @@ IT_STOPWORDS = {
 
 
 class TriggerEngineService:
+    _BARCELLO_TREND_COMMENTS_BY_SEVERITY = {
+        ("VERDE", "ACTIVE_RECOVERY", "low"): "• Il clima è **stabile** e in leggero **miglioramento**: la conversazione è **equilibrata** e senza attriti.",
+        ("VERDE", "ACTIVE_RECOVERY", "mid"): "• La conversazione sta **migliorando**: la chat è ancora attiva ma con toni più **equilibrati**.",
+        ("VERDE", "ACTIVE_RECOVERY", "high"): "• Il clima è in **ripresa**, ma resta **delicato**: serve mantenere l’equilibrio per non ricadere.",
+        ("VERDE", "PASSIVE_RECOVERY", "low"): "• Recupero **passivo**: il clima è **stabile** e pulito; la chat è tranquilla senza segnali di tensione.",
+        ("VERDE", "PASSIVE_RECOVERY", "mid"): "• Recupero **passivo**: il clima si è **stabilizzato** per **calo dell’attività**; da confermare con chat attiva.",
+        ("VERDE", "PASSIVE_RECOVERY", "high"): "• Recupero **passivo**: il verde è fragile; il recupero è dovuto a **assenza di attività**, attenzione quando la chat riparte.",
+        ("GIALLO", "VENTING", "low"): "• Si nota un leggero **nervosismo**, ma resta sotto controllo.",
+        ("GIALLO", "VENTING", "mid"): "• Si vede più **nervosismo**: prevale lo **sfogo**, ma la soglia è delicata.",
+        ("GIALLO", "VENTING", "high"): "• Il clima è vicino al **peggioramento**: lo **sfogo** rischia di trasformarsi in attrito diretto.",
+        ("GIALLO", "RISING_TENSION", "low"): "• La conversazione si sta leggermente **scaldando**: attenzione ai toni.",
+        ("GIALLO", "RISING_TENSION", "mid"): "• La conversazione sta **peggiorando**: cresce la **tensione** tra utenti.",
+        ("GIALLO", "RISING_TENSION", "high"): "• Il clima è vicino al **rosso**: la tensione è alta e va ridotta subito.",
+        ("ROSSO", "DIRECTED_CONFLICT", "low"): "• Emergono segnali di **conflitto diretto**: la situazione è già critica.",
+        ("ROSSO", "DIRECTED_CONFLICT", "mid"): "• Il clima è in netto **peggioramento**: aumenta l’**attacco diretto** tra utenti.",
+        ("ROSSO", "DIRECTED_CONFLICT", "high"): "• Il clima è molto **compromesso**: il **conflitto diretto** è dominante e in escalation.",
+        ("ROSSO", "DEESCALATION", "low"): "• Il clima resta teso, ma si intravedono segnali di **de-escalation**.",
+        ("ROSSO", "DEESCALATION", "mid"): "• Il clima sta **migliorando**: la **de-escalation** sta rallentando la tensione.",
+        ("ROSSO", "DEESCALATION", "high"): "• Nonostante il rosso, il clima sta **migliorando** grazie a una forte **de-escalation**.",
+        ("NERO", "ESCALATION", "low"): "• Il clima è molto **critico**: l’escalation è evidente.",
+        ("NERO", "ESCALATION", "mid"): "• Il clima è **compromesso**: l’**escalation** è forte e continua.",
+        ("NERO", "ESCALATION", "high"): "• Situazione **estrema**: l’**escalation** è fuori controllo e serve fermarla subito.",
+    }
+
     def __init__(
         self,
         database: DatabaseService,
@@ -1843,12 +1867,24 @@ class TriggerEngineService:
         recovery_type: str,
         status: Optional[dict[str, object]] = None,
     ) -> str:
-        del delta_score
         current_state = (state or "").upper()
         status = status or {}
         metrics = status.get("metrics") if isinstance(status.get("metrics"), dict) else {}
+        has_score = "score" in status
+        score = int(status.get("score") or 0)
+        severity = self._compute_barcello_severity(score=score, color=current_state)
         reason_key = str(status.get("reason") or "")
         msg_per_min = float((metrics or {}).get("msg_per_min") or 0.0)
+        dominant_driver = self._resolve_barcello_dominant_driver(
+            state=current_state,
+            reason_key=reason_key,
+            recovery_type=recovery_type,
+            delta_score=delta_score,
+        )
+        severity_comment = self._BARCELLO_TREND_COMMENTS_BY_SEVERITY.get((current_state, dominant_driver, severity))
+        if has_score and severity_comment:
+            return severity_comment
+
         if recovery_type == "passive":
             if current_state == "VERDE":
                 return "• Recupero **passivo**: il clima si è **stabilizzato** soprattutto per **assenza di attività**; il recupero è reale ma va verificato quando la chat riparte."
@@ -1870,6 +1906,64 @@ class TriggerEngineService:
         if current_state == "GIALLO":
             return "• La conversazione è **più equilibrata** rispetto a prima: mantenete questo ritmo per non far salire il Barcy."
         return "• La conversazione sta **peggiorando** rispetto alla finestra precedente: abbassate i toni subito."
+
+    @staticmethod
+    def _compute_barcello_severity(*, score: int, color: str) -> str:
+        current_color = (color or "").upper()
+        normalized_score = max(0, min(100, int(score)))
+        if current_color == "VERDE":
+            if normalized_score >= 85:
+                return "low"
+            if normalized_score >= 70:
+                return "mid"
+            return "high"
+        if current_color == "GIALLO":
+            if normalized_score >= 55:
+                return "low"
+            if normalized_score >= 48:
+                return "mid"
+            return "high"
+        if current_color == "ROSSO":
+            if normalized_score >= 35:
+                return "low"
+            if normalized_score >= 28:
+                return "mid"
+            return "high"
+        if current_color == "NERO":
+            if normalized_score >= 15:
+                return "low"
+            if normalized_score >= 8:
+                return "mid"
+            return "high"
+        return "mid"
+
+    @staticmethod
+    def _resolve_barcello_dominant_driver(
+        *,
+        state: str,
+        reason_key: str,
+        recovery_type: str,
+        delta_score: int,
+    ) -> str:
+        if recovery_type == "passive":
+            return "PASSIVE_RECOVERY"
+        if state == "NERO":
+            return "ESCALATION"
+        if reason_key == "healthy_activity_bonus":
+            return "ACTIVE_RECOVERY"
+        if reason_key == "venting":
+            return "VENTING"
+        if reason_key in {"directed_conflict", "reciprocal_conflict"}:
+            return "DIRECTED_CONFLICT"
+        if reason_key == "deescalation_bonus":
+            return "DEESCALATION"
+        if state == "GIALLO":
+            return "RISING_TENSION"
+        if state == "ROSSO":
+            return "DEESCALATION" if delta_score > 0 else "DIRECTED_CONFLICT"
+        if state == "VERDE":
+            return "ACTIVE_RECOVERY"
+        return ""
 
     def _build_barcello_status_embed_description(
         self,
