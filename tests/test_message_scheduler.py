@@ -347,6 +347,7 @@ def test_process_campaign_one_shot_disables_after_successful_send() -> None:
         db = DatabaseService(":memory:")
         await db.connect()
         await db.initialize_schema()
+        await db.set_setting("messages_quiet_enabled", "false")
         now = datetime.now(timezone.utc)
         campaign_id = await db.create_message_campaign(
             guild_id="1",
