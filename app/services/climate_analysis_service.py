@@ -11,15 +11,21 @@ LABELS = {"neutral", "positive", "venting", "heated_non_conflict", "directed_con
 TARGET_TYPES = {"none", "generic", "user", "group"}
 PROFANITY = {
     "cazzo", "merda", "stronzo", "vaffanculo", "fanculo", "minchia", "porca", "troia", "puttana",
-    "coglione", "bastardo", "caxxo", "rompicazzo", "incazzat", "porco",
+    "coglione", "bastardo", "caxxo", "rompicazzo", "incazzat", "porco", "cacchio", "porcod",
 }
-INSULTS = {"ridicolo", "idiota", "stupido", "scemo", "patetico", "fallito", "imbecille", "deficiente", "pagliaccio", "inetto"}
+INSULTS = {
+    "ridicolo", "idiota", "stupido", "scemo", "patetico", "fallito", "imbecille", "deficiente", "pagliaccio",
+    "inetto", "clown", "ritardato", "mongolo", "verme", "lurido",
+}
 BLASPHEMY_PATTERNS = [r"\bporco\s+dio\b", r"\bdio\s+cane\b", r"\bdio\s+boia\b", r"\bmadonna\s+puttana\b", r"\bporca\s+madonna\b"]
-CHALLENGE_PATTERNS = [r"\bma che .* dici\b", r"\bchi ti credi\b", r"\bnon capisci niente\b", r"\bhai rotto\b"]
+CHALLENGE_PATTERNS = [
+    r"\bma che .* dici\b", r"\bchi ti credi\b", r"\bnon capisci niente\b", r"\bhai rotto\b", r"\bma perche\b", r"\bma che dici\b"
+]
 CALMING = {"calma", "calmi", "tranquilli", "non litigate", "chiudiamola qui", "parliamone con calma"}
 VENTING_PATTERNS = [r"\bio\b.*\b(sto|sono)\b.*\b(incazzat|nervos|esaust|stanch|arrabbiat)", r"\bche giornat[ae]\b", r"\bmi sono rotto\b"]
 SECOND_PERSON = [r"\btu\b", r"\bsei\b", r"\bstai\b", r"\bdici\b", r"\bvoi\b"]
-PLAYFUL_MARKERS = {"ahah", "haha", "lol", "lmao", "xd", "😂", "🤣", "scherzo", "ironico"}
+PLAYFUL_MARKERS = {"ahah", "haha", "lol", "lmao", "xd", "😂", "🤣", "scherzo", "ironico", "meme", "jk"}
+AFFECTIONATE_MARKERS = {"tvb", "ti voglio bene", "bro", "fra", "tesoro", "amore", "❤️", "💙", "💚", "🫶"}
 
 
 @dataclass(frozen=True)
@@ -88,23 +94,43 @@ class ClimateAnalysisService:
         venting_hits = sum(1 for pattern in VENTING_PATTERNS if re.search(pattern, text))
         second_person_hits = sum(1 for pattern in SECOND_PERSON if re.search(pattern, text))
         playful_hits = sum(1 for marker in PLAYFUL_MARKERS if marker in text)
+        affectionate_hits = sum(1 for marker in AFFECTIONATE_MARKERS if marker in text)
         caps_ratio = self._caps_ratio(content)
         repeated_punctuation = content.count("!!") + content.count("??")
 
         has_hard_target = bool(mentions or reply_to_id)
         has_target = bool(has_hard_target or second_person_hits > 0)
         target_type = "user" if (mentions or reply_to_id) else ("group" if "voi" in text or "ragazzi" in text or "raga" in text else ("generic" if second_person_hits else "none"))
-        directedness = min(1.0, (0.45 if has_hard_target else 0.0) + (0.22 if second_person_hits else 0.0) + (0.14 if challenge_hits else 0.0))
+        target_confidence = min(
+            1.0,
+            (0.58 if has_hard_target else 0.0) + (0.12 if second_person_hits else 0.0) + (0.08 if challenge_hits else 0.0),
+        )
+        playful_confidence = min(1.0, (0.28 * playful_hits) + (0.2 * affectionate_hits))
+        direct_conflict_confidence = min(
+            1.0,
+            (0.45 * target_confidence)
+            + (0.3 if insult_hits > 0 else 0.0)
+            + (0.18 if has_hard_target and (profanity_hits > 0 or blasphemy_hits > 0) else 0.0)
+            + (0.1 if challenge_hits > 0 and (insult_hits > 0 or profanity_hits > 0) else 0.0)
+            - (0.22 if playful_confidence > 0.3 and insult_hits <= 1 else 0.0),
+        )
+        directedness = min(
+            1.0,
+            (0.46 if has_hard_target else 0.0)
+            + (0.15 if second_person_hits and (insult_hits > 0 or profanity_hits > 0 or challenge_hits > 0) else 0.0)
+            + (0.06 if challenge_hits and (insult_hits > 0 or profanity_hits > 0) else 0.0),
+        )
         toxicity = min(
             1.0,
             max(
                 0.0,
                 (0.07 * profanity_hits)
                 + (0.27 * insult_hits)
-                + (0.18 * blasphemy_hits)
+                + (0.1 * blasphemy_hits)
                 + (0.16 if profanity_hits > 0 and second_person_hits else 0.0)
                 + (0.18 if profanity_hits > 0 and has_hard_target else 0.0)
-                - (0.12 if playful_hits > 0 and not has_hard_target else 0.0),
+                - (0.14 if playful_hits > 0 and not has_hard_target else 0.0)
+                - (0.1 if affectionate_hits > 0 and has_hard_target and insult_hits == 0 else 0.0),
             ),
         )
         aggression = min(
@@ -112,7 +138,7 @@ class ClimateAnalysisService:
             (0.62 * toxicity)
             + (0.22 if repeated_punctuation else 0.0)
             + (0.2 if caps_ratio > 0.35 else 0.0)
-            + (0.14 * challenge_hits)
+            + (0.07 * challenge_hits)
             + (0.22 * directedness),
         )
         venting = min(1.0, (0.5 * venting_hits) + (0.15 if "io" in text and not has_target else 0.0))
@@ -123,16 +149,18 @@ class ClimateAnalysisService:
         reason = "neutral_no_target"
         if calming >= 0.35:
             label, reason = "deescalation", "calming_language"
-        elif directedness >= 0.55 and (
+        elif direct_conflict_confidence >= 0.6 and directedness >= 0.5 and (
             insult_hits > 0
             or (profanity_hits > 0 and second_person_hits > 0)
             or (profanity_hits > 0 and has_hard_target)
-            or challenge_hits > 0
+            or (challenge_hits > 0 and (insult_hits > 0 or profanity_hits > 0))
         ):
             label, reason = "directed_conflict", "attack_with_target"
+        elif blasphemy_hits > 0 and not has_target:
+            label, reason = "venting", "blasphemy_no_target"
         elif venting >= 0.4 and directedness < 0.4:
             label, reason = "venting", "self_venting"
-        elif aggression >= 0.35 and directedness < 0.5:
+        elif aggression >= 0.38 and directedness < 0.5:
             label, reason = "heated_non_conflict", "high_intensity_no_target"
         elif any(token in text for token in ["grazie", "brav", "ottimo"]):
             label, reason = "positive", "positive_affect"

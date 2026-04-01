@@ -28,12 +28,13 @@ NEGATIVE_KEYWORDS = [
 PROFANITY_KEYWORDS = [
     "cazzo", "caxxo", "merda", "merd", "stronzo", "stronz", "vaffanculo", "fanculo", "minchia",
     "porca", "troia", "puttana", "bastardo", "coglione", "cogliona", "rompicazzo", "incazzat",
-    "porco", "cagare", "cacata", "fottere",
+    "porco", "cagare", "cacata", "fottere", "porcod", "cacchio", "cristo",
 ]
 
 INSULT_KEYWORDS = [
     "ridicolo", "idiota", "stupido", "scemo", "patetico", "fallito", "imbecille", "pagliaccio",
     "deficiente", "mongolo", "ritardato", "lurido", "verme", "clown", "ignorante", "inetto",
+    "minus habens", "fallit", "pagliacc",
 ]
 
 BLASPHEMY_PATTERNS = [
@@ -82,10 +83,15 @@ CHALLENGE_PATTERNS = [
     r"\bhai rotto\b",
     r"\bnon capisci niente\b",
     r"\bimpara a\b",
+    r"\bma perche\b",
+    r"\bperche\?+",
 ]
 
 PLAYFUL_MARKERS = [
-    "ahah", "haha", "lol", "lmao", "xd", "😂", "🤣", "scherzo", "ironico",
+    "ahah", "haha", "lol", "lmao", "xd", "😂", "🤣", "scherzo", "ironico", "meme", "jk", "kappa", "xD",
+]
+AFFECTIONATE_MARKERS = [
+    "tvb", "ti voglio bene", "bro", "fra", "tesoro", "amore", "❤️", "💙", "💚", "🫶",
 ]
 
 DEFAULT_SCORE_WEIGHTS = {
@@ -578,6 +584,8 @@ class BarcelloService:
         blasphemy_hits_total = 0
         challenge_hits_total = 0
         hostile_mentions_count = 0
+        playful_hits_total = 0
+        affectionate_hits_total = 0
         directed_pairs: dict[tuple[str, str], int] = {}
 
         for message in messages:
@@ -608,13 +616,15 @@ class BarcelloService:
             blasphemy_hits_total += int(classification.get("blasphemy_hits") or 0)
             challenge_hits_total += int(classification.get("challenge_hits") or 0)
             hostile_mentions_count += int(classification.get("hostile_mention") or 0)
+            playful_hits_total += int(classification.get("playful_hits") or 0)
+            affectionate_hits_total += int(classification.get("affectionate_hits") or 0)
             if classification["classification_label"] == "directed_conflict":
                 directed_conflict_count += 1
             if classification["classification_label"] == "venting":
                 venting_count += 1
             if classification["classification_label"] == "deescalation":
                 deescalation_count += 1
-            if float(classification["aggression_score"]) > 0.55 and float(classification["directedness_score"]) > 0.6:
+            if float(classification["aggression_score"]) > 0.55 and float(classification["directedness_score"]) >= 0.55:
                 aggressive_directed += 1
                 target_id = str(classification.get("primary_target_id") or "")
                 if target_id:
@@ -637,6 +647,8 @@ class BarcelloService:
         calming_index = (calming_sum / message_count) if message_count else 0.0
         challenge_index = (challenge_hits_total / message_count) if message_count else 0.0
         hostile_mentions_index = (hostile_mentions_count / message_count) if message_count else 0.0
+        playful_index = (playful_hits_total / message_count) if message_count else 0.0
+        affectionate_index = (affectionate_hits_total / message_count) if message_count else 0.0
         reply_conflict_density = (directed_conflict_count / max(reply_count, 1)) if message_count else 0.0
         proportion_of_deescalation = (deescalation_count / message_count) if message_count else 0.0
         reciprocal_conflict_pairs = self._count_reciprocal_pairs(directed_pairs)
@@ -682,6 +694,8 @@ class BarcelloService:
             "calming_index": round(calming_index, 3),
             "challenge_signals": round(challenge_index, 3),
             "hostile_mentions": round(hostile_mentions_index, 3),
+            "playful_index": round(playful_index, 3),
+            "affectionate_index": round(affectionate_index, 3),
             "reply_conflict_density": round(reply_conflict_density, 3),
             "profanity_hits": profanity_hits_total,
             "insult_hits": insult_hits_total,
@@ -775,6 +789,8 @@ class BarcelloService:
         reply_conflict_density = float(metrics.get("reply_conflict_density") or 0.0)
         hostile_mentions = float(metrics.get("hostile_mentions") or 0.0)
         challenge_signals = float(metrics.get("challenge_signals") or 0.0)
+        playful_index = float(metrics.get("playful_index") or 0.0)
+        affectionate_index = float(metrics.get("affectionate_index") or 0.0)
         caps_ratio = float(metrics.get("caps_ratio") or 0.0)
         aggressive_directed_count = int(metrics.get("aggressive_directed_count") or 0)
         reciprocal_conflict_pairs = int(metrics.get("reciprocal_conflict_pairs") or 0)
@@ -788,13 +804,17 @@ class BarcelloService:
             + (0.15 * min(top1_author_share / 0.75, 1.0))
             + (0.15 * min(top3_author_share / 0.95, 1.0)),
         )
+        challenge_pressure = challenge_signals * min(
+            1.0,
+            (0.35 + (0.75 * direct_conflict_index) + (0.45 * hostile_mentions) + (0.35 * aggression_index)),
+        )
         hostility_core = min(
             1.0,
             (0.30 * hostility_index)
             + (0.22 * toxicity_index)
             + (0.18 * aggression_index)
             + (0.18 * direct_conflict_index)
-            + (0.07 * challenge_signals)
+            + (0.05 * challenge_pressure)
             + (0.05 * hostile_mentions),
         )
 
@@ -802,15 +822,21 @@ class BarcelloService:
         if hostility_core_penalty > 0:
             penalties.append({"key": "hostility_core", "label": "Ostilità conversazionale", "weight": hostility_core_penalty, "summary": f"indice {hostility_core:.2f}"})
 
-        directed_conflict_penalty = int(round((64 * direct_conflict_index) + (20 * hostile_mentions) + (4 * aggressive_directed_count)))
+        target_confidence = min(
+            1.0,
+            (0.62 * direct_conflict_index) + (0.33 * hostile_mentions) + (0.08 * min(aggressive_directed_count / 4.0, 1.0)),
+        )
+        directed_conflict_penalty = int(
+            round((62 * direct_conflict_index * max(0.35, target_confidence)) + (22 * hostile_mentions) + (5 * aggressive_directed_count))
+        )
         directed_conflict_penalty = min(78, directed_conflict_penalty)
         if directed_conflict_penalty > 0:
             penalties.append({"key": "directed_conflict_penalty", "label": "Attacco diretto / dissing", "weight": directed_conflict_penalty, "summary": f"indice {direct_conflict_index:.2f}"})
 
         escalation_penalty = int(
             round(
-                (16 * min(reciprocal_conflict_pairs, 3))
-                + (24 * reply_conflict_density)
+                (18 * min(reciprocal_conflict_pairs, 3))
+                + (26 * reply_conflict_density * max(0.35, target_confidence))
                 + (10 * max(0.0, persistence_conflict))
             )
         )
@@ -823,14 +849,17 @@ class BarcelloService:
         if venting_penalty > 0:
             penalties.append({"key": "venting_penalty", "label": "Sfogo personale", "weight": venting_penalty, "summary": f"indice {venting_index:.2f}"})
 
-        hostility_gate = min(1.0, (0.55 * hostility_core) + (0.45 * direct_conflict_index))
-        density_modifier = int(round(18 * intensity_index * hostility_gate))
+        hostility_gate = min(1.0, (0.52 * hostility_core) + (0.48 * direct_conflict_index))
+        density_modifier = int(round(14 * intensity_index * hostility_gate * max(0.2, target_confidence)))
         density_modifier = min(18, density_modifier)
         if density_modifier > 0:
             penalties.append({"key": "density_modifier", "label": "Intensità amplifica tensione", "weight": density_modifier, "summary": f"intensità {intensity_index:.2f}"})
 
-        playful_mitigation = int(round(18 * intensity_index * max(0.0, 1.0 - (hostility_gate * 1.6))))
-        if playful_mitigation > 0 and msg_per_min >= 2.5 and direct_conflict_index < 0.18:
+        playful_signal = min(1.0, (0.78 * playful_index) + (0.45 * affectionate_index))
+        playful_mitigation = int(
+            round(24 * intensity_index * playful_signal * max(0.0, 1.0 - (hostility_gate * 1.5)) * max(0.0, 1.0 - (direct_conflict_index * 2.2)))
+        )
+        if playful_mitigation > 0 and msg_per_min >= 2.0 and direct_conflict_index < 0.24:
             penalties.append({"key": "playful_mitigation", "label": "Chat attiva ma serena", "weight": -playful_mitigation, "summary": f"{msg_per_min:.1f} msg/min"})
 
         deescalation_bonus = int(round(26 * calming_index * max(0.55, 1.0 - direct_conflict_index)))
@@ -871,6 +900,7 @@ class BarcelloService:
         venting_hits = sum(1 for pattern in VENTING_PATTERNS if re.search(pattern, text))
         second_person_hits = sum(1 for pattern in SECOND_PERSON_PATTERNS if re.search(pattern, text))
         playful_hits = sum(1 for marker in PLAYFUL_MARKERS if marker in text)
+        affectionate_hits = sum(1 for marker in AFFECTIONATE_MARKERS if marker in text)
         repeated_punctuation = content.count("!!") + content.count("??")
         caps_ratio = self._caps_ratio(content)
         has_direct_target = bool(mentions or reply_to_id or second_person_hits > 0)
@@ -891,14 +921,30 @@ class BarcelloService:
         directed_language_pressure = min(
             1.0,
             (0.45 if has_hard_target else 0.0)
-            + (0.22 if second_person_hits > 0 else 0.0)
-            + (0.14 if challenge_hits > 0 else 0.0),
+            + (0.14 if second_person_hits > 0 and (insult_hits > 0 or profanity_hits > 0 or aggressive_hits > 0) else 0.0)
+            + (0.08 if challenge_hits > 0 and (insult_hits > 0 or profanity_hits > 0 or aggressive_hits > 0) else 0.0),
+        )
+        target_confidence = min(
+            1.0,
+            (0.6 if has_hard_target else 0.0)
+            + (0.1 if second_person_hits > 0 else 0.0)
+            + (0.08 if challenge_hits > 0 else 0.0),
+        )
+        playful_confidence = min(1.0, (0.25 * playful_hits) + (0.2 * affectionate_hits))
+        direct_conflict_confidence = min(
+            1.0,
+            (0.45 * target_confidence)
+            + (0.28 if insult_hits > 0 else 0.0)
+            + (0.16 if has_hard_target and (profanity_hits > 0 or blasphemy_hits > 0) else 0.0)
+            + (0.08 if aggressive_hits > 0 and has_hard_target else 0.0)
+            + (0.08 if challenge_hits > 0 and (insult_hits > 0 or profanity_hits > 0) else 0.0)
+            - (0.22 if playful_confidence > 0.3 and insult_hits <= 1 else 0.0),
         )
 
         toxicity_base = (
             0.07 * profanity_hits
             + 0.27 * insult_hits
-            + 0.18 * blasphemy_hits
+            + 0.11 * blasphemy_hits
             + 0.08 * negative_hits
         )
         directed_toxic_boost = (
@@ -907,7 +953,9 @@ class BarcelloService:
             + (0.2 if insult_hits > 0 and has_hard_target else 0.0)
             + (0.1 if blasphemy_hits > 0 and has_hard_target else 0.0)
         )
-        playful_softener = 0.12 if playful_hits > 0 and not has_hard_target else 0.0
+        playful_softener = (0.13 if playful_hits > 0 and not has_hard_target else 0.0) + (
+            0.08 if affectionate_hits > 0 and insult_hits == 0 else 0.0
+        )
         toxicity_score = min(1.0, max(0.0, toxicity_base + directed_toxic_boost - playful_softener))
         aggression_score = min(
             1.0,
@@ -915,7 +963,7 @@ class BarcelloService:
             + (0.26 if repeated_punctuation else 0.0)
             + (0.22 if caps_ratio > 0.35 else 0.0)
             + (0.14 * aggressive_hits)
-            + (0.12 * challenge_hits)
+            + (0.06 * challenge_hits)
             + (0.22 * directed_language_pressure),
         )
         directedness_score = min(1.0, directed_language_pressure + (0.1 if target_type == "group" else 0.0))
@@ -928,20 +976,24 @@ class BarcelloService:
             + (directedness_score * 0.38)
             + (toxicity_score * 0.24),
         )
-        hostile_mentions = 1 if has_hard_target and (insult_hits > 0 or profanity_hits > 0 or challenge_hits > 0 or aggressive_hits > 0) else 0
+        hostile_mentions = 1 if has_hard_target and (insult_hits > 0 or profanity_hits > 0 or aggressive_hits > 0) else 0
 
         label = "neutral"
         if calming_score >= 0.35:
             label = "deescalation"
-        elif directedness_score >= 0.55 and (
+        elif direct_conflict_confidence >= 0.58 and directedness_score >= 0.5 and (
             insult_hits > 0
             or (profanity_hits > 0 and second_person_hits > 0)
             or (profanity_hits > 0 and has_hard_target)
-            or challenge_hits > 0
+            or (challenge_hits > 0 and (insult_hits > 0 or aggressive_hits > 0))
         ):
             label = "directed_conflict"
-        elif conflict_score >= 0.5 and directedness_score >= 0.52 and (aggression_score >= 0.32 or insult_hits > 0 or profanity_hits > 0 or blasphemy_hits > 0):
+        elif conflict_score >= 0.55 and direct_conflict_confidence >= 0.52 and directedness_score >= 0.5 and (
+            aggression_score >= 0.35 or insult_hits > 0 or (profanity_hits > 0 and has_hard_target)
+        ):
             label = "directed_conflict"
+        elif blasphemy_hits > 0 and not has_direct_target:
+            label = "venting"
         elif venting_score >= 0.4 and directedness_score < 0.4:
             label = "venting"
         elif aggression_score >= 0.4 and directedness_score < 0.5:
@@ -967,6 +1019,9 @@ class BarcelloService:
             "challenge_hits": int(challenge_hits),
             "hostile_mention": int(hostile_mentions),
             "playful_hits": int(playful_hits),
+            "affectionate_hits": int(affectionate_hits),
+            "target_confidence": round(target_confidence, 3),
+            "direct_conflict_confidence": round(direct_conflict_confidence, 3),
             "classification_label": label,
         }
         return self._maybe_ai_fallback(result, content)

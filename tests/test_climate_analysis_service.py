@@ -26,6 +26,19 @@ def test_rule_based_directed_conflict_and_deescalation() -> None:
     assert calm["label"] == "deescalation"
 
 
+def test_isolated_blasphemy_without_target_is_not_directed_conflict() -> None:
+    service = ClimateAnalysisService()
+    out = service.classify_rule_based(content="porco dio che giornata", mentions=[], reply_to_id="").to_dict()
+    assert out["label"] in {"venting", "heated_non_conflict"}
+    assert out["label"] != "directed_conflict"
+
+
+def test_playful_banter_not_misclassified_as_direct_conflict() -> None:
+    service = ClimateAnalysisService()
+    out = service.classify_rule_based(content="sei scemo 😂 tvb bro", mentions=[], reply_to_id="").to_dict()
+    assert out["label"] in {"heated_non_conflict", "venting", "neutral", "positive"}
+
+
 def test_validate_payload_rejects_invalid_enum_or_range() -> None:
     service = ClimateAnalysisService()
     bad = {
