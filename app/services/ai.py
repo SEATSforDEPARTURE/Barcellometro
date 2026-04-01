@@ -232,6 +232,65 @@ class AiService:
             text = self._extract_text(result)
             return text or None
 
+    async def ask_for_task_with_validator(
+        self,
+        task: str,
+        question: str,
+        persona_system: str,
+        *,
+        validator,
+        timeout_seconds: float = 25.0,
+        fallback_question: str | None = None,
+        fallback_persona_system: str | None = None,
+    ) -> str | None:
+        if not self._enabled:
+            return None
+        model_cfg = self.get_model_config(task)
+        if not model_cfg:
+            model_cfg = self.get_model_config("summary") or "openai:gpt-4o-mini"
+        provider, model = parse_model_string(model_cfg)
+        effective_timeout = self._resolve_timeout(task, provider, timeout_seconds)
+        system = persona_system
+        prompt = question
+
+        used_models: list[str] = []
+        try:
+            result = await self._run_model(provider, model, system, prompt, effective_timeout)
+            text = self._extract_text(result)
+            used_models.append(model_cfg)
+            if text and bool(validator(text)):
+                self._metrics["last_used_task"] = task
+                self._metrics["last_used_model"] = model_cfg
+                self._metrics["last_used_models"] = list(used_models)
+                return text
+            self.logger.warning("[AI] task=%s model=%s validation_failed=true", task, model_cfg)
+        except Exception as exc:
+            self.logger.warning("[AI] task=%s model=%s failed=%s", task, model_cfg, exc.__class__.__name__)
+
+        fallback_cfg = self.get_fallback_model(task)
+        if not fallback_cfg:
+            return None
+        provider_fb, model_fb = parse_model_string(fallback_cfg)
+        if provider_fb == provider and model_fb == model:
+            return None
+        fallback_timeout = self._resolve_timeout(task, provider_fb, timeout_seconds)
+        fallback_system = fallback_persona_system if fallback_persona_system is not None else system
+        fallback_prompt = fallback_question if fallback_question is not None else prompt
+        try:
+            result_fb = await self._run_model(provider_fb, model_fb, fallback_system, fallback_prompt, fallback_timeout)
+            text_fb = self._extract_text(result_fb)
+            if text_fb and bool(validator(text_fb)):
+                used_models = [model_cfg, fallback_cfg]
+                self._metrics["last_used_task"] = task
+                self._metrics["last_used_model"] = fallback_cfg
+                self._metrics["last_used_models"] = list(used_models)
+                return text_fb
+            self.logger.warning("[AI] task=%s fallback=%s validation_failed=true", task, fallback_cfg)
+            return None
+        except Exception as exc:
+            self.logger.warning("[AI] task=%s fallback=%s failed=%s", task, fallback_cfg, exc.__class__.__name__)
+            return None
+
     def _resolve_timeout(self, task: str, provider: str, requested_timeout: float) -> float:
         if provider == "ollama" and task == "summary":
             return max(requested_timeout, self.OLLAMA_SUMMARY_TIMEOUT_SECONDS)

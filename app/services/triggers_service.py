@@ -28,6 +28,7 @@ from app.services.ai_utils import parse_model_string
 from app.services.barcello_service import BarcelloService
 from app.services.barcello_window_defaults import resolve_window_minutes
 from app.services.community_insights import CommunityInsightsService
+from app.services.climate_analysis_service import ClimateAnalysisService
 from app.config.file_loader import load_json_file
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
@@ -91,6 +92,7 @@ class TriggerEngineService:
         self._entitlements = entitlements
         self._ai = ai_service
         self._community_insights = community_insights or CommunityInsightsService(ai_service)
+        self._climate_analysis = ClimateAnalysisService(ai_service)
         self._footer = FooterService(database)
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
@@ -1113,7 +1115,7 @@ class TriggerEngineService:
         metrics = status.get("metrics") if isinstance(status.get("metrics"), dict) else {}
         hostility_index = float(metrics.get("hostility_index") or 0.0)
         ambiguity_min = float(analysis_cfg.get("ai_ambiguity_min") or 0.35)
-        ambiguity_max = float(analysis_cfg.get("ai_ambiguity_max") or 0.55)
+        ambiguity_max = float(analysis_cfg.get("ai_ambiguity_max") or 0.65)
         if not (ambiguity_min <= hostility_index <= ambiguity_max):
             return status, []
 
@@ -1124,54 +1126,58 @@ class TriggerEngineService:
             end_ts=window_end_ts,
             limit=max(5, max_messages),
         )
-        samples: list[str] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            content = str(row.get("content") or "").strip()
-            if not content:
-                continue
-            author = str(row.get("author_id") or "user")
-            samples.append(f"{author}: {content}")
-        if len(samples) < 3:
-            return status, []
-        transcript = "\n".join(samples[:max_messages])
-        payload = json.dumps(
-            {
-                "task": "climate_analysis",
-                "guild_id": guild_id,
-                "channel_id": channel_id,
-                "metrics": {
-                    "hostility_index": round(hostility_index, 3),
-                    "direct_conflict_index": round(float(metrics.get("direct_conflict_index") or 0.0), 3),
-                    "venting_index": round(float(metrics.get("venting_index") or 0.0), 3),
-                },
-                "messages": transcript,
-                "instruction": (
-                    "Classifica il clima conversazionale. "
-                    "Rispondi solo JSON: {\"climate\":\"conflict|venting|deescalation|neutral\",\"confidence\":0..1}."
-                ),
-            },
-            ensure_ascii=False,
-        )
-        ai_result = await self._ask_ai_json(payload, task="climate_analysis")
-        if not isinstance(ai_result, dict):
-            return status, []
-        climate = str(ai_result.get("climate") or "").strip().lower()
-        confidence = float(ai_result.get("confidence") or 0.0)
-        if climate not in {"conflict", "venting", "deescalation", "neutral"} or confidence < 0.55:
+        if not isinstance(rows, list) or len(rows) < 1:
             return status, []
 
+        metrics_patch, contributors = await self._climate_analysis.analyze_window(
+            rows=[row for row in rows if isinstance(row, dict)],
+            max_ai_messages=int(analysis_cfg.get("max_ai_messages") or 4) if ai_enabled and self._ai.is_enabled() else 0,
+        )
+        if not metrics_patch:
+            return status, []
+
+        merged_metrics = dict(status.get("metrics") or {})
+        merged_metrics.update(metrics_patch)
+
         score = int(status.get("score") or 0)
-        adjustments = {"conflict": -8, "venting": -3, "deescalation": 6, "neutral": 0}
-        adjusted_score = max(0, min(100, score + adjustments.get(climate, 0)))
+        direct_conflict_index = float(merged_metrics.get("direct_conflict_index") or 0.0)
+        venting_index = float(merged_metrics.get("venting_index") or 0.0)
+        calming_index = float(merged_metrics.get("calming_index") or 0.0)
+        profanity_index = float(merged_metrics.get("profanity_index") or 0.0)
+        active_participation_index = float(merged_metrics.get("active_participation_index") or 0.0)
+        hostility_index = float(merged_metrics.get("hostility_index") or 0.0)
+        delta = int(round(
+            -(34 * direct_conflict_index)
+            -(12 * hostility_index)
+            -(7 * venting_index)
+            -(5 * profanity_index)
+            +(16 * calming_index)
+            +(6 * active_participation_index)
+        ))
+        adjusted_score = max(0, min(100, score + delta))
+
+        reason = "climate_balanced"
+        if direct_conflict_index >= 0.18:
+            reason = "directed_conflict"
+        elif venting_index >= 0.22:
+            reason = "venting"
+        elif calming_index >= 0.2:
+            reason = "deescalation_bonus"
+        elif delta > 0:
+            reason = "healthy_activity_bonus"
+
         new_status = dict(status)
         new_status["score"] = adjusted_score
         new_status["color"] = await self._barcello.get_color(adjusted_score)
-        new_status["reason"] = f"ai_climate_{climate}"
-        new_status["ai_climate"] = {"climate": climate, "confidence": round(confidence, 3)}
-        contributors = self._resolve_ai_runtime_contributors("climate_analysis")
-        return new_status, contributors
+        new_status["reason"] = reason
+        new_status["metrics"] = merged_metrics
+        if metrics_patch.get("ai_used"):
+            new_status["ai_climate"] = {
+                "applied": True,
+                "models_used": contributors,
+                "last_reason_code": metrics_patch.get("last_reason_code") or "",
+            }
+        return new_status, contributors if metrics_patch.get("ai_used") else []
 
     def _resolve_ai_runtime_contributors(self, task: str) -> list[str]:
         if self._ai is None:
@@ -1840,17 +1846,17 @@ class TriggerEngineService:
         msg_per_min = float((metrics or {}).get("msg_per_min") or 0.0)
         if recovery_type == "passive":
             if current_state == "VERDE":
-                return "• Recupero **passivo** per assenza di interazioni: il clima è più calmo ma va consolidato quando la chat riparte."
+                return "• Recupero **passivo**: il clima si è **stabilizzato** soprattutto per **assenza di attività**; il recupero è reale ma va verificato quando la chat riparte."
             if current_state == "GIALLO":
-                return "• La tensione si è **attenuata per mancanza di interazioni**: serve stabilità anche quando la chat tornerà attiva."
-            return "• Il calo di attività ha **raffreddato temporaneamente** la situazione: ma il rischio resta alto."
+                return "• La tensione si è **attenuata** per **assenza di attività** (mancanza di interazioni): serve conferma quando la conversazione torna viva."
+            return "• Il calo di attività ha **raffreddato** temporaneamente la situazione: rischio ancora alto alla ripartenza."
 
         if reason_key == "healthy_activity_bonus":
-            return f"• Recupero **attivo** con chat viva ma più **equilibrata** (**{msg_per_min:.1f} msg/min**) e senza attacchi diretti."
+            return f"• La conversazione sta **migliorando**: Recupero **attivo** con chat viva, più **equilibrata** (**{msg_per_min:.1f} msg/min**) e meno **attrito diretto**."
         if reason_key in {"directed_conflict", "reciprocal_conflict"}:
-            return "• Driver principale: aumento di **attacchi diretti** tra utenti e segnali di escalation reciproca."
+            return "• La conversazione sta **peggiorando**: aumentano i segnali di **attacchi diretti** tra utenti e la densità di conflitto."
         if reason_key == "venting":
-            return "• Si nota **nervosismo diffuso ma non diretto**: monitorare senza sovra-penalizzare lo sfogo personale."
+            return "• Si nota più **nervosismo**, ma prevalgono sfoghi non diretti: meglio non trasformarli in **attrito** tra utenti."
         if reason_key == "deescalation_bonus":
             return "• Presenza di segnali **calmanti**: la chat sta assorbendo il conflitto in modo costruttivo."
 
