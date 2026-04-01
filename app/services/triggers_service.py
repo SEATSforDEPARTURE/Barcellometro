@@ -958,7 +958,7 @@ class TriggerEngineService:
         drama_label = self._get_drama_label(state_count_today, config)
         mood = await self._resolve_barcello_mood(guild_id, channel_id, config)
 
-        last_in_state_human = ""
+        last_in_state_human = "molto tempo"
         if previous_same_state_ts:
             try:
                 prev_same_state = datetime.fromisoformat(previous_same_state_ts)
@@ -973,7 +973,7 @@ class TriggerEngineService:
                 else:
                     last_in_state_human = f"{total_min // (60 * 24)} giorni"
             except ValueError:
-                last_in_state_human = ""
+                last_in_state_human = "molto tempo"
 
         main_msg = self._render_barcello_transition(
             old=prev_color,
@@ -989,24 +989,12 @@ class TriggerEngineService:
             state_count_today=state_count_today,
             last_in_state_human=last_in_state_human,
         )
-        mod_block_text = ""
+        mod_mention = ""
         if stored_color in {"ROSSO", "NERO"} and prev_color != stored_color:
-            mod_key = "MOD_PING_ROSSO" if stored_color == "ROSSO" else "MOD_PING_NERO"
-            selected_mod_template = self._select_barcello_template(
-                config,
-                channel_id,
-                mood,
-                time_bucket,
-                drama_label,
-                mod_key,
-            )
-            mod_template = self._resolve_template_value(
-                selected_mod_template,
-                seed_parts=(guild_id, channel_id, mod_key, mood, time_bucket, drama_label, minute_seed),
-            )
             mod_role_id = str(config.get("mod_role_id") or "").strip()
             mod_mention = f"<@&{mod_role_id}>" if mod_role_id else ""
-            mod_block_text = self._render_with_placeholders(mod_template, {"mod_mention": mod_mention}) if mod_template else mod_mention
+            if mod_mention:
+                main_msg = f"{main_msg} {mod_mention}".strip()
 
         did_notify = False
         if should_notify:
@@ -1016,20 +1004,22 @@ class TriggerEngineService:
                 description=format_standard_description(update_text),
                 color=self._barcello_embed_color(stable_color),
             )
-            if mod_block_text and stored_color in {"ROSSO", "NERO"}:
-                embed.add_field(name=format_standard_field_name("Moderazione", emoji="🛡️"), value=mod_block_text[:1024], inline=False)
             salute_value = self._render_trigger_health_bar(score=score, color=stored_color)
             embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
-            if state_count_today >= 2 and last_in_state_human:
-                trend_lines = [
-                    f"• È la **{state_count_today}ª volta** che diventa **{self._barcello_state_ui_label(stored_color)}**.",
-                    f"• L'ultima è stata **{last_in_state_human}** fa.",
-                ]
-                embed.add_field(
-                    name=format_standard_field_name("Trend", emoji="📊"),
-                    value="\n".join(trend_lines),
-                    inline=False,
-                )
+            trend_lines = [
+                f"• L'ultima volta in questo stato è stata {last_in_state_human} fa.",
+                self._render_barcello_trend_comment(
+                    previous_state=prev_color,
+                    current_state=stored_color,
+                    previous_score=prev_score,
+                    current_score=score,
+                ),
+            ]
+            embed.add_field(
+                name=format_standard_field_name("Trend", emoji="📊"),
+                value="\n".join(trend_lines),
+                inline=False,
+            )
             attach_footer_meta(embed, service_name="triggers", used_local_processing=True)
             channel = self._bot.get_channel(int(channel_id))
             if channel and isinstance(channel, discord.abc.Messageable):
@@ -1662,6 +1652,45 @@ class TriggerEngineService:
         if severity_new < severity_old:
             return render_key("IMPROVE") or f"✅ Barcello migliora: {old} → {new} ({old_score}→{new_score})."
         return render_key("SAME") or f"Barcello aggiornato: {new_score}."
+
+    def _render_barcello_trend_comment(
+        self,
+        *,
+        previous_state: str | None,
+        current_state: str,
+        previous_score: int | None,
+        current_score: int,
+    ) -> str:
+        severity_rank = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
+        prev_rank = severity_rank.get(previous_state or "", severity_rank.get(current_state, 0))
+        cur_rank = severity_rank.get(current_state, 0)
+        score_delta = 0 if previous_score is None else int(current_score) - int(previous_score)
+
+        if cur_rank < prev_rank or score_delta >= 4:
+            if current_state == "VERDE":
+                return "• La conversazione sta migliorando rispetto alla finestra precedente: continuate così, state tenendo il clima sereno."
+            if current_state == "GIALLO":
+                return "• La conversazione sta migliorando rispetto alla finestra precedente: restate calme e consolidate il rientro."
+            if current_state == "ROSSO":
+                return "• La conversazione sta migliorando rispetto alla finestra precedente: non riaccendete i toni e chiudete i punti aperti."
+            return "• La conversazione sta migliorando rispetto alla finestra precedente: fate un passo indietro e stabilizzate subito il confronto."
+
+        if cur_rank > prev_rank or score_delta <= -4:
+            if current_state == "VERDE":
+                return "• La conversazione è leggermente peggiorata rispetto a prima: continuate con calma per non perdere il buon clima."
+            if current_state == "GIALLO":
+                return "• La conversazione è leggermente peggiorata rispetto a prima: abbassate un filo i toni per non far maturare il Barcy."
+            if current_state == "ROSSO":
+                return "• La conversazione sta peggiorando rispetto alla finestra precedente: meglio rallentare subito e riportare il focus sui fatti."
+            return "• La conversazione è precipitata rispetto alla finestra precedente: fermate l’escalation e fate un reset netto dei toni."
+
+        if current_state == "VERDE":
+            return "• La conversazione resta stabile rispetto alla finestra precedente: mantenete questo ritmo sereno."
+        if current_state == "GIALLO":
+            return "• La conversazione resta stabile rispetto alla finestra precedente: tenete i toni bassi per tornare presto nel verde."
+        if current_state == "ROSSO":
+            return "• La conversazione resta stabile rispetto alla finestra precedente: servono messaggi più brevi e centrati per invertire il trend."
+        return "• La conversazione resta stabile rispetto alla finestra precedente: fermate le punzecchiature e raffreddate subito il confronto."
 
     def _build_barcello_status_embed_description(
         self,
