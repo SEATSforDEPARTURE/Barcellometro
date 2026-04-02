@@ -64,6 +64,11 @@ def _ctx_for_result(
             get_setting=AsyncMock(return_value=None),
             get_trigger_enabled=AsyncMock(return_value=False),
             set_trigger_enabled=AsyncMock(),
+            create_trigger_barcello_schedule=AsyncMock(return_value=1),
+            get_trigger_barcello_schedule=AsyncMock(return_value=None),
+            list_trigger_barcello_schedules=AsyncMock(return_value=[]),
+            update_trigger_barcello_schedule=AsyncMock(return_value=True),
+            delete_trigger_barcello_schedule=AsyncMock(return_value=True),
         ),
         config=SimpleNamespace(ignore_bots=True, openai_api_key=""),
         ai=None,
@@ -147,6 +152,11 @@ def test_register_barcello_registers_summary_and_alias_namespaces(barcello_modul
         "status",
         "run",
         "calibrate",
+        "schedule_add",
+        "schedule_edit",
+        "schedule_remove",
+        "schedule_show",
+        "schedule_list",
     }
     summary_barcello = _group_command(dmchannelsummary_group, "barcello")
     assert {child.name for child in summary_barcello.commands} == {"on", "off", "status", "today", "yesterday", "last", "range"}
@@ -518,5 +528,259 @@ def test_trend_section_is_two_bullets_and_uses_driver_catalog(
         for token in expected_tokens:
             assert token in trend_lines[1]
         assert any("PUNTI SALUTE" in field.name.upper() for field in embeds[0].fields)
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_schedule_add_success(barcello_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        ctx = _ctx_for_result(BarcelloResult(score=75, color="verde"))
+        ctx.database.create_trigger_barcello_schedule = AsyncMock(return_value=44)
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _triggers_barcello_command(triggers_group, "schedule_add").callback
+
+        await callback(_interaction(qualified_name="triggers barcello schedule_add"), publish_at="02/04/2026 18:30", every=15, embed_title="Titolo")
+
+        ctx.database.create_trigger_barcello_schedule.assert_awaited_once()
+        args = ctx.database.create_trigger_barcello_schedule.await_args.kwargs
+        assert args["guild_id"] == "100"
+        assert args["channel_id"] == "200"
+        assert args["every_minutes"] == 15
+        assert args["embed_title"] == "Titolo"
+        assert send_standard_response.await_args.kwargs["kind"] == "success"
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_schedule_add_invalid_publish_at(barcello_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        ctx = _ctx_for_result(BarcelloResult(score=75, color="verde"))
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _triggers_barcello_command(triggers_group, "schedule_add").callback
+
+        await callback(_interaction(qualified_name="triggers barcello schedule_add"), publish_at="2026-04-02 18:30", every=15, embed_title=None)
+
+        ctx.database.create_trigger_barcello_schedule.assert_not_awaited()
+        assert "`publish_at` deve essere nel formato DD/MM/YYYY HH:MM." in send_standard_response.await_args.kwargs["lines"][0][1]
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_schedule_add_invalid_every(barcello_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        ctx = _ctx_for_result(BarcelloResult(score=75, color="verde"))
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _triggers_barcello_command(triggers_group, "schedule_add").callback
+
+        await callback(_interaction(qualified_name="triggers barcello schedule_add"), publish_at="02/04/2026 18:30", every=-1, embed_title=None)
+
+        ctx.database.create_trigger_barcello_schedule.assert_not_awaited()
+        assert "`every` deve essere un numero di minuti maggiore o uguale a 0." in send_standard_response.await_args.kwargs["lines"][0][1]
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_schedule_edit_success_and_toggle_enabled(barcello_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        current = {
+            "id": 3,
+            "guild_id": "100",
+            "channel_id": "200",
+            "publish_at": "2026-04-02T16:30:00+00:00",
+            "next_run_at": "2026-04-02T16:30:00+00:00",
+            "every_minutes": 15,
+            "enabled": 1,
+            "embed_title": "Old",
+        }
+        updated = dict(current)
+        updated["enabled"] = 0
+        ctx = _ctx_for_result(BarcelloResult(score=75, color="verde"))
+        ctx.database.get_trigger_barcello_schedule = AsyncMock(side_effect=[current, updated])
+        ctx.database.update_trigger_barcello_schedule = AsyncMock(return_value=True)
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _triggers_barcello_command(triggers_group, "schedule_edit").callback
+
+        await callback(
+            _interaction(qualified_name="triggers barcello schedule_edit"),
+            id=3,
+            publish_at="02/04/2026 18:30",
+            every=30,
+            embed_title=" Nuovo ",
+            enabled=False,
+        )
+
+        ctx.database.update_trigger_barcello_schedule.assert_awaited_once()
+        kwargs = ctx.database.update_trigger_barcello_schedule.await_args.kwargs
+        assert kwargs["enabled"] is False
+        assert kwargs["every_minutes"] == 30
+        assert kwargs["embed_title"] == "Nuovo"
+        assert send_standard_response.await_args.kwargs["kind"] == "success"
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_schedule_show_success_and_not_found(barcello_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        row = {
+            "id": 7,
+            "guild_id": "100",
+            "channel_id": "200",
+            "publish_at": "2026-04-02T16:30:00+00:00",
+            "next_run_at": "2026-04-02T17:30:00+00:00",
+            "every_minutes": 60,
+            "enabled": 1,
+            "last_run_at": "2026-04-02T15:30:00+00:00",
+            "last_sent_at": "2026-04-02T15:30:00+00:00",
+            "embed_title": None,
+        }
+        ctx = _ctx_for_result(BarcelloResult(score=75, color="verde"))
+        ctx.database.get_trigger_barcello_schedule = AsyncMock(side_effect=[row, None])
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _triggers_barcello_command(triggers_group, "schedule_show").callback
+
+        await callback(_interaction(qualified_name="triggers barcello schedule_show"), id=7)
+        await callback(_interaction(qualified_name="triggers barcello schedule_show"), id=8)
+
+        first_call = send_standard_response.await_args_list[0].kwargs
+        assert first_call["kind"] == "info"
+        assert first_call["sections"][0].lines[1] == ("Abilitata", "sì")
+        second_call = send_standard_response.await_args_list[1].kwargs
+        assert "Schedule Barcello non trovata in questo canale." in second_call["lines"][0][1]
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_schedule_remove_success_and_not_found(barcello_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        row = {"id": 9, "guild_id": "100", "channel_id": "200"}
+        ctx = _ctx_for_result(BarcelloResult(score=75, color="verde"))
+        ctx.database.get_trigger_barcello_schedule = AsyncMock(side_effect=[row, None, row])
+        ctx.database.delete_trigger_barcello_schedule = AsyncMock(side_effect=[True, False])
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _triggers_barcello_command(triggers_group, "schedule_remove").callback
+
+        await callback(_interaction(qualified_name="triggers barcello schedule_remove"), id=9)
+        await callback(_interaction(qualified_name="triggers barcello schedule_remove"), id=10)
+        await callback(_interaction(qualified_name="triggers barcello schedule_remove"), id=11)
+
+        assert send_standard_response.await_args_list[0].kwargs["kind"] == "success"
+        assert "non trovata" in send_standard_response.await_args_list[1].kwargs["lines"][0][1]
+        assert "non trovata" in send_standard_response.await_args_list[2].kwargs["lines"][0][1]
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_schedule_list_empty_and_with_items_and_cross_channel_not_found(
+    barcello_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        ctx = _ctx_for_result(BarcelloResult(score=75, color="verde"))
+        ctx.database.list_trigger_barcello_schedules = AsyncMock(
+            side_effect=[
+                [],
+                [
+                    {
+                        "id": 1,
+                        "enabled": 1,
+                        "publish_at": "2026-04-02T16:30:00+00:00",
+                        "every_minutes": 0,
+                        "next_run_at": "2026-04-02T16:30:00+00:00",
+                        "embed_title": "",
+                    }
+                ],
+            ]
+        )
+        ctx.database.get_trigger_barcello_schedule = AsyncMock(
+            return_value={"id": 99, "guild_id": "100", "channel_id": "555"}
+        )
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        list_callback = _triggers_barcello_command(triggers_group, "schedule_list").callback
+        show_callback = _triggers_barcello_command(triggers_group, "schedule_show").callback
+
+        await list_callback(_interaction(qualified_name="triggers barcello schedule_list"))
+        await list_callback(_interaction(qualified_name="triggers barcello schedule_list"))
+        await show_callback(_interaction(qualified_name="triggers barcello schedule_show"), id=99)
+
+        assert send_standard_response.await_args_list[0].kwargs["kind"] == "warning"
+        assert "Nessuna schedule Barcello configurata in questo canale." in send_standard_response.await_args_list[0].kwargs["sections"][0].lines[0]
+        assert send_standard_response.await_args_list[1].kwargs["kind"] == "info"
+        assert "ID 1 · enabled" in send_standard_response.await_args_list[1].kwargs["sections"][0].lines[0]
+        assert "non trovata in questo canale" in send_standard_response.await_args_list[2].kwargs["lines"][0][1]
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_run_does_not_touch_scheduled_publish_anchor_from_command_layer(
+    barcello_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        result = BarcelloResult(score=65, color="giallo", metrics={"message_count": 30, "cache_hit": False})
+        ctx = _ctx_for_result(result)
+        ctx.database.get_trigger_barcello_publish_anchor = AsyncMock()
+        ctx.database.upsert_trigger_barcello_publish_anchor = AsyncMock()
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", AsyncMock())
+
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _triggers_barcello_command(triggers_group, "run").callback
+        await callback(_interaction(qualified_name="triggers barcello run"), window_minutes=15)
+
+        ctx.database.get_trigger_barcello_publish_anchor.assert_not_awaited()
+        ctx.database.upsert_trigger_barcello_publish_anchor.assert_not_awaited()
 
     asyncio.run(_run())

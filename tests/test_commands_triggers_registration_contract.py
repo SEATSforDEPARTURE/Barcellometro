@@ -67,7 +67,18 @@ def _stub_register_barcello(
     barcello_group = discord.app_commands.Group(name="barcello", description="barcello")
     triggers_group.add_command(barcello_group)
 
-    for name in ("on", "off", "status", "calibrate", "run"):
+    for name in (
+        "on",
+        "off",
+        "status",
+        "calibrate",
+        "run",
+        "schedule_add",
+        "schedule_edit",
+        "schedule_remove",
+        "schedule_show",
+        "schedule_list",
+    ):
         @barcello_group.command(name=name, description=name)
         async def _placeholder(interaction):  # noqa: ANN001
             return None
@@ -132,7 +143,18 @@ def test_setup_registers_triggers_root_with_barcello_run_contract(import_fresh, 
 
     triggers_root = next(command for command in bot.tree.get_commands() if command.name == "triggers")
     barcello_group = next(command for command in triggers_root.commands if command.name == "barcello")
-    assert {command.name for command in barcello_group.commands} == {"on", "off", "status", "calibrate", "run"}
+    assert {command.name for command in barcello_group.commands} == {
+        "on",
+        "off",
+        "status",
+        "calibrate",
+        "run",
+        "schedule_add",
+        "schedule_edit",
+        "schedule_remove",
+        "schedule_show",
+        "schedule_list",
+    }
 
 
 def test_setup_fails_fast_when_triggers_barcello_run_contract_is_broken(import_fresh, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,7 +184,7 @@ def test_setup_fails_fast_when_triggers_barcello_run_contract_is_broken(import_f
     ctx = SimpleNamespace(bot=bot, config=config, footer=None, author=None)
     monkeypatch.setattr(commands_module.CommandContext, "from_registry", lambda registry: ctx)
 
-    with pytest.raises(RuntimeError, match="missing /triggers barcello commands: run"):
+    with pytest.raises(RuntimeError, match="missing /triggers barcello commands: run, schedule_add, schedule_edit, schedule_list, schedule_remove, schedule_show"):
         commands_module.setup(registry=SimpleNamespace())
 
 

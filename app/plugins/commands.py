@@ -39,7 +39,18 @@ from app.shared.discord.footer_pipeline import install_footer_auto_finalize
 logger = logging.getLogger(__name__)
 
 
-_REQUIRED_TRIGGER_BARCELLO_COMMANDS = {"on", "off", "status", "calibrate", "run"}
+_REQUIRED_TRIGGER_BARCELLO_COMMANDS = {
+    "on",
+    "off",
+    "status",
+    "calibrate",
+    "run",
+    "schedule_add",
+    "schedule_edit",
+    "schedule_remove",
+    "schedule_show",
+    "schedule_list",
+}
 _LEGACY_SUMMARY_ROOTS = {"dmsummary", "aurasummary", "barcellosummary", "activitysummary"}
 
 

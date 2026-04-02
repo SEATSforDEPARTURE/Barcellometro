@@ -22,7 +22,15 @@ from app.shared.discord.embed_limits import _split_field_chunks
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.settings import get_setting
-from app.plugins.commands_modular.time_windows import resolve_ieri_window, resolve_oggi_window, resolve_range_window, resolve_ultimi_window
+from app.plugins.commands_modular.time_windows import (
+    ROME_TZ,
+    parse_italian_datetime,
+    resolve_ieri_window,
+    resolve_oggi_window,
+    resolve_range_window,
+    resolve_ultimi_window,
+)
+from app.shared.discord.command_embeds import CommandEmbedSection
 from app.shared.discord.command_embeds import send_standard_response
 from app.shared.discord.component_notices import send_standard_component_notice
 from app.shared.discord.delivery import send_dm_or_followup
@@ -175,6 +183,314 @@ def register_barcello(
             status_message="Barcello trigger is {state} for this channel.",
             enabled_message="Barcello trigger enabled for this channel.",
             disabled_message="Barcello trigger disabled for this channel.",
+        )
+
+    def _format_schedule_datetime(raw_ts: object) -> str:
+        if not raw_ts:
+            return "—"
+        try:
+            parsed = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+        except ValueError:
+            return str(raw_ts)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(ROME_TZ).strftime("%d/%m/%Y %H:%M")
+
+    def _format_schedule_every(every_minutes: int) -> str:
+        if every_minutes <= 0:
+            return "one-shot"
+        return f"ogni {every_minutes} minuti"
+
+    async def _resolve_barcello_channel_schedule(
+        *,
+        guild_id: str,
+        channel_id: str,
+        schedule_id: int,
+    ) -> dict[str, Any] | None:
+        row = await ctx.database.get_trigger_barcello_schedule(schedule_id)
+        if row is None:
+            return None
+        if str(row.get("guild_id") or "") != guild_id or str(row.get("channel_id") or "") != channel_id:
+            return None
+        return row
+
+    def _render_schedule_row(row: dict[str, Any]) -> str:
+        title = str(row.get("embed_title") or "").strip() or "fallback"
+        status = "enabled" if bool(row.get("enabled")) else "disabled"
+        every_minutes = int(row.get("every_minutes") or 0)
+        return (
+            f"ID {int(row.get('id') or 0)} · {status} · publish_at {_format_schedule_datetime(row.get('publish_at'))} · "
+            f"{'one-shot' if every_minutes <= 0 else f'every {every_minutes}m'} · "
+            f"next {_format_schedule_datetime(row.get('next_run_at'))} · titolo {title}"
+        )
+
+    @trigger_barcello_group.command(name="schedule_add", description="Aggiunge una schedule Barcello per questo canale.")
+    @app_commands.describe(
+        publish_at="Prima pubblicazione nel formato DD/MM/YYYY HH:MM (Europe/Rome).",
+        every="Ripetizione in minuti. Usa 0 per one-shot.",
+        embed_title="Titolo embed personalizzato opzionale.",
+    )
+    async def admin_barcello_schedule_add(
+        interaction: discord.Interaction,
+        publish_at: str,
+        every: int,
+        embed_title: str | None = None,
+    ) -> None:
+        command_path = f"{trigger_top_level} barcello schedule_add"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.schedule_add", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        if every < 0:
+            await send_ephemeral(
+                interaction,
+                "`every` deve essere un numero di minuti maggiore o uguale a 0.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        publish_dt = parse_italian_datetime(publish_at)
+        if publish_dt is None:
+            await send_ephemeral(
+                interaction,
+                "`publish_at` deve essere nel formato DD/MM/YYYY HH:MM.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        guild_id, channel_id = scope
+        publish_iso = publish_dt.astimezone(timezone.utc).isoformat()
+        schedule_id = await ctx.database.create_trigger_barcello_schedule(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            publish_at=publish_iso,
+            next_run_at=publish_iso,
+            every_minutes=every,
+            enabled=True,
+            embed_title=str(embed_title or "").strip() or None,
+        )
+        await send_standard_response(
+            interaction,
+            top_level=trigger_top_level,
+            subcommand_path=command_path,
+            lines=[("schedule_id", schedule_id), ("result", "Schedule Barcello aggiunta.")],
+            sections=[
+                CommandEmbedSection(
+                    title="Dettagli",
+                    lines=[
+                        ("publish_at", _format_schedule_datetime(publish_iso)),
+                        ("every", _format_schedule_every(every)),
+                        ("embed_title", str(embed_title or "").strip() or "fallback"),
+                    ],
+                )
+            ],
+            kind="success",
+            footer_service=ctx.footer,
+            ephemeral=True,
+        )
+
+    @trigger_barcello_group.command(name="schedule_edit", description="Modifica una schedule Barcello del canale corrente.")
+    @app_commands.describe(
+        id="ID della schedule da modificare.",
+        publish_at="Nuova data/ora nel formato DD/MM/YYYY HH:MM.",
+        every="Nuova ripetizione in minuti (0=one-shot).",
+        embed_title="Nuovo titolo embed personalizzato (stringa vuota per fallback).",
+        enabled="Abilitata/disabilitata.",
+    )
+    async def admin_barcello_schedule_edit(
+        interaction: discord.Interaction,
+        id: int,
+        publish_at: str | None = None,
+        every: int | None = None,
+        embed_title: str | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        command_path = f"{trigger_top_level} barcello schedule_edit"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.schedule_edit", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        schedule = await _resolve_barcello_channel_schedule(guild_id=guild_id, channel_id=channel_id, schedule_id=id)
+        if schedule is None:
+            await send_ephemeral(
+                interaction,
+                "Schedule Barcello non trovata in questo canale.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+
+        publish_iso: str | None = None
+        next_run_iso: str | None = None
+        if publish_at is not None:
+            publish_dt = parse_italian_datetime(publish_at)
+            if publish_dt is None:
+                await send_ephemeral(
+                    interaction,
+                    "`publish_at` deve essere nel formato DD/MM/YYYY HH:MM.",
+                    command_path=command_path,
+                    top_level=trigger_top_level,
+                )
+                return
+            publish_iso = publish_dt.astimezone(timezone.utc).isoformat()
+            next_run_iso = publish_iso
+        if every is not None:
+            if every < 0:
+                await send_ephemeral(
+                    interaction,
+                    "`every` deve essere un numero di minuti maggiore o uguale a 0.",
+                    command_path=command_path,
+                    top_level=trigger_top_level,
+                )
+                return
+            if next_run_iso is None:
+                next_run_iso = publish_iso or str(schedule.get("publish_at") or "")
+
+        title_value = str(embed_title or "").strip()
+        clear_embed_title = embed_title is not None and not title_value
+        updated = await ctx.database.update_trigger_barcello_schedule(
+            int(id),
+            enabled=enabled,
+            publish_at=publish_iso,
+            next_run_at=next_run_iso,
+            every_minutes=every,
+            embed_title=title_value or None,
+            clear_embed_title=clear_embed_title,
+        )
+        if not updated:
+            await send_ephemeral(
+                interaction,
+                "Schedule Barcello non trovata in questo canale.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        refreshed = await _resolve_barcello_channel_schedule(guild_id=guild_id, channel_id=channel_id, schedule_id=id)
+        details = refreshed or schedule
+        await send_standard_response(
+            interaction,
+            top_level=trigger_top_level,
+            subcommand_path=command_path,
+            lines=[("schedule_id", id), ("result", "Schedule Barcello aggiornata.")],
+            sections=[CommandEmbedSection(title="Dettagli", lines=[_render_schedule_row(details)])],
+            kind="success",
+            footer_service=ctx.footer,
+            ephemeral=True,
+        )
+
+    @trigger_barcello_group.command(name="schedule_remove", description="Rimuove una schedule Barcello del canale corrente.")
+    @app_commands.describe(id="ID della schedule da rimuovere.")
+    async def admin_barcello_schedule_remove(interaction: discord.Interaction, id: int) -> None:
+        command_path = f"{trigger_top_level} barcello schedule_remove"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.schedule_remove", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        schedule = await _resolve_barcello_channel_schedule(guild_id=guild_id, channel_id=channel_id, schedule_id=id)
+        if schedule is None:
+            await send_ephemeral(
+                interaction,
+                "Schedule Barcello non trovata in questo canale.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        deleted = await ctx.database.delete_trigger_barcello_schedule(int(id))
+        if not deleted:
+            await send_ephemeral(
+                interaction,
+                "Schedule Barcello non trovata in questo canale.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        await send_standard_response(
+            interaction,
+            top_level=trigger_top_level,
+            subcommand_path=command_path,
+            lines=[("schedule_id", id), ("result", "Schedule Barcello rimossa.")],
+            kind="success",
+            footer_service=ctx.footer,
+            ephemeral=True,
+        )
+
+    @trigger_barcello_group.command(name="schedule_show", description="Mostra i dettagli di una schedule Barcello del canale corrente.")
+    @app_commands.describe(id="ID della schedule da mostrare.")
+    async def admin_barcello_schedule_show(interaction: discord.Interaction, id: int) -> None:
+        command_path = f"{trigger_top_level} barcello schedule_show"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.schedule_show", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        schedule = await _resolve_barcello_channel_schedule(guild_id=guild_id, channel_id=channel_id, schedule_id=id)
+        if schedule is None:
+            await send_ephemeral(
+                interaction,
+                "Schedule Barcello non trovata in questo canale.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        every_minutes = int(schedule.get("every_minutes") or 0)
+        await send_standard_response(
+            interaction,
+            top_level=trigger_top_level,
+            subcommand_path=command_path,
+            lines=[("schedule_id", id)],
+            sections=[
+                CommandEmbedSection(
+                    title="Dettagli",
+                    lines=[
+                        ("ID", int(schedule.get("id") or 0)),
+                        ("Abilitata", "sì" if bool(schedule.get("enabled")) else "no"),
+                        ("Prima pubblicazione", _format_schedule_datetime(schedule.get("publish_at"))),
+                        ("Ripetizione", _format_schedule_every(every_minutes)),
+                        ("Prossima esecuzione", _format_schedule_datetime(schedule.get("next_run_at"))),
+                        ("Ultima esecuzione", _format_schedule_datetime(schedule.get("last_run_at"))),
+                        ("Ultimo invio", _format_schedule_datetime(schedule.get("last_sent_at"))),
+                        ("Titolo personalizzato", str(schedule.get("embed_title") or "").strip() or "fallback"),
+                    ],
+                )
+            ],
+            kind="info",
+            footer_service=ctx.footer,
+            ephemeral=True,
+        )
+
+    @trigger_barcello_group.command(name="schedule_list", description="Elenca le schedule Barcello del canale corrente.")
+    async def admin_barcello_schedule_list(interaction: discord.Interaction) -> None:
+        command_path = f"{trigger_top_level} barcello schedule_list"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.schedule_list", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        rows = await ctx.database.list_trigger_barcello_schedules(guild_id, channel_id)
+        payload = [dict(row) for row in rows]
+        await send_standard_response(
+            interaction,
+            top_level=trigger_top_level,
+            subcommand_path=command_path,
+            lines=[("channel", f"<#{channel_id}>"), ("schedules", len(payload))],
+            sections=[
+                CommandEmbedSection(
+                    title="Schedules",
+                    lines=["Nessuna schedule Barcello configurata in questo canale."]
+                    if not payload
+                    else [_render_schedule_row(row) for row in payload],
+                )
+            ],
+            kind="info" if payload else "warning",
+            footer_service=ctx.footer,
+            ephemeral=True,
         )
 
     async def _set_dmchannelsummary_toggle(interaction: discord.Interaction, action: str) -> None:
