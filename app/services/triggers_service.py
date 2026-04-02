@@ -2211,8 +2211,8 @@ class TriggerEngineService:
         state_label_clean = self._strip_markdown_wrappers(state_label)
         state_comment_clean = self._strip_markdown_wrappers(state_comment).rstrip(".")
         return (
-            f"*{greeting_clean}, sono le ***{time_clean}*** e il Barcy è ***{state_label_clean}***. "
-            f"***{state_comment_clean}***.*"
+            f"*{greeting_clean}, sono le **{time_clean}** e il Barcy è **{state_label_clean}**. "
+            f"**{state_comment_clean}**.*"
         )
 
     def _strip_markdown_wrappers(self, value: str) -> str:

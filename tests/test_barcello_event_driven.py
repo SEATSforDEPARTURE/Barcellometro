@@ -527,14 +527,15 @@ def test_scheduled_publish_uses_fallback_title_and_updates_anchor() -> None:
     assert str(embed.title or "") == "🫛 __**AGGIORNAMENTO ORARIO BARCELLO**__"
     description = str(embed.description or "")
     assert description.startswith("*") and description.endswith("*")
-    highlighted_segments = re.findall(r"\*\*\*(.+?)\*\*\*", description)
+    highlighted_segments = re.findall(r"\*\*(.+?)\*\*", description)
     assert len(highlighted_segments) == 3
     time_pattern = re.compile(r"^(\d{1,2}:\d{2}|\d{1,2}\s+e\s+\d{1,2}|\d{1,2}\s+in punto)$", flags=re.IGNORECASE)
     assert time_pattern.match(highlighted_segments[0].strip())
     assert " e il Barcy è " in description
     assert highlighted_segments[1].strip()
     assert highlighted_segments[2].strip()
-    assert "**" not in description.replace("***", "")
+    assert "***" not in description
+    assert description.count("**") == 6
     assert "Barcy" in description
     db.upsert_trigger_barcello_publish_anchor.assert_awaited_once()
 
@@ -550,7 +551,7 @@ def test_scheduled_publish_uses_title_override() -> None:
     embed = channel.sent[-1]
     assert str(embed.title or "") == "🫛 __**TITOLO CUSTOM**__"
     assert str(embed.description or "").startswith("*")
-    assert "***" in str(embed.description or "")
+    assert "***" not in str(embed.description or "")
 
 
 def test_scheduled_trend_uses_anchor_most_recent() -> None:

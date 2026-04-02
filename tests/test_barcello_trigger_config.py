@@ -118,9 +118,10 @@ def test_barcello_scheduled_renderer_returns_final_markdown_structure() -> None:
     )
 
     assert description.startswith("*") and description.endswith("*")
-    assert "***9 in punto***" in description
-    assert "Barcy è ***" in description
-    assert description.count("***") >= 6
+    assert "**9 in punto**" in description
+    assert "Barcy è **" in description
+    assert "***" not in description
+    assert description.count("**") == 6
 
 
 def test_barcello_scheduled_renderer_includes_state_label_for_requested_color() -> None:
@@ -135,4 +136,6 @@ def test_barcello_scheduled_renderer_includes_state_label_for_requested_color() 
     )
 
     allowed_labels = payload["scheduled_update_phrases"]["states"]["ROSSO"]["labels"]
-    assert any(f"***{label}***" in description for label in allowed_labels)
+    assert any(f"**{label}**" in description for label in allowed_labels)
+    assert description.startswith("*") and description.endswith("*")
+    assert "***" not in description
