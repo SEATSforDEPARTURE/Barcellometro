@@ -106,17 +106,15 @@ def test_barcello_trigger_example_templates_do_not_start_with_emoji() -> None:
     assert offenders == []
 
 
-def test_barcello_scheduled_renderer_keeps_required_markdown_structure() -> None:
+def test_barcello_scheduled_renderer_returns_final_markdown_structure() -> None:
     payload = json.loads(Path("settings/barcello_trigger.example.json").read_text(encoding="utf-8"))
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    description = service._style_barcello_scheduled_description(
-        service._render_barcello_scheduled_description(
-            cfg=payload,
-            current_color="VERDE",
-            score=88,
-            trend={"direction": "stable", "delta_score": 0},
-            now_rome=datetime(2026, 4, 2, 9, 0),
-        )
+    description = service._render_barcello_scheduled_description(
+        cfg=payload,
+        current_color="VERDE",
+        score=88,
+        trend={"direction": "stable", "delta_score": 0},
+        now_rome=datetime(2026, 4, 2, 9, 0),
     )
 
     assert description.startswith("*") and description.endswith("*")
@@ -125,17 +123,15 @@ def test_barcello_scheduled_renderer_keeps_required_markdown_structure() -> None
     assert description.count("***") >= 6
 
 
-def test_barcello_scheduled_renderer_includes_state_label_for_requested_state() -> None:
+def test_barcello_scheduled_renderer_includes_state_label_for_requested_color() -> None:
     payload = json.loads(Path("settings/barcello_trigger.example.json").read_text(encoding="utf-8"))
     service = TriggerEngineService(Mock(), Mock(), Mock(), Mock(), community_insights=Mock())
-    description = service._style_barcello_scheduled_description(
-        service._render_barcello_scheduled_description(
-            cfg=payload,
-            current_color="ROSSO",
-            score=20,
-            trend={"direction": "down", "delta_score": -4},
-            now_rome=datetime(2026, 4, 2, 21, 0),
-        )
+    description = service._render_barcello_scheduled_description(
+        cfg=payload,
+        current_color="ROSSO",
+        score=20,
+        trend={"direction": "down", "delta_score": -4},
+        now_rome=datetime(2026, 4, 2, 21, 0),
     )
 
     allowed_labels = payload["scheduled_update_phrases"]["states"]["ROSSO"]["labels"]
