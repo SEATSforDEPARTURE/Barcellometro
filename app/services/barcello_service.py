@@ -193,6 +193,7 @@ class BarcelloService:
             end_ts=window_end_ts,
             limit=2000,
         )
+        messages = await self._enrich_reply_target_authors(messages)
 
         metrics = self._compute_metrics(messages, window_minutes)
         metrics["cache_hit"] = False
@@ -307,6 +308,7 @@ class BarcelloService:
             end_ts=window_end_ts,
             limit=2000,
         )
+        messages = await self._enrich_reply_target_authors(messages)
 
         user_a_key = str(user_a_id)
         user_b_key = str(user_b_id)
@@ -365,6 +367,7 @@ class BarcelloService:
             end_ts=window_end_ts,
             limit=2000,
         )
+        messages = await self._enrich_reply_target_authors(messages)
         metrics = self._compute_metrics(messages, window_minutes)
         metrics["cache_hit"] = False
         score_config = await self._get_score_config()
@@ -404,6 +407,7 @@ class BarcelloService:
             end_ts=window_end_ts,
             limit=2000,
         )
+        messages = await self._enrich_reply_target_authors(messages)
         user_a_key = str(user_a_id)
         user_b_key = str(user_b_id)
         pair_messages = [
@@ -676,6 +680,7 @@ class BarcelloService:
         playful_hits_total = 0
         affectionate_hits_total = 0
         directed_pairs: dict[tuple[str, str], int] = {}
+        directed_event_flags: list[tuple[datetime, int, int]] = []
 
         for message in messages:
             author_id = str(self._mget(message, "author_id") or "unknown")
@@ -713,11 +718,18 @@ class BarcelloService:
                 venting_count += 1
             if classification["classification_label"] == "deescalation":
                 deescalation_count += 1
+            target_id = str(classification.get("primary_target_id") or "")
+            if classification["classification_label"] == "directed_conflict" and target_id:
+                directed_pairs[(author_id, target_id)] = directed_pairs.get((author_id, target_id), 0) + 1
             if float(classification["aggression_score"]) > 0.55 and float(classification["directedness_score"]) >= 0.55:
                 aggressive_directed += 1
-                target_id = str(classification.get("primary_target_id") or "")
-                if target_id:
-                    directed_pairs[(author_id, target_id)] = directed_pairs.get((author_id, target_id), 0) + 1
+            directed_event_flags.append(
+                (
+                    ts,
+                    1 if classification["classification_label"] == "directed_conflict" else 0,
+                    1 if (classification["classification_label"] == "directed_conflict" and float(classification["aggression_score"]) >= 0.6) else 0,
+                )
+            )
 
             timestamps.append(ts)
             authors.append(author_id)
@@ -741,6 +753,8 @@ class BarcelloService:
         reply_conflict_density = (directed_conflict_count / max(reply_count, 1)) if message_count else 0.0
         proportion_of_deescalation = (deescalation_count / message_count) if message_count else 0.0
         reciprocal_conflict_pairs = self._count_reciprocal_pairs(directed_pairs)
+        reciprocal_conflict_pairs_high_intensity = self._count_reciprocal_pairs(directed_pairs, min_each_direction=2)
+        aggressive_directed += reciprocal_conflict_pairs_high_intensity * 2
 
         author_counts: dict[str, int] = {}
         for author in authors:
@@ -765,6 +779,11 @@ class BarcelloService:
                 std_msgs_per_minute = statistics.pstdev(buckets)
             if msg_per_min > 0:
                 burst_ratio = max_msgs_per_minute / msg_per_min
+        direct_conflict_burst_peak, aggressive_directed_burst_peak = self._compute_direct_conflict_burst_peaks(
+            directed_event_flags=directed_event_flags,
+            window_minutes=duration_minutes,
+        )
+        mutual_direct_conflict_burst = reciprocal_conflict_pairs_high_intensity
 
         return {
             "message_count": message_count,
@@ -793,7 +812,11 @@ class BarcelloService:
             "proportion_of_venting": round(venting_index, 3),
             "proportion_of_deescalation": round(proportion_of_deescalation, 3),
             "reciprocal_conflict_pairs": reciprocal_conflict_pairs,
+            "reciprocal_conflict_pairs_high_intensity": reciprocal_conflict_pairs_high_intensity,
             "aggressive_directed_count": aggressive_directed,
+            "direct_conflict_burst_peak": direct_conflict_burst_peak,
+            "aggressive_directed_burst_peak": aggressive_directed_burst_peak,
+            "mutual_direct_conflict_burst": mutual_direct_conflict_burst,
             "top1_author_share": round(top1_author_share, 3),
             "top3_author_share": round(top3_author_share, 3),
             "max_msgs_per_minute": max_msgs_per_minute,
@@ -883,6 +906,10 @@ class BarcelloService:
         caps_ratio = float(metrics.get("caps_ratio") or 0.0)
         aggressive_directed_count = int(metrics.get("aggressive_directed_count") or 0)
         reciprocal_conflict_pairs = int(metrics.get("reciprocal_conflict_pairs") or 0)
+        reciprocal_conflict_pairs_high_intensity = int(metrics.get("reciprocal_conflict_pairs_high_intensity") or 0)
+        direct_conflict_burst_peak = int(metrics.get("direct_conflict_burst_peak") or 0)
+        aggressive_directed_burst_peak = int(metrics.get("aggressive_directed_burst_peak") or 0)
+        mutual_direct_conflict_burst = int(metrics.get("mutual_direct_conflict_burst") or 0)
         persistence_conflict = float(metrics.get("persistence_of_conflict_vs_previous_window") or 0.0)
 
         intensity_index = min(
@@ -913,7 +940,11 @@ class BarcelloService:
 
         target_confidence = min(
             1.0,
-            (0.62 * direct_conflict_index) + (0.33 * hostile_mentions) + (0.08 * min(aggressive_directed_count / 4.0, 1.0)),
+            (0.52 * direct_conflict_index)
+            + (0.26 * hostile_mentions)
+            + (0.08 * min(aggressive_directed_count / 4.0, 1.0))
+            + (0.08 * min(direct_conflict_burst_peak / 4.0, 1.0))
+            + (0.06 * min(mutual_direct_conflict_burst, 1.0)),
         )
         directed_conflict_penalty = int(
             round((62 * direct_conflict_index * max(0.35, target_confidence)) + (22 * hostile_mentions) + (5 * aggressive_directed_count))
@@ -925,6 +956,7 @@ class BarcelloService:
         escalation_penalty = int(
             round(
                 (18 * min(reciprocal_conflict_pairs, 3))
+                + (18 * min(reciprocal_conflict_pairs_high_intensity, 2))
                 + (26 * reply_conflict_density * max(0.35, target_confidence))
                 + (10 * max(0.0, persistence_conflict))
             )
@@ -932,6 +964,35 @@ class BarcelloService:
         escalation_penalty = min(46, escalation_penalty)
         if escalation_penalty > 0:
             penalties.append({"key": "escalation_penalty", "label": "Escalation reale", "weight": escalation_penalty, "summary": f"coppie {reciprocal_conflict_pairs}"})
+
+        burst_conflict_penalty = int(
+            round(
+                (12 * min(direct_conflict_burst_peak / 3.0, 1.0))
+                + (16 * min(aggressive_directed_burst_peak / 2.0, 1.0))
+            )
+        )
+        burst_conflict_penalty = min(28, burst_conflict_penalty)
+        if burst_conflict_penalty > 0:
+            penalties.append(
+                {
+                    "key": "burst_conflict_penalty",
+                    "label": "Picco breve ma tossico",
+                    "weight": burst_conflict_penalty,
+                    "summary": f"picco {direct_conflict_burst_peak}/3m",
+                }
+            )
+
+        mutual_direct_conflict_burst_penalty = int(round(22 * min(mutual_direct_conflict_burst, 2)))
+        mutual_direct_conflict_burst_penalty = min(44, mutual_direct_conflict_burst_penalty)
+        if mutual_direct_conflict_burst_penalty > 0:
+            penalties.append(
+                {
+                    "key": "mutual_direct_conflict_burst_penalty",
+                    "label": "Scambio ostile reciproco",
+                    "weight": mutual_direct_conflict_burst_penalty,
+                    "summary": f"coppie {mutual_direct_conflict_burst}",
+                }
+            )
 
         venting_penalty = int(round(10 * venting_index * max(0.25, 1.0 - (direct_conflict_index * 1.35))))
         venting_penalty = min(12, venting_penalty)
@@ -1027,6 +1088,7 @@ class BarcelloService:
             + (0.16 if has_hard_target and (profanity_hits > 0 or blasphemy_hits > 0) else 0.0)
             + (0.08 if aggressive_hits > 0 and has_hard_target else 0.0)
             + (0.08 if challenge_hits > 0 and (insult_hits > 0 or profanity_hits > 0) else 0.0)
+            + (0.17 if has_hard_target and second_person_hits > 0 and (insult_hits > 0 or profanity_hits > 0 or blasphemy_hits > 0) else 0.0)
             - (0.22 if playful_confidence > 0.3 and insult_hits <= 1 else 0.0),
         )
 
@@ -1155,18 +1217,76 @@ class BarcelloService:
         return uppercase_letters / total_letters
 
     @staticmethod
-    def _count_reciprocal_pairs(directed_pairs: dict[tuple[str, str], int]) -> int:
+    def _count_reciprocal_pairs(directed_pairs: dict[tuple[str, str], int], min_each_direction: int = 1) -> int:
         count = 0
         seen: set[tuple[str, str]] = set()
         for pair, value in directed_pairs.items():
             reverse = (pair[1], pair[0])
             if pair in seen or reverse in seen:
                 continue
-            if value >= 1 and directed_pairs.get(reverse, 0) >= 1:
+            if value >= min_each_direction and directed_pairs.get(reverse, 0) >= min_each_direction:
                 count += 1
                 seen.add(pair)
                 seen.add(reverse)
         return count
+
+    async def _enrich_reply_target_authors(self, messages: list[Any]) -> list[Any]:
+        if not messages:
+            return messages
+        local_author_by_message_id: dict[str, str] = {}
+        unresolved_reply_message_ids: set[str] = set()
+        normalized_messages: list[dict[str, Any]] = []
+        for message in messages:
+            normalized = dict(message)
+            message_id = str(self._mget(message, "message_id") or "").strip()
+            author_id = str(self._mget(message, "author_id") or "").strip()
+            if message_id and author_id:
+                local_author_by_message_id[message_id] = author_id
+            if not str(self._mget(message, "reply_to_author_id") or "").strip():
+                reply_message_id = str(self._mget(message, "reply_to_message_id") or "").strip()
+                if reply_message_id and reply_message_id not in local_author_by_message_id:
+                    unresolved_reply_message_ids.add(reply_message_id)
+            normalized_messages.append(normalized)
+        remote_author_by_message_id: dict[str, str] = {}
+        fetch_authors = getattr(self._database, "fetch_message_authors_by_ids", None)
+        if unresolved_reply_message_ids and callable(fetch_authors):
+            remote_author_by_message_id = await fetch_authors(list(unresolved_reply_message_ids))
+        for message in normalized_messages:
+            if str(message.get("reply_to_author_id") or "").strip():
+                continue
+            reply_message_id = str(message.get("reply_to_message_id") or "").strip()
+            if not reply_message_id:
+                continue
+            resolved_author = local_author_by_message_id.get(reply_message_id) or remote_author_by_message_id.get(reply_message_id)
+            if resolved_author:
+                message["reply_to_author_id"] = resolved_author
+        return normalized_messages
+
+    def _compute_direct_conflict_burst_peaks(
+        self,
+        *,
+        directed_event_flags: list[tuple[datetime, int, int]],
+        window_minutes: int,
+    ) -> tuple[int, int]:
+        if not directed_event_flags:
+            return 0, 0
+        bucket_count = max(1, window_minutes)
+        min_ts = min(item[0] for item in directed_event_flags)
+        directed_buckets = [0 for _ in range(bucket_count)]
+        aggressive_buckets = [0 for _ in range(bucket_count)]
+        for ts, directed_flag, aggressive_flag in directed_event_flags:
+            idx = int((ts - min_ts).total_seconds() // 60)
+            idx = max(0, min(bucket_count - 1, idx))
+            directed_buckets[idx] += directed_flag
+            aggressive_buckets[idx] += aggressive_flag
+        window = 3
+        directed_peak = 0
+        aggressive_peak = 0
+        for idx in range(bucket_count):
+            end = min(bucket_count, idx + window)
+            directed_peak = max(directed_peak, sum(directed_buckets[idx:end]))
+            aggressive_peak = max(aggressive_peak, sum(aggressive_buckets[idx:end]))
+        return directed_peak, aggressive_peak
 
     @staticmethod
     def _main_reason_key(reasons: list[dict[str, Any]]) -> str | None:

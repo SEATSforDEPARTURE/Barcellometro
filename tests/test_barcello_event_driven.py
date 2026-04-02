@@ -365,6 +365,28 @@ def test_render_barcello_trend_comment_green_fragile_vs_stable() -> None:
     assert "resta **delicato**" in green_fragile
 
 
+def test_render_barcello_trend_comment_avoids_green_improving_copy_with_strong_direct_conflict_signals() -> None:
+    service, _db, _channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 52}, {"color": "VERDE", "score": 67})
+    cautious = service._render_barcello_trend_comment(
+        state="VERDE",
+        delta_score=6,
+        recovery_type="active",
+        status={
+            "score": 67,
+            "reason": "stable_balance",
+            "metrics": {
+                "direct_conflict_index": 0.2,
+                "hostile_mentions": 0.09,
+                "reciprocal_conflict_pairs": 1,
+                "aggressive_directed_count": 3,
+            },
+        },
+    )
+    assert "migliorando" not in cautious
+    assert "equilibrata" not in cautious
+    assert "attrito diretto" in cautious
+
+
 def test_render_barcello_trend_comment_black_extreme_vs_initial() -> None:
     service, _db, _channel, _ai = _base_service({"last_color": "ROSSO", "last_score": 36}, {"color": "NERO", "score": 16})
     black_initial = service._render_barcello_trend_comment(

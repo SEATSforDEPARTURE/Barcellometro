@@ -6,6 +6,9 @@ from app.services.barcello_service import BarcelloService
 class FakeDatabase:
     def __init__(self, settings: dict[str, str] | None = None) -> None:
         self._settings = settings or {}
+        self._messages: list[dict[str, object]] = []
+        self._snapshot = None
+        self._remote_author_by_message_id: dict[str, str] = {}
 
     async def get_setting(self, key: str) -> str | None:
         return self._settings.get(key)
@@ -18,6 +21,18 @@ class FakeDatabase:
 
     async def put_barcello_message_classifications(self, *args, **kwargs):
         return None
+
+    async def get_barcello_snapshot(self, *args, **kwargs):
+        return self._snapshot
+
+    async def fetch_messages_in_range(self, *args, **kwargs):
+        return self._messages
+
+    async def put_barcello_snapshot(self, *args, **kwargs):
+        return None
+
+    async def fetch_message_authors_by_ids(self, message_ids: list[str]) -> dict[str, str]:
+        return {message_id: self._remote_author_by_message_id[message_id] for message_id in message_ids if message_id in self._remote_author_by_message_id}
 
 
 def run(coro):
@@ -161,6 +176,54 @@ def test_true_reciprocal_escalation_still_drops_to_nero_or_rosso() -> None:
     assert metrics["reciprocal_conflict_pairs"] > 0
     assert any(r["key"] == "escalation_penalty" and r["weight"] > 0 for r in reasons)
     assert score <= 40
+
+
+def test_reciprocal_reply_conflict_with_real_reply_to_message_id_is_detected() -> None:
+    db = FakeDatabase()
+    db._messages = [
+        {"message_id": "m1", "author_id": "u1", "content": "sei ridicolo", "ts": "2026-04-01T10:00:00+00:00"},
+        {"message_id": "m2", "author_id": "u2", "content": "tu sei un pezzo di merda", "reply_to_message_id": "m1", "ts": "2026-04-01T10:00:08+00:00"},
+        {"message_id": "m3", "author_id": "u1", "content": "tu sei una brutta puttana", "reply_to_message_id": "m2", "ts": "2026-04-01T10:00:15+00:00"},
+        {"message_id": "m4", "author_id": "u2", "content": "non osare bastarda, stai zitta", "reply_to_message_id": "m3", "ts": "2026-04-01T10:00:22+00:00"},
+    ] * 3
+    service = BarcelloService(db)
+    result = run(service.compute_channel("g1", "c1", window_minutes=10, now_ts="2026-04-01T10:10:00+00:00"))
+    assert result.metrics["reciprocal_conflict_pairs"] >= 1
+    assert result.metrics["aggressive_directed_count"] >= 2
+    assert result.score < 70
+
+
+def test_reply_target_resolution_uses_batch_lookup_when_referenced_message_is_outside_window() -> None:
+    db = FakeDatabase()
+    db._remote_author_by_message_id = {"old-1": "u2", "old-2": "u1"}
+    db._messages = [
+        {"message_id": "m1", "author_id": "u1", "content": "sei ridicolo", "reply_to_message_id": "old-1", "ts": "2026-04-01T10:00:00+00:00"},
+        {"message_id": "m2", "author_id": "u2", "content": "parla piano bastardo", "reply_to_message_id": "old-2", "ts": "2026-04-01T10:00:08+00:00"},
+    ] * 4
+    service = BarcelloService(db)
+    result = run(service.compute_channel("g1", "c1", window_minutes=10, now_ts="2026-04-01T10:10:00+00:00"))
+    assert result.metrics["direct_conflict_index"] > 0.3
+    assert result.metrics["reply_density"] > 0
+    assert result.score < 75
+
+
+def test_short_intense_burst_penalizes_even_if_rest_of_window_is_quiet() -> None:
+    service = BarcelloService(FakeDatabase())
+    quiet = [
+        {"author_id": f"u{i%4}", "content": "ok ricevuto", "ts": f"2026-04-01T10:{i:02d}:00+00:00"}
+        for i in range(15)
+    ]
+    burst = [
+        {"author_id": "u1", "content": "sei ridicolo", "reply_to_author_id": "u2", "ts": "2026-04-01T10:20:00+00:00"},
+        {"author_id": "u2", "content": "tu sei un pezzo di merda", "reply_to_author_id": "u1", "ts": "2026-04-01T10:20:10+00:00"},
+        {"author_id": "u1", "content": "tu sei una brutta puttana", "reply_to_author_id": "u2", "ts": "2026-04-01T10:21:00+00:00"},
+        {"author_id": "u2", "content": "non osare bastarda, stai zitta", "reply_to_author_id": "u1", "ts": "2026-04-01T10:21:10+00:00"},
+    ]
+    metrics = service._compute_metrics(quiet + burst, window_minutes=30)
+    reasons, score = service._score_from_metrics(metrics, score_config={})
+    assert metrics["direct_conflict_burst_peak"] >= 3
+    assert any(r["key"] in {"burst_conflict_penalty", "mutual_direct_conflict_burst_penalty"} for r in reasons)
+    assert score < 75
 
 
 def test_calming_messages_add_recovery_bonus() -> None:

@@ -1765,6 +1765,30 @@ class DatabaseService:
             (channel_id, start_ts, end_ts, limit),
         )
 
+    async def fetch_message_authors_by_ids(self, message_ids: list[str]) -> dict[str, str]:
+        clean_ids = [str(item).strip() for item in message_ids if str(item).strip()]
+        if not clean_ids:
+            return {}
+        chunk_size = 500
+        mapping: dict[str, str] = {}
+        for offset in range(0, len(clean_ids), chunk_size):
+            chunk = clean_ids[offset : offset + chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = await self.fetchall(
+                f"""
+                SELECT message_id, author_id
+                FROM messages
+                WHERE message_id IN ({placeholders})
+                """,
+                tuple(chunk),
+            )
+            for row in rows:
+                message_id = str(row["message_id"] or "").strip()
+                author_id = str(row["author_id"] or "").strip()
+                if message_id and author_id:
+                    mapping[message_id] = author_id
+        return mapping
+
 
     async def get_channel_coverage(self, channel_id: str) -> tuple[Optional[str], Optional[str]]:
         row = await self.fetchone(
