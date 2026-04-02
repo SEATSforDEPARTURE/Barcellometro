@@ -178,6 +178,104 @@
       ]
     }
   },
+  "scheduled_update_phrases": {
+    "time_buckets": {
+      "morning": [
+        "Buongiorno",
+        "Ehilà, buongiorno",
+        "Si riparte",
+        "Nuova giornata",
+        "Svegliaaa"
+      ],
+      "afternoon": [
+        "Buon pomeriggio",
+        "Siamo nel pieno del pomeriggio",
+        "Il pomeriggio scorre",
+        "Ci siamo",
+        "Si continua"
+      ],
+      "evening": [
+        "Buonasera",
+        "Si entra nella sera",
+        "La giornata si chiude",
+        "Clima serale",
+        "Siamo a sera"
+      ],
+      "night": [
+        "È notte fonda",
+        "Notte inoltrata",
+        "A quest'ora…",
+        "Silenzio notturno",
+        "Ore strane"
+      ]
+    },
+    "states": {
+      "VERDE": {
+        "labels": [
+          "verde",
+          "tranquillo",
+          "sereno",
+          "rilassato",
+          "in equilibrio"
+        ],
+        "comments": [
+          "Bravi, continuate così",
+          "State andando benissimo",
+          "Tutto sotto controllo",
+          "Clima top",
+          "Zero drama, mi piace"
+        ]
+      },
+      "GIALLO": {
+        "labels": [
+          "un po' teso",
+          "in equilibrio instabile",
+          "leggermente acceso",
+          "con qualche attrito",
+          "in bilico"
+        ],
+        "comments": [
+          "Occhio a non scaldarvi troppo",
+          "Tenete i toni bassi",
+          "State attenti",
+          "Si può raddrizzare",
+          "Calma ragazzi"
+        ]
+      },
+      "ROSSO": {
+        "labels": [
+          "caldo",
+          "teso",
+          "in conflitto",
+          "agitato",
+          "pesante"
+        ],
+        "comments": [
+          "Qui si sta scaldando troppo",
+          "State esagerando",
+          "Serve calma subito",
+          "Si sta degenerando",
+          "Fermatevi un attimo"
+        ]
+      },
+      "NERO": {
+        "labels": [
+          "compromesso",
+          "fuori controllo",
+          "in crisi",
+          "esploso",
+          "al limite"
+        ],
+        "comments": [
+          "Situazione critica",
+          "Qui siamo oltre il limite",
+          "Così non va",
+          "Serve uno stop",
+          "Clima ingestibile"
+        ]
+      }
+    }
+  },
   "mod_role_id_note": "Per transizioni a ROSSO/NERO il bot aggiunge solo il mention <@&mod_role_id> in coda al testo principale, senza field Moderazione.",
   "moods": {
     "chill": {
