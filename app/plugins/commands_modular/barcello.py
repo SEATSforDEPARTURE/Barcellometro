@@ -39,6 +39,7 @@ from app.domain.reporting.trend import normalize_trend, render_trend, render_tre
 
 logger = logging.getLogger(__name__)
 
+BARCELLO_SCHEDULE_FALLBACK_TITLE = "🫛 __**AGGIORNAMENTO ORARIO BARCELLO**__"
 
 
 def register_barcello(
@@ -215,7 +216,7 @@ def register_barcello(
         return row
 
     def _render_schedule_row(row: dict[str, Any]) -> str:
-        title = str(row.get("embed_title") or "").strip() or "fallback"
+        title = str(row.get("embed_title") or "").strip() or BARCELLO_SCHEDULE_FALLBACK_TITLE
         status = "enabled" if bool(row.get("enabled")) else "disabled"
         every_minutes = int(row.get("every_minutes") or 0)
         return (
@@ -233,7 +234,7 @@ def register_barcello(
     async def admin_barcello_schedule_add(
         interaction: discord.Interaction,
         publish_at: str,
-        every: int,
+        every: int | None = None,
         embed_title: str | None = None,
     ) -> None:
         command_path = f"{trigger_top_level} barcello schedule_add"
@@ -242,7 +243,8 @@ def register_barcello(
         scope = await _require_channel_scope(interaction)
         if scope is None:
             return
-        if every < 0:
+        resolved_every = int(every or 0)
+        if resolved_every < 0:
             await send_ephemeral(
                 interaction,
                 "`every` deve essere un numero di minuti maggiore o uguale a 0.",
@@ -266,7 +268,7 @@ def register_barcello(
             channel_id=channel_id,
             publish_at=publish_iso,
             next_run_at=publish_iso,
-            every_minutes=every,
+            every_minutes=resolved_every,
             enabled=True,
             embed_title=str(embed_title or "").strip() or None,
         )
@@ -280,8 +282,8 @@ def register_barcello(
                     title="Dettagli",
                     lines=[
                         ("publish_at", _format_schedule_datetime(publish_iso)),
-                        ("every", _format_schedule_every(every)),
-                        ("embed_title", str(embed_title or "").strip() or "fallback"),
+                        ("every", _format_schedule_every(resolved_every)),
+                        ("embed_title", str(embed_title or "").strip() or BARCELLO_SCHEDULE_FALLBACK_TITLE),
                     ],
                 )
             ],
@@ -455,7 +457,7 @@ def register_barcello(
                         ("Prossima esecuzione", _format_schedule_datetime(schedule.get("next_run_at"))),
                         ("Ultima esecuzione", _format_schedule_datetime(schedule.get("last_run_at"))),
                         ("Ultimo invio", _format_schedule_datetime(schedule.get("last_sent_at"))),
-                        ("Titolo personalizzato", str(schedule.get("embed_title") or "").strip() or "fallback"),
+                        ("Titolo personalizzato", str(schedule.get("embed_title") or "").strip() or BARCELLO_SCHEDULE_FALLBACK_TITLE),
                     ],
                 )
             ],
