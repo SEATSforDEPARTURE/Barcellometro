@@ -92,3 +92,38 @@ def test_trigger_barcello_anchor_upsert_and_get() -> None:
             await db.close()
 
     asyncio.run(_run())
+
+
+def test_trigger_barcello_quiet_hours_upsert_get_delete() -> None:
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        try:
+            await db.initialize_schema()
+            assert await db.get_trigger_barcello_quiet_hours("g1", "c1") is None
+            await db.upsert_trigger_barcello_quiet_hours(
+                guild_id="g1",
+                channel_id="c1",
+                quiet_start="23:00",
+                quiet_end="08:00",
+            )
+            quiet = await db.get_trigger_barcello_quiet_hours("g1", "c1")
+            assert quiet is not None
+            assert quiet["quiet_start"] == "23:00"
+            assert quiet["quiet_end"] == "08:00"
+            await db.upsert_trigger_barcello_quiet_hours(
+                guild_id="g1",
+                channel_id="c1",
+                quiet_start="22:30",
+                quiet_end="07:30",
+            )
+            quiet_after = await db.get_trigger_barcello_quiet_hours("g1", "c1")
+            assert quiet_after is not None
+            assert quiet_after["quiet_start"] == "22:30"
+            assert quiet_after["quiet_end"] == "07:30"
+            assert await db.delete_trigger_barcello_quiet_hours("g1", "c1") is True
+            assert await db.get_trigger_barcello_quiet_hours("g1", "c1") is None
+        finally:
+            await db.close()
+
+    asyncio.run(_run())

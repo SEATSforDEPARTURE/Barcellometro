@@ -69,6 +69,9 @@ def _ctx_for_result(
             list_trigger_barcello_schedules=AsyncMock(return_value=[]),
             update_trigger_barcello_schedule=AsyncMock(return_value=True),
             delete_trigger_barcello_schedule=AsyncMock(return_value=True),
+            upsert_trigger_barcello_quiet_hours=AsyncMock(),
+            get_trigger_barcello_quiet_hours=AsyncMock(return_value=None),
+            delete_trigger_barcello_quiet_hours=AsyncMock(return_value=True),
         ),
         config=SimpleNamespace(ignore_bots=True, openai_api_key=""),
         ai=None,
@@ -157,6 +160,9 @@ def test_register_barcello_registers_summary_and_alias_namespaces(barcello_modul
         "schedule_remove",
         "schedule_show",
         "schedule_list",
+        "quiet_set",
+        "quiet_show",
+        "quiet_reset",
     }
     summary_barcello = _group_command(dmchannelsummary_group, "barcello")
     assert {child.name for child in summary_barcello.commands} == {"on", "off", "status", "today", "yesterday", "last", "range"}
@@ -999,6 +1005,71 @@ def test_triggers_barcello_schedule_list_empty_and_with_items_and_cross_channel_
         assert send_standard_response.await_args_list[1].kwargs["kind"] == "info"
         assert "ID 1 · enabled" in send_standard_response.await_args_list[1].kwargs["sections"][0].lines[0]
         assert "non trovata in questo canale" in send_standard_response.await_args_list[2].kwargs["lines"][0][1]
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_quiet_set_success_and_invalid_format(barcello_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        ctx = _ctx_for_result(BarcelloResult(score=66, color="verde"))
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        callback = _triggers_barcello_command(triggers_group, "quiet_set").callback
+
+        await callback(_interaction(qualified_name="triggers barcello quiet_set"), start="23:00", end="08:00")
+        await callback(_interaction(qualified_name="triggers barcello quiet_set"), start="23", end="08:00")
+
+        ctx.database.upsert_trigger_barcello_quiet_hours.assert_awaited_once_with(
+            guild_id="100",
+            channel_id="200",
+            quiet_start="23:00",
+            quiet_end="08:00",
+        )
+        messages = [call.kwargs["lines"] for call in send_standard_response.await_args_list]
+        assert [("result", "Quiet hours Barcello aggiornate.")] in messages
+        assert any(("dettaglio", "Formato non valido: usa HH:MM (es. 23:00).") in lines for lines in messages)
+
+    asyncio.run(_run())
+
+
+def test_triggers_barcello_quiet_show_empty_and_configured_and_reset(barcello_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        ctx = _ctx_for_result(BarcelloResult(score=66, color="verde"))
+        ctx.database.get_trigger_barcello_quiet_hours = AsyncMock(
+            side_effect=[None, {"quiet_start": "22:30", "quiet_end": "07:15", "updated_at": datetime.now(timezone.utc).isoformat()}]
+        )
+        triggers_group = discord.app_commands.Group(name="triggers", description="triggers")
+        dmchannelsummary_group = discord.app_commands.Group(name="dmchannelsummary", description="dmchannelsummary")
+        barcello_alias_group = discord.app_commands.Group(name="barcello", description="barcello")
+        tree = _FakeTree()
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(barcello_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(barcello_module, "send_standard_response", send_standard_response)
+
+        barcello_module.register_barcello(triggers_group, dmchannelsummary_group, barcello_alias_group, tree, None, ctx)
+        show_callback = _triggers_barcello_command(triggers_group, "quiet_show").callback
+        reset_callback = _triggers_barcello_command(triggers_group, "quiet_reset").callback
+
+        await show_callback(_interaction(qualified_name="triggers barcello quiet_show"))
+        await show_callback(_interaction(qualified_name="triggers barcello quiet_show"))
+        await reset_callback(_interaction(qualified_name="triggers barcello quiet_reset"))
+
+        assert ctx.database.get_trigger_barcello_quiet_hours.await_count == 2
+        ctx.database.delete_trigger_barcello_quiet_hours.assert_awaited_once_with("100", "200")
+        configured = [
+            call.kwargs
+            for call in send_standard_response.await_args_list
+            if call.kwargs.get("subcommand_path") == "triggers barcello quiet_show" and call.kwargs.get("sections")
+        ][0]
+        assert configured["sections"][0].lines[0] == ("start", "22:30")
+        assert configured["sections"][0].lines[1] == ("end", "07:15")
 
     asyncio.run(_run())
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import types
 from datetime import datetime, timedelta, timezone
@@ -60,6 +61,7 @@ def _base_service(prev_state: dict, status: dict, *, cfg: dict | None = None, ai
     database.list_barcello_recovery_armed_channels = AsyncMock(return_value=[])
     database.get_trigger_barcello_publish_anchor = AsyncMock(return_value=None)
     database.upsert_trigger_barcello_publish_anchor = AsyncMock()
+    database.get_trigger_barcello_quiet_hours = AsyncMock(return_value=None)
     database.mark_trigger_barcello_schedule_run = AsyncMock(return_value=True)
     database.list_due_trigger_barcello_schedules = AsyncMock(return_value=[])
 
@@ -523,6 +525,10 @@ def test_scheduled_publish_uses_fallback_title_and_updates_anchor() -> None:
     assert sent is True
     embed = channel.sent[-1]
     assert str(embed.title or "") == "🫛 __**AGGIORNAMENTO ORARIO BARCELLO**__"
+    description = str(embed.description or "")
+    assert description.startswith("*") and description.endswith("*")
+    assert re.search(r"\*\*\*(\d{1,2}:\d{2}|\d{1,2}\s+e\s+\d{1,2}|\d{1,2}\s+in punto)\*\*\*", description)
+    assert re.search(r"\*\*\*(VERDE|GIALLA|GIALLO|ROSSA|ROSSO|NERA|NERO)\*\*\*", description, flags=re.IGNORECASE)
     db.upsert_trigger_barcello_publish_anchor.assert_awaited_once()
 
 
@@ -535,7 +541,9 @@ def test_scheduled_publish_uses_title_override() -> None:
 
     assert sent is True
     embed = channel.sent[-1]
-    assert str(embed.title or "") == "Titolo custom"
+    assert str(embed.title or "") == "🫛 __**TITOLO CUSTOM**__"
+    assert str(embed.description or "").startswith("*")
+    assert "***" in str(embed.description or "")
 
 
 def test_scheduled_trend_uses_anchor_most_recent() -> None:
@@ -550,6 +558,49 @@ def test_scheduled_trend_uses_anchor_most_recent() -> None:
     assert sent is True
     trend_field = next(field for field in channel.sent[-1].fields if "TREND" in str(field.name or ""))
     assert "ultimo publish (scheduled)" in str(trend_field.value or "")
+
+
+def test_scheduled_is_skipped_inside_quiet_hours_recurring() -> None:
+    service, db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 80})
+    db.get_trigger_barcello_quiet_hours = AsyncMock(return_value={"quiet_start": "23:00", "quiet_end": "08:00"})
+    run_at = datetime(2026, 4, 2, 22, 30, tzinfo=timezone.utc)
+    schedule = {"id": 1, "guild_id": "1", "channel_id": "2", "every_minutes": 30}
+
+    sent = asyncio.run(service._publish_barcello_scheduled_update(schedule, now=run_at))
+
+    assert sent is False
+    assert channel.sent == []
+    mark_kwargs = db.mark_trigger_barcello_schedule_run.await_args.kwargs
+    assert mark_kwargs["keep_enabled"] is True
+    db.upsert_trigger_barcello_publish_anchor.assert_not_awaited()
+
+
+def test_scheduled_one_shot_is_consumed_inside_quiet_hours() -> None:
+    service, db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 80})
+    db.get_trigger_barcello_quiet_hours = AsyncMock(return_value={"quiet_start": "23:00", "quiet_end": "08:00"})
+    run_at = datetime(2026, 4, 2, 22, 30, tzinfo=timezone.utc)
+    schedule = {"id": 10, "guild_id": "1", "channel_id": "2", "every_minutes": 0}
+
+    sent = asyncio.run(service._publish_barcello_scheduled_update(schedule, now=run_at))
+
+    assert sent is False
+    assert channel.sent == []
+    assert db.mark_trigger_barcello_schedule_run.await_args.kwargs["keep_enabled"] is False
+
+
+def test_scheduled_quiet_hours_overnight_window_logic() -> None:
+    service, db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 80})
+    db.get_trigger_barcello_quiet_hours = AsyncMock(return_value={"quiet_start": "23:00", "quiet_end": "08:00"})
+    inside = datetime(2026, 4, 2, 23, 30, tzinfo=timezone.utc)  # 01:30 Europe/Rome
+    outside = datetime(2026, 4, 2, 9, 30, tzinfo=timezone.utc)  # 11:30 Europe/Rome
+    schedule = {"id": 11, "guild_id": "1", "channel_id": "2", "every_minutes": 30}
+
+    sent_inside = asyncio.run(service._publish_barcello_scheduled_update(schedule, now=inside))
+    sent_outside = asyncio.run(service._publish_barcello_scheduled_update(schedule, now=outside))
+
+    assert sent_inside is False
+    assert sent_outside is True
+    assert len(channel.sent) == 1
 
 
 def test_scheduled_after_state_change_uses_state_change_anchor() -> None:
@@ -570,6 +621,16 @@ def test_scheduled_after_state_change_uses_state_change_anchor() -> None:
     assert sent is True
     trend_field = next(field for field in channel.sent[-1].fields if "TREND" in str(field.name or ""))
     assert "ultimo publish (state_change)" in str(trend_field.value or "")
+
+
+def test_state_change_publish_is_not_blocked_by_quiet_hours() -> None:
+    service, db, channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 50}, {"color": "ROSSO", "score": 30})
+    db.get_trigger_barcello_quiet_hours = AsyncMock(return_value={"quiet_start": "00:00", "quiet_end": "23:59"})
+
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+
+    assert out["notified"] is True
+    assert len(channel.sent) == 1
 
 
 def test_trend_mode_state_change_vs_scheduled_are_kept_distinct() -> None:

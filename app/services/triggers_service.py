@@ -1330,6 +1330,16 @@ class TriggerEngineService:
                 keep_enabled=keep_enabled,
             )
             return False
+        quiet_hours = await self._database.get_trigger_barcello_quiet_hours(guild_id, channel_id)
+        if self._is_within_barcello_quiet_hours(quiet_hours, run_at=run_at):
+            await self._database.mark_trigger_barcello_schedule_run(
+                int(schedule.get("id") or 0),
+                run_at=run_iso,
+                sent=False,
+                next_run_at=next_run_at,
+                keep_enabled=keep_enabled,
+            )
+            return False
 
         config = self._load_barcello_trigger_cfg_cached()
         window_minutes = self._get_effective_window_minutes(
@@ -1357,17 +1367,17 @@ class TriggerEngineService:
         trend = self._compute_barcello_anchor_trend(anchor, current_color=current_color, current_score=score)
 
         title_override = str(schedule.get("embed_title") or "").strip()
-        title = title_override or format_standard_title("AGGIORNAMENTO ORARIO BARCELLO", emoji="🫛")
-        description = self._render_barcello_scheduled_description(
+        title = format_standard_title(title_override or "AGGIORNAMENTO ORARIO BARCELLO", emoji="🫛")
+        description = self._style_barcello_scheduled_description(self._render_barcello_scheduled_description(
             cfg=config,
             current_color=current_color,
             score=score,
             trend=trend,
             now_rome=run_at.astimezone(ROME_TZ),
-        )
+        ))
         embed = discord.Embed(
             title=title,
-            description=format_standard_description(description),
+            description=description,
             color=self._barcello_embed_color(current_color),
         )
         salute_value = self._render_trigger_health_bar(score=score, color=current_color)
@@ -2163,6 +2173,46 @@ class TriggerEngineService:
             "state_comment": self._scheduled_state_comment(current_color),
         }
         return self._render_with_placeholders(template, placeholders)
+
+    def _style_barcello_scheduled_description(self, description: str) -> str:
+        text = str(description or "").strip()
+        if not text:
+            return ""
+        emphasized = text
+        emphasized = re.sub(r"\b(\d{1,2}:\d{2})\b", r"***\1***", emphasized)
+        emphasized = re.sub(
+            r"\bsono le\s+(\d{1,2}(?:\s*(?::|e)\s*\d{1,2})?)\b",
+            lambda match: f"sono le ***{match.group(1).strip()}***",
+            emphasized,
+            flags=re.IGNORECASE,
+        )
+        emphasized = re.sub(r"\b(\d{1,2}\s+in punto)\b", r"***\1***", emphasized, flags=re.IGNORECASE)
+        emphasized = re.sub(r"\b(VERDE|GIALLA|GIALLO|ROSSA|ROSSO|NERA|NERO)\b", r"***\1***", emphasized, flags=re.IGNORECASE)
+        if "." in emphasized:
+            prefix, suffix = emphasized.rsplit(".", 1)
+            tail = suffix.strip()
+            if tail:
+                emphasized = f"{prefix}. ***{tail}***"
+        return format_standard_description(emphasized, italic=True)
+
+    def _is_within_barcello_quiet_hours(self, quiet: dict[str, Any] | None, *, run_at: datetime) -> bool:
+        if not quiet:
+            return False
+        start_raw = str(quiet.get("quiet_start") or "").strip()
+        end_raw = str(quiet.get("quiet_end") or "").strip()
+        match_start = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", start_raw)
+        match_end = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", end_raw)
+        if match_start is None or match_end is None:
+            return False
+        start_minutes = int(match_start.group(1)) * 60 + int(match_start.group(2))
+        end_minutes = int(match_end.group(1)) * 60 + int(match_end.group(2))
+        now_rome = run_at.astimezone(ROME_TZ)
+        current_minutes = now_rome.hour * 60 + now_rome.minute
+        if start_minutes == end_minutes:
+            return False
+        if start_minutes < end_minutes:
+            return start_minutes <= current_minutes < end_minutes
+        return current_minutes >= start_minutes or current_minutes < end_minutes
 
     def _select_barcello_scheduled_template(self, cfg: dict[str, Any], *, current_color: str) -> str:
         scheduled = cfg.get("scheduled_update_templates") if isinstance(cfg.get("scheduled_update_templates"), dict) else {}
