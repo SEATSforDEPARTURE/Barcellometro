@@ -527,8 +527,13 @@ def test_scheduled_publish_uses_fallback_title_and_updates_anchor() -> None:
     assert str(embed.title or "") == "🫛 __**AGGIORNAMENTO ORARIO BARCELLO**__"
     description = str(embed.description or "")
     assert description.startswith("*") and description.endswith("*")
-    assert re.search(r"\*\*\*(\d{1,2}:\d{2}|\d{1,2}\s+e\s+\d{1,2}|\d{1,2}\s+in punto)\*\*\*", description)
-    assert re.search(r"\*\*\*(VERDE|GIALLA|GIALLO|ROSSA|ROSSO|NERA|NERO)\*\*\*", description, flags=re.IGNORECASE)
+    highlighted_segments = re.findall(r"\*\*\*(.+?)\*\*\*", description)
+    assert len(highlighted_segments) >= 2
+    time_pattern = re.compile(r"^(\d{1,2}:\d{2}|\d{1,2}\s+e\s+\d{1,2}|\d{1,2}\s+in punto)$", flags=re.IGNORECASE)
+    assert any(time_pattern.match(segment.strip()) for segment in highlighted_segments)
+    assert any(not time_pattern.match(segment.strip()) for segment in highlighted_segments)
+    assert "Barcy" in description
+    assert "e il Barcy è" in description
     db.upsert_trigger_barcello_publish_anchor.assert_awaited_once()
 
 
