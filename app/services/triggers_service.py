@@ -2046,6 +2046,11 @@ class TriggerEngineService:
             recovery_type=recovery_type,
             delta_score=delta_score,
         )
+        strong_direct_conflict_signals = self._has_strong_direct_conflict_signals(metrics)
+        if strong_direct_conflict_signals and current_state in {"VERDE", "GIALLO"}:
+            if current_state == "VERDE":
+                return "• Clima ancora **fragile**: sono presenti segnali recenti di **attrito diretto**; evitate escalation e personalizzazioni."
+            return "• Persistono segnali di **conflitto diretto**: serve abbassare i toni subito per evitare passaggio in rosso."
         severity_comment = self._BARCELLO_TREND_COMMENTS_BY_SEVERITY.get((current_state, dominant_driver, severity))
         if has_score and severity_comment:
             return severity_comment
@@ -2071,6 +2076,21 @@ class TriggerEngineService:
         if current_state == "GIALLO":
             return "• La conversazione è **più equilibrata** rispetto a prima: mantenete questo ritmo per non far salire il Barcy."
         return "• La conversazione sta **peggiorando** rispetto alla finestra precedente: abbassate i toni subito."
+
+    @staticmethod
+    def _has_strong_direct_conflict_signals(metrics: dict[str, object]) -> bool:
+        directed_conflict = float(metrics.get("direct_conflict_index") or 0.0)
+        hostile_mentions = float(metrics.get("hostile_mentions") or 0.0)
+        reciprocal_pairs = int(metrics.get("reciprocal_conflict_pairs") or 0)
+        aggressive_directed_count = int(metrics.get("aggressive_directed_count") or 0)
+        mutual_burst = int(metrics.get("mutual_direct_conflict_burst") or 0)
+        return (
+            directed_conflict >= 0.12
+            or hostile_mentions >= 0.08
+            or reciprocal_pairs >= 1
+            or aggressive_directed_count >= 2
+            or mutual_burst >= 1
+        )
 
     async def _upsert_barcello_publish_anchor(
         self,
