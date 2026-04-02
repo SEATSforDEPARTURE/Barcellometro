@@ -2157,43 +2157,36 @@ class TriggerEngineService:
         trend: dict[str, Any],
         now_rome: datetime,
     ) -> str:
-        phrase = self._build_barcello_time_phrase(now_rome)
-        template = self._select_barcello_scheduled_template(cfg, current_color=current_color)
-        placeholders = {
-            "time_local": now_rome.strftime("%H:%M"),
-            "hour": str(now_rome.hour),
-            "minute": str(now_rome.minute),
-            "time_phrase": phrase,
-            "state": current_color,
-            "state_label": self._barcello_state_ui_label(current_color),
-            "score": str(int(score)),
-            "trend_direction": str(trend.get("direction") or "stable"),
-            "trend_delta_score": str(int(trend.get("delta_score") or 0)),
-            "greeting": self._scheduled_greeting(now_rome.hour),
-            "state_comment": self._scheduled_state_comment(current_color),
-        }
-        return self._render_with_placeholders(template, placeholders)
+        _ = score
+        _ = trend
+        scheduled_phrases = cfg.get("scheduled_update_phrases") if isinstance(cfg.get("scheduled_update_phrases"), dict) else {}
+        time_bucket = self._scheduled_time_bucket(now_rome.hour)
+        time_phrase = self._build_barcello_time_phrase(now_rome)
+        greeting = self._scheduled_greeting(now_rome, scheduled_phrases=scheduled_phrases, time_bucket=time_bucket)
+        state_label = self._scheduled_state_label(
+            current_color,
+            scheduled_phrases=scheduled_phrases,
+            time_bucket=time_bucket,
+            now_rome=now_rome,
+        )
+        state_comment = self._scheduled_state_comment(
+            current_color,
+            scheduled_phrases=scheduled_phrases,
+            time_bucket=time_bucket,
+            now_rome=now_rome,
+        )
+        return (
+            f"{greeting}, sono le ***{time_phrase}*** e il Barcy è ***{state_label}***. "
+            f"***{state_comment}***."
+        )
 
     def _style_barcello_scheduled_description(self, description: str) -> str:
         text = str(description or "").strip()
         if not text:
             return ""
-        emphasized = text
-        emphasized = re.sub(r"\b(\d{1,2}:\d{2})\b", r"***\1***", emphasized)
-        emphasized = re.sub(
-            r"\bsono le\s+(\d{1,2}(?:\s*(?::|e)\s*\d{1,2})?)\b",
-            lambda match: f"sono le ***{match.group(1).strip()}***",
-            emphasized,
-            flags=re.IGNORECASE,
-        )
-        emphasized = re.sub(r"\b(\d{1,2}\s+in punto)\b", r"***\1***", emphasized, flags=re.IGNORECASE)
-        emphasized = re.sub(r"\b(VERDE|GIALLA|GIALLO|ROSSA|ROSSO|NERA|NERO)\b", r"***\1***", emphasized, flags=re.IGNORECASE)
-        if "." in emphasized:
-            prefix, suffix = emphasized.rsplit(".", 1)
-            tail = suffix.strip()
-            if tail:
-                emphasized = f"{prefix}. ***{tail}***"
-        return format_standard_description(emphasized, italic=True)
+        if text.startswith("*") and text.endswith("*"):
+            return text
+        return format_standard_description(text, italic=True)
 
     def _is_within_barcello_quiet_hours(self, quiet: dict[str, Any] | None, *, run_at: datetime) -> bool:
         if not quiet:
@@ -2233,27 +2226,120 @@ class TriggerEngineService:
 
     def _build_barcello_time_phrase(self, now_rome: datetime) -> str:
         if now_rome.minute == 0:
-            return f"sono le {now_rome.hour} in punto"
-        return f"sono le {now_rome.hour} e {now_rome.minute:02d}"
+            return f"{now_rome.hour} in punto"
+        return f"{now_rome.hour} e {now_rome.minute:02d}"
 
-    def _scheduled_greeting(self, hour: int) -> str:
-        if 5 <= hour < 12:
-            return "Buongiorno"
+    def _scheduled_time_bucket(self, hour: int) -> str:
+        if 0 <= hour < 6:
+            return "night"
+        if 6 <= hour < 12:
+            return "morning"
         if 12 <= hour < 18:
-            return "Buon pomeriggio"
-        if 18 <= hour < 23:
-            return "Buonasera"
-        return "Ciao"
+            return "afternoon"
+        return "evening"
 
-    def _scheduled_state_comment(self, color: str) -> str:
-        current = self._normalize_barcello_color(color) or ""
-        comments = {
-            "VERDE": "Bravi, continuate così.",
-            "GIALLO": "C'è un po' di tensione, meglio restare morbidi.",
-            "ROSSO": "L'aria è tesa: abbassiamo i toni.",
-            "NERO": "Situazione critica, serve fermarsi un attimo.",
+    def _scheduled_greeting(
+        self,
+        now_rome: datetime,
+        *,
+        scheduled_phrases: dict[str, Any],
+        time_bucket: str,
+    ) -> str:
+        defaults = {
+            "night": ["È notte fonda", "Notte inoltrata", "A quest'ora…", "Silenzio notturno", "Ore strane"],
+            "morning": ["Buongiorno", "Ehilà, buongiorno", "Si riparte", "Nuova giornata", "Svegliaaa"],
+            "afternoon": [
+                "Buon pomeriggio",
+                "Siamo nel pieno del pomeriggio",
+                "Il pomeriggio scorre",
+                "Ci siamo",
+                "Si continua",
+            ],
+            "evening": ["Buonasera", "Si entra nella sera", "La giornata si chiude", "Clima serale", "Siamo a sera"],
         }
-        return comments.get(current, "Situazione da monitorare.")
+        buckets = scheduled_phrases.get("time_buckets") if isinstance(scheduled_phrases.get("time_buckets"), dict) else {}
+        options = buckets.get(time_bucket) if isinstance(buckets.get(time_bucket), list) else defaults.get(time_bucket, [])
+        selected = self._resolve_template_value(
+            options,
+            seed_parts=(
+                "scheduled_greeting",
+                time_bucket,
+                now_rome.strftime("%Y%m%d%H"),
+            ),
+        )
+        return selected or "Ciao"
+
+    def _scheduled_state_label(
+        self,
+        color: str,
+        *,
+        scheduled_phrases: dict[str, Any],
+        time_bucket: str,
+        now_rome: datetime,
+    ) -> str:
+        current = self._normalize_barcello_color(color) or ""
+        states = scheduled_phrases.get("states") if isinstance(scheduled_phrases.get("states"), dict) else {}
+        state_payload = states.get(current) if isinstance(states.get(current), dict) else {}
+        labels = state_payload.get("labels") if isinstance(state_payload.get("labels"), list) else []
+        fallback_labels = {
+            "VERDE": ["verde", "tranquillo", "sereno", "rilassato", "in equilibrio"],
+            "GIALLO": ["un po' teso", "in equilibrio instabile", "leggermente acceso", "con qualche attrito", "in bilico"],
+            "ROSSO": ["caldo", "teso", "in conflitto", "agitato", "pesante"],
+            "NERO": ["compromesso", "fuori controllo", "in crisi", "esploso", "al limite"],
+        }
+        selected = self._resolve_template_value(
+            labels or fallback_labels.get(current, [self._barcello_state_ui_label(current)]),
+            seed_parts=("scheduled_state_label", current, time_bucket, now_rome.strftime("%Y%m%d%H")),
+        )
+        return selected or self._barcello_state_ui_label(current)
+
+    def _scheduled_state_comment(
+        self,
+        color: str,
+        *,
+        scheduled_phrases: dict[str, Any],
+        time_bucket: str,
+        now_rome: datetime,
+    ) -> str:
+        current = self._normalize_barcello_color(color) or ""
+        states = scheduled_phrases.get("states") if isinstance(scheduled_phrases.get("states"), dict) else {}
+        state_payload = states.get(current) if isinstance(states.get(current), dict) else {}
+        comments = state_payload.get("comments") if isinstance(state_payload.get("comments"), list) else []
+        fallback_comments = {
+            "VERDE": [
+                "Bravi, continuate così",
+                "State andando benissimo",
+                "Tutto sotto controllo",
+                "Clima top",
+                "Zero drama, mi piace",
+            ],
+            "GIALLO": [
+                "Occhio a non scaldarvi troppo",
+                "Tenete i toni bassi",
+                "State attenti",
+                "Si può raddrizzare",
+                "Calma ragazzi",
+            ],
+            "ROSSO": [
+                "Qui si sta scaldando troppo",
+                "State esagerando",
+                "Serve calma subito",
+                "Si sta degenerando",
+                "Fermatevi un attimo",
+            ],
+            "NERO": [
+                "Situazione critica",
+                "Qui siamo oltre il limite",
+                "Così non va",
+                "Serve uno stop",
+                "Clima ingestibile",
+            ],
+        }
+        selected = self._resolve_template_value(
+            comments or fallback_comments.get(current, ["Situazione da monitorare"]),
+            seed_parts=("scheduled_state_comment", current, time_bucket, now_rome.strftime("%Y%m%d%H")),
+        )
+        return selected or "Situazione da monitorare"
 
     @staticmethod
     def _compute_barcello_severity(*, score: int, color: str) -> str:
