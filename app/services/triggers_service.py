@@ -1364,17 +1364,22 @@ class TriggerEngineService:
             return False
         score = int(status.get("score") or 0)
         anchor = await self._database.get_trigger_barcello_publish_anchor(guild_id, channel_id)
-        trend = self._compute_barcello_anchor_trend(anchor, current_color=current_color, current_score=score)
+        trend = self._compute_barcello_anchor_trend(
+            anchor,
+            current_color=current_color,
+            current_score=score,
+            now=run_at,
+        )
 
         title_override = str(schedule.get("embed_title") or "").strip()
         title = format_standard_title(title_override or "AGGIORNAMENTO ORARIO BARCELLO", emoji="🫛")
-        description = self._style_barcello_scheduled_description(self._render_barcello_scheduled_description(
+        description = self._render_barcello_scheduled_description(
             cfg=config,
             current_color=current_color,
             score=score,
             trend=trend,
             now_rome=run_at.astimezone(ROME_TZ),
-        ))
+        )
         embed = discord.Embed(
             title=title,
             description=description,
@@ -1382,11 +1387,16 @@ class TriggerEngineService:
         )
         salute_value = self._render_trigger_health_bar(score=score, color=current_color)
         embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
-        embed.add_field(
-            name=format_standard_field_name("Trend", emoji="📊"),
-            value=trend["trend_line"],
-            inline=False,
-        )
+        trend_lines = [
+            trend["trend_line"],
+            self._render_barcello_trend_comment(
+                state=current_color,
+                delta_score=int(trend["delta_score"]),
+                recovery_type="active",
+                status=status,
+            ),
+        ]
+        embed.add_field(name=format_standard_field_name("Trend", emoji="📊"), value="\n".join(trend_lines), inline=False)
         attach_footer_meta(embed, service_name="triggers", contributors=[], used_local_processing=True)
 
         did_send = False
@@ -2087,29 +2097,50 @@ class TriggerEngineService:
         *,
         current_color: str,
         current_score: int,
+        now: datetime | None = None,
     ) -> dict[str, Any]:
+        reference_now = now or datetime.now(timezone.utc)
         if not anchor:
             return {
                 "direction": "stable",
                 "delta_score": 0,
-                "trend_line": "• Primo riferimento disponibile per il trend.",
+                "trend_line": "• L'ultima volta in questo stato non è ancora disponibile.",
             }
         prev_score = int(anchor.get("last_score") or 0)
         prev_color = self._normalize_barcello_color(anchor.get("last_color")) or current_color
-        prev_kind = str(anchor.get("last_kind") or "state_change")
         delta_score = int(current_score) - prev_score
         severity = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
         cur_rank = severity.get(current_color, 0)
         prev_rank = severity.get(prev_color, 0)
         if delta_score > 0 or cur_rank < prev_rank:
             direction = "up"
-            text = f"• Rispetto all'ultimo publish ({prev_kind}) il Barcy è in miglioramento (+{delta_score})."
         elif delta_score < 0 or cur_rank > prev_rank:
             direction = "down"
-            text = f"• Rispetto all'ultimo publish ({prev_kind}) il Barcy è in peggioramento ({delta_score})."
         else:
             direction = "stable"
-            text = "• Rispetto all'ultimo publish il Barcy è stabile."
+
+        prev_ts_raw = str(anchor.get("last_ts") or "")
+        elapsed_human = "molto tempo"
+        if prev_ts_raw:
+            try:
+                prev_dt = datetime.fromisoformat(prev_ts_raw)
+                if prev_dt.tzinfo is None:
+                    prev_dt = prev_dt.replace(tzinfo=timezone.utc)
+                delta = max(reference_now - prev_dt, timedelta())
+                total_min = int(delta.total_seconds() // 60)
+                if total_min < 120:
+                    elapsed_human = f"{total_min} minuti"
+                elif total_min < 60 * 24 * 2:
+                    elapsed_human = f"{total_min // 60} ore"
+                else:
+                    elapsed_human = f"{total_min // (60 * 24)} giorni"
+            except ValueError:
+                elapsed_human = "molto tempo"
+
+        if prev_color == current_color:
+            text = f"• L'ultima volta in questo stato è stata **{elapsed_human} fa**."
+        else:
+            text = f"• Ultimo riferimento: **{elapsed_human} fa** in stato **{prev_color}**."
         return {"direction": direction, "delta_score": delta_score, "trend_line": text}
 
     def _compute_barcello_state_change_trend(
@@ -2175,18 +2206,20 @@ class TriggerEngineService:
             time_bucket=time_bucket,
             now_rome=now_rome,
         )
+        greeting_clean = self._strip_markdown_wrappers(greeting)
+        time_clean = self._strip_markdown_wrappers(time_phrase)
+        state_label_clean = self._strip_markdown_wrappers(state_label)
+        state_comment_clean = self._strip_markdown_wrappers(state_comment).rstrip(".")
         return (
-            f"{greeting}, sono le ***{time_phrase}*** e il Barcy è ***{state_label}***. "
-            f"***{state_comment}***."
+            f"*{greeting_clean}, sono le ***{time_clean}*** e il Barcy è ***{state_label_clean}***. "
+            f"***{state_comment_clean}***.*"
         )
 
-    def _style_barcello_scheduled_description(self, description: str) -> str:
-        text = str(description or "").strip()
-        if not text:
-            return ""
-        if text.startswith("*") and text.endswith("*"):
-            return text
-        return format_standard_description(text, italic=True)
+    def _strip_markdown_wrappers(self, value: str) -> str:
+        text = str(value or "").strip()
+        while text.startswith("*") and text.endswith("*") and len(text) >= 2:
+            text = text[1:-1].strip()
+        return text
 
     def _is_within_barcello_quiet_hours(self, quiet: dict[str, Any] | None, *, run_at: datetime) -> bool:
         if not quiet:
