@@ -461,6 +461,9 @@ def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> No
         "schedule_remove",
         "schedule_show",
         "schedule_list",
+        "quiet_set",
+        "quiet_show",
+        "quiet_reset",
     )
 
     monkeypatch.setattr(commands_module, "CommandContext", SimpleNamespace(from_registry=lambda registry: ctx))
