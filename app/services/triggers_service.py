@@ -1088,8 +1088,12 @@ class TriggerEngineService:
         did_notify = False
         if should_notify:
             update_text = main_msg or f"Stato corrente: {self._barcello_state_ui_label(stored_color)}."
-            anchor = await self._database.get_trigger_barcello_publish_anchor(guild_id, channel_id)
-            trend = self._compute_barcello_anchor_trend(anchor, current_color=stored_color, current_score=score)
+            trend = self._compute_barcello_state_change_trend(
+                previous_same_state_ts=previous_same_state_ts,
+                now=now,
+                previous_score=prev_score,
+                current_score=score,
+            )
             embed = discord.Embed(
                 title=self._render_barcello_alert_title(old_color=prev_color, new_color=stored_color),
                 description=format_standard_description(update_text),
@@ -2097,6 +2101,42 @@ class TriggerEngineService:
             direction = "stable"
             text = "• Rispetto all'ultimo publish il Barcy è stabile."
         return {"direction": direction, "delta_score": delta_score, "trend_line": text}
+
+    def _compute_barcello_state_change_trend(
+        self,
+        *,
+        previous_same_state_ts: str,
+        now: datetime,
+        previous_score: int | None,
+        current_score: int,
+    ) -> dict[str, Any]:
+        last_in_state_human = "molto tempo"
+        if previous_same_state_ts:
+            try:
+                prev_same_state = datetime.fromisoformat(previous_same_state_ts)
+                if prev_same_state.tzinfo is None:
+                    prev_same_state = prev_same_state.replace(tzinfo=timezone.utc)
+                delta = max(now - prev_same_state, timedelta())
+                total_min = int(delta.total_seconds() // 60)
+                if total_min < 120:
+                    last_in_state_human = f"{total_min} minuti"
+                elif total_min < 60 * 24 * 2:
+                    last_in_state_human = f"{total_min // 60} ore"
+                else:
+                    last_in_state_human = f"{total_min // (60 * 24)} giorni"
+            except ValueError:
+                last_in_state_human = "molto tempo"
+        trend_line = f"• L'ultima volta in questo stato è stata **{last_in_state_human} fa**."
+        delta_score = 0
+        if previous_score is not None:
+            delta_score = int(current_score) - int(previous_score)
+        if delta_score > 0:
+            direction = "up"
+        elif delta_score < 0:
+            direction = "down"
+        else:
+            direction = "stable"
+        return {"direction": direction, "delta_score": delta_score, "trend_line": trend_line}
 
     def _render_barcello_scheduled_description(
         self,

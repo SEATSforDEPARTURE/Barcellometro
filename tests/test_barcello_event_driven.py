@@ -570,3 +570,29 @@ def test_scheduled_after_state_change_uses_state_change_anchor() -> None:
     assert sent is True
     trend_field = next(field for field in channel.sent[-1].fields if "TREND" in str(field.name or ""))
     assert "ultimo publish (state_change)" in str(trend_field.value or "")
+
+
+def test_trend_mode_state_change_vs_scheduled_are_kept_distinct() -> None:
+    now = datetime.now(timezone.utc)
+    service, db, channel, _ai = _base_service({"last_color": "ROSSO", "last_score": 22}, {"color": "ROSSO", "score": 25})
+    db.get_trigger_state = AsyncMock(
+        return_value={
+            "date": now.date().isoformat(),
+            "counts": {"ROSSO": 2},
+            "last_entered_ts": {"ROSSO": (now - timedelta(minutes=9)).isoformat()},
+        }
+    )
+    db.get_trigger_barcello_publish_anchor = AsyncMock(return_value=None)
+
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+    assert out["notified"] is True
+    state_change_trend = next(field for field in channel.sent[-1].fields if "TREND" in str(field.name or ""))
+    assert "L'ultima volta in questo stato è stata **9 minuti fa**." in str(state_change_trend.value or "")
+
+    db.get_trigger_barcello_publish_anchor = AsyncMock(return_value=None)
+    service._barcello.get_current_status = AsyncMock(return_value={"color": "ROSSO", "score": 25})
+    schedule = {"id": 77, "guild_id": "1", "channel_id": "2", "every_minutes": 30}
+    sent = asyncio.run(service._publish_barcello_scheduled_update(schedule))
+    assert sent is True
+    scheduled_trend = next(field for field in channel.sent[-1].fields if "TREND" in str(field.name or ""))
+    assert "Primo riferimento disponibile per il trend." in str(scheduled_trend.value or "")
