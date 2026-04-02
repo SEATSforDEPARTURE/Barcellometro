@@ -195,13 +195,6 @@ class BarcelloService:
         )
         messages = await self._enrich_reply_target_authors(messages)
 
-        metrics = self._compute_metrics(messages, window_minutes)
-        metrics["cache_hit"] = False
-        score_config = await self._get_score_config()
-        reasons, score = self._score_from_metrics(metrics, score_config)
-        color = await self.get_color(score)
-
-        trend = await self._compute_trend(guild_id, channel_id, window_minutes, window_end_ts, score, metrics)
         previous = await self._database.get_barcello_snapshot_before(
             guild_id=guild_id,
             channel_id=channel_id,
@@ -209,10 +202,14 @@ class BarcelloService:
             window_end_ts=window_end_ts,
         )
         previous_metrics = json.loads(previous["metrics_json"]) if previous else {}
-        metrics["persistence_of_conflict_vs_previous_window"] = round(
-            float(metrics.get("direct_conflict_index", 0.0)) - float(previous_metrics.get("direct_conflict_index", 0.0)),
-            3,
-        )
+        metrics = self._compute_metrics(messages, window_minutes)
+        metrics["cache_hit"] = False
+        self._apply_temporal_context(metrics, previous_metrics=previous_metrics, previous_score=int(previous["score"]) if previous else None)
+        score_config = await self._get_score_config()
+        reasons, score = self._score_from_metrics(metrics, score_config)
+        color = await self.get_color(score)
+
+        trend = await self._compute_trend(guild_id, channel_id, window_minutes, window_end_ts, score, metrics)
         advice = self._build_advice(metrics, score)
 
         result = BarcelloResult(
@@ -322,13 +319,14 @@ class BarcelloService:
         metrics["cache_hit"] = False
         pair_metrics = self._compute_pair_metrics(pair_messages, user_a_key, user_b_key)
         metrics.update(pair_metrics)
+        pair_key = ":".join(sorted([user_a_key, user_b_key]))
+        previous_score = self._metrics["last_score_by_pair"].get(pair_key)
+        self._apply_temporal_context(metrics, previous_metrics={}, previous_score=previous_score)
         score_config = await self._get_score_config()
         reasons, score = self._score_from_metrics(metrics, score_config)
         color = await self.get_color(score)
 
-        pair_key = ":".join(sorted([user_a_key, user_b_key]))
         last_scores = self._metrics["last_score_by_pair"]
-        previous_score = last_scores.get(pair_key)
         trend = self._build_trend(score, previous_score) if previous_score is not None else None
         last_scores[pair_key] = score
         if len(last_scores) > 50:
@@ -370,6 +368,7 @@ class BarcelloService:
         messages = await self._enrich_reply_target_authors(messages)
         metrics = self._compute_metrics(messages, window_minutes)
         metrics["cache_hit"] = False
+        self._apply_temporal_context(metrics, previous_metrics={}, previous_score=None)
         score_config = await self._get_score_config()
         reasons, score = self._score_from_metrics(metrics, score_config)
         color = await self.get_color(score)
@@ -419,6 +418,7 @@ class BarcelloService:
         metrics["cache_hit"] = False
         pair_metrics = self._compute_pair_metrics(pair_messages, user_a_key, user_b_key)
         metrics.update(pair_metrics)
+        self._apply_temporal_context(metrics, previous_metrics={}, previous_score=None)
         score_config = await self._get_score_config()
         reasons, score = self._score_from_metrics(metrics, score_config)
         color = await self.get_color(score)
@@ -520,6 +520,9 @@ class BarcelloService:
         previous_metrics_raw = previous["metrics_json"] if "metrics_json" in previous.keys() else ""
         previous_metrics = json.loads(previous_metrics_raw) if previous_metrics_raw else {}
         direction = self._build_trend(score, prev_score)["direction"]
+        latch_level = float(current_metrics.get("conflict_latch_level") or 0.0)
+        if latch_level >= 0.3 and direction == "improving":
+            direction = "stable"
         current_color = await self.get_color(score)
         prev_color = await self.get_color(prev_score)
         dominant_driver = self._choose_dominant_driver(
@@ -551,6 +554,7 @@ class BarcelloService:
             message_count_current_window=int(current_metrics.get("message_count") or 0),
             message_count_previous_window=int(previous_metrics.get("message_count") or 0),
             minutes_since_same_state=minutes_since_same_state,
+            latch_active=bool(current_metrics.get("conflict_latch_active") or False),
         )
 
     @staticmethod
@@ -565,6 +569,7 @@ class BarcelloService:
         message_count_current_window: int = 0,
         message_count_previous_window: int = 0,
         minutes_since_same_state: int = 0,
+        latch_active: bool = False,
     ) -> dict[str, Any]:
         delta = score - prev_score
         if abs(delta) < 5:
@@ -584,6 +589,7 @@ class BarcelloService:
             "message_count_current_window": int(message_count_current_window or 0),
             "message_count_previous_window": int(message_count_previous_window or 0),
             "minutes_since_same_state": int(max(0, minutes_since_same_state or 0)),
+            "latch_active": bool(latch_active),
         }
 
     async def _minutes_since_last_same_color(
@@ -681,6 +687,7 @@ class BarcelloService:
         affectionate_hits_total = 0
         directed_pairs: dict[tuple[str, str], int] = {}
         directed_event_flags: list[tuple[datetime, int, int]] = []
+        event_records: list[dict[str, Any]] = []
 
         for message in messages:
             author_id = str(self._mget(message, "author_id") or "unknown")
@@ -729,6 +736,23 @@ class BarcelloService:
                     1 if classification["classification_label"] == "directed_conflict" else 0,
                     1 if (classification["classification_label"] == "directed_conflict" and float(classification["aggression_score"]) >= 0.6) else 0,
                 )
+            )
+            event_records.append(
+                {
+                    "ts": ts,
+                    "author_id": author_id,
+                    "target_id": target_id,
+                    "mentions": mentions,
+                    "reply_to_id": reply_to_id,
+                    "is_directed_conflict": classification["classification_label"] == "directed_conflict",
+                    "aggression_score": float(classification["aggression_score"]),
+                    "toxicity_score": float(classification["toxicity_score"]),
+                    "directedness_score": float(classification["directedness_score"]),
+                    "hostile_mention": int(classification.get("hostile_mention") or 0),
+                    "profanity_hits": int(classification.get("profanity_hits") or 0),
+                    "insult_hits": int(classification.get("insult_hits") or 0),
+                    "second_person": int(bool(re.search(r"\b(tu|voi|sei|stai|fai|dici|ti)\b", self._normalize_text(content)))),
+                }
             )
 
             timestamps.append(ts)
@@ -784,6 +808,9 @@ class BarcelloService:
             window_minutes=duration_minutes,
         )
         mutual_direct_conflict_burst = reciprocal_conflict_pairs_high_intensity
+        micro_window = self._compute_local_worst_segment(event_records)
+        conflict_bursts = self._detect_conflict_bursts(event_records)
+        active_burst = conflict_bursts[-1] if conflict_bursts else None
 
         return {
             "message_count": message_count,
@@ -817,6 +844,13 @@ class BarcelloService:
             "direct_conflict_burst_peak": direct_conflict_burst_peak,
             "aggressive_directed_burst_peak": aggressive_directed_burst_peak,
             "mutual_direct_conflict_burst": mutual_direct_conflict_burst,
+            "local_worst_segment": micro_window,
+            "local_worst_segment_score": round(float(micro_window.get("severity", 0.0)), 3),
+            "local_worst_segment_directed_conflict": int(micro_window.get("directed_conflict_count", 0)),
+            "conflict_bursts": conflict_bursts,
+            "conflict_burst_count": len(conflict_bursts),
+            "active_conflict_burst_severity": round(float(active_burst.get("severity", 0.0)) if active_burst else 0.0, 3),
+            "active_conflict_burst_reciprocity": bool(active_burst.get("reciprocity")) if active_burst else False,
             "top1_author_share": round(top1_author_share, 3),
             "top3_author_share": round(top3_author_share, 3),
             "max_msgs_per_minute": max_msgs_per_minute,
@@ -911,6 +945,14 @@ class BarcelloService:
         aggressive_directed_burst_peak = int(metrics.get("aggressive_directed_burst_peak") or 0)
         mutual_direct_conflict_burst = int(metrics.get("mutual_direct_conflict_burst") or 0)
         persistence_conflict = float(metrics.get("persistence_of_conflict_vs_previous_window") or 0.0)
+        local_worst_segment_score = float(metrics.get("local_worst_segment_score") or 0.0)
+        local_worst_segment_directed = int(metrics.get("local_worst_segment_directed_conflict") or 0)
+        conflict_burst_count = int(metrics.get("conflict_burst_count") or 0)
+        active_conflict_burst_severity = float(metrics.get("active_conflict_burst_severity") or 0.0)
+        active_conflict_burst_reciprocity = bool(metrics.get("active_conflict_burst_reciprocity") or False)
+        conflict_latch_level = float(metrics.get("conflict_latch_level") or 0.0)
+        conflict_latch_active = bool(metrics.get("conflict_latch_active") or False)
+        previous_score = metrics.get("previous_score")
 
         intensity_index = min(
             1.0,
@@ -933,10 +975,17 @@ class BarcelloService:
             + (0.05 * challenge_pressure)
             + (0.05 * hostile_mentions),
         )
+        metrics["intensity_index"] = round(intensity_index, 3)
 
-        hostility_core_penalty = int(round(42 * hostility_core))
-        if hostility_core_penalty > 0:
-            penalties.append({"key": "hostility_core", "label": "Ostilità conversazionale", "weight": hostility_core_penalty, "summary": f"indice {hostility_core:.2f}"})
+        global_window_score = int(
+            round(
+                (42 * hostility_core)
+                + (8 * min(max(0.0, burst_ratio - 1.0) / 3.0, 1.0))
+                + (6 * max(0.0, top1_author_share - 0.45))
+            )
+        )
+        if global_window_score > 0:
+            penalties.append({"key": "global_window_score", "label": "Pressione globale finestra", "weight": global_window_score, "summary": f"indice {hostility_core:.2f}"})
 
         target_confidence = min(
             1.0,
@@ -959,25 +1008,31 @@ class BarcelloService:
                 + (18 * min(reciprocal_conflict_pairs_high_intensity, 2))
                 + (26 * reply_conflict_density * max(0.35, target_confidence))
                 + (10 * max(0.0, persistence_conflict))
+                + (20 * conflict_latch_level)
             )
         )
         escalation_penalty = min(46, escalation_penalty)
         if escalation_penalty > 0:
             penalties.append({"key": "escalation_penalty", "label": "Escalation reale", "weight": escalation_penalty, "summary": f"coppie {reciprocal_conflict_pairs}"})
 
-        burst_conflict_penalty = int(
+        local_burst_penalty = int(
             round(
                 (12 * min(direct_conflict_burst_peak / 3.0, 1.0))
                 + (16 * min(aggressive_directed_burst_peak / 2.0, 1.0))
+                + (24 * local_worst_segment_score)
+                + (8 * min(local_worst_segment_directed / 2.0, 1.0))
+                + (8 * min(conflict_burst_count / 2.0, 1.0))
+                + (10 * active_conflict_burst_severity)
+                + (8 if active_conflict_burst_reciprocity else 0)
             )
         )
-        burst_conflict_penalty = min(28, burst_conflict_penalty)
-        if burst_conflict_penalty > 0:
+        local_burst_penalty = min(56, local_burst_penalty)
+        if local_burst_penalty > 0:
             penalties.append(
                 {
-                    "key": "burst_conflict_penalty",
+                    "key": "local_burst_penalty",
                     "label": "Picco breve ma tossico",
-                    "weight": burst_conflict_penalty,
+                    "weight": local_burst_penalty,
                     "summary": f"picco {direct_conflict_burst_peak}/3m",
                 }
             )
@@ -1012,10 +1067,18 @@ class BarcelloService:
         if playful_mitigation > 0 and msg_per_min >= 2.0 and direct_conflict_index < 0.24:
             penalties.append({"key": "playful_mitigation", "label": "Chat attiva ma serena", "weight": -playful_mitigation, "summary": f"{msg_per_min:.1f} msg/min"})
 
-        deescalation_bonus = int(round(26 * calming_index * max(0.55, 1.0 - direct_conflict_index)))
-        deescalation_bonus = min(24, deescalation_bonus)
-        if deescalation_bonus > 0:
-            penalties.append({"key": "deescalation_bonus", "label": "Segnali di de-escalation", "weight": -deescalation_bonus, "summary": f"indice {calming_index:.2f}"})
+        recovery_adjustment = int(round(26 * calming_index * max(0.2, 1.0 - direct_conflict_index) * max(0.2, 1.0 - (conflict_latch_level * 1.4))))
+        if conflict_latch_active and msg_per_min < 0.2:
+            recovery_adjustment = int(round(recovery_adjustment * 0.4))
+        recovery_adjustment = min(24, recovery_adjustment)
+        if recovery_adjustment > 0:
+            penalties.append({"key": "recovery_adjustment", "label": "Segnali di de-escalation", "weight": -recovery_adjustment, "summary": f"indice {calming_index:.2f}"})
+
+        hysteresis_penalty = 0
+        if previous_score is not None and conflict_latch_level > 0.28 and int(previous_score) < 61:
+            hysteresis_penalty = int(round(12 * conflict_latch_level))
+        if hysteresis_penalty > 0:
+            penalties.append({"key": "hysteresis_penalty", "label": "Hysteresis stato", "weight": hysteresis_penalty, "summary": "recupero prudente"})
 
         if caps_ratio > 0.45 and hostility_gate > 0.35:
             penalties.append({"key": "heated_style", "label": "Linguaggio acceso", "weight": int(round(9 * min(caps_ratio, 1.0))), "summary": f"caps {caps_ratio:.2f}"})
@@ -1288,6 +1351,149 @@ class BarcelloService:
             aggressive_peak = max(aggressive_peak, sum(aggressive_buckets[idx:end]))
         return directed_peak, aggressive_peak
 
+    def _compute_local_worst_segment(self, event_records: list[dict[str, Any]]) -> dict[str, Any]:
+        if not event_records:
+            return {
+                "segment_seconds": 60,
+                "start_ts": "",
+                "end_ts": "",
+                "severity": 0.0,
+                "directed_conflict_count": 0,
+                "hostile_mentions": 0,
+                "reciprocal_pairs": 0,
+                "aggressive_mentions": 0,
+            }
+        sorted_events = sorted(event_records, key=lambda item: item["ts"])
+        segment_sizes = [60, 90, 120]
+        worst: dict[str, Any] = {}
+        for segment_seconds in segment_sizes:
+            for idx, start_event in enumerate(sorted_events):
+                start = start_event["ts"]
+                end = start + timedelta(seconds=segment_seconds)
+                chunk = [item for item in sorted_events[idx:] if item["ts"] <= end]
+                directed = sum(1 for item in chunk if item["is_directed_conflict"])
+                hostile_mentions = sum(int(item["hostile_mention"]) for item in chunk)
+                aggressive_mentions = sum(
+                    1 for item in chunk
+                    if item["is_directed_conflict"]
+                    and item["aggression_score"] >= 0.58
+                    and (item["target_id"] or item["mentions"] or item["reply_to_id"])
+                )
+                pair_counts: dict[tuple[str, str], int] = {}
+                for item in chunk:
+                    src = str(item["author_id"] or "")
+                    dst = str(item["target_id"] or "")
+                    if item["is_directed_conflict"] and src and dst:
+                        pair_counts[(src, dst)] = pair_counts.get((src, dst), 0) + 1
+                reciprocal = self._count_reciprocal_pairs(pair_counts)
+                severity = min(
+                    1.0,
+                    (0.45 * min(directed / 3.0, 1.0))
+                    + (0.25 * min(aggressive_mentions / 2.0, 1.0))
+                    + (0.2 * min(hostile_mentions / 2.0, 1.0))
+                    + (0.1 * min(reciprocal, 1.0)),
+                )
+                candidate = {
+                    "segment_seconds": segment_seconds,
+                    "start_ts": start.isoformat(),
+                    "end_ts": min(end, sorted_events[-1]["ts"]).isoformat(),
+                    "severity": round(severity, 3),
+                    "directed_conflict_count": directed,
+                    "hostile_mentions": hostile_mentions,
+                    "reciprocal_pairs": reciprocal,
+                    "aggressive_mentions": aggressive_mentions,
+                }
+                if not worst or candidate["severity"] > float(worst.get("severity", 0.0)):
+                    worst = candidate
+        return worst
+
+    def _detect_conflict_bursts(self, event_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        bursts: list[dict[str, Any]] = []
+        sorted_events = sorted(event_records, key=lambda item: item["ts"])
+        current: dict[str, Any] | None = None
+        for event in sorted_events:
+            is_hostile = bool(
+                event["is_directed_conflict"]
+                or (
+                    (int(event["insult_hits"]) > 0 or int(event["profanity_hits"]) > 0)
+                    and int(event["second_person"]) > 0
+                    and (event["target_id"] or event["mentions"] or event["reply_to_id"])
+                )
+            )
+            if not is_hostile:
+                continue
+            if current is None or (event["ts"] - current["last_seen_dt"]).total_seconds() > 120:
+                if current:
+                    bursts.append(current)
+                current = {
+                    "start_dt": event["ts"],
+                    "last_seen_dt": event["ts"],
+                    "participants": set([str(event["author_id"] or "")]),
+                    "pairs": {},
+                    "message_count": 0,
+                    "hostile_mentions": 0,
+                    "directed_messages": 0,
+                    "aggressive_messages": 0,
+                }
+            current["last_seen_dt"] = event["ts"]
+            current["message_count"] += 1
+            current["hostile_mentions"] += int(event["hostile_mention"])
+            current["directed_messages"] += 1 if event["is_directed_conflict"] else 0
+            current["aggressive_messages"] += 1 if (event["aggression_score"] >= 0.58 and event["directedness_score"] >= 0.5) else 0
+            src = str(event["author_id"] or "")
+            dst = str(event["target_id"] or "")
+            if src:
+                current["participants"].add(src)
+            if dst:
+                current["participants"].add(dst)
+                key = (src, dst)
+                current["pairs"][key] = current["pairs"].get(key, 0) + 1
+        if current:
+            bursts.append(current)
+
+        out: list[dict[str, Any]] = []
+        for burst in bursts:
+            reciprocal = self._count_reciprocal_pairs(burst["pairs"]) > 0
+            severity = min(
+                1.0,
+                (0.4 * min(burst["directed_messages"] / 3.0, 1.0))
+                + (0.25 * min(burst["aggressive_messages"] / 2.0, 1.0))
+                + (0.2 * min(burst["hostile_mentions"] / 2.0, 1.0))
+                + (0.15 if reciprocal else 0.0),
+            )
+            out.append(
+                {
+                    "start_ts": burst["start_dt"].isoformat(),
+                    "end_ts": burst["last_seen_dt"].isoformat(),
+                    "participants": sorted(item for item in burst["participants"] if item),
+                    "severity": round(severity, 3),
+                    "message_count": int(burst["message_count"]),
+                    "reciprocity": reciprocal,
+                }
+            )
+        return out
+
+    def _apply_temporal_context(
+        self,
+        metrics: dict[str, Any],
+        *,
+        previous_metrics: dict[str, Any],
+        previous_score: int | None,
+    ) -> None:
+        current_conflict = float(metrics.get("direct_conflict_index") or 0.0)
+        previous_conflict = float(previous_metrics.get("direct_conflict_index") or 0.0)
+        metrics["persistence_of_conflict_vs_previous_window"] = round(current_conflict - previous_conflict, 3)
+        current_burst = max(
+            float(metrics.get("active_conflict_burst_severity") or 0.0),
+            float(metrics.get("local_worst_segment_score") or 0.0),
+        )
+        previous_latch = float(previous_metrics.get("conflict_latch_level") or 0.0)
+        decayed_previous = previous_latch * 0.72
+        latch_level = min(1.0, max(current_burst, decayed_previous + (current_burst * 0.55)))
+        metrics["conflict_latch_level"] = round(latch_level, 3)
+        metrics["conflict_latch_active"] = bool(latch_level >= 0.3)
+        metrics["previous_score"] = int(previous_score) if previous_score is not None else None
+
     @staticmethod
     def _main_reason_key(reasons: list[dict[str, Any]]) -> str | None:
         if not reasons:
@@ -1331,11 +1537,17 @@ class BarcelloService:
         playful = float(current_metrics.get("playful_index") or 0.0)
         affectionate = float(current_metrics.get("affectionate_index") or 0.0)
         persistence = float(current_metrics.get("persistence_of_conflict_vs_previous_window") or 0.0)
+        local_burst = float(current_metrics.get("local_worst_segment_score") or 0.0)
+        latch = float(current_metrics.get("conflict_latch_level") or 0.0)
         msg_current = int(current_metrics.get("message_count") or 0)
         msg_prev = int(previous_metrics.get("message_count") or 0)
 
-        if current_color == "nero" and (direct >= 0.42 or persistence > 0.1):
+        if current_color == "nero" and (direct >= 0.42 or persistence > 0.1 or local_burst > 0.6):
             return "escalation"
+        if local_burst >= 0.55:
+            return "burst_conflict"
+        if latch >= 0.3 and direction == "improving":
+            return "recovery_latched"
         if direct >= 0.3:
             return "directed_conflict"
         if direction == "improving" and calming >= 0.12 and direct < 0.24:

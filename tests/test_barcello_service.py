@@ -14,7 +14,7 @@ class FakeDatabase:
         return self._settings.get(key)
 
     async def get_barcello_snapshot_before(self, *args, **kwargs):
-        return None
+        return self._snapshot
 
     async def put_barcello_window_analysis(self, *args, **kwargs):
         return None
@@ -23,12 +23,21 @@ class FakeDatabase:
         return None
 
     async def get_barcello_snapshot(self, *args, **kwargs):
-        return self._snapshot
+        return None
 
     async def fetch_messages_in_range(self, *args, **kwargs):
         return self._messages
 
     async def put_barcello_snapshot(self, *args, **kwargs):
+        self._snapshot = {
+            "guild_id": kwargs.get("guild_id", "g1"),
+            "channel_id": kwargs.get("channel_id", "c1"),
+            "window_minutes": kwargs.get("window_minutes", 10),
+            "window_end_ts": kwargs.get("window_end_ts", ""),
+            "score": kwargs.get("score", 100),
+            "reasons_json": kwargs.get("reasons_json", "[]"),
+            "metrics_json": kwargs.get("metrics_json", "{}"),
+        }
         return None
 
     async def fetch_message_authors_by_ids(self, message_ids: list[str]) -> dict[str, str]:
@@ -220,17 +229,62 @@ def test_short_intense_burst_penalizes_even_if_rest_of_window_is_quiet() -> None
         {"author_id": "u2", "content": "non osare bastarda, stai zitta", "reply_to_author_id": "u1", "ts": "2026-04-01T10:21:10+00:00"},
     ]
     metrics = service._compute_metrics(quiet + burst, window_minutes=30)
+    service._apply_temporal_context(metrics, previous_metrics={}, previous_score=None)
     reasons, score = service._score_from_metrics(metrics, score_config={})
     assert metrics["direct_conflict_burst_peak"] >= 3
-    assert any(r["key"] in {"burst_conflict_penalty", "mutual_direct_conflict_burst_penalty"} for r in reasons)
-    assert score < 75
+    assert metrics["local_worst_segment_score"] > 0.55
+    assert any(r["key"] in {"local_burst_penalty", "mutual_direct_conflict_burst_penalty"} for r in reasons)
+    assert score < 55
 
 
 def test_calming_messages_add_recovery_bonus() -> None:
     service = BarcelloService(FakeDatabase())
     messages = [{"author_id": "u1", "content": "calma raga, non litigate, chiudiamola qui", "ts": "2026-04-01T10:00:00+00:00"} for _ in range(10)]
     metrics = service._compute_metrics(messages, window_minutes=10)
+    service._apply_temporal_context(metrics, previous_metrics={}, previous_score=None)
     reasons, score = service._score_from_metrics(metrics, score_config={})
     assert metrics["calming_index"] > 0.25
-    assert any(r["key"] == "deescalation_bonus" for r in reasons)
+    assert any(r["key"] == "recovery_adjustment" for r in reasons)
     assert score >= 90
+
+
+def test_burst_followed_by_short_silence_keeps_latch_and_blocks_instant_green_rebound() -> None:
+    db = FakeDatabase()
+    db._messages = [
+        {"author_id": "u1", "content": "sei un idiota", "reply_to_author_id": "u2", "ts": "2026-04-01T10:10:00+00:00"},
+        {"author_id": "u2", "content": "taci pagliaccio", "reply_to_author_id": "u1", "ts": "2026-04-01T10:10:08+00:00"},
+        {"author_id": "u1", "content": "vaffanculo", "reply_to_author_id": "u2", "ts": "2026-04-01T10:10:16+00:00"},
+        {"author_id": "u2", "content": "sei ridicolo", "reply_to_author_id": "u1", "ts": "2026-04-01T10:10:24+00:00"},
+    ]
+    service = BarcelloService(db)
+    first = run(service.compute_channel("g1", "c1", window_minutes=15, now_ts="2026-04-01T10:11:00+00:00"))
+    assert first.metrics["conflict_latch_level"] >= 0.4
+    assert first.score <= 55
+    db._messages = []
+    second = run(service.compute_channel("g1", "c1", window_minutes=15, now_ts="2026-04-01T10:12:00+00:00"))
+    assert second.metrics["conflict_latch_level"] >= 0.28
+    assert second.score < 90
+
+
+def test_hysteresis_penalty_applies_when_previous_window_was_unhealthy() -> None:
+    service = BarcelloService(FakeDatabase())
+    quiet_metrics = service._compute_metrics([], window_minutes=10)
+    service._apply_temporal_context(
+        quiet_metrics,
+        previous_metrics={"conflict_latch_level": 0.8, "direct_conflict_index": 0.4},
+        previous_score=45,
+    )
+    reasons, score = service._score_from_metrics(quiet_metrics, score_config={})
+    assert any(item["key"] == "hysteresis_penalty" for item in reasons)
+    assert score < 98
+
+
+def test_non_hostile_chaos_does_not_trigger_conflict_burst() -> None:
+    service = BarcelloService(FakeDatabase())
+    messages = [
+        {"author_id": f"u{i%6}", "content": "HAHAH che caos lol 😂", "ts": f"2026-04-01T10:{(i%50):02d}:00+00:00"}
+        for i in range(40)
+    ]
+    metrics = service._compute_metrics(messages, window_minutes=12)
+    assert metrics["conflict_burst_count"] == 0
+    assert metrics["local_worst_segment_score"] < 0.35
