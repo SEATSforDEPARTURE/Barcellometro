@@ -450,7 +450,18 @@ def test_riassunto_no_data_guardrail_uses_standard_embed() -> None:
 def test_global_app_command_error_handler_uses_standard_embed(monkeypatch) -> None:
     bot = _FakeBot()
     ctx = SimpleNamespace(bot=bot, config=SimpleNamespace(guild_id="123"), footer=None)
-    required_barcello_commands = ("on", "off", "status", "calibrate", "run")
+    required_barcello_commands = (
+        "on",
+        "off",
+        "status",
+        "calibrate",
+        "run",
+        "schedule_add",
+        "schedule_edit",
+        "schedule_remove",
+        "schedule_show",
+        "schedule_list",
+    )
 
     monkeypatch.setattr(commands_module, "CommandContext", SimpleNamespace(from_registry=lambda registry: ctx))
     monkeypatch.setattr(commands_module, "install_footer_auto_finalize", lambda footer: None)
