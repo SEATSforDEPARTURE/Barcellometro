@@ -1,4 +1,24 @@
 import asyncio
+import sys
+from types import ModuleType
+
+import pytest
+
+from tests._sqlite_stub import ensure_sqlite_stub
+
+ensure_sqlite_stub()
+
+openai_stub = ModuleType("openai")
+openai_stub.AsyncOpenAI = object
+sys.modules.setdefault("openai", openai_stub)
+
+httpx_stub = ModuleType("httpx")
+httpx_stub.AsyncClient = object
+httpx_stub.Client = object
+sys.modules.setdefault("httpx", httpx_stub)
+
+pytest.importorskip("aiosqlite")
+
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -13,26 +33,18 @@ def run(coro):
     return asyncio.run(coro)
 
 
-class FakeCursor:
-    def __init__(self, row=None) -> None:
-        self._row = row
-
-    async def fetchone(self):
-        return self._row
-
-
-class FakeConn:
+class FakeDatabaseService:
     def __init__(self) -> None:
         self.rows: dict[str, dict[str, str | None]] = {}
 
-    async def execute(self, query: str, params: tuple[object, ...]):
+    async def execute(self, query: str, params: tuple[object, ...] = ()) -> None:
         q = " ".join(query.lower().split())
         if "delete from qna_followup_sessions" in q:
             now_iso = str(params[0])
             expired = [k for k, v in self.rows.items() if str(v["expires_at"]) <= now_iso]
             for key in expired:
                 self.rows.pop(key, None)
-            return FakeCursor()
+            return
         if "insert into qna_followup_sessions" in q:
             self.rows[str(params[0])] = {
                 "anchor_message_id": str(params[0]),
@@ -46,31 +58,23 @@ class FakeConn:
                 "updated_at": str(params[8]),
                 "expires_at": str(params[9]),
             }
-            return FakeCursor()
-        if "select anchor_message_id, guild_id, channel_id" in q:
-            row = self.rows.get(str(params[0]))
-            if row is None or str(row["expires_at"]) <= str(params[1]):
-                return FakeCursor(None)
-            return FakeCursor((
-                row["anchor_message_id"],
-                row["guild_id"],
-                row["channel_id"],
-                row["user_id"],
-                row["scope"],
-                row["history_json"],
-                row["model_name"],
-                row["created_at"],
-                row["updated_at"],
-            ))
+            return
         raise AssertionError(f"Unsupported query: {query}")
 
-    async def commit(self):
-        return None
+    async def fetchone(self, query: str, params: tuple[object, ...] = ()):
+        q = " ".join(query.lower().split())
+        if "select anchor_message_id, guild_id, channel_id" not in q:
+            raise AssertionError(f"Unsupported query: {query}")
+
+        row = self.rows.get(str(params[0]))
+        if row is None or str(row["expires_at"]) <= str(params[1]):
+            return None
+        return row
 
 
 def test_qna_followup_repo_ttl_is_7_days_and_refreshes() -> None:
     async def _scenario() -> None:
-        db = SimpleNamespace(_conn=FakeConn())
+        db = FakeDatabaseService()
         repo = QnaSessionsRepo(db)
 
         await repo.save_session(
@@ -83,7 +87,7 @@ def test_qna_followup_repo_ttl_is_7_days_and_refreshes() -> None:
             model_name="gpt",
             created_at=datetime.now(timezone.utc),
         )
-        row1 = db._conn.rows["100"]
+        row1 = db.rows["100"]
         updated1 = datetime.fromisoformat(str(row1["updated_at"]))
         expires1 = datetime.fromisoformat(str(row1["expires_at"]))
         assert timedelta(days=6, hours=23) < (expires1 - updated1) <= timedelta(days=7, minutes=1)
@@ -98,7 +102,7 @@ def test_qna_followup_repo_ttl_is_7_days_and_refreshes() -> None:
             model_name="gpt",
             created_at=datetime.now(timezone.utc),
         )
-        row2 = db._conn.rows["100"]
+        row2 = db.rows["100"]
         updated2 = datetime.fromisoformat(str(row2["updated_at"]))
         expires2 = datetime.fromisoformat(str(row2["expires_at"]))
         assert updated2 >= updated1
@@ -109,9 +113,9 @@ def test_qna_followup_repo_ttl_is_7_days_and_refreshes() -> None:
 
 def test_qna_followup_repo_ignores_expired_sessions() -> None:
     async def _scenario() -> None:
-        db = SimpleNamespace(_conn=FakeConn())
+        db = FakeDatabaseService()
         now = datetime.now(timezone.utc)
-        db._conn.rows["200"] = {
+        db.rows["200"] = {
             "anchor_message_id": "200",
             "guild_id": "10",
             "channel_id": "20",
@@ -125,14 +129,17 @@ def test_qna_followup_repo_ignores_expired_sessions() -> None:
         }
         repo = QnaSessionsRepo(db)
         assert await repo.get_session(200) is None
-        assert "200" not in db._conn.rows
+        assert "200" not in db.rows
 
     run(_scenario())
 
 
 def test_handle_message_qna_recovers_session_from_db() -> None:
     async def _scenario() -> None:
-        db = SimpleNamespace(_conn=FakeConn(), get_trigger_enabled=AsyncMock(return_value=True), get_usage=AsyncMock(return_value=0), increment_usage=AsyncMock())
+        db = FakeDatabaseService()
+        db.get_trigger_enabled = AsyncMock(return_value=True)
+        db.get_usage = AsyncMock(return_value=0)
+        db.increment_usage = AsyncMock()
         service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
         service._ask_general_answer = AsyncMock(return_value="Risposta da DB")
         await service._qna_sessions_repo.save_session(
@@ -172,7 +179,10 @@ def test_handle_message_qna_recovers_session_from_db() -> None:
 
 def test_handle_message_qna_expired_session_fallback_dm_only() -> None:
     async def _scenario() -> None:
-        db = SimpleNamespace(_conn=FakeConn(), get_trigger_enabled=AsyncMock(return_value=True), get_usage=AsyncMock(return_value=0), increment_usage=AsyncMock())
+        db = FakeDatabaseService()
+        db.get_trigger_enabled = AsyncMock(return_value=True)
+        db.get_usage = AsyncMock(return_value=0)
+        db.increment_usage = AsyncMock()
         service = TriggerEngineService(db, Mock(), Mock(), Mock(), community_insights=Mock())
         service._bot = SimpleNamespace(user=SimpleNamespace(id=9999))
         service._ask_general_answer = AsyncMock()

@@ -8,6 +8,7 @@ import hashlib
 import os
 import random
 import re
+import sqlite3
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -121,6 +122,7 @@ class TriggerEngineService:
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
         self._recovery_task: asyncio.Task[None] | None = None
+        self._startup_cleanup_task: asyncio.Task[None] | None = None
         self._barcello_eval_tasks: dict[str, asyncio.Task[None]] = {}
         self._barcello_moods_missing_warned = False
         self._barcello_trigger_cfg: dict[str, Any] | None = None
@@ -141,7 +143,8 @@ class TriggerEngineService:
             self._task = asyncio.create_task(self._insights_loop())
         if self._recovery_task is None:
             self._recovery_task = asyncio.create_task(self._barcello_recovery_loop())
-        asyncio.create_task(self._qna_sessions_repo.delete_expired_sessions())
+        if self._startup_cleanup_task is None:
+            self._startup_cleanup_task = asyncio.create_task(self._startup_cleanup_qna_sessions())
 
     def stop(self) -> None:
         if self._task is not None:
@@ -150,9 +153,20 @@ class TriggerEngineService:
         if self._recovery_task is not None:
             self._recovery_task.cancel()
             self._recovery_task = None
+        if self._startup_cleanup_task is not None:
+            self._startup_cleanup_task.cancel()
+            self._startup_cleanup_task = None
         for task in self._barcello_eval_tasks.values():
             task.cancel()
         self._barcello_eval_tasks.clear()
+
+    async def _startup_cleanup_qna_sessions(self) -> None:
+        try:
+            await self._qna_sessions_repo.delete_expired_sessions()
+        except sqlite3.OperationalError as exc:
+            if "database is locked" not in str(exc).lower():
+                raise
+            logger.warning("qna_followup_startup_cleanup_skipped reason=database_locked")
 
     async def on_event(self, envelope: EventEnvelope) -> None:
         if envelope.event_type != "message.create":

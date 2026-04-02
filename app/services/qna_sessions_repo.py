@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import inspect
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -33,30 +33,9 @@ class QnaSessionsRepo:
     def _now(self) -> datetime:
         return datetime.now(timezone.utc)
 
-    async def _safe_execute(self, conn, query: str, params: tuple[object, ...]) -> object | None:
-        try:
-            out = conn.execute(query, params)
-        except Exception:
-            return None
-        if inspect.isawaitable(out):
-            return await out
-        return None
-
-    async def _safe_commit(self, conn) -> None:
-        try:
-            out = conn.commit()
-        except Exception:
-            return
-        if inspect.isawaitable(out):
-            await out
-
     async def delete_expired_sessions(self) -> None:
-        conn = self._database._conn
-        if conn is None:
-            return
         now_iso = self._now().isoformat()
-        await self._safe_execute(conn, "DELETE FROM qna_followup_sessions WHERE expires_at <= ?", (now_iso,))
-        await self._safe_commit(conn)
+        await self._database.execute("DELETE FROM qna_followup_sessions WHERE expires_at <= ?", (now_iso,))
 
     async def save_session(
         self,
@@ -70,9 +49,6 @@ class QnaSessionsRepo:
         model_name: str | None,
         created_at: datetime | None = None,
     ) -> None:
-        conn = self._database._conn
-        if conn is None:
-            return
         await self.delete_expired_sessions()
         now = self._now()
         created = created_at or now
@@ -80,8 +56,7 @@ class QnaSessionsRepo:
             created = created.replace(tzinfo=timezone.utc)
         expires_at = now + self._ttl
         history_json = json.dumps(history, ensure_ascii=False)
-        await self._safe_execute(
-            conn,
+        await self._database.execute(
             """
             INSERT INTO qna_followup_sessions (
                 anchor_message_id, guild_id, channel_id, user_id, scope, history_json, model_name, created_at, updated_at, expires_at
@@ -109,32 +84,31 @@ class QnaSessionsRepo:
                 expires_at.isoformat(),
             ),
         )
-        await self._safe_commit(conn)
 
     async def get_session(self, anchor_message_id: int) -> PersistedQnaSession | None:
-        conn = self._database._conn
-        if conn is None:
-            return None
         await self.delete_expired_sessions()
         now_iso = self._now().isoformat()
-        cursor = await self._safe_execute(conn,
-            """
+        try:
+            row = await self._database.fetchone(
+                """
             SELECT anchor_message_id, guild_id, channel_id, user_id, scope, history_json, model_name, created_at, updated_at
             FROM qna_followup_sessions
             WHERE anchor_message_id = ? AND expires_at > ?
             """,
-            (str(anchor_message_id), now_iso),
-        )
-        if cursor is None:
+                (str(anchor_message_id), now_iso),
+            )
+        except sqlite3.OperationalError as exc:
+            if "database is locked" not in str(exc).lower():
+                raise
+            logger.warning("qna_followup_get_session_locked anchor=%s", anchor_message_id)
             return None
-        row = await cursor.fetchone()
         if row is None:
             return None
 
         try:
-            history_raw = json.loads(row[5] or "[]")
+            history_raw = json.loads(row["history_json"] or "[]")
         except json.JSONDecodeError:
-            logger.warning("qna_followup_invalid_history anchor=%s", row[0])
+            logger.warning("qna_followup_invalid_history anchor=%s", row["anchor_message_id"])
             history_raw = []
         history: list[dict[str, str]] = []
         if isinstance(history_raw, list):
@@ -145,24 +119,25 @@ class QnaSessionsRepo:
                     if role and content:
                         history.append({"role": role, "content": content})
 
-        created_at = datetime.fromisoformat(str(row[7]))
-        last_used_at = datetime.fromisoformat(str(row[8]))
+        created_at = datetime.fromisoformat(str(row["created_at"]))
+        last_used_at = datetime.fromisoformat(str(row["updated_at"]))
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
         if last_used_at.tzinfo is None:
             last_used_at = last_used_at.replace(tzinfo=timezone.utc)
 
-        user_id_value = int(row[3]) if row[3] is not None else None
-        scope_value = str(row[4])
+        user_id_raw = row["user_id"]
+        user_id_value = int(user_id_raw) if user_id_raw is not None else None
+        scope_value = str(row["scope"])
         if scope_value not in {"general_llm", "channel_qna"}:
             return None
 
         return PersistedQnaSession(
-            guild_id=int(row[1]),
-            channel_id=int(row[2]),
+            guild_id=int(row["guild_id"]),
+            channel_id=int(row["channel_id"]),
             user_id=user_id_value,
-            anchor_message_id=int(row[0]),
+            anchor_message_id=int(row["anchor_message_id"]),
             scope=scope_value,
             session=QnaSession(scope=scope_value, history=history, created_at=created_at, last_used_at=last_used_at),
-            model_name=str(row[6]) if row[6] else None,
+            model_name=str(row["model_name"]) if row["model_name"] else None,
         )
