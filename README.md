@@ -134,6 +134,14 @@ Regole operative:
 - `/admin barcello run [user1] [user2] [window_minutes]` → esegue lo stesso report barcello dal namespace admin senza rimuovere i comandi di configurazione.
 - `/admin barcello calibrate` → calibra i pesi del motore barcello (mod).
 
+#### Motore Barcello: event-triggered + burst-aware
+- Il **triggering** resta event-driven (si valuta quando arrivano eventi recenti e validi).
+- Lo **scoring** non è più una media semplice della finestra: separa componenti `global_window_score`, `local_burst_penalty`, `escalation_penalty`, `recovery_adjustment`.
+- All'interno della finestra principale vengono analizzate micro-finestre (60/90/120s) per trovare il **worst segment**: un litigio breve ma intenso può dominare il risultato.
+- I conflitti ravvicinati vengono clusterizzati in **conflict bursts** con `start/end`, partecipanti, severità, conteggio messaggi e reciprocità.
+- È presente un **latch con decay lento**: dopo un burst conflittuale il recupero è graduale (evita rimbalzi verdi immediati).
+- È applicata **hysteresis** sul recupero: l'uscita da stati peggiori è più prudente quando il latch è ancora attivo.
+
 ### STT
 - `/audio clips stt_set backend:local|ai`
 - `/audio clips stt_set model:small|medium|large-v3`
