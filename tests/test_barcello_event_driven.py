@@ -528,12 +528,14 @@ def test_scheduled_publish_uses_fallback_title_and_updates_anchor() -> None:
     description = str(embed.description or "")
     assert description.startswith("*") and description.endswith("*")
     highlighted_segments = re.findall(r"\*\*\*(.+?)\*\*\*", description)
-    assert len(highlighted_segments) >= 2
+    assert len(highlighted_segments) == 3
     time_pattern = re.compile(r"^(\d{1,2}:\d{2}|\d{1,2}\s+e\s+\d{1,2}|\d{1,2}\s+in punto)$", flags=re.IGNORECASE)
-    assert any(time_pattern.match(segment.strip()) for segment in highlighted_segments)
-    assert any(not time_pattern.match(segment.strip()) for segment in highlighted_segments)
+    assert time_pattern.match(highlighted_segments[0].strip())
+    assert " e il Barcy è " in description
+    assert highlighted_segments[1].strip()
+    assert highlighted_segments[2].strip()
+    assert "**" not in description.replace("***", "")
     assert "Barcy" in description
-    assert "e il Barcy è" in description
     db.upsert_trigger_barcello_publish_anchor.assert_awaited_once()
 
 
@@ -554,7 +556,7 @@ def test_scheduled_publish_uses_title_override() -> None:
 def test_scheduled_trend_uses_anchor_most_recent() -> None:
     service, db, channel, _ai = _base_service({"last_color": "VERDE", "last_score": 70}, {"color": "VERDE", "score": 80})
     db.get_trigger_barcello_publish_anchor = AsyncMock(
-        return_value={"last_color": "GIALLO", "last_score": 50, "last_ts": "2026-04-02T10:00:00+00:00", "last_kind": "scheduled"}
+        return_value={"last_color": "VERDE", "last_score": 50, "last_ts": "2026-04-02T10:00:00+00:00", "last_kind": "scheduled"}
     )
     schedule = {"id": 1, "guild_id": "1", "channel_id": "2", "every_minutes": 30}
 
@@ -562,7 +564,10 @@ def test_scheduled_trend_uses_anchor_most_recent() -> None:
 
     assert sent is True
     trend_field = next(field for field in channel.sent[-1].fields if "TREND" in str(field.name or ""))
-    assert "ultimo publish (scheduled)" in str(trend_field.value or "")
+    trend_lines = [line for line in str(trend_field.value or "").splitlines() if line.strip()]
+    assert len(trend_lines) == 2
+    assert trend_lines[0].startswith("• L'ultima volta in questo stato è stata **")
+    assert trend_lines[1].startswith("• ")
 
 
 def test_scheduled_is_skipped_inside_quiet_hours_recurring() -> None:
@@ -625,7 +630,10 @@ def test_scheduled_after_state_change_uses_state_change_anchor() -> None:
     sent = asyncio.run(service._publish_barcello_scheduled_update(schedule))
     assert sent is True
     trend_field = next(field for field in channel.sent[-1].fields if "TREND" in str(field.name or ""))
-    assert "ultimo publish (state_change)" in str(trend_field.value or "")
+    trend_lines = [line for line in str(trend_field.value or "").splitlines() if line.strip()]
+    assert len(trend_lines) == 2
+    assert trend_lines[0].startswith("• Ultimo riferimento: **")
+    assert "**ROSSO**" in trend_lines[0]
 
 
 def test_state_change_publish_is_not_blocked_by_quiet_hours() -> None:
@@ -661,4 +669,7 @@ def test_trend_mode_state_change_vs_scheduled_are_kept_distinct() -> None:
     sent = asyncio.run(service._publish_barcello_scheduled_update(schedule))
     assert sent is True
     scheduled_trend = next(field for field in channel.sent[-1].fields if "TREND" in str(field.name or ""))
-    assert "Primo riferimento disponibile per il trend." in str(scheduled_trend.value or "")
+    scheduled_lines = [line for line in str(scheduled_trend.value or "").splitlines() if line.strip()]
+    assert len(scheduled_lines) == 2
+    assert scheduled_lines[0] == "• L'ultima volta in questo stato non è ancora disponibile."
+    assert scheduled_lines[1].startswith("• ")
