@@ -122,6 +122,7 @@ class TriggerEngineService:
         self._bot: discord.Client | None = None
         self._task: asyncio.Task[None] | None = None
         self._recovery_task: asyncio.Task[None] | None = None
+        self._barcello_schedule_task: asyncio.Task[None] | None = None
         self._startup_cleanup_task: asyncio.Task[None] | None = None
         self._barcello_eval_tasks: dict[str, asyncio.Task[None]] = {}
         self._barcello_moods_missing_warned = False
@@ -143,6 +144,8 @@ class TriggerEngineService:
             self._task = asyncio.create_task(self._insights_loop())
         if self._recovery_task is None:
             self._recovery_task = asyncio.create_task(self._barcello_recovery_loop())
+        if self._barcello_schedule_task is None:
+            self._barcello_schedule_task = asyncio.create_task(self._barcello_schedules_loop())
         if self._startup_cleanup_task is None:
             self._startup_cleanup_task = asyncio.create_task(self._startup_cleanup_qna_sessions())
 
@@ -153,6 +156,9 @@ class TriggerEngineService:
         if self._recovery_task is not None:
             self._recovery_task.cancel()
             self._recovery_task = None
+        if self._barcello_schedule_task is not None:
+            self._barcello_schedule_task.cancel()
+            self._barcello_schedule_task = None
         if self._startup_cleanup_task is not None:
             self._startup_cleanup_task.cancel()
             self._startup_cleanup_task = None
@@ -1082,6 +1088,8 @@ class TriggerEngineService:
         did_notify = False
         if should_notify:
             update_text = main_msg or f"Stato corrente: {self._barcello_state_ui_label(stored_color)}."
+            anchor = await self._database.get_trigger_barcello_publish_anchor(guild_id, channel_id)
+            trend = self._compute_barcello_anchor_trend(anchor, current_color=stored_color, current_score=score)
             embed = discord.Embed(
                 title=self._render_barcello_alert_title(old_color=prev_color, new_color=stored_color),
                 description=format_standard_description(update_text),
@@ -1090,10 +1098,10 @@ class TriggerEngineService:
             salute_value = self._render_trigger_health_bar(score=score, color=stored_color)
             embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
             trend_lines = [
-                f"• L'ultima volta in questo stato è stata **{last_in_state_human} fa**.",
+                trend["trend_line"],
                 self._render_barcello_trend_comment(
                     state=stored_color,
-                    delta_score=0 if prev_score is None else score - prev_score,
+                    delta_score=int(trend["delta_score"]),
                     recovery_type=recovery_type,
                     status=status,
                 ),
@@ -1113,6 +1121,14 @@ class TriggerEngineService:
             if channel and isinstance(channel, discord.abc.Messageable):
                 await channel.send(embed=embed)
                 did_notify = True
+                await self._upsert_barcello_publish_anchor(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    color=stored_color,
+                    score=score,
+                    ts=now_iso,
+                    kind="state_change",
+                )
                 cooldown_key = "recovery" if is_recovery_notify else ("minor" if stored_color in {"VERDE", "GIALLO"} else "major")
                 await self._database.set_barcello_last_notified(guild_id, channel_id, cooldown_key.upper(), now_iso)
                 if is_recovery_notify:
@@ -1271,6 +1287,117 @@ class TriggerEngineService:
             except Exception:  # noqa: BLE001
                 logger.exception("barcello recovery loop failed")
                 await asyncio.sleep(60)
+
+    async def _barcello_schedules_loop(self) -> None:
+        while True:
+            try:
+                await self._run_due_barcello_schedules()
+                await asyncio.sleep(30)
+            except Exception:  # noqa: BLE001
+                logger.exception("barcello schedules loop failed")
+                await asyncio.sleep(30)
+
+    async def _run_due_barcello_schedules(self) -> None:
+        now = datetime.now(timezone.utc)
+        due_rows = await self._database.list_due_trigger_barcello_schedules(now.isoformat())
+        for row in due_rows:
+            await self._publish_barcello_scheduled_update(dict(row), now=now)
+
+    async def _publish_barcello_scheduled_update(self, schedule: dict[str, Any], *, now: datetime | None = None) -> bool:
+        if self._bot is None:
+            return False
+        run_at = now or datetime.now(timezone.utc)
+        run_iso = run_at.isoformat()
+        every_minutes = int(schedule.get("every_minutes") or 0)
+        if every_minutes > 0:
+            next_run_at = (run_at + timedelta(minutes=every_minutes)).isoformat()
+            keep_enabled = True
+        else:
+            next_run_at = run_iso
+            keep_enabled = False
+        guild_id = str(schedule.get("guild_id") or "")
+        channel_id = str(schedule.get("channel_id") or "")
+        if not guild_id or not channel_id:
+            await self._database.mark_trigger_barcello_schedule_run(
+                int(schedule.get("id") or 0),
+                run_at=run_iso,
+                sent=False,
+                next_run_at=next_run_at,
+                keep_enabled=keep_enabled,
+            )
+            return False
+
+        config = self._load_barcello_trigger_cfg_cached()
+        window_minutes = self._get_effective_window_minutes(
+            cfg=config,
+            channel_id=channel_id,
+            default_window=max(1, int(config.get("window_minutes") or 60)),
+        )
+        status = await self._barcello.get_current_status(
+            guild_id,
+            channel_id=channel_id,
+            window_minutes=window_minutes,
+        )
+        current_color = self._normalize_barcello_color(status.get("color"))
+        if current_color is None:
+            await self._database.mark_trigger_barcello_schedule_run(
+                int(schedule.get("id") or 0),
+                run_at=run_iso,
+                sent=False,
+                next_run_at=next_run_at,
+                keep_enabled=keep_enabled,
+            )
+            return False
+        score = int(status.get("score") or 0)
+        anchor = await self._database.get_trigger_barcello_publish_anchor(guild_id, channel_id)
+        trend = self._compute_barcello_anchor_trend(anchor, current_color=current_color, current_score=score)
+
+        title_override = str(schedule.get("embed_title") or "").strip()
+        title = title_override or format_standard_title("AGGIORNAMENTO ORARIO BARCELLO", emoji="🫛")
+        description = self._render_barcello_scheduled_description(
+            cfg=config,
+            current_color=current_color,
+            score=score,
+            trend=trend,
+            now_rome=run_at.astimezone(ROME_TZ),
+        )
+        embed = discord.Embed(
+            title=title,
+            description=format_standard_description(description),
+            color=self._barcello_embed_color(current_color),
+        )
+        salute_value = self._render_trigger_health_bar(score=score, color=current_color)
+        embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
+        embed.add_field(
+            name=format_standard_field_name("Trend", emoji="📊"),
+            value=trend["trend_line"],
+            inline=False,
+        )
+        attach_footer_meta(embed, service_name="triggers", contributors=[], used_local_processing=True)
+
+        did_send = False
+        channel = self._bot.get_channel(int(channel_id))
+        if channel and isinstance(channel, discord.abc.Messageable):
+            await channel.send(embed=embed)
+            did_send = True
+            await self._upsert_barcello_publish_anchor(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                color=current_color,
+                score=score,
+                ts=run_iso,
+                kind="scheduled",
+            )
+        else:
+            logger.warning("barcello scheduled notify skipped: channel unavailable channel=%s", channel_id)
+        await self._database.mark_trigger_barcello_schedule_run(
+            int(schedule.get("id") or 0),
+            run_at=run_iso,
+            sent=did_send,
+            next_run_at=next_run_at,
+            keep_enabled=keep_enabled,
+        )
+        return did_send
 
     def _is_fresh_activity_ok(self, cfg: dict[str, Any], activity: dict[str, Any]) -> bool:
         event_cfg = cfg.get("event_driven") if isinstance(cfg.get("event_driven"), dict) else {}
@@ -1721,7 +1848,7 @@ class TriggerEngineService:
     def _render_barcello_alert_title(self, *, old_color: str | None, new_color: str) -> str:
         _ = old_color
         _ = new_color
-        return format_standard_title("AGGIORNAMENTO BARCELLO", emoji="🫛")
+        return format_standard_title("CAMBIO STATO BARCELLO", emoji="🫛")
 
     def _render_trigger_health_bar(self, *, score: int, color: str) -> str:
         safe_score = max(0, min(100, int(score)))
@@ -1920,6 +2047,123 @@ class TriggerEngineService:
         if current_state == "GIALLO":
             return "• La conversazione è **più equilibrata** rispetto a prima: mantenete questo ritmo per non far salire il Barcy."
         return "• La conversazione sta **peggiorando** rispetto alla finestra precedente: abbassate i toni subito."
+
+    async def _upsert_barcello_publish_anchor(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        color: str,
+        score: int,
+        ts: str,
+        kind: str,
+    ) -> None:
+        await self._database.upsert_trigger_barcello_publish_anchor(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            last_color=color,
+            last_score=score,
+            last_ts=ts,
+            last_kind=kind,
+        )
+
+    def _compute_barcello_anchor_trend(
+        self,
+        anchor: dict[str, Any] | None,
+        *,
+        current_color: str,
+        current_score: int,
+    ) -> dict[str, Any]:
+        if not anchor:
+            return {
+                "direction": "stable",
+                "delta_score": 0,
+                "trend_line": "• Primo riferimento disponibile per il trend.",
+            }
+        prev_score = int(anchor.get("last_score") or 0)
+        prev_color = self._normalize_barcello_color(anchor.get("last_color")) or current_color
+        prev_kind = str(anchor.get("last_kind") or "state_change")
+        delta_score = int(current_score) - prev_score
+        severity = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
+        cur_rank = severity.get(current_color, 0)
+        prev_rank = severity.get(prev_color, 0)
+        if delta_score > 0 or cur_rank < prev_rank:
+            direction = "up"
+            text = f"• Rispetto all'ultimo publish ({prev_kind}) il Barcy è in miglioramento (+{delta_score})."
+        elif delta_score < 0 or cur_rank > prev_rank:
+            direction = "down"
+            text = f"• Rispetto all'ultimo publish ({prev_kind}) il Barcy è in peggioramento ({delta_score})."
+        else:
+            direction = "stable"
+            text = "• Rispetto all'ultimo publish il Barcy è stabile."
+        return {"direction": direction, "delta_score": delta_score, "trend_line": text}
+
+    def _render_barcello_scheduled_description(
+        self,
+        *,
+        cfg: dict[str, Any],
+        current_color: str,
+        score: int,
+        trend: dict[str, Any],
+        now_rome: datetime,
+    ) -> str:
+        phrase = self._build_barcello_time_phrase(now_rome)
+        template = self._select_barcello_scheduled_template(cfg, current_color=current_color)
+        placeholders = {
+            "time_local": now_rome.strftime("%H:%M"),
+            "hour": str(now_rome.hour),
+            "minute": str(now_rome.minute),
+            "time_phrase": phrase,
+            "state": current_color,
+            "state_label": self._barcello_state_ui_label(current_color),
+            "score": str(int(score)),
+            "trend_direction": str(trend.get("direction") or "stable"),
+            "trend_delta_score": str(int(trend.get("delta_score") or 0)),
+            "greeting": self._scheduled_greeting(now_rome.hour),
+            "state_comment": self._scheduled_state_comment(current_color),
+        }
+        return self._render_with_placeholders(template, placeholders)
+
+    def _select_barcello_scheduled_template(self, cfg: dict[str, Any], *, current_color: str) -> str:
+        scheduled = cfg.get("scheduled_update_templates") if isinstance(cfg.get("scheduled_update_templates"), dict) else {}
+        by_state = scheduled.get("by_state") if isinstance(scheduled.get("by_state"), dict) else {}
+        state_candidate = self._resolve_template_value(
+            by_state.get(current_color),
+            seed_parts=(current_color, datetime.now(ROME_TZ).strftime("%Y%m%d%H%M")),
+        )
+        if state_candidate:
+            return state_candidate
+        default_template = self._resolve_template_value(
+            scheduled.get("default"),
+            seed_parts=("default", current_color, datetime.now(ROME_TZ).strftime("%Y%m%d%H%M")),
+        )
+        if default_template:
+            return default_template
+        return "{greeting}, {time_phrase} e il Barcy è {state_label}. {state_comment}"
+
+    def _build_barcello_time_phrase(self, now_rome: datetime) -> str:
+        if now_rome.minute == 0:
+            return f"sono le {now_rome.hour} in punto"
+        return f"sono le {now_rome.hour} e {now_rome.minute:02d}"
+
+    def _scheduled_greeting(self, hour: int) -> str:
+        if 5 <= hour < 12:
+            return "Buongiorno"
+        if 12 <= hour < 18:
+            return "Buon pomeriggio"
+        if 18 <= hour < 23:
+            return "Buonasera"
+        return "Ciao"
+
+    def _scheduled_state_comment(self, color: str) -> str:
+        current = self._normalize_barcello_color(color) or ""
+        comments = {
+            "VERDE": "Bravi, continuate così.",
+            "GIALLO": "C'è un po' di tensione, meglio restare morbidi.",
+            "ROSSO": "L'aria è tesa: abbassiamo i toni.",
+            "NERO": "Situazione critica, serve fermarsi un attimo.",
+        }
+        return comments.get(current, "Situazione da monitorare.")
 
     @staticmethod
     def _compute_barcello_severity(*, score: int, color: str) -> str:

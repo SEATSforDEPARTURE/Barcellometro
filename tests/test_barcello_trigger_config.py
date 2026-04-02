@@ -81,7 +81,18 @@ def test_barcello_trigger_example_json_is_valid_and_has_core_sections() -> None:
     assert isinstance(payload, dict)
     assert isinstance(payload.get("templates"), dict) and payload["templates"]
     assert isinstance(payload.get("moods"), dict) and payload["moods"]
+    assert isinstance(payload.get("scheduled_update_templates"), dict) and payload["scheduled_update_templates"]
     assert isinstance(payload.get("channels"), dict)
+
+
+def test_barcello_trigger_scheduled_templates_have_required_placeholders() -> None:
+    payload = json.loads(Path("settings/barcello_trigger.example.json").read_text(encoding="utf-8"))
+    scheduled = payload.get("scheduled_update_templates")
+    assert isinstance(scheduled, dict)
+    template_strings = _collect_template_strings({"templates": scheduled})
+    assert template_strings
+    expected = {"{time_phrase}", "{state_label}"}
+    assert any(all(token in text for token in expected) for text in template_strings)
 
 
 def test_barcello_trigger_example_templates_do_not_start_with_emoji() -> None:
