@@ -551,6 +551,35 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, channel_id, color)
             );
 
+            CREATE TABLE IF NOT EXISTS trigger_barcello_schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                publish_at TEXT NOT NULL,
+                next_run_at TEXT NOT NULL,
+                every_minutes INTEGER NOT NULL DEFAULT 0,
+                embed_title TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_run_at TEXT NULL,
+                last_sent_at TEXT NULL,
+                deleted_at TEXT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_trigger_barcello_schedules_due
+            ON trigger_barcello_schedules (enabled, next_run_at);
+
+            CREATE TABLE IF NOT EXISTS trigger_barcello_publish_anchor (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                last_color TEXT NOT NULL,
+                last_score INTEGER NOT NULL,
+                last_ts TEXT NOT NULL,
+                last_kind TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id)
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_phrases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
@@ -2665,6 +2694,215 @@ class DatabaseService:
                 last_notified_ts = excluded.last_notified_ts
             """,
             (guild_id, channel_id, color, ts),
+        )
+
+    async def create_trigger_barcello_schedule(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        publish_at: str,
+        next_run_at: str,
+        every_minutes: int = 0,
+        enabled: bool = True,
+        embed_title: str | None = None,
+    ) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self._conn.execute(
+            """
+            INSERT INTO trigger_barcello_schedules (
+                guild_id, channel_id, enabled, publish_at, next_run_at, every_minutes, embed_title,
+                created_at, updated_at, last_run_at, last_sent_at, deleted_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
+            """,
+            (
+                guild_id,
+                channel_id,
+                1 if enabled else 0,
+                publish_at,
+                next_run_at,
+                int(every_minutes),
+                embed_title,
+                now,
+                now,
+            ),
+        )
+        await self._conn.commit()
+        return int(cursor.lastrowid or 0)
+
+    async def get_trigger_barcello_schedule(self, schedule_id: int) -> Optional[dict[str, Any]]:
+        row = await self.fetchone(
+            "SELECT * FROM trigger_barcello_schedules WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+            (int(schedule_id),),
+        )
+        return dict(row) if row else None
+
+    async def list_trigger_barcello_schedules(
+        self,
+        guild_id: str,
+        channel_id: str | None = None,
+    ) -> list[aiosqlite.Row]:
+        if channel_id is None:
+            return await self.fetchall(
+                """
+                SELECT *
+                FROM trigger_barcello_schedules
+                WHERE guild_id = ? AND deleted_at IS NULL
+                ORDER BY id ASC
+                """,
+                (guild_id,),
+            )
+        return await self.fetchall(
+            """
+            SELECT *
+            FROM trigger_barcello_schedules
+            WHERE guild_id = ? AND channel_id = ? AND deleted_at IS NULL
+            ORDER BY id ASC
+            """,
+            (guild_id, channel_id),
+        )
+
+    async def update_trigger_barcello_schedule(
+        self,
+        schedule_id: int,
+        *,
+        enabled: bool | None = None,
+        publish_at: str | None = None,
+        next_run_at: str | None = None,
+        every_minutes: int | None = None,
+        embed_title: str | None = None,
+        clear_embed_title: bool = False,
+    ) -> bool:
+        updates: list[str] = []
+        params: list[Any] = []
+        if enabled is not None:
+            updates.append("enabled = ?")
+            params.append(1 if enabled else 0)
+        if publish_at is not None:
+            updates.append("publish_at = ?")
+            params.append(publish_at)
+        if next_run_at is not None:
+            updates.append("next_run_at = ?")
+            params.append(next_run_at)
+        if every_minutes is not None:
+            updates.append("every_minutes = ?")
+            params.append(int(every_minutes))
+        if clear_embed_title:
+            updates.append("embed_title = NULL")
+        elif embed_title is not None:
+            updates.append("embed_title = ?")
+            params.append(embed_title)
+        updates.append("updated_at = ?")
+        params.append(datetime.now(timezone.utc).isoformat())
+        params.append(int(schedule_id))
+        if not updates:
+            return False
+        cursor = await self._conn.execute(
+            f"""
+            UPDATE trigger_barcello_schedules
+            SET {", ".join(updates)}
+            WHERE id = ? AND deleted_at IS NULL
+            """,
+            tuple(params),
+        )
+        await self._conn.commit()
+        return int(cursor.rowcount or 0) > 0
+
+    async def delete_trigger_barcello_schedule(self, schedule_id: int) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self._conn.execute(
+            """
+            UPDATE trigger_barcello_schedules
+            SET deleted_at = ?, enabled = 0, updated_at = ?
+            WHERE id = ? AND deleted_at IS NULL
+            """,
+            (now, now, int(schedule_id)),
+        )
+        await self._conn.commit()
+        return int(cursor.rowcount or 0) > 0
+
+    async def list_due_trigger_barcello_schedules(self, now_iso: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT *
+            FROM trigger_barcello_schedules
+            WHERE enabled = 1
+              AND deleted_at IS NULL
+              AND next_run_at <= ?
+            ORDER BY next_run_at ASC, id ASC
+            """,
+            (now_iso,),
+        )
+
+    async def mark_trigger_barcello_schedule_run(
+        self,
+        schedule_id: int,
+        *,
+        run_at: str,
+        sent: bool,
+        next_run_at: str,
+        keep_enabled: bool = True,
+    ) -> bool:
+        cursor = await self._conn.execute(
+            """
+            UPDATE trigger_barcello_schedules
+            SET
+                enabled = ?,
+                next_run_at = ?,
+                last_run_at = ?,
+                last_sent_at = CASE WHEN ? = 1 THEN ? ELSE last_sent_at END,
+                updated_at = ?
+            WHERE id = ? AND deleted_at IS NULL
+            """,
+            (
+                1 if keep_enabled else 0,
+                next_run_at,
+                run_at,
+                1 if sent else 0,
+                run_at,
+                run_at,
+                int(schedule_id),
+            ),
+        )
+        await self._conn.commit()
+        return int(cursor.rowcount or 0) > 0
+
+    async def get_trigger_barcello_publish_anchor(self, guild_id: str, channel_id: str) -> Optional[dict[str, Any]]:
+        row = await self.fetchone(
+            """
+            SELECT guild_id, channel_id, last_color, last_score, last_ts, last_kind
+            FROM trigger_barcello_publish_anchor
+            WHERE guild_id = ? AND channel_id = ?
+            LIMIT 1
+            """,
+            (guild_id, channel_id),
+        )
+        return dict(row) if row else None
+
+    async def upsert_trigger_barcello_publish_anchor(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        last_color: str,
+        last_score: int,
+        last_ts: str,
+        last_kind: str,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO trigger_barcello_publish_anchor (
+                guild_id, channel_id, last_color, last_score, last_ts, last_kind
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                last_color = excluded.last_color,
+                last_score = excluded.last_score,
+                last_ts = excluded.last_ts,
+                last_kind = excluded.last_kind
+            """,
+            (guild_id, channel_id, last_color, int(last_score), last_ts, last_kind),
         )
 
     async def add_trigger_phrase(

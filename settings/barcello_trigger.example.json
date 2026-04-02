@@ -153,6 +153,31 @@
       "Recupero climatico: ora il Barcy è {new}."
     ]
   },
+  "scheduled_update_templates": {
+    "default": [
+      "{greeting}, {time_phrase} e il Barcy è {state_label}. {state_comment}",
+      "{time_phrase}: stato attuale {state_label} con score {score}. {state_comment}",
+      "{greeting}! {time_phrase}, Barcy in {state_label}. {state_comment}"
+    ],
+    "by_state": {
+      "VERDE": [
+        "{greeting}, {time_phrase} e il Barcy è verde. Bravi, continuate così.",
+        "{time_phrase} e oggi il Barcy è tranquillo: stato {state_label}."
+      ],
+      "GIALLO": [
+        "{greeting}, {time_phrase} e qui l'aria è un po' tesa.",
+        "{time_phrase}: il Barcy è {state_label}, attenzione ai toni."
+      ],
+      "ROSSO": [
+        "{time_phrase} e il Barcy è {state_label}. Serve calma subito.",
+        "{greeting}, {time_phrase}: clima {state_label}, abbassiamo i toni."
+      ],
+      "NERO": [
+        "{time_phrase} e il Barcy è {state_label}. Situazione critica.",
+        "{greeting}, {time_phrase}: stato {state_label}, fate un reset."
+      ]
+    }
+  },
   "mod_role_id_note": "Per transizioni a ROSSO/NERO il bot aggiunge solo il mention <@&mod_role_id> in coda al testo principale, senza field Moderazione.",
   "moods": {
     "chill": {
