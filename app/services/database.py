@@ -580,6 +580,15 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, channel_id)
             );
 
+            CREATE TABLE IF NOT EXISTS trigger_barcello_quiet_hours (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                quiet_start TEXT NOT NULL,
+                quiet_end TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id)
+            );
+
             CREATE TABLE IF NOT EXISTS trigger_phrases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
@@ -2904,6 +2913,52 @@ class DatabaseService:
             """,
             (guild_id, channel_id, last_color, int(last_score), last_ts, last_kind),
         )
+
+    async def get_trigger_barcello_quiet_hours(self, guild_id: str, channel_id: str) -> Optional[dict[str, Any]]:
+        row = await self.fetchone(
+            """
+            SELECT guild_id, channel_id, quiet_start, quiet_end, updated_at
+            FROM trigger_barcello_quiet_hours
+            WHERE guild_id = ? AND channel_id = ?
+            LIMIT 1
+            """,
+            (guild_id, channel_id),
+        )
+        return dict(row) if row else None
+
+    async def upsert_trigger_barcello_quiet_hours(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        quiet_start: str,
+        quiet_end: str,
+    ) -> None:
+        updated_at = datetime.now(timezone.utc).isoformat()
+        await self.execute(
+            """
+            INSERT INTO trigger_barcello_quiet_hours (
+                guild_id, channel_id, quiet_start, quiet_end, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                quiet_start = excluded.quiet_start,
+                quiet_end = excluded.quiet_end,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, channel_id, quiet_start, quiet_end, updated_at),
+        )
+
+    async def delete_trigger_barcello_quiet_hours(self, guild_id: str, channel_id: str) -> bool:
+        cursor = await self._conn.execute(
+            """
+            DELETE FROM trigger_barcello_quiet_hours
+            WHERE guild_id = ? AND channel_id = ?
+            """,
+            (guild_id, channel_id),
+        )
+        await self._conn.commit()
+        return int(cursor.rowcount or 0) > 0
 
     async def add_trigger_phrase(
         self,

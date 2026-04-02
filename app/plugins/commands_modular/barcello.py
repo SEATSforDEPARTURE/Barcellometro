@@ -40,6 +40,7 @@ from app.domain.reporting.trend import normalize_trend, render_trend, render_tre
 logger = logging.getLogger(__name__)
 
 BARCELLO_SCHEDULE_FALLBACK_TITLE = "🫛 __**AGGIORNAMENTO ORARIO BARCELLO**__"
+HHMM_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
 def register_barcello(
@@ -224,6 +225,12 @@ def register_barcello(
             f"{'one-shot' if every_minutes <= 0 else f'every {every_minutes}m'} · "
             f"next {_format_schedule_datetime(row.get('next_run_at'))} · titolo {title}"
         )
+
+    def _parse_quiet_hhmm(value: str) -> str | None:
+        normalized = str(value or "").strip()
+        if not HHMM_PATTERN.match(normalized):
+            return None
+        return normalized
 
     @trigger_barcello_group.command(name="schedule_add", description="Aggiunge una schedule Barcello per questo canale.")
     @app_commands.describe(
@@ -491,6 +498,101 @@ def register_barcello(
                 )
             ],
             kind="info" if payload else "warning",
+            footer_service=ctx.footer,
+            ephemeral=True,
+        )
+
+    @trigger_barcello_group.command(name="quiet_set", description="Imposta quiet hours per schedule Barcello nel canale corrente.")
+    @app_commands.describe(start="Ora inizio HH:MM (Europe/Rome).", end="Ora fine HH:MM (Europe/Rome).")
+    async def admin_barcello_quiet_set(interaction: discord.Interaction, start: str, end: str) -> None:
+        command_path = f"{trigger_top_level} barcello quiet_set"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.quiet_set", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        quiet_start = _parse_quiet_hhmm(start)
+        quiet_end = _parse_quiet_hhmm(end)
+        if quiet_start is None or quiet_end is None:
+            await send_ephemeral(
+                interaction,
+                "Formato non valido: usa HH:MM (es. 23:00).",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        guild_id, channel_id = scope
+        await ctx.database.upsert_trigger_barcello_quiet_hours(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            quiet_start=quiet_start,
+            quiet_end=quiet_end,
+        )
+        await send_standard_response(
+            interaction,
+            top_level=trigger_top_level,
+            subcommand_path=command_path,
+            lines=[("result", "Quiet hours Barcello aggiornate.")],
+            sections=[CommandEmbedSection(title="Dettagli", lines=[("start", quiet_start), ("end", quiet_end), ("timezone", "Europe/Rome")])],
+            kind="success",
+            footer_service=ctx.footer,
+            ephemeral=True,
+        )
+
+    @trigger_barcello_group.command(name="quiet_show", description="Mostra quiet hours Barcello del canale corrente.")
+    async def admin_barcello_quiet_show(interaction: discord.Interaction) -> None:
+        command_path = f"{trigger_top_level} barcello quiet_show"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.quiet_show", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        quiet = await ctx.database.get_trigger_barcello_quiet_hours(guild_id, channel_id)
+        if quiet is None:
+            await send_ephemeral(
+                interaction,
+                "Quiet hours Barcello non impostate in questo canale.",
+                command_path=command_path,
+                top_level=trigger_top_level,
+            )
+            return
+        await send_standard_response(
+            interaction,
+            top_level=trigger_top_level,
+            subcommand_path=command_path,
+            lines=[("result", "Quiet hours Barcello attive.")],
+            sections=[
+                CommandEmbedSection(
+                    title="Dettagli",
+                    lines=[
+                        ("start", str(quiet.get("quiet_start") or "—")),
+                        ("end", str(quiet.get("quiet_end") or "—")),
+                        ("timezone", "Europe/Rome"),
+                    ],
+                )
+            ],
+            kind="info",
+            footer_service=ctx.footer,
+            ephemeral=True,
+        )
+
+    @trigger_barcello_group.command(name="quiet_reset", description="Rimuove quiet hours Barcello dal canale corrente.")
+    async def admin_barcello_quiet_reset(interaction: discord.Interaction) -> None:
+        command_path = f"{trigger_top_level} barcello quiet_reset"
+        if not await check_permission(interaction, f"admin.{trigger_top_level}.barcello.quiet_reset", ctx):
+            return
+        scope = await _require_channel_scope(interaction)
+        if scope is None:
+            return
+        guild_id, channel_id = scope
+        await ctx.database.delete_trigger_barcello_quiet_hours(guild_id, channel_id)
+        await send_standard_response(
+            interaction,
+            top_level=trigger_top_level,
+            subcommand_path=command_path,
+            lines=[("result", "Quiet hours Barcello rimosse.")],
+            kind="success",
             footer_service=ctx.footer,
             ephemeral=True,
         )

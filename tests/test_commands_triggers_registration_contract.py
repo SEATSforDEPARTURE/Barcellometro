@@ -78,6 +78,9 @@ def _stub_register_barcello(
         "schedule_remove",
         "schedule_show",
         "schedule_list",
+        "quiet_set",
+        "quiet_show",
+        "quiet_reset",
     ):
         @barcello_group.command(name=name, description=name)
         async def _placeholder(interaction):  # noqa: ANN001
@@ -154,6 +157,9 @@ def test_setup_registers_triggers_root_with_barcello_run_contract(import_fresh, 
         "schedule_remove",
         "schedule_show",
         "schedule_list",
+        "quiet_set",
+        "quiet_show",
+        "quiet_reset",
     }
 
 
@@ -184,7 +190,10 @@ def test_setup_fails_fast_when_triggers_barcello_run_contract_is_broken(import_f
     ctx = SimpleNamespace(bot=bot, config=config, footer=None, author=None)
     monkeypatch.setattr(commands_module.CommandContext, "from_registry", lambda registry: ctx)
 
-    with pytest.raises(RuntimeError, match="missing /triggers barcello commands: run, schedule_add, schedule_edit, schedule_list, schedule_remove, schedule_show"):
+    with pytest.raises(
+        RuntimeError,
+        match="missing /triggers barcello commands: quiet_reset, quiet_set, quiet_show, run, schedule_add, schedule_edit, schedule_list, schedule_remove, schedule_show",
+    ):
         commands_module.setup(registry=SimpleNamespace())
 
 

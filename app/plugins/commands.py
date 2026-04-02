@@ -50,6 +50,9 @@ _REQUIRED_TRIGGER_BARCELLO_COMMANDS = {
     "schedule_remove",
     "schedule_show",
     "schedule_list",
+    "quiet_set",
+    "quiet_show",
+    "quiet_reset",
 }
 _LEGACY_SUMMARY_ROOTS = {"dmsummary", "aurasummary", "barcellosummary", "activitysummary"}
 
