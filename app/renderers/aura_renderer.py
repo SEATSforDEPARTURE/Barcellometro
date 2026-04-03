@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -541,11 +542,23 @@ def _build_trend_section(*, current_score: float | None, previous_score: float |
     )
 
 
+def _rank_movement(item: ChannelAuraTopUserItem) -> tuple[str, str, str, str]:
+    movement = str(item.movement or "").strip().lower()
+    normalized_comment = _compact_trend_comment(item.trend_comment)
+    if movement == "new_first_time" or "prima volta in classifica" in normalized_comment:
+        return ("🆕", "new_first_time", "**prima** volta in classifica", "new")
+    if movement == "down" or ("perde" in normalized_comment and "posizion" in normalized_comment):
+        return ("⬇️", "down", "**scende** di posizione", "down")
+    if movement == "up" or "sale in classifica" in normalized_comment:
+        return ("⬆️", "up", "**sale** in classifica", "up")
+    return ("↔️", "stable", "**stabile** nel ranking", "stable")
+
+
 def _format_top_row(item: ChannelAuraTopUserItem | None, rank: int, *, compact_comment: bool) -> str:
     if item is None:
-        return f"{rank:>2} N/A - Nessuno"
-    comment = _compact_trend_comment(item.trend_comment) if compact_comment else _shorten_with_ellipsis(_compact_trend_comment(item.trend_comment), max_len=44)
-    return f"{rank:>2} {_rank_emoji(rank)} {item.trend_emoji} **+{item.score} P.A.** <@{item.user_id}> — {comment}"
+        return f"{_rank_emoji(rank)} N/A - Nessuno"
+    movement_emoji, _, phrase, _ = _rank_movement(item)
+    return f"{_rank_emoji(rank)}{movement_emoji} **+{item.score} P.A.** → <@{item.user_id}> — {phrase}"
 
 
 def _build_mission_lines(m: ChannelAuraMissionTrend) -> list[str]:
@@ -562,6 +575,8 @@ def _build_mission_lines(m: ChannelAuraMissionTrend) -> list[str]:
 
 def _standard_field(label: str) -> str:
     raw = str(label or "").strip()
+    if raw == "🏆 **__CLASSIFICA TOP 10**__":
+        return raw
     for emoji in ("📈", "🏆", "🕹️", "📜", "✨", "👤", "🧭", "🧾", "📌", "😇", "😈", ":bricks:"):
         if raw.startswith(f"{emoji} "):
             return format_standard_field_name(raw[len(emoji)+1:].strip(), emoji=emoji)
@@ -583,8 +598,9 @@ def _compose_channel_aura_embed(
     compact_advice: bool,
     footer_text: str | None,
 ) -> discord.Embed:
+    title_base = re.sub(r"[*_`]", "", str(title or "")).replace("📓", "").strip() or "RESOCONTO CANALE · AURA"
     embed = discord.Embed(
-        title=format_standard_title(title.replace("📓 ", ""), emoji="📓"),
+        title=format_standard_title(title_base, emoji="📓"),
         description=(
             f"*Nel periodo di riferimento sono stati assegnati **{int(data.positive_points)} PUNTI AURA** "
             f"ai partecipanti coinvolti, mentre **{abs(int(data.negative_points))} PUNTI AURA** "
@@ -609,14 +625,15 @@ def _compose_channel_aura_embed(
 
     rank_lookup = {int(item.rank): item for item in data.top_users[:10]}
     top_rows = [_format_top_row(rank_lookup.get(rank), rank, compact_comment=compact_top_comments) for rank in range(1, 11)]
-    climbed = sum(1 for item in data.top_users[:10] if str(item.movement) == "up")
-    dropped = sum(1 for item in data.top_users[:10] if str(item.movement) == "down")
-    stable = sum(1 for item in data.top_users[:10] if str(item.movement) == "stable")
+    movement_summary = [_rank_movement(item)[3] for item in data.top_users[:10]]
+    climbed = sum(1 for status in movement_summary if status == "up")
+    dropped = sum(1 for status in movement_summary if status == "down")
+    stable = sum(1 for status in movement_summary if status == "stable")
     classifica_value = (
-        f"• **{climbed}** profili **salgono**, **{dropped}** **perdono** posizioni e **{stable}** restano **stabili** nel ranking.\n"
+        f"• {climbed} profili salgono, {dropped} perdono posizioni e {stable} restano stabili nel ranking.\n"
         + "\n".join(top_rows)
     )
-    _add_field_with_chunks(embed, name="🏆 Classifica Top 10", value=classifica_value)
+    _add_field_with_chunks(embed, name="🏆 **__CLASSIFICA TOP 10**__", value=classifica_value)
 
     _add_field_with_chunks(
         embed,
@@ -651,7 +668,7 @@ def _compose_channel_aura_embed(
 def build_channel_aura_embed(
     *,
     data: ChannelAuraEmbedData,
-    title: str = "📓 __**RESOCONTO CANALE · AURA**__",
+    title: str = "RESOCONTO CANALE · AURA",
     footer_text: str = "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
     max_chars: int = AURA_DETAILS_INTERNAL_BUDGET,
 ) -> discord.Embed:

@@ -909,7 +909,7 @@ class ChannelSummaryService:
         )
 
         aura_embed = build_channel_aura_embed(
-            title="📓 __**RESOCONTO CANALE · AURA**__",
+            title="RESOCONTO CANALE · AURA",
             footer_text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
             data=ChannelAuraEmbedData(
                 positive_points=total_positive,
