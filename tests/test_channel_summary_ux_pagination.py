@@ -36,7 +36,7 @@ def _build_fixture_embeds() -> list[discord.Embed]:
         "10": MessageMeta(message_id="10", ts="2026-04-03T09:00:00+00:00", author_id="1"),
         "11": MessageMeta(message_id="11", ts="2026-04-03T10:00:00+00:00", author_id="2"),
     }
-    aura_embed = discord.Embed(title="✨ AURA")
+    aura_embed = discord.Embed(title="📓 __**RESOCONTO CANALE · AURA**__")
     attach_author_meta(aura_embed, service_name="channel_summary", canonical_top_level_command="channelsummary")
 
     return build_channel_summary_embeds(
@@ -98,7 +98,7 @@ def test_channel_summary_first_embed_uses_narrative_description_without_period_o
     assert "**giallo**" in description
     assert "**altalenante e alcuni attriti distribuiti nel periodo**" in description
     assert description.count("il barcello") == 1
-    assert description.count("complessivamente") <= 1
+    assert description.count("clima") == 1
     assert "Nella giornata" not in description
     assert "Nel periodo selezionato" not in description
     assert "il barcello è rimasto" not in description
@@ -107,9 +107,11 @@ def test_channel_summary_first_embed_uses_narrative_description_without_period_o
     assert get_embed_images_meta(first_embed) is not None
 
 
-def test_channel_summary_details_embed_has_expected_intro_description() -> None:
-    details_embed = _build_fixture_embeds()[1]
-    assert details_embed.description == "*Andiamo a leggere cosa è successo...*"
+def test_channel_summary_titles_match_requested_naming() -> None:
+    embeds = _build_fixture_embeds()
+    assert embeds[0].title == "📓 __**RESOCONTO CANALE · PANORAMICA**__"
+    assert embeds[1].title == "📓 __**RESOCONTO CANALE · RIASSUNTO**__"
+    assert embeds[2].title == "📓 __**RESOCONTO CANALE · AURA**__"
 
 
 def test_rolling_period_uses_correct_italian_grammar() -> None:

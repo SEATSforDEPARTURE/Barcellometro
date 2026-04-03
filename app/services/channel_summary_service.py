@@ -811,7 +811,7 @@ class ChannelSummaryService:
         channel_id: str,
         start_local: datetime,
         end_local: datetime,
-        title: str = "🗒️ DETTAGLI PUNTI AURA",
+        title: str = "📓 __**RESOCONTO CANALE · AURA**__",
     ) -> discord.Embed | None:
         embed = await self._build_channel_aura_embed(
             guild_id=guild_id,
@@ -838,6 +838,10 @@ class ChannelSummaryService:
         prev_end_ts = prev_end_local.astimezone(timezone.utc).isoformat()
 
         current = await self._database.fetch_aura_channel_ledger_report(guild_id, channel_id, start_ts, end_ts)
+        previous = await self._database.fetch_aura_channel_ledger_report(guild_id, channel_id, prev_start_ts, prev_end_ts)
+        prev_positive = int(previous["totals"].get("positive") or 0)
+        prev_negative = int(previous["totals"].get("negative") or 0)
+
         total_users = int(current["totals"].get("users_count") or 0)
         total_positive = int(current["totals"].get("positive") or 0)
         total_negative = int(current["totals"].get("negative") or 0)
@@ -879,7 +883,7 @@ class ChannelSummaryService:
         )
 
         aura_embed = build_channel_aura_embed(
-            title="🗒️ DETTAGLI PUNTI AURA",
+            title="📓 __**RESOCONTO CANALE · AURA**__",
             footer_text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
             data=ChannelAuraEmbedData(
                 positive_points=total_positive,
@@ -899,6 +903,8 @@ class ChannelSummaryService:
                     trend_role2=mission_role2,
                 ),
                 advice_lines=advice,
+                delta_positive=total_positive - prev_positive,
+                delta_negative=abs(total_negative) - abs(prev_negative),
             )
         )
         logger.debug("channel_summary aura_embed_chars=%s guild=%s channel=%s", _estimate_embed_size(aura_embed), guild_id, channel_id)
