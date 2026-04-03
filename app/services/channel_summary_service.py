@@ -788,14 +788,18 @@ class ChannelSummaryService:
         return previous_start_local, previous_end_local
 
 
-    def _rank_trend(self, prev_rank: int | None, current_rank: int) -> tuple[str, str]:
+    def _rank_trend(self, prev_rank: int | None, current_rank: int, *, has_historical_presence: bool, history_available: bool) -> tuple[str, str, str]:
         if prev_rank is None:
-            return "🆕", "nuovo ingresso nel ranking"
+            if not history_available:
+                return "🆕", "nuovo ingresso nel periodo", "new_period"
+            if has_historical_presence:
+                return "🆕", "nuovo ingresso nel periodo", "new_period"
+            return "🆕", "prima volta in classifica", "new_first_time"
         if prev_rank > current_rank:
-            return "⬆️", "sale in classifica"
+            return "⬆️", "sale in classifica", "up"
         if prev_rank < current_rank:
-            return "⬇️", "perde posizioni"
-        return "↔️", "stabile nel ranking"
+            return "⬇️", "perde posizioni", "down"
+        return "↔️", "stabile nel ranking", "stable"
 
     def _aura_trend(self, current: int, previous: int) -> tuple[str, str]:
         if current > previous:
@@ -851,14 +855,27 @@ class ChannelSummaryService:
         top_now = await self._database.fetch_aura_channel_top_users(guild_id, channel_id, start_ts, end_ts, limit=10)
         top_prev = await self._database.fetch_aura_channel_top_users(guild_id, channel_id, prev_start_ts, prev_end_ts, limit=50)
         prev_ranks = {str(r["user_id"]): idx for idx, r in enumerate(top_prev, start=1)}
+        current_top_ids = [str(row["user_id"]) for row in top_now if row.get("user_id")]
+        historical_presence = await self._database.fetch_aura_channel_users_with_history_before(
+            guild_id,
+            channel_id,
+            prev_start_ts,
+            current_top_ids,
+        )
+        history_available = await self._database.has_aura_channel_history_before(guild_id, channel_id, prev_start_ts)
 
         top_items: list[ChannelAuraTopUserItem] = []
         for idx, row in enumerate(top_now, start=1):
             uid = str(row["user_id"])
             score = max(0, int(row["total"] or 0))
             prev_rank = prev_ranks.get(uid)
-            trend_emoji, comment = self._rank_trend(prev_rank, idx)
-            top_items.append(ChannelAuraTopUserItem(user_id=uid, score=score, trend_emoji=trend_emoji, trend_comment=comment, rank=idx))
+            trend_emoji, comment, movement = self._rank_trend(
+                prev_rank,
+                idx,
+                has_historical_presence=(uid in historical_presence),
+                history_available=history_available,
+            )
+            top_items.append(ChannelAuraTopUserItem(user_id=uid, score=score, trend_emoji=trend_emoji, trend_comment=comment, rank=idx, movement=movement))
 
         by_reason = list(current.get("by_reason", []))
         pos_reasons = [(f"{aura_reason_to_human(str(it['reason_code']))}", int(it["total"] or 0)) for it in by_reason if int(it["total"] or 0) > 0]
@@ -872,6 +889,15 @@ class ChannelSummaryService:
         prev_completed_role2 = int(missions_prev.get("completed_role2") or 0)
         mission_role1 = self._aura_trend(now_completed_role1, prev_completed_role1)
         mission_role2 = self._aura_trend(now_completed_role2, prev_completed_role2)
+        role1_label = "PLUS"
+        role2_label = "PRO"
+        try:
+            summary_cfg = await self._summary.get_config()
+            tiers = summary_cfg.get("tiers", {}) if isinstance(summary_cfg, dict) else {}
+            role1_label = str(((tiers.get("role1") or {}).get("label")) or role1_label)
+            role2_label = str(((tiers.get("role2") or {}).get("label")) or role2_label)
+        except Exception:
+            logger.exception("channel_summary aura_roles_label_resolution_failed guild=%s channel=%s", guild_id, channel_id)
 
         top_positive_reason = str(pos_reasons[0][0]) if pos_reasons else None
         advice = build_channel_aura_advice(
@@ -901,10 +927,12 @@ class ChannelSummaryService:
                     eligible_role2=int(missions_now.get("eligible_role2") or 0),
                     trend_role1=mission_role1,
                     trend_role2=mission_role2,
+                    role1_label=role1_label,
+                    role2_label=role2_label,
                 ),
                 advice_lines=advice,
-                delta_positive=total_positive - prev_positive,
-                delta_negative=abs(total_negative) - abs(prev_negative),
+                previous_positive_points=prev_positive,
+                previous_negative_points=prev_negative,
             )
         )
         logger.debug("channel_summary aura_embed_chars=%s guild=%s channel=%s", _estimate_embed_size(aura_embed), guild_id, channel_id)

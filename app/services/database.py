@@ -6636,6 +6636,42 @@ class DatabaseService:
         )
         return [{"user_id": str(r["user_id"]), "total": int(r["total"] or 0)} for r in rows if r["user_id"]]
 
+    async def fetch_aura_channel_users_with_history_before(
+        self,
+        guild_id: str,
+        channel_id: str,
+        before_ts: str,
+        user_ids: list[str],
+    ) -> set[str]:
+        clean_ids = [str(uid) for uid in user_ids if str(uid).strip()]
+        if not clean_ids:
+            return set()
+        placeholders = ",".join("?" for _ in clean_ids)
+        rows = await self.fetchall(
+            f"""
+            SELECT DISTINCT user_id
+            FROM aura_events_ledger
+            WHERE guild_id = ?
+              AND channel_id = ?
+              AND ts < ?
+              AND user_id IN ({placeholders})
+            """,
+            (guild_id, channel_id, before_ts, *clean_ids),
+        )
+        return {str(r["user_id"]) for r in rows if r.get("user_id")}
+
+    async def has_aura_channel_history_before(self, guild_id: str, channel_id: str, before_ts: str) -> bool:
+        row = await self.fetchone(
+            """
+            SELECT 1 AS has_rows
+            FROM aura_events_ledger
+            WHERE guild_id = ? AND channel_id = ? AND ts < ?
+            LIMIT 1
+            """,
+            (guild_id, channel_id, before_ts),
+        )
+        return bool(row and row.get("has_rows"))
+
     async def fetch_aura_channel_mission_stats(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> dict[str, int]:
         assigned_rows = await self.fetchall(
             """

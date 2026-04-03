@@ -565,3 +565,120 @@ def test_channel_aura_embed_classifica_shows_placeholders_until_top10() -> None:
     classifica = _field_value_by_plain_name(embed, "Classifica Top 10")
     assert " 9 N/A - Nessuno" in classifica
     assert "10 N/A - Nessuno" in classifica
+
+
+def test_channel_aura_embed_sections_follow_standard_wrapping() -> None:
+    from app.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+
+    embed = build_channel_aura_embed(
+        data=ChannelAuraEmbedData(
+            positive_points=100,
+            negative_points=-10,
+            previous_positive_points=70,
+            previous_negative_points=-20,
+            users_count=3,
+            top_users=[ChannelAuraTopUserItem(user_id="1", score=80, trend_emoji="⬆️", trend_comment="sale in classifica", rank=1, movement="up")],
+            positive_reasons=[("per qualità dei messaggi", 90)],
+            negative_reasons=[("per spam", -10)],
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample(role1_label="PLUS", role2_label="PRO")),
+            advice_lines=["Continuate così."],
+        )
+    )
+    required = {
+        "✨ __**KARMA**__",
+        "📈 __**TREND**__",
+        "🏆 __**CLASSIFICA TOP 10**__",
+        "😇 __**PUNTI ATTRIBUITI**__",
+        "😈 __**PUNTI REVOCATI**__",
+        "📜 __**MISSIONI COMPLETATE**__",
+        "🧭 __**I CONSIGLI DEL BARCELLOMETRO**__",
+    }
+    assert required.issubset({f.name for f in embed.fields})
+
+
+def test_channel_aura_embed_karma_and_trend_are_consistent() -> None:
+    from app.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+
+    improved = build_channel_aura_embed(
+        data=ChannelAuraEmbedData(
+            positive_points=120,
+            negative_points=-20,
+            previous_positive_points=70,
+            previous_negative_points=-40,
+            users_count=4,
+            top_users=[ChannelAuraTopUserItem(user_id="2", score=90, trend_emoji="⬆️", trend_comment="sale in classifica", rank=1, movement="up")],
+            positive_reasons=[("per missioni", 70)],
+            negative_reasons=[("per spam", -20)],
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample()),
+            advice_lines=["ok"],
+        )
+    )
+    worsened = build_channel_aura_embed(
+        data=ChannelAuraEmbedData(
+            positive_points=80,
+            negative_points=-50,
+            previous_positive_points=100,
+            previous_negative_points=-30,
+            users_count=4,
+            top_users=[ChannelAuraTopUserItem(user_id="2", score=90, trend_emoji="⬇️", trend_comment="perde posizioni", rank=1, movement="down")],
+            positive_reasons=[("per missioni", 40)],
+            negative_reasons=[("per spam", -50)],
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample()),
+            advice_lines=["ok"],
+        )
+    )
+    assert "miglioramento" in _field_value_by_plain_name(improved, "Karma")
+    assert "migliorato" in _field_value_by_plain_name(improved, "Trend")
+    assert "peggioramento" in _field_value_by_plain_name(worsened, "Karma")
+    assert "peggiorato" in _field_value_by_plain_name(worsened, "Trend")
+
+
+def test_channel_aura_embed_classifica_intro_uses_real_movements_and_first_time_wording() -> None:
+    from app.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+
+    embed = build_channel_aura_embed(
+        data=ChannelAuraEmbedData(
+            positive_points=200,
+            negative_points=-30,
+            previous_positive_points=140,
+            previous_negative_points=-35,
+            users_count=5,
+            top_users=[
+                ChannelAuraTopUserItem(user_id="1", score=120, trend_emoji="⬆️", trend_comment="sale in classifica", rank=1, movement="up"),
+                ChannelAuraTopUserItem(user_id="2", score=80, trend_emoji="↔️", trend_comment="stabile nel ranking", rank=2, movement="stable"),
+                ChannelAuraTopUserItem(user_id="3", score=60, trend_emoji="🆕", trend_comment="prima volta in classifica", rank=3, movement="stable"),
+                ChannelAuraTopUserItem(user_id="4", score=40, trend_emoji="⬇️", trend_comment="perde posizioni", rank=4, movement="down"),
+            ],
+            positive_reasons=[("per missioni", 100)],
+            negative_reasons=[("per spam", -30)],
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample()),
+            advice_lines=["ok"],
+        )
+    )
+    classifica = _field_value_by_plain_name(embed, "Classifica Top 10")
+    assert "**1** profili **salgono**, **1** **perdono** posizioni e **2** restano **stabili**" in classifica
+    assert "prima volta in classifica" in classifica
+
+
+def test_channel_aura_embed_points_are_bold_and_missions_use_role_labels() -> None:
+    from app.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_embed
+
+    embed = build_channel_aura_embed(
+        data=ChannelAuraEmbedData(
+            positive_points=120,
+            negative_points=-25,
+            previous_positive_points=110,
+            previous_negative_points=-20,
+            users_count=4,
+            top_users=[ChannelAuraTopUserItem(user_id="42", score=99, trend_emoji="↔️", trend_comment="stabile nel ranking", rank=1, movement="stable")],
+            positive_reasons=[("per aver coinvolto utenti diversi", 81)],
+            negative_reasons=[("per comportamento simile a spam", -32)],
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample(role1_label="SENTINELLE", role2_label="ORACOLI")),
+            advice_lines=["ok"],
+        )
+    )
+    assert "1) **+81 P.A.** per aver coinvolto utenti diversi" in _field_value_by_plain_name(embed, "Punti attribuiti")
+    assert "1) **-32 P.A.** per comportamento simile a spam" in _field_value_by_plain_name(embed, "Punti revocati")
+    missioni = _field_value_by_plain_name(embed, "Missioni completate")
+    assert "SENTINELLE" in missioni
+    assert "ORACOLI" in missioni
