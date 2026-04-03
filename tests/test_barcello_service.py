@@ -216,6 +216,106 @@ def test_reply_target_resolution_uses_batch_lookup_when_referenced_message_is_ou
     assert result.score < 75
 
 
+def test_audio_embed_uses_only_transcription_and_ignores_summary() -> None:
+    service = BarcelloService(FakeDatabase())
+    message = {
+        "author_id": "bot-1",
+        "content": "testo bot che non va contato",
+        "ts": "2026-04-01T10:00:00+00:00",
+        "embeds_json": [
+            {
+                "title": "🎙️ Audio",
+                "description": "Nota vocale di <@111>",
+                "fields": [
+                    {"name": "🗣️ Trascrizione", "value": "oggi sto male ma parlo solo di un tipo fuori"},
+                    {"name": "⏲️ Riassunto", "value": "riassunto aggressivo del bot"},
+                ],
+                "footer": {"text": "audio service"},
+            }
+        ],
+    }
+    normalized = service._normalize_message_for_analysis(message)
+    assert normalized["author_id"] == "111"
+    assert normalized["content"] == "oggi sto male ma parlo solo di un tipo fuori"
+    assert "riassunto aggressivo del bot" not in normalized["content"]
+
+
+def test_audio_aggressive_external_story_isolated_does_not_go_nero() -> None:
+    service = BarcelloService(FakeDatabase())
+    messages = [
+        {
+            "author_id": "bot-1",
+            "content": "",
+            "ts": "2026-04-01T10:00:00+00:00",
+            "embeds_json": [
+                {
+                    "description": "Audio di <@111>",
+                    "fields": [
+                        {"name": "TRASCRIZIONE", "value": "un tizio in strada mi ha aggredito, ero incazzato di brutto"},
+                        {"name": "RIASSUNTO", "value": "lite pesante"},
+                    ],
+                }
+            ],
+        }
+    ]
+    metrics = service._compute_metrics(messages, window_minutes=15)
+    reasons, score = service._score_from_metrics(metrics, score_config={})
+    assert metrics["direct_conflict_index"] == 0
+    assert metrics["black_gate_passed"] is False
+    assert score >= 21
+    assert not any(r["key"] == "mutual_direct_conflict_burst_penalty" and r["weight"] > 0 for r in reasons)
+
+
+def test_audio_vulgar_without_internal_target_stays_non_black() -> None:
+    service = BarcelloService(FakeDatabase())
+    messages = [
+        {
+            "author_id": "bot-1",
+            "content": "",
+            "ts": "2026-04-01T10:00:00+00:00",
+            "embeds_json": [
+                {"description": "Audio di <@111>", "fields": [{"name": "Trascrizione", "value": "che giornata di merda, sono incazzato"}]}
+            ],
+        }
+        for _ in range(4)
+    ]
+    metrics = service._compute_metrics(messages, window_minutes=20)
+    _, score = service._score_from_metrics(metrics, score_config={})
+    assert metrics["direct_conflict_index"] == 0
+    assert score > 20
+
+
+def test_reciprocal_conflict_with_audio_transcriptions_can_reach_black() -> None:
+    service = BarcelloService(FakeDatabase())
+    messages = []
+    for idx in range(6):
+        messages.append(
+            {
+                "author_id": "bot-1",
+                "content": "",
+                "reply_to_author_id": "2",
+                "mentions_json": "[\"2\"]",
+                "ts": f"2026-04-01T10:00:{idx:02d}+00:00",
+                "embeds_json": [{"description": "Audio di <@1>", "fields": [{"name": "Trascrizione", "value": "sei ridicolo <@2>"}]}],
+            }
+        )
+        messages.append(
+            {
+                "author_id": "bot-1",
+                "content": "",
+                "reply_to_author_id": "1",
+                "mentions_json": "[\"1\"]",
+                "ts": f"2026-04-01T10:01:{idx:02d}+00:00",
+                "embeds_json": [{"description": "Audio di <@2>", "fields": [{"name": "Trascrizione", "value": "stai zitto pagliaccio <@1>"}]}],
+            }
+        )
+    metrics = service._compute_metrics(messages, window_minutes=8)
+    _, score = service._score_from_metrics(metrics, score_config={})
+    assert metrics["reciprocal_conflict_pairs"] >= 1
+    assert metrics["black_gate_passed"] is True
+    assert score <= 20
+
+
 def test_short_intense_burst_penalizes_even_if_rest_of_window_is_quiet() -> None:
     service = BarcelloService(FakeDatabase())
     quiet = [

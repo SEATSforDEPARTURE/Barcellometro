@@ -87,6 +87,22 @@ CHALLENGE_PATTERNS = [
     r"\bperche\?+",
 ]
 
+EXTERNAL_CONFLICT_MARKERS = [
+    "mi hanno",
+    "mi ha",
+    "uno mi",
+    "una mi",
+    "fuori",
+    "strada",
+    "lavoro",
+    "scuola",
+    "cliente",
+    "tipo",
+    "tizio",
+    "questa gente",
+    "quello li",
+]
+
 PLAYFUL_MARKERS = [
     "ahah", "haha", "lol", "lmao", "xd", "😂", "🤣", "scherzo", "ironico", "meme", "jk", "kappa", "xD",
 ]
@@ -156,6 +172,107 @@ class BarcelloService:
                 return message.get(key, default)
             except Exception:
                 return default
+
+    def _parse_embeds_payload(self, message: Any) -> list[dict[str, Any]]:
+        raw = self._mget(message, "embeds_json")
+        if isinstance(raw, list):
+            return [item for item in raw if isinstance(item, dict)]
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [item for item in parsed if isinstance(item, dict)]
+            except json.JSONDecodeError:
+                return []
+        return []
+
+    def _extract_audio_embed_parts(self, embeds: list[dict[str, Any]]) -> dict[str, Any]:
+        transcription_chunks: list[str] = []
+        summary_chunks: list[str] = []
+        speaker_id = ""
+        speaker_confidence = 0.0
+
+        def _norm(value: Any) -> str:
+            return self._normalize_text(str(value or ""))
+
+        def _maybe_extract_user_id(text: str) -> str:
+            match = re.search(r"<@!?(\d+)>", text or "")
+            return str(match.group(1)) if match else ""
+
+        for embed in embeds:
+            if not isinstance(embed, dict):
+                continue
+            for candidate in (
+                str(embed.get("description") or ""),
+                str((embed.get("author") or {}).get("name") or ""),
+                str(embed.get("title") or ""),
+            ):
+                extracted_id = _maybe_extract_user_id(candidate)
+                if extracted_id:
+                    speaker_id = extracted_id
+                    speaker_confidence = max(speaker_confidence, 0.95)
+
+            fields = embed.get("fields") if isinstance(embed.get("fields"), list) else []
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                name_raw = str(field.get("name") or "")
+                value_raw = str(field.get("value") or "")
+                name = _norm(name_raw)
+                if not value_raw.strip():
+                    continue
+                if "trascrizione" in name or "transcript" in name or "transcription" in name:
+                    transcription_chunks.append(value_raw.strip())
+                elif "riassunto" in name or "summary" in name:
+                    summary_chunks.append(value_raw.strip())
+                elif ("speaker" in name or "autore" in name or "utente" in name) and not speaker_id:
+                    extracted_id = _maybe_extract_user_id(value_raw)
+                    if extracted_id:
+                        speaker_id = extracted_id
+                        speaker_confidence = max(speaker_confidence, 0.9)
+
+        transcription_text = "\n".join(chunk for chunk in transcription_chunks if chunk).strip()
+        summary_text = "\n".join(chunk for chunk in summary_chunks if chunk).strip()
+        return {
+            "transcription_text": transcription_text,
+            "summary_text": summary_text,
+            "speaker_id": speaker_id,
+            "speaker_confidence": round(speaker_confidence, 3),
+        }
+
+    def _normalize_message_for_analysis(self, message: Any) -> dict[str, Any]:
+        author_id = str(self._mget(message, "author_id") or "unknown")
+        content = (self._mget(message, "content", "") or "").strip()
+        embeds = self._parse_embeds_payload(message)
+        has_audio_source = any(str(embed.get("source") or "").lower() in {"audio_note_stt", "audio_note_it"} for embed in embeds)
+        extracted_audio = self._extract_audio_embed_parts(embeds) if embeds else {}
+        transcription_text = str(extracted_audio.get("transcription_text") or "").strip()
+        speaker_id = str(extracted_audio.get("speaker_id") or "").strip()
+        speaker_confidence = float(extracted_audio.get("speaker_confidence") or 0.0)
+        is_audio_service = bool(has_audio_source or transcription_text)
+
+        normalized_author_id = author_id
+        normalized_content = content
+        speaker_reliable = False
+        if has_audio_source:
+            normalized_content = content
+            normalized_author_id = author_id
+            speaker_reliable = True
+        elif is_audio_service:
+            normalized_content = transcription_text
+            if speaker_id and speaker_confidence >= 0.8:
+                normalized_author_id = speaker_id
+                speaker_reliable = True
+            else:
+                normalized_author_id = f"audio_speaker_unresolved:{author_id}"
+                speaker_reliable = False
+
+        return {
+            "author_id": normalized_author_id,
+            "content": normalized_content,
+            "is_audio_service": is_audio_service,
+            "audio_speaker_reliable": speaker_reliable,
+        }
 
     async def compute_channel(
         self,
@@ -662,7 +779,7 @@ class BarcelloService:
         )
 
     def _compute_metrics(self, messages: list[Any], window_minutes: int) -> dict[str, Any]:
-        message_count = len(messages)
+        message_count = 0
         timestamps: list[datetime] = []
         authors: list[str] = []
         classifications: list[dict[str, Any]] = []
@@ -672,6 +789,7 @@ class BarcelloService:
         reply_count = 0
         directed_conflict_count = 0
         venting_count = 0
+        external_conflict_report_count = 0
         deescalation_count = 0
         hostility_sum = 0.0
         calming_sum = 0.0
@@ -688,10 +806,22 @@ class BarcelloService:
         directed_pairs: dict[tuple[str, str], int] = {}
         directed_event_flags: list[tuple[datetime, int, int]] = []
         event_records: list[dict[str, Any]] = []
+        audio_message_count = 0
+        audio_unreliable_speaker_count = 0
 
         for message in messages:
-            author_id = str(self._mget(message, "author_id") or "unknown")
-            content = (self._mget(message, "content", "") or "").strip()
+            normalized = self._normalize_message_for_analysis(message)
+            author_id = str(normalized["author_id"] or "unknown")
+            content = str(normalized["content"] or "").strip()
+            is_audio_service = bool(normalized["is_audio_service"])
+            audio_speaker_reliable = bool(normalized["audio_speaker_reliable"])
+            if is_audio_service:
+                audio_message_count += 1
+                if not audio_speaker_reliable:
+                    audio_unreliable_speaker_count += 1
+            if not content:
+                continue
+            message_count += 1
             ts = self._parse_ts(self._mget(message, "ts"))
             mentions = self._parse_mentions(message, content)
             reply_to_id = str(self._mget(message, "reply_to_author_id") or "").strip()
@@ -706,6 +836,7 @@ class BarcelloService:
                 author_id=author_id,
                 mentions=mentions,
                 reply_to_id=reply_to_id,
+                allow_direct_conflict=(not is_audio_service) or audio_speaker_reliable,
             )
             classifications.append(classification)
             hostility_sum += float(classification["conflict_score"])
@@ -719,22 +850,28 @@ class BarcelloService:
             hostile_mentions_count += int(classification.get("hostile_mention") or 0)
             playful_hits_total += int(classification.get("playful_hits") or 0)
             affectionate_hits_total += int(classification.get("affectionate_hits") or 0)
-            if classification["classification_label"] == "directed_conflict":
+            if classification["classification_label"] == "directed_internal_conflict":
                 directed_conflict_count += 1
-            if classification["classification_label"] == "venting":
+            if classification["classification_label"] == "venting_isolated":
                 venting_count += 1
+            if classification["classification_label"] == "external_conflict_report":
+                external_conflict_report_count += 1
             if classification["classification_label"] == "deescalation":
                 deescalation_count += 1
             target_id = str(classification.get("primary_target_id") or "")
-            if classification["classification_label"] == "directed_conflict" and target_id:
+            if classification["classification_label"] == "directed_internal_conflict" and target_id:
                 directed_pairs[(author_id, target_id)] = directed_pairs.get((author_id, target_id), 0) + 1
-            if float(classification["aggression_score"]) > 0.55 and float(classification["directedness_score"]) >= 0.55:
+            if (
+                classification["classification_label"] == "directed_internal_conflict"
+                and float(classification["aggression_score"]) > 0.55
+                and float(classification["directedness_score"]) >= 0.55
+            ):
                 aggressive_directed += 1
             directed_event_flags.append(
                 (
                     ts,
-                    1 if classification["classification_label"] == "directed_conflict" else 0,
-                    1 if (classification["classification_label"] == "directed_conflict" and float(classification["aggression_score"]) >= 0.6) else 0,
+                    1 if classification["classification_label"] == "directed_internal_conflict" else 0,
+                    1 if (classification["classification_label"] == "directed_internal_conflict" and float(classification["aggression_score"]) >= 0.6) else 0,
                 )
             )
             event_records.append(
@@ -744,7 +881,7 @@ class BarcelloService:
                     "target_id": target_id,
                     "mentions": mentions,
                     "reply_to_id": reply_to_id,
-                    "is_directed_conflict": classification["classification_label"] == "directed_conflict",
+                    "is_directed_conflict": classification["classification_label"] == "directed_internal_conflict",
                     "aggression_score": float(classification["aggression_score"]),
                     "toxicity_score": float(classification["toxicity_score"]),
                     "directedness_score": float(classification["directedness_score"]),
@@ -837,6 +974,7 @@ class BarcelloService:
             "blasphemy_hits": blasphemy_hits_total,
             "proportion_of_directed_conflict": round(direct_conflict_index, 3),
             "proportion_of_venting": round(venting_index, 3),
+            "external_conflict_report_index": round((external_conflict_report_count / message_count) if message_count else 0.0, 3),
             "proportion_of_deescalation": round(proportion_of_deescalation, 3),
             "reciprocal_conflict_pairs": reciprocal_conflict_pairs,
             "reciprocal_conflict_pairs_high_intensity": reciprocal_conflict_pairs_high_intensity,
@@ -857,6 +995,8 @@ class BarcelloService:
             "std_msgs_per_minute": round(std_msgs_per_minute, 2),
             "burst_ratio": round(burst_ratio, 2),
             "reply_war": reciprocal_conflict_pairs > 0,
+            "audio_message_count": audio_message_count,
+            "audio_unreliable_speaker_count": audio_unreliable_speaker_count,
             "message_classifications": classifications,
         }
 
@@ -952,6 +1092,8 @@ class BarcelloService:
         active_conflict_burst_reciprocity = bool(metrics.get("active_conflict_burst_reciprocity") or False)
         conflict_latch_level = float(metrics.get("conflict_latch_level") or 0.0)
         conflict_latch_active = bool(metrics.get("conflict_latch_active") or False)
+        external_conflict_report_index = float(metrics.get("external_conflict_report_index") or 0.0)
+        message_count = int(metrics.get("message_count") or 0)
         previous_score = metrics.get("previous_score")
 
         intensity_index = min(
@@ -1050,6 +1192,8 @@ class BarcelloService:
             )
 
         venting_penalty = int(round(10 * venting_index * max(0.25, 1.0 - (direct_conflict_index * 1.35))))
+        if direct_conflict_index < 0.12 and external_conflict_report_index > 0:
+            venting_penalty = int(round(venting_penalty * 0.65))
         venting_penalty = min(12, venting_penalty)
         if venting_penalty > 0:
             penalties.append({"key": "venting_penalty", "label": "Sfogo personale", "weight": venting_penalty, "summary": f"indice {venting_index:.2f}"})
@@ -1088,7 +1232,46 @@ class BarcelloService:
         penalties.sort(key=lambda item: abs(int(item["weight"])), reverse=True)
         total_penalty = sum(int(item["weight"]) for item in penalties)
         score = self._clamp_score(100 - total_penalty)
+        black_gate_ok = self._black_state_gate_passed(
+            metrics=metrics,
+            direct_conflict_index=direct_conflict_index,
+            reciprocal_conflict_pairs=reciprocal_conflict_pairs,
+            reply_conflict_density=reply_conflict_density,
+            persistence_conflict=persistence_conflict,
+            local_worst_segment_directed=local_worst_segment_directed,
+            conflict_burst_count=conflict_burst_count,
+            message_count=message_count,
+        )
+        metrics["black_gate_passed"] = black_gate_ok
+        if score <= 20 and not black_gate_ok:
+            penalties.append(
+                {
+                    "key": "black_gate_block",
+                    "label": "Gate anti-collasso (assenza escalation reciproca)",
+                    "weight": -21,
+                    "summary": "NERO richiede conflitto interno cumulativo",
+                }
+            )
+            score = max(21, score)
         return penalties, score
+
+    @staticmethod
+    def _black_state_gate_passed(
+        *,
+        metrics: dict[str, Any],
+        direct_conflict_index: float,
+        reciprocal_conflict_pairs: int,
+        reply_conflict_density: float,
+        persistence_conflict: float,
+        local_worst_segment_directed: int,
+        conflict_burst_count: int,
+        message_count: int,
+    ) -> bool:
+        has_direct_internal_conflict = direct_conflict_index >= 0.22 and local_worst_segment_directed >= 2
+        has_targeting_signal = float(metrics.get("hostile_mentions") or 0.0) >= 0.08 or reply_conflict_density >= 0.55
+        has_reciprocity = reciprocal_conflict_pairs >= 1
+        has_persistence = persistence_conflict > 0.04 or conflict_burst_count >= 2 or message_count >= 12
+        return bool(has_direct_internal_conflict and has_targeting_signal and has_reciprocity and has_persistence)
 
     def _parse_mentions(self, message: Any, content: str) -> list[str]:
         mentions_raw = self._mget(message, "mentions_json")
@@ -1101,7 +1284,15 @@ class BarcelloService:
                 logger.debug("Invalid mentions JSON in message payload")
         return re.findall(r"<@!?(\d+)>", content)
 
-    def _classify_message(self, *, content: str, author_id: str, mentions: list[str], reply_to_id: str) -> dict[str, Any]:
+    def _classify_message(
+        self,
+        *,
+        content: str,
+        author_id: str,
+        mentions: list[str],
+        reply_to_id: str,
+        allow_direct_conflict: bool = True,
+    ) -> dict[str, Any]:
         text = self._normalize_text(content)
         profanity_hits = self._count_keyword_hits(text, PROFANITY_KEYWORDS)
         insult_hits = self._count_keyword_hits(text, INSULT_KEYWORDS)
@@ -1111,6 +1302,7 @@ class BarcelloService:
         negative_hits = self._count_keyword_hits(text, NEGATIVE_KEYWORDS)
         calming_hits = sum(text.count(word) for word in CALMING_KEYWORDS)
         venting_hits = sum(1 for pattern in VENTING_PATTERNS if re.search(pattern, text))
+        external_conflict_hits = sum(1 for marker in EXTERNAL_CONFLICT_MARKERS if marker in text)
         second_person_hits = sum(1 for pattern in SECOND_PERSON_PATTERNS if re.search(pattern, text))
         playful_hits = sum(1 for marker in PLAYFUL_MARKERS if marker in text)
         affectionate_hits = sum(1 for marker in AFFECTIONATE_MARKERS if marker in text)
@@ -1195,21 +1387,23 @@ class BarcelloService:
         label = "neutral"
         if calming_score >= 0.35:
             label = "deescalation"
-        elif direct_conflict_confidence >= 0.58 and directedness_score >= 0.5 and (
+        elif allow_direct_conflict and direct_conflict_confidence >= 0.58 and directedness_score >= 0.5 and (
             insult_hits > 0
             or (profanity_hits > 0 and second_person_hits > 0)
             or (profanity_hits > 0 and has_hard_target)
             or (challenge_hits > 0 and (insult_hits > 0 or aggressive_hits > 0))
         ):
-            label = "directed_conflict"
-        elif conflict_score >= 0.55 and direct_conflict_confidence >= 0.52 and directedness_score >= 0.5 and (
+            label = "directed_internal_conflict"
+        elif allow_direct_conflict and conflict_score >= 0.55 and direct_conflict_confidence >= 0.52 and directedness_score >= 0.5 and (
             aggression_score >= 0.35 or insult_hits > 0 or (profanity_hits > 0 and has_hard_target)
         ):
-            label = "directed_conflict"
+            label = "directed_internal_conflict"
+        elif (external_conflict_hits > 0 or (venting_hits > 0 and "mi " in text)) and not has_hard_target:
+            label = "external_conflict_report"
         elif blasphemy_hits > 0 and not has_direct_target:
-            label = "venting"
+            label = "venting_isolated"
         elif venting_score >= 0.4 and directedness_score < 0.4:
-            label = "venting"
+            label = "venting_isolated"
         elif aggression_score >= 0.4 and directedness_score < 0.5:
             label = "heated_non_conflict"
         elif "grazie" in text or "brav" in text:

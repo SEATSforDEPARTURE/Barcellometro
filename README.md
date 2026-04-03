@@ -141,6 +141,10 @@ Regole operative:
 - I conflitti ravvicinati vengono clusterizzati in **conflict bursts** con `start/end`, partecipanti, severità, conteggio messaggi e reciprocità.
 - È presente un **latch con decay lento**: dopo un burst conflittuale il recupero è graduale (evita rimbalzi verdi immediati).
 - È applicata **hysteresis** sul recupero: l'uscita da stati peggiori è più prudente quando il latch è ancora attivo.
+- I messaggi **audio** contano solo tramite la sezione **TRASCRIZIONE** dell'embed; titolo/footer/testi automatici del bot e sezione **RIASSUNTO** vengono ignorati nel calcolo.
+- Se l'audio non consente di risalire con affidabilità all'autore parlante, il contenuto resta trattato in modalità conservativa (tensione generale) e non può attivare conflitto diretto interno da solo.
+- Le etichette interne distinguono `venting_isolated`, `external_conflict_report`, `directed_internal_conflict`.
+- Lo stato **NERO** richiede gate cumulativo: conflitto diretto interno + targeting/reply reali + reciprocità + persistenza su più messaggi/mini-finestre. Un monologo/sfogo isolato non basta.
 
 ### STT
 - `/audio clips stt_set backend:local|ai`
