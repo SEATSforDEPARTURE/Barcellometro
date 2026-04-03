@@ -167,6 +167,73 @@ def _sanitize_barcello_commentary(line: str) -> str:
     clean = re.sub(r"\s{2,}", " ", clean).strip(" ,.")
     return clean
 
+
+def _rolling_period_to_italian(period_label: str) -> str:
+    clean = re.sub(r"\([^)]*\)", "", str(period_label or "")).strip()
+    match = re.match(r"(?i)^ultim[oaie]\s+(?:(\d+)\s+)?(minuto|minuti|ora|ore|giorno|giorni|settimana|settimane)\b", clean)
+    if not match:
+        return clean or "Nel periodo selezionato"
+    qty = int(match.group(1) or "1")
+    unit = match.group(2).lower()
+    if qty == 1:
+        singular_map = {
+            "minuto": "Nell'ultimo minuto",
+            "minuti": "Nell'ultimo minuto",
+            "ora": "Nell'ultima ora",
+            "ore": "Nell'ultima ora",
+            "giorno": "Nell'ultimo giorno",
+            "giorni": "Nell'ultimo giorno",
+            "settimana": "Nell'ultima settimana",
+            "settimane": "Nell'ultima settimana",
+        }
+        return singular_map.get(unit, "Nell'ultimo periodo")
+    plural_map = {
+        "minuto": "Negli ultimi",
+        "minuti": "Negli ultimi",
+        "giorno": "Negli ultimi",
+        "giorni": "Negli ultimi",
+        "ora": "Nelle ultime",
+        "ore": "Nelle ultime",
+        "settimana": "Nelle ultime",
+        "settimane": "Nelle ultime",
+    }
+    return f"{plural_map.get(unit, 'Negli ultimi')} {qty} {unit}"
+
+
+def _window_header_to_period_and_range(window_header: str) -> tuple[str, str | None]:
+    clean = str(window_header or "").strip()
+    if clean.startswith("**") and clean.endswith("**"):
+        clean = clean[2:-2].strip()
+    clean = clean.replace("🗓️", "").strip()
+    clean = re.sub(r"\s*\n\s*", " ", clean)
+    clean = re.sub(r"\s{2,}", " ", clean).strip()
+    range_match = re.search(r"(\d{2}/\d{2}/\d{4} \d{2}:\d{2})\s*→\s*(\d{2}/\d{2}/\d{4} \d{2}:\d{2})", clean)
+    range_text = f"{range_match.group(1)} → {range_match.group(2)}" if range_match else None
+    if range_match:
+        period_raw = clean[: range_match.start()].strip(" .")
+        if not period_raw:
+            return "Nel periodo selezionato", range_text
+        if period_raw.lower().startswith("ultim"):
+            return _rolling_period_to_italian(period_raw), range_text
+        return period_raw, range_text
+    period_raw = clean or "Nel periodo selezionato"
+    return period_raw, None
+
+
+def _build_barcello_narrative(*, color_label: str, commentary: str) -> str:
+    climate = _sanitize_barcello_commentary(commentary)
+    climate = re.sub(r"(?i)\bnel periodo selezionato\b", "", climate)
+    climate = re.sub(r"(?i)^il barcello è stat[oa]\s+", "", climate).strip(" ,.")
+    climate = re.sub(rf"(?i)^{re.escape(color_label)}\s*,\s*", "", climate).strip(" ,.")
+    climate = re.sub(r"(?i)^con un clima\s+", "", climate).strip(" ,.")
+    climate = re.sub(r"(?i)\bcomplessivamente\b", "", climate)
+    climate = re.sub(r"\s{2,}", " ", climate).strip(" ,.")
+    if not climate:
+        climate = "monitorato dal Barcellometro"
+    if climate.lower() == color_label.lower():
+        climate = "coerente con questo andamento"
+    return f"il barcello è stato **{color_label}**, con un clima **{climate}**"
+
 def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, color: int) -> None:
     for idx, chunk in enumerate(_split_field_value(value, MAX_FIELD_VALUE)):
         field_name = _standard_field_name(name if idx == 0 else f"{name} (cont.)")
@@ -232,11 +299,12 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
-    period_text = _window_header_to_narrative_period(window_header)
-    commentary = _sanitize_barcello_commentary(barcello_line) or "con un clima monitorato dal Barcellometro."
-    if commentary and commentary[-1] not in ".!?":
-        commentary += "."
-    status_description = f"*{period_text} il barcello è stato complessivamente **{color_label}**, {commentary}*"
+    period_text, range_text = _window_header_to_period_and_range(window_header)
+    period_segment = f"**{period_text}**"
+    if range_text:
+        period_segment += f" ({range_text})"
+    narrative = _build_barcello_narrative(color_label=color_label, commentary=barcello_line)
+    status_description = f"*{period_segment} {narrative}.*"
     status_embed = discord.Embed(
         title=format_standard_title(f"RESOCONTO CANALE — #{channel_name}", emoji="📓"),
         description=status_description,
