@@ -583,7 +583,7 @@ def test_scheduled_publish_uses_fallback_title_and_updates_anchor() -> None:
     assert " e il Barcy è " in description
     assert highlighted_segments[1].strip()
     assert highlighted_segments[2].strip()
-    assert "***" not in description
+    assert "****" not in description
     assert description.count("**") == 6
     assert "Barcy" in description
     db.upsert_trigger_barcello_publish_anchor.assert_awaited_once()
@@ -615,7 +615,7 @@ def test_scheduled_update_keeps_template_in_description_and_dynamic_summary_in_t
     assert sent is True
     embed = channel.sent[-1]
     description = str(embed.description or "")
-    assert description == "* Descrizione schedulata **verde stabile**. *"
+    assert description == "*Descrizione schedulata **verde stabile**.*"
     assert "migliorando" not in description
     trend_field = next(field for field in embed.fields if "TREND" in str(field.name or ""))
     trend_lines = [line for line in str(trend_field.value or "").splitlines() if line.strip()]
@@ -635,7 +635,7 @@ def test_scheduled_publish_uses_title_override() -> None:
     embed = channel.sent[-1]
     assert str(embed.title or "") == "🫛 __**TITOLO CUSTOM**__"
     assert str(embed.description or "").startswith("*")
-    assert "***" not in str(embed.description or "")
+    assert "****" not in str(embed.description or "")
 
 
 def test_scheduled_trend_uses_anchor_most_recent() -> None:

@@ -47,6 +47,21 @@ from app.shared.discord.embed_body import (
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
+
+
+def normalize_barcello_description(text: str) -> str:
+    """Normalize Barcello description markdown to a single italic wrapper."""
+    normalized = str(text or "").strip()
+    normalized = re.sub(r"^\s*[•\-]\s*", "", normalized)
+    while normalized.startswith("*") and normalized.endswith("*") and len(normalized) >= 2:
+        normalized = normalized[1:-1].strip()
+    if not normalized:
+        return ""
+    if not (normalized.startswith("*") and normalized.endswith("*")):
+        normalized = f"*{normalized}*"
+    return normalized
+
+
 PHRASE_FALLBACK_TEMPLATES = {
     "DEFAULT": "È la {count_user}ª volta che lo dici. L'ultima è stata {last_seen_human} fa. 👀",
     "FIRST": "È la prima volta che lo dici. 👀",
@@ -1084,7 +1099,9 @@ class TriggerEngineService:
 
         did_notify = False
         if should_notify:
-            update_text = description_text or f"Stato corrente: {self._barcello_state_ui_label(stored_color)}."
+            update_text = description_text or normalize_barcello_description(
+                f"Stato corrente: {self._barcello_state_ui_label(stored_color)}."
+            )
             trend = self._compute_barcello_state_change_trend(
                 previous_same_state_ts=previous_same_state_ts,
                 now=now,
@@ -1093,7 +1110,7 @@ class TriggerEngineService:
             )
             embed = discord.Embed(
                 title=self._render_barcello_alert_title(old_color=prev_color, new_color=stored_color),
-                description=format_standard_description(update_text),
+                description=update_text,
                 color=self._barcello_embed_color(stable_color),
             )
             salute_value = self._render_trigger_health_bar(score=score, color=stored_color)
@@ -2012,7 +2029,7 @@ class TriggerEngineService:
         description = str(main_msg or "").strip()
         if mod_mention:
             description = f"{description} {mod_mention}".strip()
-        return description
+        return normalize_barcello_description(description)
 
     def _build_barcello_recovery_trend_detail(
         self,
@@ -2272,7 +2289,7 @@ class TriggerEngineService:
         rendered = self._render_with_placeholders(template, template_values).strip() if template else ""
         if not rendered:
             rendered = f"{greeting_clean}, sono le **{time_clean}** e il Barcy è **{state_label_clean}**. **{state_comment_clean}**."
-        return f"* {rendered} *"
+        return normalize_barcello_description(rendered)
 
     def _strip_markdown_wrappers(self, value: str) -> str:
         text = str(value or "").strip()
