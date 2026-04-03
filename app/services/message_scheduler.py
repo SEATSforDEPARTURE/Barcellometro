@@ -18,7 +18,7 @@ from app.services.ai import AiService
 from app.services.scheduler_utils import (
     ROME_TZ,
     calculate_initial_next_run,
-    calculate_next_run_after_send,
+    calculate_next_wall_clock_run,
     is_in_quiet_hours,
 )
 
@@ -255,10 +255,17 @@ class MessageSchedulerService:
         campaign_type = str(campaign["type"])
         interval_minutes = int(campaign["interval_minutes"])
         is_one_shot = interval_minutes <= 0
+        due_slot = str(campaign.get("next_run_at") or now.isoformat())
         next_run_dt = (
             now + timedelta(minutes=ONE_SHOT_RETRY_MINUTES)
             if is_one_shot
-            else calculate_next_run_after_send(now, interval_minutes, int(campaign["jitter_seconds"]))
+            else calculate_next_wall_clock_run(
+                now_utc=now,
+                due_slot_iso=due_slot,
+                interval_minutes=interval_minutes,
+                jitter_seconds=int(campaign["jitter_seconds"]),
+                tz=ROME_TZ,
+            )
         )
         next_run_at = next_run_dt.isoformat()
         campaign_channel_id = campaign.get("channel_id")
@@ -281,7 +288,6 @@ class MessageSchedulerService:
             )
             return
         channel_id = str(campaign_channel_id)
-        due_slot = str(campaign.get("next_run_at") or now.isoformat())
         await self._database.update_campaign_next_run(
             guild_id=guild_id,
             campaign_id=campaign_id,
