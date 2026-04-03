@@ -22,6 +22,7 @@ from app.services.database import DatabaseService
 from app.services.content_summary_service import SummaryResult, SummaryService
 from app.shared.discord.embed_limits import _estimate_embed_size, estimate_embeds_total_size
 from app.services.message_name_service import resolve_display_name_from_message_id, resolve_primary_message_id, safe_display_name
+from app.shared.discord.author_pipeline import finalize_embeds_author
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -722,7 +723,6 @@ class ChannelSummaryService:
             used_local_processing=footer_local,
         )
         if len(embeds) >= 2:
-            embeds[1].title = "🗒️ DETTAGLI CANALE (Pag 1/2)"
             attach_footer_meta(
                 embeds[1],
                 service_name="channel_summary",
@@ -735,6 +735,7 @@ class ChannelSummaryService:
             if aura_chars_final > 5800:
                 logger.warning("channel_summary aura_embed_over_budget chars=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
                 embeds = embeds[:2]
+        await finalize_embeds_author(embeds, None, default_service_name="channel_summary")
         try:
             if len(embeds) >= 3:
                 first_batch = embeds[:2]
