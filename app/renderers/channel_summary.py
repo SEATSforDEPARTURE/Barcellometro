@@ -151,6 +151,22 @@ def _standard_field_name(name: str) -> str:
             return format_standard_field_name(raw[len(emoji)+1:].strip(), emoji=emoji)
     return format_standard_field_name(raw)
 
+
+def _window_header_to_narrative_period(window_header: str) -> str:
+    clean = str(window_header or "").strip()
+    if clean.startswith("**") and clean.endswith("**"):
+        clean = clean[2:-2].strip()
+    clean = clean.replace("🗓️", "").strip()
+    clean = re.sub(r"\s*\n\s*", " ", clean)
+    return clean or "Periodo selezionato."
+
+
+def _sanitize_barcello_commentary(line: str) -> str:
+    clean = str(line or "").strip()
+    clean = re.sub(r"\(\s*\d+\s*/\s*100\s*\)", "", clean)
+    clean = re.sub(r"\s{2,}", " ", clean).strip(" ,.")
+    return clean
+
 def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, color: int) -> None:
     for idx, chunk in enumerate(_split_field_value(value, MAX_FIELD_VALUE)):
         field_name = _standard_field_name(name if idx == 0 else f"{name} (cont.)")
@@ -216,16 +232,15 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
+    period_text = _window_header_to_narrative_period(window_header)
+    commentary = _sanitize_barcello_commentary(barcello_line) or "con un clima monitorato dal Barcellometro."
+    if commentary and commentary[-1] not in ".!?":
+        commentary += "."
+    status_description = f"*{period_text} il barcello è stato complessivamente **{color_label}**, {commentary}*"
     status_embed = discord.Embed(
         title=format_standard_title(f"RESOCONTO CANALE — #{channel_name}", emoji="📓"),
-        description=format_standard_description("Sintesi del canale nel periodo selezionato.", italic=False),
+        description=status_description,
         color=embed_color,
-    )
-    status_embed.add_field(name=format_standard_field_name("Periodo", emoji="🕒"), value=window_header, inline=False)
-    status_embed.add_field(
-        name=format_standard_field_name("Allerta", emoji=emoji),
-        value=f"**ALLERTA {alert_label}**\n{barcello_line}",
-        inline=False,
     )
     status_embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=f"{_render_health_bar(barcello_status.score, emoji)} ({barcello_status.score}/100)", inline=False)
     trend_text = trend_value or render_trend_value(barcello_status.trend)
@@ -288,13 +303,12 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
 
 
 def build_channel_summary_insufficient_data_embed(*, channel_name: str, window_header: str) -> discord.Embed:
+    period_text = _window_header_to_narrative_period(window_header)
     embed = discord.Embed(
         title=format_standard_title(f"RESOCONTO CANALE — #{channel_name}", emoji="📓"),
-        description="Dati insufficienti per completare il resoconto.",
+        description=f"*{period_text}: dati insufficienti per completare il resoconto del canale nel periodo selezionato.*",
         color=0x2F3136,
     )
-    embed.add_field(name=format_standard_field_name("Periodo", emoji="🕒"), value=window_header, inline=False)
-    embed.add_field(name=format_standard_field_name("Stato", emoji="⚠️"), value="Dati non sufficienti alla generazione del resoconto.", inline=False)
     attach_footer_meta(embed, service_name="channel_summary", used_local_processing=True)
     attach_author_meta(embed, service_name="channel_summary", canonical_top_level_command="channelsummary")
     attach_embed_images_meta(embed, service_name="channel_summary")
