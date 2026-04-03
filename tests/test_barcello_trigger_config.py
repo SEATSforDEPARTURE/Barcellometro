@@ -25,7 +25,7 @@ if "httpx" not in sys.modules:
     httpx_stub.Client = object
     sys.modules["httpx"] = httpx_stub
 
-from app.services.triggers_service import TriggerEngineService
+from app.services.triggers_service import TriggerEngineService, normalize_barcello_description
 
 
 def _collect_template_strings(node: object, *, in_templates: bool = False) -> list[str]:
@@ -120,7 +120,7 @@ def test_barcello_scheduled_renderer_returns_final_markdown_structure() -> None:
     assert description.startswith("*") and description.endswith("*")
     assert "**9 in punto**" in description
     assert "Barcy è " in description
-    assert "***" not in description
+    assert "•" not in description
     assert description.count("**") >= 2
 
 
@@ -138,4 +138,12 @@ def test_barcello_scheduled_renderer_includes_state_label_for_requested_color() 
     allowed_labels = payload["scheduled_update_phrases"]["states"]["ROSSO"]["labels"]
     assert any(f"**{label}**" in description for label in allowed_labels)
     assert description.startswith("*") and description.endswith("*")
-    assert "***" not in description
+    assert "****" not in description
+
+
+def test_normalize_barcello_description_wraps_plain_text_once() -> None:
+    assert normalize_barcello_description("Testo con **dettagli**") == "*Testo con **dettagli***"
+
+
+def test_normalize_barcello_description_avoids_double_wrapping_and_bullets() -> None:
+    assert normalize_barcello_description("• *Testo già formattato con **dettagli***") == "*Testo già formattato con **dettagli***"

@@ -381,22 +381,22 @@
         "t2": {
           "templates": {
             "VERDE->ROSSO": [
-              "*Seconda volta oggi.* Io sto per impazzire.",
+              "Seconda volta oggi. Io sto per impazzire.",
               "Secondo rosso oggi: state testando il Barcy.",
               "Eccoci di nuovo… secondo rosso oggi."
             ],
             "VERDE->NERO": [
-              "*Seconda volta oggi nel nero.* È troppo.",
+              "Seconda volta oggi nel nero. È troppo.",
               "Nero di nuovo, seconda volta oggi. Stop.",
               "Secondo nero oggi. Qui si fa male qualcuno."
             ],
             "ROSSO_FIRST_TODAY": [
-              "*Seconda volta oggi.* Io sto per impazzire.",
+              "Seconda volta oggi. Io sto per impazzire.",
               "Secondo rosso oggi: state testando il Barcy.",
               "Eccoci di nuovo… secondo rosso oggi."
             ],
             "NERO_FIRST_TODAY": [
-              "*Seconda volta oggi nel nero.* È troppo.",
+              "Seconda volta oggi nel nero. È troppo.",
               "Nero di nuovo, seconda volta oggi. Stop.",
               "Secondo nero oggi. Qui si fa male qualcuno."
             ]
