@@ -397,6 +397,8 @@ class ChannelAuraEmbedData:
     negative_reasons: list[tuple[str, int]]
     missions: ChannelAuraMissionTrend
     advice_lines: list[str]
+    delta_positive: int = 0
+    delta_negative: int = 0
 
 
 def _rank_emoji(rank: int) -> str:
@@ -458,39 +460,90 @@ def _compact_trend_comment(comment: str) -> str:
     return _shorten_with_ellipsis(comment, max_len=52) or "stabile nel periodo"
 
 
-def _build_points_lines(
-    *,
-    positive_reasons: list[tuple[str, int]],
-    negative_reasons: list[tuple[str, int]],
-    max_positive: int,
-    max_negative: int,
-) -> list[str]:
-    lines: list[str] = []
+def _build_positive_points_lines(positive_reasons: list[tuple[str, int]], *, max_items: int) -> list[str]:
     positives = sorted(((reason, int(total)) for reason, total in positive_reasons if int(total) > 0), key=lambda item: item[1], reverse=True)
-    negatives = sorted(((reason, int(total)) for reason, total in negative_reasons if int(total) < 0), key=lambda item: abs(item[1]), reverse=True)
-
-    if positives:
-        lines.append("😇 Punti assegnati:")
-        for idx, (reason, total) in enumerate(positives[:max_positive], start=1):
-            lines.append(f"{idx}) +{total} P.A. {reason}")
-
-    if negatives and max_negative > 0:
-        if lines:
-            lines.append("")
-        lines.append("😈 Punti revocati:")
-        for idx, (reason, total) in enumerate(negatives[:max_negative], start=1):
-            lines.append(f"{idx}) {total} P.A. {reason}")
-
-    if not lines:
-        lines.append("• Nessun dato rilevante nel periodo.")
+    if not positives:
+        return ["• Nessuna attribuzione significativa nel periodo."]
+    lines: list[str] = []
+    for idx, (reason, total) in enumerate(positives[:max_items], start=1):
+        lines.append(f"{idx}) +{total} P.A. {reason}")
     return lines
 
 
+def _build_negative_points_lines(negative_reasons: list[tuple[str, int]], *, max_items: int) -> list[str]:
+    negatives = sorted(((reason, int(total)) for reason, total in negative_reasons if int(total) < 0), key=lambda item: abs(item[1]), reverse=True)
+    if not negatives:
+        return ["• Nessuna revoca significativa nel periodo."]
+    lines: list[str] = []
+    for idx, (reason, total) in enumerate(negatives[:max_items], start=1):
+        lines.append(f"{idx}) {total} P.A. {reason}")
+    return lines
+
+
+def _build_karma_section(*, positive_points: int, negative_points: int) -> tuple[str, str]:
+    assigned = max(0, int(positive_points))
+    revoked = abs(int(negative_points))
+    total = assigned + revoked
+    if total <= 0:
+        axis = "😈━━━━━━⚪━━━━━━😇"
+        comment = "• Dati ancora troppo scarsi per leggere con precisione il karma del periodo."
+        return axis, comment
+
+    ratio = assigned / total
+    marker_idx = min(12, max(0, round(ratio * 12)))
+    segments = ["━"] * 13
+    segments[marker_idx] = "🟡"
+    axis = f"😈{''.join(segments)}😇"
+
+    if ratio >= 0.65:
+        interpretation = "più angelico"
+    elif ratio <= 0.35:
+        interpretation = "più caotico/diabolico"
+    else:
+        interpretation = "equilibrato"
+    return axis, f"• In questo canale il clima aura è risultato **{interpretation}**."
+
+
+def _build_trend_section(*, delta_positive: int, delta_negative: int) -> str:
+    if delta_positive == 0 and delta_negative == 0:
+        return "• Il bilancio aura è rimasto **stabile** rispetto al periodo precedente."
+
+    balance_delta = delta_positive - delta_negative
+    if balance_delta > 0:
+        verdict = "migliorato"
+    elif balance_delta < 0:
+        verdict = "peggiorato"
+    else:
+        verdict = "stabile"
+
+    if delta_positive == 0 and delta_negative == 0:
+        return "• Dati ancora limitati: trend non valutabile con precisione."
+    return (
+        f"• Sono stati assegnati **{delta_positive:+d} P.A.** e revocati **{delta_negative:+d} P.A.** "
+        f"rispetto al periodo precedente. Il karma è **{verdict}**."
+    )
+
+
+def _format_top_row(item: ChannelAuraTopUserItem | None, rank: int, *, compact_comment: bool) -> str:
+    if item is None:
+        return f"{rank:>2} N/A - Nessuno"
+    comment = _compact_trend_comment(item.trend_comment) if compact_comment else _shorten_with_ellipsis(_compact_trend_comment(item.trend_comment), max_len=44)
+    return f"{rank:>2} {_rank_emoji(rank)} {item.trend_emoji} **+{item.score} P.A.** <@{item.user_id}> — {comment}"
+
+
+def _build_mission_lines(m: ChannelAuraMissionTrend) -> list[str]:
+    role1_ratio = f"{m.completed_role1}/{m.eligible_role1}" if m.eligible_role1 > 0 else "0/0"
+    role2_ratio = f"{m.completed_role2}/{m.eligible_role2}" if m.eligible_role2 > 0 else "0/0"
+    return [
+        f"• Ruolo1: **{role1_ratio}** completate ({m.trend_role1[0]} {_compact_trend_comment(m.trend_role1[1])})",
+        f"• Ruolo2: **{role2_ratio}** completate ({m.trend_role2[0]} {_compact_trend_comment(m.trend_role2[1])})",
+        f"• Missioni assegnate: ruolo1 **{m.assigned_role1}**, ruolo2 **{m.assigned_role2}**.",
+    ]
 
 
 def _standard_field(label: str) -> str:
     raw = str(label or "").strip()
-    for emoji in ("📈", "🏆", "🕹️", "📜", "✨", "👤", "🧭", "🧾", "📌", ":bricks:"):
+    for emoji in ("📈", "🏆", "🕹️", "📜", "✨", "👤", "🧭", "🧾", "📌", "😇", "😈", ":bricks:"):
         if raw.startswith(f"{emoji} "):
             return format_standard_field_name(raw[len(emoji)+1:].strip(), emoji=emoji)
     return format_standard_field_name(raw)
@@ -511,74 +564,52 @@ def _compose_channel_aura_embed(
     compact_advice: bool,
     footer_text: str | None,
 ) -> discord.Embed:
-    embed = discord.Embed(title=format_standard_title(title.replace("🗒️ ", ""), emoji="🗒️"), color=0x5865F2)
-    _add_field_with_chunks(
-        embed,
-        name=_standard_field("📈 Panoramica"),
-        value=(
-            f"• Punti assegnati: **+{int(data.positive_points)}**\n"
-            f"• Punti rimossi: **{abs(int(data.negative_points))}**\n"
-            f"• Utenti coinvolti: **{int(data.users_count)}**"
+    embed = discord.Embed(
+        title=format_standard_title(title.replace("📓 ", ""), emoji="📓"),
+        description=(
+            f"*Nel periodo di riferimento sono stati assegnati **{int(data.positive_points)} PUNTI AURA** "
+            f"ai partecipanti coinvolti, mentre **{abs(int(data.negative_points))} PUNTI AURA** "
+            f"sono stati revocati nel canale selezionato.*"
         ),
+        color=0x5865F2,
     )
 
-    rank_lines = [
-        f"• {_rank_emoji(item.rank)}{item.trend_emoji} **+{item.score} P.A.** → <@{item.user_id}> — {(_compact_trend_comment(item.trend_comment) if compact_top_comments else _shorten_with_ellipsis(item.trend_comment, max_len=70))}"
-        for item in data.top_users[:10]
-    ]
+    karma_axis, karma_comment = _build_karma_section(positive_points=data.positive_points, negative_points=data.negative_points)
+    _add_field_with_chunks(embed, name=_standard_field("✨ Karma"), value=f"{karma_axis}\n{karma_comment}")
+
+    trend_text = _build_trend_section(delta_positive=int(data.delta_positive), delta_negative=int(data.delta_negative))
+    _add_field_with_chunks(embed, name=_standard_field("📈 Trend"), value=trend_text)
+
+    rank_lookup = {int(item.rank): item for item in data.top_users[:10]}
+    top_rows = [_format_top_row(rank_lookup.get(rank), rank, compact_comment=compact_top_comments) for rank in range(1, 11)]
+    classifica_value = (
+        "• Alcuni profili hanno guadagnato posizioni, altri le hanno perse, mentre altri sono rimasti stabili.\n"
+        + "\n".join(top_rows)
+    )
+    _add_field_with_chunks(embed, name=_standard_field("🏆 Classifica Top 10"), value=classifica_value)
+
     _add_field_with_chunks(
         embed,
-        name=_standard_field("🏆 Classifica"),
-        value="\n".join(rank_lines) or "• Nessun dato rilevante nel periodo.",
-    )
-
-    points_lines = _build_points_lines(
-        positive_reasons=data.positive_reasons,
-        negative_reasons=data.negative_reasons,
-        max_positive=compact_points[0],
-        max_negative=compact_points[1],
-    )
-    _add_field_with_chunks(
-        embed,
-        name=_standard_field("🕹️ Motivazioni"),
-        value="\n".join(points_lines),
-    )
-
-    m = data.missions
-    role1_emoji, role1_comment = m.trend_role1
-    role2_emoji, role2_comment = m.trend_role2
-    role1_ratio = f"{m.completed_role1}/{m.eligible_role1}" if m.eligible_role1 > 0 else "0/0"
-    role2_ratio = f"{m.completed_role2}/{m.eligible_role2}" if m.eligible_role2 > 0 else "0/0"
-    mission_value = (
-        f"🧭 Assegnate:\n"
-        f"• {m.assigned_role1} missioni da completare a ruolo1\n"
-        f"• {m.assigned_role2} missioni da completare a ruolo2\n\n"
-        f"🎯 Risultati:\n"
-        f"• {role1_ratio} completate da ruolo1 {role1_emoji} {_compact_trend_comment(role1_comment)}\n"
-        f"• {role2_ratio} completate da ruolo2 {role2_emoji} {_compact_trend_comment(role2_comment)}"
-        if compact_missions
-        else (
-            "🧭 Assegnate:\n"
-            f"• {m.assigned_role1} missioni da completare a ruolo1\n"
-            f"• {m.assigned_role2} missioni da completare a ruolo2\n\n"
-            "🎯 Risultati:\n"
-            f"• {role1_ratio} completate da ruolo1 {role1_emoji} {_compact_trend_comment(role1_comment)}\n"
-            f"• {role2_ratio} completate da ruolo2 {role2_emoji} {_compact_trend_comment(role2_comment)}"
-        )
+        name=_standard_field("😇 Punti attribuiti"),
+        value="\n".join(_build_positive_points_lines(data.positive_reasons, max_items=compact_points[0])),
     )
     _add_field_with_chunks(
         embed,
-        name=_standard_field("📜 Missioni"),
-        value=mission_value,
+        name=_standard_field("😈 Punti revocati"),
+        value="\n".join(_build_negative_points_lines(data.negative_reasons, max_items=compact_points[1])),
     )
 
-    advice_max_len = 80 if compact_advice else 120
-    advice_lines = [_shorten_with_ellipsis(line, max_len=advice_max_len) for line in data.advice_lines[:advice_limit]]
-    _add_field_with_chunks(
-        embed,
-        name=_standard_field("✨ I consigli del barcellometro"),
-        value="\n".join(f"• {line}" for line in advice_lines) or "• Nessun consiglio disponibile.",
-    )
+    mission_lines = _build_mission_lines(data.missions)
+    if compact_missions:
+        mission_lines = mission_lines[:2]
+    _add_field_with_chunks(embed, name=_standard_field("📜 Missioni completate"), value="\n".join(mission_lines) or "• Nessuna missione completata nel periodo (0/0).")
+
+    advice_max_len = 84 if compact_advice else 120
+    advice_lines = [_shorten_with_ellipsis(line, max_len=advice_max_len) for line in data.advice_lines[:advice_limit] if str(line).strip()]
+    if not advice_lines:
+        advice_lines = ["Consolidate il coinvolgimento del canale con interazioni costruttive e missioni giornaliere."]
+    _add_field_with_chunks(embed, name=_standard_field("🧭 I consigli del barcellometro"), value="\n".join(f"• {line}" for line in advice_lines))
+
     if footer_text:
         logger.debug("aura_footer_note_delegated_to_central_pipeline=%s", footer_text)
     attach_footer_meta(embed, service_name="aura", used_local_processing=True)
@@ -590,7 +621,7 @@ def _compose_channel_aura_embed(
 def build_channel_aura_embed(
     *,
     data: ChannelAuraEmbedData,
-    title: str = "🗒️ DETTAGLI PUNTI AURA (Pag 2/2)",
+    title: str = "📓 __**RESOCONTO CANALE · AURA**__",
     footer_text: str = "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
     max_chars: int = AURA_DETAILS_INTERNAL_BUDGET,
 ) -> discord.Embed:
