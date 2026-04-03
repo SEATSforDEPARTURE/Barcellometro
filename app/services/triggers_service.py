@@ -1072,22 +1072,18 @@ class TriggerEngineService:
             state_count_today=state_count_today,
             last_in_state_human=last_in_state_human,
         )
-        main_msg = self._decorate_barcello_transition_message(
-            previous_state=prev_color,
-            current_state=stored_color,
-            main_msg=main_msg,
-            recovery_type=recovery_type,
-        )
         mod_mention = ""
         if stored_color in {"ROSSO", "NERO"} and prev_color != stored_color:
             mod_role_id = str(config.get("mod_role_id") or "").strip()
             mod_mention = f"<@&{mod_role_id}>" if mod_role_id else ""
-            if mod_mention:
-                main_msg = f"{main_msg} {mod_mention}".strip()
+        description_text = self._build_barcello_description_from_template(
+            main_msg,
+            mod_mention=mod_mention,
+        )
 
         did_notify = False
         if should_notify:
-            update_text = main_msg or f"Stato corrente: {self._barcello_state_ui_label(stored_color)}."
+            update_text = description_text or f"Stato corrente: {self._barcello_state_ui_label(stored_color)}."
             trend = self._compute_barcello_state_change_trend(
                 previous_same_state_ts=previous_same_state_ts,
                 now=now,
@@ -1103,10 +1099,11 @@ class TriggerEngineService:
             embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
             trend_lines = [
                 trend["trend_line"],
-                self._render_barcello_trend_comment(
-                    state=stored_color,
-                    delta_score=int(trend["delta_score"]),
+                self._build_barcello_trend_detail_line(
+                    previous_state=prev_color,
+                    current_state=stored_color,
                     recovery_type=recovery_type,
+                    delta_score=int(trend["delta_score"]),
                     status=status,
                 ),
             ]
@@ -1389,8 +1386,9 @@ class TriggerEngineService:
         embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=salute_value, inline=False)
         trend_lines = [
             trend["trend_line"],
-            self._render_barcello_trend_comment(
-                state=current_color,
+            self._build_barcello_trend_detail_line(
+                previous_state=None,
+                current_state=current_color,
                 delta_score=int(trend["delta_score"]),
                 recovery_type="active",
                 status=status,
@@ -2002,27 +2000,52 @@ class TriggerEngineService:
             return "passive"
         return "active"
 
-    def _decorate_barcello_transition_message(
+    def _build_barcello_description_from_template(self, main_msg: str, *, mod_mention: str = "") -> str:
+        description = str(main_msg or "").strip()
+        if mod_mention:
+            description = f"{description} {mod_mention}".strip()
+        return description
+
+    def _build_barcello_recovery_trend_detail(
         self,
         *,
         previous_state: str | None,
         current_state: str,
-        main_msg: str,
         recovery_type: str,
-    ) -> str:
+    ) -> str | None:
         if previous_state is None:
-            return main_msg
+            return None
         severity_rank = {"VERDE": 0, "GIALLO": 1, "ROSSO": 2, "NERO": 3}
         prev_rank = severity_rank.get(previous_state, 0)
         cur_rank = severity_rank.get(current_state, 0)
         if cur_rank >= prev_rank:
-            return main_msg
-        state_label = f"**{current_state}**"
+            return None
         if recovery_type == "passive":
-            intro = f"Rientro nel verde: {state_label}. 🌿" if current_state == "VERDE" else f"Rientro in {state_label}. 🌿"
-            return f"{intro}\nIl clima si è **stabilizzato** per assenza di tensioni."
-        intro = f"Rientro nel verde: {state_label}. 📈" if current_state == "VERDE" else f"Rientro in {state_label}. 📈"
-        return f"{intro}\nIl clima sta **migliorando** con una conversazione attiva."
+            return "Il clima si è **stabilizzato** per assenza di tensioni."
+        return "Il clima sta **migliorando** con una conversazione attiva."
+
+    def _build_barcello_trend_detail_line(
+        self,
+        *,
+        previous_state: str | None,
+        current_state: str,
+        recovery_type: str,
+        delta_score: int,
+        status: dict[str, object] | None = None,
+    ) -> str:
+        recovery_detail = self._build_barcello_recovery_trend_detail(
+            previous_state=previous_state,
+            current_state=current_state,
+            recovery_type=recovery_type,
+        )
+        if recovery_detail:
+            return f"• {recovery_detail}"
+        return self._render_barcello_trend_comment(
+            state=current_state,
+            delta_score=delta_score,
+            recovery_type=recovery_type,
+            status=status,
+        )
 
     def _render_barcello_trend_comment(
         self,
@@ -2208,7 +2231,6 @@ class TriggerEngineService:
         trend: dict[str, Any],
         now_rome: datetime,
     ) -> str:
-        _ = score
         _ = trend
         scheduled_phrases = cfg.get("scheduled_update_phrases") if isinstance(cfg.get("scheduled_update_phrases"), dict) else {}
         time_bucket = self._scheduled_time_bucket(now_rome.hour)
@@ -2229,11 +2251,20 @@ class TriggerEngineService:
         greeting_clean = self._strip_markdown_wrappers(greeting)
         time_clean = self._strip_markdown_wrappers(time_phrase)
         state_label_clean = self._strip_markdown_wrappers(state_label)
-        state_comment_clean = self._strip_markdown_wrappers(state_comment).rstrip(".")
-        return (
-            f"*{greeting_clean}, sono le **{time_clean}** e il Barcy è **{state_label_clean}**. "
-            f"**{state_comment_clean}**.*"
-        )
+        state_comment_clean = self._strip_markdown_wrappers(state_comment)
+
+        template = self._select_barcello_scheduled_template(cfg, current_color=current_color)
+        template_values = {
+            "greeting": greeting_clean,
+            "time_phrase": f"**{time_clean}**",
+            "state_label": f"**{state_label_clean}**",
+            "score": str(int(score)),
+            "state_comment": f"**{state_comment_clean}**",
+        }
+        rendered = self._render_with_placeholders(template, template_values).strip() if template else ""
+        if not rendered:
+            rendered = f"{greeting_clean}, sono le **{time_clean}** e il Barcy è **{state_label_clean}**. **{state_comment_clean}**."
+        return f"* {rendered} *"
 
     def _strip_markdown_wrappers(self, value: str) -> str:
         text = str(value or "").strip()
