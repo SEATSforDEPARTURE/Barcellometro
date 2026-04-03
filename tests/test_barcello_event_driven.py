@@ -435,7 +435,7 @@ def test_recovery_type_passive_trend_mentions_low_activity() -> None:
     assert out["notified"] is True
     trend_field = next(field for field in channel.sent[0].fields if "TREND" in str(field.name or ""))
     value = str(trend_field.value or "")
-    assert "Recupero **passivo**" in value
+    assert "stabilizzato" in value
 
 
 def test_recovery_description_is_bold_and_contextual() -> None:
@@ -444,8 +444,35 @@ def test_recovery_description_is_bold_and_contextual() -> None:
     out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
     assert out["notified"] is True
     description = str(channel.sent[0].description or "")
-    assert "Rientro nel verde: **VERDE**. 🌿" in description
-    assert "**stabilizzato**" in description
+    assert "stabilizzato" not in description
+    trend_field = next(field for field in channel.sent[0].fields if "TREND" in str(field.name or ""))
+    trend_lines = [line for line in str(trend_field.value or "").splitlines() if line.strip()]
+    assert trend_lines[1] == "• Il clima si è **stabilizzato** per assenza di tensioni."
+
+
+def test_state_change_description_uses_only_template_and_moves_dynamic_summary_to_trend() -> None:
+    cfg = {
+        "window_minutes": 60,
+        "min_messages": 1,
+        "event_driven": {"minor_state_confirm_seconds": 180},
+        "cooldown_minutes": {"minor": 20, "major": 8, "recovery": 60},
+        "recovery": {"enabled": True, "poll_seconds": 300, "min_quiet_minutes": 12},
+        "templates": {"GIALLO->VERDE": "Template transizione dal JSON."},
+    }
+    service, db, channel, _ai = _base_service({"last_color": "GIALLO", "last_score": 45}, {"color": "VERDE", "score": 78}, cfg=cfg)
+    db.fetchone = AsyncMock(side_effect=[{"count": 20}, {"count": 22}])
+
+    out = asyncio.run(service.run_barcello_trigger_now("1", "2", force_publish=True))
+
+    assert out["notified"] is True
+    embed = channel.sent[0]
+    description = str(embed.description or "")
+    assert "Template transizione dal JSON." in description
+    assert "migliorando con una conversazione attiva" not in description
+    trend_field = next(field for field in embed.fields if "TREND" in str(field.name or ""))
+    trend_lines = [line for line in str(trend_field.value or "").splitlines() if line.strip()]
+    assert trend_lines[1] == "• Il clima sta **migliorando** con una conversazione attiva."
+    assert "Template transizione dal JSON." not in trend_lines[1]
 
 
 def test_run_barcello_trigger_now_pair_mode_uses_compute_pair() -> None:
@@ -560,6 +587,41 @@ def test_scheduled_publish_uses_fallback_title_and_updates_anchor() -> None:
     assert description.count("**") == 6
     assert "Barcy" in description
     db.upsert_trigger_barcello_publish_anchor.assert_awaited_once()
+
+
+def test_scheduled_update_keeps_template_in_description_and_dynamic_summary_in_trend() -> None:
+    cfg = {
+        "window_minutes": 60,
+        "min_messages": 1,
+        "event_driven": {"minor_state_confirm_seconds": 180},
+        "cooldown_minutes": {"minor": 20, "major": 8, "recovery": 60},
+        "recovery": {"enabled": True, "poll_seconds": 300, "min_quiet_minutes": 12},
+        "scheduled_update_templates": {"by_state": {"VERDE": ["Descrizione schedulata {state_label}."]}},
+        "scheduled_update_phrases": {
+            "states": {"VERDE": {"labels": ["verde stabile"], "comments": ["commento"]}},
+            "time_buckets": {"morning": ["ciao"]},
+        },
+    }
+    service, db, channel, _ai = _base_service(
+        {"last_color": "VERDE", "last_score": 70},
+        {"color": "VERDE", "score": 88, "reason": "healthy_activity_bonus", "metrics": {"msg_per_min": 4.2}},
+        cfg=cfg,
+    )
+    db.get_trigger_barcello_publish_anchor = AsyncMock(return_value=None)
+    schedule = {"id": 1, "guild_id": "1", "channel_id": "2", "every_minutes": 30}
+
+    sent = asyncio.run(service._publish_barcello_scheduled_update(schedule))
+
+    assert sent is True
+    embed = channel.sent[-1]
+    description = str(embed.description or "")
+    assert description == "* Descrizione schedulata **verde stabile**. *"
+    assert "migliorando" not in description
+    trend_field = next(field for field in embed.fields if "TREND" in str(field.name or ""))
+    trend_lines = [line for line in str(trend_field.value or "").splitlines() if line.strip()]
+    assert len(trend_lines) == 2
+    assert "miglior" in trend_lines[1]
+    assert "Descrizione schedulata" not in trend_lines[1]
 
 
 def test_scheduled_publish_uses_title_override() -> None:
