@@ -373,6 +373,7 @@ class ChannelAuraTopUserItem:
     trend_emoji: str
     trend_comment: str
     rank: int
+    movement: str = "stable"
 
 
 @dataclass
@@ -385,6 +386,8 @@ class ChannelAuraMissionTrend:
     eligible_role2: int
     trend_role1: tuple[str, str]
     trend_role2: tuple[str, str]
+    role1_label: str = "PLUS"
+    role2_label: str = "PRO"
 
 
 @dataclass
@@ -397,8 +400,8 @@ class ChannelAuraEmbedData:
     negative_reasons: list[tuple[str, int]]
     missions: ChannelAuraMissionTrend
     advice_lines: list[str]
-    delta_positive: int = 0
-    delta_negative: int = 0
+    previous_positive_points: int = 0
+    previous_negative_points: int = 0
 
 
 def _rank_emoji(rank: int) -> str:
@@ -445,8 +448,10 @@ def _shorten_with_ellipsis(text: str, *, max_len: int) -> str:
 
 def _compact_trend_comment(comment: str) -> str:
     low = str(comment or "").lower()
+    if "prima volta in classifica" in low:
+        return "prima volta in classifica"
     if "nuovo ingresso" in low:
-        return "nuovo ingresso nel ranking"
+        return "nuovo ingresso nel periodo"
     if "sale" in low and "classifica" in low:
         return "sale in classifica"
     if "perde" in low and "posizion" in low:
@@ -466,7 +471,7 @@ def _build_positive_points_lines(positive_reasons: list[tuple[str, int]], *, max
         return ["• Nessuna attribuzione significativa nel periodo."]
     lines: list[str] = []
     for idx, (reason, total) in enumerate(positives[:max_items], start=1):
-        lines.append(f"{idx}) +{total} P.A. {reason}")
+        lines.append(f"{idx}) **+{total} P.A.** {reason}")
     return lines
 
 
@@ -476,51 +481,63 @@ def _build_negative_points_lines(negative_reasons: list[tuple[str, int]], *, max
         return ["• Nessuna revoca significativa nel periodo."]
     lines: list[str] = []
     for idx, (reason, total) in enumerate(negatives[:max_items], start=1):
-        lines.append(f"{idx}) {total} P.A. {reason}")
+        lines.append(f"{idx}) **{total} P.A.** {reason}")
     return lines
 
 
-def _build_karma_section(*, positive_points: int, negative_points: int) -> tuple[str, str]:
+def _channel_karma_score(*, positive_points: int, negative_points: int) -> float | None:
     assigned = max(0, int(positive_points))
     revoked = abs(int(negative_points))
     total = assigned + revoked
     if total <= 0:
+        return None
+    return (assigned - revoked) / total
+
+
+def _build_karma_section(*, karma_score: float | None, trend_direction: str) -> tuple[str, str]:
+    if karma_score is None:
         axis = "😈━━━━━━⚪━━━━━━😇"
         comment = "• Dati ancora troppo scarsi per leggere con precisione il karma del periodo."
         return axis, comment
 
-    ratio = assigned / total
+    ratio = (karma_score + 1.0) / 2.0
     marker_idx = min(12, max(0, round(ratio * 12)))
     segments = ["━"] * 13
     segments[marker_idx] = "🟡"
     axis = f"😈{''.join(segments)}😇"
 
-    if ratio >= 0.65:
+    if karma_score >= 0.25:
         interpretation = "più angelico"
-    elif ratio <= 0.35:
+    elif karma_score <= -0.25:
         interpretation = "più caotico/diabolico"
     else:
         interpretation = "equilibrato"
-    return axis, f"• In questo canale il clima aura è risultato **{interpretation}**."
+    trend_suffix = ""
+    if trend_direction == "improved":
+        trend_suffix = " e in **miglioramento**"
+    elif trend_direction == "worsened":
+        trend_suffix = " ma in **peggioramento**"
+    return axis, f"• Nel periodo corrente il clima aura è risultato **{interpretation}**{trend_suffix}."
 
 
-def _build_trend_section(*, delta_positive: int, delta_negative: int) -> str:
-    if delta_positive == 0 and delta_negative == 0:
-        return "• Il bilancio aura è rimasto **stabile** rispetto al periodo precedente."
+def _build_trend_section(*, current_score: float | None, previous_score: float | None, delta_positive: int, delta_negative: int) -> tuple[str, str]:
+    if current_score is None or previous_score is None:
+        return ("unknown", "• Dati ancora limitati: trend non valutabile con precisione.")
 
-    balance_delta = delta_positive - delta_negative
-    if balance_delta > 0:
+    delta_score = current_score - previous_score
+    if delta_score > 0.01:
         verdict = "migliorato"
-    elif balance_delta < 0:
+        direction = "improved"
+    elif delta_score < -0.01:
         verdict = "peggiorato"
+        direction = "worsened"
     else:
         verdict = "stabile"
-
-    if delta_positive == 0 and delta_negative == 0:
-        return "• Dati ancora limitati: trend non valutabile con precisione."
+        direction = "stable"
     return (
+        direction,
         f"• Sono stati assegnati **{delta_positive:+d} P.A.** e revocati **{delta_negative:+d} P.A.** "
-        f"rispetto al periodo precedente. Il karma è **{verdict}**."
+        f"rispetto al periodo precedente. Lo stesso indicatore karma è **{verdict}**.",
     )
 
 
@@ -534,10 +551,12 @@ def _format_top_row(item: ChannelAuraTopUserItem | None, rank: int, *, compact_c
 def _build_mission_lines(m: ChannelAuraMissionTrend) -> list[str]:
     role1_ratio = f"{m.completed_role1}/{m.eligible_role1}" if m.eligible_role1 > 0 else "0/0"
     role2_ratio = f"{m.completed_role2}/{m.eligible_role2}" if m.eligible_role2 > 0 else "0/0"
+    role1_label = str(m.role1_label or "PLUS").strip().upper()
+    role2_label = str(m.role2_label or "PRO").strip().upper()
     return [
-        f"• Ruolo1: **{role1_ratio}** completate ({m.trend_role1[0]} {_compact_trend_comment(m.trend_role1[1])})",
-        f"• Ruolo2: **{role2_ratio}** completate ({m.trend_role2[0]} {_compact_trend_comment(m.trend_role2[1])})",
-        f"• Missioni assegnate: ruolo1 **{m.assigned_role1}**, ruolo2 **{m.assigned_role2}**.",
+        f"• {role1_label}: **{role1_ratio}** completate ({m.trend_role1[0]} {_compact_trend_comment(m.trend_role1[1])})",
+        f"• {role2_label}: **{role2_ratio}** completate ({m.trend_role2[0]} {_compact_trend_comment(m.trend_role2[1])})",
+        f"• Missioni assegnate: {role1_label} **{m.assigned_role1}**, {role2_label} **{m.assigned_role2}**.",
     ]
 
 
@@ -574,41 +593,52 @@ def _compose_channel_aura_embed(
         color=0x5865F2,
     )
 
-    karma_axis, karma_comment = _build_karma_section(positive_points=data.positive_points, negative_points=data.negative_points)
-    _add_field_with_chunks(embed, name=_standard_field("✨ Karma"), value=f"{karma_axis}\n{karma_comment}")
-
-    trend_text = _build_trend_section(delta_positive=int(data.delta_positive), delta_negative=int(data.delta_negative))
-    _add_field_with_chunks(embed, name=_standard_field("📈 Trend"), value=trend_text)
+    current_score = _channel_karma_score(positive_points=data.positive_points, negative_points=data.negative_points)
+    previous_score = _channel_karma_score(positive_points=data.previous_positive_points, negative_points=data.previous_negative_points)
+    delta_positive = int(data.positive_points) - int(data.previous_positive_points)
+    delta_negative = abs(int(data.negative_points)) - abs(int(data.previous_negative_points))
+    trend_direction, trend_text = _build_trend_section(
+        current_score=current_score,
+        previous_score=previous_score,
+        delta_positive=delta_positive,
+        delta_negative=delta_negative,
+    )
+    karma_axis, karma_comment = _build_karma_section(karma_score=current_score, trend_direction=trend_direction)
+    _add_field_with_chunks(embed, name="✨ Karma", value=f"{karma_axis}\n{karma_comment}")
+    _add_field_with_chunks(embed, name="📈 Trend", value=trend_text)
 
     rank_lookup = {int(item.rank): item for item in data.top_users[:10]}
     top_rows = [_format_top_row(rank_lookup.get(rank), rank, compact_comment=compact_top_comments) for rank in range(1, 11)]
+    climbed = sum(1 for item in data.top_users[:10] if str(item.movement) == "up")
+    dropped = sum(1 for item in data.top_users[:10] if str(item.movement) == "down")
+    stable = sum(1 for item in data.top_users[:10] if str(item.movement) == "stable")
     classifica_value = (
-        "• Alcuni profili hanno guadagnato posizioni, altri le hanno perse, mentre altri sono rimasti stabili.\n"
+        f"• **{climbed}** profili **salgono**, **{dropped}** **perdono** posizioni e **{stable}** restano **stabili** nel ranking.\n"
         + "\n".join(top_rows)
     )
-    _add_field_with_chunks(embed, name=_standard_field("🏆 Classifica Top 10"), value=classifica_value)
+    _add_field_with_chunks(embed, name="🏆 Classifica Top 10", value=classifica_value)
 
     _add_field_with_chunks(
         embed,
-        name=_standard_field("😇 Punti attribuiti"),
+        name="😇 Punti attribuiti",
         value="\n".join(_build_positive_points_lines(data.positive_reasons, max_items=compact_points[0])),
     )
     _add_field_with_chunks(
         embed,
-        name=_standard_field("😈 Punti revocati"),
+        name="😈 Punti revocati",
         value="\n".join(_build_negative_points_lines(data.negative_reasons, max_items=compact_points[1])),
     )
 
     mission_lines = _build_mission_lines(data.missions)
     if compact_missions:
         mission_lines = mission_lines[:2]
-    _add_field_with_chunks(embed, name=_standard_field("📜 Missioni completate"), value="\n".join(mission_lines) or "• Nessuna missione completata nel periodo (0/0).")
+    _add_field_with_chunks(embed, name="📜 Missioni completate", value="\n".join(mission_lines) or "• Nessuna missione completata nel periodo (0/0).")
 
     advice_max_len = 84 if compact_advice else 120
     advice_lines = [_shorten_with_ellipsis(line, max_len=advice_max_len) for line in data.advice_lines[:advice_limit] if str(line).strip()]
     if not advice_lines:
         advice_lines = ["Consolidate il coinvolgimento del canale con interazioni costruttive e missioni giornaliere."]
-    _add_field_with_chunks(embed, name=_standard_field("🧭 I consigli del barcellometro"), value="\n".join(f"• {line}" for line in advice_lines))
+    _add_field_with_chunks(embed, name="🧭 I consigli del barcellometro", value="\n".join(f"• {line}" for line in advice_lines))
 
     if footer_text:
         logger.debug("aura_footer_note_delegated_to_central_pipeline=%s", footer_text)
