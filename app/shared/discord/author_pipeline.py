@@ -96,14 +96,16 @@ def set_logical_author_pagination(embeds: Iterable[discord.Embed] | None) -> lis
         meta = get_author_meta(embed)
         if meta is None:
             continue
+        logical_page_index = meta.logical_page_index if meta.logical_page_index is not None else (idx if total > 1 else None)
+        logical_page_total = meta.logical_page_total if meta.logical_page_total is not None else (total if total > 1 else None)
         attach_author_meta(
             embed,
             service_name=meta.service_name,
             canonical_top_level_command=meta.canonical_top_level_command,
             author_icon_url=meta.author_icon_url,
             author_url=meta.author_url,
-            logical_page_index=idx if total > 1 else None,
-            logical_page_total=total if total > 1 else None,
+            logical_page_index=logical_page_index,
+            logical_page_total=logical_page_total,
             minimal=meta.minimal,
             skip=meta.skip,
             preserve_existing=meta.preserve_existing,

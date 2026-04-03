@@ -212,19 +212,22 @@ def _window_header_to_period_and_range(window_header: str) -> tuple[str, str | N
     if range_match:
         period_raw = clean[: range_match.start()].strip(" .")
         if not period_raw:
-            return "Nel periodo selezionato", range_text
+            return "Periodo selezionato", range_text
         if period_raw.lower().startswith("ultim"):
             return _rolling_period_to_italian(period_raw), range_text
         return period_raw, range_text
-    period_raw = clean or "Nel periodo selezionato"
+    period_raw = clean or "Periodo selezionato"
     return period_raw, None
 
 
-def _build_barcello_narrative(*, color_label: str, commentary: str) -> str:
+def _extract_climate_description(*, color_label: str, commentary: str) -> str:
     climate = _sanitize_barcello_commentary(commentary)
-    climate = re.sub(r"(?i)\bnel periodo selezionato\b", "", climate)
+    climate = re.sub(r"(?i)\b(?:nel\s+)?periodo selezionato\b", "", climate)
     climate = re.sub(r"(?i)^il barcello è stat[oa]\s+", "", climate).strip(" ,.")
     climate = re.sub(rf"(?i)^{re.escape(color_label)}\s*,\s*", "", climate).strip(" ,.")
+    climate = re.sub(r"(?i)^Nella giornata di(?: oggi| ieri)?\s+", "", climate).strip(" ,.")
+    climate = re.sub(r"(?i)^Nel periodo selezionato\s+", "", climate).strip(" ,.")
+    climate = re.sub(r"(?i)^il barcello è rimasto\s+", "", climate).strip(" ,.")
     climate = re.sub(r"(?i)^con un clima\s+", "", climate).strip(" ,.")
     climate = re.sub(r"(?i)\bcomplessivamente\b", "", climate)
     climate = re.sub(r"\s{2,}", " ", climate).strip(" ,.")
@@ -232,7 +235,14 @@ def _build_barcello_narrative(*, color_label: str, commentary: str) -> str:
         climate = "monitorato dal Barcellometro"
     if climate.lower() == color_label.lower():
         climate = "coerente con questo andamento"
-    return f"il barcello è stato **{color_label}**, con un clima **{climate}**"
+    return climate
+
+
+def _build_channel_summary_overview_description(*, period_text: str, range_text: str | None, color_label: str, climate_description: str) -> str:
+    period_segment = f"**{period_text}**"
+    if range_text:
+        period_segment += f" ({range_text})"
+    return f"*{period_segment} il barcello è stato **{color_label}**, con un clima **{climate_description}**.*"
 
 def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, color: int) -> None:
     for idx, chunk in enumerate(_split_field_value(value, MAX_FIELD_VALUE)):
@@ -300,11 +310,13 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
     embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
     period_text, range_text = _window_header_to_period_and_range(window_header)
-    period_segment = f"**{period_text}**"
-    if range_text:
-        period_segment += f" ({range_text})"
-    narrative = _build_barcello_narrative(color_label=color_label, commentary=barcello_line)
-    status_description = f"*{period_segment} {narrative}.*"
+    climate_description = _extract_climate_description(color_label=color_label, commentary=barcello_line)
+    status_description = _build_channel_summary_overview_description(
+        period_text=period_text,
+        range_text=range_text,
+        color_label=color_label,
+        climate_description=climate_description,
+    )
     status_embed = discord.Embed(
         title=format_standard_title(f"RESOCONTO CANALE — #{channel_name}", emoji="📓"),
         description=status_description,
@@ -318,7 +330,13 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
     attach_author_meta(status_embed, service_name="channel_summary", canonical_top_level_command="channelsummary")
     attach_embed_images_meta(status_embed, service_name="channel_summary")
 
-    pages: list[discord.Embed] = [discord.Embed(title=format_standard_title("DETTAGLI", emoji="🗒️"), color=0x95A5A6)]
+    pages: list[discord.Embed] = [
+        discord.Embed(
+            title=format_standard_title("DETTAGLI", emoji="🗒️"),
+            description="*Andiamo a leggere cosa è successo...*",
+            color=0x95A5A6,
+        )
+    ]
     themes = [_as_hashtag(theme) for theme in summary_result.themes if str(theme or "").strip()]
     _add_field_chunked(pages, name="🏷️ TEMI", value=", ".join(themes) if themes else "Nessun tema rilevato.", color=0x95A5A6)
 

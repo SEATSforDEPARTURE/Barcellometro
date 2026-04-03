@@ -15,6 +15,7 @@ class AiService:
     OLLAMA_SLOW_TASKS: frozenset[str] = frozenset({"summary", "server_summary", "campaign_editorial"})
     OLLAMA_SLOW_TASK_TIMEOUT_SECONDS: float = 90.0
     OLLAMA_SUMMARY_TIMEOUT_SECONDS: float = 150.0
+    OPENAI_SUMMARY_TIMEOUT_SECONDS: float = 60.0
     OLLAMA_CAMPAIGN_PROMPT_TIMEOUT_SECONDS: float = 120.0
     SUPPORTED_MODEL_TASKS: tuple[str, ...] = (
         "summary",
@@ -292,6 +293,8 @@ class AiService:
             return None
 
     def _resolve_timeout(self, task: str, provider: str, requested_timeout: float) -> float:
+        if provider == "openai" and task == "summary":
+            return max(requested_timeout, self.OPENAI_SUMMARY_TIMEOUT_SECONDS)
         if provider == "ollama" and task == "summary":
             return max(requested_timeout, self.OLLAMA_SUMMARY_TIMEOUT_SECONDS)
         if provider == "ollama" and task == "campaign_prompt":
