@@ -15,6 +15,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - exercised via test environment shims
     aiosqlite = None  # type: ignore[assignment]
 from zoneinfo import ZoneInfo
+from app.services.scheduler_utils import calculate_next_summary_schedule_run_utc
 
 logger = logging.getLogger(__name__)
 
@@ -4090,17 +4091,13 @@ class DatabaseService:
         rep_val = row["repeat_every_value"]
         rep_unit = str(row["repeat_every_unit"] or "").strip().lower()
         if rep_val:
-            value = int(rep_val)
-            mult = 60 if rep_unit == "min" else 3600 if rep_unit == "hours" else 86400 if rep_unit == "days" else 0
-            if mult > 0:
-                base_raw = str(row["next_run_at"] or row["publish_at"] or "")
-                try:
-                    base_dt = datetime.fromisoformat(base_raw.replace("Z", "+00:00"))
-                    if base_dt.tzinfo is None:
-                        base_dt = base_dt.replace(tzinfo=timezone.utc)
-                except Exception:
-                    base_dt = now
-                next_publish_at = (base_dt + timedelta(seconds=value * mult)).isoformat()
+            next_run = calculate_next_summary_schedule_run_utc(
+                base_iso=str(row["next_run_at"] or row["publish_at"] or ""),
+                repeat_every_value=int(rep_val),
+                repeat_every_unit=rep_unit,
+            )
+            if next_run is not None:
+                next_publish_at = next_run.isoformat()
         if next_publish_at:
             await self.execute(
                 "UPDATE channel_summary_schedule SET last_run_at = ?, last_sent_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?",
@@ -4268,17 +4265,13 @@ class DatabaseService:
         rep_val = row["repeat_every_value"]
         rep_unit = str(row["repeat_every_unit"] or "").strip().lower()
         if rep_val:
-            value = int(rep_val)
-            mult = 60 if rep_unit == "min" else 3600 if rep_unit == "hours" else 86400 if rep_unit == "days" else 0
-            if mult > 0:
-                base_raw = str(row["next_run_at"] or row["publish_at"] or "")
-                try:
-                    base_dt = datetime.fromisoformat(base_raw.replace("Z", "+00:00"))
-                    if base_dt.tzinfo is None:
-                        base_dt = base_dt.replace(tzinfo=timezone.utc)
-                except Exception:
-                    base_dt = now
-                next_publish_at = (base_dt + timedelta(seconds=value * mult)).isoformat()
+            next_run = calculate_next_summary_schedule_run_utc(
+                base_iso=str(row["next_run_at"] or row["publish_at"] or ""),
+                repeat_every_value=int(rep_val),
+                repeat_every_unit=rep_unit,
+            )
+            if next_run is not None:
+                next_publish_at = next_run.isoformat()
         if next_publish_at:
             await self.execute(
                 "UPDATE server_summary_schedule SET last_run_at = ?, last_sent_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?",
