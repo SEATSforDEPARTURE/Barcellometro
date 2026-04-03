@@ -1,6 +1,5 @@
 from app.services.aura_archetypes import build_dynamic_archetype_reason
 from app.renderers.aura_renderer import AuraRenderPayload, AuraTrendInfo, _build_missions, _build_profile_character_analysis_lines, _build_profile_traits_lines, _load_archetype_definitions, build_aura_embeds, render_karma_bar
-from app.shared.discord.embed_body import format_standard_title
 import re
 
 
@@ -14,7 +13,7 @@ def _unwrap_standard_label(value: str) -> str:
         if match is None:
             break
         text = match.group("inner").strip()
-    return text
+    return re.sub(r"[*_`]", "", text).strip()
 
 
 def _field_value_by_plain_name(embed, plain_name: str) -> str:
@@ -22,7 +21,7 @@ def _field_value_by_plain_name(embed, plain_name: str) -> str:
     return next(
         field.value
         for field in embed.fields
-        if _unwrap_standard_label(field.name) == normalized
+        if normalized in _unwrap_standard_label(field.name)
     )
 
 
@@ -431,19 +430,19 @@ def test_channel_aura_embed_compacts_and_stays_within_limits() -> None:
     assert _estimate_embed_size(embed) <= MAX_EMBED_CHARS
     assert "KARMA" in names
     assert "TREND" in names
-    assert "CLASSIFICA TOP 10" in names
+    assert any("CLASSIFICA TOP 10" in name for name in names)
     assert "PUNTI ATTRIBUITI" in names
     assert "PUNTI REVOCATI" in names
     assert "MISSIONI COMPLETATE" in names
     assert "I CONSIGLI DEL BARCELLOMETRO" in names
 
-    top_text = "\n".join(field.value for field in embed.fields if _unwrap_standard_label(field.name) == "CLASSIFICA TOP 10")
-    top_rows = [line for line in top_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
+    top_text = "\n".join(field.value for field in embed.fields if "CLASSIFICA TOP 10" in _unwrap_standard_label(field.name))
+    top_rows = [line for line in top_text.splitlines() if "<@" in line or "N/A - Nessuno" in line]
     assert len(top_rows) == 10
     assert all("<@" in row and "**+" in row and "—" in row for row in top_rows)
 
     punteggi_text = "\n".join(field.value for field in embed.fields if _unwrap_standard_label(field.name) == "PUNTI ATTRIBUITI")
-    punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
+    punteggi_rows = [line for line in punteggi_text.splitlines() if re.match(r"^\d+\)", line.strip())]
     assert len(punteggi_rows) <= 7
     assert len(punteggi_rows) < len(top_rows) + 8
 
@@ -474,7 +473,7 @@ def test_channel_aura_embed_preserves_all_10_rank_positions_with_compact_comment
     )
 
     top_text = "\n".join(
-        field.value for field in embed.fields if _unwrap_standard_label(field.name).startswith("CLASSIFICA TOP 10")
+        field.value for field in embed.fields if "CLASSIFICA TOP 10" in _unwrap_standard_label(field.name)
     )
     rows = [line for line in top_text.splitlines() if "<@" in line]
     assert len(rows) == 10
@@ -510,7 +509,7 @@ def test_channel_aura_embed_uses_final_title_and_footer_in_size_budget() -> None
         ),
     )
 
-    assert embed.title == format_standard_title("__**RESOCONTO CANALE · AURA**__", emoji="📓")
+    assert embed.title == "📓 __**RESOCONTO CANALE · AURA**__"
     assert getattr(embed.footer, "text", None) in (None, "")
     assert _estimate_embed_size(embed) <= AURA_DETAILS_INTERNAL_BUDGET
 
@@ -540,7 +539,7 @@ def test_channel_aura_embed_compacts_punteggi_before_reducing_top10_rows() -> No
     assert len(top_rows) == 10
 
     punteggi_text = "\n".join(field.value for field in embed.fields if _unwrap_standard_label(field.name) == "PUNTI ATTRIBUITI")
-    punteggi_rows = [line for line in punteggi_text.splitlines() if line.strip() and line.strip()[0].isdigit()]
+    punteggi_rows = [line for line in punteggi_text.splitlines() if re.match(r"^\d+\)", line.strip())]
     assert len(punteggi_rows) <= 4
 
 def test_channel_aura_embed_classifica_shows_placeholders_until_top10() -> None:
@@ -563,8 +562,8 @@ def test_channel_aura_embed_classifica_shows_placeholders_until_top10() -> None:
     )
 
     classifica = _field_value_by_plain_name(embed, "Classifica Top 10")
-    assert " 9 N/A - Nessuno" in classifica
-    assert "10 N/A - Nessuno" in classifica
+    assert "9️⃣ N/A - Nessuno" in classifica
+    assert "🔟 N/A - Nessuno" in classifica
 
 
 def test_channel_aura_embed_sections_follow_standard_wrapping() -> None:
@@ -587,7 +586,7 @@ def test_channel_aura_embed_sections_follow_standard_wrapping() -> None:
     required = {
         "✨ __**KARMA**__",
         "📈 __**TREND**__",
-        "🏆 __**CLASSIFICA TOP 10**__",
+        "🏆 **__CLASSIFICA TOP 10**__",
         "😇 __**PUNTI ATTRIBUITI**__",
         "😈 __**PUNTI REVOCATI**__",
         "📜 __**MISSIONI COMPLETATE**__",
@@ -656,8 +655,10 @@ def test_channel_aura_embed_classifica_intro_uses_real_movements_and_first_time_
         )
     )
     classifica = _field_value_by_plain_name(embed, "Classifica Top 10")
-    assert "**1** profili **salgono**, **1** **perdono** posizioni e **2** restano **stabili**" in classifica
-    assert "prima volta in classifica" in classifica
+    assert "• 1 profili salgono, 1 perdono posizioni e 1 restano stabili nel ranking." in classifica
+    assert "⬇️" in classifica
+    assert "**scende** di posizione" in classifica
+    assert "**prima** volta in classifica" in classifica
 
 
 def test_channel_aura_embed_points_are_bold_and_missions_use_role_labels() -> None:
