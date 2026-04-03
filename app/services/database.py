@@ -6658,7 +6658,21 @@ class DatabaseService:
             """,
             (guild_id, channel_id, before_ts, *clean_ids),
         )
-        return {str(r["user_id"]) for r in rows if r.get("user_id")}
+        result: set[str] = set()
+        for row in rows:
+            try:
+                user_id = row["user_id"]
+            except (KeyError, IndexError):
+                logger.warning(
+                    "fetch_aura_channel_users_with_history_before row missing user_id guild=%s channel=%s row_type=%s",
+                    guild_id,
+                    channel_id,
+                    type(row).__name__,
+                )
+                continue
+            if user_id:
+                result.add(str(user_id))
+        return result
 
     async def has_aura_channel_history_before(self, guild_id: str, channel_id: str, before_ts: str) -> bool:
         row = await self.fetchone(
@@ -6670,7 +6684,18 @@ class DatabaseService:
             """,
             (guild_id, channel_id, before_ts),
         )
-        return bool(row and row.get("has_rows"))
+        if not row:
+            return False
+        try:
+            return bool(row["has_rows"])
+        except (KeyError, IndexError):
+            logger.warning(
+                "has_aura_channel_history_before row missing has_rows guild=%s channel=%s row_type=%s",
+                guild_id,
+                channel_id,
+                type(row).__name__,
+            )
+            return False
 
     async def fetch_aura_channel_mission_stats(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> dict[str, int]:
         assigned_rows = await self.fetchall(
