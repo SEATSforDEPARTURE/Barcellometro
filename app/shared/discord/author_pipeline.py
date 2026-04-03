@@ -6,7 +6,7 @@ from typing import Any
 
 import discord
 
-from app.services.author import AuthorMeta, AuthorService, get_author_meta, render_author_name_with_page
+from app.services.author import AuthorMeta, AuthorService, attach_author_meta, get_author_meta, render_author_name_with_page
 from app.services.footer import get_footer_meta
 
 logger = logging.getLogger(__name__)
@@ -44,14 +44,16 @@ async def finalize_embed_author(
     if meta.skip:
         logger.debug("author finalize: skipped_due_to_meta_skip=true service=%s", meta.service_name)
         return embed
+    resolved_page_index = meta.logical_page_index if meta.logical_page_index is not None else page_index
+    resolved_page_total = meta.logical_page_total if meta.logical_page_total is not None else page_total
     if author_service is None:
         if not getattr(embed.author, "name", None):
             embed.set_author(
                 name=render_author_name_with_page(
                     service_name=meta.service_name,
                     canonical_top_level_command=meta.canonical_top_level_command,
-                    page_index=page_index,
-                    page_total=page_total,
+                    page_index=resolved_page_index,
+                    page_total=resolved_page_total,
                 )
             )
         return embed
@@ -67,8 +69,8 @@ async def finalize_embed_author(
         return await author_service.apply(
             embed,
             default_service_name=default_service_name,
-            page_index=page_index,
-            page_total=page_total,
+            page_index=resolved_page_index,
+            page_total=resolved_page_total,
         )
     except Exception as exc:  # noqa: BLE001
         if "database is locked" in str(exc).lower():
@@ -80,11 +82,33 @@ async def finalize_embed_author(
                 name=render_author_name_with_page(
                     service_name=meta.service_name,
                     canonical_top_level_command=meta.canonical_top_level_command,
-                    page_index=page_index,
-                    page_total=page_total,
+                    page_index=resolved_page_index,
+                    page_total=resolved_page_total,
                 )
             )
         return embed
+
+
+def set_logical_author_pagination(embeds: Iterable[discord.Embed] | None) -> list[discord.Embed]:
+    embed_list = list(embeds or [])
+    total = len(embed_list)
+    for idx, embed in enumerate(embed_list, start=1):
+        meta = get_author_meta(embed)
+        if meta is None:
+            continue
+        attach_author_meta(
+            embed,
+            service_name=meta.service_name,
+            canonical_top_level_command=meta.canonical_top_level_command,
+            author_icon_url=meta.author_icon_url,
+            author_url=meta.author_url,
+            logical_page_index=idx if total > 1 else None,
+            logical_page_total=total if total > 1 else None,
+            minimal=meta.minimal,
+            skip=meta.skip,
+            preserve_existing=meta.preserve_existing,
+        )
+    return embed_list
 
 
 async def finalize_embeds_author(
@@ -93,7 +117,7 @@ async def finalize_embeds_author(
     *,
     default_service_name: str = "unknown",
 ) -> list[discord.Embed]:
-    embed_list = list(embeds or [])
+    embed_list = set_logical_author_pagination(embeds)
     total = len(embed_list)
     for idx, embed in enumerate(embed_list, start=1):
         await finalize_embed_author(

@@ -7,6 +7,7 @@ import discord
 
 from app.services.author import attach_author_meta, attach_author_meta_to_all
 from app.services.footer import attach_footer_meta, attach_footer_meta_to_all
+from app.shared.discord.author_pipeline import finalize_embeds_author
 from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
 
 
@@ -80,6 +81,7 @@ async def send_report_dm_chunks(
         if files:
             await destination.send(files=files)
         return
+    await finalize_embeds_author(embed_list, None)
     for idx in range(0, len(embed_list), chunk_size):
         batch_files = files if idx == 0 else None
         await destination.send(embeds=embed_list[idx : idx + chunk_size], files=batch_files)

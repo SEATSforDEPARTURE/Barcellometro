@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Optional
 import discord
 
 from app.services.footer import attach_footer_meta
+from app.shared.discord.author_pipeline import finalize_embeds_author
 
 from app.services.barcello_service import BarcelloService
 from app.services.community_insights import CommunityInsightsService
@@ -583,6 +584,7 @@ class MessageSchedulerService:
             base_title,
             campaign.get("id"),
         )
+        await finalize_embeds_author(embeds, None, default_service_name=footer_service)
 
         if total <= MAX_EMBEDS_PER_MESSAGE:
             await channel.send(embeds=embeds)
