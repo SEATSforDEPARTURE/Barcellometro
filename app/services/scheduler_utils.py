@@ -41,6 +41,46 @@ def calculate_next_run_after_send(now_utc: datetime, interval_minutes: int, jitt
     return now_utc + timedelta(minutes=interval_minutes, seconds=jitter)
 
 
+def calculate_next_summary_schedule_run_utc(
+    *,
+    base_iso: str | None,
+    repeat_every_value: int | None,
+    repeat_every_unit: str | None,
+    tz: ZoneInfo = ROME_TZ,
+) -> datetime | None:
+    if repeat_every_value is None:
+        return None
+    value = int(repeat_every_value)
+    if value <= 0:
+        return None
+    unit = str(repeat_every_unit or "").strip().lower()
+    if unit not in {"min", "hours", "days"}:
+        return None
+
+    base_raw = str(base_iso or "")
+    try:
+        base_utc = datetime.fromisoformat(base_raw.replace("Z", "+00:00"))
+        if base_utc.tzinfo is None:
+            base_utc = base_utc.replace(tzinfo=timezone.utc)
+        else:
+            base_utc = base_utc.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+    if unit == "days":
+        return (base_utc.astimezone(tz) + timedelta(days=value)).astimezone(timezone.utc)
+
+    if unit == "hours" and value % 24 == 0:
+        return (base_utc.astimezone(tz) + timedelta(days=value // 24)).astimezone(timezone.utc)
+
+    if unit == "min" and value % 1440 == 0:
+        return (base_utc.astimezone(tz) + timedelta(days=value // 1440)).astimezone(timezone.utc)
+
+    if unit == "hours":
+        return base_utc + timedelta(hours=value)
+    return base_utc + timedelta(minutes=value)
+
+
 def is_in_quiet_hours(now_local_time: time, start_str: str, end_str: str) -> bool:
     start = _parse_local_time(start_str)
     end = _parse_local_time(end_str)
