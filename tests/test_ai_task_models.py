@@ -223,6 +223,24 @@ def test_ask_for_task_extends_timeout_for_summary_ollama() -> None:
     asyncio.run(_run())
 
 
+def test_ask_for_task_extends_timeout_for_summary_openai() -> None:
+    async def _run() -> None:
+        db = _Db()
+        service = AiService(db, api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "openai:gpt-4o-mini"}
+        service._fallback_model_map = {}
+        service._run_model = AsyncMock(return_value=types.SimpleNamespace(output_text="ok"))  # type: ignore[method-assign]
+
+        out = await service.ask_for_task("summary", "q", "sys", timeout_seconds=25.0)
+
+        assert out == "ok"
+        timeout_used = service._run_model.await_args.args[4]
+        assert timeout_used == 60.0
+
+    asyncio.run(_run())
+
+
 def test_ask_for_task_ollama_summary_fallback_uses_extended_timeout() -> None:
     async def _run() -> None:
         db = _Db()

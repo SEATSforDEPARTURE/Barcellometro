@@ -97,10 +97,19 @@ def test_channel_summary_first_embed_uses_narrative_description_without_period_o
     assert "**Oggi. Venerdì, 3 Aprile 2026**" in description
     assert "**giallo**" in description
     assert "**altalenante e alcuni attriti distribuiti nel periodo**" in description
+    assert description.count("il barcello") == 1
     assert description.count("complessivamente") <= 1
+    assert "Nella giornata" not in description
+    assert "Nel periodo selezionato" not in description
+    assert "il barcello è rimasto" not in description
 
     assert get_footer_meta(first_embed) is not None
     assert get_embed_images_meta(first_embed) is not None
+
+
+def test_channel_summary_details_embed_has_expected_intro_description() -> None:
+    details_embed = _build_fixture_embeds()[1]
+    assert details_embed.description == "*Andiamo a leggere cosa è successo...*"
 
 
 def test_rolling_period_uses_correct_italian_grammar() -> None:
@@ -154,7 +163,7 @@ def test_channel_summary_description_for_ultimi_and_range_respects_markdown_patt
     )[0]
     description = range_embed.description or ""
     assert description.startswith("*") and description.endswith("*")
-    assert "**Nel periodo selezionato** (30/03/2026 00:00 → 03/04/2026 23:59)" in description
+    assert "**Periodo selezionato** (30/03/2026 00:00 → 03/04/2026 23:59)" in description
     assert "**verde**" in description and "**altalenante**" in description
     assert description.count("il barcello è stato") == 1
 
