@@ -319,7 +319,8 @@ class BarcelloService:
             window_end_ts=window_end_ts,
         )
         previous_metrics = json.loads(previous["metrics_json"]) if previous else {}
-        metrics = self._compute_metrics(messages, window_minutes)
+        member_name_map = await self._database.get_member_name_map(guild_id) if hasattr(self._database, "get_member_name_map") else {}
+        metrics = self._compute_metrics(messages, window_minutes, member_name_map=member_name_map)
         metrics["cache_hit"] = False
         self._apply_temporal_context(metrics, previous_metrics=previous_metrics, previous_score=int(previous["score"]) if previous else None)
         score_config = await self._get_score_config()
@@ -432,7 +433,8 @@ class BarcelloService:
             if (self._mget(message, "author_id") or "") in {user_a_key, user_b_key}
         ]
 
-        metrics = self._compute_metrics(pair_messages, window_minutes)
+        member_name_map = await self._database.get_member_name_map(guild_id) if hasattr(self._database, "get_member_name_map") else {}
+        metrics = self._compute_metrics(pair_messages, window_minutes, member_name_map=member_name_map)
         metrics["cache_hit"] = False
         pair_metrics = self._compute_pair_metrics(pair_messages, user_a_key, user_b_key)
         metrics.update(pair_metrics)
@@ -483,7 +485,8 @@ class BarcelloService:
             limit=2000,
         )
         messages = await self._enrich_reply_target_authors(messages)
-        metrics = self._compute_metrics(messages, window_minutes)
+        member_name_map = await self._database.get_member_name_map(guild_id) if hasattr(self._database, "get_member_name_map") else {}
+        metrics = self._compute_metrics(messages, window_minutes, member_name_map=member_name_map)
         metrics["cache_hit"] = False
         self._apply_temporal_context(metrics, previous_metrics={}, previous_score=None)
         score_config = await self._get_score_config()
@@ -531,7 +534,8 @@ class BarcelloService:
             for message in messages
             if (self._mget(message, "author_id") or "") in {user_a_key, user_b_key}
         ]
-        metrics = self._compute_metrics(pair_messages, window_minutes)
+        member_name_map = await self._database.get_member_name_map(guild_id) if hasattr(self._database, "get_member_name_map") else {}
+        metrics = self._compute_metrics(pair_messages, window_minutes, member_name_map=member_name_map)
         metrics["cache_hit"] = False
         pair_metrics = self._compute_pair_metrics(pair_messages, user_a_key, user_b_key)
         metrics.update(pair_metrics)
@@ -778,7 +782,13 @@ class BarcelloService:
             advice=advice,
         )
 
-    def _compute_metrics(self, messages: list[Any], window_minutes: int) -> dict[str, Any]:
+    def _compute_metrics(
+        self,
+        messages: list[Any],
+        window_minutes: int,
+        *,
+        member_name_map: Optional[dict[str, str]] = None,
+    ) -> dict[str, Any]:
         message_count = 0
         timestamps: list[datetime] = []
         authors: list[str] = []
@@ -806,8 +816,18 @@ class BarcelloService:
         directed_pairs: dict[tuple[str, str], int] = {}
         directed_event_flags: list[tuple[datetime, int, int]] = []
         event_records: list[dict[str, Any]] = []
+        target_confidence_sum = 0.0
         audio_message_count = 0
         audio_unreliable_speaker_count = 0
+        recent_pair_ts: dict[tuple[str, str], datetime] = {}
+        known_user_ids = {
+            str(self._mget(message, "author_id") or "").strip()
+            for message in messages
+            if str(self._mget(message, "author_id") or "").strip()
+        }
+        if member_name_map:
+            known_user_ids.update(str(uid).strip() for uid in member_name_map.keys() if str(uid).strip())
+        member_name_index = self._build_member_name_index(member_name_map or {})
 
         for message in messages:
             normalized = self._normalize_message_for_analysis(message)
@@ -836,9 +856,20 @@ class BarcelloService:
                 author_id=author_id,
                 mentions=mentions,
                 reply_to_id=reply_to_id,
+                known_user_ids=known_user_ids,
+                member_name_index=member_name_index,
+                has_recent_back_and_forth=self._has_recent_back_and_forth(
+                    recent_pair_ts=recent_pair_ts,
+                    author_id=author_id,
+                    mentions=mentions,
+                    reply_to_id=reply_to_id,
+                    ts=ts,
+                ),
                 allow_direct_conflict=(not is_audio_service) or audio_speaker_reliable,
             )
             classifications.append(classification)
+            target_confidence = float(classification.get("target_confidence") or 0.0)
+            target_confidence_sum += target_confidence
             hostility_sum += float(classification["conflict_score"])
             calming_sum += float(classification["calming_score"])
             toxicity_sum += float(classification["toxicity_score"])
@@ -850,28 +881,34 @@ class BarcelloService:
             hostile_mentions_count += int(classification.get("hostile_mention") or 0)
             playful_hits_total += int(classification.get("playful_hits") or 0)
             affectionate_hits_total += int(classification.get("affectionate_hits") or 0)
-            if classification["classification_label"] == "directed_internal_conflict":
+            is_directed_conflict = (
+                classification["classification_label"] == "directed_internal_conflict"
+                and target_confidence >= 0.6
+            )
+            if is_directed_conflict:
                 directed_conflict_count += 1
             if classification["classification_label"] == "venting_isolated":
                 venting_count += 1
-            if classification["classification_label"] == "external_conflict_report":
+            if classification["classification_label"] in {"external_conflict_report", "external_or_venting"}:
                 external_conflict_report_count += 1
             if classification["classification_label"] == "deescalation":
                 deescalation_count += 1
             target_id = str(classification.get("primary_target_id") or "")
-            if classification["classification_label"] == "directed_internal_conflict" and target_id:
+            if is_directed_conflict and target_id:
                 directed_pairs[(author_id, target_id)] = directed_pairs.get((author_id, target_id), 0) + 1
             if (
-                classification["classification_label"] == "directed_internal_conflict"
+                is_directed_conflict
                 and float(classification["aggression_score"]) > 0.55
                 and float(classification["directedness_score"]) >= 0.55
             ):
                 aggressive_directed += 1
+            if target_id:
+                recent_pair_ts[(author_id, target_id)] = ts
             directed_event_flags.append(
                 (
                     ts,
-                    1 if classification["classification_label"] == "directed_internal_conflict" else 0,
-                    1 if (classification["classification_label"] == "directed_internal_conflict" and float(classification["aggression_score"]) >= 0.6) else 0,
+                    1 if is_directed_conflict else 0,
+                    1 if (is_directed_conflict and float(classification["aggression_score"]) >= 0.6) else 0,
                 )
             )
             event_records.append(
@@ -881,11 +918,12 @@ class BarcelloService:
                     "target_id": target_id,
                     "mentions": mentions,
                     "reply_to_id": reply_to_id,
-                    "is_directed_conflict": classification["classification_label"] == "directed_internal_conflict",
+                    "is_directed_conflict": is_directed_conflict,
                     "aggression_score": float(classification["aggression_score"]),
                     "toxicity_score": float(classification["toxicity_score"]),
                     "directedness_score": float(classification["directedness_score"]),
                     "hostile_mention": int(classification.get("hostile_mention") or 0),
+                    "target_confidence": round(target_confidence, 3),
                     "profanity_hits": int(classification.get("profanity_hits") or 0),
                     "insult_hits": int(classification.get("insult_hits") or 0),
                     "second_person": int(bool(re.search(r"\b(tu|voi|sei|stai|fai|dici|ti)\b", self._normalize_text(content)))),
@@ -916,6 +954,8 @@ class BarcelloService:
         reciprocal_conflict_pairs = self._count_reciprocal_pairs(directed_pairs)
         reciprocal_conflict_pairs_high_intensity = self._count_reciprocal_pairs(directed_pairs, min_each_direction=2)
         aggressive_directed += reciprocal_conflict_pairs_high_intensity * 2
+
+        avg_target_confidence = (target_confidence_sum / message_count) if message_count else 0.0
 
         author_counts: dict[str, int] = {}
         for author in authors:
@@ -966,6 +1006,7 @@ class BarcelloService:
             "calming_index": round(calming_index, 3),
             "challenge_signals": round(challenge_index, 3),
             "hostile_mentions": round(hostile_mentions_index, 3),
+            "avg_target_confidence": round(avg_target_confidence, 3),
             "playful_index": round(playful_index, 3),
             "affectionate_index": round(affectionate_index, 3),
             "reply_conflict_density": round(reply_conflict_density, 3),
@@ -994,7 +1035,7 @@ class BarcelloService:
             "max_msgs_per_minute": max_msgs_per_minute,
             "std_msgs_per_minute": round(std_msgs_per_minute, 2),
             "burst_ratio": round(burst_ratio, 2),
-            "reply_war": reciprocal_conflict_pairs > 0,
+            "reply_war": reciprocal_conflict_pairs > 0 and avg_target_confidence >= 0.6,
             "audio_message_count": audio_message_count,
             "audio_unreliable_speaker_count": audio_unreliable_speaker_count,
             "message_classifications": classifications,
@@ -1093,8 +1134,10 @@ class BarcelloService:
         conflict_latch_level = float(metrics.get("conflict_latch_level") or 0.0)
         conflict_latch_active = bool(metrics.get("conflict_latch_active") or False)
         external_conflict_report_index = float(metrics.get("external_conflict_report_index") or 0.0)
+        avg_target_confidence = float(metrics.get("avg_target_confidence") or 0.0)
         message_count = int(metrics.get("message_count") or 0)
         previous_score = metrics.get("previous_score")
+        strong_target_gate = avg_target_confidence >= 0.6
 
         intensity_index = min(
             1.0,
@@ -1137,9 +1180,12 @@ class BarcelloService:
             + (0.08 * min(direct_conflict_burst_peak / 4.0, 1.0))
             + (0.06 * min(mutual_direct_conflict_burst, 1.0)),
         )
+        target_confidence = max(target_confidence, avg_target_confidence)
         directed_conflict_penalty = int(
             round((62 * direct_conflict_index * max(0.35, target_confidence)) + (22 * hostile_mentions) + (5 * aggressive_directed_count))
         )
+        if not strong_target_gate:
+            directed_conflict_penalty = int(round(directed_conflict_penalty * 0.2))
         directed_conflict_penalty = min(78, directed_conflict_penalty)
         if directed_conflict_penalty > 0:
             penalties.append({"key": "directed_conflict_penalty", "label": "Attacco diretto / dissing", "weight": directed_conflict_penalty, "summary": f"indice {direct_conflict_index:.2f}"})
@@ -1153,6 +1199,8 @@ class BarcelloService:
                 + (20 * conflict_latch_level)
             )
         )
+        if not strong_target_gate:
+            escalation_penalty = 0
         escalation_penalty = min(46, escalation_penalty)
         if escalation_penalty > 0:
             penalties.append({"key": "escalation_penalty", "label": "Escalation reale", "weight": escalation_penalty, "summary": f"coppie {reciprocal_conflict_pairs}"})
@@ -1180,6 +1228,8 @@ class BarcelloService:
             )
 
         mutual_direct_conflict_burst_penalty = int(round(22 * min(mutual_direct_conflict_burst, 2)))
+        if not strong_target_gate:
+            mutual_direct_conflict_burst_penalty = 0
         mutual_direct_conflict_burst_penalty = min(44, mutual_direct_conflict_burst_penalty)
         if mutual_direct_conflict_burst_penalty > 0:
             penalties.append(
@@ -1241,6 +1291,7 @@ class BarcelloService:
             local_worst_segment_directed=local_worst_segment_directed,
             conflict_burst_count=conflict_burst_count,
             message_count=message_count,
+            avg_target_confidence=avg_target_confidence,
         )
         metrics["black_gate_passed"] = black_gate_ok
         if score <= 20 and not black_gate_ok:
@@ -1266,12 +1317,19 @@ class BarcelloService:
         local_worst_segment_directed: int,
         conflict_burst_count: int,
         message_count: int,
+        avg_target_confidence: float,
     ) -> bool:
         has_direct_internal_conflict = direct_conflict_index >= 0.22 and local_worst_segment_directed >= 2
         has_targeting_signal = float(metrics.get("hostile_mentions") or 0.0) >= 0.08 or reply_conflict_density >= 0.55
         has_reciprocity = reciprocal_conflict_pairs >= 1
         has_persistence = persistence_conflict > 0.04 or conflict_burst_count >= 2 or message_count >= 12
-        return bool(has_direct_internal_conflict and has_targeting_signal and has_reciprocity and has_persistence)
+        return bool(
+            has_direct_internal_conflict
+            and has_targeting_signal
+            and has_reciprocity
+            and has_persistence
+            and avg_target_confidence >= 0.7
+        )
 
     def _parse_mentions(self, message: Any, content: str) -> list[str]:
         mentions_raw = self._mget(message, "mentions_json")
@@ -1291,6 +1349,9 @@ class BarcelloService:
         author_id: str,
         mentions: list[str],
         reply_to_id: str,
+        known_user_ids: set[str],
+        member_name_index: dict[str, str],
+        has_recent_back_and_forth: bool,
         allow_direct_conflict: bool = True,
     ) -> dict[str, Any]:
         text = self._normalize_text(content)
@@ -1312,12 +1373,17 @@ class BarcelloService:
         has_hard_target = bool(mentions or reply_to_id)
         target_type = "none"
         primary_target_id = ""
+        matched_user_id = self._match_user_in_text(text=text, author_id=author_id, known_user_ids=known_user_ids, member_name_index=member_name_index)
+        unmatched_name_signal = 1 if self._has_unmatched_name_signal(content=content, matched_user_id=matched_user_id) else 0
         if mentions:
             target_type = "user"
             primary_target_id = mentions[0]
         elif reply_to_id:
             target_type = "user"
             primary_target_id = reply_to_id
+        elif matched_user_id:
+            target_type = "user"
+            primary_target_id = matched_user_id
         elif second_person_hits > 0:
             target_type = "generic"
         if "ragazzi" in text or "raga" in text or "voi" in text:
@@ -1331,9 +1397,14 @@ class BarcelloService:
         )
         target_confidence = min(
             1.0,
-            (0.6 if has_hard_target else 0.0)
-            + (0.1 if second_person_hits > 0 else 0.0)
-            + (0.08 if challenge_hits > 0 else 0.0),
+            max(
+                0.0,
+                (0.9 if mentions else 0.0)
+                + (0.7 if reply_to_id else 0.0)
+                + (0.6 if matched_user_id else 0.0)
+                + (0.5 if has_recent_back_and_forth else 0.0)
+                - (0.4 if unmatched_name_signal else 0.0),
+            ),
         )
         playful_confidence = min(1.0, (0.25 * playful_hits) + (0.2 * affectionate_hits))
         direct_conflict_confidence = min(
@@ -1385,21 +1456,42 @@ class BarcelloService:
         hostile_mentions = 1 if has_hard_target and (insult_hits > 0 or profanity_hits > 0 or aggressive_hits > 0) else 0
 
         label = "neutral"
+        target_bucket = "external_or_venting"
+        if target_confidence >= 0.75:
+            target_bucket = "directed_internal_conflict"
+        elif target_confidence >= 0.4:
+            target_bucket = "ambiguous_target"
+
         if calming_score >= 0.35:
             label = "deescalation"
-        elif allow_direct_conflict and direct_conflict_confidence >= 0.58 and directedness_score >= 0.5 and (
+        elif (
+            allow_direct_conflict
+            and target_bucket == "directed_internal_conflict"
+            and direct_conflict_confidence >= 0.58
+            and directedness_score >= 0.5
+            and (
             insult_hits > 0
             or (profanity_hits > 0 and second_person_hits > 0)
             or (profanity_hits > 0 and has_hard_target)
             or (challenge_hits > 0 and (insult_hits > 0 or aggressive_hits > 0))
+            )
         ):
             label = "directed_internal_conflict"
-        elif allow_direct_conflict and conflict_score >= 0.55 and direct_conflict_confidence >= 0.52 and directedness_score >= 0.5 and (
+        elif (
+            allow_direct_conflict
+            and target_bucket == "directed_internal_conflict"
+            and conflict_score >= 0.55
+            and direct_conflict_confidence >= 0.52
+            and directedness_score >= 0.5
+            and (
             aggression_score >= 0.35 or insult_hits > 0 or (profanity_hits > 0 and has_hard_target)
+            )
         ):
             label = "directed_internal_conflict"
+        elif target_bucket == "ambiguous_target" and (aggression_score >= 0.35 or toxicity_score >= 0.35):
+            label = "ambiguous_target"
         elif (external_conflict_hits > 0 or (venting_hits > 0 and "mi " in text)) and not has_hard_target:
-            label = "external_conflict_report"
+            label = "external_or_venting"
         elif blasphemy_hits > 0 and not has_direct_target:
             label = "venting_isolated"
         elif venting_score >= 0.4 and directedness_score < 0.4:
@@ -1429,10 +1521,61 @@ class BarcelloService:
             "playful_hits": int(playful_hits),
             "affectionate_hits": int(affectionate_hits),
             "target_confidence": round(target_confidence, 3),
+            "target_bucket": target_bucket,
             "direct_conflict_confidence": round(direct_conflict_confidence, 3),
             "classification_label": label,
         }
         return self._maybe_ai_fallback(result, content)
+
+    @staticmethod
+    def _build_member_name_index(member_name_map: dict[str, str]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for user_id, raw_name in member_name_map.items():
+            normalized_name = BarcelloService._normalize_text(str(raw_name or ""))
+            if not normalized_name:
+                continue
+            for token in re.findall(r"\b[a-z0-9_]{3,}\b", normalized_name):
+                out.setdefault(token, str(user_id))
+        return out
+
+    @staticmethod
+    def _match_user_in_text(
+        *,
+        text: str,
+        author_id: str,
+        known_user_ids: set[str],
+        member_name_index: dict[str, str],
+    ) -> str:
+        for token in re.findall(r"\b[a-z0-9_]{3,}\b", text):
+            matched_id = member_name_index.get(token)
+            if matched_id and matched_id != author_id and matched_id in known_user_ids:
+                return matched_id
+        return ""
+
+    @staticmethod
+    def _has_unmatched_name_signal(content: str, matched_user_id: str) -> bool:
+        if matched_user_id:
+            return False
+        return bool(re.search(r"\b[A-Z][a-z]{2,}\b", content or ""))
+
+    @staticmethod
+    def _has_recent_back_and_forth(
+        *,
+        recent_pair_ts: dict[tuple[str, str], datetime],
+        author_id: str,
+        mentions: list[str],
+        reply_to_id: str,
+        ts: datetime,
+    ) -> bool:
+        candidate_targets = [target for target in mentions if target]
+        if reply_to_id:
+            candidate_targets.append(reply_to_id)
+        for target_id in candidate_targets:
+            reverse_key = (target_id, author_id)
+            previous_ts = recent_pair_ts.get(reverse_key)
+            if previous_ts and (ts - previous_ts) <= timedelta(minutes=8):
+                return True
+        return False
 
     @staticmethod
     def _normalize_text(content: str) -> str:

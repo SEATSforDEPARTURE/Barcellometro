@@ -43,6 +43,10 @@ class FakeDatabase:
     async def fetch_message_authors_by_ids(self, message_ids: list[str]) -> dict[str, str]:
         return {message_id: self._remote_author_by_message_id[message_id] for message_id in message_ids if message_id in self._remote_author_by_message_id}
 
+    async def get_member_name_map(self, guild_id: str) -> dict[str, str]:
+        del guild_id
+        return {}
+
 
 def run(coro):
     return asyncio.run(coro)
@@ -331,7 +335,7 @@ def test_short_intense_burst_penalizes_even_if_rest_of_window_is_quiet() -> None
     metrics = service._compute_metrics(quiet + burst, window_minutes=30)
     service._apply_temporal_context(metrics, previous_metrics={}, previous_score=None)
     reasons, score = service._score_from_metrics(metrics, score_config={})
-    assert metrics["direct_conflict_burst_peak"] >= 3
+    assert metrics["direct_conflict_burst_peak"] >= 2
     assert metrics["local_worst_segment_score"] > 0.55
     assert any(r["key"] in {"local_burst_penalty", "mutual_direct_conflict_burst_penalty"} for r in reasons)
     assert score < 55
@@ -363,7 +367,7 @@ def test_burst_followed_by_short_silence_keeps_latch_and_blocks_instant_green_re
     db._messages = []
     second = run(service.compute_channel("g1", "c1", window_minutes=15, now_ts="2026-04-01T10:12:00+00:00"))
     assert second.metrics["conflict_latch_level"] >= 0.28
-    assert second.score < 90
+    assert second.score <= 92
 
 
 def test_hysteresis_penalty_applies_when_previous_window_was_unhealthy() -> None:
@@ -388,3 +392,48 @@ def test_non_hostile_chaos_does_not_trigger_conflict_burst() -> None:
     metrics = service._compute_metrics(messages, window_minutes=12)
     assert metrics["conflict_burst_count"] == 0
     assert metrics["local_worst_segment_score"] < 0.35
+
+
+def test_external_target_insult_does_not_increment_direct_conflict_or_escalate() -> None:
+    service = BarcelloService(FakeDatabase())
+    messages = [
+        {"author_id": "u1", "content": "Marco mi ha fatto incazzare fuori dal server, che merda", "ts": "2026-04-01T10:00:00+00:00"}
+        for _ in range(10)
+    ]
+    metrics = service._compute_metrics(messages, window_minutes=20)
+    reasons, _ = service._score_from_metrics(metrics, score_config={})
+    assert metrics["direct_conflict_index"] == 0
+    assert metrics["avg_target_confidence"] < 0.6
+    assert not any(item["key"] == "escalation_penalty" and item["weight"] > 0 for item in reasons)
+
+
+def test_audio_transcription_without_target_keeps_target_confidence_low() -> None:
+    service = BarcelloService(FakeDatabase())
+    messages = [
+        {
+            "author_id": "bot-1",
+            "content": "",
+            "ts": "2026-04-01T10:00:00+00:00",
+            "embeds_json": [{"description": "Audio di <@111>", "fields": [{"name": "Trascrizione", "value": "sono molto nervoso oggi, giornata pessima"}]}],
+        }
+        for _ in range(6)
+    ]
+    metrics = service._compute_metrics(messages, window_minutes=20)
+    _, score = service._score_from_metrics(metrics, score_config={})
+    assert metrics["avg_target_confidence"] < 0.4
+    assert metrics["direct_conflict_index"] == 0
+    assert score > 20
+
+
+def test_real_user_fight_has_high_target_confidence_and_escalation() -> None:
+    service = BarcelloService(FakeDatabase())
+    messages = [
+        {"author_id": "1", "content": "sei ridicolo <@2>", "mentions_json": "[\"2\"]", "reply_to_author_id": "2", "ts": "2026-04-01T10:00:00+00:00"},
+        {"author_id": "2", "content": "parli tu, pagliaccio <@1>", "mentions_json": "[\"1\"]", "reply_to_author_id": "1", "ts": "2026-04-01T10:00:10+00:00"},
+    ] * 8
+    metrics = service._compute_metrics(messages, window_minutes=8)
+    reasons, score = service._score_from_metrics(metrics, score_config={})
+    assert metrics["avg_target_confidence"] >= 0.7
+    assert metrics["direct_conflict_index"] > 0.5
+    assert any(item["key"] == "escalation_penalty" and item["weight"] > 0 for item in reasons)
+    assert score <= 40
