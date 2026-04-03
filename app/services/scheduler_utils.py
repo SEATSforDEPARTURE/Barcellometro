@@ -41,6 +41,41 @@ def calculate_next_run_after_send(now_utc: datetime, interval_minutes: int, jitt
     return now_utc + timedelta(minutes=interval_minutes, seconds=jitter)
 
 
+def _parse_utc_iso(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def calculate_next_wall_clock_run(
+    *,
+    now_utc: datetime,
+    due_slot_iso: str | None,
+    interval_minutes: int,
+    jitter_seconds: int = 0,
+    tz: ZoneInfo = ROME_TZ,
+) -> datetime:
+    if interval_minutes <= 0:
+        raise ValueError("interval_minutes must be > 0")
+    due_utc = _parse_utc_iso(due_slot_iso) or now_utc
+    now_local = now_utc.astimezone(tz)
+    candidate_local = due_utc.astimezone(tz) + timedelta(minutes=interval_minutes)
+    if candidate_local <= now_local:
+        delta_minutes = int((now_local - candidate_local).total_seconds() // 60)
+        steps = delta_minutes // interval_minutes + 1
+        candidate_local = candidate_local + timedelta(minutes=steps * interval_minutes)
+    candidate_utc = candidate_local.astimezone(timezone.utc)
+    jitter = random.randint(0, max(jitter_seconds, 0))
+    return candidate_utc + timedelta(seconds=jitter)
+
+
 def calculate_next_summary_schedule_run_utc(
     *,
     base_iso: str | None,

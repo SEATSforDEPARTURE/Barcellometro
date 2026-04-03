@@ -30,7 +30,7 @@ from app.services.footer import attach_footer_meta_to_all
 from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
 from app.shared.discord.component_notices import send_standard_component_notice
 from app.shared.discord.footer_pipeline import finalize_embeds
-from app.services.scheduler_utils import calculate_next_run_after_send
+from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,13 @@ class CampaignContentService:
             await self._database.update_campaign_content_next_run(guild_id=guild_id, config_id=int(config["id"]), next_run_at=now.isoformat(), last_sent_at=now.isoformat())
             await self._database.set_campaign_content_enabled(guild_id=guild_id, config_id=int(config["id"]), enabled=False)
             return
-        next_run = calculate_next_run_after_send(now, interval_minutes, 0)
+        next_run = calculate_next_wall_clock_run(
+            now_utc=now,
+            due_slot_iso=str(config.get("next_run_at") or now.isoformat()),
+            interval_minutes=interval_minutes,
+            jitter_seconds=0,
+            tz=ROME_TZ,
+        )
         await self._database.update_campaign_content_next_run(guild_id=guild_id, config_id=int(config["id"]), next_run_at=next_run.isoformat(), last_sent_at=now.isoformat())
 
     async def _rewrite_news_payload(self, payload: dict[str, Any]) -> str | None:

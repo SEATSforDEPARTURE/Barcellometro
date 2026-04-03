@@ -37,6 +37,7 @@ from app.services.ingest import EventEnvelope
 from app.services.qna_session_store import QnaSession, QnaSessionStore
 from app.services.qna_sessions_repo import QnaSessionsRepo
 from app.services.qna_query_engine import QnaAnswerResult, QnaQueryEngine
+from app.services.scheduler_utils import calculate_next_wall_clock_run
 from app.shared.safety.pii import contains_pii
 from app.shared.discord.embed_body import (
     format_standard_description,
@@ -1311,7 +1312,14 @@ class TriggerEngineService:
         run_iso = run_at.isoformat()
         every_minutes = int(schedule.get("every_minutes") or 0)
         if every_minutes > 0:
-            next_run_at = (run_at + timedelta(minutes=every_minutes)).isoformat()
+            due_slot_iso = str(schedule.get("next_run_at") or run_iso)
+            next_run_at = calculate_next_wall_clock_run(
+                now_utc=run_at,
+                due_slot_iso=due_slot_iso,
+                interval_minutes=every_minutes,
+                jitter_seconds=0,
+                tz=ROME_TZ,
+            ).isoformat()
             keep_enabled = True
         else:
             next_run_at = run_iso
