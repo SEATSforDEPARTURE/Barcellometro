@@ -7,6 +7,7 @@ import discord
 from app.services.author import get_author_meta
 from app.services.footer import get_footer_meta
 from app.shared.discord.report_embeds import apply_standard_report_style, build_report_cover_embed
+from app.shared.discord.report_embeds import send_report_dm_chunks
 
 
 def test_build_report_cover_embed_attaches_footer_and_author_meta_with_canonical_top_level() -> None:
@@ -61,3 +62,39 @@ def test_canonical_top_level_wiring_is_explicit_in_target_command_modules() -> N
         path = key.split("#", 1)[0]
         source = Path(path).read_text(encoding="utf-8")
         assert snippet in source, f"missing {snippet} in {path}"
+
+
+def test_send_report_dm_chunks_uses_global_author_pagination_before_split() -> None:
+    import asyncio
+
+    from app.shared.discord.author_pipeline import finalize_embeds_author
+
+    class _Destination:
+        def __init__(self) -> None:
+            self.sent: list[list[discord.Embed]] = []
+
+        async def send(self, *, embeds=None, files=None) -> None:  # noqa: ANN001
+            batch = list(embeds or [])
+            # Simula auto-finalize lato send per singolo batch.
+            await finalize_embeds_author(batch, None, default_service_name="riassunto")
+            self.sent.append(batch)
+
+    async def _run() -> None:
+        embeds = [discord.Embed(title=f"P{idx}") for idx in range(1, 13)]
+        apply_standard_report_style(
+            embeds,
+            service_name="riassunto",
+            canonical_top_level_command="dmchannelsummary",
+        )
+        destination = _Destination()
+
+        await send_report_dm_chunks(destination, embeds=embeds, chunk_size=10)
+
+        assert len(destination.sent) == 2
+        first_batch, second_batch = destination.sent
+        assert first_batch[0].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 1/12)"
+        assert first_batch[-1].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 10/12)"
+        assert second_batch[0].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 11/12)"
+        assert second_batch[-1].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 12/12)"
+
+    asyncio.run(_run())

@@ -146,6 +146,8 @@ class AuthorMeta:
     canonical_top_level_command: str | None = None
     author_icon_url: str | None = None
     author_url: str | None = None
+    logical_page_index: int | None = None
+    logical_page_total: int | None = None
     minimal: bool = False
     skip: bool = False
     preserve_existing: bool = False
@@ -380,6 +382,8 @@ def attach_author_meta(
     canonical_top_level_command: str | None = None,
     author_icon_url: str | None = None,
     author_url: str | None = None,
+    logical_page_index: int | None = None,
+    logical_page_total: int | None = None,
     minimal: bool = False,
     skip: bool = False,
     preserve_existing: bool = False,
@@ -393,6 +397,8 @@ def attach_author_meta(
             canonical_top_level_command=_normalize_canonical_top_level_command(canonical_top_level_command),
             author_icon_url=_clean(author_icon_url) or None,
             author_url=_clean(author_url) or None,
+            logical_page_index=logical_page_index,
+            logical_page_total=logical_page_total,
             minimal=bool(minimal),
             skip=bool(skip),
             preserve_existing=bool(preserve_existing),
@@ -409,6 +415,8 @@ def attach_author_meta_to_all(
     canonical_top_level_command: str | None = None,
     author_icon_url: str | None = None,
     author_url: str | None = None,
+    logical_page_index: int | None = None,
+    logical_page_total: int | None = None,
     minimal: bool = False,
     skip: bool = False,
     preserve_existing: bool = False,
@@ -421,6 +429,8 @@ def attach_author_meta_to_all(
             canonical_top_level_command=canonical_top_level_command,
             author_icon_url=author_icon_url,
             author_url=author_url,
+            logical_page_index=logical_page_index,
+            logical_page_total=logical_page_total,
             minimal=minimal,
             skip=skip,
             preserve_existing=preserve_existing,
@@ -466,6 +476,8 @@ def copy_author_meta(source: discord.Embed, target: discord.Embed) -> discord.Em
         canonical_top_level_command=meta.canonical_top_level_command,
         author_icon_url=meta.author_icon_url,
         author_url=meta.author_url,
+        logical_page_index=meta.logical_page_index,
+        logical_page_total=meta.logical_page_total,
         minimal=meta.minimal,
         skip=meta.skip,
         preserve_existing=meta.preserve_existing,

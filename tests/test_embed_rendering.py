@@ -95,3 +95,41 @@ def test_finalize_embeds_rendering_from_dict_respects_minimal_author_and_footer_
         assert "Dati elaborati con gpt-4o-mini" in (rendered[0].footer.text or "")
 
     asyncio.run(_run())
+
+
+def test_finalize_embeds_rendering_keeps_logical_pagination_when_reprocessed_by_batches() -> None:
+    async def _run() -> None:
+        author = AuthorService(_FakeDatabase())
+        footer = FooterService(_FakeDatabase())
+        embeds = [discord.Embed(title=f"Page {idx}") for idx in range(1, 4)]
+        for embed in embeds:
+            attach_author_meta(embed, service_name="riassunto", canonical_top_level_command="dmchannelsummary")
+
+        await finalize_embeds_rendering(
+            embeds,
+            footer_service=footer,
+            author_service=author,
+            default_service_name="riassunto",
+        )
+        assert embeds[0].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 1/3)"
+        assert embeds[1].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 2/3)"
+        assert embeds[2].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 3/3)"
+
+        await finalize_embeds_rendering(
+            embeds[:2],
+            footer_service=footer,
+            author_service=author,
+            default_service_name="riassunto",
+        )
+        await finalize_embeds_rendering(
+            embeds[2:],
+            footer_service=footer,
+            author_service=author,
+            default_service_name="riassunto",
+        )
+
+        assert embeds[0].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 1/3)"
+        assert embeds[1].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 2/3)"
+        assert embeds[2].author.name == "servizio DM CHANNEL SUMMARY · (Pag. 3/3)"
+
+    asyncio.run(_run())
