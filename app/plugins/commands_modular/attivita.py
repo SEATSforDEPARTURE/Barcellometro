@@ -117,10 +117,7 @@ def add_field_safe(embed: discord.Embed, *, name: str, value: str, inline: bool 
     safe_name = _truncate(name, MAX_FIELD_NAME)
 
     def _normalize_field_name(raw: str) -> str:
-        text = _truncate(raw, MAX_FIELD_NAME)
-        if "__**" in text:
-            return text
-        return _truncate(format_standard_field_name(text), MAX_FIELD_NAME)
+        return _truncate(format_standard_field_name(_truncate(raw, MAX_FIELD_NAME)), MAX_FIELD_NAME)
 
     chunks = _split_chunks(value, MAX_FIELD_VALUE)
     for idx, chunk in enumerate(chunks):

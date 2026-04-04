@@ -39,7 +39,7 @@ from app.domain.reporting.trend import normalize_trend, render_trend, render_tre
 
 logger = logging.getLogger(__name__)
 
-BARCELLO_SCHEDULE_FALLBACK_TITLE = "🫛 __**AGGIORNAMENTO ORARIO BARCELLO**__"
+BARCELLO_SCHEDULE_FALLBACK_TITLE = format_standard_title("AGGIORNAMENTO ORARIO BARCELLO", emoji="🫛")
 HHMM_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -726,10 +726,7 @@ def register_barcello(
 
     def _add_section(embed: discord.Embed, *, name: str, value: str) -> None:
         def _normalize_field_name(raw: str) -> str:
-            text = str(raw or "").strip()
-            if "__**" in text:
-                return text
-            return format_standard_field_name(text)
+            return format_standard_field_name(str(raw or "").strip())
 
         chunks = _split_field_chunks(value, 1024)
         available = 25 - len(embed.fields)

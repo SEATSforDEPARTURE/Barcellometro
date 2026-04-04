@@ -583,23 +583,14 @@ def _build_mission_lines(m: ChannelAuraMissionTrend) -> list[str]:
     ]
 
 
-def _format_aura_field_name(text: str, *, emoji: str | None = None) -> str:
-    base = str(text or "").strip().upper()
-    if emoji:
-        return f"{emoji} __**{base}**__"
-    return f"__**{base}**__"
-
-
 def _standard_field(label: str) -> str:
     raw = str(label or "").strip()
     if not raw:
-        return _format_aura_field_name("")
-    if re.fullmatch(r"[^\s]+\s+__\*\*.+\*\*__", raw):
-        return raw
+        return format_standard_field_name("")
     for emoji in ("📈", "🏆", "🕹️", "📜", "✨", "👤", "🧭", "🧾", "📌", "😇", "😈", ":bricks:"):
         if raw.startswith(f"{emoji} "):
-            return _format_aura_field_name(raw[len(emoji) + 1 :].strip(), emoji=emoji)
-    return _format_aura_field_name(raw)
+            return format_standard_field_name(raw[len(emoji) + 1 :].strip(), emoji=emoji)
+    return format_standard_field_name(raw)
 
 def _add_field_with_chunks(embed: discord.Embed, *, name: str, value: str) -> None:
     for part_idx, piece in enumerate(_split_field_chunks(value, 1024)):

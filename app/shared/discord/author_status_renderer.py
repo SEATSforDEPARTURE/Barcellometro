@@ -12,7 +12,7 @@ from app.services.author import (
     human_author_service_name,
 )
 from app.services.footer import attach_footer_meta
-from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 from app.shared.discord.embed_limits import MAX_EMBED_CHARS, normalize_embeds_for_discord
 from app.shared.discord.embed_rendering import finalize_embeds_rendering
 
@@ -142,7 +142,7 @@ async def build_author_status_embeds(
     for page in pages:
         embed = discord.Embed(
             title=format_standard_title(page.title, emoji="📦"),
-            description=f"*{page.description}*",
+            description=format_standard_description(page.description),
             color=0x3498DB,
         )
         for field in page.fields:
