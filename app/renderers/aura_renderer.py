@@ -403,6 +403,10 @@ class ChannelAuraEmbedData:
     advice_lines: list[str]
     previous_positive_points: int = 0
     previous_negative_points: int = 0
+    average_karma_score: float | None = None
+    previous_average_karma_score: float | None = None
+    average_karma_participants: int = 0
+    previous_average_karma_participants: int = 0
 
 
 def _rank_emoji(rank: int) -> str:
@@ -504,7 +508,13 @@ def _build_karma_section(*, karma_score: float | None, trend_direction: str) -> 
     ratio = (karma_score + 1.0) / 2.0
     marker_idx = min(12, max(0, round(ratio * 12)))
     segments = ["━"] * 13
-    segments[marker_idx] = "🟡"
+    if ratio < 0.35:
+        marker = "🟣"
+    elif ratio > 0.65:
+        marker = "🔵"
+    else:
+        marker = "⚪"
+    segments[marker_idx] = marker
     axis = f"😈{''.join(segments)}😇"
 
     if karma_score >= 0.25:
@@ -521,7 +531,7 @@ def _build_karma_section(*, karma_score: float | None, trend_direction: str) -> 
     return axis, f"• Nel periodo corrente il clima aura è risultato **{interpretation}**{trend_suffix}."
 
 
-def _build_trend_section(*, current_score: float | None, previous_score: float | None, delta_positive: int, delta_negative: int) -> tuple[str, str]:
+def _build_trend_section(*, current_score: float | None, previous_score: float | None, participants: int, previous_participants: int) -> tuple[str, str]:
     if current_score is None or previous_score is None:
         return ("unknown", "• Dati ancora limitati: trend non valutabile con precisione.")
 
@@ -537,8 +547,8 @@ def _build_trend_section(*, current_score: float | None, previous_score: float |
         direction = "stable"
     return (
         direction,
-        f"• Sono stati assegnati **{delta_positive:+d} P.A.** e revocati **{delta_negative:+d} P.A.** "
-        f"rispetto al periodo precedente. Lo stesso indicatore karma è **{verdict}**.",
+        f"• Il karma medio dei partecipanti Aura nel canale è **{verdict}** rispetto al periodo precedente "
+        f"({participants} utenti ora, {previous_participants} nel periodo precedente).",
     )
 
 
@@ -618,15 +628,13 @@ def _compose_channel_aura_embed(
         color=0x5865F2,
     )
 
-    current_score = _channel_karma_score(positive_points=data.positive_points, negative_points=data.negative_points)
-    previous_score = _channel_karma_score(positive_points=data.previous_positive_points, negative_points=data.previous_negative_points)
-    delta_positive = int(data.positive_points) - int(data.previous_positive_points)
-    delta_negative = abs(int(data.negative_points)) - abs(int(data.previous_negative_points))
+    current_score = data.average_karma_score
+    previous_score = data.previous_average_karma_score
     trend_direction, trend_text = _build_trend_section(
         current_score=current_score,
         previous_score=previous_score,
-        delta_positive=delta_positive,
-        delta_negative=delta_negative,
+        participants=max(0, int(data.average_karma_participants)),
+        previous_participants=max(0, int(data.previous_average_karma_participants)),
     )
     karma_axis, karma_comment = _build_karma_section(karma_score=current_score, trend_direction=trend_direction)
     _add_field_with_chunks(embed, name="✨ Karma", value=f"{karma_axis}\n{karma_comment}")

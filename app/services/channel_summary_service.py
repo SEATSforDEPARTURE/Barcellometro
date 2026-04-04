@@ -839,6 +839,8 @@ class ChannelSummaryService:
 
         current = await self._database.fetch_aura_channel_ledger_report(guild_id, channel_id, start_ts, end_ts)
         previous = await self._database.fetch_aura_channel_ledger_report(guild_id, channel_id, prev_start_ts, prev_end_ts)
+        current_avg_karma = await self._database.fetch_aura_channel_avg_user_karma_score(guild_id, channel_id, start_ts, end_ts)
+        previous_avg_karma = await self._database.fetch_aura_channel_avg_user_karma_score(guild_id, channel_id, prev_start_ts, prev_end_ts)
         prev_positive = int(previous["totals"].get("positive") or 0)
         prev_negative = int(previous["totals"].get("negative") or 0)
 
@@ -929,6 +931,10 @@ class ChannelSummaryService:
                 advice_lines=advice,
                 previous_positive_points=prev_positive,
                 previous_negative_points=prev_negative,
+                average_karma_score=current_avg_karma.get("avg_score"),
+                previous_average_karma_score=previous_avg_karma.get("avg_score"),
+                average_karma_participants=int(current_avg_karma.get("participants_count") or 0),
+                previous_average_karma_participants=int(previous_avg_karma.get("participants_count") or 0),
             )
         )
         logger.debug("channel_summary aura_embed_chars=%s guild=%s channel=%s", _estimate_embed_size(aura_embed), guild_id, channel_id)

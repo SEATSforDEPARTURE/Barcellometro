@@ -606,6 +606,10 @@ def test_channel_aura_embed_karma_and_trend_are_consistent() -> None:
             negative_points=-20,
             previous_positive_points=70,
             previous_negative_points=-40,
+            average_karma_score=0.6,
+            previous_average_karma_score=0.1,
+            average_karma_participants=4,
+            previous_average_karma_participants=3,
             users_count=4,
             top_users=[ChannelAuraTopUserItem(user_id="2", score=90, trend_emoji="⬆️", trend_comment="sale in classifica", rank=1, movement="up")],
             positive_reasons=[("per missioni", 70)],
@@ -620,6 +624,10 @@ def test_channel_aura_embed_karma_and_trend_are_consistent() -> None:
             negative_points=-50,
             previous_positive_points=100,
             previous_negative_points=-30,
+            average_karma_score=-0.4,
+            previous_average_karma_score=0.2,
+            average_karma_participants=4,
+            previous_average_karma_participants=4,
             users_count=4,
             top_users=[ChannelAuraTopUserItem(user_id="2", score=90, trend_emoji="⬇️", trend_comment="perde posizioni", rank=1, movement="down")],
             positive_reasons=[("per missioni", 40)],
@@ -632,6 +640,41 @@ def test_channel_aura_embed_karma_and_trend_are_consistent() -> None:
     assert "migliorato" in _field_value_by_plain_name(improved, "Trend")
     assert "peggioramento" in _field_value_by_plain_name(worsened, "Karma")
     assert "peggiorato" in _field_value_by_plain_name(worsened, "Trend")
+
+
+def test_channel_aura_embed_karma_marker_color_changes_by_zone() -> None:
+    from app.renderers.aura_renderer import _build_karma_section
+
+    low_axis, _ = _build_karma_section(karma_score=-0.9, trend_direction="worsened")
+    mid_axis, _ = _build_karma_section(karma_score=0.0, trend_direction="stable")
+    high_axis, _ = _build_karma_section(karma_score=0.9, trend_direction="improved")
+
+    assert "🟣" in low_axis
+    assert "⚪" in mid_axis
+    assert "🔵" in high_axis
+
+
+def test_channel_aura_embed_karma_fallback_when_average_not_available() -> None:
+    from app.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, build_channel_aura_embed
+
+    embed = build_channel_aura_embed(
+        data=ChannelAuraEmbedData(
+            positive_points=40,
+            negative_points=-10,
+            users_count=2,
+            top_users=[],
+            positive_reasons=[],
+            negative_reasons=[],
+            missions=ChannelAuraMissionTrend(**_mission_trend_sample()),
+            advice_lines=["ok"],
+            average_karma_score=None,
+            previous_average_karma_score=None,
+        )
+    )
+    karma = _field_value_by_plain_name(embed, "Karma")
+    trend = _field_value_by_plain_name(embed, "Trend")
+    assert "Dati ancora troppo scarsi" in karma
+    assert "trend non valutabile" in trend
 
 
 def test_channel_aura_embed_classifica_intro_uses_real_movements_and_first_time_wording() -> None:
