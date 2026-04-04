@@ -15,9 +15,16 @@ ensure_sqlite_stub()
 
 if "openai" not in sys.modules:
     sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
+if "httpx" not in sys.modules:
+    sys.modules["httpx"] = types.SimpleNamespace()
 
 from app.services.campaign_content_fetchers import dedupe_news_items
-from app.services.campaign_content_formatter import build_horoscope_embeds, build_news_embeds, build_weather_embeds
+from app.services.campaign_content_formatter import (
+    build_horoscope_embeds,
+    build_news_embeds,
+    build_weather_embeds,
+    chunk_news_items_for_embed,
+)
 from app.services.campaign_content_service import CampaignContentService
 from app.services.database import DatabaseService
 
@@ -57,6 +64,65 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     assert "CRONACA" in titles[1]
     assert "SPORT" not in " ".join(titles)
     assert "TECNOLOGIA" in " ".join(titles)
+
+
+def test_news_category_embed_chunks_items_with_continuation_fields() -> None:
+    payload = {
+        "categories": {
+            "economia": [
+                {"title": f"Titolo {idx}", "summary": f"Sintesi {idx}. Seconda frase {idx}.", "source": "ansa.it", "link": f"https://example.com/{idx}"}
+                for idx in range(1, 6)
+            ]
+        }
+    }
+    embeds = build_news_embeds({}, payload)
+    category_embed = embeds[1]
+    assert len(category_embed.fields) == 3
+    assert category_embed.fields[0].name == "📄 __**NOTIZIE**__"
+    assert category_embed.fields[1].name == "📄 __**NOTIZIE (CONT.)**__"
+    assert category_embed.fields[2].name == "📄 __**NOTIZIE (CONT.)**__"
+    assert category_embed.fields[0].value.startswith("1. ")
+    assert "\n\n2. " in category_embed.fields[0].value
+    assert category_embed.fields[1].value.startswith("3. ")
+    assert "\n\n4. " in category_embed.fields[1].value
+    assert category_embed.fields[2].value.startswith("5. ")
+    for field in category_embed.fields:
+        assert len(field.value) <= 1024
+        assert "..." not in field.value
+
+
+def test_chunk_news_items_for_embed_limits_to_two_items_each_field() -> None:
+    items = [
+        {"title": f"News {idx}", "summary": "Prima frase. Seconda frase. Terza frase.", "source": "example.com", "link": f"https://example.com/{idx}"}
+        for idx in range(1, 6)
+    ]
+    chunks = chunk_news_items_for_embed(items, display="Economia")
+    assert len(chunks) == 3
+    assert chunks[0].count("\n\n") == 1
+    assert chunks[1].count("\n\n") == 1
+    assert chunks[2].count("\n\n") == 0
+    assert all(len(chunk) <= 1024 for chunk in chunks)
+
+
+def test_news_fallback_summary_uses_two_sentences_without_ai_summary() -> None:
+    payload = {
+        "categories": {
+            "economia": [
+                {
+                    "title": "Mercati in movimento",
+                    "summary": "",
+                    "description": "<p>Prima frase pulita.</p><p>Seconda frase utile.</p><p>Terza frase da ignorare.</p>",
+                    "source": "ansa.it",
+                    "link": "https://example.com/mercati",
+                }
+            ]
+        }
+    }
+    embeds = build_news_embeds({}, payload)
+    field_value = embeds[1].fields[0].value
+    assert "Prima frase pulita." in field_value
+    assert "Seconda frase utile." in field_value
+    assert "Terza frase da ignorare." not in field_value
 
 
 def test_build_horoscope_embeds_strip_inner_headings() -> None:
