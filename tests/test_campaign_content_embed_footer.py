@@ -1,11 +1,16 @@
 from pathlib import Path
 import re
+import sys
+import types
 
-from app.services.campaign_content_formatter import (
-    build_horoscope_embeds,
-    build_news_embeds,
-    build_weather_embeds,
-)
+if "openai" not in sys.modules:
+    sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
+if "httpx" not in sys.modules:
+    sys.modules["httpx"] = types.SimpleNamespace()
+
+from app.services.author import render_author_name
+from app.services.campaign_content_formatter import build_horoscope_embeds, build_news_embeds, build_news_page_map, build_weather_embeds
+from app.services.campaign_content_service import CampaignContentService
 from app.services.footer import get_footer_meta
 
 _STANDARD_WRAP_RE = re.compile(r"^(?:(?P<emoji>\S+)\s+)?__\*\*(?P<inner>.*)\*\*__$")
@@ -61,9 +66,9 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
         {"signs": {"Ariete": {"text": "Focus"}}},
     )
-    assert _title_inner_without_emoji(news[0].title or "") == "NOTIZIARIO CRICETOSO • INIZIO"
-    assert _title_inner_without_emoji(news[1].title or "") == "NOTIZIARIO CRICETOSO • TRASH"
-    assert _title_inner_without_emoji(news[2].title or "") == "NOTIZIARIO CRICETOSO • VIRAL"
+    assert _title_inner_without_emoji(news[0].title or "") == "HAMSTER NEWS • PANORAMICA"
+    assert _title_inner_without_emoji(news[1].title or "") == "HAMSTER NEWS • TRASH"
+    assert _title_inner_without_emoji(news[2].title or "") == "HAMSTER NEWS • VIRAL"
     assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO DEL GIORNO • INIZIO"
     assert _title_inner_without_emoji(horoscope[1].title or "") == "OROSCOPO DEL GIORNO • ARIETE"
     news_meta = [get_footer_meta(embed) for embed in news]
@@ -92,8 +97,9 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Notizie uniche aggregate" not in description
     assert "Barcellometro" in description
     assert "redazione" in description.lower()
-    assert "Spettacolo" in description
-    assert "Gossip" in description
+    assert "Da quale categoria vuoi partire" in description
+    assert "**" in description
+    assert all(field.name != format_name for field in overview.fields for format_name in ["__**VARIE**__", "__**TITOLI IN EVIDENZA**__"])
 
 
 def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
@@ -157,3 +163,69 @@ def test_campaign_formatter_applies_footer_meta_in_all_builders() -> None:
     assert 'return _apply_campaign_footer(embeds, service_name="campagne_meteo")' in source
     assert 'return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")' in source
     assert 'return _apply_campaign_footer([embed], service_name=service_name)' in source
+
+
+def test_news_service_label_maps_to_campaigns_and_not_unknown() -> None:
+    assert render_author_name(service_name="campagne_notizie") == "servizio CAMPAIGNS"
+    assert "UNKNOWN" not in render_author_name(service_name="campagne_notizie")
+
+
+def test_news_overview_builds_category_fields_buttons_and_no_legacy_sections() -> None:
+    payload = {
+        "categories": {
+            "cronaca": [{"title": "C1", "summary": "S", "source": "ansa", "link": "https://example.com/1"}],
+            "sport": [{"title": "S1", "summary": "S", "source": "gazzetta", "link": "https://example.com/2"}],
+            "varie": [{"title": "V1", "summary": "S", "source": "misc", "link": "https://example.com/3"}],
+        }
+    }
+    news = build_news_embeds({"embed_title": "IGNORED"}, payload)
+    overview = news[0]
+    page_map = build_news_page_map(payload)
+    overview_field_labels = [field.name for field in overview.fields]
+
+    assert all("VARIE" not in name for name in overview_field_labels)
+    assert all("TITOLI IN EVIDENZA" not in name for name in overview_field_labels)
+
+    displayed_labels = [entry["label"] for entry in page_map if entry.get("type") == "category"]
+    displayed_emoji = [label.split(" ", 1)[0] for label in displayed_labels]
+    field_emoji = [name.split(" ", 1)[0] for name in overview_field_labels]
+    assert len(displayed_labels) == len(overview_field_labels)
+    assert displayed_emoji == field_emoji
+
+
+def test_news_overview_uses_first_available_story_image_and_survives_without_image() -> None:
+    with_image = build_news_embeds(
+        {},
+        {
+            "categories": {
+                "cronaca": [{"title": "A", "summary": "S", "source": "ansa", "link": "https://example.com", "image_url": "https://cdn.example.com/img.jpg"}],
+                "sport": [{"title": "B", "summary": "S", "source": "gazzetta", "link": "https://example.com"}],
+            }
+        },
+    )
+    without_image = build_news_embeds(
+        {},
+        {"categories": {"cronaca": [{"title": "A", "summary": "S", "source": "ansa", "link": "https://example.com"}]}},
+    )
+    assert str(with_image[0].image.url) == "https://cdn.example.com/img.jpg"
+    assert without_image[0].image.url is None
+
+
+def test_campaign_sources_are_shortened_in_footer_source_normalization() -> None:
+    compact = CampaignContentService._normalize_sources(  # type: ignore[attr-defined]
+        [
+            "https://www.reuters.com/world/europe/very/long/path?query=1",
+            "https://ANSA.it/politica/articolo-lungo",
+            "open-meteo",
+        ]
+    )
+    assert compact == ["reuters.com", "ansa.it", "open-meteo"]
+
+
+def test_news_formatter_uses_global_standard_flow_for_title_description_and_field_names() -> None:
+    source = Path("app/services/campaign_content_formatter.py").read_text()
+    assert "format_standard_title" in source
+    assert "format_standard_description" in source
+    assert "format_standard_field_name" in source
+    assert "def format_news_" not in source
+    assert "def build_news_title" not in source

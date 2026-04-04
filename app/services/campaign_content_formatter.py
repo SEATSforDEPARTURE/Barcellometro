@@ -4,10 +4,11 @@ import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
+from urllib.parse import urlparse
 
 import discord
 from app.services.footer import attach_footer_meta_to_all
-from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
 DEFAULT_COLOR = 0x2F3136
 
@@ -195,57 +196,86 @@ def _overview_now(payload: dict[str, Any]) -> datetime:
     return datetime.now(timezone.utc)
 
 
-def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
-    categories = payload.get("categories", {})
-    color = resolve_color(config.get("embed_color"))
-    title = config.get("embed_title") or "🗞️ Notizie del giorno"
-    embeds: list[discord.Embed] = []
-    seen_titles: set[str] = set()
-    highlights: list[str] = []
-    for category, items in categories.items():
-        display = get_category_display_name(category)
-        emoji = get_category_emoji(category)
-        for item in items:
-            title_clean = sanitize_plain_text(item.get("title", ""))[:160]
-            if not title_clean:
-                continue
-            dedupe_key = title_clean.casefold()
-            if dedupe_key in seen_titles:
-                continue
-            seen_titles.add(dedupe_key)
-            highlights.append(f"• {emoji} {display} — {title_clean}")
-            if len(highlights) >= 3:
-                break
-        if len(highlights) >= 3:
-            break
+def _valid_news_items(items: Any) -> list[dict[str, Any]]:
+    valid: list[dict[str, Any]] = []
+    if not isinstance(items, list):
+        return valid
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = sanitize_plain_text(str(item.get("title") or ""))
+        if title:
+            valid.append(item)
+    return valid
 
-    overview = discord.Embed(title=format_standard_title(f"{title} • Inizio"), color=color)
+
+def _iter_news_categories(payload: dict[str, Any], *, max_categories: int = 10) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
+    selected: list[tuple[str, str, str, list[dict[str, Any]]]] = []
+    categories = payload.get("categories", {})
+    if not isinstance(categories, dict):
+        return selected
+    for category, items in categories.items():
+        valid_items = _valid_news_items(items)
+        if not valid_items:
+            continue
+        display = get_category_display_name(str(category))
+        if display.upper() in {"VARIE", "TITOLI IN EVIDENZA"}:
+            continue
+        emoji = get_category_emoji(str(category))
+        selected.append((str(category), display, emoji, valid_items))
+        if len(selected) >= max_categories:
+            break
+    return selected
+
+
+def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, Any]]]]) -> str | None:
+    image_keys = ("image", "image_url", "imageUrl", "urlToImage", "thumbnail", "thumbnail_url", "media_url")
+    for _, _, _, items in categories:
+        for item in items:
+            for key in image_keys:
+                candidate = str(item.get(key) or "").strip()
+                if not candidate:
+                    continue
+                parsed = urlparse(candidate)
+                if parsed.scheme in {"http", "https"} and parsed.netloc:
+                    return candidate
+    return None
+
+
+def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
+    color = resolve_color(config.get("embed_color"))
+    title = "📰 HAMSTER NEWS"
+    embeds: list[discord.Embed] = []
+    category_rows = _iter_news_categories(payload)
+    overview = discord.Embed(title=format_standard_title(f"{title} • Panoramica"), color=color)
     tone = _time_of_day_label(_overview_now(payload))
-    if highlights:
-        highlights_preview = "\n".join(highlights)
-        overview.description = (
-            f"🐹 Edizione di **{tone}**: il Barcellometro è in conduzione e la redazione oggi gira come una ruota da corsa.\n"
-            f"{highlights_preview}"
-        )
-        overview.add_field(
-            name=format_standard_field_name("Titoli in evidenza", emoji="🗞️"),
-            value="\n".join(highlights),
-            inline=False,
-        )
-        overview.add_field(
-            name=format_standard_field_name("Navigazione", emoji="👇"),
-            value="Per l'approfondimento categoria per categoria, clicca i pulsanti qui sotto.",
-            inline=False,
+    if category_rows:
+        overview.description = format_standard_description(
+            (
+                f"🐹 Edizione di **{tone}**: Barcellometro è in conduzione con la redazione più frizzante del quartiere. "
+                "**Da quale categoria vuoi partire per il recap?**"
+            ),
+            blank_line_before_fields=True,
         )
     else:
-        overview.description = (
-            f"🐹 Turno di **{tone}** in redazione: il Barcellometro ha trovato pochi lanci solidi, ma niente panico.\n"
-            "Apri i pulsanti in basso e controlla le categorie: può sempre saltare fuori la chicca dell'ultimo minuto."
+        overview.description = format_standard_description(
+            (
+                f"🐹 Turno di **{tone}** in redazione: Barcellometro è al desk, oggi il flusso è leggero ma il radar resta acceso. "
+                "**Vuoi comunque farti un giro nelle categorie disponibili?**"
+            ),
         )
+    for _, display, emoji, items in category_rows:
+        lines = [f"• {sanitize_plain_text(str(item.get('title') or ''))[:140]}" for item in items[:3]]
+        overview.add_field(
+            name=format_standard_field_name(display, emoji=emoji),
+            value="\n".join(lines)[:1024] or "Aggiornamenti in arrivo.",
+            inline=False,
+        )
+    first_image_url = _first_story_image_url(category_rows)
+    if first_image_url:
+        overview.set_image(url=first_image_url)
     embeds.append(overview)
-    for category, items in categories.items():
-        display = get_category_display_name(category)
-        emoji = get_category_emoji(category)
+    for _, display, emoji, items in category_rows:
         embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
         lines: list[str] = []
         for idx, item in enumerate(items[:5], start=1):
@@ -264,12 +294,12 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
 
 def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
     page_map: list[dict[str, Any]] = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
-    for index, category in enumerate(payload.get("categories", {}).keys(), start=1):
+    for index, (category, display, emoji, _) in enumerate(_iter_news_categories(payload), start=1):
         page_map.append(
             {
                 "type": "category",
                 "key": slugify_label(category),
-                "label": f"{get_category_emoji(category)} {get_category_display_name(category).upper()}",
+                "label": f"{emoji} {display.upper()}",
                 "page": index,
             }
         )
