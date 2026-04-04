@@ -173,6 +173,87 @@ def trim_sentence_block(text: str, *, limit: int = 320) -> str:
     return clipped.rstrip() + "…"
 
 
+_NEWS_META_PREFIX_RE = re.compile(
+    r"(?im)^\s*(?:[-•*]\s*)?(?:🧃\s*)?"
+    r"(?:in breve|riassunto|sintesi|ecco(?:\s+la)?\s+riscrizione|testo riformulato|riscrittura)\s*:\s*"
+)
+_NEWS_META_LINE_RE = re.compile(
+    r"(?im)^\s*(?:ecco(?:\s+la)?\s+riscrizione(?:\s+del\s+testo)?|testo riformulato|riassunto editoriale|"
+    r"output finale|versione finale|assistente editoriale)\b[^\n]*$"
+)
+_NEWS_BAD_FALLBACKS = {
+    "aggiornamento in arrivo.",
+    "aggiornamento in arrivo",
+    "nessun riassunto disponibile",
+    "nessun riassunto disponibile.",
+}
+
+
+def sanitize_public_news_text(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"```(?:\w+)?", "", cleaned, flags=re.IGNORECASE).replace("```", "")
+    cleaned = _NEWS_META_PREFIX_RE.sub("", cleaned)
+    cleaned = _NEWS_META_LINE_RE.sub("", cleaned)
+    cleaned = re.sub(r"(?im)^\s*(?:nota|istruzione|prompt|spiegazione)\s*:\s*[^\n]*$", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \n\t-•")
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+    return cleaned.strip()
+
+
+def _is_useless_news_text(text: str) -> bool:
+    normalized = sanitize_public_news_text(text).lower()
+    return not normalized or normalized in _NEWS_BAD_FALLBACKS
+
+
+def _first_real_news_sentences(item: dict[str, Any], *, limit: int = 220) -> str:
+    for key in ("summary", "description", "excerpt", "content", "text"):
+        candidate = sanitize_public_news_text(str(item.get(key) or ""))
+        if _is_useless_news_text(candidate):
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+", candidate)
+        picked: list[str] = []
+        for sentence in sentences:
+            normalized = sentence.strip()
+            if not normalized:
+                continue
+            picked.append(normalized)
+            if len(picked) >= 2:
+                break
+        compact = " ".join(picked) if picked else candidate
+        return trim_sentence_block(compact, limit=limit)
+    return "Dettagli in aggiornamento."
+
+
+def _news_source_line(item: dict[str, Any], *, link: str) -> str:
+    source_raw = sanitize_plain_text(str(item.get("source") or "")).lower()
+    source_line = source_raw
+    if "http" in source_line:
+        parsed_source = urlparse(source_line)
+        source_line = parsed_source.netloc or source_line
+    if "." not in source_line and link:
+        parsed_link = urlparse(link)
+        source_line = parsed_link.netloc or source_line
+    if source_line and not source_line.startswith("www."):
+        source_line = f"www.{source_line}"
+    return source_line.strip() or "www.nd.it"
+
+
+def _format_news_item_block(item: dict[str, Any], *, display: str, numbered: bool, index: int) -> str:
+    link = str(item.get("link") or "").strip()
+    title_line = sanitize_plain_text(str(item.get("title") or "Titolo non disponibile"))[:140]
+    linked_title = f"[{title_line}]({link})" if link else title_line
+    summary = sanitize_public_news_text(str(item.get("summary") or ""))
+    summary = sanitize_plain_text(summary, remove_category_hint=display)
+    if _is_useless_news_text(summary):
+        summary = _first_real_news_sentences(item)
+    summary = trim_sentence_block(summary, limit=220)
+    source_line = _news_source_line(item, link=link)
+    heading = f"{index}. **{linked_title}**" if numbered else f"**{linked_title}**"
+    return f"{heading}\n• {summary}\n`fonte: {source_line}`"
+
+
 def similarity_title(a: str, b: str) -> float:
     return SequenceMatcher(None, sanitize_plain_text(a).lower(), sanitize_plain_text(b).lower()).ratio()
 
@@ -299,26 +380,9 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             ),
         )
     for _, display, emoji, main_item, _ in category_rows:
-        link = str(main_item.get("link") or "").strip()
-        title_line = sanitize_plain_text(str(main_item.get("title") or "Titolo non disponibile"))[:140]
-        linked_title = f"[{title_line}]({link})" if link else title_line
-        summary_line = trim_sentence_block(str(main_item.get("summary") or "Aggiornamento in arrivo."), limit=170)
-        summary_line = sanitize_plain_text(summary_line, remove_category_hint=display) or "Aggiornamento in arrivo."
-        short_summary = trim_sentence_block(summary_line, limit=150)
-        source_raw = sanitize_plain_text(str(main_item.get("source") or "")).lower()
-        source_line = source_raw
-        if "http" in source_line:
-            parsed_source = urlparse(source_line)
-            source_line = parsed_source.netloc or source_line
-        if "." not in source_line and link:
-            parsed_link = urlparse(link)
-            source_line = parsed_link.netloc or source_line
-        if source_line and not source_line.startswith("www."):
-            source_line = f"www.{source_line}"
-        source_line = source_line.strip() or "www.nd.it"
         overview.add_field(
             name=format_standard_field_name(f"{display} in primo piano", emoji=emoji),
-            value=f"**{linked_title}**\n• 🧃 **In breve:** {short_summary}\nfonte: {source_line}"[:1024],
+            value=_format_news_item_block(main_item, display=display, numbered=False, index=0)[:1024],
             inline=False,
         )
     first_image_url = _first_story_image_url(category_rows)
@@ -332,13 +396,9 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
         lines: list[str] = []
         for idx, item in enumerate(items[:5], start=1):
-            summary = trim_sentence_block(item.get("summary", "Nessun riassunto disponibile"), limit=280)
-            summary = sanitize_plain_text(summary, remove_category_hint=display)
-            lines.append(f"**{idx}. {sanitize_plain_text(item.get('title', 'Titolo'))[:160]}**")
-            lines.append(summary or "Aggiornamento in arrivo.")
-            lines.append(f"`Fonte: {sanitize_plain_text(item.get('source', 'n/d'))[:80]}` • [Apri link]({item.get('link', 'https://example.com')})")
+            lines.append(_format_news_item_block(item, display=display, numbered=True, index=idx))
             lines.append("")
-        embed.description = f"Rassegna {emoji} {display}: approfondimento per categoria."
+        embed.description = format_standard_description(f"*Rassegna {emoji} {display}: approfondimento per categoria.*", blank_line_before_fields=True)
         page_value = "\n".join(lines)[:1024] if lines else f"Nessuna notizia valida per {emoji} {display}."
         embed.add_field(name=format_standard_field_name("Notizie", emoji=emoji), value=page_value, inline=False)
         embeds.append(embed)

@@ -318,7 +318,7 @@ class CampaignContentService:
         prompt = (
             f"Servizio: {context}. Riscrivi in italiano per Discord con tono leggero e ironico ma sostanzioso. "
             "Non inventare dati/fatti/valori e non cambiare numeri. Evita frasi generiche fotocopia. "
-            "Restituisci solo il testo finale da pubblicare: niente prefazioni, niente meta-commenti, niente spiegazioni del prompt. "
+            "Restituisci solo il testo finale da pubblicare: niente prefazioni, niente etichette tipo 'In breve:', niente meta-commenti, niente spiegazioni del prompt. "
             f"Contesto: {extra_info}.\nTesto:\n{text}"
         )
         try:
@@ -339,6 +339,11 @@ class CampaignContentService:
         cleaned = re.sub(r"```(?:\w+)?", "", cleaned, flags=re.IGNORECASE).replace("```", "")
         cleaned = re.sub(
             r"(?im)^\s*(?:[-•*]\s*)?(?:🧃\s*)?(?:in breve|riassunto|sintesi)\s*:\s*(?:ecco\s+)?(?:la\s+)?(?:riscrizione|versione)\b.*$",
+            "",
+            cleaned,
+        )
+        cleaned = re.sub(
+            r"(?im)^\s*(?:[-•*]\s*)?(?:🧃\s*)?(?:in breve|riassunto|sintesi|testo\s+riformulato)\s*:\s*",
             "",
             cleaned,
         )

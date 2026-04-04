@@ -15,6 +15,7 @@ from app.services.campaign_content_formatter import (
     build_news_embeds,
     build_news_page_map,
     build_weather_embeds,
+    sanitize_public_news_text,
 )
 from app.services.campaign_content_service import CampaignContentService
 from app.services.embed_images import EmbedImagesService, get_embed_images_meta
@@ -140,9 +141,70 @@ def test_news_overview_field_copy_is_concise_and_has_source_line() -> None:
     assert field_value is not None
     assert field_value.count("\n") == 2
     assert "\n• " in field_value
-    assert "**In breve:**" in field_value
-    assert field_value.count("🧃") <= 1
-    assert "fonte: www.ansa.it" in field_value
+    assert "**In breve:**" not in field_value
+    assert "🧃 In breve:" not in field_value
+    assert "`fonte: www.ansa.it`" in field_value
+
+
+def test_news_public_sanitization_strips_meta_prefixes_and_keeps_content() -> None:
+    dirty = "🧃 In breve: Ecco la riscrizione\nRiassunto: **Focus** utile."
+    cleaned = sanitize_public_news_text(dirty)
+    assert "In breve" not in cleaned
+    assert "Ecco la riscrizione" not in cleaned
+    assert cleaned == "**Focus** utile."
+
+
+def test_news_category_item_format_matches_overview_and_limit_five_items() -> None:
+    payload = {
+        "categories": {
+            "cronaca": [
+                {"title": f"Titolo {idx}", "summary": f"Sommario {idx}.", "source": "ansa.it", "link": f"https://example.com/{idx}"}
+                for idx in range(1, 8)
+            ]
+        }
+    }
+    news = build_news_embeds({}, payload)
+    category_embed = news[1]
+    assert category_embed.description and category_embed.description.strip().startswith("*")
+    body = category_embed.fields[0].value or ""
+    assert "1. **[Titolo 1](https://example.com/1)**" in body
+    assert "5. **[Titolo 5](https://example.com/5)**" in body
+    assert "6. **[Titolo 6](https://example.com/6)**" not in body
+    assert "\n• " in body
+    assert "`fonte: www.ansa.it`" in body
+
+
+def test_news_fallback_uses_real_source_sentences_before_minimal_placeholder() -> None:
+    payload = {
+        "categories": {
+            "cronaca": [
+                {
+                    "title": "Fallback reale",
+                    "summary": "Aggiornamento in arrivo.",
+                    "description": "Prima frase utile dal feed. Seconda frase utile dal feed. Terza non necessaria.",
+                    "source": "ansa.it",
+                    "link": "https://example.com/fallback",
+                }
+            ]
+        }
+    }
+    news = build_news_embeds({}, payload)
+    field_value = news[0].fields[0].value or ""
+    assert "Aggiornamento in arrivo." not in field_value
+    assert "Prima frase utile dal feed." in field_value
+
+
+def test_news_minimal_fallback_used_only_when_all_text_is_empty() -> None:
+    payload = {
+        "categories": {
+            "cronaca": [
+                {"title": "Solo titolo", "summary": "", "description": "", "content": "", "source": "ansa.it", "link": "https://example.com/empty"}
+            ]
+        }
+    }
+    news = build_news_embeds({}, payload)
+    field_value = news[0].fields[0].value or ""
+    assert "Dettagli in aggiornamento." in field_value
 
 
 def test_news_fallback_embed_uses_campaigns_author_service_label() -> None:
