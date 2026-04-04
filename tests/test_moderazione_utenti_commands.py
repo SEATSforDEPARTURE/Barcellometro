@@ -1177,3 +1177,102 @@ def test_users_list_commands_render_structured_lines_and_no_narrative(monkeypatc
             assert "espulso da" not in line
 
     asyncio.run(_run())
+
+
+def test_users_aura_policy_show_with_eligible_users_renders_only_eligible(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+
+        eligible_result = SimpleNamespace(eligible=True, reason="ok")
+        excluded_result = SimpleNamespace(eligible=False, reason="Aura non attiva: account bot escluso")
+        aura_service = SimpleNamespace(
+            get_policy=AsyncMock(return_value={"enabled": True}),
+            evaluate_member=AsyncMock(side_effect=[eligible_result, excluded_result]),
+        )
+        members = [
+            SimpleNamespace(id=10, mention="<@10>"),
+            SimpleNamespace(id=11, mention="<@11>"),
+        ]
+        interaction = SimpleNamespace(guild_id=1, guild=SimpleNamespace(members=members), user=SimpleNamespace(id=9))
+        ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, aura_eligibility=aura_service, config=SimpleNamespace())
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+
+        command = _find_command(users_group, "aura", "policy_show")
+        await command.callback(interaction, None, True, None)
+
+        kwargs = send_standard_response.await_args.kwargs
+        assert kwargs["subcommand_path"] == "users aura policy_show"
+        assert kwargs["sections"][0].title == "👥 __**UTENTI AURA ATTIVI**__"
+        assert kwargs["sections"][0].lines == ["Totale utenti: 1", "<@10>"]
+        aura_service.get_policy.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+def test_users_aura_policy_show_with_excluded_users_renders_reason_mapping(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+
+        aura_service = SimpleNamespace(
+            get_policy=AsyncMock(return_value={"enabled": True}),
+            evaluate_member=AsyncMock(return_value=SimpleNamespace(eligible=False, reason="Aura non attiva: servono almeno 12 messaggi nel periodo")),
+        )
+        member = SimpleNamespace(id=42, mention="<@42>")
+        interaction = SimpleNamespace(guild_id=1, guild=SimpleNamespace(members=[member]), user=SimpleNamespace(id=9))
+        ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, aura_eligibility=aura_service, config=SimpleNamespace())
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+
+        command = _find_command(users_group, "aura", "policy_show")
+        await command.callback(interaction, None, None, True)
+
+        section = send_standard_response.await_args.kwargs["sections"][0]
+        assert section.title == "🚫 __**UTENTI ESCLUSI DAL PROGRAMMA AURA**__"
+        assert section.lines == ["Totale utenti: 1", "• <@42> — meno di 12 messaggi"]
+
+    asyncio.run(_run())
+
+
+def test_aura_exclusion_reason_to_human_mapping() -> None:
+    assert moderazione_utenti_module._aura_exclusion_reason_to_human("Aura non attiva: account bot escluso") == "bot"
+    assert moderazione_utenti_module._aura_exclusion_reason_to_human("Aura non attiva: account troppo recente (min 3 giorni)") == "account troppo recente"
+    assert moderazione_utenti_module._aura_exclusion_reason_to_human("Aura non attiva: servono almeno 8 messaggi nel periodo") == "meno di 8 messaggi"
+    assert moderazione_utenti_module._aura_exclusion_reason_to_human("Aura non attiva: ruolo escluso") == "ruolo escluso"
+    assert moderazione_utenti_module._aura_exclusion_reason_to_human("Aura non attiva: manca un ruolo ammesso") == "non ha ruoli ammessi"
+    assert moderazione_utenti_module._aura_exclusion_reason_to_human("Aura disattivata per questo server") == "programma aura disattivo"
+
+
+def test_users_aura_policy_show_without_runtime_flags_keeps_standard_policy_output(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+
+        policy = {
+            "enabled": True,
+            "eligible_roles": [],
+            "excluded_roles": [],
+            "exclude_bots": True,
+            "days_account": 5,
+            "min_messages": 3,
+        }
+        aura_service = SimpleNamespace(get_policy=AsyncMock(return_value=policy), evaluate_member=AsyncMock())
+        interaction = SimpleNamespace(guild_id=1, guild=SimpleNamespace(members=[]), user=SimpleNamespace(id=9))
+        ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, aura_eligibility=aura_service, config=SimpleNamespace())
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+
+        command = _find_command(users_group, "aura", "policy_show")
+        await command.callback(interaction, None, None, None)
+
+        kwargs = send_standard_response.await_args.kwargs
+        assert kwargs["sections"] is None
+        assert ("program", "on") in kwargs["lines"]
+        aura_service.evaluate_member.assert_not_awaited()
+
+    asyncio.run(_run())

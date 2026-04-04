@@ -187,7 +187,7 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/users dms invite_set|invite_show|invite_reset`
 - `/users aura on|off|status`
 - `/users aura policy_set [eligible_roles] [excluded_roles] [exclude_bots] [days_account] [min_messages]`
-- `/users aura policy_show [field]` (`field`: `eligible_roles|excluded_roles|exclude_bots|days_account|min_messages`)
+- `/users aura policy_show [field] [eligible_users] [excluded_users]` (`field`: `eligible_roles|excluded_roles|exclude_bots|days_account|min_messages`)
 - `/users aura policy_reset [field]` (reset al default hardcoded del campo; senza field resetta tutta la policy aura)
 - `/users grace tempban_set quantity:<n> unit:<minuti|ore|giorni|settimane>`
 - `/users grace tempban_show`
