@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
-from typing import Optional
+from typing import Callable, Optional
+import unicodedata
 
 import discord
 from discord import app_commands
@@ -33,6 +34,34 @@ MOOD_CHOICES = [
 
 NEWS_SOURCE_CHOICES = sorted({str(source).strip().lower() for source in NEWS_SOURCE_MAP})
 NEWS_CATEGORY_CHOICES = sorted({str(category).strip().lower() for category in SUPPORTED_NEWS_CATEGORIES})
+
+
+def _fold_token(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(char for char in normalized if not unicodedata.combining(char)).strip().lower()
+
+
+def _news_source_aliases() -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for token, source_url in NEWS_SOURCE_MAP.items():
+        canonical = str(token).strip().lower()
+        aliases[canonical] = canonical
+        aliases[f"{canonical}.it"] = canonical
+        aliases[f"www.{canonical}.it"] = canonical
+        url = str(source_url).strip().lower()
+        if url.startswith(("http://", "https://")):
+            host = url.split("//", 1)[1].split("/", 1)[0].strip()
+            if host:
+                aliases[host] = canonical
+                aliases[f"https://{host}"] = canonical
+                aliases[f"http://{host}"] = canonical
+                if host.startswith("www."):
+                    aliases[host[4:]] = canonical
+    return aliases
+
+
+NEWS_SOURCE_ALIASES = _news_source_aliases()
+NEWS_CATEGORY_ALIASES = {_fold_token(token): token for token in NEWS_CATEGORY_CHOICES}
 
 
 async def _ensure_setting(ctx: CommandContext, key: str, default: str) -> str:
@@ -98,11 +127,75 @@ def _normalize_csv_values(raw: Optional[str]) -> list[str]:
     return normalized
 
 
-def _parse_guided_csv_values(raw: Optional[str], *, allowed: list[str]) -> tuple[list[str], list[str]]:
-    allowed_set = {token.lower() for token in allowed}
-    normalized = _normalize_csv_values(raw)
-    invalid = [token for token in normalized if token not in allowed_set]
-    return [token for token in normalized if token in allowed_set], invalid
+def _parse_guided_csv_values(
+    raw: Optional[str],
+    *,
+    allowed: list[str],
+    aliases: dict[str, str] | None = None,
+    normalizer: Callable[[str], str] | None = None,
+) -> tuple[list[str], list[str]]:
+    aliases = aliases or {}
+    normalize = normalizer or (lambda token: str(token or "").strip().lower())
+    allowed_map = {normalize(token): token for token in allowed}
+    normalized: list[str] = []
+    invalid: list[str] = []
+    seen: set[str] = set()
+
+    for raw_token in _parse_csv(raw):
+        raw_clean = str(raw_token).strip()
+        folded = normalize(raw_clean)
+        canonical = aliases.get(folded) or allowed_map.get(folded)
+        if canonical is None:
+            canonical = aliases.get(raw_clean.lower())
+        if canonical is None:
+            invalid.append(raw_clean.lower())
+            continue
+        canonical_clean = str(canonical).strip().lower()
+        if canonical_clean in seen:
+            continue
+        seen.add(canonical_clean)
+        normalized.append(canonical_clean)
+    return normalized, invalid
+
+
+def _compose_guided_csv_suggestions(
+    current: str,
+    *,
+    allowed_values: list[str],
+    preferred_labels: dict[str, str] | None = None,
+    aliases: dict[str, str] | None = None,
+    normalizer: Callable[[str], str] | None = None,
+) -> list[app_commands.Choice[str]]:
+    preferred_labels = preferred_labels or {}
+    aliases = aliases or {}
+    normalize = normalizer or (lambda token: str(token or "").strip().lower())
+    raw = str(current or "")
+    parts = raw.split(",")
+    previous_parts = [segment.strip() for segment in parts[:-1] if segment.strip()]
+    fragment_raw = parts[-1].strip() if parts else ""
+    fragment = normalize(fragment_raw)
+
+    selected: set[str] = set()
+    for part in previous_parts:
+        folded = normalize(part)
+        canonical = aliases.get(folded, folded)
+        selected.add(canonical.lower())
+
+    base = ", ".join(previous_parts)
+    suggestions: list[app_commands.Choice[str]] = []
+    for token in allowed_values:
+        canonical = str(token).strip().lower()
+        if canonical in selected:
+            continue
+        candidate = normalize(canonical)
+        if fragment and not candidate.startswith(fragment):
+            continue
+        value = f"{base}, {canonical}" if base else canonical
+        label = preferred_labels.get(canonical, canonical)
+        suggestions.append(app_commands.Choice(name=label[:100], value=value[:100]))
+        if len(suggestions) >= 25:
+            break
+    return suggestions
 
 
 def _format_message_campaign_row(row: dict[str, object]) -> str:
@@ -253,33 +346,24 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         row = await ctx.database.get_campaign_content_config_by_service(guild_id, channel_id, service_type)
         return dict(row) if row is not None else None
 
-    async def _suggest_csv_choices(current: str, *, allowed_values: list[str], preferred_labels: dict[str, str] | None = None) -> list[app_commands.Choice[str]]:
-        preferred_labels = preferred_labels or {}
-        raw = str(current or "")
-        parts = [segment.strip() for segment in raw.split(",")]
-        fragment = parts[-1].lower() if parts else ""
-        selected = {segment.lower() for segment in parts[:-1] if segment.strip()}
-        suggestions: list[app_commands.Choice[str]] = []
-        for token in allowed_values:
-            if token in selected:
-                continue
-            if fragment and fragment not in token:
-                continue
-            base = ", ".join(parts[:-1]).strip()
-            value = f"{base}, {token}" if base else token
-            label = preferred_labels.get(token, token)
-            suggestions.append(app_commands.Choice(name=label[:100], value=value[:100]))
-            if len(suggestions) >= 25:
-                break
-        return suggestions
-
     async def _news_sources_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         labels = {token: f"{token} ({NEWS_SOURCE_MAP[token]})" for token in NEWS_SOURCE_CHOICES}
-        return await _suggest_csv_choices(current, allowed_values=NEWS_SOURCE_CHOICES, preferred_labels=labels)
+        return _compose_guided_csv_suggestions(
+            current,
+            allowed_values=NEWS_SOURCE_CHOICES,
+            preferred_labels=labels,
+            aliases=NEWS_SOURCE_ALIASES,
+        )
 
     async def _news_categories_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         labels = {token: token.title() for token in NEWS_CATEGORY_CHOICES}
-        return await _suggest_csv_choices(current, allowed_values=NEWS_CATEGORY_CHOICES, preferred_labels=labels)
+        return _compose_guided_csv_suggestions(
+            current,
+            allowed_values=NEWS_CATEGORY_CHOICES,
+            preferred_labels=labels,
+            aliases=NEWS_CATEGORY_ALIASES,
+            normalizer=_fold_token,
+        )
 
     async def _get_service_schedule(guild_id: str, service_type: str, schedule_id: int) -> dict[str, object] | None:
         row = await ctx.database.get_campaign_content_config(guild_id, schedule_id)
@@ -1008,7 +1092,11 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         sources: str | None = None,
         categories: str | None = None,
     ) -> None:
-        normalized_sources, invalid_sources = _parse_guided_csv_values(sources, allowed=NEWS_SOURCE_CHOICES)
+        normalized_sources, invalid_sources = _parse_guided_csv_values(
+            sources,
+            allowed=NEWS_SOURCE_CHOICES,
+            aliases=NEWS_SOURCE_ALIASES,
+        )
         if invalid_sources:
             await _send(
                 interaction,
@@ -1017,7 +1105,12 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
                 kind="error",
             )
             return
-        normalized_categories, invalid_categories = _parse_guided_csv_values(categories, allowed=NEWS_CATEGORY_CHOICES)
+        normalized_categories, invalid_categories = _parse_guided_csv_values(
+            categories,
+            allowed=NEWS_CATEGORY_CHOICES,
+            aliases=NEWS_CATEGORY_ALIASES,
+            normalizer=_fold_token,
+        )
         if invalid_categories:
             await _send(
                 interaction,
