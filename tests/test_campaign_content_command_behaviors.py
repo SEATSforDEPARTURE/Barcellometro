@@ -2,6 +2,7 @@ import asyncio
 import importlib.util
 import sys
 import types
+from datetime import timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -32,6 +33,7 @@ def messaggi_module(monkeypatch):
     scheduler_stub = types.ModuleType("app.services.scheduler_utils")
     scheduler_stub.calculate_initial_next_run = lambda now, ora_inizio, every, timezone: now
     scheduler_stub.calculate_next_run_after_send = lambda now, every, timezone: now
+    scheduler_stub.calculate_next_summary_schedule_run_utc = lambda *args, **kwargs: None
     scheduler_stub.ROME_TZ = object()
     monkeypatch.setitem(sys.modules, "app.services.scheduler_utils", scheduler_stub)
 
@@ -53,6 +55,9 @@ class _FakeDb:
     def __init__(self) -> None:
         self.message_campaign = None
         self.service_campaign = None
+        self.service_campaign_by_id = None
+        self.service_campaigns = []
+        self.created_service_payload = None
 
     async def get_message_campaign(self, guild_id: str, campaign_id: int):
         _ = guild_id, campaign_id
@@ -60,13 +65,24 @@ class _FakeDb:
 
     async def get_campaign_content_config(self, guild_id: str, campaign_id: int):
         _ = guild_id, campaign_id
-        return self.service_campaign
+        return self.service_campaign_by_id
 
     async def get_campaign_content_config_by_service(self, guild_id: str, channel_id: str, service_type: str):
         _ = guild_id, channel_id
         if self.service_campaign and self.service_campaign.get("service_type") == service_type:
             return self.service_campaign
         return None
+
+    async def list_campaign_content_configs_by_service(self, guild_id: str, *, service_type: str, channel_id: str | None = None, include_disabled: bool = True):
+        _ = guild_id, include_disabled
+        rows = [row for row in self.service_campaigns if row.get("service_type") == service_type]
+        if channel_id is not None:
+            rows = [row for row in rows if str(row.get("channel_id")) == str(channel_id)]
+        return rows
+
+    async def create_campaign_content_config(self, **kwargs):
+        self.created_service_payload = kwargs
+        return 999
 
     async def get_message_channel_status(self, guild_id: str, channel_id: str):
         _ = guild_id, channel_id
@@ -119,7 +135,7 @@ def test_custom_run_reports_not_found_when_campaign_missing(messaggi_module) -> 
     async def _run() -> None:
         db = _FakeDb()
         scheduler = _FakeScheduler()
-        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
 
         group = discord.app_commands.Group(name="campaigns", description="x")
         messaggi_module.register_messaggi(group, ctx)
@@ -146,9 +162,9 @@ def test_custom_run_reports_not_found_when_campaign_missing(messaggi_module) -> 
 def test_weather_run_dispatches_editorial_service(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
-        db.service_campaign = {"id": 7, "service_type": "WEATHER"}
+        db.service_campaigns = [{"id": 7, "service_type": "WEATHER", "channel_id": "10"}]
         scheduler = _FakeScheduler()
-        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
 
         group = discord.app_commands.Group(name="campaigns", description="x")
         messaggi_module.register_messaggi(group, ctx)
@@ -163,12 +179,12 @@ def test_weather_run_dispatches_editorial_service(messaggi_module) -> None:
             subcommand_path="campaigns weather run",
             visual_top_level="campaigns",
             subtitle_args=None,
-            lines=[("channel", "<#10>"), ("result", "running")],
+            lines=[("schedule_id", 7), ("channel", "<#10>"), ("result", "running")],
             sections=None,
             kind="success",
             footer_service=ctx.footer,
         )
-        scheduler._campaign_content_service.execute_weather_service.assert_awaited_once_with(db.service_campaign)
+        scheduler._campaign_content_service.execute_weather_service.assert_awaited_once_with(db.service_campaigns[0])
         scheduler._campaign_content_service.execute_news_service.assert_not_called()
         scheduler._campaign_content_service.execute_horoscope_service.assert_not_called()
 
@@ -183,7 +199,7 @@ def test_service_runs_dispatch_by_service_type(messaggi_module) -> None:
             ("horoscope", "HOROSCOPE", "execute_horoscope_service"),
         ]:
             db = _FakeDb()
-            db.service_campaign = {"id": 3, "service_type": service_type}
+            db.service_campaigns = [{"id": 3, "service_type": service_type, "channel_id": "10"}]
             scheduler = _FakeScheduler()
             ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
             group = discord.app_commands.Group(name="campaigns", description="x")
@@ -195,9 +211,122 @@ def test_service_runs_dispatch_by_service_type(messaggi_module) -> None:
             interaction = _FakeInteraction()
             await callback(interaction)
 
-            getattr(scheduler._campaign_content_service, attr_name).assert_awaited_once_with(db.service_campaign)
+            getattr(scheduler._campaign_content_service, attr_name).assert_awaited_once_with(db.service_campaigns[0])
 
     asyncio.run(_run())
+
+
+def test_service_run_by_id_uses_exact_schedule(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.service_campaign_by_id = {"id": 91, "service_type": "NEWS", "channel_id": "77"}
+        scheduler = _FakeScheduler()
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+
+        messaggi_module.register_messaggi(group, ctx)
+        news_group = _get_subgroup(group, "news")
+        callback = _get_command_callback(news_group, "run")
+        interaction = _FakeInteraction()
+        await callback(interaction, id=91)
+
+        scheduler._campaign_content_service.execute_news_service.assert_awaited_once_with(db.service_campaign_by_id)
+
+    asyncio.run(_run())
+
+
+def test_service_run_by_id_rejects_wrong_service_type(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.service_campaign_by_id = {"id": 12, "service_type": "NEWS", "channel_id": "10"}
+        scheduler = _FakeScheduler()
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+
+        messaggi_module.register_messaggi(group, ctx)
+        weather_group = _get_subgroup(group, "weather")
+        callback = _get_command_callback(weather_group, "run")
+        interaction = _FakeInteraction()
+        await callback(interaction, id=12)
+
+        scheduler._campaign_content_service.execute_weather_service.assert_not_called()
+        messaggi_module.send_standard_response.assert_awaited_once()
+        assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
+
+    asyncio.run(_run())
+
+
+def test_service_run_without_id_is_not_ambiguous_when_multiple_rows(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        db.service_campaigns = [
+            {"id": 3, "service_type": "HOROSCOPE", "channel_id": "10"},
+            {"id": 4, "service_type": "HOROSCOPE", "channel_id": "10"},
+        ]
+        scheduler = _FakeScheduler()
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+
+        messaggi_module.register_messaggi(group, ctx)
+        horoscope_group = _get_subgroup(group, "horoscope")
+        callback = _get_command_callback(horoscope_group, "run")
+        interaction = _FakeInteraction()
+        await callback(interaction)
+
+        scheduler._campaign_content_service.execute_horoscope_service.assert_not_called()
+        assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
+
+    asyncio.run(_run())
+
+
+def test_news_schedule_add_validates_and_normalizes_sources_and_categories(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+
+        messaggi_module.register_messaggi(group, ctx)
+        news_group = _get_subgroup(group, "news")
+        callback = _get_command_callback(news_group, "schedule_add")
+        interaction = _FakeInteraction()
+        await callback(
+            interaction,
+            sources="ANSA, ansa, repubblica",
+            categories="Tech, tech, politica",
+        )
+
+        assert db.created_service_payload is not None
+        assert db.created_service_payload["sources_json"] == '["ansa", "repubblica"]'
+        assert db.created_service_payload["categories_json"] == "tech,politica"
+
+    asyncio.run(_run())
+
+
+def test_news_schedule_add_rejects_unsupported_sources(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone="Europe/Rome", footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+
+        messaggi_module.register_messaggi(group, ctx)
+        news_group = _get_subgroup(group, "news")
+        callback = _get_command_callback(news_group, "schedule_add")
+        interaction = _FakeInteraction()
+        await callback(interaction, sources="unsupported")
+
+        assert db.created_service_payload is None
+        assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
+
+    asyncio.run(_run())
+
+
+def test_news_schedule_add_command_exposes_autocomplete() -> None:
+    source = Path("app/plugins/commands_modular/messaggi.py").read_text(encoding="utf-8")
+    assert "@app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete)" in source
 
 
 def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module) -> None:
