@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import discord
+from app.services.author import attach_author_meta_to_all
 from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
@@ -116,6 +117,7 @@ def apply_shared_footer_and_pagination(embeds: list[discord.Embed], footer_text:
 
 def _apply_campaign_footer(embeds: list[discord.Embed], *, service_name: str) -> list[discord.Embed]:
     attach_footer_meta_to_all(embeds, service_name=service_name, used_local_processing=True)
+    attach_author_meta_to_all(embeds, service_name=service_name, canonical_top_level_command="campaigns")
     return embeds
 
 
@@ -282,8 +284,8 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     if category_rows:
         overview.description = format_standard_description(
             (
-                f"🐹 Buona **{daypart}**: Barcellometro è alla conduzione con la redazione più rumorosa del quartiere. "
-                "Titoli caldi, zero pippone e andiamo dritti al punto.\n"
+                f"🐹 Buona **{daypart}**: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
+                "Titoli caldi, pochi giri di parole e dritti al punto.\n"
                 "**Che ci dice il mondo quest'oggi?**"
             ),
             blank_line_before_fields=True,
@@ -316,7 +318,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         source_line = source_line.strip() or "www.nd.it"
         overview.add_field(
             name=format_standard_field_name(f"{display} in primo piano", emoji=emoji),
-            value=f"**{linked_title}**\n🧃 **In breve:** {short_summary}\nfonte: {source_line}"[:1024],
+            value=f"**{linked_title}**\n• 🧃 **In breve:** {short_summary}\nfonte: {source_line}"[:1024],
             inline=False,
         )
     first_image_url = _first_story_image_url(category_rows)

@@ -8,8 +8,14 @@ if "openai" not in sys.modules:
 if "httpx" not in sys.modules:
     sys.modules["httpx"] = types.SimpleNamespace()
 
-from app.services.author import render_author_name
-from app.services.campaign_content_formatter import build_horoscope_embeds, build_news_embeds, build_news_page_map, build_weather_embeds
+from app.services.author import get_author_meta, render_author_name
+from app.services.campaign_content_formatter import (
+    build_fallback_embed,
+    build_horoscope_embeds,
+    build_news_embeds,
+    build_news_page_map,
+    build_weather_embeds,
+)
 from app.services.campaign_content_service import CampaignContentService
 from app.services.embed_images import EmbedImagesService, get_embed_images_meta
 from app.services.footer import get_footer_meta
@@ -133,9 +139,18 @@ def test_news_overview_field_copy_is_concise_and_has_source_line() -> None:
     field_value = news[0].fields[0].value
     assert field_value is not None
     assert field_value.count("\n") == 2
+    assert "\n• " in field_value
     assert "**In breve:**" in field_value
     assert field_value.count("🧃") <= 1
     assert "fonte: www.ansa.it" in field_value
+
+
+def test_news_fallback_embed_uses_campaigns_author_service_label() -> None:
+    fallback = build_fallback_embed({}, ["https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml"], service_name="campagne_notizie")
+    author_meta = get_author_meta(fallback[0])
+    assert author_meta is not None
+    assert author_meta.service_name == "campagne_notizie"
+    assert render_author_name(service_name=author_meta.service_name) == "servizio CAMPAIGNS"
 
 
 def test_weather_and_horoscope_overview_have_editorial_intro() -> None:

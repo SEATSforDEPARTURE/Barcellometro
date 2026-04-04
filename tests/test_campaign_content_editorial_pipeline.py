@@ -5,6 +5,7 @@ import sys
 import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 import discord
 
@@ -120,6 +121,57 @@ def test_send_and_store_metadata_contains_page_map() -> None:
         metadata = json.loads(db.kwargs["metadata_json"])
         assert "page_map" in metadata
         assert metadata["page_map"][0]["type"] == "overview"
+
+    asyncio.run(_run())
+
+
+def test_news_rewrite_sanitizes_prompt_leakage_prefixes() -> None:
+    dirty = "🧃 In breve: Ecco la riscrizione del testo con tono leggero e ironico:\nNuova versione pulita."
+    cleaned = CampaignContentService._sanitize_editorial_text(dirty)  # type: ignore[attr-defined]
+    assert "Ecco la riscrizione" not in cleaned
+    assert "tono leggero e ironico" not in cleaned
+    assert cleaned == "Nuova versione pulita."
+
+
+def test_execute_news_service_reads_csv_categories_fallback_column() -> None:
+    class _Db:
+        async def upsert_campaign_content_message(self, **_kwargs):
+            return None
+
+        async def update_campaign_content_next_run(self, **_kwargs):
+            return None
+
+        async def set_campaign_content_enabled(self, **_kwargs):
+            return None
+
+    class _Channel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
+        async def send(self, *args, **kwargs):
+            return SimpleNamespace(id=999)
+
+    class _Bot:
+        def get_channel(self, _id):
+            return _Channel()
+
+    async def _run() -> None:
+        service = CampaignContentService(database=_Db(), bot=_Bot(), ai_service=None)
+        config = {
+            "guild_id": "1",
+            "channel_id": "2",
+            "id": 5,
+            "interval_minutes": 0,
+            "service_type": "NEWS",
+            "categories": "cronaca,spettacolo",
+            "categories_json": None,
+            "sources_json": '["ansa"]',
+        }
+        with patch("app.services.campaign_content_service.fetch_news_content", return_value={"categories": {}, "sources": [], "used_sources": []}) as mocked_fetch:
+            await service.execute_news_service(config)
+        mocked_fetch.assert_called_once()
+        args, _kwargs = mocked_fetch.call_args
+        assert args[1] == ["cronaca", "spettacolo"]
 
     asyncio.run(_run())
 
