@@ -7,15 +7,68 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Any
 
-NEWS_SOURCE_MAP = {
-    "ansa": "https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml",
-    "repubblica": "https://www.repubblica.it/rss/homepage/rss2.0.xml",
-    "ilpost": "https://www.ilpost.it/feed/",
-    "open": "https://www.open.online/feed/",
-    "fanpage": "https://www.fanpage.it/feed/",
-    "wired": "https://www.wired.it/feed/rss",
-    "corriere": "https://xml2.corriereobjects.it/rss/homepage.xml",
-}
+NEWS_SOURCE_CATALOG = [
+    {
+        "value": "ansa",
+        "label": "ansa.it",
+        "url": "https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml",
+        "aliases": ["ansa", "ansa.it", "www.ansa.it"],
+    },
+    {
+        "value": "repubblica",
+        "label": "repubblica.it",
+        "url": "https://www.repubblica.it/rss/homepage/rss2.0.xml",
+        "aliases": ["repubblica", "repubblica.it", "www.repubblica.it"],
+    },
+    {
+        "value": "ilpost",
+        "label": "ilpost.it",
+        "url": "https://www.ilpost.it/feed/",
+        "aliases": ["ilpost", "ilpost.it", "www.ilpost.it"],
+    },
+    {
+        "value": "open",
+        "label": "open.online",
+        "url": "https://www.open.online/feed/",
+        "aliases": ["open", "open.online", "www.open.online"],
+    },
+    {
+        "value": "fanpage",
+        "label": "fanpage.it",
+        "url": "https://www.fanpage.it/feed/",
+        "aliases": ["fanpage", "fanpage.it", "www.fanpage.it"],
+    },
+    {
+        "value": "wired",
+        "label": "wired.it",
+        "url": "https://www.wired.it/feed/rss",
+        "aliases": ["wired", "wired.it", "www.wired.it"],
+    },
+    {
+        "value": "corriere",
+        "label": "corriere.it",
+        "url": "https://xml2.corriereobjects.it/rss/homepage.xml",
+        "aliases": ["corriere", "corriere.it", "www.corriere.it"],
+    },
+]
+
+NEWS_CATEGORY_CATALOG = [
+    {"value": "cronaca", "label": "Cronaca", "aliases": ["cronaca"]},
+    {"value": "politica", "label": "Politica", "aliases": ["politica"]},
+    {"value": "sport", "label": "Sport", "aliases": ["sport"]},
+    {"value": "spettacolo", "label": "Spettacolo", "aliases": ["spettacolo"]},
+    {"value": "gossip", "label": "Gossip", "aliases": ["gossip"]},
+    {"value": "tecnologia", "label": "Tecnologia", "aliases": ["tecnologia", "tech"]},
+    {"value": "economia", "label": "Economia", "aliases": ["economia"]},
+    {"value": "mondo", "label": "Mondo", "aliases": ["mondo", "esteri"]},
+    {"value": "viral", "label": "Viral", "aliases": ["viral"]},
+    {"value": "trash", "label": "Trash", "aliases": ["trash"]},
+    {"value": "curiosita", "label": "Curiosità", "aliases": ["curiosita", "curiosità"]},
+    {"value": "varie", "label": "Varie", "aliases": ["varie"]},
+]
+
+NEWS_SOURCE_MAP = {entry["value"]: entry["url"] for entry in NEWS_SOURCE_CATALOG}
+SUPPORTED_NEWS_CATEGORIES = [entry["value"] for entry in NEWS_CATEGORY_CATALOG]
 
 WEATHER_SOURCE_MAP = {
     "open-meteo": "open-meteo",
@@ -33,22 +86,6 @@ HOROSCOPE_SOURCE_MAP = {
 DEFAULT_NEWS_SOURCES = ["ansa", "repubblica"]
 DEFAULT_WEATHER_SOURCES = ["open-meteo", "meteoam", "3bmeteo"]
 DEFAULT_HOROSCOPE_SOURCES = ["ohmanda"]
-SUPPORTED_NEWS_CATEGORIES = [
-    "cronaca",
-    "politica",
-    "sport",
-    "spettacolo",
-    "gossip",
-    "tecnologia",
-    "tech",
-    "economia",
-    "mondo",
-    "viral",
-    "trash",
-    "curiosita",
-    "curiosità",
-    "varie",
-]
 
 SIGNS = [
     "Ariete",

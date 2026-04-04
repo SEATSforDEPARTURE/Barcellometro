@@ -13,7 +13,7 @@ from app.plugins.commands_modular.registration import add_group_once, count_chil
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime
-from app.services.campaign_content_fetchers import NEWS_SOURCE_MAP, SUPPORTED_NEWS_CATEGORIES
+from app.services.campaign_content_fetchers import NEWS_CATEGORY_CATALOG, NEWS_SOURCE_CATALOG
 from app.services.scheduler_utils import calculate_initial_next_run
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
 
@@ -32,8 +32,10 @@ MOOD_CHOICES = [
     app_commands.Choice(name="BLACK_ONLY", value="BLACK_ONLY"),
 ]
 
-NEWS_SOURCE_CHOICES = sorted({str(source).strip().lower() for source in NEWS_SOURCE_MAP})
-NEWS_CATEGORY_CHOICES = sorted({str(category).strip().lower() for category in SUPPORTED_NEWS_CATEGORIES})
+NEWS_SOURCE_CHOICES = [str(entry["value"]).strip().lower() for entry in NEWS_SOURCE_CATALOG]
+NEWS_SOURCE_LABELS = {str(entry["value"]).strip().lower(): str(entry["label"]).strip() for entry in NEWS_SOURCE_CATALOG}
+NEWS_CATEGORY_CHOICES = [str(entry["value"]).strip().lower() for entry in NEWS_CATEGORY_CATALOG]
+NEWS_CATEGORY_LABELS = {str(entry["value"]).strip().lower(): str(entry["label"]).strip() for entry in NEWS_CATEGORY_CATALOG}
 
 
 def _fold_token(value: str) -> str:
@@ -43,16 +45,21 @@ def _fold_token(value: str) -> str:
 
 def _news_source_aliases() -> dict[str, str]:
     aliases: dict[str, str] = {}
-    for token, source_url in NEWS_SOURCE_MAP.items():
-        canonical = str(token).strip().lower()
+    for entry in NEWS_SOURCE_CATALOG:
+        canonical = str(entry["value"]).strip().lower()
         aliases[canonical] = canonical
-        aliases[f"{canonical}.it"] = canonical
-        aliases[f"www.{canonical}.it"] = canonical
-        url = str(source_url).strip().lower()
+        aliases[_fold_token(canonical)] = canonical
+        for alias in entry.get("aliases", []):
+            alias_clean = str(alias).strip().lower()
+            if alias_clean:
+                aliases[alias_clean] = canonical
+                aliases[_fold_token(alias_clean)] = canonical
+        url = str(entry.get("url", "")).strip().lower()
         if url.startswith(("http://", "https://")):
             host = url.split("//", 1)[1].split("/", 1)[0].strip()
             if host:
                 aliases[host] = canonical
+                aliases[_fold_token(host)] = canonical
                 aliases[f"https://{host}"] = canonical
                 aliases[f"http://{host}"] = canonical
                 if host.startswith("www."):
@@ -60,8 +67,22 @@ def _news_source_aliases() -> dict[str, str]:
     return aliases
 
 
+def _news_category_aliases() -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for entry in NEWS_CATEGORY_CATALOG:
+        canonical = str(entry["value"]).strip().lower()
+        aliases[_fold_token(canonical)] = canonical
+        aliases[canonical] = canonical
+        for alias in entry.get("aliases", []):
+            alias_clean = str(alias).strip().lower()
+            if alias_clean:
+                aliases[alias_clean] = canonical
+                aliases[_fold_token(alias_clean)] = canonical
+    return aliases
+
+
 NEWS_SOURCE_ALIASES = _news_source_aliases()
-NEWS_CATEGORY_ALIASES = {_fold_token(token): token for token in NEWS_CATEGORY_CHOICES}
+NEWS_CATEGORY_ALIASES = _news_category_aliases()
 
 
 async def _ensure_setting(ctx: CommandContext, key: str, default: str) -> str:
@@ -113,6 +134,13 @@ def validate_campaign_texts(
 
 def _parse_csv(raw: Optional[str]) -> list[str]:
     return [item.strip() for item in str(raw or "").split(",") if item.strip()]
+
+
+def _split_csv_for_autocomplete(raw: str) -> tuple[list[str], str]:
+    segments = str(raw or "").split(",")
+    confirmed_tokens = [segment.strip() for segment in segments[:-1] if segment.strip()]
+    active_token = segments[-1].strip() if segments else ""
+    return confirmed_tokens, active_token
 
 
 def _normalize_csv_values(raw: Optional[str]) -> list[str]:
@@ -169,20 +197,29 @@ def _compose_guided_csv_suggestions(
     preferred_labels = preferred_labels or {}
     aliases = aliases or {}
     normalize = normalizer or (lambda token: str(token or "").strip().lower())
-    raw = str(current or "")
-    parts = raw.split(",")
-    previous_parts = [segment.strip() for segment in parts[:-1] if segment.strip()]
-    fragment_raw = parts[-1].strip() if parts else ""
-    fragment = normalize(fragment_raw)
+    confirmed_tokens, active_token = _split_csv_for_autocomplete(current)
+    fragment = normalize(active_token)
 
     selected: set[str] = set()
-    for part in previous_parts:
+    normalized_confirmed_tokens: list[str] = []
+    for part in confirmed_tokens:
         folded = normalize(part)
-        canonical = aliases.get(folded, folded)
-        selected.add(canonical.lower())
+        canonical = str(aliases.get(folded, folded)).strip().lower()
+        if canonical in selected:
+            continue
+        selected.add(canonical)
+        normalized_confirmed_tokens.append(canonical)
 
-    base = ", ".join(previous_parts)
+    logger.debug(
+        "guided_csv_autocomplete raw=%r confirmed=%s active=%r",
+        current,
+        normalized_confirmed_tokens,
+        active_token,
+    )
+
+    base = ", ".join((preferred_labels.get(token, token) for token in normalized_confirmed_tokens))
     suggestions: list[app_commands.Choice[str]] = []
+    emitted_values: set[str] = set()
     for token in allowed_values:
         canonical = str(token).strip().lower()
         if canonical in selected:
@@ -190,11 +227,17 @@ def _compose_guided_csv_suggestions(
         candidate = normalize(canonical)
         if fragment and not candidate.startswith(fragment):
             continue
-        value = f"{base}, {canonical}" if base else canonical
+        selected_label = preferred_labels.get(canonical, canonical)
+        value = f"{base}, {selected_label}" if base else selected_label
+        folded_value = _fold_token(value)
+        if folded_value in emitted_values:
+            continue
+        emitted_values.add(folded_value)
         label = preferred_labels.get(canonical, canonical)
         suggestions.append(app_commands.Choice(name=label[:100], value=value[:100]))
         if len(suggestions) >= 25:
             break
+    logger.debug("guided_csv_autocomplete suggestions=%d", len(suggestions))
     return suggestions
 
 
@@ -347,20 +390,18 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         return dict(row) if row is not None else None
 
     async def _news_sources_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        labels = {token: f"{token} ({NEWS_SOURCE_MAP[token]})" for token in NEWS_SOURCE_CHOICES}
         return _compose_guided_csv_suggestions(
             current,
             allowed_values=NEWS_SOURCE_CHOICES,
-            preferred_labels=labels,
+            preferred_labels=NEWS_SOURCE_LABELS,
             aliases=NEWS_SOURCE_ALIASES,
         )
 
     async def _news_categories_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        labels = {token: token.title() for token in NEWS_CATEGORY_CHOICES}
         return _compose_guided_csv_suggestions(
             current,
             allowed_values=NEWS_CATEGORY_CHOICES,
-            preferred_labels=labels,
+            preferred_labels=NEWS_CATEGORY_LABELS,
             aliases=NEWS_CATEGORY_ALIASES,
             normalizer=_fold_token,
         )
