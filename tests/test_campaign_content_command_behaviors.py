@@ -304,6 +304,31 @@ def test_news_schedule_add_validates_and_normalizes_sources_and_categories(messa
     asyncio.run(_run())
 
 
+def test_news_schedule_add_accepts_display_labels_and_persists_canonical_values(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+
+        messaggi_module.register_messaggi(group, ctx)
+        news_group = _get_subgroup(group, "news")
+        callback = _get_command_callback(news_group, "schedule_add")
+        interaction = _FakeInteraction()
+        await callback(
+            interaction,
+            sources="ansa.it, repubblica.it, https://www.corriere.it",
+            categories="Curiosità, Politica, Tech",
+        )
+
+        assert db.created_service_payload is not None
+        assert db.created_service_payload["sources_json"] == '["ansa", "repubblica", "corriere"]'
+        assert db.created_service_payload["categories_json"] == "curiosita,politica,tecnologia"
+
+    asyncio.run(_run())
+
+
 def test_news_schedule_add_rejects_unsupported_sources(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
