@@ -576,15 +576,15 @@ def _build_mission_lines(m: ChannelAuraMissionTrend) -> list[str]:
 def _format_aura_field_name(text: str, *, emoji: str | None = None) -> str:
     base = str(text or "").strip().upper()
     if emoji:
-        return f"{emoji} **__{base}**__"
-    return f"**__{base}**__"
+        return f"{emoji} __**{base}**__"
+    return f"__**{base}**__"
 
 
 def _standard_field(label: str) -> str:
     raw = str(label or "").strip()
     if not raw:
         return _format_aura_field_name("")
-    if re.fullmatch(r"[^\s]+\s+\*\*__.+\*\*__", raw):
+    if re.fullmatch(r"[^\s]+\s+__\*\*.+\*\*__", raw):
         return raw
     for emoji in ("📈", "🏆", "🕹️", "📜", "✨", "👤", "🧭", "🧾", "📌", "😇", "😈", ":bricks:"):
         if raw.startswith(f"{emoji} "):
@@ -642,7 +642,7 @@ def _compose_channel_aura_embed(
         f"• {climbed} profili salgono, {dropped} perdono posizioni e {stable} restano stabili nel ranking.\n"
         + "\n".join(top_rows)
     )
-    _add_field_with_chunks(embed, name="🏆 **__CLASSIFICA TOP 10**__", value=classifica_value)
+    _add_field_with_chunks(embed, name="🏆 CLASSIFICA TOP 10", value=classifica_value)
 
     _add_field_with_chunks(
         embed,

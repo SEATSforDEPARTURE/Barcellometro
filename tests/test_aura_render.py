@@ -584,15 +584,17 @@ def test_channel_aura_embed_sections_follow_standard_wrapping() -> None:
         )
     )
     required = {
-        "✨ **__KARMA**__",
-        "📈 **__TREND**__",
-        "🏆 **__CLASSIFICA TOP 10**__",
-        "😇 **__PUNTI ATTRIBUITI**__",
-        "😈 **__PUNTI REVOCATI**__",
-        "📜 **__MISSIONI COMPLETATE**__",
-        "🧭 **__I CONSIGLI DEL BARCELLOMETRO**__",
+        "✨ __**KARMA**__",
+        "📈 __**TREND**__",
+        "🏆 __**CLASSIFICA TOP 10**__",
+        "😇 __**PUNTI ATTRIBUITI**__",
+        "😈 __**PUNTI REVOCATI**__",
+        "📜 __**MISSIONI COMPLETATE**__",
+        "🧭 __**I CONSIGLI DEL BARCELLOMETRO**__",
     }
-    assert required.issubset({f.name for f in embed.fields})
+    actual_names = {f.name for f in embed.fields}
+    assert required.issubset(actual_names)
+    assert not any(re.match(r"^\S+\s+\*\*__.+\*\*__$", str(name or "")) for name in actual_names)
 
 
 def test_channel_aura_embed_karma_and_trend_are_consistent() -> None:
