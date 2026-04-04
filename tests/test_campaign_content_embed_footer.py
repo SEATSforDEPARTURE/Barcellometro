@@ -78,6 +78,7 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
     assert all(meta is not None for meta in horoscope_meta)
     assert {meta.service_name for meta in news_meta if meta is not None} == {"campagne_notizie"}
     assert {meta.service_name for meta in horoscope_meta if meta is not None} == {"campagne_oroscopo"}
+    assert (news[0].title or "").startswith("📰 __**HAMSTER NEWS • PANORAMICA**__")
 
 
 def test_news_overview_has_editorial_tone_without_technical_lines() -> None:

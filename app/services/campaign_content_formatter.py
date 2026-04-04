@@ -273,10 +273,11 @@ def _first_story_image_url(categories: list[tuple[str, str, str, dict[str, Any],
 
 def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
-    title = "📰 HAMSTER NEWS"
+    title = "HAMSTER NEWS"
+    title_emoji = "📰"
     embeds: list[discord.Embed] = []
     category_rows = _iter_news_categories(payload)
-    overview = discord.Embed(title=format_standard_title(f"{title} • Panoramica"), color=color)
+    overview = discord.Embed(title=format_standard_title(f"{title} • Panoramica", emoji=title_emoji), color=color)
     tone = _time_of_day_label(_overview_now(payload))
     daypart = tone if tone in {"mattina", "pomeriggio", "sera"} else "sera"
     if category_rows:
@@ -327,7 +328,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     )
     embeds.append(overview)
     for _, display, emoji, _, items in category_rows:
-        embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
+        embed = discord.Embed(title=format_standard_title(f"{title} • {display}", emoji=title_emoji), color=color)
         lines: list[str] = []
         for idx, item in enumerate(items[:5], start=1):
             summary = trim_sentence_block(item.get("summary", "Nessun riassunto disponibile"), limit=280)
