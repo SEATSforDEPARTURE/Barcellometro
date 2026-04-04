@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
 import urllib.parse
@@ -70,6 +71,110 @@ NEWS_CATEGORY_CATALOG = [
 
 NEWS_SOURCE_MAP = {entry["value"]: entry["url"] for entry in NEWS_SOURCE_CATALOG}
 SUPPORTED_NEWS_CATEGORIES = [entry["value"] for entry in NEWS_CATEGORY_CATALOG]
+NEWS_CATEGORY_ORDER = {category: index for index, category in enumerate(SUPPORTED_NEWS_CATEGORIES)}
+logger = logging.getLogger(__name__)
+
+NEWS_CATEGORY_TAXONOMY: dict[str, dict[str, Any]] = {
+    "cronaca": {
+        "label": "Cronaca",
+        "aliases": ["cronaca", "crime", "nera", "incidenti", "fatti"],
+        "feed_equivalents": ["cronaca", "cronaca nera", "incidenti", "fatti"],
+        "keywords": [
+            "arresto", "arrestato", "polizia", "carabinieri", "procura", "morto", "morta", "feriti",
+            "incendio", "rapina", "omicidio", "clan", "latitante", "sequestro", "indagine",
+        ],
+        "source_hints": [],
+        "priority": 100,
+    },
+    "politica": {
+        "label": "Politica",
+        "aliases": ["politica", "governo", "parlamento"],
+        "feed_equivalents": ["politica", "palazzo", "governo"],
+        "keywords": ["governo", "parlamento", "ministro", "partito", "opposizione", "senato", "camera"],
+        "source_hints": [],
+        "priority": 90,
+    },
+    "sport": {
+        "label": "Sport",
+        "aliases": ["sport", "calcio", "motori", "tennis"],
+        "feed_equivalents": ["sport", "calcio", "serie a", "champions"],
+        "keywords": ["partita", "gol", "campionato", "serie a", "tennis", "giro d'italia", "vittoria", "allenatore"],
+        "source_hints": [],
+        "priority": 80,
+    },
+    "spettacolo": {
+        "label": "Spettacolo",
+        "aliases": ["spettacolo", "show", "cinema", "tv", "musica", "cultura"],
+        "feed_equivalents": ["spettacolo", "tv", "cinema", "musica"],
+        "keywords": ["show", "programma", "cinema", "serie tv", "festival", "fiction", "palinsesto"],
+        "source_hints": [],
+        "priority": 70,
+    },
+    "gossip": {
+        "label": "Gossip",
+        "aliases": ["gossip", "vip", "celebrita", "celebrità"],
+        "feed_equivalents": ["gossip", "vip", "celebrita"],
+        "keywords": ["gossip", "vip", "paparazzi", "fidanzata", "fidanzato", "coppia", "scandalo", "retroscena"],
+        "source_hints": [],
+        "priority": 65,
+    },
+    "tecnologia": {
+        "label": "Tecnologia",
+        "aliases": ["tecnologia", "tech", "digitale", "ai"],
+        "feed_equivalents": ["tecnologia", "tech", "digitale", "innovazione", "scienza e tecnologia"],
+        "keywords": ["startup", "intelligenza artificiale", "ai", "app", "software", "smartphone", "cybersecurity", "web3"],
+        "source_hints": ["wired"],
+        "priority": 60,
+    },
+    "economia": {
+        "label": "Economia",
+        "aliases": ["economia", "finanza", "mercati", "borsa"],
+        "feed_equivalents": ["economia", "finanza", "mercati", "business"],
+        "keywords": ["pil", "inflazione", "borsa", "mercati", "spread", "manovra", "azienda", "lavoro"],
+        "source_hints": [],
+        "priority": 55,
+    },
+    "mondo": {
+        "label": "Mondo",
+        "aliases": ["mondo", "esteri", "internazionale", "geopolitica"],
+        "feed_equivalents": ["esteri", "mondo", "internazionale", "dal mondo"],
+        "keywords": ["usa", "russia", "ucraina", "cina", "israele", "gaza", "europa", "esteri", "internazionale"],
+        "source_hints": [],
+        "priority": 50,
+    },
+    "viral": {
+        "label": "Viral",
+        "aliases": ["viral", "virale", "social", "web"],
+        "feed_equivalents": ["viral", "virale", "social"],
+        "keywords": ["video", "social", "tiktok", "instagram", "virale", "meme", "web", "clip", "utenti", "commenti impazziti"],
+        "source_hints": [],
+        "priority": 45,
+    },
+    "trash": {
+        "label": "Trash",
+        "aliases": ["trash", "trash tv", "polemica"],
+        "feed_equivalents": ["trash", "trash tv", "reality"],
+        "keywords": ["reality", "polemica", "polemiche", "social impazziti", "lite", "liti", "show", "scandalo", "siparietto"],
+        "source_hints": [],
+        "priority": 40,
+    },
+    "curiosita": {
+        "label": "Curiosità",
+        "aliases": ["curiosita", "curiosità", "insolito"],
+        "feed_equivalents": ["curiosita", "curiosità", "insolito", "lifestyle"],
+        "keywords": ["incredibile", "curioso", "singolare", "record", "assurdo", "insolito", "scoperta"],
+        "source_hints": [],
+        "priority": 35,
+    },
+    "varie": {
+        "label": "Varie",
+        "aliases": ["varie", "generale"],
+        "feed_equivalents": ["varie", "generale"],
+        "keywords": [],
+        "source_hints": [],
+        "priority": 1,
+    },
+}
 
 
 def _fold_token(value: str) -> str:
@@ -155,6 +260,61 @@ def normalize_news_category_token(value: str) -> str | None:
     if not token:
         return None
     return NEWS_CATEGORY_ALIASES.get(token) or NEWS_CATEGORY_ALIASES.get(_fold_token(token))
+
+
+def _normalize_text_for_matching(value: str) -> str:
+    folded = _fold_token(value or "")
+    cleaned = re.sub(r"[^a-z0-9\s']", " ", folded)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _contains_term(text: str, term: str) -> bool:
+    normalized_term = _normalize_text_for_matching(term)
+    if not normalized_term:
+        return False
+    return re.search(rf"\b{re.escape(normalized_term)}\b", text) is not None
+
+
+def classify_news_item(
+    *,
+    title: str,
+    description: str,
+    raw_categories: list[str],
+    source: str,
+) -> list[str]:
+    normalized_title = _normalize_text_for_matching(title)
+    normalized_description = _normalize_text_for_matching(description)
+    normalized_source = _normalize_text_for_matching(source)
+    normalized_raw_categories = [_normalize_text_for_matching(category) for category in raw_categories if str(category).strip()]
+    text_blob = " ".join(part for part in [normalized_title, normalized_description, *normalized_raw_categories] if part).strip()
+
+    scores: dict[str, int] = {}
+    for canonical, metadata in NEWS_CATEGORY_TAXONOMY.items():
+        if canonical == "varie":
+            continue
+        score = 0
+        for raw_category in normalized_raw_categories:
+            if any(_contains_term(raw_category, feed_equivalent) for feed_equivalent in metadata.get("feed_equivalents", [])):
+                score += 5
+        for alias in metadata.get("aliases", []):
+            if _contains_term(text_blob, alias):
+                score += 2
+        for keyword in metadata.get("keywords", []):
+            if _contains_term(text_blob, keyword):
+                score += 2
+        for hint in metadata.get("source_hints", []):
+            if _contains_term(normalized_source, hint):
+                score += 1
+        if score > 0:
+            scores[canonical] = score
+
+    if not scores:
+        return ["varie"]
+
+    top_score = max(scores.values())
+    selected = [category for category, score in scores.items() if score >= 2 and score >= top_score - 5]
+    selected.sort(key=lambda category: (-scores.get(category, 0), NEWS_CATEGORY_ORDER.get(category, 999)))
+    return selected or ["varie"]
 
 WEATHER_SOURCE_MAP = {
     "open-meteo": "open-meteo",
@@ -414,28 +574,67 @@ def dedupe_news_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
     return deduped
 
 def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, Any]:
-    normalized_categories = [c.strip().lower() for c in categories if c.strip()]
+    normalized_categories = [
+        normalized
+        for normalized in (normalize_news_category_token(c) for c in categories)
+        if normalized
+    ]
     effective_sources = _resolve_news_sources(sources)
+    logger.info(
+        "news_fetch_start configured_sources=%s resolved_sources=%s requested_categories=%s",
+        sources,
+        effective_sources,
+        normalized_categories,
+    )
     items: list[dict[str, str]] = []
     attempted: list[str] = []
     used_sources: list[str] = []
+    discarded_count = 0
     for source in effective_sources:
         attempted.append(source)
         try:
             payload = _http_get(source)
             root = ET.fromstring(payload)
             found_for_source = False
-            for node in root.findall(".//item"):
+            nodes = root.findall(".//item")
+            logger.debug("news_fetch_source_items source=%s total_items=%s", source, len(nodes))
+            for node in nodes:
                 title = (node.findtext("title") or "").strip()
                 link = (node.findtext("link") or "").strip()
                 description = re.sub(r"\s+", " ", (node.findtext("description") or "").strip())
-                raw_category = (node.findtext("category") or "varie").strip().lower()
-                text_blob = f"{title} {description} {raw_category}".lower()
-                matched = [cat for cat in normalized_categories if cat in text_blob]
-                if normalized_categories and not matched:
+                raw_categories = [str(cat.text or "").strip() for cat in node.findall("category") if str(cat.text or "").strip()]
+                if not raw_categories:
+                    raw_categories = [(node.findtext("category") or "varie").strip()]
+                classified_categories = classify_news_item(
+                    title=title,
+                    description=description,
+                    raw_categories=raw_categories,
+                    source=source,
+                )
+                matched_categories = (
+                    [cat for cat in normalized_categories if cat in classified_categories]
+                    if normalized_categories
+                    else classified_categories
+                )
+                if normalized_categories and not matched_categories:
+                    discarded_count += 1
+                    logger.debug(
+                        "news_item_discarded title=%s classified=%s requested=%s raw_categories=%s",
+                        title[:80],
+                        classified_categories,
+                        normalized_categories,
+                        raw_categories,
+                    )
                     continue
-                selected_categories = matched if matched else [raw_category or "varie"]
+                selected_categories = matched_categories or ["varie"]
                 found_for_source = True
+                logger.debug(
+                    "news_item_classified title=%s classified=%s selected=%s source=%s",
+                    title[:80],
+                    classified_categories,
+                    selected_categories,
+                    source,
+                )
                 for selected_category in selected_categories:
                     items.append(
                         {
@@ -448,7 +647,8 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                     )
             if found_for_source:
                 used_sources.append(source)
-        except Exception:
+        except Exception as exc:
+            logger.warning("news_fetch_source_failed source=%s error=%s", source, exc)
             continue
 
     grouped: dict[str, list[dict[str, str]]] = {}
@@ -464,6 +664,22 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
     for cat, cat_items in grouped.items():
         if cat not in ordered and cat_items:
             ordered[cat] = cat_items
+
+    if normalized_categories and not ordered:
+        logger.info(
+            "news_fetch_no_matches requested_categories=%s attempted_sources=%s discarded_items=%s",
+            normalized_categories,
+            attempted,
+            discarded_count,
+        )
+    else:
+        logger.info(
+            "news_fetch_complete matched_categories=%s total_items=%s used_sources=%s discarded_items=%s",
+            list(ordered.keys()),
+            sum(len(v) for v in ordered.values()),
+            used_sources,
+            discarded_count,
+        )
 
     return {
         "categories": ordered,
