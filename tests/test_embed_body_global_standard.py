@@ -409,6 +409,36 @@ def _channel_summary_fixture() -> tuple[BarcelloResult, SummaryResult, dict[str,
     return bar, summary, index, {id(m1): "10"}, {id(dyn): "11"}, {id(dyn): ["Luigi"]}, quote_items
 
 
+
+
+def test_standard_helpers_are_idempotent_on_canonical_values() -> None:
+    assert format_standard_title("📓 __**RESOCONTO CANALE**__") == "📓 __**RESOCONTO CANALE**__"
+    assert format_standard_field_name("📈 __**TREND**__") == "📈 __**TREND**__"
+    assert format_standard_description("*Intro standard*", italic=True) == "*Intro standard*"
+
+
+def test_runtime_renderer_outputs_do_not_use_inverted_markdown_in_field_names() -> None:
+    bar, summary, index, moment_primary, dynamic_primary, dynamic_names, quote_items = _channel_summary_fixture()
+    channel_embeds = build_channel_summary_embeds(
+        guild_id=1,
+        channel_id=2,
+        channel_name="generale",
+        barcello_status=bar,
+        barcello_line="Linea di sintesi",
+        summary_result=summary,
+        message_index=index,
+        advice_bullets=["Coinvolgere nuovi utenti"],
+        proverbio="Chi ben comincia è a metà dell'opera.",
+        window_header="**🗓️ Oggi. Domenica, 1 Marzo 2026**",
+        moment_primary=moment_primary,
+        dynamic_primary=dynamic_primary,
+        dynamic_names=dynamic_names,
+        quote_render_items=quote_items,
+    )
+    for embed in channel_embeds:
+        for field in embed.fields:
+            assert not field.name.strip().startswith("**__")
+
 def test_runtime_renderer_outputs_follow_body_standard() -> None:
     # channel_summary
     bar, summary, index, moment_primary, dynamic_primary, dynamic_names, quote_items = _channel_summary_fixture()

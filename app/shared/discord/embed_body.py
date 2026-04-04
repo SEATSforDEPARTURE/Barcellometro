@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 import discord
 
@@ -10,6 +11,27 @@ DISCORD_TITLE_MAX = 256
 DISCORD_DESCRIPTION_MAX = 4096
 DISCORD_FIELD_NAME_MAX = 256
 DISCORD_FIELD_VALUE_MAX = 1024
+
+
+_CANONICAL_EMBED_HEADING_RE = re.compile(r"^(?:(?P<emoji>\S+)\s+)?__\*\*(?P<body>.+?)\*\*__$")
+
+
+def _extract_canonical_heading(value: str) -> tuple[str, str | None]:
+    raw = str(value or "").strip()
+    if not raw:
+        return "", None
+    match = _CANONICAL_EMBED_HEADING_RE.fullmatch(raw)
+    if not match:
+        return raw, None
+    return match.group("body").strip(), match.group("emoji")
+
+
+def _extract_single_italic(value: str) -> str:
+    raw = str(value or "").strip()
+    match = re.fullmatch(r"\*(?!\*)(.+?)(?<!\*)\*", raw, flags=re.DOTALL)
+    if not match:
+        return raw
+    return match.group(1).strip()
 
 
 def _truncate(value: str, max_len: int) -> str:
@@ -25,10 +47,11 @@ def format_standard_title(text: str, *, emoji: str | None = None, uppercase: boo
     Note: `uppercase` is kept for backward compatibility with legacy call sites,
     but the definitive standard is always uppercase.
     """
-    base = (text or "").strip()
+    base, detected_emoji = _extract_canonical_heading(text)
     rendered = base.upper()
-    if emoji:
-        rendered = f"{emoji} __**{rendered}**__"
+    active_emoji = emoji or detected_emoji
+    if active_emoji:
+        rendered = f"{active_emoji} __**{rendered}**__"
     else:
         rendered = f"__**{rendered}**__"
     return _truncate(rendered, DISCORD_TITLE_MAX)
@@ -45,7 +68,7 @@ def format_standard_description(text: str, *, italic: bool = True, blank_line_be
     Definitive contract: description is a short italic introduction, never the
     structural container for key sections (which must be Discord fields).
     """
-    base = (text or "").strip()
+    base = _extract_single_italic(text) if italic else (text or "").strip()
     rendered = f"*{base}*" if italic and base else base
     if blank_line_before_fields and rendered and not rendered.endswith("\n\n"):
         rendered = f"{rendered}\n\n"
@@ -54,10 +77,11 @@ def format_standard_description(text: str, *, italic: bool = True, blank_line_be
 
 def format_standard_field_name(text: str, *, emoji: str | None = None) -> str:
     """Render canonical embed field names as `(emoji) __**UPPERCASE**__`."""
-    base = (text or "").strip()
+    base, detected_emoji = _extract_canonical_heading(text)
     normalized = base.upper()
-    if emoji:
-        rendered = f"{emoji} __**{normalized}**__"
+    active_emoji = emoji or detected_emoji
+    if active_emoji:
+        rendered = f"{active_emoji} __**{normalized}**__"
     else:
         rendered = f"__**{normalized}**__"
     return _truncate(rendered, DISCORD_FIELD_NAME_MAX)

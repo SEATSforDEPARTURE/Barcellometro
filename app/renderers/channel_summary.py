@@ -251,7 +251,7 @@ def _add_field_chunked(pages: list[discord.Embed], *, name: str, value: str, col
     for idx, chunk in enumerate(_split_field_value(value, MAX_FIELD_VALUE)):
         field_name = _standard_field_name(name if idx == 0 else f"{name} (cont.)")
         if len(pages[-1].fields) >= MAX_FIELDS_PER_EMBED:
-            pages.append(discord.Embed(title="📓 __**RESOCONTO CANALE · RIASSUNTO**__", color=color))
+            pages.append(discord.Embed(title=format_standard_title("RESOCONTO CANALE · RIASSUNTO", emoji="📓"), color=color))
         pages[-1].add_field(name=field_name[:256], value=chunk[:MAX_FIELD_VALUE], inline=False)
 
 
@@ -321,7 +321,7 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
         climate_description=climate_description,
     )
     status_embed = discord.Embed(
-        title="📓 __**RESOCONTO CANALE · PANORAMICA**__",
+        title=format_standard_title("RESOCONTO CANALE · PANORAMICA", emoji="📓"),
         description=status_description,
         color=embed_color,
     )
@@ -335,8 +335,8 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
 
     pages: list[discord.Embed] = [
         discord.Embed(
-            title="📓 __**RESOCONTO CANALE · RIASSUNTO**__",
-            description="*Andiamo a leggere cosa è successo...*",
+            title=format_standard_title("RESOCONTO CANALE · RIASSUNTO", emoji="📓"),
+            description=format_standard_description("Andiamo a leggere cosa è successo..."),
             color=0x95A5A6,
         )
     ]
@@ -378,7 +378,7 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
         _add_field_chunked(pages, name="🍀 PROVERBIO", value=proverbio.strip(), color=0x95A5A6)
 
     for embed in pages:
-        embed.title = "📓 __**RESOCONTO CANALE · RIASSUNTO**__"
+        embed.title = format_standard_title("RESOCONTO CANALE · RIASSUNTO", emoji="📓")
     attach_footer_meta_to_all(pages, service_name="channel_summary", used_local_processing=True)
     attach_author_meta_to_all(pages, service_name="channel_summary", canonical_top_level_command="channelsummary")
     attach_embed_images_meta_to_all(pages, service_name="channel_summary")
@@ -394,8 +394,8 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
 def build_channel_summary_insufficient_data_embed(*, channel_name: str, window_header: str) -> discord.Embed:
     period_text = _window_header_to_narrative_period(window_header)
     embed = discord.Embed(
-        title="📓 __**RESOCONTO CANALE · PANORAMICA**__",
-        description=f"*{period_text}: dati insufficienti per completare il resoconto del canale nel periodo selezionato.*",
+        title=format_standard_title("RESOCONTO CANALE · PANORAMICA", emoji="📓"),
+        description=format_standard_description(f"{period_text}: dati insufficienti per completare il resoconto del canale nel periodo selezionato."),
         color=0x2F3136,
     )
     attach_footer_meta(embed, service_name="channel_summary", used_local_processing=True)
