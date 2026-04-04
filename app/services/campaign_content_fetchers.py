@@ -434,26 +434,28 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                 matched = [cat for cat in normalized_categories if cat in text_blob]
                 if normalized_categories and not matched:
                     continue
-                selected_category = matched[0] if matched else raw_category or "varie"
+                selected_categories = matched if matched else [raw_category or "varie"]
                 found_for_source = True
-                items.append(
-                    {
-                        "title": title[:160],
-                        "link": link,
-                        "summary": description[:500],
-                        "category": selected_category or "varie",
-                        "source": urllib.parse.urlparse(source).netloc or source,
-                    }
-                )
+                for selected_category in selected_categories:
+                    items.append(
+                        {
+                            "title": title[:160],
+                            "link": link,
+                            "summary": description[:500],
+                            "category": selected_category or "varie",
+                            "source": urllib.parse.urlparse(source).netloc or source,
+                        }
+                    )
             if found_for_source:
                 used_sources.append(source)
         except Exception:
             continue
 
-    items = dedupe_news_items(items)
     grouped: dict[str, list[dict[str, str]]] = {}
     for item in items:
         grouped.setdefault(item["category"], []).append(item)
+    for category, category_items in list(grouped.items()):
+        grouped[category] = dedupe_news_items(category_items)
 
     ordered: dict[str, list[dict[str, str]]] = {}
     for cat in normalized_categories:

@@ -63,6 +63,8 @@ class CampaignContentService:
 
     async def execute_news_service(self, config: dict[str, Any]) -> None:
         categories = self._csv_to_list(config.get("categories_json"))
+        if not categories:
+            categories = self._csv_to_list(config.get("categories"))
         configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
         payload = fetch_news_content(configured_sources, categories)
         used_sources = self._normalize_sources(payload.get("used_sources", []))
@@ -316,6 +318,7 @@ class CampaignContentService:
         prompt = (
             f"Servizio: {context}. Riscrivi in italiano per Discord con tono leggero e ironico ma sostanzioso. "
             "Non inventare dati/fatti/valori e non cambiare numeri. Evita frasi generiche fotocopia. "
+            "Restituisci solo il testo finale da pubblicare: niente prefazioni, niente meta-commenti, niente spiegazioni del prompt. "
             f"Contesto: {extra_info}.\nTesto:\n{text}"
         )
         try:
@@ -323,10 +326,34 @@ class CampaignContentService:
         except Exception as exc:
             logger.warning("campaign content: %s editorial rewrite failed (%s), using original text", context, exc.__class__.__name__)
             return text, False
-        rewritten = (output or "").strip()
+        rewritten = self._sanitize_editorial_text(output or "")
         if not rewritten:
             return text, False
         return rewritten, True
+
+    @staticmethod
+    def _sanitize_editorial_text(text: str) -> str:
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            return ""
+        cleaned = re.sub(r"```(?:\w+)?", "", cleaned, flags=re.IGNORECASE).replace("```", "")
+        cleaned = re.sub(
+            r"(?im)^\s*(?:[-•*]\s*)?(?:🧃\s*)?(?:in breve|riassunto|sintesi)\s*:\s*(?:ecco\s+)?(?:la\s+)?(?:riscrizione|versione)\b.*$",
+            "",
+            cleaned,
+        )
+        cleaned = re.sub(
+            r"(?im)^\s*(?:[-•*]\s*)?(?:ecco|ti\s+fornisco|di\s+seguito)\b.{0,120}(?:riscrizione|testo|tono)\b.*$",
+            "",
+            cleaned,
+        )
+        cleaned = re.sub(
+            r"(?im)^\s*(?:nota|istruzione|prompt|output|spiegazione)\s*:\s*.*$",
+            "",
+            cleaned,
+        )
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        return cleaned
 
     async def load_message_record(self, message_id: str) -> dict[str, Any] | None:
         row = await self._database.get_campaign_content_message(message_id)
