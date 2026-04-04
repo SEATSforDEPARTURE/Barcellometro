@@ -49,6 +49,13 @@ def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None
     assert '@users_group.command(name="tempban"' in modular
     assert '@users_group.command(name="tempban_list"' in modular
     assert 'dms_group = app_commands.Group(name="dms"' in modular
+    assert 'aura_group = app_commands.Group(name="aura"' in modular
+    assert '@aura_group.command(name="on"' in modular
+    assert '@aura_group.command(name="off"' in modular
+    assert '@aura_group.command(name="status"' in modular
+    assert '@aura_group.command(name="policy_set"' in modular
+    assert '@aura_group.command(name="policy_show"' in modular
+    assert '@aura_group.command(name="policy_reset"' in modular
     assert 'grace_group = app_commands.Group(name="grace"' in modular
     assert '@grace_group.command(name="manual"' in modular
     assert '@grace_group.command(name="tempban_set"' in modular
@@ -162,6 +169,7 @@ def test_users_canonical_inventory_matches_contract() -> None:
         "tempban",
         "tempban_list",
         "dms",
+        "aura",
         "grace",
         "grace_list",
         "unban",
@@ -196,6 +204,14 @@ def test_users_canonical_inventory_matches_contract() -> None:
         "tempban_set",
         "tempban_show",
         "tempban_reset",
+    }
+    assert {cmd.name for cmd in _find_command(users_group, "aura").commands} == {
+        "on",
+        "off",
+        "status",
+        "policy_set",
+        "policy_show",
+        "policy_reset",
     }
     assert "assign" not in {cmd.name for cmd in _find_command(users_group, "grace").commands}
 

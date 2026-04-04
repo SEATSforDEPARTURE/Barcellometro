@@ -908,6 +908,18 @@ class DatabaseService:
                 PRIMARY KEY (guild_id, user_id)
             );
 
+            CREATE TABLE IF NOT EXISTS aura_policy (
+                guild_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                eligible_roles_json TEXT NOT NULL DEFAULT '[]',
+                excluded_roles_json TEXT NOT NULL DEFAULT '[]',
+                exclude_bots INTEGER NOT NULL DEFAULT 1,
+                days_account INTEGER NOT NULL DEFAULT 7,
+                min_messages INTEGER NOT NULL DEFAULT 20,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS aura_user_rolling_stats (
                 guild_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
@@ -1516,6 +1528,102 @@ class DatabaseService:
 
     async def delete_setting(self, key: str) -> None:
         await self.execute("DELETE FROM settings WHERE key = ?", (key,))
+
+    async def get_aura_policy(self, guild_id: str) -> Optional[dict[str, Any]]:
+        row = await self.fetchone("SELECT * FROM aura_policy WHERE guild_id = ?", (guild_id,))
+        if row is None:
+            return None
+        data = dict(row)
+        for key in ("eligible_roles_json", "excluded_roles_json"):
+            raw = str(data.get(key) or "[]")
+            try:
+                parsed = json.loads(raw)
+                data[key] = [str(item) for item in parsed] if isinstance(parsed, list) else []
+            except json.JSONDecodeError:
+                data[key] = []
+        data["enabled"] = bool(int(data.get("enabled", 0) or 0))
+        data["exclude_bots"] = bool(int(data.get("exclude_bots", 1) or 1))
+        data["days_account"] = max(0, int(data.get("days_account", 0) or 0))
+        data["min_messages"] = max(0, int(data.get("min_messages", 0) or 0))
+        return data
+
+    async def upsert_aura_policy(self, guild_id: str, **fields: Any) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        current = await self.get_aura_policy(guild_id)
+        base: dict[str, Any] = {
+            "enabled": 0,
+            "eligible_roles_json": [],
+            "excluded_roles_json": [],
+            "exclude_bots": 1,
+            "days_account": 7,
+            "min_messages": 20,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if current is not None:
+            base.update(
+                {
+                    "enabled": 1 if bool(current.get("enabled")) else 0,
+                    "eligible_roles_json": list(current.get("eligible_roles_json") or []),
+                    "excluded_roles_json": list(current.get("excluded_roles_json") or []),
+                    "exclude_bots": 1 if bool(current.get("exclude_bots")) else 0,
+                    "days_account": max(0, int(current.get("days_account", 0) or 0)),
+                    "min_messages": max(0, int(current.get("min_messages", 0) or 0)),
+                    "created_at": str(current.get("created_at") or now),
+                }
+            )
+
+        normalized = dict(fields)
+        for list_key in ("eligible_roles_json", "excluded_roles_json"):
+            if list_key in normalized:
+                value = normalized[list_key]
+                if isinstance(value, list):
+                    normalized[list_key] = [str(item) for item in value if str(item).strip()]
+                elif isinstance(value, str):
+                    try:
+                        parsed = json.loads(value)
+                        normalized[list_key] = [str(item) for item in parsed] if isinstance(parsed, list) else []
+                    except json.JSONDecodeError:
+                        normalized[list_key] = []
+                else:
+                    normalized[list_key] = []
+        for bool_key in ("enabled", "exclude_bots"):
+            if bool_key in normalized:
+                normalized[bool_key] = 1 if bool(normalized[bool_key]) else 0
+        for int_key in ("days_account", "min_messages"):
+            if int_key in normalized:
+                normalized[int_key] = max(0, int(normalized[int_key] or 0))
+
+        base.update(normalized)
+        base["updated_at"] = now
+        values = (
+            guild_id,
+            int(base["enabled"]),
+            json.dumps(list(base["eligible_roles_json"]), ensure_ascii=False),
+            json.dumps(list(base["excluded_roles_json"]), ensure_ascii=False),
+            int(base["exclude_bots"]),
+            int(base["days_account"]),
+            int(base["min_messages"]),
+            str(base["created_at"]),
+            str(base["updated_at"]),
+        )
+        await self.execute(
+            """
+            INSERT INTO aura_policy (
+                guild_id, enabled, eligible_roles_json, excluded_roles_json,
+                exclude_bots, days_account, min_messages, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                eligible_roles_json = excluded.eligible_roles_json,
+                excluded_roles_json = excluded.excluded_roles_json,
+                exclude_bots = excluded.exclude_bots,
+                days_account = excluded.days_account,
+                min_messages = excluded.min_messages,
+                updated_at = excluded.updated_at
+            """,
+            values,
+        )
 
     async def upsert_channel(self, channel_id: str, guild_id: str, name: str, enabled: int, channel_type: str, category_id: Optional[str], is_nsfw: int, slowmode_delay: int) -> None:
         await self.execute(
