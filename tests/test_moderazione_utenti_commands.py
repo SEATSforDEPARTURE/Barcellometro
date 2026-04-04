@@ -10,6 +10,7 @@ import discord
 
 from app.plugins.commands_modular.greetings import register_greetings
 from app.plugins.commands_modular.moderazione_utenti import register_moderazione_utenti
+from app.shared.discord.command_embeds import build_command_embeds
 
 
 def test_commands_register_mod_users_and_top_level_greetings_namespace() -> None:
@@ -1205,7 +1206,9 @@ def test_users_aura_policy_show_with_eligible_users_renders_only_eligible(monkey
 
         kwargs = send_standard_response.await_args.kwargs
         assert kwargs["subcommand_path"] == "users aura policy_show"
-        assert kwargs["sections"][0].title == "👥 __**UTENTI AURA ATTIVI**__"
+        assert kwargs["subtitle_args"] == ["eligible_users"]
+        assert kwargs["sections"][0].title == "UTENTI AURA ATTIVI"
+        assert kwargs["sections"][0].emoji == "👥"
         assert kwargs["sections"][0].lines == ["Totale utenti: 1", "<@10>"]
         aura_service.get_policy.assert_not_awaited()
 
@@ -1231,8 +1234,11 @@ def test_users_aura_policy_show_with_excluded_users_renders_reason_mapping(monke
         command = _find_command(users_group, "aura", "policy_show")
         await command.callback(interaction, None, None, True)
 
-        section = send_standard_response.await_args.kwargs["sections"][0]
-        assert section.title == "🚫 __**UTENTI ESCLUSI DAL PROGRAMMA AURA**__"
+        kwargs = send_standard_response.await_args.kwargs
+        assert kwargs["subtitle_args"] == ["excluded_users"]
+        section = kwargs["sections"][0]
+        assert section.title == "UTENTI ESCLUSI DAL PROGRAMMA AURA"
+        assert section.emoji == "🚫"
         assert section.lines == ["Totale utenti: 1", "• <@42> — meno di 12 messaggi"]
 
     asyncio.run(_run())
@@ -1271,8 +1277,49 @@ def test_users_aura_policy_show_without_runtime_flags_keeps_standard_policy_outp
         await command.callback(interaction, None, None, None)
 
         kwargs = send_standard_response.await_args.kwargs
+        assert kwargs["subtitle_args"] is None
         assert kwargs["sections"] is None
         assert ("program", "on") in kwargs["lines"]
         aura_service.evaluate_member.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+def test_users_aura_policy_show_with_field_sets_subtitle_parameter(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(moderazione_utenti_module, "check_permission", AsyncMock(return_value=True))
+        send_standard_response = AsyncMock()
+        monkeypatch.setattr(moderazione_utenti_module, "send_standard_response", send_standard_response)
+
+        policy = {"excluded_roles": []}
+        aura_service = SimpleNamespace(get_policy=AsyncMock(return_value=policy), evaluate_member=AsyncMock())
+        interaction = SimpleNamespace(guild_id=1, guild=SimpleNamespace(members=[]), user=SimpleNamespace(id=9))
+        ctx = SimpleNamespace(database=Mock(), footer=None, member_flow_notifications=None, barcello_service=None, aura_eligibility=aura_service, config=SimpleNamespace())
+        users_group = discord.app_commands.Group(name="users", description="users")
+        register_moderazione_utenti(users_group, ctx)
+
+        command = _find_command(users_group, "aura", "policy_show")
+        await command.callback(interaction, discord.app_commands.Choice(name="excluded_roles", value="excluded_roles"), None, None)
+
+        kwargs = send_standard_response.await_args.kwargs
+        assert kwargs["subtitle_args"][0].value == "excluded_roles"
+        assert kwargs["subcommand_path"] == "users aura policy_show"
+
+    asyncio.run(_run())
+
+
+def test_users_aura_policy_show_embed_uses_standard_title_and_field_wrapping() -> None:
+    async def _run() -> None:
+        embeds = await build_command_embeds(
+            top_level="users",
+            subcommand_path="users aura policy_show",
+            subtitle_args=["eligible_roles"],
+            lines=[("eligible_roles", "<@&1>")],
+            sections=[{"title": "UTENTI ESCLUSI DAL PROGRAMMA AURA", "emoji": "🚫", "lines": ["Totale utenti: 0"]}],
+        )
+        embed = embeds[0]
+        assert embed.title == "🛠️ __**AURA POLICY_SHOW ELIGIBLE_ROLES**__"
+        assert all("__**" in field.name and "**__" in field.name for field in embed.fields)
+        assert all(not field.name.startswith("**__") for field in embed.fields)
 
     asyncio.run(_run())

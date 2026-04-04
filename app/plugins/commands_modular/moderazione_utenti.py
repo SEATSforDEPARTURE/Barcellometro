@@ -1728,7 +1728,7 @@ def register_moderazione_utenti(
                 lines.extend(shown or ["Nessun utente eleggibile."])
                 if hidden:
                     lines.append(f"... e altri {hidden}")
-                sections.append(CommandEmbedSection(title="👥 __**UTENTI AURA ATTIVI**__", lines=lines))
+                sections.append(CommandEmbedSection(title="UTENTI AURA ATTIVI", lines=lines, emoji="👥"))
             if bool(excluded_users):
                 shown = excluded_lines[:_AURA_POLICY_SHOW_MAX_USERS]
                 hidden = max(0, len(excluded_lines) - len(shown))
@@ -1736,10 +1736,18 @@ def register_moderazione_utenti(
                 lines.extend(shown or ["Nessun utente escluso."])
                 if hidden:
                     lines.append(f"... e altri {hidden}")
-                sections.append(CommandEmbedSection(title="🚫 __**UTENTI ESCLUSI DAL PROGRAMMA AURA**__", lines=lines))
+                sections.append(CommandEmbedSection(title="UTENTI ESCLUSI DAL PROGRAMMA AURA", lines=lines, emoji="🚫"))
+            subtitle_args: list[object] = []
+            if field is not None:
+                subtitle_args.append(field)
+            if bool(eligible_users):
+                subtitle_args.append("eligible_users")
+            if bool(excluded_users):
+                subtitle_args.append("excluded_users")
             await _send(
                 interaction,
                 subcommand_path="users aura policy_show",
+                subtitle_args=subtitle_args or None,
                 sections=sections,
             )
             return
@@ -1751,9 +1759,9 @@ def register_moderazione_utenti(
         if field_name in {"eligible_roles", "excluded_roles"}:
             roles = [str(item) for item in policy.get(field_name, []) if str(item).strip()]
             rendered = _format_aura_roles(interaction.guild, roles) if roles else ("none" if field_name == "excluded_roles" else "all roles (no allowlist)")
-            await _send(interaction, subcommand_path="users aura policy_show", lines=[(field_name, rendered)])
+            await _send(interaction, subcommand_path="users aura policy_show", subtitle_args=[field], lines=[(field_name, rendered)])
             return
-        await _send(interaction, subcommand_path="users aura policy_show", lines=[(field_name, policy.get(field_name))])
+        await _send(interaction, subcommand_path="users aura policy_show", subtitle_args=[field], lines=[(field_name, policy.get(field_name))])
 
     @aura_group.command(name="policy_reset", description="Reset Aura policy fields to defaults.")
     @app_commands.describe(field="Optional field name to reset. Leave empty for full reset.")
