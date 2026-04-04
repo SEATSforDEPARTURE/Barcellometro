@@ -11,6 +11,7 @@ if "httpx" not in sys.modules:
 from app.services.author import render_author_name
 from app.services.campaign_content_formatter import build_horoscope_embeds, build_news_embeds, build_news_page_map, build_weather_embeds
 from app.services.campaign_content_service import CampaignContentService
+from app.services.embed_images import EmbedImagesService, get_embed_images_meta
 from app.services.footer import get_footer_meta
 
 _STANDARD_WRAP_RE = re.compile(r"^(?:(?P<emoji>\S+)\s+)?__\*\*(?P<inner>.*)\*\*__$")
@@ -207,6 +208,36 @@ def test_news_overview_uses_first_available_story_image_and_survives_without_ima
         {},
         {"categories": {"cronaca": [{"title": "A", "summary": "S", "source": "ansa", "link": "https://example.com"}]}},
     )
+
+    with_image_meta = get_embed_images_meta(with_image[0])
+    without_image_meta = get_embed_images_meta(without_image[0])
+    assert with_image_meta is not None
+    assert with_image_meta.service_name == "campagne_notizie"
+    assert with_image_meta.image_url == "https://cdn.example.com/img.jpg"
+    assert without_image_meta is not None
+    assert without_image_meta.service_name == "campagne_notizie"
+    assert without_image_meta.image_url is None
+    assert with_image[0].image.url is None
+    assert without_image[0].image.url is None
+
+    class _Db:
+        async def get_setting(self, _key):
+            return None
+
+        async def set_setting(self, _key, _value):
+            return None
+
+        async def fetchall(self, _query, _params):
+            return []
+
+    async def _run() -> None:
+        service = EmbedImagesService(_Db())
+        await service.apply(with_image[0], default_service_name="campagne_notizie")
+        await service.apply(without_image[0], default_service_name="campagne_notizie")
+
+    import asyncio
+
+    asyncio.run(_run())
     assert str(with_image[0].image.url) == "https://cdn.example.com/img.jpg"
     assert without_image[0].image.url is None
 
