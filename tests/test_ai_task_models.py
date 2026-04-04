@@ -262,6 +262,31 @@ def test_ask_for_task_ollama_summary_fallback_uses_extended_timeout() -> None:
     asyncio.run(_run())
 
 
+def test_resolve_timeout_extends_campaign_editorial_openai() -> None:
+    service = AiService(_Db(), api_key="")
+    assert service._resolve_timeout("campaign_editorial", "openai", 25.0) == 90.0
+    assert service._resolve_timeout("campaign_editorial", "openai", 120.0) == 120.0
+
+
+def test_ask_for_task_campaign_editorial_fallback_openai_uses_extended_timeout() -> None:
+    async def _run() -> None:
+        service = AiService(_Db(), api_key="")
+        service._enabled = True
+        service._model_map = {"summary": "openai:gpt-4o-mini", "campaign_editorial": "ollama:qwen2.5:1.5b"}
+        service._fallback_model_map = {"campaign_editorial": "openai:gpt-4o-mini"}
+        service._run_model = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[TimeoutError("primary-timeout"), types.SimpleNamespace(output_text="fallback-ok")]
+        )
+
+        out = await service.ask_for_task("campaign_editorial", "q", "sys", timeout_seconds=25.0)
+
+        assert out == "fallback-ok"
+        assert service._run_model.await_args_list[0].args[4] == 90.0
+        assert service._run_model.await_args_list[1].args[4] == 90.0
+
+    asyncio.run(_run())
+
+
 def test_ask_for_task_extends_timeout_for_campaign_prompt_ollama() -> None:
     async def _run() -> None:
         db = _Db()
