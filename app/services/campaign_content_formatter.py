@@ -187,12 +187,17 @@ _NEWS_BAD_FALLBACKS = {
     "nessun riassunto disponibile",
     "nessun riassunto disponibile.",
 }
+_NEWS_MAX_SENTENCES = 2
+_NEWS_MAX_ITEMS_PER_FIELD = 2
+_NEWS_FIELD_SOFT_LIMIT = 900
+_NEWS_FIELD_HARD_LIMIT = 1024
 
 
 def sanitize_public_news_text(text: str) -> str:
     cleaned = str(text or "").strip()
     if not cleaned:
         return ""
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
     cleaned = re.sub(r"```(?:\w+)?", "", cleaned, flags=re.IGNORECASE).replace("```", "")
     cleaned = _NEWS_META_PREFIX_RE.sub("", cleaned)
     cleaned = _NEWS_META_LINE_RE.sub("", cleaned)
@@ -207,22 +212,28 @@ def _is_useless_news_text(text: str) -> bool:
     return not normalized or normalized in _NEWS_BAD_FALLBACKS
 
 
-def _first_real_news_sentences(item: dict[str, Any], *, limit: int = 220) -> str:
+def _take_news_sentences(text: str, *, max_sentences: int = _NEWS_MAX_SENTENCES) -> str:
+    candidate = sanitize_public_news_text(text)
+    if not candidate:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", candidate)
+    picked: list[str] = []
+    for sentence in sentences:
+        normalized = sentence.strip()
+        if not normalized:
+            continue
+        picked.append(normalized)
+        if len(picked) >= max_sentences:
+            break
+    return " ".join(picked) if picked else candidate
+
+
+def _first_real_news_sentences(item: dict[str, Any]) -> str:
     for key in ("summary", "description", "excerpt", "content", "text"):
         candidate = sanitize_public_news_text(str(item.get(key) or ""))
         if _is_useless_news_text(candidate):
             continue
-        sentences = re.split(r"(?<=[.!?])\s+", candidate)
-        picked: list[str] = []
-        for sentence in sentences:
-            normalized = sentence.strip()
-            if not normalized:
-                continue
-            picked.append(normalized)
-            if len(picked) >= 2:
-                break
-        compact = " ".join(picked) if picked else candidate
-        return trim_sentence_block(compact, limit=limit)
+        return _take_news_sentences(candidate)
     return "Dettagli in aggiornamento."
 
 
@@ -242,16 +253,56 @@ def _news_source_line(item: dict[str, Any], *, link: str) -> str:
 
 def _format_news_item_block(item: dict[str, Any], *, display: str, numbered: bool, index: int) -> str:
     link = str(item.get("link") or "").strip()
-    title_line = sanitize_plain_text(str(item.get("title") or "Titolo non disponibile"))[:140]
+    title_line = sanitize_plain_text(str(item.get("title") or "Titolo non disponibile"))
     linked_title = f"[{title_line}]({link})" if link else title_line
     summary = sanitize_public_news_text(str(item.get("summary") or ""))
     summary = sanitize_plain_text(summary, remove_category_hint=display)
     if _is_useless_news_text(summary):
         summary = _first_real_news_sentences(item)
-    summary = trim_sentence_block(summary, limit=220)
+    else:
+        summary = _take_news_sentences(summary)
     source_line = _news_source_line(item, link=link)
     heading = f"{index}. **{linked_title}**" if numbered else f"**{linked_title}**"
     return f"{heading}\n• {summary}\n`fonte: {source_line}`"
+
+
+def chunk_news_items_for_embed(items: list[dict[str, Any]], *, display: str) -> list[str]:
+    blocks = [_format_news_item_block(item, display=display, numbered=True, index=idx) for idx, item in enumerate(items[:5], start=1)]
+    if not blocks:
+        return []
+    chunks: list[str] = []
+    current: list[str] = []
+    for block in blocks:
+        candidate = "\n\n".join([*current, block]) if current else block
+        force_new_chunk = bool(current) and (
+            len(current) >= _NEWS_MAX_ITEMS_PER_FIELD
+            or len(candidate) > _NEWS_FIELD_SOFT_LIMIT
+        )
+        if force_new_chunk:
+            chunks.append("\n\n".join(current))
+            current = [block]
+        else:
+            current.append(block)
+    if current:
+        chunks.append("\n\n".join(current))
+
+    sanitized_chunks: list[str] = []
+    for chunk in chunks:
+        if len(chunk) <= _NEWS_FIELD_HARD_LIMIT:
+            sanitized_chunks.append(chunk)
+            continue
+        split_blocks = chunk.split("\n\n")
+        rolling: list[str] = []
+        for block in split_blocks:
+            rolling_candidate = "\n\n".join([*rolling, block]) if rolling else block
+            if rolling and len(rolling_candidate) > _NEWS_FIELD_HARD_LIMIT:
+                sanitized_chunks.append("\n\n".join(rolling))
+                rolling = [block]
+            else:
+                rolling.append(block)
+        if rolling:
+            sanitized_chunks.append("\n\n".join(rolling))
+    return sanitized_chunks
 
 
 def similarity_title(a: str, b: str) -> float:
@@ -382,7 +433,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     for _, display, emoji, main_item, _ in category_rows:
         overview.add_field(
             name=format_standard_field_name(f"{display} in primo piano", emoji=emoji),
-            value=_format_news_item_block(main_item, display=display, numbered=False, index=0)[:1024],
+            value=_format_news_item_block(main_item, display=display, numbered=False, index=0),
             inline=False,
         )
     first_image_url = _first_story_image_url(category_rows)
@@ -394,13 +445,22 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     embeds.append(overview)
     for _, display, emoji, _, items in category_rows:
         embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
-        lines: list[str] = []
-        for idx, item in enumerate(items[:5], start=1):
-            lines.append(_format_news_item_block(item, display=display, numbered=True, index=idx))
-            lines.append("")
         embed.description = format_standard_description(f"*Rassegna {emoji} {display}: approfondimento per categoria.*", blank_line_before_fields=True)
-        page_value = "\n".join(lines)[:1024] if lines else f"Nessuna notizia valida per {emoji} {display}."
-        embed.add_field(name=format_standard_field_name("Notizie", emoji=emoji), value=page_value, inline=False)
+        chunks = chunk_news_items_for_embed(items, display=display)
+        if not chunks:
+            embed.add_field(
+                name=format_standard_field_name("Notizie", emoji="📄"),
+                value=f"Nessuna notizia valida per {emoji} {display}.",
+                inline=False,
+            )
+        else:
+            for idx, chunk in enumerate(chunks):
+                field_label = "Notizie" if idx == 0 else "Notizie (CONT.)"
+                embed.add_field(
+                    name=format_standard_field_name(field_label, emoji="📄"),
+                    value=chunk,
+                    inline=False,
+                )
         embeds.append(embed)
     return _apply_campaign_footer(embeds, service_name="campagne_notizie")
 
