@@ -52,7 +52,7 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     assert len(deduped) == 2
     embeds = build_news_embeds({"embed_title": "📰 NOTIZIARIO"}, payload)
     titles = [_normalize_standardized_title(e.title) for e in embeds]
-    assert "INIZIO" in titles[0]
+    assert "PANORAMICA" in titles[0]
     assert "CRONACA" in titles[1]
     assert "SPORT" in titles[2]
 

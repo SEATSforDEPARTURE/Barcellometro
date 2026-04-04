@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import discord
+from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
@@ -272,8 +273,11 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             inline=False,
         )
     first_image_url = _first_story_image_url(category_rows)
-    if first_image_url:
-        overview.set_image(url=first_image_url)
+    attach_embed_images_meta(
+        overview,
+        service_name="campagne_notizie",
+        image_url=first_image_url,
+    )
     embeds.append(overview)
     for _, display, emoji, items in category_rows:
         embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
