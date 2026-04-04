@@ -16,6 +16,15 @@ from app.services.entitlements import EntitlementsService
 
 logger = logging.getLogger(__name__)
 
+AURA_POLICY_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "eligible_roles": [],
+    "excluded_roles": [],
+    "exclude_bots": True,
+    "days_account": 7,
+    "min_messages": 20,
+}
+
 
 @dataclass(frozen=True)
 class AuraRuleDefinition:
@@ -560,42 +569,90 @@ class AuraEligibilityService:
         self._db = database
         self._entitlements = entitlements
 
-    async def evaluate_member(self, member: discord.abc.User, guild_id: str, start_ts: str, end_ts: str) -> AuraEligibilityResult:
-        aura_config = await self._entitlements.get_feature_profile_config(member, "aura")
-        eligibility = aura_config.get("eligibility", {}) if isinstance(aura_config, dict) else {}
-        if not bool(aura_config.get("enabled", False)):
-            return AuraEligibilityResult(False, "Aura non attiva per il tuo tier")
+    async def get_policy(self, guild_id: str) -> dict[str, Any]:
+        row = await self._db.get_aura_policy(guild_id) if hasattr(self._db, "get_aura_policy") else None
+        policy = {
+            "enabled": bool(AURA_POLICY_DEFAULTS["enabled"]),
+            "eligible_roles": list(AURA_POLICY_DEFAULTS["eligible_roles"]),
+            "excluded_roles": list(AURA_POLICY_DEFAULTS["excluded_roles"]),
+            "exclude_bots": bool(AURA_POLICY_DEFAULTS["exclude_bots"]),
+            "days_account": int(AURA_POLICY_DEFAULTS["days_account"]),
+            "min_messages": int(AURA_POLICY_DEFAULTS["min_messages"]),
+        }
+        if isinstance(row, dict):
+            policy["enabled"] = bool(row.get("enabled", policy["enabled"]))
+            policy["eligible_roles"] = [str(item) for item in row.get("eligible_roles_json", []) if str(item).strip()]
+            policy["excluded_roles"] = [str(item) for item in row.get("excluded_roles_json", []) if str(item).strip()]
+            policy["exclude_bots"] = bool(row.get("exclude_bots", policy["exclude_bots"]))
+            policy["days_account"] = max(0, int(row.get("days_account", policy["days_account"]) or 0))
+            policy["min_messages"] = max(0, int(row.get("min_messages", policy["min_messages"]) or 0))
+        return policy
 
-        if bool(eligibility.get("exclude_bots", True)) and bool(getattr(member, "bot", False)):
+    async def set_policy(self, guild_id: str, **fields: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if "enabled" in fields:
+            payload["enabled"] = bool(fields["enabled"])
+        if "eligible_roles" in fields:
+            payload["eligible_roles_json"] = [str(item) for item in fields["eligible_roles"] if str(item).strip()]
+        if "excluded_roles" in fields:
+            payload["excluded_roles_json"] = [str(item) for item in fields["excluded_roles"] if str(item).strip()]
+        if "exclude_bots" in fields:
+            payload["exclude_bots"] = bool(fields["exclude_bots"])
+        if "days_account" in fields:
+            payload["days_account"] = max(0, int(fields["days_account"] or 0))
+        if "min_messages" in fields:
+            payload["min_messages"] = max(0, int(fields["min_messages"] or 0))
+        if payload and hasattr(self._db, "upsert_aura_policy"):
+            await self._db.upsert_aura_policy(guild_id, **payload)
+        return await self.get_policy(guild_id)
+
+    async def reset_policy_fields(self, guild_id: str, fields: list[str]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for field_name in fields:
+            if field_name == "enabled":
+                payload["enabled"] = bool(AURA_POLICY_DEFAULTS["enabled"])
+            elif field_name == "eligible_roles":
+                payload["eligible_roles_json"] = list(AURA_POLICY_DEFAULTS["eligible_roles"])
+            elif field_name == "excluded_roles":
+                payload["excluded_roles_json"] = list(AURA_POLICY_DEFAULTS["excluded_roles"])
+            elif field_name == "exclude_bots":
+                payload["exclude_bots"] = bool(AURA_POLICY_DEFAULTS["exclude_bots"])
+            elif field_name == "days_account":
+                payload["days_account"] = int(AURA_POLICY_DEFAULTS["days_account"])
+            elif field_name == "min_messages":
+                payload["min_messages"] = int(AURA_POLICY_DEFAULTS["min_messages"])
+        if payload and hasattr(self._db, "upsert_aura_policy"):
+            await self._db.upsert_aura_policy(guild_id, **payload)
+        return await self.get_policy(guild_id)
+
+    async def evaluate_member(self, member: discord.abc.User, guild_id: str, start_ts: str, end_ts: str) -> AuraEligibilityResult:
+        policy = await self.get_policy(guild_id)
+        if not bool(policy.get("enabled", False)):
+            return AuraEligibilityResult(False, "Aura disattivata per questo server")
+
+        if bool(policy.get("exclude_bots", True)) and bool(getattr(member, "bot", False)):
             return AuraEligibilityResult(False, "Aura non attiva: account bot escluso")
 
-        min_age = int(eligibility.get("min_account_age_days", 7) or 7)
+        excluded_roles = {str(role_id).strip() for role_id in policy.get("excluded_roles", []) if str(role_id).strip()}
+        if excluded_roles:
+            for role in getattr(member, "roles", []):
+                if str(getattr(role, "id", "")).strip() in excluded_roles:
+                    return AuraEligibilityResult(False, "Aura non attiva: ruolo escluso")
+
+        eligible_roles = {str(role_id).strip() for role_id in policy.get("eligible_roles", []) if str(role_id).strip()}
+        if eligible_roles:
+            member_role_ids = {str(getattr(role, "id", "")).strip() for role in getattr(member, "roles", [])}
+            if not (member_role_ids & eligible_roles):
+                return AuraEligibilityResult(False, "Aura non attiva: manca un ruolo ammesso")
+
+        min_age = max(0, int(policy.get("days_account", 0) or 0))
         created_at = getattr(member, "created_at", None)
         if isinstance(created_at, datetime):
             created_dt = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) - created_dt < timedelta(days=min_age):
                 return AuraEligibilityResult(False, f"Aura non attiva: account troppo recente (min {min_age} giorni)")
 
-        exclude_roles = {str(r).lower() for r in eligibility.get("exclude_roles", []) if r is not None}
-        if exclude_roles:
-            for role in getattr(member, "roles", []):
-                if str(getattr(role, "id", "")).lower() in exclude_roles or str(getattr(role, "name", "")).lower() in exclude_roles:
-                    return AuraEligibilityResult(False, "Aura non attiva: ruolo escluso")
-
-        if bool(eligibility.get("exclude_if_flagged_fake", True)):
-            fake_users_raw = await self._db.get_setting("aura.fake_user_ids")
-            fake_users: set[str] = set()
-            if fake_users_raw:
-                try:
-                    parsed = json.loads(fake_users_raw)
-                    if isinstance(parsed, list):
-                        fake_users = {str(x) for x in parsed}
-                except json.JSONDecodeError:
-                    logger.warning("Invalid aura.fake_user_ids setting")
-            if str(getattr(member, "id", "")) in fake_users:
-                return AuraEligibilityResult(False, "Aura non attiva: account segnalato")
-
-        min_messages = int(eligibility.get("min_messages_in_range", 20) or 20)
+        min_messages = max(0, int(policy.get("min_messages", 0) or 0))
         user_id = str(getattr(member, "id", ""))
         count = await self._db.count_user_messages_in_range(guild_id, user_id, start_ts, end_ts)
         if count < min_messages:

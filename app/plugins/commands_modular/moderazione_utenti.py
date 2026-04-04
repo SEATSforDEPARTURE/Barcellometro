@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,7 @@ from app.services.users_moderation_dms import (
     USERS_DM_SUPPORTED_PLACEHOLDERS,
     UsersModerationDmService,
 )
+from app.services.aura import AURA_POLICY_DEFAULTS
 from app.shared.discord.command_embeds import CommandEmbedSection, build_command_embeds, send_command_embeds, send_standard_response
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,7 @@ WINDOW_ACTION_LABELS = {
     "ungrace": "grace",
 }
 USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
+_AURA_POLICY_FIELDS = ("eligible_roles", "excluded_roles", "exclude_bots", "days_account", "min_messages")
 USERS_DM_TEMPLATE_HELP = (
     "Supported placeholders: "
     + ", ".join(f"{{{name}}}" for name in USERS_DM_SUPPORTED_PLACEHOLDERS)
@@ -89,6 +92,15 @@ def _normalize_embed_color(raw: str | None) -> str | None:
 
 def _normalize_lookup_key(value: str | None) -> str:
     return " ".join(str(value or "").strip().casefold().split())
+
+
+def _parse_role_ids_input(raw_roles: str | None) -> list[str]:
+    text = str(raw_roles or "").strip()
+    if not text:
+        return []
+    found = re.findall(r"<@&(\d+)>", text)
+    values = found if found else re.findall(r"\d+", text)
+    return list(dict.fromkeys(values))
 
 
 class _ResolvedModerationUser:
@@ -1525,6 +1537,160 @@ def register_moderazione_utenti(
         await _send(interaction, subcommand_path="users dms invite_reset", lines=[("result", "reset")], kind="success")
 
     users_group.add_command(dms_group)
+
+    aura_group = app_commands.Group(name="aura", description="Aura program policy controls.")
+
+    async def _require_aura_service(interaction: discord.Interaction):
+        service = getattr(ctx, "aura_eligibility", None)
+        if service is None:
+            await _send(interaction, subcommand_path="users aura status", lines=[("error", "service unavailable")], kind="error")
+            return None
+        return service
+
+    def _format_aura_roles(guild: discord.Guild | None, role_ids: list[str]) -> str:
+        if not role_ids:
+            return "all roles (no allowlist)" if guild else "[]"
+        if guild is None:
+            return ", ".join(f"<@&{role_id}>" for role_id in role_ids)
+        chunks: list[str] = []
+        for role_id in role_ids:
+            role_obj = guild.get_role(int(role_id)) if role_id.isdigit() else None
+            chunks.append(role_obj.mention if role_obj is not None else f"{role_id} (missing)")
+        return ", ".join(chunks)
+
+    def _render_policy_lines(interaction: discord.Interaction, policy: dict[str, object]) -> list[tuple[str, object]]:
+        eligible_roles = [str(item) for item in policy.get("eligible_roles", []) if str(item).strip()]
+        excluded_roles = [str(item) for item in policy.get("excluded_roles", []) if str(item).strip()]
+        return [
+            ("program", "on" if bool(policy.get("enabled")) else "off"),
+            ("eligible_roles", _format_aura_roles(interaction.guild, eligible_roles)),
+            ("excluded_roles", _format_aura_roles(interaction.guild, excluded_roles) if excluded_roles else "none"),
+            ("exclude_bots", "on" if bool(policy.get("exclude_bots")) else "off"),
+            ("days_account", int(policy.get("days_account", 0) or 0)),
+            ("min_messages", int(policy.get("min_messages", 0) or 0)),
+        ]
+
+    @aura_group.command(name="on", description="Enable the Aura program for this server.")
+    async def users_aura_on(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        service = await _require_aura_service(interaction)
+        if service is None:
+            return
+        policy = await service.set_policy(str(interaction.guild_id), enabled=True)
+        await _send(interaction, subcommand_path="users aura on", lines=[("program", "on"), ("result", "updated"), ("min_messages", policy["min_messages"])], kind="success")
+
+    @aura_group.command(name="off", description="Disable the Aura program for this server.")
+    async def users_aura_off(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        service = await _require_aura_service(interaction)
+        if service is None:
+            return
+        await service.set_policy(str(interaction.guild_id), enabled=False)
+        await _send(interaction, subcommand_path="users aura off", lines=[("program", "off"), ("result", "updated")], kind="success")
+
+    @aura_group.command(name="status", description="Show Aura runtime status and policy.")
+    async def users_aura_status(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        service = await _require_aura_service(interaction)
+        if service is None:
+            return
+        policy = await service.get_policy(str(interaction.guild_id))
+        await _send(interaction, subcommand_path="users aura status", lines=_render_policy_lines(interaction, policy))
+
+    @aura_group.command(name="policy_set", description="Update Aura eligibility policy fields.")
+    @app_commands.describe(
+        eligible_roles="Allowed roles as mentions/IDs (empty string clears).",
+        excluded_roles="Excluded roles as mentions/IDs (empty string clears).",
+        exclude_bots="Exclude bot users from Aura.",
+        days_account="Minimum account age in days (>= 0).",
+        min_messages="Minimum messages in selected period (>= 0).",
+    )
+    async def users_aura_policy_set(
+        interaction: discord.Interaction,
+        eligible_roles: str | None = None,
+        excluded_roles: str | None = None,
+        exclude_bots: bool | None = None,
+        days_account: app_commands.Range[int, 0, 36500] | None = None,
+        min_messages: app_commands.Range[int, 0, 500000] | None = None,
+    ) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        service = await _require_aura_service(interaction)
+        if service is None:
+            return
+        payload: dict[str, object] = {}
+        if eligible_roles is not None:
+            parsed = _parse_role_ids_input(eligible_roles)
+            payload["eligible_roles"] = parsed
+            if interaction.guild is not None:
+                invalid_ids = [role_id for role_id in parsed if interaction.guild.get_role(int(role_id)) is None]
+                if invalid_ids:
+                    await _send(interaction, subcommand_path="users aura policy_set", lines=[("error", f"Unknown eligible_roles: {', '.join(invalid_ids)}")], kind="error")
+                    return
+        if excluded_roles is not None:
+            parsed = _parse_role_ids_input(excluded_roles)
+            payload["excluded_roles"] = parsed
+            if interaction.guild is not None:
+                invalid_ids = [role_id for role_id in parsed if interaction.guild.get_role(int(role_id)) is None]
+                if invalid_ids:
+                    await _send(interaction, subcommand_path="users aura policy_set", lines=[("error", f"Unknown excluded_roles: {', '.join(invalid_ids)}")], kind="error")
+                    return
+        if exclude_bots is not None:
+            payload["exclude_bots"] = bool(exclude_bots)
+        if days_account is not None:
+            payload["days_account"] = int(days_account)
+        if min_messages is not None:
+            payload["min_messages"] = int(min_messages)
+        if not payload:
+            await _send(interaction, subcommand_path="users aura policy_set", lines=[("error", "Provide at least one field.")], kind="error")
+            return
+        policy = await service.set_policy(str(interaction.guild_id), **payload)
+        await _send(interaction, subcommand_path="users aura policy_set", lines=[("result", "updated"), *_render_policy_lines(interaction, policy)], kind="success")
+
+    @aura_group.command(name="policy_show", description="Show one Aura policy field or the full policy.")
+    @app_commands.describe(field="Optional field name to inspect.")
+    @app_commands.choices(field=[app_commands.Choice(name=item, value=item) for item in _AURA_POLICY_FIELDS])
+    async def users_aura_policy_show(interaction: discord.Interaction, field: app_commands.Choice[str] | None = None) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        service = await _require_aura_service(interaction)
+        if service is None:
+            return
+        policy = await service.get_policy(str(interaction.guild_id))
+        if field is None:
+            await _send(interaction, subcommand_path="users aura policy_show", lines=_render_policy_lines(interaction, policy))
+            return
+        field_name = field.value
+        if field_name in {"eligible_roles", "excluded_roles"}:
+            roles = [str(item) for item in policy.get(field_name, []) if str(item).strip()]
+            rendered = _format_aura_roles(interaction.guild, roles) if roles else ("none" if field_name == "excluded_roles" else "all roles (no allowlist)")
+            await _send(interaction, subcommand_path="users aura policy_show", lines=[(field_name, rendered)])
+            return
+        await _send(interaction, subcommand_path="users aura policy_show", lines=[(field_name, policy.get(field_name))])
+
+    @aura_group.command(name="policy_reset", description="Reset Aura policy fields to defaults.")
+    @app_commands.describe(field="Optional field name to reset. Leave empty for full reset.")
+    @app_commands.choices(field=[app_commands.Choice(name=item, value=item) for item in _AURA_POLICY_FIELDS])
+    async def users_aura_policy_reset(interaction: discord.Interaction, field: app_commands.Choice[str] | None = None) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        service = await _require_aura_service(interaction)
+        if service is None:
+            return
+        target_fields = [field.value] if field is not None else list(_AURA_POLICY_FIELDS)
+        policy = await service.reset_policy_fields(str(interaction.guild_id), target_fields)
+        defaults = ", ".join(f"{name}={json.dumps(AURA_POLICY_DEFAULTS[name], ensure_ascii=False)}" for name in target_fields)
+        await _send(
+            interaction,
+            subcommand_path="users aura policy_reset",
+            lines=[("result", "reset"), ("defaults_applied", defaults), *_render_policy_lines(interaction, policy)],
+            kind="success",
+        )
+
+    users_group.add_command(aura_group)
 
     grace_group = app_commands.Group(name="grace", description="Manual grace commands and follow-up tempban defaults.")
 

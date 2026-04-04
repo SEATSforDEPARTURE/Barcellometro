@@ -2,8 +2,9 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
-from app.services.aura import ArchetypeAnalyzerService, AuraEligibilityService, AuraMissionService, AuraScoringService, build_discord_jump_link, compute_and_store_aura_result, load_aura_rule_definitions, load_aura_rules, normalize_text_for_matching, render_karma_bar, resolve_aura_reason_label
+from app.services.aura import ArchetypeAnalyzerService, AuraAggregationJob, AuraEligibilityService, AuraMissionService, AuraScoringService, build_discord_jump_link, compute_and_store_aura_result, load_aura_rule_definitions, load_aura_rules, normalize_text_for_matching, render_karma_bar, resolve_aura_reason_label
 from app.services.database import DatabaseService
 from app.services.entitlements import EntitlementsService
 from app.services.barcello_window_defaults import resolve_default_window_minutes
@@ -13,12 +14,29 @@ class FakeDatabase:
     def __init__(self, *, settings=None, message_count: int = 0):
         self._settings = settings or {}
         self._message_count = message_count
+        self._aura_policy = None
 
     async def get_setting(self, key: str):
         return self._settings.get(key)
 
     async def count_user_messages_in_range(self, guild_id: str, user_id: str, start_ts: str, end_ts: str):
         return self._message_count
+
+    async def get_aura_policy(self, guild_id: str):
+        return self._aura_policy
+
+    async def upsert_aura_policy(self, guild_id: str, **fields):
+        current = self._aura_policy or {
+            "guild_id": guild_id,
+            "enabled": 0,
+            "eligible_roles_json": [],
+            "excluded_roles_json": [],
+            "exclude_bots": 1,
+            "days_account": 7,
+            "min_messages": 20,
+        }
+        current.update(fields)
+        self._aura_policy = current
 
 
 @dataclass
@@ -83,35 +101,18 @@ def test_render_karma_bar_cursor_edges() -> None:
 
 
 def test_eligibility_bots_and_min_messages() -> None:
-    policies = {
-        "commands": {
-            "aura": {
-                "profiles": {
-                    "base": {
-                        "features": {
-                            "aura": {
-                                "enabled": True,
-                                "eligibility": {
-                                    "min_account_age_days": 7,
-                                    "min_messages_in_range": 20,
-                                    "exclude_bots": True,
-                                    "exclude_roles": [],
-                                    "exclude_if_flagged_fake": True,
-                                },
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    settings = {
-        "entitlements.policies": json.dumps(policies),
-        "entitlements.profile_map": json.dumps({"profiles": {"base": {"priority": 0}}, "role_to_profile": {}}),
-        "mod.role_ids": "[]",
-    }
-
-    db_low = FakeDatabase(settings=settings, message_count=5)
+    db_low = FakeDatabase(message_count=5)
+    run(
+        db_low.upsert_aura_policy(
+            "10",
+            enabled=1,
+            exclude_bots=1,
+            min_messages=20,
+            days_account=7,
+            eligible_roles_json=[],
+            excluded_roles_json=[],
+        )
+    )
     ent = EntitlementsService(db_low)
     service = AuraEligibilityService(db_low, ent)
     member = FakeMember(id=1, roles=[], guild_permissions=FakePermissions(), bot=False)
@@ -119,13 +120,124 @@ def test_eligibility_bots_and_min_messages() -> None:
     assert result.eligible is False
     assert "almeno 20 messaggi" in result.reason
 
-    db_ok = FakeDatabase(settings=settings, message_count=100)
+    db_ok = FakeDatabase(message_count=100)
+    run(
+        db_ok.upsert_aura_policy(
+            "10",
+            enabled=1,
+            exclude_bots=1,
+            min_messages=20,
+            days_account=7,
+            eligible_roles_json=[],
+            excluded_roles_json=[],
+        )
+    )
     ent_ok = EntitlementsService(db_ok)
     service_ok = AuraEligibilityService(db_ok, ent_ok)
     bot_member = FakeMember(id=2, roles=[], guild_permissions=FakePermissions(), bot=True)
     bot_result = run(service_ok.evaluate_member(bot_member, "10", datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()))
     assert bot_result.eligible is False
     assert "bot" in bot_result.reason.lower()
+
+
+def test_eligibility_policy_defaults_and_roles_precedence() -> None:
+    db = FakeDatabase(message_count=100)
+    service = AuraEligibilityService(db, EntitlementsService(db))
+    member = FakeMember(id=1, roles=[FakeRole(id=123)], guild_permissions=FakePermissions(), bot=False)
+    result = run(service.evaluate_member(member, "10", datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()))
+    assert result.eligible is False
+    assert "disattivata" in result.reason.lower()
+
+    run(
+        db.upsert_aura_policy(
+            "10",
+            enabled=1,
+            eligible_roles_json=["123"],
+            excluded_roles_json=["123"],
+            exclude_bots=0,
+            days_account=0,
+            min_messages=0,
+        )
+    )
+    result_blocked = run(service.evaluate_member(member, "10", datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()))
+    assert result_blocked.eligible is False
+    assert "ruolo escluso" in result_blocked.reason.lower()
+
+    run(db.upsert_aura_policy("10", excluded_roles_json=["999"]))
+    result_ok = run(service.evaluate_member(member, "10", datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()))
+    assert result_ok.eligible is True
+
+
+def test_database_aura_policy_defaults_and_reset_flow() -> None:
+    async def _scenario() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        await db.initialize_schema()
+        entitlements = EntitlementsService(db)
+        service = AuraEligibilityService(db, entitlements)
+
+        defaults = await service.get_policy("1")
+        assert defaults["enabled"] is False
+        assert defaults["days_account"] == 7
+        assert defaults["min_messages"] == 20
+
+        updated = await service.set_policy("1", enabled=True, min_messages=5, excluded_roles=["77"])
+        assert updated["enabled"] is True
+        assert updated["min_messages"] == 5
+        assert updated["excluded_roles"] == ["77"]
+
+        reset_single = await service.reset_policy_fields("1", ["min_messages"])
+        assert reset_single["min_messages"] == 20
+        assert reset_single["enabled"] is True
+
+        reset_multi = await service.reset_policy_fields("1", ["excluded_roles", "exclude_bots"])
+        assert reset_multi["excluded_roles"] == []
+        assert reset_multi["exclude_bots"] is True
+        await db.close()
+
+    run(_scenario())
+
+
+def test_aggregation_job_uses_persisted_aura_policy(monkeypatch) -> None:
+    class _FakeDb(FakeDatabase):
+        def __init__(self):
+            super().__init__(message_count=100)
+            self.profile_updates = 0
+
+        async def upsert_aura_user_profile(self, **kwargs):
+            self.profile_updates += 1
+
+        async def fetch_user_channels_in_range(self, guild_id, user_id, start_ts, end_ts):
+            return []
+
+    class _FakeGuild:
+        id = 1
+
+        def __init__(self, members):
+            self.members = members
+
+    async def _scenario() -> None:
+        db = _FakeDb()
+        entitlements = EntitlementsService(db)
+        service = AuraEligibilityService(db, entitlements)
+        member = FakeMember(id=1, roles=[], guild_permissions=FakePermissions(), bot=False)
+        job = AuraAggregationJob(db, SimpleNamespace(guilds=[_FakeGuild([member])]), service)
+        calls: list[dict[str, str]] = []
+
+        async def _fake_compute(*args, **kwargs):
+            calls.append(kwargs)
+
+        monkeypatch.setattr("app.services.aura.compute_and_store_aura_result", _fake_compute)
+
+        await db.upsert_aura_policy("1", enabled=0, min_messages=0, days_account=0, exclude_bots=0, eligible_roles_json=[], excluded_roles_json=[])
+        await job.run_once()
+        assert calls == []
+
+        await db.upsert_aura_policy("1", enabled=1, min_messages=0, days_account=0, exclude_bots=0, eligible_roles_json=[], excluded_roles_json=[])
+        await job.run_once()
+        assert len(calls) == 1
+
+    run(_scenario())
 
 
 def test_compute_and_store_aura_result_creates_missing_window_row() -> None:

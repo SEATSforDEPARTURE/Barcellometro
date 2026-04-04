@@ -185,6 +185,10 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
 - `/users dms template_tempban_set|template_tempban_show|template_tempban_reset`
 - `/users dms cooldown_set|cooldown_show|cooldown_reset`
 - `/users dms invite_set|invite_show|invite_reset`
+- `/users aura on|off|status`
+- `/users aura policy_set [eligible_roles] [excluded_roles] [exclude_bots] [days_account] [min_messages]`
+- `/users aura policy_show [field]` (`field`: `eligible_roles|excluded_roles|exclude_bots|days_account|min_messages`)
+- `/users aura policy_reset [field]` (reset al default hardcoded del campo; senza field resetta tutta la policy aura)
 - `/users grace tempban_set quantity:<n> unit:<minuti|ore|giorni|settimane>`
 - `/users grace tempban_show`
 - `/users grace tempban_reset`
@@ -210,8 +214,13 @@ Requisiti runtime: `ffmpeg` e `ffprobe` disponibili nel PATH (in alternativa vie
   - `/unban oggi|ieri motivo:<...>`
   - `/unban ultimi quantità:<n> unità:<minuti|ore|giorni|settimane> motivo:<...>`
   - `/unban range da:<DD/MM/YYYY HH:MM> a:<DD/MM/YYYY HH:MM> motivo:<...>`
-  - stessa convenzione per `/untempban ...` e `/ungrace ...`
+- stessa convenzione per `/untempban ...` e `/ungrace ...`
 - Scadenza grace manuale: quando `/users grace manual` (o alias `/grace`) scade, il servizio revoca automaticamente il grace e applica un tempban automatico solo se il default configurato con `grace tempban_set` è maggiore di `0` secondi.
+- Semantica Aura policy:
+  - `eligible_roles`: se vuoto non applica filtro positivo; se valorizzato richiede almeno un ruolo in lista.
+  - `excluded_roles`: se presente esclude sempre l’utente e ha precedenza su `eligible_roles`.
+  - `exclude_bots`, `days_account`, `min_messages`: criteri runtime persistiti a livello guild.
+  - I valori hardcoded restano solo come fallback/default per `policy_reset`.
 
 ### Greetings / inactivity
 - `/greetings on [channel]`
