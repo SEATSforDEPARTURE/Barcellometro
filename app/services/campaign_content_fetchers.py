@@ -68,6 +68,82 @@ NEWS_CATEGORY_CATALOG = [
     {"value": "varie", "label": "Varie", "aliases": ["varie"]},
 ]
 
+NEWS_CATEGORY_CLASSIFICATION = {
+    "cronaca": {
+        "aliases": ["cronaca", "cronache", "fatti", "attualita", "attualità", "italia"],
+        "feed_categories": ["cronaca", "italia", "attualita", "attualità", "news", "topnews", "ultime"],
+        "keywords": [
+            "incidente",
+            "omicidio",
+            "arresto",
+            "procura",
+            "tribunale",
+            "polizia",
+            "carabinieri",
+            "rapina",
+            "alluvione",
+            "crollo",
+            "feriti",
+            "morto",
+        ],
+    },
+    "politica": {
+        "aliases": ["politica", "governo", "parlamento", "elezioni"],
+        "feed_categories": ["politica", "governo", "parlamento", "elezioni", "istituzioni"],
+        "keywords": ["governo", "parlamento", "decreto", "ministro", "premier", "elezioni", "camera", "senato", "riforma"],
+    },
+    "sport": {
+        "aliases": ["sport", "calcio", "serie a", "motori", "tennis"],
+        "feed_categories": ["sport", "calcio", "serie-a", "motori", "tennis", "formula 1", "basket"],
+        "keywords": ["partita", "gol", "campionato", "serie a", "champions", "allenatore", "gp", "tennis", "olimpiadi"],
+    },
+    "spettacolo": {
+        "aliases": ["spettacolo", "cinema", "tv", "televisione", "musica", "show"],
+        "feed_categories": ["spettacolo", "cinema", "tv", "televisione", "musica", "cultura", "entertainment"],
+        "keywords": ["film", "serie tv", "palinsesto", "teatro", "festival", "concerto", "red carpet", "streaming"],
+    },
+    "gossip": {
+        "aliases": ["gossip", "vip", "celebrita", "celebrità", "star", "paparazzi"],
+        "feed_categories": ["gossip", "vip", "people", "celeb", "star"],
+        "keywords": ["fidanzato", "fidanzata", "relazione", "separazione", "paparazzi", "indiscrezione", "retroscena"],
+    },
+    "tecnologia": {
+        "aliases": ["tecnologia", "tech", "digitale", "innovazione", "scienza"],
+        "feed_categories": ["tecnologia", "tech", "digitale", "innovazione", "scienza", "internet"],
+        "keywords": ["startup", "intelligenza artificiale", "ai", "app", "smartphone", "software", "hardware", "cyber", "chip"],
+    },
+    "economia": {
+        "aliases": ["economia", "finanza", "mercati", "borsa", "business"],
+        "feed_categories": ["economia", "finanza", "mercati", "borsa", "business", "lavoro"],
+        "keywords": ["inflazione", "pil", "spread", "borsa", "mercati", "stipendi", "tasse", "manovra", "aziende"],
+    },
+    "mondo": {
+        "aliases": ["mondo", "esteri", "internazionale", "europa", "usa", "guerra"],
+        "feed_categories": ["mondo", "esteri", "internazionale", "europa", "usa", "asia", "medio oriente"],
+        "keywords": ["nato", "onu", "confine", "diplomazia", "ucraina", "gaza", "washington", "bruxelles", "esteri"],
+    },
+    "viral": {
+        "aliases": ["viral", "virale", "trending", "social", "meme"],
+        "feed_categories": ["viral", "virale", "trending", "social", "web"],
+        "keywords": ["diventa virale", "virale", "trending", "meme", "tiktok", "instagram", "video shock", "social"],
+    },
+    "trash": {
+        "aliases": ["trash", "trashata", "trashissimo", "assurdo"],
+        "feed_categories": ["trash", "trashata", "trash tv", "costume"],
+        "keywords": ["figuraccia", "imbarazzante", "polemica social", "gaffe", "trash", "siparietto", "reality"],
+    },
+    "curiosita": {
+        "aliases": ["curiosita", "curiosità", "insolito", "strano"],
+        "feed_categories": ["curiosita", "curiosità", "insolito", "strano", "lifestyle"],
+        "keywords": ["incredibile", "curioso", "record", "insolito", "strano", "non ci crederai", "scoperta"],
+    },
+    "varie": {
+        "aliases": ["varie", "generale", "news", "topnews"],
+        "feed_categories": ["varie", "generale", "news", "topnews", "homepage"],
+        "keywords": [],
+    },
+}
+
 NEWS_SOURCE_MAP = {entry["value"]: entry["url"] for entry in NEWS_SOURCE_CATALOG}
 SUPPORTED_NEWS_CATEGORIES = [entry["value"] for entry in NEWS_CATEGORY_CATALOG]
 
@@ -124,6 +200,15 @@ def _build_news_category_aliases() -> dict[str, str]:
             if alias_clean:
                 aliases[alias_clean] = canonical
                 aliases[_fold_token(alias_clean)] = canonical
+    for canonical, config in NEWS_CATEGORY_CLASSIFICATION.items():
+        aliases[canonical] = canonical
+        aliases[_fold_token(canonical)] = canonical
+        for bucket in ("aliases", "feed_categories"):
+            for alias in config.get(bucket, []):
+                alias_clean = str(alias).strip().lower()
+                if alias_clean:
+                    aliases[alias_clean] = canonical
+                    aliases[_fold_token(alias_clean)] = canonical
     return aliases
 
 
@@ -155,6 +240,75 @@ def normalize_news_category_token(value: str) -> str | None:
     if not token:
         return None
     return NEWS_CATEGORY_ALIASES.get(token) or NEWS_CATEGORY_ALIASES.get(_fold_token(token))
+
+
+def _tokenize_news_text(value: str) -> str:
+    folded = _fold_token(value)
+    return re.sub(r"[^a-z0-9]+", " ", folded).strip()
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    token_text = _tokenize_news_text(text)
+    token_keyword = _tokenize_news_text(keyword)
+    if not token_text or not token_keyword:
+        return False
+    return f" {token_keyword} " in f" {token_text} "
+
+
+def _extract_feed_categories(node: ET.Element) -> list[str]:
+    feed_categories: list[str] = []
+    for category_node in node.findall("category"):
+        candidate = (category_node.text or "").strip()
+        if candidate:
+            feed_categories.append(candidate)
+    return feed_categories
+
+
+def classify_news_item(
+    *,
+    title: str,
+    description: str,
+    raw_categories: list[str],
+    source: str,
+    requested_categories: list[str],
+) -> list[str]:
+    requested = requested_categories or SUPPORTED_NEWS_CATEGORIES
+    normalized_requested = [c for c in requested if c in SUPPORTED_NEWS_CATEGORIES]
+    category_scores: dict[str, int] = {}
+
+    for raw_category in raw_categories:
+        normalized_raw = normalize_news_category_token(raw_category)
+        if normalized_raw:
+            category_scores[normalized_raw] = max(category_scores.get(normalized_raw, 0), 5)
+        for canonical, config in NEWS_CATEGORY_CLASSIFICATION.items():
+            for feed_equivalent in config.get("feed_categories", []):
+                if _contains_keyword(raw_category, str(feed_equivalent)):
+                    category_scores[canonical] = max(category_scores.get(canonical, 0), 4)
+                    break
+
+    text_blob = " ".join(part for part in [title, description] if part).strip()
+    for canonical, config in NEWS_CATEGORY_CLASSIFICATION.items():
+        for keyword in config.get("keywords", []):
+            if _contains_keyword(text_blob, str(keyword)):
+                category_scores[canonical] = category_scores.get(canonical, 0) + 2
+        for alias in config.get("aliases", []):
+            if _contains_keyword(text_blob, str(alias)):
+                category_scores[canonical] = category_scores.get(canonical, 0) + 1
+
+    source_token = urllib.parse.urlparse(source).netloc or source
+    source_folded = _fold_token(source_token)
+    if "wired" in source_folded:
+        category_scores["tecnologia"] = category_scores.get("tecnologia", 0) + 1
+    if "fanpage" in source_folded:
+        category_scores["viral"] = category_scores.get("viral", 0) + 1
+
+    ranked = sorted(category_scores.items(), key=lambda pair: (-pair[1], normalized_requested.index(pair[0]) if pair[0] in normalized_requested else 999))
+    matched = [category for category, score in ranked if score > 0 and category in normalized_requested]
+    if matched:
+        return matched
+    if "varie" in normalized_requested:
+        return ["varie"]
+    return []
 
 WEATHER_SOURCE_MAP = {
     "open-meteo": "open-meteo",
@@ -414,7 +568,11 @@ def dedupe_news_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
     return deduped
 
 def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, Any]:
-    normalized_categories = [c.strip().lower() for c in categories if c.strip()]
+    normalized_categories = []
+    for category in categories:
+        normalized = normalize_news_category_token(category)
+        if normalized and normalized not in normalized_categories:
+            normalized_categories.append(normalized)
     effective_sources = _resolve_news_sources(sources)
     items: list[dict[str, str]] = []
     attempted: list[str] = []
@@ -429,12 +587,17 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                 title = (node.findtext("title") or "").strip()
                 link = (node.findtext("link") or "").strip()
                 description = re.sub(r"\s+", " ", (node.findtext("description") or "").strip())
-                raw_category = (node.findtext("category") or "varie").strip().lower()
-                text_blob = f"{title} {description} {raw_category}".lower()
-                matched = [cat for cat in normalized_categories if cat in text_blob]
+                raw_categories = _extract_feed_categories(node)
+                matched = classify_news_item(
+                    title=title,
+                    description=description,
+                    raw_categories=raw_categories,
+                    source=source,
+                    requested_categories=normalized_categories,
+                )
                 if normalized_categories and not matched:
                     continue
-                selected_categories = matched if matched else [raw_category or "varie"]
+                selected_categories = matched if matched else ["varie"]
                 found_for_source = True
                 for selected_category in selected_categories:
                     items.append(
@@ -442,7 +605,7 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                             "title": title[:160],
                             "link": link,
                             "summary": description[:500],
-                            "category": selected_category or "varie",
+                            "category": selected_category,
                             "source": urllib.parse.urlparse(source).netloc or source,
                         }
                     )

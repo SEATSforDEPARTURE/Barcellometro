@@ -176,6 +176,50 @@ def test_execute_news_service_reads_csv_categories_fallback_column() -> None:
     asyncio.run(_run())
 
 
+def test_execute_news_service_fallback_embed_uses_campaigns_service_label() -> None:
+    class _Db:
+        async def upsert_campaign_content_message(self, **_kwargs):
+            return None
+
+        async def update_campaign_content_next_run(self, **_kwargs):
+            return None
+
+        async def set_campaign_content_enabled(self, **_kwargs):
+            return None
+
+    class _Channel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
+        async def send(self, *args, **kwargs):
+            return SimpleNamespace(id=1001)
+
+    class _Bot:
+        def get_channel(self, _id):
+            return _Channel()
+
+    async def _run() -> None:
+        service = CampaignContentService(database=_Db(), bot=_Bot(), ai_service=None)
+        config = {
+            "guild_id": "1",
+            "channel_id": "2",
+            "id": 6,
+            "interval_minutes": 0,
+            "service_type": "NEWS",
+            "categories_json": "[]",
+            "sources_json": '["ansa"]',
+        }
+        fake_embed = discord.Embed(title="fallback")
+        with (
+            patch("app.services.campaign_content_service.fetch_news_content", return_value={"categories": {}, "sources": ["ansa"], "used_sources": []}),
+            patch("app.services.campaign_content_service.build_fallback_embed", return_value=[fake_embed]) as mocked_fallback,
+        ):
+            await service.execute_news_service(config)
+        assert mocked_fallback.call_args.kwargs["service_name"] == "campagne_notizie"
+
+    asyncio.run(_run())
+
+
 def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
     class _Ai:
         def __init__(self, output: str):
