@@ -56,6 +56,7 @@ WINDOW_ACTION_LABELS = {
 }
 USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
 _AURA_POLICY_FIELDS = ("eligible_roles", "excluded_roles", "exclude_bots", "days_account", "min_messages")
+_AURA_POLICY_SHOW_MAX_USERS = 25
 USERS_DM_TEMPLATE_HELP = (
     "Supported placeholders: "
     + ", ".join(f"{{{name}}}" for name in USERS_DM_SUPPORTED_PLACEHOLDERS)
@@ -101,6 +102,28 @@ def _parse_role_ids_input(raw_roles: str | None) -> list[str]:
     found = re.findall(r"<@&(\d+)>", text)
     values = found if found else re.findall(r"\d+", text)
     return list(dict.fromkeys(values))
+
+
+def _aura_exclusion_reason_to_human(reason: str) -> str:
+    normalized = str(reason or "").strip().casefold()
+    if not normalized:
+        return "motivo non disponibile"
+    if "bot" in normalized:
+        return "bot"
+    if "disattivata" in normalized:
+        return "programma aura disattivo"
+    if "ruolo escluso" in normalized:
+        return "ruolo escluso"
+    if "manca un ruolo ammesso" in normalized:
+        return "non ha ruoli ammessi"
+    if "account troppo recente" in normalized:
+        return "account troppo recente"
+    if "almeno" in normalized and "messaggi" in normalized:
+        required = re.search(r"almeno\s+(\d+)", normalized)
+        if required:
+            return f"meno di {required.group(1)} messaggi"
+        return "messaggi insufficienti nel periodo"
+    return str(reason or "").strip()
 
 
 class _ResolvedModerationUser:
@@ -1651,13 +1674,74 @@ def register_moderazione_utenti(
         await _send(interaction, subcommand_path="users aura policy_set", lines=[("result", "updated"), *_render_policy_lines(interaction, policy)], kind="success")
 
     @aura_group.command(name="policy_show", description="Show one Aura policy field or the full policy.")
-    @app_commands.describe(field="Optional field name to inspect.")
+    @app_commands.describe(
+        field="Optional field name to inspect.",
+        eligible_users="Show runtime list of users currently eligible for Aura.",
+        excluded_users="Show runtime list of users currently excluded from Aura.",
+    )
     @app_commands.choices(field=[app_commands.Choice(name=item, value=item) for item in _AURA_POLICY_FIELDS])
-    async def users_aura_policy_show(interaction: discord.Interaction, field: app_commands.Choice[str] | None = None) -> None:
+    async def users_aura_policy_show(
+        interaction: discord.Interaction,
+        field: app_commands.Choice[str] | None = None,
+        eligible_users: bool | None = None,
+        excluded_users: bool | None = None,
+    ) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
         service = await _require_aura_service(interaction)
         if service is None:
+            return
+        requested_runtime_lists = eligible_users is not None or excluded_users is not None
+        if requested_runtime_lists:
+            if interaction.guild is None:
+                await _send(interaction, subcommand_path="users aura policy_show", lines=[("error", "Guild non disponibile.")], kind="error")
+                return
+            if not bool(eligible_users) and not bool(excluded_users):
+                await _send(
+                    interaction,
+                    subcommand_path="users aura policy_show",
+                    lines=[("warning", "Imposta eligible_users e/o excluded_users su true.")],
+                    kind="warning",
+                )
+                return
+            now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+            period_end = now_utc.isoformat()
+            period_start = (now_utc - timedelta(days=30)).isoformat()
+            eligible_lines: list[str] = []
+            excluded_lines: list[str] = []
+            for member in list(interaction.guild.members):
+                result = await service.evaluate_member(member, str(interaction.guild_id), period_start, period_end)
+                if result.eligible:
+                    if bool(eligible_users):
+                        eligible_lines.append(getattr(member, "mention", f"<@{getattr(member, 'id', '')}>"))
+                    continue
+                if bool(excluded_users):
+                    reason_human = _aura_exclusion_reason_to_human(result.reason)
+                    mention = getattr(member, "mention", f"<@{getattr(member, 'id', '')}>")
+                    excluded_lines.append(f"• {mention} — {reason_human}")
+
+            sections: list[CommandEmbedSection] = []
+            if bool(eligible_users):
+                shown = eligible_lines[:_AURA_POLICY_SHOW_MAX_USERS]
+                hidden = max(0, len(eligible_lines) - len(shown))
+                lines: list[str] = [f"Totale utenti: {len(eligible_lines)}"]
+                lines.extend(shown or ["Nessun utente eleggibile."])
+                if hidden:
+                    lines.append(f"... e altri {hidden}")
+                sections.append(CommandEmbedSection(title="👥 __**UTENTI AURA ATTIVI**__", lines=lines))
+            if bool(excluded_users):
+                shown = excluded_lines[:_AURA_POLICY_SHOW_MAX_USERS]
+                hidden = max(0, len(excluded_lines) - len(shown))
+                lines = [f"Totale utenti: {len(excluded_lines)}"]
+                lines.extend(shown or ["Nessun utente escluso."])
+                if hidden:
+                    lines.append(f"... e altri {hidden}")
+                sections.append(CommandEmbedSection(title="🚫 __**UTENTI ESCLUSI DAL PROGRAMMA AURA**__", lines=lines))
+            await _send(
+                interaction,
+                subcommand_path="users aura policy_show",
+                sections=sections,
+            )
             return
         policy = await service.get_policy(str(interaction.guild_id))
         if field is None:
