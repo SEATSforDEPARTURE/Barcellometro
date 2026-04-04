@@ -3,7 +3,7 @@ from app.renderers.aura_renderer import AuraRenderPayload, AuraTrendInfo, _build
 import re
 
 
-_STANDARD_WRAP_RE = re.compile(r"^(?:(?P<emoji>\S+)\s+)?__\*\*(?P<inner>.*)\*\*__$")
+_STANDARD_WRAP_RE = re.compile(r"^(?:(?P<emoji>\S+)\s+)?(?:(?:__\*\*|\*\*__)(?P<inner>.*)(?:\*\*__|__\*\*))$")
 
 
 def _unwrap_standard_label(value: str) -> str:
@@ -584,13 +584,13 @@ def test_channel_aura_embed_sections_follow_standard_wrapping() -> None:
         )
     )
     required = {
-        "✨ __**KARMA**__",
-        "📈 __**TREND**__",
+        "✨ **__KARMA**__",
+        "📈 **__TREND**__",
         "🏆 **__CLASSIFICA TOP 10**__",
-        "😇 __**PUNTI ATTRIBUITI**__",
-        "😈 __**PUNTI REVOCATI**__",
-        "📜 __**MISSIONI COMPLETATE**__",
-        "🧭 __**I CONSIGLI DEL BARCELLOMETRO**__",
+        "😇 **__PUNTI ATTRIBUITI**__",
+        "😈 **__PUNTI REVOCATI**__",
+        "📜 **__MISSIONI COMPLETATE**__",
+        "🧭 **__I CONSIGLI DEL BARCELLOMETRO**__",
     }
     assert required.issubset({f.name for f in embed.fields})
 
