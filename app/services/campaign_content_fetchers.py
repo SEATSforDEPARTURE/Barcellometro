@@ -323,7 +323,13 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
         if cat not in ordered and cat_items:
             ordered[cat] = cat_items
 
-    return {"categories": ordered, "sources": attempted, "used_sources": used_sources, "configured_sources": sources}
+    return {
+        "categories": ordered,
+        "sources": attempted,
+        "used_sources": used_sources,
+        "configured_sources": sources,
+        "configured_categories": normalized_categories,
+    }
 
 
 def fetch_weather_content(sources: list[str]) -> dict[str, Any]:

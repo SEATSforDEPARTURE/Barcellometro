@@ -54,7 +54,8 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     titles = [_normalize_standardized_title(e.title) for e in embeds]
     assert "PANORAMICA" in titles[0]
     assert "CRONACA" in titles[1]
-    assert "SPORT" in titles[2]
+    assert "SPORT" not in " ".join(titles)
+    assert "TECNOLOGIA" in " ".join(titles)
 
 
 def test_build_horoscope_embeds_strip_inner_headings() -> None:

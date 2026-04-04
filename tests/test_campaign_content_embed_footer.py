@@ -55,14 +55,14 @@ def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
 def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() -> None:
     news = build_news_embeds(
         {"embed_title": "📰 NOTIZIARIO CRICETOSO"},
-        {
-            "categories": {
-                "trash": [{"title": "T1", "summary": "S1", "source": "open-meteo", "link": "https://example.com"}],
-                "viral": [{"title": "T2", "summary": "S2", "source": "meteoam", "link": "https://example.com"}],
+            {
+                "categories": {
+                    "trash": [{"title": "T1", "summary": "S1", "source": "open-meteo", "link": "https://example.com"}],
+                    "viral": [{"title": "T2", "summary": "S2", "source": "meteoam", "link": "https://example.com/2"}],
+                },
+                "sources": ["open-meteo", "meteoam"],
             },
-            "sources": ["open-meteo", "meteoam"],
-        },
-    )
+        )
     horoscope = build_horoscope_embeds(
         {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
         {"signs": {"Ariete": {"text": "Focus"}}},
@@ -193,6 +193,65 @@ def test_news_overview_builds_category_fields_buttons_and_no_legacy_sections() -
     assert len(displayed_labels) == len(overview_field_labels)
     assert displayed_emoji == field_emoji
 
+
+def test_news_overview_selection_uses_configured_order_caps_at_ten_and_buttons_match() -> None:
+    payload = {
+        "configured_categories": [f"cat{i}" for i in range(1, 13)],
+        "categories": {
+            **{
+                f"cat{i}": [
+                    {
+                        "title": f"Titolo {i}",
+                        "summary": f"Sintesi {i}",
+                        "source": "ansa",
+                        "link": f"https://example.com/{i}",
+                    }
+                ]
+                for i in range(1, 13)
+            },
+            "varie": [{"title": "legacy", "summary": "x", "source": "misc", "link": "https://example.com/legacy"}],
+        },
+    }
+    news = build_news_embeds({}, payload)
+    overview = news[0]
+    page_map = build_news_page_map(payload)
+
+    assert len(overview.fields) == 10
+    names = [field.name for field in overview.fields]
+    assert "CAT1" in names[0].upper()
+    assert "CAT11" not in " ".join(name.upper() for name in names)
+    assert all("VARIE" not in name.upper() for name in names)
+
+    button_labels = [entry["label"] for entry in page_map if entry.get("type") == "category"]
+    assert len(button_labels) == len(overview.fields) == len(news) - 1
+    for label, field in zip(button_labels, overview.fields, strict=True):
+        assert label.split(" ", 1)[1] in field.name
+
+
+def test_news_overview_avoids_duplicate_main_story_across_categories_and_handles_empty_categories() -> None:
+    payload = {
+        "configured_categories": ["cronaca", "sport", "tech", "mondo"],
+        "categories": {
+            "cronaca": [
+                {"title": "Titolo condiviso", "summary": "s1", "source": "ansa", "link": "https://example.com/shared"},
+                {"title": "Cronaca esclusiva", "summary": "s2", "source": "ansa", "link": "https://example.com/cronaca"},
+            ],
+            "sport": [
+                {"title": "Titolo condiviso", "summary": "s3", "source": "gazzetta", "link": "https://example.com/shared"},
+                {"title": "Sport esclusivo", "summary": "s4", "source": "gazzetta", "link": "https://example.com/sport"},
+            ],
+            "tech": [],
+            "mondo": [{"title": "", "summary": "vuoto", "source": "reuters", "link": "https://example.com/mondo"}],
+        },
+    }
+    news = build_news_embeds({}, payload)
+    overview = news[0]
+    values = [field.value for field in overview.fields]
+
+    assert len(overview.fields) == 2
+    assert any("Titolo condiviso" in value for value in values)
+    assert any("Sport esclusivo" in value for value in values)
+    assert sum("Titolo condiviso" in value for value in values) == 1
 
 def test_news_overview_uses_first_available_story_image_and_survives_without_image() -> None:
     with_image = build_news_embeds(

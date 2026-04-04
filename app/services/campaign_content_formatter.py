@@ -210,31 +210,59 @@ def _valid_news_items(items: Any) -> list[dict[str, Any]]:
     return valid
 
 
-def _iter_news_categories(payload: dict[str, Any], *, max_categories: int = 10) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
-    selected: list[tuple[str, str, str, list[dict[str, Any]]]] = []
+def _normalized_story_identity(item: dict[str, Any]) -> str:
+    link = str(item.get("link") or "").strip().lower().rstrip("/")
+    if link:
+        return f"url:{link}"
+    title = sanitize_plain_text(str(item.get("title") or "")).lower()
+    if title:
+        return f"title:{title}"
+    return ""
+
+
+def _iter_news_categories(payload: dict[str, Any], *, max_categories: int = 10) -> list[tuple[str, str, str, dict[str, Any], list[dict[str, Any]]]]:
+    selected: list[tuple[str, str, str, dict[str, Any], list[dict[str, Any]]]] = []
     categories = payload.get("categories", {})
     if not isinstance(categories, dict):
         return selected
-    for category, items in categories.items():
+    configured = payload.get("configured_categories")
+    configured_order = [str(category).strip().lower() for category in configured] if isinstance(configured, list) else []
+    ordered_categories = list(categories.keys())
+    if configured_order:
+        known = {str(category).strip().lower(): category for category in ordered_categories}
+        ordered_categories = [known[key] for key in configured_order if key in known]
+    seen_story_keys: set[str] = set()
+    for category in ordered_categories:
+        items = categories.get(category)
         valid_items = _valid_news_items(items)
         if not valid_items:
             continue
         display = get_category_display_name(str(category))
         if display.upper() in {"VARIE", "TITOLI IN EVIDENZA"}:
             continue
+        main_item: dict[str, Any] | None = None
+        for item in valid_items:
+            story_key = _normalized_story_identity(item)
+            if not story_key or story_key in seen_story_keys:
+                continue
+            main_item = item
+            seen_story_keys.add(story_key)
+            break
+        if main_item is None:
+            continue
         emoji = get_category_emoji(str(category))
-        selected.append((str(category), display, emoji, valid_items))
+        selected.append((str(category), display, emoji, main_item, valid_items))
         if len(selected) >= max_categories:
             break
     return selected
 
 
-def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, Any]]]]) -> str | None:
+def _first_story_image_url(categories: list[tuple[str, str, str, dict[str, Any], list[dict[str, Any]]]]) -> str | None:
     image_keys = ("image", "image_url", "imageUrl", "urlToImage", "thumbnail", "thumbnail_url", "media_url")
-    for _, _, _, items in categories:
-        for item in items:
+    for _, _, _, main_item, items in categories:
+        for pool_item in [main_item, *items]:
             for key in image_keys:
-                candidate = str(item.get(key) or "").strip()
+                candidate = str(pool_item.get(key) or "").strip()
                 if not candidate:
                     continue
                 parsed = urlparse(candidate)
@@ -265,11 +293,16 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
                 "**Vuoi comunque farti un giro nelle categorie disponibili?**"
             ),
         )
-    for _, display, emoji, items in category_rows:
-        lines = [f"• {sanitize_plain_text(str(item.get('title') or ''))[:140]}" for item in items[:3]]
+    for _, display, emoji, main_item, _ in category_rows:
+        link = str(main_item.get("link") or "").strip()
+        title_line = sanitize_plain_text(str(main_item.get("title") or "Titolo non disponibile"))[:140]
+        linked_title = f"[{title_line}]({link})" if link else title_line
+        summary_line = trim_sentence_block(str(main_item.get("summary") or "Aggiornamento in arrivo."), limit=180)
+        summary_line = sanitize_plain_text(summary_line, remove_category_hint=display) or "Aggiornamento in arrivo."
+        source_line = sanitize_plain_text(str(main_item.get("source") or "n/d"))[:80]
         overview.add_field(
             name=format_standard_field_name(display, emoji=emoji),
-            value="\n".join(lines)[:1024] or "Aggiornamenti in arrivo.",
+            value=f"**{linked_title}**\n{summary_line}\n`Fonte: {source_line}`"[:1024],
             inline=False,
         )
     first_image_url = _first_story_image_url(category_rows)
@@ -279,7 +312,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         image_url=first_image_url,
     )
     embeds.append(overview)
-    for _, display, emoji, items in category_rows:
+    for _, display, emoji, _, items in category_rows:
         embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
         lines: list[str] = []
         for idx, item in enumerate(items[:5], start=1):
@@ -298,7 +331,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
 
 def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
     page_map: list[dict[str, Any]] = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
-    for index, (category, display, emoji, _) in enumerate(_iter_news_categories(payload), start=1):
+    for index, (category, display, emoji, _, _) in enumerate(_iter_news_categories(payload), start=1):
         page_map.append(
             {
                 "type": "category",
