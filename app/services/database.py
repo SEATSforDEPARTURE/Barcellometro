@@ -6636,6 +6636,51 @@ class DatabaseService:
         )
         return [{"user_id": str(r["user_id"]), "total": int(r["total"] or 0)} for r in rows if r["user_id"]]
 
+    async def fetch_aura_channel_avg_user_karma_score(self, guild_id: str, channel_id: str, start_ts: str, end_ts: str) -> dict[str, Any]:
+        row = await self.fetchone(
+            """
+            WITH per_user AS (
+                SELECT
+                    l.user_id AS user_id,
+                    SUM(CASE WHEN l.delta_points > 0 THEN l.delta_points ELSE 0 END) AS assigned,
+                    SUM(CASE WHEN l.delta_points < 0 THEN ABS(l.delta_points) ELSE 0 END) AS revoked
+                FROM aura_events_ledger l
+                INNER JOIN aura_user_profile p
+                  ON p.guild_id = l.guild_id
+                 AND p.user_id = l.user_id
+                WHERE l.guild_id = ?
+                  AND l.channel_id = ?
+                  AND l.ts >= ? AND l.ts <= ?
+                  AND p.eligible = 1
+                  AND COALESCE(NULLIF(TRIM(p.role_tier), ''), 'unknown') IN ('role1', 'role2')
+                GROUP BY l.user_id
+            ),
+            per_user_scores AS (
+                SELECT
+                    user_id,
+                    assigned,
+                    revoked,
+                    CASE
+                        WHEN (assigned + revoked) > 0 THEN (CAST(assigned AS REAL) - CAST(revoked AS REAL)) / CAST((assigned + revoked) AS REAL)
+                        ELSE NULL
+                    END AS karma_score
+                FROM per_user
+            )
+            SELECT
+                AVG(karma_score) AS avg_score,
+                COUNT(*) AS participants_count
+            FROM per_user_scores
+            WHERE karma_score IS NOT NULL
+            """,
+            (guild_id, channel_id, start_ts, end_ts),
+        )
+        if not row:
+            return {"avg_score": None, "participants_count": 0}
+        return {
+            "avg_score": float(row["avg_score"]) if row["avg_score"] is not None else None,
+            "participants_count": int(row["participants_count"] or 0),
+        }
+
     async def fetch_aura_channel_users_with_history_before(
         self,
         guild_id: str,
