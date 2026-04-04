@@ -150,6 +150,43 @@ def sanitize_plain_text(text: str, *, remove_category_hint: str | None = None) -
     return cleaned
 
 
+def sanitize_news_public_text(text: str, *, remove_category_hint: str | None = None) -> str:
+    cleaned = str(text or "")
+    cleaned = re.sub(r"(?im)^\s*(?:[-•*]\s*)?(?:🧃\s*)?(?:in breve|riassunto|sintesi)\s*:\s*", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*(?:ecco|nota|output|prompt)\s*:\s*.*$", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if remove_category_hint:
+        cleaned = re.sub(rf"^{re.escape(remove_category_hint)}\s*[:\-–|]+\s*", "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def summarize_news_description(text: str, *, max_sentences: int = 2) -> str:
+    cleaned = sanitize_news_public_text(text)
+    if not cleaned:
+        return "Aggiornamento in arrivo."
+    chunks = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
+    summary = " ".join(chunks[:max_sentences]).strip() if chunks else cleaned
+    words = summary.split()
+    if len(words) > 40:
+        summary = " ".join(words[:40]).rstrip(" ,;:")
+        if summary and summary[-1] not in ".!?":
+            summary = f"{summary}."
+    return summary
+
+
+def _source_domain(source: str, link: str | None = None) -> str:
+    source_line = sanitize_plain_text(source).lower()
+    if "http" in source_line:
+        parsed_source = urlparse(source_line)
+        source_line = parsed_source.netloc or source_line
+    if "." not in source_line and link:
+        parsed_link = urlparse(link)
+        source_line = parsed_link.netloc or source_line
+    if source_line and not source_line.startswith("www."):
+        source_line = f"www.{source_line}"
+    return source_line.strip() or "www.nd.it"
+
+
 def sanitize_horoscope_text(sign: str, text: str) -> str:
     cleaned = sanitize_plain_text(text)
     if not cleaned:
@@ -302,23 +339,13 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         link = str(main_item.get("link") or "").strip()
         title_line = sanitize_plain_text(str(main_item.get("title") or "Titolo non disponibile"))[:140]
         linked_title = f"[{title_line}]({link})" if link else title_line
-        summary_line = trim_sentence_block(str(main_item.get("summary") or "Aggiornamento in arrivo."), limit=170)
-        summary_line = sanitize_plain_text(summary_line, remove_category_hint=display) or "Aggiornamento in arrivo."
-        short_summary = trim_sentence_block(summary_line, limit=150)
-        source_raw = sanitize_plain_text(str(main_item.get("source") or "")).lower()
-        source_line = source_raw
-        if "http" in source_line:
-            parsed_source = urlparse(source_line)
-            source_line = parsed_source.netloc or source_line
-        if "." not in source_line and link:
-            parsed_link = urlparse(link)
-            source_line = parsed_link.netloc or source_line
-        if source_line and not source_line.startswith("www."):
-            source_line = f"www.{source_line}"
-        source_line = source_line.strip() or "www.nd.it"
+        short_summary = summarize_news_description(
+            sanitize_news_public_text(str(main_item.get("summary") or "Aggiornamento in arrivo."), remove_category_hint=display)
+        )
+        source_line = _source_domain(str(main_item.get("source") or ""), link)
         overview.add_field(
             name=format_standard_field_name(f"{display} in primo piano", emoji=emoji),
-            value=f"**{linked_title}**\n• 🧃 **In breve:** {short_summary}\nfonte: {source_line}"[:1024],
+            value=f"**{linked_title}**\n- {short_summary}\n`fonte: {source_line}`",
             inline=False,
         )
     first_image_url = _first_story_image_url(category_rows)
@@ -332,14 +359,19 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
         lines: list[str] = []
         for idx, item in enumerate(items[:5], start=1):
-            summary = trim_sentence_block(item.get("summary", "Nessun riassunto disponibile"), limit=280)
-            summary = sanitize_plain_text(summary, remove_category_hint=display)
-            lines.append(f"**{idx}. {sanitize_plain_text(item.get('title', 'Titolo'))[:160]}**")
-            lines.append(summary or "Aggiornamento in arrivo.")
-            lines.append(f"`Fonte: {sanitize_plain_text(item.get('source', 'n/d'))[:80]}` • [Apri link]({item.get('link', 'https://example.com')})")
+            item_link = str(item.get("link") or "").strip()
+            item_title = sanitize_plain_text(item.get("title", "Titolo"))[:160]
+            linked_item_title = f"[{item_title}]({item_link})" if item_link else item_title
+            summary = summarize_news_description(
+                sanitize_news_public_text(item.get("summary", "Nessun riassunto disponibile"), remove_category_hint=display)
+            )
+            source_line = _source_domain(str(item.get("source") or ""), item_link)
+            lines.append(f"{idx}. **{linked_item_title}**")
+            lines.append(f"- {summary}")
+            lines.append(f"`fonte: {source_line}`")
             lines.append("")
-        embed.description = f"Rassegna {emoji} {display}: approfondimento per categoria."
-        page_value = "\n".join(lines)[:1024] if lines else f"Nessuna notizia valida per {emoji} {display}."
+        embed.description = format_standard_description(f"Rassegna {emoji} {display}: approfondimento per categoria.")
+        page_value = "\n".join(lines) if lines else f"Nessuna notizia valida per {emoji} {display}."
         embed.add_field(name=format_standard_field_name("Notizie", emoji=emoji), value=page_value, inline=False)
         embeds.append(embed)
     return _apply_campaign_footer(embeds, service_name="campagne_notizie")

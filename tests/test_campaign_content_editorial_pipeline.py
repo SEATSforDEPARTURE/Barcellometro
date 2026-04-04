@@ -17,7 +17,12 @@ if "openai" not in sys.modules:
     sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
 
 from app.services.campaign_content_fetchers import dedupe_news_items
-from app.services.campaign_content_formatter import build_horoscope_embeds, build_news_embeds, build_weather_embeds
+from app.services.campaign_content_formatter import (
+    build_horoscope_embeds,
+    build_news_embeds,
+    build_weather_embeds,
+    summarize_news_description,
+)
 from app.services.campaign_content_service import CampaignContentService
 from app.services.database import DatabaseService
 
@@ -131,6 +136,39 @@ def test_news_rewrite_sanitizes_prompt_leakage_prefixes() -> None:
     assert "Ecco la riscrizione" not in cleaned
     assert "tono leggero e ironico" not in cleaned
     assert cleaned == "Nuova versione pulita."
+
+
+def test_news_public_formatter_strips_in_breve_boilerplate() -> None:
+    news = build_news_embeds(
+        {},
+        {
+            "categories": {
+                "cronaca": [
+                    {
+                        "title": "Titolo",
+                        "summary": "In breve: situazione in evoluzione rapida. Arrivano nuovi dettagli.",
+                        "source": "ansa.it",
+                        "link": "https://example.com/1",
+                    }
+                ]
+            }
+        },
+    )
+    value = news[0].fields[0].value or ""
+    assert "In breve:" not in value
+
+
+def test_news_long_description_is_summarized_without_crude_ellipsis() -> None:
+    text = (
+        "Questa è una frase estremamente lunga piena di dettagli operativi utili alla redazione "
+        "e contiene molte parole per superare il limite desiderato senza diventare illeggibile "
+        "anche quando viene pubblicata nel feed Discord quotidiano con stile editoriale. "
+        "Seconda frase breve e chiara."
+    )
+    summarized = summarize_news_description(text)
+    assert "…" not in summarized
+    assert "..." not in summarized
+    assert summarized.endswith(".")
 
 
 def test_execute_news_service_reads_csv_categories_fallback_column() -> None:

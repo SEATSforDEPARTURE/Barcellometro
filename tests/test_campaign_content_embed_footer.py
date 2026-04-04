@@ -139,10 +139,64 @@ def test_news_overview_field_copy_is_concise_and_has_source_line() -> None:
     field_value = news[0].fields[0].value
     assert field_value is not None
     assert field_value.count("\n") == 2
-    assert "\n• " in field_value
-    assert "**In breve:**" in field_value
-    assert field_value.count("🧃") <= 1
-    assert "fonte: www.ansa.it" in field_value
+    assert "\n- " in field_value
+    assert "In breve:" not in field_value
+    assert "🧃" not in field_value
+    assert "`fonte: www.ansa.it`" in field_value
+
+
+def test_news_overview_keeps_linked_bold_title_and_allows_bold_in_description() -> None:
+    news = build_news_embeds(
+        {},
+        {
+            "categories": {
+                "cronaca": [
+                    {
+                        "title": "Titolo con link",
+                        "summary": "Scatta un **allarme** nel quartiere. La squadra interviene in pochi minuti.",
+                        "source": "ansa.it",
+                        "link": "https://www.ansa.it/sito/notizie/test.html",
+                    }
+                ]
+            }
+        },
+    )
+    field_value = news[0].fields[0].value or ""
+    assert "**[Titolo con link](https://www.ansa.it/sito/notizie/test.html)**" in field_value
+    assert "- Scatta un **allarme** nel quartiere." in field_value
+
+
+def test_category_embed_description_is_italic_and_items_match_overview_format() -> None:
+    news = build_news_embeds(
+        {},
+        {
+            "categories": {
+                "cronaca": [
+                    {"title": "Titolo 1", "summary": "Prima frase. Seconda frase. Terza frase.", "source": "ansa.it", "link": "https://example.com/1"},
+                    {"title": "Titolo 2", "summary": "A. B.", "source": "repubblica.it", "link": "https://example.com/2"},
+                ]
+            }
+        },
+    )
+    category = news[1]
+    assert category.description is not None
+    assert category.description.startswith("*") and category.description.endswith("*")
+    content = category.fields[0].value or ""
+    assert "1. **[Titolo 1](https://example.com/1)**" in content
+    assert "\n- Prima frase. Seconda frase." in content
+    assert "`fonte: www.ansa.it`" in content
+    assert "2. **[Titolo 2](https://example.com/2)**" in content
+
+
+def test_category_embed_caps_news_items_to_five() -> None:
+    items = [
+        {"title": f"Titolo {idx}", "summary": "Frase uno. Frase due.", "source": "ansa.it", "link": f"https://example.com/{idx}"}
+        for idx in range(1, 8)
+    ]
+    news = build_news_embeds({}, {"categories": {"cronaca": items}})
+    content = news[1].fields[0].value or ""
+    assert "5. **[Titolo 5](https://example.com/5)**" in content
+    assert "6. **[Titolo 6](https://example.com/6)**" not in content
 
 
 def test_news_fallback_embed_uses_campaigns_author_service_label() -> None:
