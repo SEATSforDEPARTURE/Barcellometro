@@ -548,16 +548,21 @@ def test_resocontocanale_aura_ieri_uses_shared_builder_without_title_override() 
         ctx = SimpleNamespace(channel_summary=channel_summary)
         interaction = _FakeInteraction(qualified_name="channelsummary aura ieri")
         window = resolve_ieri_window()
+        old_permission = resoconto_module.check_permission
+        resoconto_module.check_permission = AsyncMock(return_value=True)
 
-        await resoconto_module._run_channel_aura_window(
-            interaction,
-            ctx=ctx,
-            window=window,
-            path="aura ieri",
-            subtitle_args=None,
-            send_message=AsyncMock(),
-            send_resoconto_response=AsyncMock(),
-        )
+        try:
+            await resoconto_module._run_channel_aura_window(
+                interaction,
+                ctx=ctx,
+                window=window,
+                path="aura ieri",
+                subtitle_args=None,
+                send_message=AsyncMock(),
+                send_resoconto_response=AsyncMock(),
+            )
+        finally:
+            resoconto_module.check_permission = old_permission
 
         called_kwargs = channel_summary.generate_channel_aura_embed.await_args.kwargs
         assert "title" not in called_kwargs
