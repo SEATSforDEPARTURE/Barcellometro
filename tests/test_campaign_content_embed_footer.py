@@ -166,12 +166,30 @@ def test_news_category_item_format_matches_overview_and_limit_five_items() -> No
     news = build_news_embeds({}, payload)
     category_embed = news[1]
     assert category_embed.description and category_embed.description.strip().startswith("*")
-    body = category_embed.fields[0].value or ""
-    assert "1. **[Titolo 1](https://example.com/1)**" in body
-    assert "5. **[Titolo 5](https://example.com/5)**" in body
-    assert "6. **[Titolo 6](https://example.com/6)**" not in body
-    assert "\n• " in body
-    assert "`fonte: www.ansa.it`" in body
+    assert category_embed.fields
+    first_field_value = category_embed.fields[0].value or ""
+    assert "1. **[Titolo 1](https://example.com/1)**" in first_field_value
+    assert "2. **[Titolo 2](https://example.com/2)**" in first_field_value
+    assert category_embed.fields[0].name == "📄 __**NOTIZIE**__"
+    assert any(field.name == "📄 __**NOTIZIE (CONT.)**__" for field in category_embed.fields[1:])
+
+    all_fields_text = "\n\n".join((field.value or "") for field in category_embed.fields)
+    assert "5. **[Titolo 5](https://example.com/5)**" in all_fields_text
+    assert "6. **[Titolo 6](https://example.com/6)**" not in all_fields_text
+    assert "7. **[Titolo 7](https://example.com/7)**" not in all_fields_text
+
+    number_pattern = re.compile(r"(?m)^(\d+)\. \*\*\[Titolo \d+\]\(https://example\.com/\d+\)\*\*")
+    all_numbers = [int(match.group(1)) for match in number_pattern.finditer(all_fields_text)]
+    assert all_numbers == [1, 2, 3, 4, 5]
+
+    for idx, field in enumerate(category_embed.fields):
+        value = field.value or ""
+        assert len(value) <= 1024
+        assert value.count("\n• ") >= 1
+        assert value.count("`fonte: www.ansa.it`") >= 1
+        assert re.search(r"(?m)^\d+\. \*\*\[[^\]]+\]\(https://example\.com/\d+\)\*\*$", value)
+        item_count = len(number_pattern.findall(value))
+        assert item_count <= 2, f"Field {idx} exceeds max 2 items: {item_count}"
 
 
 def test_news_fallback_uses_real_source_sentences_before_minimal_placeholder() -> None:
