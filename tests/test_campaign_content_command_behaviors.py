@@ -324,6 +324,61 @@ def test_news_schedule_add_rejects_unsupported_sources(messaggi_module) -> None:
     asyncio.run(_run())
 
 
+def test_guided_sources_autocomplete_contextual_and_no_duplicates(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "ansa.it, rep",
+        allowed_values=messaggi_module.NEWS_SOURCE_CHOICES,
+        aliases=messaggi_module.NEWS_SOURCE_ALIASES,
+    )
+    values = [choice.value for choice in choices]
+    assert "ansa" not in values
+    assert "ansa.it, repubblica" in values
+    assert all(", " in value for value in values)
+
+
+def test_guided_categories_autocomplete_uses_last_token_only(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "esteri, pol",
+        allowed_values=messaggi_module.NEWS_CATEGORY_CHOICES,
+        aliases=messaggi_module.NEWS_CATEGORY_ALIASES,
+        normalizer=messaggi_module._fold_token,
+    )
+    values = [choice.value for choice in choices]
+    assert "esteri, politica" in values
+    assert all(value.startswith("esteri, ") for value in values)
+
+
+def test_parse_guided_sources_normalizes_aliases_and_dedupes(messaggi_module) -> None:
+    normalized, invalid = messaggi_module._parse_guided_csv_values(
+        "ANSA.IT, ansa, https://www.repubblica.it, repubblica",
+        allowed=messaggi_module.NEWS_SOURCE_CHOICES,
+        aliases=messaggi_module.NEWS_SOURCE_ALIASES,
+    )
+    assert invalid == []
+    assert normalized == ["ansa", "repubblica"]
+
+
+def test_parse_guided_categories_normalizes_casing_spaces_and_accents(messaggi_module) -> None:
+    normalized, invalid = messaggi_module._parse_guided_csv_values(
+        "  Curiosità, curiosita,  POLITICA ",
+        allowed=messaggi_module.NEWS_CATEGORY_CHOICES,
+        aliases=messaggi_module.NEWS_CATEGORY_ALIASES,
+        normalizer=messaggi_module._fold_token,
+    )
+    assert invalid == []
+    assert normalized == ["curiosità", "politica"]
+
+
+def test_parse_guided_values_rejects_unsupported_tokens(messaggi_module) -> None:
+    normalized, invalid = messaggi_module._parse_guided_csv_values(
+        "ansa, not-supported",
+        allowed=messaggi_module.NEWS_SOURCE_CHOICES,
+        aliases=messaggi_module.NEWS_SOURCE_ALIASES,
+    )
+    assert normalized == ["ansa"]
+    assert invalid == ["not-supported"]
+
+
 def test_news_schedule_add_command_exposes_autocomplete() -> None:
     source = Path("app/plugins/commands_modular/messaggi.py").read_text(encoding="utf-8")
     assert "@app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete)" in source
