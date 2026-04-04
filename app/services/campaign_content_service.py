@@ -5,6 +5,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import discord
 
@@ -531,10 +532,22 @@ class CampaignContentService:
 
     @staticmethod
     def _normalize_sources(sources: list[str]) -> list[str]:
+        def _compact_source(source: str) -> str:
+            token = str(source or "").strip()
+            if not token:
+                return ""
+            parsed = urlparse(token)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                host = parsed.netloc.lower()
+                if host.startswith("www."):
+                    host = host[4:]
+                return host
+            return token.lower()
+
         normalized: list[str] = []
         seen: set[str] = set()
         for source in sources:
-            token = str(source or "").strip().lower()
+            token = _compact_source(source)
             if not token or token in seen:
                 continue
             seen.add(token)
