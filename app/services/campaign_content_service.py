@@ -75,7 +75,11 @@ class CampaignContentService:
                 service_name=self._campaign_footer_service_name("NEWS"),
             )
         else:
-            used_model = await self._rewrite_news_payload(payload)
+            try:
+                used_model = await self._rewrite_news_payload(payload)
+            except Exception as exc:
+                logger.warning("campaign content: news editorial rewrite failed (%s), publishing original payload", exc.__class__.__name__)
+                used_model = None
             embeds = build_news_embeds(config, payload)
         await self._send_and_store(
             config,
@@ -91,7 +95,11 @@ class CampaignContentService:
     async def execute_weather_service(self, config: dict[str, Any]) -> None:
         configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
         payload = fetch_weather_content(configured_sources)
-        used_model = await self._rewrite_weather_payload(payload)
+        try:
+            used_model = await self._rewrite_weather_payload(payload)
+        except Exception as exc:
+            logger.warning("campaign content: weather editorial rewrite failed (%s), publishing original payload", exc.__class__.__name__)
+            used_model = None
         used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_weather_embeds(config, payload)
         await self._send_and_store(
@@ -108,7 +116,11 @@ class CampaignContentService:
     async def execute_horoscope_service(self, config: dict[str, Any]) -> None:
         configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
         payload = fetch_horoscope_content(configured_sources)
-        used_model = await self._rewrite_horoscope_payload(payload)
+        try:
+            used_model = await self._rewrite_horoscope_payload(payload)
+        except Exception as exc:
+            logger.warning("campaign content: horoscope editorial rewrite failed (%s), publishing original payload", exc.__class__.__name__)
+            used_model = None
         used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_horoscope_embeds(config, payload)
         await self._send_and_store(
@@ -246,13 +258,19 @@ class CampaignContentService:
             "Ogni sezione deve avere massimo 2-3 frasi brevi e naturali.\n"
             f"JSON input:\n{json.dumps(compact, ensure_ascii=False)}"
         )
-        output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
+        output: str | None = None
+        try:
+            output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
+        except Exception as exc:
+            logger.warning("campaign content: horoscope editorial ask failed (%s), using original payload", exc.__class__.__name__)
         parsed: dict[str, Any] = {}
+        ai_applied = False
         try:
             parsed = json.loads(output or "{}")
             if not isinstance(parsed, dict):
                 parsed = {}
         except json.JSONDecodeError:
+            logger.warning("campaign content: horoscope editorial returned invalid json, using field-level fallbacks")
             parsed = {}
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
@@ -261,10 +279,11 @@ class CampaignContentService:
                 candidate = rewritten_sign.get(key)
                 if isinstance(candidate, str) and candidate.strip():
                     sign_payload[key] = sanitize_horoscope_text(sign, candidate)
+                    ai_applied = True
                 else:
                     sign_payload[key] = sanitize_horoscope_text(sign, str(sign_payload.get(key) or ""))
         self._enforce_horoscope_diversity(payload)
-        return self._resolve_ai_model_name("campaign_editorial")
+        return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
 
     @staticmethod
     def _simple_similarity(a: str, b: str) -> float:
@@ -298,8 +317,15 @@ class CampaignContentService:
             "Non inventare dati/fatti/valori e non cambiare numeri. Evita frasi generiche fotocopia. "
             f"Contesto: {extra_info}.\nTesto:\n{text}"
         )
-        output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
-        return (output or text).strip(), True
+        try:
+            output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
+        except Exception as exc:
+            logger.warning("campaign content: %s editorial rewrite failed (%s), using original text", context, exc.__class__.__name__)
+            return text, False
+        rewritten = (output or "").strip()
+        if not rewritten:
+            return text, False
+        return rewritten, True
 
     async def load_message_record(self, message_id: str) -> dict[str, Any] | None:
         row = await self._database.get_campaign_content_message(message_id)

@@ -333,3 +333,97 @@ def test_campaign_content_one_shot_disables_after_send() -> None:
         await db.close()
 
     asyncio.run(_run())
+
+
+def test_horoscope_publish_continues_when_editorial_ai_fails() -> None:
+    class _Channel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
+        async def send(self, *args, **kwargs):
+            return SimpleNamespace(id=321)
+
+    class _Bot:
+        def get_channel(self, _id):
+            return _Channel()
+
+    class _Ai:
+        def is_enabled(self):
+            return True
+
+        async def ask_for_task(self, *args, **kwargs):
+            raise TimeoutError("editorial-timeout")
+
+    async def _run() -> None:
+        payload = {"signs": {"Ariete": {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        for s in ["Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]:
+            payload["signs"][s] = {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+        db = SimpleNamespace(upsert_campaign_content_message=AsyncMock(), update_campaign_content_next_run=AsyncMock())
+        service = CampaignContentService(database=db, bot=_Bot(), ai_service=_Ai())
+        from unittest.mock import patch
+
+        with patch("app.services.campaign_content_service.fetch_horoscope_content", return_value=payload):
+            await service.execute_horoscope_service({"guild_id": "1", "channel_id": "2", "id": 4, "interval_minutes": 60, "sources_json": "[]"})
+
+        metadata = json.loads(db.upsert_campaign_content_message.await_args.kwargs["metadata_json"])
+        assert metadata["used_model"] is None
+        assert metadata["ai_model_used"] is None
+
+    asyncio.run(_run())
+
+
+def test_invalid_editorial_json_does_not_fail_horoscope_publish() -> None:
+    class _Ai:
+        def is_enabled(self):
+            return True
+
+        async def ask_for_task(self, *args, **kwargs):
+            return "not-json"
+
+    async def _run() -> None:
+        payload = {"signs": {"Ariete": {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        for s in ["Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]:
+            payload["signs"][s] = {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
+        used_model = await service._rewrite_horoscope_payload(payload)
+        assert used_model is None
+        assert payload["signs"]["Ariete"]["love"] == "orig"
+
+    asyncio.run(_run())
+
+
+def test_weather_and_news_publish_succeed_when_rewrite_text_ai_fails() -> None:
+    class _Channel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
+        async def send(self, *args, **kwargs):
+            return SimpleNamespace(id=111)
+
+    class _Bot:
+        def get_channel(self, _id):
+            return _Channel()
+
+    class _Ai:
+        def is_enabled(self):
+            return True
+
+        async def ask_for_task(self, *args, **kwargs):
+            raise RuntimeError("ai-down")
+
+    from unittest.mock import patch
+
+    async def _run() -> None:
+        db = SimpleNamespace(upsert_campaign_content_message=AsyncMock(), update_campaign_content_next_run=AsyncMock())
+        service = CampaignContentService(database=db, bot=_Bot(), ai_service=_Ai())
+        weather_payload = {"regions": {"Nord": {"summary": "meteo ok", "source_points": []}}, "used_sources": []}
+        news_payload = {"categories": {"cronaca": [{"title": "t", "summary": "s", "category": "cronaca", "source": "ansa", "link": "https://x"}]}, "used_sources": []}
+        with patch("app.services.campaign_content_service.fetch_weather_content", return_value=weather_payload):
+            await service.execute_weather_service({"guild_id": "1", "channel_id": "2", "id": 9, "interval_minutes": 60, "sources_json": "[]"})
+        with patch("app.services.campaign_content_service.fetch_news_content", return_value=news_payload):
+            await service.execute_news_service(
+                {"guild_id": "1", "channel_id": "2", "id": 10, "interval_minutes": 60, "sources_json": "[]", "categories_json": "[]"}
+            )
+        assert db.upsert_campaign_content_message.await_count == 2
+
+    asyncio.run(_run())

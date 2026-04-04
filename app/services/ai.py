@@ -16,6 +16,7 @@ class AiService:
     OLLAMA_SLOW_TASK_TIMEOUT_SECONDS: float = 90.0
     OLLAMA_SUMMARY_TIMEOUT_SECONDS: float = 150.0
     OPENAI_SUMMARY_TIMEOUT_SECONDS: float = 60.0
+    OPENAI_CAMPAIGN_EDITORIAL_TIMEOUT_SECONDS: float = 90.0
     OLLAMA_CAMPAIGN_PROMPT_TIMEOUT_SECONDS: float = 120.0
     SUPPORTED_MODEL_TASKS: tuple[str, ...] = (
         "summary",
@@ -213,11 +214,12 @@ class AiService:
             if task == "summary" and provider == "ollama" and provider_fb == "ollama":
                 fallback_note = " same_backend_lower_capacity_reliability=low"
             self.logger.warning(
-                "[AI] task=%s primary=%s:%s failed=%s fallback=%s:%s timeout=%.1fs%s",
+                "[AI] task=%s primary=%s:%s failed=%s primary_timeout=%.1fs fallback=%s:%s fallback_timeout=%.1fs%s",
                 task,
                 provider,
                 model,
                 exc.__class__.__name__,
+                effective_timeout,
                 provider_fb,
                 model_fb,
                 fallback_timeout,
@@ -295,6 +297,8 @@ class AiService:
     def _resolve_timeout(self, task: str, provider: str, requested_timeout: float) -> float:
         if provider == "openai" and task == "summary":
             return max(requested_timeout, self.OPENAI_SUMMARY_TIMEOUT_SECONDS)
+        if provider == "openai" and task == "campaign_editorial":
+            return max(requested_timeout, self.OPENAI_CAMPAIGN_EDITORIAL_TIMEOUT_SECONDS)
         if provider == "ollama" and task == "summary":
             return max(requested_timeout, self.OLLAMA_SUMMARY_TIMEOUT_SECONDS)
         if provider == "ollama" and task == "campaign_prompt":
