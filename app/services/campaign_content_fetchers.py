@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -69,6 +70,91 @@ NEWS_CATEGORY_CATALOG = [
 
 NEWS_SOURCE_MAP = {entry["value"]: entry["url"] for entry in NEWS_SOURCE_CATALOG}
 SUPPORTED_NEWS_CATEGORIES = [entry["value"] for entry in NEWS_CATEGORY_CATALOG]
+
+
+def _fold_token(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(char for char in normalized if not unicodedata.combining(char)).strip().lower()
+
+
+def _build_news_source_aliases() -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for entry in NEWS_SOURCE_CATALOG:
+        canonical = str(entry["value"]).strip().lower()
+        aliases[canonical] = canonical
+        aliases[_fold_token(canonical)] = canonical
+        label = str(entry.get("label") or "").strip().lower()
+        if label:
+            aliases[label] = canonical
+            aliases[_fold_token(label)] = canonical
+        for alias in entry.get("aliases", []):
+            alias_clean = str(alias).strip().lower()
+            if alias_clean:
+                aliases[alias_clean] = canonical
+                aliases[_fold_token(alias_clean)] = canonical
+                if "." in alias_clean and "://" not in alias_clean:
+                    aliases[f"https://{alias_clean}"] = canonical
+                    aliases[f"http://{alias_clean}"] = canonical
+        url = str(entry.get("url") or "").strip().lower()
+        if url.startswith(("http://", "https://")):
+            aliases[url] = canonical
+            host = url.split("//", 1)[1].split("/", 1)[0].strip()
+            if host:
+                aliases[host] = canonical
+                aliases[_fold_token(host)] = canonical
+                aliases[f"https://{host}"] = canonical
+                aliases[f"http://{host}"] = canonical
+                if host.startswith("www."):
+                    aliases[host[4:]] = canonical
+    return aliases
+
+
+def _build_news_category_aliases() -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for entry in NEWS_CATEGORY_CATALOG:
+        canonical = str(entry["value"]).strip().lower()
+        aliases[canonical] = canonical
+        aliases[_fold_token(canonical)] = canonical
+        label = str(entry.get("label") or "").strip().lower()
+        if label:
+            aliases[label] = canonical
+            aliases[_fold_token(label)] = canonical
+        for alias in entry.get("aliases", []):
+            alias_clean = str(alias).strip().lower()
+            if alias_clean:
+                aliases[alias_clean] = canonical
+                aliases[_fold_token(alias_clean)] = canonical
+    return aliases
+
+
+NEWS_SOURCE_ALIASES = _build_news_source_aliases()
+NEWS_CATEGORY_ALIASES = _build_news_category_aliases()
+
+
+def normalize_news_source_token(value: str) -> str | None:
+    token = str(value or "").strip().lower()
+    if not token:
+        return None
+    direct = NEWS_SOURCE_ALIASES.get(token) or NEWS_SOURCE_ALIASES.get(_fold_token(token))
+    if direct:
+        return direct
+    if token.startswith(("http://", "https://")):
+        parsed = urllib.parse.urlparse(token)
+        host = parsed.netloc.strip().lower()
+        if host:
+            return (
+                NEWS_SOURCE_ALIASES.get(host)
+                or NEWS_SOURCE_ALIASES.get(_fold_token(host))
+                or (NEWS_SOURCE_ALIASES.get(host[4:]) if host.startswith("www.") else None)
+            )
+    return None
+
+
+def normalize_news_category_token(value: str) -> str | None:
+    token = str(value or "").strip().lower()
+    if not token:
+        return None
+    return NEWS_CATEGORY_ALIASES.get(token) or NEWS_CATEGORY_ALIASES.get(_fold_token(token))
 
 WEATHER_SOURCE_MAP = {
     "open-meteo": "open-meteo",
@@ -243,7 +329,8 @@ def _normalize_source_tokens(sources: list[str], defaults: list[str]) -> list[st
 def _resolve_news_sources(sources: list[str]) -> list[str]:
     resolved: list[str] = []
     for token in _normalize_source_tokens(sources, DEFAULT_NEWS_SOURCES):
-        mapped = NEWS_SOURCE_MAP.get(token)
+        canonical = normalize_news_source_token(token) or token
+        mapped = NEWS_SOURCE_MAP.get(canonical)
         if mapped:
             resolved.append(mapped)
             continue

@@ -13,7 +13,12 @@ from app.plugins.commands_modular.registration import add_group_once, count_chil
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime
-from app.services.campaign_content_fetchers import NEWS_CATEGORY_CATALOG, NEWS_SOURCE_CATALOG
+from app.services.campaign_content_fetchers import (
+    NEWS_CATEGORY_ALIASES,
+    NEWS_CATEGORY_CATALOG,
+    NEWS_SOURCE_ALIASES,
+    NEWS_SOURCE_CATALOG,
+)
 from app.services.scheduler_utils import calculate_initial_next_run
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
 
@@ -41,48 +46,6 @@ NEWS_CATEGORY_LABELS = {str(entry["value"]).strip().lower(): str(entry["label"])
 def _fold_token(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", str(value or ""))
     return "".join(char for char in normalized if not unicodedata.combining(char)).strip().lower()
-
-
-def _news_source_aliases() -> dict[str, str]:
-    aliases: dict[str, str] = {}
-    for entry in NEWS_SOURCE_CATALOG:
-        canonical = str(entry["value"]).strip().lower()
-        aliases[canonical] = canonical
-        aliases[_fold_token(canonical)] = canonical
-        for alias in entry.get("aliases", []):
-            alias_clean = str(alias).strip().lower()
-            if alias_clean:
-                aliases[alias_clean] = canonical
-                aliases[_fold_token(alias_clean)] = canonical
-        url = str(entry.get("url", "")).strip().lower()
-        if url.startswith(("http://", "https://")):
-            host = url.split("//", 1)[1].split("/", 1)[0].strip()
-            if host:
-                aliases[host] = canonical
-                aliases[_fold_token(host)] = canonical
-                aliases[f"https://{host}"] = canonical
-                aliases[f"http://{host}"] = canonical
-                if host.startswith("www."):
-                    aliases[host[4:]] = canonical
-    return aliases
-
-
-def _news_category_aliases() -> dict[str, str]:
-    aliases: dict[str, str] = {}
-    for entry in NEWS_CATEGORY_CATALOG:
-        canonical = str(entry["value"]).strip().lower()
-        aliases[_fold_token(canonical)] = canonical
-        aliases[canonical] = canonical
-        for alias in entry.get("aliases", []):
-            alias_clean = str(alias).strip().lower()
-            if alias_clean:
-                aliases[alias_clean] = canonical
-                aliases[_fold_token(alias_clean)] = canonical
-    return aliases
-
-
-NEWS_SOURCE_ALIASES = _news_source_aliases()
-NEWS_CATEGORY_ALIASES = _news_category_aliases()
 
 
 async def _ensure_setting(ctx: CommandContext, key: str, default: str) -> str:
@@ -1120,8 +1083,8 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         every="Repeat interval in minutes",
         embed_title="Optional embed title",
         embed_color="Optional embed color",
-        sources="Guided comma-separated news sources",
-        categories="Guided comma-separated news categories",
+        sources="Guided multi-value sources (comma-separated)",
+        categories="Guided multi-value categories (comma-separated)",
     )
     @app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete)
     async def news_schedule_add(
