@@ -8,9 +8,15 @@ import discord
 
 if "openai" not in sys.modules:
     sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
+if "httpx" not in sys.modules:
+    sys.modules["httpx"] = types.SimpleNamespace()
 
 from app.services.campaign_content_service import CampaignContentService
-from app.services.campaign_content_views import BaseCampaignNavigatorView, PersistentCampaignLauncherView
+from app.services.campaign_content_views import (
+    BaseCampaignNavigatorView,
+    PersistentCampaignLauncherView,
+    _fallback_campaign_footer_context,
+)
 from app.shared.discord.footer_pipeline import finalize_embed
 
 
@@ -85,6 +91,11 @@ def test_horoscope_has_all_signs_without_public_nav_buttons() -> None:
     assert "Inizio" not in labels
     for sign in signs:
         assert sign in labels
+
+
+def test_campaign_footer_context_resolves_campaign_alias_without_unknown_service() -> None:
+    context = _fallback_campaign_footer_context(SimpleNamespace(), service_type="campagne_notizie", metadata=None)
+    assert context["service_name"] == "campagne_notizie"
 
 
 def test_ephemeral_navigation_preferred_over_public_edit() -> None:

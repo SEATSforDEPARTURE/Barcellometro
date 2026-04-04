@@ -26,6 +26,7 @@ from app.services.campaign_content_formatter import (
 )
 from app.services.campaign_content_views import BaseCampaignNavigatorView, PersistentCampaignLauncherView
 from app.services.database import DatabaseService
+from app.services.embed_public_service_keys import resolve_public_embed_service_key
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
@@ -501,7 +502,14 @@ class CampaignContentService:
             "WEATHER": "campagne_meteo",
             "HOROSCOPE": "campagne_oroscopo",
         }
-        return mapped.get(str(service_type or "").upper(), "campagne_notizie")
+        token = str(service_type or "").strip()
+        direct = mapped.get(token.upper())
+        if direct:
+            return direct
+        resolved = resolve_public_embed_service_key(token, system="author")
+        if resolved == "campaigns":
+            return "campagne_notizie"
+        return "campagne_notizie"
 
     def _campaign_footer_contributors(self, metadata: dict[str, Any] | None) -> list[str]:
         if not isinstance(metadata, dict):

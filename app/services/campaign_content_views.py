@@ -5,6 +5,7 @@ from typing import Any
 import discord
 
 from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
+from app.services.embed_public_service_keys import resolve_public_embed_service_key
 from app.shared.discord.component_notices import send_standard_component_notice
 
 
@@ -13,11 +14,17 @@ def _fallback_campaign_footer_context(service: Any, *, service_type: str, metada
     if hasattr(service, "_campaign_footer_service_name"):
         resolved_service_name = service._campaign_footer_service_name(service_type)  # type: ignore[attr-defined]
     if not resolved_service_name:
-        resolved_service_name = {
+        mapped_service = {
             "NEWS": "campagne_notizie",
             "WEATHER": "campagne_meteo",
             "HOROSCOPE": "campagne_oroscopo",
-        }.get(str(service_type or "").upper(), "campagne_notizie")
+        }.get(str(service_type or "").upper())
+        if mapped_service:
+            resolved_service_name = mapped_service
+        elif resolve_public_embed_service_key(str(service_type or ""), system="author") == "campaigns":
+            resolved_service_name = "campagne_notizie"
+        else:
+            resolved_service_name = "campagne_notizie"
 
     contributors: list[str] = []
     if hasattr(service, "_campaign_footer_contributors"):

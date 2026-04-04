@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 NEWS_SOURCE_CATALOG = [
     {
@@ -70,6 +73,95 @@ NEWS_CATEGORY_CATALOG = [
 
 NEWS_SOURCE_MAP = {entry["value"]: entry["url"] for entry in NEWS_SOURCE_CATALOG}
 SUPPORTED_NEWS_CATEGORIES = [entry["value"] for entry in NEWS_CATEGORY_CATALOG]
+
+NEWS_CLASSIFICATION_RULES: dict[str, dict[str, Any]] = {
+    "cronaca": {
+        "label": "Cronaca",
+        "aliases": ["cronaca", "fatti", "cronache"],
+        "feed_categories": ["cronaca", "crime", "locali", "attualita"],
+        "keywords": [
+            "incidente",
+            "arresto",
+            "morto",
+            "ferito",
+            "procura",
+            "carabinieri",
+            "polizia",
+            "omicidio",
+            "incendio",
+            "rapina",
+            "tribunale",
+            "sequestro",
+        ],
+    },
+    "politica": {
+        "label": "Politica",
+        "aliases": ["politica", "governo", "parlamento"],
+        "feed_categories": ["politica", "governo", "istituzioni"],
+        "keywords": ["governo", "parlamento", "decreto", "senato", "camera", "premier", "ministro", "elezioni", "partito"],
+    },
+    "sport": {
+        "label": "Sport",
+        "aliases": ["sport", "calcio", "tennis", "formula 1", "motogp"],
+        "feed_categories": ["sport", "calcio", "motori", "tennis"],
+        "keywords": ["campionato", "gol", "partita", "allenatore", "serie a", "champions", "atleta", "gara", "vittoria"],
+    },
+    "spettacolo": {
+        "label": "Spettacolo",
+        "aliases": ["spettacolo", "cultura pop", "show"],
+        "feed_categories": ["spettacoli", "tv", "cinema", "musica", "showbiz"],
+        "keywords": ["cinema", "film", "serie tv", "palco", "teatro", "concerto", "festival", "spettacolo", "attore", "attrice"],
+    },
+    "gossip": {
+        "label": "Gossip",
+        "aliases": ["gossip", "vip", "celebrita", "celebrità"],
+        "feed_categories": ["gossip", "vip", "people"],
+        "keywords": ["vip", "celeb", "fidanzata", "fidanzato", "coppia", "paparazzi", "retroscena", "indiscrezione"],
+    },
+    "tecnologia": {
+        "label": "Tecnologia",
+        "aliases": ["tecnologia", "tech", "digitale", "innovazione"],
+        "feed_categories": ["tecnologia", "tech", "scienza", "digitale"],
+        "keywords": ["startup", "intelligenza artificiale", "ai", "software", "smartphone", "app", "chip", "digitale", "cyber"],
+    },
+    "economia": {
+        "label": "Economia",
+        "aliases": ["economia", "finanza", "mercati"],
+        "feed_categories": ["economia", "finanza", "business", "borsa"],
+        "keywords": ["borsa", "spread", "inflazione", "pil", "mercato", "aziende", "banche", "tasso", "stipendi", "finanza"],
+    },
+    "mondo": {
+        "label": "Mondo",
+        "aliases": ["mondo", "esteri", "internazionale", "internazionali"],
+        "feed_categories": ["esteri", "mondo", "internazionale"],
+        "keywords": ["usa", "cina", "russia", "ucraina", "gaza", "israele", "europa", "onu", "nato", "internazionale", "esteri"],
+    },
+    "viral": {
+        "label": "Viral",
+        "aliases": ["viral", "virale", "social"],
+        "feed_categories": ["viral", "web", "social"],
+        "keywords": ["video", "social", "tiktok", "instagram", "virale", "web", "trend", "online", "meme", "utenti", "clip"],
+    },
+    "trash": {
+        "label": "Trash",
+        "aliases": ["trash", "trash tv", "polemica"],
+        "feed_categories": ["trash", "tv", "reality", "gossip"],
+        "keywords": ["reality", "scandalo", "polemica", "siparietto", "sfuriata", "lite", "trash tv", "talk show", "gossip spinto"],
+        "source_hints": ["fanpage.it", "open.online"],
+    },
+    "curiosita": {
+        "label": "Curiosità",
+        "aliases": ["curiosita", "curiosità", "insolito"],
+        "feed_categories": ["curiosita", "curiosità", "insolito"],
+        "keywords": ["incredibile", "record", "scoperta", "singolare", "insolito", "assurdo", "curioso"],
+    },
+    "varie": {
+        "label": "Varie",
+        "aliases": ["varie", "generale", "topnews"],
+        "feed_categories": ["varie", "generale", "topnews"],
+        "keywords": [],
+    },
+}
 
 
 def _fold_token(value: str) -> str:
@@ -413,42 +505,144 @@ def dedupe_news_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
         deduped.append(item)
     return deduped
 
+def _normalize_news_categories(categories: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in categories:
+        token = normalize_news_category_token(raw)
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        normalized.append(token)
+    return normalized
+
+
+def _extract_news_item_category_hints(node: ET.Element) -> list[str]:
+    hints: list[str] = []
+    for child in list(node):
+        tag_name = str(child.tag or "").lower()
+        if not tag_name.endswith("category") and not tag_name.endswith("subject"):
+            continue
+        text = str(child.text or "").strip()
+        if text:
+            hints.append(text)
+    return hints
+
+
+def _normalize_news_text(text: str) -> str:
+    return re.sub(r"\s+", " ", _fold_token(text or ""))
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    if not keyword:
+        return False
+    if " " in keyword:
+        return keyword in text
+    return re.search(rf"\b{re.escape(keyword)}\b", text) is not None
+
+
+def classify_news_item(*, title: str, description: str, raw_categories: list[str], source: str) -> list[str]:
+    title_text = _normalize_news_text(title)
+    description_text = _normalize_news_text(description)
+    source_text = _normalize_news_text(source)
+    category_text = " ".join(_normalize_news_text(cat) for cat in raw_categories if cat)
+    text_blob = " ".join(part for part in [title_text, description_text, category_text] if part).strip()
+    scores: dict[str, int] = {}
+    for category, rule in NEWS_CLASSIFICATION_RULES.items():
+        score = 0
+        for alias in rule.get("aliases", []):
+            alias_norm = _normalize_news_text(alias)
+            if alias_norm and _contains_keyword(text_blob, alias_norm):
+                score += 3
+        for feed_equivalent in rule.get("feed_categories", []):
+            feed_norm = _normalize_news_text(feed_equivalent)
+            if feed_norm and _contains_keyword(category_text, feed_norm):
+                score += 4
+        for keyword in rule.get("keywords", []):
+            keyword_norm = _normalize_news_text(keyword)
+            if keyword_norm and _contains_keyword(text_blob, keyword_norm):
+                score += 2
+        for source_hint in rule.get("source_hints", []):
+            source_hint_norm = _normalize_news_text(source_hint)
+            if source_hint_norm and source_hint_norm in source_text:
+                score += 1
+        if score > 0:
+            scores[category] = score
+    if not scores:
+        return ["varie"]
+    ordered = sorted(scores.items(), key=lambda pair: (-pair[1], SUPPORTED_NEWS_CATEGORIES.index(pair[0])))
+    top_score = ordered[0][1]
+    selected = [category for category, score in ordered if score >= max(2, top_score - 2)]
+    if "varie" in selected and len(selected) > 1:
+        selected.remove("varie")
+    return selected[:3] or ["varie"]
+
+
 def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, Any]:
-    normalized_categories = [c.strip().lower() for c in categories if c.strip()]
+    normalized_categories = _normalize_news_categories(categories)
     effective_sources = _resolve_news_sources(sources)
     items: list[dict[str, str]] = []
+    varie_fallback_items: list[dict[str, str]] = []
     attempted: list[str] = []
     used_sources: list[str] = []
+    discarded_unclassified = 0
+    per_source_total: dict[str, int] = {}
+    per_category_count: dict[str, int] = {}
     for source in effective_sources:
         attempted.append(source)
         try:
             payload = _http_get(source)
             root = ET.fromstring(payload)
             found_for_source = False
+            source_label = urllib.parse.urlparse(source).netloc or source
+            per_source_total[source_label] = 0
             for node in root.findall(".//item"):
+                per_source_total[source_label] += 1
                 title = (node.findtext("title") or "").strip()
                 link = (node.findtext("link") or "").strip()
                 description = re.sub(r"\s+", " ", (node.findtext("description") or "").strip())
-                raw_category = (node.findtext("category") or "varie").strip().lower()
-                text_blob = f"{title} {description} {raw_category}".lower()
-                matched = [cat for cat in normalized_categories if cat in text_blob]
-                if normalized_categories and not matched:
+                raw_categories = _extract_news_item_category_hints(node) or [node.findtext("category") or "varie"]
+                classified_categories = classify_news_item(
+                    title=title,
+                    description=description,
+                    raw_categories=raw_categories,
+                    source=source_label,
+                )
+                if not classified_categories:
+                    discarded_unclassified += 1
                     continue
-                selected_categories = matched if matched else [raw_category or "varie"]
+                if normalized_categories:
+                    selected_categories = [cat for cat in normalized_categories if cat in classified_categories]
+                else:
+                    selected_categories = classified_categories
+                if not selected_categories:
+                    if normalized_categories and "varie" in classified_categories:
+                        varie_fallback_items.append(
+                            {
+                                "title": title[:160],
+                                "link": link,
+                                "summary": description[:500],
+                                "category": "varie",
+                                "source": source_label,
+                            }
+                        )
+                    continue
                 found_for_source = True
                 for selected_category in selected_categories:
+                    per_category_count[selected_category] = per_category_count.get(selected_category, 0) + 1
                     items.append(
                         {
                             "title": title[:160],
                             "link": link,
                             "summary": description[:500],
-                            "category": selected_category or "varie",
-                            "source": urllib.parse.urlparse(source).netloc or source,
+                            "category": selected_category,
+                            "source": source_label,
                         }
                     )
             if found_for_source:
                 used_sources.append(source)
-        except Exception:
+        except Exception as exc:
+            logger.warning("campaign news fetch failed for source=%s (%s)", source, exc.__class__.__name__)
             continue
 
     grouped: dict[str, list[dict[str, str]]] = {}
@@ -461,9 +655,23 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
     for cat in normalized_categories:
         if cat in grouped and grouped[cat]:
             ordered[cat] = grouped[cat]
+    if normalized_categories and not ordered:
+        fallback_candidates = grouped.get("varie", []) or dedupe_news_items(varie_fallback_items)
+        if fallback_candidates:
+            ordered["varie"] = fallback_candidates
     for cat, cat_items in grouped.items():
         if cat not in ordered and cat_items:
             ordered[cat] = cat_items
+
+    logger.info(
+        "campaign news fetch diagnostics sources=%s requested_categories=%s read_items=%s classified_counts=%s discarded_unclassified=%d fallback=%s",
+        attempted,
+        normalized_categories,
+        per_source_total,
+        per_category_count,
+        discarded_unclassified,
+        bool(normalized_categories and not any(cat in ordered for cat in normalized_categories) and "varie" in ordered),
+    )
 
     return {
         "categories": ordered,
@@ -471,6 +679,11 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
         "used_sources": used_sources,
         "configured_sources": sources,
         "configured_categories": normalized_categories,
+        "diagnostics": {
+            "per_source_total": per_source_total,
+            "per_category_count": per_category_count,
+            "discarded_unclassified": discarded_unclassified,
+        },
     }
 
 
