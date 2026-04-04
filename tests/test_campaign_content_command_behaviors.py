@@ -299,7 +299,7 @@ def test_news_schedule_add_validates_and_normalizes_sources_and_categories(messa
 
         assert db.created_service_payload is not None
         assert db.created_service_payload["sources_json"] == '["ansa", "repubblica"]'
-        assert db.created_service_payload["categories_json"] == "tech,politica"
+        assert db.created_service_payload["categories_json"] == "tecnologia,politica"
 
     asyncio.run(_run())
 
@@ -328,11 +328,12 @@ def test_guided_sources_autocomplete_contextual_and_no_duplicates(messaggi_modul
     choices = messaggi_module._compose_guided_csv_suggestions(
         "ansa.it, rep",
         allowed_values=messaggi_module.NEWS_SOURCE_CHOICES,
+        preferred_labels=messaggi_module.NEWS_SOURCE_LABELS,
         aliases=messaggi_module.NEWS_SOURCE_ALIASES,
     )
     values = [choice.value for choice in choices]
-    assert "ansa" not in values
-    assert "ansa.it, repubblica" in values
+    assert "ansa.it" not in values
+    assert "ansa.it, repubblica.it" in values
     assert all(", " in value for value in values)
 
 
@@ -340,12 +341,60 @@ def test_guided_categories_autocomplete_uses_last_token_only(messaggi_module) ->
     choices = messaggi_module._compose_guided_csv_suggestions(
         "esteri, pol",
         allowed_values=messaggi_module.NEWS_CATEGORY_CHOICES,
+        preferred_labels=messaggi_module.NEWS_CATEGORY_LABELS,
         aliases=messaggi_module.NEWS_CATEGORY_ALIASES,
         normalizer=messaggi_module._fold_token,
     )
     values = [choice.value for choice in choices]
-    assert "esteri, politica" in values
-    assert all(value.startswith("esteri, ") for value in values)
+    assert "Mondo, Politica" in values
+    assert all(value.startswith("Mondo, ") for value in values)
+
+
+def test_guided_autocomplete_selected_values_are_excluded(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "Spettacolo, cr",
+        allowed_values=messaggi_module.NEWS_CATEGORY_CHOICES,
+        preferred_labels=messaggi_module.NEWS_CATEGORY_LABELS,
+        aliases=messaggi_module.NEWS_CATEGORY_ALIASES,
+        normalizer=messaggi_module._fold_token,
+    )
+    names = [choice.name for choice in choices]
+    assert "Spettacolo" not in names
+    assert "Cronaca" in names
+
+
+def test_guided_choice_values_rebuild_full_csv_for_sources(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "ansa.it, rep",
+        allowed_values=messaggi_module.NEWS_SOURCE_CHOICES,
+        preferred_labels=messaggi_module.NEWS_SOURCE_LABELS,
+        aliases=messaggi_module.NEWS_SOURCE_ALIASES,
+    )
+    match = next(choice for choice in choices if choice.name == "repubblica.it")
+    assert match.value == "ansa.it, repubblica.it"
+
+
+def test_guided_selecting_second_category_preserves_first_in_csv_value(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "Spettacolo, cr",
+        allowed_values=messaggi_module.NEWS_CATEGORY_CHOICES,
+        preferred_labels=messaggi_module.NEWS_CATEGORY_LABELS,
+        aliases=messaggi_module.NEWS_CATEGORY_ALIASES,
+        normalizer=messaggi_module._fold_token,
+    )
+    match = next(choice for choice in choices if choice.name == "Cronaca")
+    assert match.value == "Spettacolo, Cronaca"
+
+
+def test_guided_selecting_second_source_preserves_first_in_csv_value(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "ansa.it, rep",
+        allowed_values=messaggi_module.NEWS_SOURCE_CHOICES,
+        preferred_labels=messaggi_module.NEWS_SOURCE_LABELS,
+        aliases=messaggi_module.NEWS_SOURCE_ALIASES,
+    )
+    match = next(choice for choice in choices if choice.name == "repubblica.it")
+    assert match.value == "ansa.it, repubblica.it"
 
 
 def test_parse_guided_sources_normalizes_aliases_and_dedupes(messaggi_module) -> None:
@@ -366,7 +415,20 @@ def test_parse_guided_categories_normalizes_casing_spaces_and_accents(messaggi_m
         normalizer=messaggi_module._fold_token,
     )
     assert invalid == []
-    assert normalized == ["curiosità", "politica"]
+    assert normalized == ["curiosita", "politica"]
+
+
+def test_guided_categories_suggestions_are_canonicalized_without_duplicate_aliases(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "cur",
+        allowed_values=messaggi_module.NEWS_CATEGORY_CHOICES,
+        preferred_labels=messaggi_module.NEWS_CATEGORY_LABELS,
+        aliases=messaggi_module.NEWS_CATEGORY_ALIASES,
+        normalizer=messaggi_module._fold_token,
+    )
+    names = [choice.name for choice in choices]
+    assert names.count("Curiosità") == 1
+    assert "Curiosita" not in names
 
 
 def test_parse_guided_values_rejects_unsupported_tokens(messaggi_module) -> None:
