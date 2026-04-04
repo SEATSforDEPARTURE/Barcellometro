@@ -278,31 +278,45 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     category_rows = _iter_news_categories(payload)
     overview = discord.Embed(title=format_standard_title(f"{title} • Panoramica"), color=color)
     tone = _time_of_day_label(_overview_now(payload))
+    daypart = tone if tone in {"mattina", "pomeriggio", "sera"} else "sera"
     if category_rows:
         overview.description = format_standard_description(
             (
-                f"🐹 Edizione di **{tone}**: Barcellometro è in conduzione con la redazione più frizzante del quartiere. "
-                "**Da quale categoria vuoi partire per il recap?**"
+                f"🐹 Buona **{daypart}**: Barcellometro è alla conduzione con la redazione più rumorosa del quartiere. "
+                "Titoli caldi, zero pippone e andiamo dritti al punto.\n"
+                "**Che ci dice il mondo quest'oggi?**"
             ),
             blank_line_before_fields=True,
         )
     else:
         overview.description = format_standard_description(
             (
-                f"🐹 Turno di **{tone}** in redazione: Barcellometro è al desk, oggi il flusso è leggero ma il radar resta acceso. "
-                "**Vuoi comunque farti un giro nelle categorie disponibili?**"
+                f"🐹 Buona **{daypart}**: Barcellometro è in redazione, oggi è più calma ma il radar resta acceso. "
+                "Se spunta qualcosa di succoso, noi ci siamo.\n"
+                "**Che ci dice il mondo quest'oggi?**"
             ),
         )
     for _, display, emoji, main_item, _ in category_rows:
         link = str(main_item.get("link") or "").strip()
         title_line = sanitize_plain_text(str(main_item.get("title") or "Titolo non disponibile"))[:140]
         linked_title = f"[{title_line}]({link})" if link else title_line
-        summary_line = trim_sentence_block(str(main_item.get("summary") or "Aggiornamento in arrivo."), limit=180)
+        summary_line = trim_sentence_block(str(main_item.get("summary") or "Aggiornamento in arrivo."), limit=170)
         summary_line = sanitize_plain_text(summary_line, remove_category_hint=display) or "Aggiornamento in arrivo."
-        source_line = sanitize_plain_text(str(main_item.get("source") or "n/d"))[:80]
+        short_summary = trim_sentence_block(summary_line, limit=150)
+        source_raw = sanitize_plain_text(str(main_item.get("source") or "")).lower()
+        source_line = source_raw
+        if "http" in source_line:
+            parsed_source = urlparse(source_line)
+            source_line = parsed_source.netloc or source_line
+        if "." not in source_line and link:
+            parsed_link = urlparse(link)
+            source_line = parsed_link.netloc or source_line
+        if source_line and not source_line.startswith("www."):
+            source_line = f"www.{source_line}"
+        source_line = source_line.strip() or "www.nd.it"
         overview.add_field(
-            name=format_standard_field_name(display, emoji=emoji),
-            value=f"**{linked_title}**\n{summary_line}\n`Fonte: {source_line}`"[:1024],
+            name=format_standard_field_name(f"{display} in primo piano", emoji=emoji),
+            value=f"**{linked_title}**\n🧃 **In breve:** {short_summary}\nfonte: {source_line}"[:1024],
             inline=False,
         )
     first_image_url = _first_story_image_url(category_rows)
