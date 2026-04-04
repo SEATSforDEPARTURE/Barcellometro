@@ -12,6 +12,7 @@ from app.plugins.commands_modular.registration import add_group_once, count_chil
 from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime
+from app.services.campaign_content_fetchers import NEWS_SOURCE_MAP, SUPPORTED_NEWS_CATEGORIES
 from app.services.scheduler_utils import calculate_initial_next_run
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
 
@@ -29,6 +30,9 @@ MOOD_CHOICES = [
     app_commands.Choice(name="RED_ONLY", value="RED_ONLY"),
     app_commands.Choice(name="BLACK_ONLY", value="BLACK_ONLY"),
 ]
+
+NEWS_SOURCE_CHOICES = sorted({str(source).strip().lower() for source in NEWS_SOURCE_MAP})
+NEWS_CATEGORY_CHOICES = sorted({str(category).strip().lower() for category in SUPPORTED_NEWS_CATEGORIES})
 
 
 async def _ensure_setting(ctx: CommandContext, key: str, default: str) -> str:
@@ -80,6 +84,25 @@ def validate_campaign_texts(
 
 def _parse_csv(raw: Optional[str]) -> list[str]:
     return [item.strip() for item in str(raw or "").split(",") if item.strip()]
+
+
+def _normalize_csv_values(raw: Optional[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in _parse_csv(raw):
+        token = str(item).strip().lower()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        normalized.append(token)
+    return normalized
+
+
+def _parse_guided_csv_values(raw: Optional[str], *, allowed: list[str]) -> tuple[list[str], list[str]]:
+    allowed_set = {token.lower() for token in allowed}
+    normalized = _normalize_csv_values(raw)
+    invalid = [token for token in normalized if token not in allowed_set]
+    return [token for token in normalized if token in allowed_set], invalid
 
 
 def _format_message_campaign_row(row: dict[str, object]) -> str:
@@ -230,6 +253,34 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         row = await ctx.database.get_campaign_content_config_by_service(guild_id, channel_id, service_type)
         return dict(row) if row is not None else None
 
+    async def _suggest_csv_choices(current: str, *, allowed_values: list[str], preferred_labels: dict[str, str] | None = None) -> list[app_commands.Choice[str]]:
+        preferred_labels = preferred_labels or {}
+        raw = str(current or "")
+        parts = [segment.strip() for segment in raw.split(",")]
+        fragment = parts[-1].lower() if parts else ""
+        selected = {segment.lower() for segment in parts[:-1] if segment.strip()}
+        suggestions: list[app_commands.Choice[str]] = []
+        for token in allowed_values:
+            if token in selected:
+                continue
+            if fragment and fragment not in token:
+                continue
+            base = ", ".join(parts[:-1]).strip()
+            value = f"{base}, {token}" if base else token
+            label = preferred_labels.get(token, token)
+            suggestions.append(app_commands.Choice(name=label[:100], value=value[:100]))
+            if len(suggestions) >= 25:
+                break
+        return suggestions
+
+    async def _news_sources_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        labels = {token: f"{token} ({NEWS_SOURCE_MAP[token]})" for token in NEWS_SOURCE_CHOICES}
+        return await _suggest_csv_choices(current, allowed_values=NEWS_SOURCE_CHOICES, preferred_labels=labels)
+
+    async def _news_categories_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        labels = {token: token.title() for token in NEWS_CATEGORY_CHOICES}
+        return await _suggest_csv_choices(current, allowed_values=NEWS_CATEGORY_CHOICES, preferred_labels=labels)
+
     async def _get_service_schedule(guild_id: str, service_type: str, schedule_id: int) -> dict[str, object] | None:
         row = await ctx.database.get_campaign_content_config(guild_id, schedule_id)
         if row is None or str(row["service_type"]).upper() != service_type:
@@ -331,6 +382,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         interaction: discord.Interaction,
         *,
         service_type: str,
+        schedule_id: int | None = None,
     ) -> None:
         if not await _check(interaction, f"campaigns.{service_type.lower()}.run", f"campagne.{service_type.lower()}.run"):
             return
@@ -339,15 +391,43 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         if scope is None:
             return
         guild_id, channel_id = scope
-        row = await _build_service_run_payload(guild_id, channel_id, service_type)
-        if row is None:
-            await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"No {service_type.lower()} schedule found for this channel.")], kind="warning")
-            return
+        if schedule_id is not None:
+            by_id = await ctx.database.get_campaign_content_config(guild_id, schedule_id)
+            if by_id is None:
+                await _send(interaction, subcommand_path=subcommand_path, subtitle_args=[schedule_id], lines=[("warning", "Schedule not found.")], kind="warning")
+                return
+            row = dict(by_id)
+            if str(row.get("service_type") or "").upper() != service_type:
+                await _send(interaction, subcommand_path=subcommand_path, subtitle_args=[schedule_id], lines=[("error", f"Schedule ID {schedule_id} is not a {service_type.lower()} schedule.")], kind="error")
+                return
+        else:
+            scoped_rows = [
+                dict(candidate)
+                for candidate in await ctx.database.list_campaign_content_configs_by_service(
+                    guild_id,
+                    service_type=service_type,
+                    channel_id=channel_id,
+                    include_disabled=True,
+                )
+            ]
+            if not scoped_rows:
+                await _send(interaction, subcommand_path=subcommand_path, lines=[("warning", f"No {service_type.lower()} schedule found for this channel.")], kind="warning")
+                return
+            if len(scoped_rows) > 1:
+                await _send(interaction, subcommand_path=subcommand_path, lines=[("error", f"Multiple {service_type.lower()} schedules found in this channel. Specify `id`.")], kind="error")
+                return
+            row = scoped_rows[0]
         service = getattr(ctx.message_scheduler, "_campaign_content_service", None) if ctx.message_scheduler is not None else None
         if service is None:
             await _send(interaction, subcommand_path=subcommand_path, lines=[("error", "Campaign content service unavailable.")], kind="error")
             return
-        await _send(interaction, subcommand_path=subcommand_path, lines=[("channel", f"<#{channel_id}>"), ("result", "running")], kind="success")
+        await _send(
+            interaction,
+            subcommand_path=subcommand_path,
+            subtitle_args=[schedule_id] if schedule_id is not None else None,
+            lines=[("schedule_id", row.get("id")), ("channel", f"<#{row.get('channel_id')}>"), ("result", "running")],
+            kind="success",
+        )
         if service_type == "NEWS":
             await service.execute_news_service(row)
         elif service_type == "WEATHER":
@@ -387,7 +467,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         except ValueError as exc:
             await _send(interaction, subcommand_path=subcommand_path, lines=[("error", str(exc))], kind="error")
             return
-        sources_json = json.dumps(_parse_csv(sources), ensure_ascii=False)
+        sources_json = json.dumps(_normalize_csv_values(sources), ensure_ascii=False)
         config_id = await ctx.database.create_campaign_content_config(
             guild_id=guild_id,
             channel_id=channel_id,
@@ -398,7 +478,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_title=embed_title,
             embed_color=embed_color,
             sources_json=sources_json,
-            categories_json=categories,
+            categories_json=",".join(_normalize_csv_values(categories)) if categories is not None else None,
             next_run_at=next_run.isoformat(),
         )
         await _send(interaction, subcommand_path=subcommand_path, subtitle_args=[config_id], lines=[("schedule_id", config_id), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
@@ -459,8 +539,8 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             interval_minutes=interval_minutes,
             embed_title=embed_title,
             embed_color=embed_color,
-            sources_json=json.dumps(_parse_csv(sources), ensure_ascii=False) if sources is not None else None,
-            categories_json=categories,
+            sources_json=json.dumps(_normalize_csv_values(sources), ensure_ascii=False) if sources is not None else None,
+            categories_json=",".join(_normalize_csv_values(categories)) if categories is not None else None,
             next_run_at=next_run_at,
             set_time_local=time_local is not None,
             set_interval_minutes=interval_minutes is not None,
@@ -915,9 +995,10 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         every="Repeat interval in minutes",
         embed_title="Optional embed title",
         embed_color="Optional embed color",
-        sources="Comma-separated source list or RSS URLs",
-        categories="Comma-separated category list",
+        sources="Guided comma-separated news sources",
+        categories="Guided comma-separated news categories",
     )
+    @app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete)
     async def news_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
@@ -927,6 +1008,24 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         sources: str | None = None,
         categories: str | None = None,
     ) -> None:
+        normalized_sources, invalid_sources = _parse_guided_csv_values(sources, allowed=NEWS_SOURCE_CHOICES)
+        if invalid_sources:
+            await _send(
+                interaction,
+                subcommand_path="campaigns news schedule_add",
+                lines=[("error", f"Unsupported sources: {', '.join(invalid_sources)}.")],
+                kind="error",
+            )
+            return
+        normalized_categories, invalid_categories = _parse_guided_csv_values(categories, allowed=NEWS_CATEGORY_CHOICES)
+        if invalid_categories:
+            await _send(
+                interaction,
+                subcommand_path="campaigns news schedule_add",
+                lines=[("error", f"Unsupported categories: {', '.join(invalid_categories)}.")],
+                kind="error",
+            )
+            return
         await _service_schedule_add(
             interaction,
             service_type="NEWS",
@@ -934,8 +1033,8 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             every=every,
             embed_title=embed_title,
             embed_color=embed_color,
-            sources=sources,
-            categories=categories,
+            sources=",".join(normalized_sources) if sources is not None else None,
+            categories=",".join(normalized_categories) if categories is not None else None,
         )
 
     @news_group.command(name="schedule_edit", description="Edit a news campaign schedule")
@@ -982,8 +1081,9 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         await _service_schedule_list(interaction, service_type="NEWS")
 
     @news_group.command(name="run", description="Run the news campaign immediately")
-    async def news_run(interaction: discord.Interaction) -> None:
-        await _service_run(interaction, service_type="NEWS")
+    @app_commands.describe(id="News schedule ID (recommended when multiple schedules exist)")
+    async def news_run(interaction: discord.Interaction, id: int | None = None) -> None:
+        await _service_run(interaction, service_type="NEWS", schedule_id=id)
 
     @weather_group.command(name="on", description="Enable weather campaigns in the current channel")
     async def weather_on(interaction: discord.Interaction) -> None:
@@ -1071,8 +1171,9 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         await _service_schedule_list(interaction, service_type="WEATHER")
 
     @weather_group.command(name="run", description="Run the weather campaign immediately")
-    async def weather_run(interaction: discord.Interaction) -> None:
-        await _service_run(interaction, service_type="WEATHER")
+    @app_commands.describe(id="Weather schedule ID (recommended when multiple schedules exist)")
+    async def weather_run(interaction: discord.Interaction, id: int | None = None) -> None:
+        await _service_run(interaction, service_type="WEATHER", schedule_id=id)
 
     @horoscope_group.command(name="on", description="Enable horoscope campaigns in the current channel")
     async def horoscope_on(interaction: discord.Interaction) -> None:
@@ -1160,5 +1261,6 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         await _service_schedule_list(interaction, service_type="HOROSCOPE")
 
     @horoscope_group.command(name="run", description="Run the horoscope campaign immediately")
-    async def horoscope_run(interaction: discord.Interaction) -> None:
-        await _service_run(interaction, service_type="HOROSCOPE")
+    @app_commands.describe(id="Horoscope schedule ID (recommended when multiple schedules exist)")
+    async def horoscope_run(interaction: discord.Interaction, id: int | None = None) -> None:
+        await _service_run(interaction, service_type="HOROSCOPE", schedule_id=id)

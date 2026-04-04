@@ -33,6 +33,22 @@ HOROSCOPE_SOURCE_MAP = {
 DEFAULT_NEWS_SOURCES = ["ansa", "repubblica"]
 DEFAULT_WEATHER_SOURCES = ["open-meteo", "meteoam", "3bmeteo"]
 DEFAULT_HOROSCOPE_SOURCES = ["ohmanda"]
+SUPPORTED_NEWS_CATEGORIES = [
+    "cronaca",
+    "politica",
+    "sport",
+    "spettacolo",
+    "gossip",
+    "tecnologia",
+    "tech",
+    "economia",
+    "mondo",
+    "viral",
+    "trash",
+    "curiosita",
+    "curiosità",
+    "varie",
+]
 
 SIGNS = [
     "Ariete",
