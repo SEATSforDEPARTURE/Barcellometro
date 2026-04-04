@@ -111,7 +111,6 @@ async def _run_channel_aura_window(
         channel_id=str(interaction.channel_id),
         start_local=window.start_dt,
         end_local=window.end_dt,
-        title=format_standard_title("DETTAGLI PUNTI AURA", emoji="🗒️"),
     )
     if embed is None:
         await send_resoconto_response(

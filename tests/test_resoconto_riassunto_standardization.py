@@ -22,6 +22,7 @@ from app.plugins import commands as commands_module
 from app.plugins.commands_modular import resoconto as resoconto_module
 from app.plugins.commands_modular import riassunto as riassunto_module
 from app.plugins.commands_modular.resoconto import register_resoconto
+from app.plugins.commands_modular.time_windows import resolve_ieri_window
 from app.plugins.commands_modular.riassunto import register_riassunto
 from app.shared.discord.command_embeds import send_standard_response
 from tests._embed_test_utils import primary_field
@@ -537,3 +538,34 @@ def test_critical_modules_no_longer_use_raw_slash_text_helpers() -> None:
         text = path.read_text()
         for needle in forbidden:
             assert needle not in text, f"Unexpected raw response in {path}: {needle}"
+
+
+def test_resocontocanale_aura_ieri_uses_shared_builder_without_title_override() -> None:
+    async def _run() -> None:
+        canonical_title = "📓 __**RESOCONTO CANALE · AURA**__"
+        aura_embed = discord.Embed(title=canonical_title, description="shared description")
+        channel_summary = SimpleNamespace(generate_channel_aura_embed=AsyncMock(return_value=aura_embed))
+        ctx = SimpleNamespace(channel_summary=channel_summary)
+        interaction = _FakeInteraction(qualified_name="channelsummary aura ieri")
+        window = resolve_ieri_window()
+
+        await resoconto_module._run_channel_aura_window(
+            interaction,
+            ctx=ctx,
+            window=window,
+            path="aura ieri",
+            subtitle_args=None,
+            send_message=AsyncMock(),
+            send_resoconto_response=AsyncMock(),
+        )
+
+        called_kwargs = channel_summary.generate_channel_aura_embed.await_args.kwargs
+        assert "title" not in called_kwargs
+        assert called_kwargs["start_local"] == window.start_dt
+        assert called_kwargs["end_local"] == window.end_dt
+
+        sent_kwargs = interaction.followup.send.await_args.kwargs
+        sent_embeds = sent_kwargs["embeds"]
+        assert sent_embeds[0].title == canonical_title
+
+    asyncio.run(_run())
