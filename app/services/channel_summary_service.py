@@ -684,7 +684,7 @@ class ChannelSummaryService:
         channel_name = getattr(channel, "name", None) or channel_id
         known_display_names = sorted({name for names in dynamic_names.values() for name in names if str(name).strip()}, key=len, reverse=True)
 
-        aura_embed = await self._build_channel_aura_embed(
+        aura_embed = await self.build_channel_summary_aura_embed(
             guild_id=guild_id,
             channel_id=channel_id,
             start_local=start_local,
@@ -815,19 +815,15 @@ class ChannelSummaryService:
         channel_id: str,
         start_local: datetime,
         end_local: datetime,
-        title: str = "📓 __**RESOCONTO CANALE · AURA**__",
     ) -> discord.Embed | None:
-        embed = await self._build_channel_aura_embed(
+        return await self.build_channel_summary_aura_embed(
             guild_id=guild_id,
             channel_id=channel_id,
             start_local=start_local,
             end_local=end_local,
         )
-        if embed is not None:
-            embed.title = title
-        return embed
 
-    async def _build_channel_aura_embed(
+    async def build_channel_summary_aura_embed(
         self,
         *,
         guild_id: str,
