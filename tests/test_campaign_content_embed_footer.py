@@ -98,9 +98,44 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Notizie uniche aggregate" not in description
     assert "Barcellometro" in description
     assert "redazione" in description.lower()
-    assert "Da quale categoria vuoi partire" in description
-    assert "**" in description
+    assert "**Che ci dice il mondo quest'oggi?**" in description
+    assert any(daypart in description.lower() for daypart in ["mattina", "pomeriggio", "sera"])
     assert all(field.name != format_name for field in overview.fields for format_name in ["__**VARIE**__", "__**TITOLI IN EVIDENZA**__"])
+
+
+def test_news_overview_intro_drops_old_generic_opening_copy() -> None:
+    news = build_news_embeds(
+        {},
+        {"generated_at": "2026-01-01T09:00:00+00:00", "categories": {"cronaca": [{"title": "t", "summary": "s", "source": "ansa", "link": "https://ansa.it"}]}},
+    )
+    description = news[0].description or ""
+    assert "Da quale categoria vuoi partire per il recap?" not in description
+    assert "Turno di" not in description
+    assert "Edizione di" not in description
+
+
+def test_news_overview_field_copy_is_concise_and_has_source_line() -> None:
+    news = build_news_embeds(
+        {},
+        {
+            "categories": {
+                "cronaca": [
+                    {
+                        "title": "Titolo fedele fonte",
+                        "summary": "Prima frase del riassunto. Seconda frase del riassunto molto breve. Terza frase che non dovrebbe apparire.",
+                        "source": "ansa.it",
+                        "link": "https://www.ansa.it/sito/notizie/test.html",
+                    }
+                ]
+            }
+        },
+    )
+    field_value = news[0].fields[0].value
+    assert field_value is not None
+    assert field_value.count("\n") == 2
+    assert "**In breve:**" in field_value
+    assert field_value.count("🧃") <= 1
+    assert "fonte: www.ansa.it" in field_value
 
 
 def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
