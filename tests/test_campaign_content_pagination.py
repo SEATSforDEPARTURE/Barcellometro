@@ -53,22 +53,6 @@ def test_weather_has_required_buttons() -> None:
     assert all(token not in labels for token in ["⏮️ INIZIO", "⬅️ INDIETRO", "➡️ AVANTI", "Overview Italia"])
 
 
-def test_news_dynamic_buttons_and_disabled_state() -> None:
-    view = PersistentCampaignLauncherView(
-        _FakeService(),
-        service_type="NEWS",
-        total_pages=3,
-        page_map=[
-            {"type": "overview", "label": "Inizio", "page": 0},
-            {"type": "category", "key": "cronaca", "label": "📰 CRONACA", "page": 1},
-            {"type": "category", "key": "sport", "label": "⚽ SPORT", "page": 2},
-        ],
-    )
-    labels = _build_button_labels(view)
-    assert labels == ["📰 CRONACA", "⚽ SPORT"]
-    assert all(item.disabled is False for item in view.children)
-
-
 def test_horoscope_has_all_signs_without_public_nav_buttons() -> None:
     page_map = [{"type": "overview", "label": "Inizio", "page": 0}]
     signs = [
@@ -92,9 +76,12 @@ def test_ephemeral_navigation_preferred_over_public_edit() -> None:
         service = _FakeService()
         view = PersistentCampaignLauncherView(
             service,
-            service_type="NEWS",
-            total_pages=2,
-            page_map=[{"type": "overview", "label": "Inizio", "page": 0}, {"type": "category", "key": "cronaca", "label": "📰 CRONACA", "page": 1}],
+            service_type="WEATHER",
+            total_pages=4,
+            page_map=[
+                {"type": "overview", "label": "Overview Italia", "page": 0},
+                {"type": "area", "key": "nord", "label": "🧊 NORD", "page": 1},
+            ],
         )
         interaction = _FakeInteraction()
         first_dynamic_button = view.children[0]
@@ -106,13 +93,13 @@ def test_ephemeral_navigation_preferred_over_public_edit() -> None:
 
 
 def test_personal_navigator_disables_current_section_only() -> None:
-    embeds = [{"title": "overview"}, {"title": "cronaca"}, {"title": "sport"}]
+    embeds = [{"title": "overview"}, {"title": "nord"}, {"title": "centro"}]
     page_map = [
-        {"type": "overview", "label": "Inizio", "page": 0},
-        {"type": "category", "key": "cronaca", "label": "📰 CRONACA", "page": 1},
-        {"type": "category", "key": "sport", "label": "⚽ SPORT", "page": 2},
+        {"type": "overview", "label": "Overview Italia", "page": 0},
+        {"type": "area", "key": "nord", "label": "🧊 NORD", "page": 1},
+        {"type": "area", "key": "centro", "label": "🏛️ CENTRO", "page": 2},
     ]
-    view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, service_type="NEWS", current_index=2, timeout=60)
+    view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, service_type="WEATHER", current_index=2, timeout=60)
     assert len(view.children) == 2
     assert view.children[0].disabled is False
     assert view.children[1].disabled is True
@@ -159,23 +146,6 @@ def test_weather_ephemeral_click_edits_same_message() -> None:
             {"type": "area", "key": "sud_e_isole", "label": "🌋 SUD E ISOLE", "page": 3},
         ]
         view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, service_type="WEATHER", current_index=1, timeout=60)
-        interaction = _FakeInteraction()
-        await view.children[1].callback(interaction)
-        interaction.response.edit_message.assert_awaited_once()
-        interaction.response.send_message.assert_not_called()
-
-    asyncio.run(_run())
-
-
-def test_news_ephemeral_click_edits_same_message() -> None:
-    async def _run() -> None:
-        embeds = [{"title": "Overview"}, {"title": "Cronaca"}, {"title": "Sport"}]
-        page_map = [
-            {"type": "overview", "page": 0},
-            {"type": "category", "key": "cronaca", "label": "📰 CRONACA", "page": 1},
-            {"type": "category", "key": "sport", "label": "⚽ SPORT", "page": 2},
-        ]
-        view = BaseCampaignNavigatorView(_FakeService(), embeds=embeds, page_map=page_map, service_type="NEWS", current_index=1, timeout=60)
         interaction = _FakeInteraction()
         await view.children[1].callback(interaction)
         interaction.response.edit_message.assert_awaited_once()

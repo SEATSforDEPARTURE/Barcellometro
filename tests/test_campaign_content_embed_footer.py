@@ -75,8 +75,7 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         {"signs": {"Ariete": {"text": "Focus"}}},
     )
     assert _title_inner_without_emoji(news[0].title or "") == "HAMSTER NEWS • PANORAMICA"
-    assert _title_inner_without_emoji(news[1].title or "") == "HAMSTER NEWS • TRASH"
-    assert _title_inner_without_emoji(news[2].title or "") == "HAMSTER NEWS • VIRAL"
+    assert len(news) == 1
     assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO DEL GIORNO • INIZIO"
     assert _title_inner_without_emoji(horoscope[1].title or "") == "OROSCOPO DEL GIORNO • ARIETE"
     news_meta = [get_footer_meta(embed) for embed in news]
@@ -164,31 +163,20 @@ def test_news_category_item_format_matches_overview_and_limit_five_items() -> No
         }
     }
     news = build_news_embeds({}, payload)
-    category_embed = news[1]
-    assert category_embed.description and category_embed.description.strip().startswith("*")
-    assert category_embed.fields
-    first_field_value = category_embed.fields[0].value or ""
-    assert "1. **[Titolo 1](https://example.com/1)**" in first_field_value
-    assert "2. **[Titolo 2](https://example.com/2)**" in first_field_value
-    assert category_embed.fields[0].name == "📄 __**NOTIZIE**__"
-    assert any(field.name == "📄 __**NOTIZIE (CONT.)**__" for field in category_embed.fields[1:])
+    overview = news[0]
+    assert len(overview.fields) == 1
+    first_field_value = overview.fields[0].value or ""
+    assert "**[Titolo 1](https://example.com/1)**" in first_field_value
+    assert "**[Titolo 2](https://example.com/2)**" in first_field_value
+    assert "**[Titolo 3](https://example.com/3)**" not in first_field_value
+    assert overview.fields[0].name == "📰 __**CRONACA**__"
 
-    all_fields_text = "\n\n".join((field.value or "") for field in category_embed.fields)
-    assert "5. **[Titolo 5](https://example.com/5)**" in all_fields_text
-    assert "6. **[Titolo 6](https://example.com/6)**" not in all_fields_text
-    assert "7. **[Titolo 7](https://example.com/7)**" not in all_fields_text
-
-    number_pattern = re.compile(r"(?m)^(\d+)\. \*\*\[Titolo \d+\]\(https://example\.com/\d+\)\*\*")
-    all_numbers = [int(match.group(1)) for match in number_pattern.finditer(all_fields_text)]
-    assert all_numbers == [1, 2, 3, 4, 5]
-
-    for idx, field in enumerate(category_embed.fields):
+    for idx, field in enumerate(overview.fields):
         value = field.value or ""
         assert len(value) <= 1024
         assert value.count("\n• ") >= 1
         assert value.count("`fonte: www.ansa.it`") >= 1
-        assert re.search(r"(?m)^\d+\. \*\*\[[^\]]+\]\(https://example\.com/\d+\)\*\*$", value)
-        item_count = len(number_pattern.findall(value))
+        item_count = value.count("`fonte:")
         assert item_count <= 2, f"Field {idx} exceeds max 2 items: {item_count}"
 
 
@@ -290,7 +278,7 @@ def test_campaign_service_resolve_model_uses_task_parameter_for_editorial() -> N
 def test_campaign_formatter_applies_footer_meta_in_all_builders() -> None:
     source = Path("app/services/campaign_content_formatter.py").read_text()
     assert 'def _apply_campaign_footer' in source
-    assert 'return _apply_campaign_footer(embeds, service_name="campagne_notizie")' in source
+    assert 'return _apply_campaign_footer([overview], service_name="campagne_notizie")' in source
     assert 'return _apply_campaign_footer(embeds, service_name="campagne_meteo")' in source
     assert 'return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")' in source
     assert 'return _apply_campaign_footer([embed], service_name=service_name)' in source
@@ -317,14 +305,10 @@ def test_news_overview_builds_category_fields_buttons_and_no_legacy_sections() -
     assert all("VARIE" not in name for name in overview_field_labels)
     assert all("TITOLI IN EVIDENZA" not in name for name in overview_field_labels)
 
-    displayed_labels = [entry["label"] for entry in page_map if entry.get("type") == "category"]
-    displayed_emoji = [label.split(" ", 1)[0] for label in displayed_labels]
-    field_emoji = [name.split(" ", 1)[0] for name in overview_field_labels]
-    assert len(displayed_labels) == len(overview_field_labels)
-    assert displayed_emoji == field_emoji
+    assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
 
-def test_news_overview_selection_uses_configured_order_caps_at_ten_and_buttons_match() -> None:
+def test_news_overview_selection_uses_configured_order_caps_at_five_categories_and_ten_news() -> None:
     payload = {
         "configured_categories": [f"cat{i}" for i in range(1, 13)],
         "categories": {
@@ -346,16 +330,12 @@ def test_news_overview_selection_uses_configured_order_caps_at_ten_and_buttons_m
     overview = news[0]
     page_map = build_news_page_map(payload)
 
-    assert len(overview.fields) == 10
+    assert len(overview.fields) == 5
     names = [field.name for field in overview.fields]
     assert "CAT1" in names[0].upper()
-    assert "CAT11" not in " ".join(name.upper() for name in names)
+    assert "CAT6" not in " ".join(name.upper() for name in names)
     assert all("VARIE" not in name.upper() for name in names)
-
-    button_labels = [entry["label"] for entry in page_map if entry.get("type") == "category"]
-    assert len(button_labels) == len(overview.fields) == len(news) - 1
-    for label, field in zip(button_labels, overview.fields, strict=True):
-        assert label.split(" ", 1)[1] in field.name
+    assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
 
 def test_news_overview_avoids_duplicate_main_story_across_categories_and_handles_empty_categories() -> None:

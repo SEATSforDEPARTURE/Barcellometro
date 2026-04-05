@@ -102,7 +102,7 @@ def test_campaign_embeds_include_global_phrase_after_finalize() -> None:
 
 
 def test_campaign_send_and_store_persists_centralized_footer_with_phrase() -> None:
-    async def _run() -> tuple[discord.Embed, str]:
+    async def _run() -> tuple[discord.Embed, str, object | None]:
         db = _FooterDb()
         footer_service = _build_footer_service(db)
         await footer_service.set_version('dev7.1')
@@ -127,13 +127,14 @@ def test_campaign_send_and_store_persists_centralized_footer_with_phrase() -> No
         )
 
         saved = json.loads(db.saved_messages[0]['embeds_json'])
-        return channel.sent[0], saved[0]['footer']['text']
+        return channel.sent[0], saved[0]['footer']['text'], db.saved_messages[0].get("metadata_json")
 
-    sent_embed, stored_footer = asyncio.run(_run())
+    sent_embed, stored_footer, metadata_json = asyncio.run(_run())
 
     assert sent_embed.footer is not None
     assert sent_embed.footer.text == 'Barcellometro dev7.1 · In via di sviluppo · Dati elaborati con ansa'
     assert stored_footer == 'Barcellometro dev7.1 · In via di sviluppo · Dati elaborati con ansa'
+    assert metadata_json is not None
 
 
 def test_footer_finalize_with_contributors_keeps_phrase_and_processing_order() -> None:

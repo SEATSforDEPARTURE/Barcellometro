@@ -22,8 +22,8 @@ from app.services.campaign_content_fetchers import dedupe_news_items
 from app.services.campaign_content_formatter import (
     build_horoscope_embeds,
     build_news_embeds,
+    build_news_page_map,
     build_weather_embeds,
-    chunk_news_items_for_embed,
 )
 from app.services.campaign_content_service import CampaignContentService
 from app.services.database import DatabaseService
@@ -59,49 +59,11 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     deduped = dedupe_news_items(payload["categories"]["cronaca"] + payload["categories"]["sport"] + payload["categories"]["tecnologia"])
     assert len(deduped) == 2
     embeds = build_news_embeds({"embed_title": "📰 NOTIZIARIO"}, payload)
-    titles = [_normalize_standardized_title(e.title) for e in embeds]
-    assert "PANORAMICA" in titles[0]
-    assert "CRONACA" in titles[1]
-    assert "SPORT" not in " ".join(titles)
-    assert "TECNOLOGIA" in " ".join(titles)
-
-
-def test_news_category_embed_chunks_items_with_continuation_fields() -> None:
-    payload = {
-        "categories": {
-            "economia": [
-                {"title": f"Titolo {idx}", "summary": f"Sintesi {idx}. Seconda frase {idx}.", "source": "ansa.it", "link": f"https://example.com/{idx}"}
-                for idx in range(1, 6)
-            ]
-        }
-    }
-    embeds = build_news_embeds({}, payload)
-    category_embed = embeds[1]
-    assert len(category_embed.fields) == 3
-    assert category_embed.fields[0].name == "📄 __**NOTIZIE**__"
-    assert category_embed.fields[1].name == "📄 __**NOTIZIE (CONT.)**__"
-    assert category_embed.fields[2].name == "📄 __**NOTIZIE (CONT.)**__"
-    assert category_embed.fields[0].value.startswith("1. ")
-    assert "\n\n2. " in category_embed.fields[0].value
-    assert category_embed.fields[1].value.startswith("3. ")
-    assert "\n\n4. " in category_embed.fields[1].value
-    assert category_embed.fields[2].value.startswith("5. ")
-    for field in category_embed.fields:
-        assert len(field.value) <= 1024
-        assert "..." not in field.value
-
-
-def test_chunk_news_items_for_embed_limits_to_two_items_each_field() -> None:
-    items = [
-        {"title": f"News {idx}", "summary": "Prima frase. Seconda frase. Terza frase.", "source": "example.com", "link": f"https://example.com/{idx}"}
-        for idx in range(1, 6)
-    ]
-    chunks = chunk_news_items_for_embed(items, display="Economia")
-    assert len(chunks) == 3
-    assert chunks[0].count("\n\n") == 1
-    assert chunks[1].count("\n\n") == 1
-    assert chunks[2].count("\n\n") == 0
-    assert all(len(chunk) <= 1024 for chunk in chunks)
+    assert len(embeds) == 1
+    field_names = [field.name for field in embeds[0].fields]
+    assert "📰 __**CRONACA**__" in field_names
+    assert "💻 __**TECNOLOGIA**__" in field_names
+    assert "⚽ __**SPORT**__" not in field_names
 
 
 def test_news_fallback_summary_uses_two_sentences_without_ai_summary() -> None:
@@ -119,7 +81,7 @@ def test_news_fallback_summary_uses_two_sentences_without_ai_summary() -> None:
         }
     }
     embeds = build_news_embeds({}, payload)
-    field_value = embeds[1].fields[0].value
+    field_value = embeds[0].fields[0].value
     assert "Prima frase pulita." in field_value
     assert "Seconda frase utile." in field_value
     assert "Terza frase da ignorare." not in field_value
@@ -158,15 +120,21 @@ def test_send_and_store_metadata_contains_page_map() -> None:
             self.next_kwargs = kwargs
 
     class _Channel(discord.abc.Messageable):
+        def __init__(self):
+            self.last_view = object()
+
         async def _get_channel(self):
             return self
 
         async def send(self, *args, **kwargs):
+            self.last_view = kwargs.get("view")
             return SimpleNamespace(id=123)
+
+    channel = _Channel()
 
     class _Bot:
         def get_channel(self, _id):
-            return _Channel()
+            return channel
 
     async def _run() -> None:
         db = _Db()
@@ -186,7 +154,8 @@ def test_send_and_store_metadata_contains_page_map() -> None:
         )
         metadata = json.loads(db.kwargs["metadata_json"])
         assert "page_map" in metadata
-        assert metadata["page_map"][0]["type"] == "overview"
+        assert metadata["page_map"] == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+        assert channel.last_view is None
 
     asyncio.run(_run())
 
@@ -372,6 +341,18 @@ def test_open_personal_navigator_clamps_target_index() -> None:
         assert (high_embed.title or "") == "P1"
 
     asyncio.run(_run())
+
+
+def test_news_page_map_has_only_overview_entry() -> None:
+    page_map = build_news_page_map(
+        {
+            "categories": {
+                "cronaca": [{"title": "a"}],
+                "sport": [{"title": "b"}],
+            }
+        }
+    )
+    assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
 
 def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
