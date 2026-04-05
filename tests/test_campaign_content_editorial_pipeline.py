@@ -344,14 +344,7 @@ def test_open_personal_navigator_clamps_target_index() -> None:
 
 
 def test_news_page_map_has_only_overview_entry() -> None:
-    page_map = build_news_page_map(
-        {
-            "categories": {
-                "cronaca": [{"title": "a"}],
-                "sport": [{"title": "b"}],
-            }
-        }
-    )
+    page_map = build_news_page_map()
     assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
 

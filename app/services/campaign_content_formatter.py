@@ -506,8 +506,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     return _apply_campaign_footer([overview], service_name="campagne_notizie")
 
 
-def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    _ = payload
+def build_news_page_map() -> list[dict[str, Any]]:
     return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
 

@@ -402,9 +402,6 @@ class CampaignContentService:
         }
 
     async def open_personal_navigator(self, interaction: discord.Interaction, *, target_index: int, service_type: str) -> bool:
-        if str(service_type or "").upper() == "NEWS":
-            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
-            return False
         message = interaction.message
         if message is None:
             await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
@@ -467,7 +464,7 @@ class CampaignContentService:
 
     def _build_page_map(self, service_type: str, *, payload_embeds: list[Any], payload: dict[str, Any] | None) -> list[dict[str, Any]]:
         if service_type == "NEWS":
-            return build_news_page_map(payload or {})
+            return build_news_page_map()
         if service_type == "WEATHER":
             return build_weather_page_map()
         if service_type == "HOROSCOPE":

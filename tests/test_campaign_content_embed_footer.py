@@ -289,7 +289,7 @@ def test_news_service_label_maps_to_campaigns_and_not_unknown() -> None:
     assert "UNKNOWN" not in render_author_name(service_name="campagne_notizie")
 
 
-def test_news_overview_builds_category_fields_buttons_and_no_legacy_sections() -> None:
+def test_news_overview_builds_only_overview_without_legacy_sections() -> None:
     payload = {
         "categories": {
             "cronaca": [{"title": "C1", "summary": "S", "source": "ansa", "link": "https://example.com/1"}],
@@ -299,7 +299,7 @@ def test_news_overview_builds_category_fields_buttons_and_no_legacy_sections() -
     }
     news = build_news_embeds({"embed_title": "IGNORED"}, payload)
     overview = news[0]
-    page_map = build_news_page_map(payload)
+    page_map = build_news_page_map()
     overview_field_labels = [field.name for field in overview.fields]
 
     assert all("VARIE" not in name for name in overview_field_labels)
@@ -328,7 +328,7 @@ def test_news_overview_selection_uses_configured_order_caps_at_five_categories_a
     }
     news = build_news_embeds({}, payload)
     overview = news[0]
-    page_map = build_news_page_map(payload)
+    page_map = build_news_page_map()
 
     assert len(overview.fields) == 5
     names = [field.name for field in overview.fields]
