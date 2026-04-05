@@ -179,12 +179,14 @@ class CampaignContentService:
         if not isinstance(channel, discord.abc.Messageable):
             return
         page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=payload)
-        view: discord.ui.View | None = PersistentCampaignLauncherView(
-            self,
-            service_type=service_type,
-            total_pages=len(embeds),
-            page_map=page_map,
-        )
+        view: discord.ui.View | None = None
+        if service_type in {"WEATHER", "HOROSCOPE"}:
+            view = PersistentCampaignLauncherView(
+                self,
+                service_type=service_type,
+                total_pages=len(embeds),
+                page_map=page_map,
+            )
         message = await channel.send(embed=embeds[0], view=view)
         metadata = {
             "footer_text": footer_text,
@@ -400,6 +402,9 @@ class CampaignContentService:
         }
 
     async def open_personal_navigator(self, interaction: discord.Interaction, *, target_index: int, service_type: str) -> bool:
+        if str(service_type or "").upper() == "NEWS":
+            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
+            return False
         message = interaction.message
         if message is None:
             await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
@@ -450,9 +455,10 @@ class CampaignContentService:
         index = max(0, min(target_index, len(embeds) - 1))
         metadata = record.get("metadata", {})
         page_map = metadata.get("page_map") if isinstance(metadata, dict) else []
-        view = PersistentCampaignLauncherView(self, service_type=record.get("service_type") or "NEWS", total_pages=len(embeds), page_map=page_map if isinstance(page_map, list) else [])
+        resolved_service_type = str(record.get("service_type") or "WEATHER")
+        view = PersistentCampaignLauncherView(self, service_type=resolved_service_type, total_pages=len(embeds), page_map=page_map if isinstance(page_map, list) else [])
         embed = await self._hydrate_stored_campaign_embed(
-            service_type=str(record.get("service_type") or "NEWS"),
+            service_type=resolved_service_type,
             embed_payload=embeds[index],
             metadata=metadata if isinstance(metadata, dict) else None,
         )
@@ -461,13 +467,7 @@ class CampaignContentService:
 
     def _build_page_map(self, service_type: str, *, payload_embeds: list[Any], payload: dict[str, Any] | None) -> list[dict[str, Any]]:
         if service_type == "NEWS":
-            if payload is not None:
-                return build_news_page_map(payload)
-            categories = list(range(max(0, len(payload_embeds) - 1)))
-            return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}] + [
-                {"type": "category", "key": f"cat_{idx+1}", "label": f"📌 CATEGORIA {idx+1}", "page": idx + 1}
-                for idx in categories
-            ]
+            return build_news_page_map(payload or {})
         if service_type == "WEATHER":
             return build_weather_page_map()
         if service_type == "HOROSCOPE":

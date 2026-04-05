@@ -191,6 +191,8 @@ _NEWS_MAX_SENTENCES = 2
 _NEWS_MAX_ITEMS_PER_FIELD = 2
 _NEWS_FIELD_SOFT_LIMIT = 900
 _NEWS_FIELD_HARD_LIMIT = 1024
+_NEWS_MAX_CATEGORIES = 5
+_NEWS_MAX_TOTAL_ITEMS = 10
 
 
 def sanitize_public_news_text(text: str) -> str:
@@ -251,19 +253,70 @@ def _news_source_line(item: dict[str, Any], *, link: str) -> str:
     return source_line.strip() or "www.nd.it"
 
 
-def _format_news_item_block(item: dict[str, Any], *, display: str, numbered: bool, index: int) -> str:
-    link = str(item.get("link") or "").strip()
-    title_line = sanitize_plain_text(str(item.get("title") or "Titolo non disponibile"))
-    linked_title = f"[{title_line}]({link})" if link else title_line
+def _build_news_item_summary(item: dict[str, Any], *, display: str) -> str:
     summary = sanitize_public_news_text(str(item.get("summary") or ""))
     summary = sanitize_plain_text(summary, remove_category_hint=display)
     if _is_useless_news_text(summary):
-        summary = _first_real_news_sentences(item)
-    else:
-        summary = _take_news_sentences(summary)
+        return _first_real_news_sentences(item)
+    return _take_news_sentences(summary)
+
+
+def _truncate_news_summary(summary: str, *, max_chars: int) -> str:
+    if len(summary) <= max_chars:
+        return summary
+    clipped = summary[:max_chars].rstrip()
+    cut = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
+    if cut >= int(max_chars * 0.6):
+        return clipped[: cut + 1].strip()
+    return clipped.rstrip(" ,;:") + "…"
+
+
+def _format_news_item_block(
+    item: dict[str, Any],
+    *,
+    display: str,
+    numbered: bool,
+    index: int,
+    max_summary_chars: int | None = None,
+) -> str:
+    link = str(item.get("link") or "").strip()
+    title_line = sanitize_plain_text(str(item.get("title") or "Titolo non disponibile"))
+    linked_title = f"[{title_line}]({link})" if link else title_line
+    summary = _build_news_item_summary(item, display=display)
+    if max_summary_chars is not None and max_summary_chars > 0:
+        summary = _truncate_news_summary(summary, max_chars=max_summary_chars)
     source_line = _news_source_line(item, link=link)
     heading = f"{index}. **{linked_title}**" if numbered else f"**{linked_title}**"
     return f"{heading}\n• {summary}\n`fonte: {source_line}`"
+
+
+def _build_news_category_field_value(items: list[dict[str, Any]], *, display: str) -> str:
+    limited_items = items[:_NEWS_MAX_ITEMS_PER_FIELD]
+    if not limited_items:
+        return ""
+    summary_limits = [320, 220, 170, 130, 100]
+    for summary_limit in summary_limits:
+        blocks = [
+            _format_news_item_block(
+                item,
+                display=display,
+                numbered=False,
+                index=0,
+                max_summary_chars=summary_limit,
+            )
+            for item in limited_items
+        ]
+        candidate = "\n\n".join(blocks)
+        if len(candidate) <= _NEWS_FIELD_HARD_LIMIT:
+            return candidate
+    fallback = _format_news_item_block(
+        limited_items[0],
+        display=display,
+        numbered=False,
+        index=0,
+        max_summary_chars=220,
+    )
+    return fallback[:_NEWS_FIELD_HARD_LIMIT]
 
 
 def chunk_news_items_for_embed(items: list[dict[str, Any]], *, display: str) -> list[str]:
@@ -354,8 +407,8 @@ def _normalized_story_identity(item: dict[str, Any]) -> str:
     return ""
 
 
-def _iter_news_categories(payload: dict[str, Any], *, max_categories: int = 10) -> list[tuple[str, str, str, dict[str, Any], list[dict[str, Any]]]]:
-    selected: list[tuple[str, str, str, dict[str, Any], list[dict[str, Any]]]] = []
+def _iter_news_categories(payload: dict[str, Any], *, max_categories: int = _NEWS_MAX_CATEGORIES) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
+    selected: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     categories = payload.get("categories", {})
     if not isinstance(categories, dict):
         return selected
@@ -366,6 +419,7 @@ def _iter_news_categories(payload: dict[str, Any], *, max_categories: int = 10) 
         known = {str(category).strip().lower(): category for category in ordered_categories}
         ordered_categories = [known[key] for key in configured_order if key in known]
     seen_story_keys: set[str] = set()
+    total_selected_items = 0
     for category in ordered_categories:
         items = categories.get(category)
         valid_items = _valid_news_items(items)
@@ -374,27 +428,31 @@ def _iter_news_categories(payload: dict[str, Any], *, max_categories: int = 10) 
         display = get_category_display_name(str(category))
         if display.upper() in {"VARIE", "TITOLI IN EVIDENZA"}:
             continue
-        main_item: dict[str, Any] | None = None
+        category_items: list[dict[str, Any]] = []
         for item in valid_items:
+            if len(category_items) >= _NEWS_MAX_ITEMS_PER_FIELD:
+                break
+            if total_selected_items >= _NEWS_MAX_TOTAL_ITEMS:
+                break
             story_key = _normalized_story_identity(item)
             if not story_key or story_key in seen_story_keys:
                 continue
-            main_item = item
+            category_items.append(item)
             seen_story_keys.add(story_key)
-            break
-        if main_item is None:
+            total_selected_items += 1
+        if not category_items:
             continue
         emoji = get_category_emoji(str(category))
-        selected.append((str(category), display, emoji, main_item, valid_items))
-        if len(selected) >= max_categories:
+        selected.append((str(category), display, emoji, category_items))
+        if len(selected) >= max_categories or total_selected_items >= _NEWS_MAX_TOTAL_ITEMS:
             break
     return selected
 
 
-def _first_story_image_url(categories: list[tuple[str, str, str, dict[str, Any], list[dict[str, Any]]]]) -> str | None:
+def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, Any]]]]) -> str | None:
     image_keys = ("image", "image_url", "imageUrl", "urlToImage", "thumbnail", "thumbnail_url", "media_url")
-    for _, _, _, main_item, items in categories:
-        for pool_item in [main_item, *items]:
+    for _, _, _, items in categories:
+        for pool_item in items:
             for key in image_keys:
                 candidate = str(pool_item.get(key) or "").strip()
                 if not candidate:
@@ -430,10 +488,13 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
                 "**Che ci dice il mondo quest'oggi?**"
             ),
         )
-    for _, display, emoji, main_item, _ in category_rows:
+    for _, display, emoji, items in category_rows:
+        field_value = _build_news_category_field_value(items, display=display)
+        if not field_value:
+            continue
         overview.add_field(
-            name=format_standard_field_name(f"{display} in primo piano", emoji=emoji),
-            value=_format_news_item_block(main_item, display=display, numbered=False, index=0),
+            name=format_standard_field_name(display, emoji=emoji),
+            value=field_value,
             inline=False,
         )
     first_image_url = _first_story_image_url(category_rows)
@@ -442,41 +503,12 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         service_name="campagne_notizie",
         image_url=first_image_url,
     )
-    embeds.append(overview)
-    for _, display, emoji, _, items in category_rows:
-        embed = discord.Embed(title=format_standard_title(f"{title} • {display}"), color=color)
-        embed.description = format_standard_description(f"*Rassegna {emoji} {display}: approfondimento per categoria.*", blank_line_before_fields=True)
-        chunks = chunk_news_items_for_embed(items, display=display)
-        if not chunks:
-            embed.add_field(
-                name=format_standard_field_name("Notizie", emoji="📄"),
-                value=f"Nessuna notizia valida per {emoji} {display}.",
-                inline=False,
-            )
-        else:
-            for idx, chunk in enumerate(chunks):
-                field_label = "Notizie" if idx == 0 else "Notizie (CONT.)"
-                embed.add_field(
-                    name=format_standard_field_name(field_label, emoji="📄"),
-                    value=chunk,
-                    inline=False,
-                )
-        embeds.append(embed)
-    return _apply_campaign_footer(embeds, service_name="campagne_notizie")
+    return _apply_campaign_footer([overview], service_name="campagne_notizie")
 
 
 def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    page_map: list[dict[str, Any]] = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
-    for index, (category, display, emoji, _, _) in enumerate(_iter_news_categories(payload), start=1):
-        page_map.append(
-            {
-                "type": "category",
-                "key": slugify_label(category),
-                "label": f"{emoji} {display.upper()}",
-                "page": index,
-            }
-        )
-    return page_map
+    _ = payload
+    return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
 
 def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
