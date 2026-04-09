@@ -259,15 +259,43 @@ _NEWS_DELICATE_KEYWORDS = (
     "violenza",
 )
 _SERIOUS_NEWS_TAIL_COMMENTS = (
+    "Una vicenda che lascia addosso parecchio gelo 🫥",
+    "Qui il quadro è davvero pesante, purtroppo 😔",
+    "Una storia che colpisce duro, senza girarci attorno 🫥",
+    "Il clima resta cupo, e si sente tutto 😔",
+    "Qui c’è poco da alleggerire, purtroppo 🫥",
+    "Notizia durissima da mandare giù 😔",
     "Una notizia davvero pesante, purtroppo 🫥",
     "Qui il quadro è doloroso, senza girarci attorno 😔",
-    "Una vicenda che lascia addosso parecchio gelo 🫥",
 )
 _STANDARD_NEWS_TAIL_COMMENTS = (
-    "Qui la ruota gira veloce 👀",
     "Insomma, aria bella tesa 🐹",
+    "Qui la ruota gira veloce 👀",
+    "Tema che farà ancora discutere parecchio 🤹",
+    "La faccenda resta bella calda 👀",
+    "Qui si continua a girare forte sulla ruota 🐹",
+    "Insomma, il brusio non manca di certo 👀",
     "Tema che farà discutere ancora un bel po’ 🤹",
 )
+_CATEGORY_MATCH_KEYWORDS = {
+    "tecnologia": (
+        "ai", "intelligenza artificiale", "software", "hardware", "app", "chip", "startup tech",
+        "startup", "cybersecurity", "piattaforma", "piattaforme", "device", "internet", "robotica",
+        "cloud", "algoritmo", "digitale", "open source",
+    ),
+    "economia": (
+        "mercati", "pil", "inflazione", "fmi", "banche", "debito", "dazi", "crescita", "consumi",
+        "lavoro", "borsa", "spread", "macroeconom", "finanza", "economia",
+    ),
+    "politica": (
+        "governo", "parlamento", "senato", "camera", "partiti", "premier", "ministro", "legge",
+        "opposizione", "decreto", "maggioranza", "riforma",
+    ),
+    "cronaca": (
+        "incidente", "tribunale", "omicidio", "aggressione", "sequestro", "indagini", "carabinieri",
+        "polizia", "procura", "arresto", "ferito", "vittima",
+    ),
+}
 
 
 def sanitize_public_news_text(text: str) -> str:
@@ -328,15 +356,39 @@ def _news_source_line(item: dict[str, Any], *, link: str) -> str:
     return source_line.strip() or "www.nd.it"
 
 
-def _build_news_item_summary(item: dict[str, Any], *, display: str) -> str:
+def _build_news_item_summary(
+    item: dict[str, Any],
+    *,
+    display: str,
+    used_tail_comments: set[str] | None = None,
+    seed_key: str | None = None,
+) -> str:
     ai_summary = sanitize_public_news_text(str(item.get("ai_summary") or ""))
     if not _is_useless_news_text(ai_summary):
-        return _normalize_news_summary_for_embed(ai_summary, item=item, display=display)
+        return _normalize_news_summary_for_embed(
+            ai_summary,
+            item=item,
+            display=display,
+            used_tail_comments=used_tail_comments,
+            seed_key=seed_key,
+        )
     summary = sanitize_public_news_text(str(item.get("summary") or ""))
     summary = sanitize_plain_text(summary, remove_category_hint=display)
     if _is_useless_news_text(summary):
-        return _normalize_news_summary_for_embed(_first_real_news_sentences(item), item=item, display=display)
-    return _normalize_news_summary_for_embed(summary, item=item, display=display)
+        return _normalize_news_summary_for_embed(
+            _first_real_news_sentences(item),
+            item=item,
+            display=display,
+            used_tail_comments=used_tail_comments,
+            seed_key=seed_key,
+        )
+    return _normalize_news_summary_for_embed(
+        summary,
+        item=item,
+        display=display,
+        used_tail_comments=used_tail_comments,
+        seed_key=seed_key,
+    )
 
 
 def _news_summary_contains_emoji(text: str) -> bool:
@@ -359,6 +411,20 @@ def _build_news_tail_comment(*, tone: str, item: dict[str, Any]) -> str:
     key = _news_identity(item) or sanitize_plain_text(str(item.get("title") or "")).lower() or "news"
     idx = abs(hash(key)) % len(palette)
     return palette[idx]
+
+
+def _pick_news_tail_comment(tone: str, used_comments: set[str], seed_key: str | None = None) -> str:
+    palette = _SERIOUS_NEWS_TAIL_COMMENTS if tone == "serious" else _STANDARD_NEWS_TAIL_COMMENTS
+    key = sanitize_plain_text(seed_key or "").lower() or tone
+    start_idx = abs(hash(key)) % len(palette)
+    for offset in range(len(palette)):
+        candidate = palette[(start_idx + offset) % len(palette)]
+        if candidate not in used_comments:
+            used_comments.add(candidate)
+            return candidate
+    fallback = palette[start_idx]
+    used_comments.add(fallback)
+    return fallback
 
 
 def _starts_with_emoji(text: str) -> bool:
@@ -432,11 +498,25 @@ def _compose_news_embed_summary(body: str, tail_comment: str) -> str:
     return f"{body_clean} {tail}".strip()
 
 
-def _normalize_news_summary_for_embed(raw_summary: str, *, item: dict[str, Any], display: str) -> str:
+def _normalize_news_summary_for_embed(
+    raw_summary: str,
+    *,
+    item: dict[str, Any],
+    display: str,
+    used_tail_comments: set[str] | None = None,
+    seed_key: str | None = None,
+) -> str:
     tone = _classify_news_tone(item, display=display)
     body = _build_news_summary_body(raw_summary, item=item, display=display, tone=tone)
-    tail = _build_news_tail_comment(tone=tone, item=item)
-    logger.info("news_summary_tail_applied tone=%s title=%s", tone, sanitize_plain_text(str(item.get("title") or ""))[:80])
+    if used_tail_comments is None:
+        tail = _build_news_tail_comment(tone=tone, item=item)
+    else:
+        tail = _pick_news_tail_comment(
+            tone,
+            used_tail_comments,
+            seed_key=seed_key or _news_identity(item) or sanitize_plain_text(str(item.get("title") or "")),
+        )
+    logger.info("news_summary_tail_applied tone=%s title=%s tail=%s", tone, sanitize_plain_text(str(item.get("title") or ""))[:80], tail[:80])
     return _compose_news_embed_summary(body, tail)
 
 
@@ -480,11 +560,13 @@ def _format_news_item_block(
     numbered: bool,
     index: int,
     max_summary_chars: int | None = None,
+    used_tail_comments: set[str] | None = None,
+    seed_key: str | None = None,
 ) -> str:
     link = str(item.get("link") or "").strip()
     title_line = sanitize_plain_text(str(item.get("title") or "Titolo non disponibile"))
     linked_title = f"[{title_line}]({link})" if link else title_line
-    summary = _build_news_item_summary(item, display=display)
+    summary = _build_news_item_summary(item, display=display, used_tail_comments=used_tail_comments, seed_key=seed_key)
     if max_summary_chars is not None and max_summary_chars > 0:
         original_len = len(summary)
         summary = _truncate_news_summary(summary, max_chars=max_summary_chars)
@@ -602,6 +684,16 @@ def _parse_news_datetime(raw: Any) -> datetime | None:
 
 
 def _build_single_news_field_value(item: dict[str, Any], *, display: str) -> str:
+    return _build_single_news_field_value_with_tail_tracking(item=item, display=display, used_tail_comments=None, seed_key=None)
+
+
+def _build_single_news_field_value_with_tail_tracking(
+    item: dict[str, Any],
+    *,
+    display: str,
+    used_tail_comments: set[str] | None,
+    seed_key: str | None,
+) -> str:
     for summary_limit in [280, 220, 170]:
         value = _format_news_item_block(
             item,
@@ -609,10 +701,20 @@ def _build_single_news_field_value(item: dict[str, Any], *, display: str) -> str
             numbered=False,
             index=0,
             max_summary_chars=summary_limit,
+            used_tail_comments=used_tail_comments,
+            seed_key=seed_key,
         )
         if len(value) <= _NEWS_FIELD_HARD_LIMIT:
             return value
-    return _format_news_item_block(item, display=display, numbered=False, index=0, max_summary_chars=120)[:_NEWS_FIELD_HARD_LIMIT]
+    return _format_news_item_block(
+        item,
+        display=display,
+        numbered=False,
+        index=0,
+        max_summary_chars=120,
+        used_tail_comments=used_tail_comments,
+        seed_key=seed_key,
+    )[:_NEWS_FIELD_HARD_LIMIT]
 
 
 def _iter_configured_editorial_categories(payload: dict[str, Any]) -> list[str]:
@@ -640,6 +742,72 @@ def _iter_configured_editorial_categories(payload: dict[str, Any]) -> list[str]:
         seen.add(key)
         selected.append(mapped)
     return selected
+
+
+def _tokenize_news_blob(item: dict[str, Any]) -> str:
+    chunks = [
+        sanitize_public_news_text(str(item.get("title") or "")),
+        sanitize_public_news_text(str(item.get("summary") or "")),
+        sanitize_public_news_text(str(item.get("description") or "")),
+        sanitize_public_news_text(str(item.get("content") or "")),
+    ]
+    normalized = " ".join(chunks).lower()
+    normalized = re.sub(r"[^a-zàèéìòù0-9\s']", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _contains_keyword_blob(blob: str, keyword: str) -> bool:
+    needle = sanitize_public_news_text(keyword).lower().strip()
+    if not needle:
+        return False
+    return re.search(rf"\b{re.escape(needle)}\b", blob) is not None
+
+
+def _score_item_category_match(item: dict[str, Any], category: str) -> float:
+    requested = slugify_label(category).replace("_", " ")
+    blob = _tokenize_news_blob(item)
+    if not blob:
+        return 0.0
+    score = 1.0  # candidate comes from the requested bucket
+    assigned = slugify_label(str(item.get("category") or "")).replace("_", " ")
+    if assigned == requested:
+        score += 1.2
+    classified = item.get("classified_categories")
+    if isinstance(classified, list):
+        normalized_classified = {slugify_label(str(value)).replace("_", " ") for value in classified}
+        if requested in normalized_classified:
+            score += 1.0
+    raw_categories = item.get("raw_categories")
+    if isinstance(raw_categories, list):
+        for raw in raw_categories:
+            normalized_raw = sanitize_public_news_text(str(raw)).lower()
+            if requested in normalized_raw:
+                score += 1.0
+                break
+    keywords = _CATEGORY_MATCH_KEYWORDS.get(requested, ())
+    for keyword in keywords:
+        if _contains_keyword_blob(blob, keyword):
+            score += 1.1
+    # Penalize when another category has much stronger lexical evidence.
+    competing_scores: list[float] = []
+    for other_category, other_keywords in _CATEGORY_MATCH_KEYWORDS.items():
+        if other_category == requested:
+            continue
+        other_score = 0.0
+        for keyword in other_keywords:
+            if _contains_keyword_blob(blob, keyword):
+                other_score += 1.1
+        competing_scores.append(other_score)
+    strongest_other = max(competing_scores, default=0.0)
+    if strongest_other > score:
+        score -= min(2.5, strongest_other - score)
+    return round(score, 3)
+
+
+def _item_matches_requested_category(item: dict[str, Any], category: str) -> bool:
+    requested = slugify_label(category).replace("_", " ")
+    score = _score_item_category_match(item, requested)
+    return score >= 2.0
 
 
 def _collect_deduped_news_pool(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -736,11 +904,20 @@ def _select_featured_news_item(
 def _select_editorial_category_item(
     category_items: Any,
     *,
+    category: str,
     used_ids: set[str],
 ) -> dict[str, Any] | None:
     for item in _valid_news_items(category_items):
         key = _news_identity(item)
         if not key or key in used_ids:
+            continue
+        if not _item_matches_requested_category(item, category):
+            logger.info(
+                "news_category_slot_rejected category=%s title=%s reason=weak_category_match score=%.2f",
+                category,
+                sanitize_plain_text(str(item.get("title") or ""))[:100],
+                _score_item_category_match(item, category),
+            )
             continue
         return item
     return None
@@ -778,14 +955,21 @@ def select_final_news_slots(payload: dict[str, Any]) -> list[dict[str, Any]]:
         for category in _iter_configured_editorial_categories(payload):
             selected_item = _select_editorial_category_item(
                 categories.get(category),
+                category=category,
                 used_ids=used_ids,
             )
             if selected_item is None:
+                logger.info("news_category_slot_skipped category=%s reason=no_strong_match", category)
                 continue
             story_id = _news_identity(selected_item)
             if story_id:
                 used_ids.add(story_id)
             display = get_category_display_name(category)
+            logger.info(
+                "news_category_slot_selected category=%s title=%s",
+                category,
+                sanitize_plain_text(str(selected_item.get("title") or ""))[:100],
+            )
             selected_slots.append(
                 {
                     "slot": "category",
@@ -827,7 +1011,7 @@ def _first_editorial_story_ids(payload: dict[str, Any]) -> set[str]:
         return set()
     first_ids: set[str] = set()
     for category in _iter_configured_editorial_categories(payload):
-        first_item = _select_editorial_category_item(categories.get(category), used_ids=set())
+        first_item = _select_editorial_category_item(categories.get(category), category=category, used_ids=set())
         if first_item is None:
             continue
         story_id = _news_identity(first_item)
@@ -916,6 +1100,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         selected_slots = select_final_news_slots(payload)
     editorial_categories: list[tuple[str, str, str, dict[str, Any]]] = []
     latest_item: dict[str, Any] | None = None
+    used_tail_comments: set[str] = set()
     for slot in selected_slots:
         if not isinstance(slot, dict):
             continue
@@ -929,21 +1114,37 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             latest_item = item
             overview.add_field(
                 name=format_standard_field_name("ULTIM'ORA", emoji="⚡"),
-                value=_build_single_news_field_value(item, display="ULTIM'ORA"),
+                value=_build_single_news_field_value_with_tail_tracking(
+                    item,
+                    display="ULTIM'ORA",
+                    used_tail_comments=used_tail_comments,
+                    seed_key=f"ultimora:{_news_identity(item)}",
+                ),
                 inline=False,
             )
             continue
         if slot_type == "featured":
             overview.add_field(
                 name=format_standard_field_name("IN EVIDENZA", emoji="🌟"),
-                value=_build_single_news_field_value(item, display="IN EVIDENZA"),
+                value=_build_single_news_field_value_with_tail_tracking(
+                    item,
+                    display="IN EVIDENZA",
+                    used_tail_comments=used_tail_comments,
+                    seed_key=f"featured:{_news_identity(item)}",
+                ),
                 inline=False,
             )
             continue
         editorial_categories.append((str(slot.get("category") or ""), display, emoji, item))
+        category_key = str(slot.get("category") or "")
         overview.add_field(
             name=format_standard_field_name(f"{display} IN PRIMO PIANO", emoji=emoji),
-            value=_build_single_news_field_value(item, display=display),
+            value=_build_single_news_field_value_with_tail_tracking(
+                item,
+                display=display,
+                used_tail_comments=used_tail_comments,
+                seed_key=f"{category_key}:{_news_identity(item)}",
+            ),
             inline=False,
         )
     for field_name, field_value in _build_news_extra_fields(config, base_dt=now_utc):

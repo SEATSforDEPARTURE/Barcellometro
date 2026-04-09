@@ -270,7 +270,13 @@ class CampaignContentService:
         selected_slots = select_final_news_slots(payload)
         payload["selected_news_slots"] = selected_slots
         candidate_count = sum(len(items) for items in payload.get("categories", {}).values() if isinstance(items, list))
-        logger.info("news_selection_complete candidate_count=%s selected_count=%s", candidate_count, len(selected_slots))
+        selected_categories = [str(slot.get("category") or "") for slot in selected_slots if isinstance(slot, dict) and slot.get("slot") == "category"]
+        logger.info(
+            "news_selection_complete candidate_count=%s selected_count=%s category_slots=%s",
+            candidate_count,
+            len(selected_slots),
+            selected_categories,
+        )
         selected_category_ids = {
             _news_identity(slot.get("item") or {})
             for slot in selected_slots
