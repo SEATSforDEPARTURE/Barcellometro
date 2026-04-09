@@ -458,7 +458,9 @@ class CampaignContentService:
             + "\n".join(fields)
         )
 
-    def _is_acceptable_news_ai_summary(self, raw_output: str, *, source_title: str, source_summary: str) -> tuple[bool, str, str]:
+    def _is_acceptable_news_ai_summary(
+        self, raw_output: str, *, source_title: str, source_summary: str
+    ) -> tuple[bool, str | None, str]:
         cleaned = self._sanitize_news_summary_fallback(self._sanitize_editorial_text(raw_output))
         if not cleaned or len(cleaned) < 24:
             return False, "too_short_or_empty", ""
@@ -485,7 +487,7 @@ class CampaignContentService:
         english_hits = sum(1 for token in re.findall(r"[a-zA-Z']+", cleaned.lower()) if token in _COMMON_ENGLISH_NEWS_WORDS)
         if english_hits >= 4:
             return False, "unexpected_english", cleaned
-        return True, "accepted", cleaned
+        return True, None, cleaned
 
     @staticmethod
     def _starts_with_emoji(text: str) -> bool:
