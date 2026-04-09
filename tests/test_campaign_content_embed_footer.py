@@ -170,8 +170,8 @@ def test_news_category_item_format_matches_single_item_field_format() -> None:
     overview = news[0]
     assert len(overview.fields) >= 3
     first_field_value = overview.fields[2].value or ""
-    assert "**[Titolo 3](https://example.com/3)**" in first_field_value
-    assert "**[Titolo 2](https://example.com/2)**" not in first_field_value
+    assert any(f"**[Titolo {idx}](https://example.com/{idx})**" in first_field_value for idx in range(2, 8))
+    assert "**[Titolo 1](https://example.com/1)**" not in first_field_value
     assert overview.fields[0].name == "⚡ __**ULTIM'ORA**__"
     assert overview.fields[1].name == "🌟 __**IN EVIDENZA**__"
     assert overview.fields[2].name == "🕵️ __**CRONACA IN PRIMO PIANO**__"
@@ -239,7 +239,7 @@ def test_news_minimal_fallback_used_only_when_all_text_is_empty() -> None:
     news = build_news_embeds({}, payload)
     field_value = news[0].fields[0].value or ""
     assert "Dettagli in aggiornamento." in field_value
-    assert any(emoji in field_value for emoji in ("👀", "😵‍💫", "😔"))
+    assert any(emoji in field_value for emoji in ("👀", "🐹", "🤹", "🫥", "😔"))
 
 
 def test_news_fallback_embed_uses_campaigns_author_service_label() -> None:

@@ -34,7 +34,7 @@ def test_news_overview_intro_does_not_start_with_emoji_and_keeps_prompt_line() -
     assert "**Che ci racconta il mondo oggi?**" in description
 
 
-def test_ultimora_and_in_evidenza_share_summary_pipeline_without_bot_opening_and_max_two_sentences() -> None:
+def test_ultimora_and_in_evidenza_share_summary_pipeline_with_tail_comment_at_end() -> None:
     payload = {
         "categories": {
             "cronaca": [
@@ -63,12 +63,14 @@ def test_ultimora_and_in_evidenza_share_summary_pipeline_without_bot_opening_and
 
     for value in (ultimora_value, evidenza_value):
         summary_line = value.split("\n")[1]
-        assert not summary_line.removeprefix("• ").lstrip().startswith(("👀", "😵‍💫", "🤖", "😔", "🫥"))
+        summary_text = summary_line.removeprefix("• ").strip()
+        assert not summary_text.startswith(("👀", "😵‍💫", "🤖", "😔", "🫥", "🐹", "🤹"))
         assert not summary_line.lower().startswith(("• qui la faccenda", "• in pratica", "• attenzione"))
-        assert _sentence_count(summary_line.removeprefix("• ")) <= 2
+        assert _sentence_count(summary_text) == 3
+        assert any(summary_text.endswith(tail) for tail in ("👀", "🐹", "🤹", "🫥", "😔"))
 
 
-def test_news_ai_validation_rejects_opening_emoji_or_bot_comment_and_fallback_respects_opening_rules() -> None:
+def test_news_ai_validation_rejects_emoji_or_bot_comment_and_fallback_is_body_only() -> None:
     service = CampaignContentService(database=object(), bot=object(), ai_service=None)  # type: ignore[arg-type]
 
     accepted, reason, _ = service._is_acceptable_news_ai_summary(  # type: ignore[attr-defined]
@@ -77,7 +79,7 @@ def test_news_ai_validation_rejects_opening_emoji_or_bot_comment_and_fallback_re
         source_summary="Aggiornamenti live.",
     )
     assert accepted is False
-    assert reason == "starts_with_emoji"
+    assert reason == "emoji_not_allowed"
 
     accepted_comment, reason_comment, _ = service._is_acceptable_news_ai_summary(  # type: ignore[attr-defined]
         "Qui la faccenda si scalda: nuovi sviluppi in arrivo.",
@@ -85,7 +87,7 @@ def test_news_ai_validation_rejects_opening_emoji_or_bot_comment_and_fallback_re
         source_summary="Aggiornamenti live.",
     )
     assert accepted_comment is False
-    assert reason_comment == "starts_with_bot_comment"
+    assert reason_comment == "bot_comment_not_allowed"
 
     fallback = service._build_news_summary_fallback(  # type: ignore[attr-defined]
         title="Aggiornamento traffico cittadino",
@@ -93,5 +95,5 @@ def test_news_ai_validation_rejects_opening_emoji_or_bot_comment_and_fallback_re
     )
     assert not fallback.lstrip().startswith(("👀", "😔", "🫥"))
     assert "qui la faccenda" not in fallback.lower()
-    assert any(emoji in fallback for emoji in ("👀", "🫥"))
+    assert all(emoji not in fallback for emoji in ("👀", "🫥", "😔", "🐹", "🤹"))
     assert _sentence_count(fallback) <= 2

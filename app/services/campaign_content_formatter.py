@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -14,6 +15,7 @@ from app.services.footer import attach_footer_meta_to_all
 from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
 DEFAULT_COLOR = 0x2F3136
+logger = logging.getLogger(__name__)
 
 
 SIGN_ORDER = [
@@ -191,6 +193,7 @@ _NEWS_BAD_FALLBACKS = {
 _NEWS_MAX_SENTENCES = 2
 _NEWS_FIELD_HARD_LIMIT = 1024
 _NEWS_MAX_EDITORIAL_CATEGORIES = 3
+_NEWS_MAX_SUMMARY_BODY_CHARS = 260
 _ITALY_TZ = ZoneInfo("Europe/Rome")
 NEWS_EXTRA_ORDER = ["barzelletta", "aforisma", "canzone", "meme"]
 NEWS_EXTRA_FIELD_TITLES = {
@@ -230,18 +233,40 @@ _NEWS_EMOJI_RE = re.compile(
 _NEWS_DELICATE_KEYWORDS = (
     "morto",
     "morti",
+    "morte",
+    "deceduto",
+    "deceduta",
     "ucciso",
     "uccisa",
+    "omicidio",
+    "ferito grave",
+    "feriti gravi",
     "vittime",
     "tragedia",
     "incidente",
+    "incidente grave",
     "esplos",
     "sparatoria",
     "guerra",
+    "bombard",
     "attacco",
     "alluvione",
     "terremoto",
     "femminicidio",
+    "minore",
+    "minori",
+    "aggressione",
+    "violenza",
+)
+_SERIOUS_NEWS_TAIL_COMMENTS = (
+    "Una notizia davvero pesante, purtroppo 🫥",
+    "Qui il quadro è doloroso, senza girarci attorno 😔",
+    "Una vicenda che lascia addosso parecchio gelo 🫥",
+)
+_STANDARD_NEWS_TAIL_COMMENTS = (
+    "Qui la ruota gira veloce 👀",
+    "Insomma, aria bella tesa 🐹",
+    "Tema che farà discutere ancora un bel po’ 🤹",
 )
 
 
@@ -318,13 +343,22 @@ def _news_summary_contains_emoji(text: str) -> bool:
     return bool(_NEWS_EMOJI_RE.search(text or ""))
 
 
-def _is_delicate_news_item(item: dict[str, Any], *, display: str) -> bool:
+def _classify_news_tone(item: dict[str, Any], *, display: str) -> str:
     blob = " ".join(
         sanitize_public_news_text(str(item.get(key) or ""))
         for key in ("title", "summary", "description", "content", "category")
     )
     blob = f"{blob} {display}".lower()
-    return any(token in blob for token in _NEWS_DELICATE_KEYWORDS)
+    if any(token in blob for token in _NEWS_DELICATE_KEYWORDS):
+        return "serious"
+    return "standard"
+
+
+def _build_news_tail_comment(*, tone: str, item: dict[str, Any]) -> str:
+    palette = _SERIOUS_NEWS_TAIL_COMMENTS if tone == "serious" else _STANDARD_NEWS_TAIL_COMMENTS
+    key = _news_identity(item) or sanitize_plain_text(str(item.get("title") or "")).lower() or "news"
+    idx = abs(hash(key)) % len(palette)
+    return palette[idx]
 
 
 def _starts_with_emoji(text: str) -> bool:
@@ -348,8 +382,8 @@ def _starts_with_bot_comment(text: str) -> bool:
     )
 
 
-def _normalize_news_summary_for_embed(raw_summary: str, *, item: dict[str, Any], display: str) -> str:
-    cleaned = _take_news_sentences(raw_summary)
+def _build_news_summary_body(raw_summary: str, *, item: dict[str, Any], display: str, tone: str) -> str:
+    cleaned = _take_news_sentences(raw_summary, max_sentences=2)
     if not cleaned:
         cleaned = "Dettagli in aggiornamento."
     cleaned = re.sub(r"^\s*[:\-–|]+\s*", "", cleaned).strip()
@@ -361,29 +395,82 @@ def _normalize_news_summary_for_embed(raw_summary: str, *, item: dict[str, Any],
             "",
             cleaned,
         ).strip()
-    delicate = _is_delicate_news_item(item, display=display)
     source_hint = sanitize_public_news_text(str(item.get("summary") or ""))
     if source_hint and SequenceMatcher(None, cleaned.lower(), source_hint.lower()).ratio() >= 0.9:
         cleaned = cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned.lower()
-    cleaned = _take_news_sentences(cleaned)
+    cleaned = _take_news_sentences(cleaned, max_sentences=2)
     if not cleaned:
         cleaned = "Dettagli in aggiornamento."
-    if not _news_summary_contains_emoji(cleaned):
-        tail = "Situazione pesante, purtroppo 🫥" if delicate else "Quadro in evoluzione 👀"
-        if not re.search(r"[.!?]\s*$", cleaned):
-            cleaned = f"{cleaned}."
-        cleaned = _take_news_sentences(f"{cleaned} {tail}")
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
+    if len(sentences) == 1:
+        extra = (
+            "Il contesto resta delicato e richiede aggiornamenti verificati."
+            if tone == "serious"
+            else "Il quadro resta in movimento e va seguito nei prossimi passaggi."
+        )
+        sentences.append(extra)
+    cleaned = " ".join(sentences[:2]).strip()
+    if len(cleaned) > _NEWS_MAX_SUMMARY_BODY_CHARS:
+        cleaned = _truncate_news_summary_safely(cleaned, max_chars=_NEWS_MAX_SUMMARY_BODY_CHARS)
+        cleaned = _take_news_sentences(cleaned, max_sentences=2)
+    if not re.search(r"[.!?]\s*$", cleaned):
+        cleaned = f"{cleaned}."
     return cleaned
+
+
+def _compose_news_embed_summary(body: str, tail_comment: str) -> str:
+    body_clean = sanitize_public_news_text(body)
+    tail = sanitize_public_news_text(tail_comment)
+    if not body_clean:
+        body_clean = "Dettagli in aggiornamento."
+    if not tail:
+        tail = _STANDARD_NEWS_TAIL_COMMENTS[0]
+    if not re.search(r"[.!?]\s*$", body_clean):
+        body_clean = f"{body_clean}."
+    if body_clean.endswith(f" {tail}"):
+        return body_clean
+    return f"{body_clean} {tail}".strip()
+
+
+def _normalize_news_summary_for_embed(raw_summary: str, *, item: dict[str, Any], display: str) -> str:
+    tone = _classify_news_tone(item, display=display)
+    body = _build_news_summary_body(raw_summary, item=item, display=display, tone=tone)
+    tail = _build_news_tail_comment(tone=tone, item=item)
+    logger.info("news_summary_tail_applied tone=%s title=%s", tone, sanitize_plain_text(str(item.get("title") or ""))[:80])
+    return _compose_news_embed_summary(body, tail)
+
+
+def _truncate_news_summary_safely(text: str, *, max_chars: int) -> str:
+    cleaned = sanitize_public_news_text(text)
+    if len(cleaned) <= max_chars:
+        return cleaned
+    clipped = cleaned[:max_chars].rstrip()
+    cut = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
+    if cut >= int(max_chars * 0.6):
+        return clipped[: cut + 1].strip()
+    word_cut = clipped.rfind(" ")
+    if word_cut >= int(max_chars * 0.6):
+        return clipped[:word_cut].rstrip(" ,;:")
+    return clipped.rstrip(" ,;:")
 
 
 def _truncate_news_summary(summary: str, *, max_chars: int) -> str:
     if len(summary) <= max_chars:
         return summary
-    clipped = summary[:max_chars].rstrip()
-    cut = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
-    if cut >= int(max_chars * 0.6):
-        return clipped[: cut + 1].strip()
-    return clipped.rstrip(" ,;:") + "…"
+    parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", summary) if part.strip()]
+    if len(parts) <= 1:
+        return _truncate_news_summary_safely(summary, max_chars=max_chars)
+    tail = parts[-1]
+    body = " ".join(parts[:-1]).strip()
+    # Keep a minimum body chunk while preserving final bot comment.
+    min_reserved_for_tail = min(len(tail) + 1, max_chars - 20) if max_chars > 20 else 0
+    if min_reserved_for_tail > 0 and len(body) + 1 + len(tail) > max_chars:
+        allowed_body = max_chars - len(tail) - 1
+        body = _truncate_news_summary_safely(body, max_chars=max(20, allowed_body)).rstrip(".!?")
+    composed = _compose_news_embed_summary(body, tail)
+    if len(composed) <= max_chars:
+        return composed
+    return _truncate_news_summary_safely(composed, max_chars=max_chars)
 
 
 def _format_news_item_block(
@@ -399,7 +486,15 @@ def _format_news_item_block(
     linked_title = f"[{title_line}]({link})" if link else title_line
     summary = _build_news_item_summary(item, display=display)
     if max_summary_chars is not None and max_summary_chars > 0:
+        original_len = len(summary)
         summary = _truncate_news_summary(summary, max_chars=max_summary_chars)
+        if len(summary) < original_len:
+            logger.info(
+                "news_summary_truncated title=%s original_chars=%s final_chars=%s",
+                sanitize_plain_text(str(item.get("title") or ""))[:80],
+                original_len,
+                len(summary),
+            )
     source_line = _news_source_line(item, link=link)
     heading = f"{index}. **{linked_title}**" if numbered else f"**{linked_title}**"
     return f"{heading}\n• {summary}\n`fonte: {source_line}`"
