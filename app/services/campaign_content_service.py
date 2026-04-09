@@ -29,6 +29,11 @@ from app.services.campaign_content_formatter import (
     build_news_page_map,
     build_weather_embeds,
     build_weather_page_map,
+    _iter_configured_editorial_categories,
+    _news_identity,
+    _valid_news_items,
+    select_final_news_slots,
+    sanitize_public_news_text,
     sanitize_horoscope_text,
 )
 from app.services.campaign_content_views import BaseCampaignNavigatorView, PersistentCampaignLauncherView
@@ -69,6 +74,9 @@ _NEWS_DELICATE_KEYWORDS = (
     "alluvione",
     "terremoto",
     "femminicidio",
+)
+_NEWS_BOT_OPENING_RE = re.compile(
+    r"(?i)^(?:qui la faccenda|qui si parla di|in pratica|attenzione|clima teso|notizia pesante)\b"
 )
 _COMMON_ENGLISH_NEWS_WORDS = {"the", "and", "with", "breaking", "update", "today", "after", "from", "that", "this"}
 _NEWS_EXTRA_ITALIAN_FALLBACKS = {
@@ -273,13 +281,50 @@ class CampaignContentService:
     async def _rewrite_news_payload(self, payload: dict[str, Any]) -> str | None:
         used_ai = False
         cache: dict[str, str] = {}
-        for items in payload.get("categories", {}).values():
-            for item in items[:5]:
-                ai_summary, ai_used = await self._summarize_news_item_for_embed(item, cache=cache)
-                if ai_summary:
-                    item["ai_summary"] = ai_summary
-                item["summary_fallback_used"] = not ai_used
-                used_ai = used_ai or ai_used
+        selected_slots = select_final_news_slots(payload)
+        payload["selected_news_slots"] = selected_slots
+        candidate_count = sum(len(items) for items in payload.get("categories", {}).values() if isinstance(items, list))
+        logger.info("news_selection_complete candidate_count=%s selected_count=%s", candidate_count, len(selected_slots))
+        selected_category_ids = {
+            _news_identity(slot.get("item") or {})
+            for slot in selected_slots
+            if isinstance(slot, dict) and slot.get("slot") == "category"
+        }
+        categories = payload.get("categories", {})
+        if isinstance(categories, dict):
+            used_after_top: set[str] = set()
+            for slot in selected_slots:
+                if not isinstance(slot, dict):
+                    continue
+                if slot.get("slot") in {"ultimora", "featured"}:
+                    story_id = _news_identity(slot.get("item") or {})
+                    if story_id:
+                        used_after_top.add(story_id)
+            for category in _iter_configured_editorial_categories(payload):
+                first_valid = next(iter(_valid_news_items(categories.get(category))), None)
+                if not first_valid:
+                    continue
+                first_id = _news_identity(first_valid)
+                if first_id and first_id in used_after_top and first_id not in selected_category_ids:
+                    logger.info(
+                        "news_slot_skipped reason=already_used slot=%s title=%s",
+                        category,
+                        str(first_valid.get("title") or "")[:80],
+                    )
+        logger.info("news_ai_summary_batch_start selected_count=%s", len(selected_slots))
+        for slot in selected_slots:
+            item = slot.get("item")
+            if not isinstance(item, dict):
+                continue
+            slot_name = str(slot.get("slot") or "unknown")
+            if slot_name == "category":
+                slot_name = str(slot.get("category") or "category")
+            logger.debug("news_ai_summary_start slot=%s title=%s", slot_name, str(item.get("title") or "")[:80])
+            ai_summary, ai_used = await self._summarize_news_item_for_embed(item, cache=cache)
+            if ai_summary:
+                item["ai_summary"] = ai_summary
+            item["summary_fallback_used"] = not ai_used
+            used_ai = used_ai or ai_used
         return self._resolve_ai_model_name("campaign_editorial") if used_ai else None
 
     async def _resolve_next_news_scheduled_run(self, config: dict[str, Any]) -> datetime | None:
@@ -375,7 +420,7 @@ class CampaignContentService:
 
     @staticmethod
     def _news_fallback_prefix(*, delicate: bool) -> str:
-        return "Notizia pesante purtroppo 😔:" if delicate else "Qui la faccenda si scalda 👀:"
+        return "Situazione pesante, purtroppo 🫥" if delicate else "Quadro in evoluzione 👀"
 
     @staticmethod
     def _sanitize_news_input_text(text: str) -> str:
@@ -424,11 +469,13 @@ class CampaignContentService:
             fields.append(f"Pubblicata: {published_at}")
         return (
             "Ricevi solo titolo e breve contenuto di una notizia. "
-            "Scrivi in italiano un mini-riassunto di massimo 2 frasi brevi. "
-            "Usa solo le informazioni fornite. Non aggiungere contesto esterno, non inventare dettagli, "
-            "non fare introduzioni meta, non citare la fonte nel testo, non copiare quasi letteralmente il testo sorgente. "
-            "Inserisci una piccola emoji naturale nel testo (non nel titolo); per notizie delicate usa tono rispettoso con emoji sobria. "
-            "Niente commenti sul prompt o sul tuo ruolo.\n"
+            "Scrivi in italiano un mini-riassunto in massimo 2 frasi. "
+            "Inizia subito dal contenuto della notizia: non iniziare con emoji, faccine o commenti del bot. "
+            "Non iniziare con formule tipo 'qui la faccenda', 'in pratica', 'attenzione' o simili. "
+            "Usa esclusivamente le informazioni fornite: non aggiungere fatti esterni e non inventare dettagli. "
+            "Niente introduzioni meta, niente riferimenti al prompt o al tuo ruolo, niente fonte nel testo. "
+            "Se vuoi inserire un tocco leggero/cricetoso o una piccola emoji, mettili solo nel mezzo o alla fine. "
+            "Per notizie delicate usa tono sobrio e rispettoso.\n"
             + "\n".join(fields)
         )
 
@@ -442,11 +489,13 @@ class CampaignContentService:
             return False, "meta_output", cleaned
         if re.search(r"<[^>]+>|```", cleaned):
             return False, "dirty_markup", cleaned
+        if self._starts_with_emoji(cleaned):
+            return False, "starts_with_emoji", cleaned
+        if self._starts_with_bot_comment(cleaned):
+            return False, "starts_with_bot_comment", cleaned
         sentence_count = len([s for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()])
         if sentence_count > 2:
             return False, "too_many_sentences", cleaned
-        if not self._news_summary_contains_emoji(cleaned):
-            return False, "missing_emoji", cleaned
         source_blob = " ".join(part for part in [source_title, source_summary] if part).strip().lower()
         if source_blob:
             if SequenceMatcher(None, cleaned.lower(), source_blob).ratio() >= 0.9:
@@ -459,20 +508,37 @@ class CampaignContentService:
             return False, "unexpected_english", cleaned
         return True, "accepted", cleaned
 
+    @staticmethod
+    def _starts_with_emoji(text: str) -> bool:
+        first = re.search(r"\S+", text or "")
+        if not first:
+            return False
+        return bool(_NEWS_EMOJI_RE.search(first.group(0)))
+
+    @staticmethod
+    def _starts_with_bot_comment(text: str) -> bool:
+        return bool(_NEWS_BOT_OPENING_RE.search(sanitize_public_news_text(text).lower().lstrip(" -:;,.!")))
+
     def _build_news_summary_fallback(self, *, title: str, cleaned_summary: str) -> str:
-        base = self._sanitize_news_summary_fallback(cleaned_summary)
+        base = sanitize_public_news_text(self._sanitize_news_summary_fallback(cleaned_summary))
         if base and title and SequenceMatcher(None, base.lower(), title.lower()).ratio() > 0.9:
             base = ""
         delicate = self._is_delicate_news_text(title, cleaned_summary)
         if base:
-            prefixed = f"{self._news_fallback_prefix(delicate=delicate)} {base}".strip()
-            return self._sanitize_news_summary_fallback(prefixed)
+            if self._starts_with_emoji(base):
+                base = re.sub(r"^\s*\S+\s*", "", base).strip()
+            if self._starts_with_bot_comment(base):
+                base = re.sub(r"(?i)^(?:qui la faccenda|qui si parla di|in pratica|attenzione|clima teso|notizia pesante)\b[^:.\-]*[:.\-]?\s*", "", base).strip()
+            if not base:
+                base = self._sanitize_news_input_text(title)
+            first_sentence = re.split(r"(?<=[.!?])\s+", base, maxsplit=1)[0].strip()
+            if not re.search(r"[.!?]\s*$", first_sentence):
+                first_sentence = f"{first_sentence}."
+            return self._sanitize_news_summary_fallback(f"{first_sentence} {self._news_fallback_prefix(delicate=delicate)}")
         title_clean = self._sanitize_news_input_text(title)
         if not title_clean:
-            return "Aggiornamento in corso 👀."
-        return self._sanitize_news_summary_fallback(
-            f"{self._news_fallback_prefix(delicate=delicate)} {title_clean}."
-        )
+            return self._sanitize_news_summary_fallback(f"Aggiornamento in corso. {self._news_fallback_prefix(delicate=delicate)}")
+        return self._sanitize_news_summary_fallback(f"{title_clean}. {self._news_fallback_prefix(delicate=delicate)}")
 
     async def _normalize_news_extras_payload(self, payload: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}

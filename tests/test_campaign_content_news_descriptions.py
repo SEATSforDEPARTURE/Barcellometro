@@ -1,4 +1,15 @@
 import re
+import sys
+import types
+
+from tests._sqlite_stub import ensure_sqlite_stub
+
+ensure_sqlite_stub()
+
+if "openai" not in sys.modules:
+    sys.modules["openai"] = types.SimpleNamespace(AsyncOpenAI=object)
+if "httpx" not in sys.modules:
+    sys.modules["httpx"] = types.SimpleNamespace()
 
 from app.services.campaign_content_formatter import build_news_embeds
 from app.services.campaign_content_service import CampaignContentService
@@ -23,7 +34,7 @@ def test_news_overview_intro_does_not_start_with_emoji_and_keeps_prompt_line() -
     assert "**Che ci racconta il mondo oggi?**" in description
 
 
-def test_ultimora_and_in_evidenza_share_summary_pipeline_with_emoji_and_two_sentences() -> None:
+def test_ultimora_and_in_evidenza_share_summary_pipeline_without_bot_opening_and_max_two_sentences() -> None:
     payload = {
         "categories": {
             "cronaca": [
@@ -52,27 +63,35 @@ def test_ultimora_and_in_evidenza_share_summary_pipeline_with_emoji_and_two_sent
 
     for value in (ultimora_value, evidenza_value):
         summary_line = value.split("\n")[1]
-        assert any(emoji in summary_line for emoji in ("👀", "😵‍💫", "🤖", "😔"))
+        assert not summary_line.removeprefix("• ").lstrip().startswith(("👀", "😵‍💫", "🤖", "😔", "🫥"))
+        assert not summary_line.lower().startswith(("• qui la faccenda", "• in pratica", "• attenzione"))
         assert _sentence_count(summary_line.removeprefix("• ")) <= 2
 
-    assert "• Il governo annuncia una riunione urgente" not in ultimora_value
-    assert "• Opposizione e maggioranza si scontrano" not in evidenza_value
 
-
-def test_news_ai_validation_requires_emoji_and_fallback_has_emoji() -> None:
+def test_news_ai_validation_rejects_opening_emoji_or_bot_comment_and_fallback_respects_opening_rules() -> None:
     service = CampaignContentService(database=object(), bot=object(), ai_service=None)  # type: ignore[arg-type]
 
     accepted, reason, _ = service._is_acceptable_news_ai_summary(  # type: ignore[attr-defined]
-        "La notizia conferma nuovi sviluppi. Il quadro resta aperto.",
+        "👀 La notizia conferma nuovi sviluppi. Il quadro resta aperto.",
         source_title="Sviluppi in corso",
         source_summary="Aggiornamenti live.",
     )
     assert accepted is False
-    assert reason == "missing_emoji"
+    assert reason == "starts_with_emoji"
+
+    accepted_comment, reason_comment, _ = service._is_acceptable_news_ai_summary(  # type: ignore[attr-defined]
+        "Qui la faccenda si scalda: nuovi sviluppi in arrivo.",
+        source_title="Sviluppi in corso",
+        source_summary="Aggiornamenti live.",
+    )
+    assert accepted_comment is False
+    assert reason_comment == "starts_with_bot_comment"
 
     fallback = service._build_news_summary_fallback(  # type: ignore[attr-defined]
         title="Aggiornamento traffico cittadino",
         cleaned_summary="Code in aumento sulle principali arterie urbane. Disagi nelle ore di punta.",
     )
-    assert any(emoji in fallback for emoji in ("👀", "😔"))
+    assert not fallback.lstrip().startswith(("👀", "😔", "🫥"))
+    assert "qui la faccenda" not in fallback.lower()
+    assert any(emoji in fallback for emoji in ("👀", "🫥"))
     assert _sentence_count(fallback) <= 2

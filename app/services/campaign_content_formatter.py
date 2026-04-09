@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from zoneinfo import ZoneInfo
 
 import discord
@@ -327,28 +327,53 @@ def _is_delicate_news_item(item: dict[str, Any], *, display: str) -> bool:
     return any(token in blob for token in _NEWS_DELICATE_KEYWORDS)
 
 
-def _news_summary_prefix(item: dict[str, Any], *, display: str, delicate: bool) -> str:
-    category = sanitize_public_news_text(str(item.get("category") or display)).lower()
-    if delicate:
-        return "Notizia pesante purtroppo 😔:"
-    if "politic" in category:
-        return "Clima teso in aula 👀:"
-    if "tech" in category or "tecnolog" in category:
-        return "Qui i chip friggono bene 🤖:"
-    return "Qui la faccenda si scalda 😵‍💫:"
+def _starts_with_emoji(text: str) -> bool:
+    first = re.search(r"\S+", text or "")
+    if not first:
+        return False
+    return _news_summary_contains_emoji(first.group(0))
+
+
+def _starts_with_bot_comment(text: str) -> bool:
+    lowered = sanitize_public_news_text(text).lower().lstrip(" -:;,.")
+    return lowered.startswith(
+        (
+            "qui la faccenda",
+            "qui si parla",
+            "in pratica",
+            "attenzione",
+            "notizia pesante",
+            "clima teso",
+        )
+    )
 
 
 def _normalize_news_summary_for_embed(raw_summary: str, *, item: dict[str, Any], display: str) -> str:
     cleaned = _take_news_sentences(raw_summary)
     if not cleaned:
         cleaned = "Dettagli in aggiornamento."
+    cleaned = re.sub(r"^\s*[:\-–|]+\s*", "", cleaned).strip()
+    while _starts_with_emoji(cleaned):
+        cleaned = re.sub(r"^\s*\S+\s*", "", cleaned).strip()
+    if _starts_with_bot_comment(cleaned):
+        cleaned = re.sub(
+            r"(?i)^(?:qui la faccenda|qui si parla di|in pratica|attenzione|notizia pesante|clima teso)[^:.\-]*[:.\-]?\s*",
+            "",
+            cleaned,
+        ).strip()
     delicate = _is_delicate_news_item(item, display=display)
     source_hint = sanitize_public_news_text(str(item.get("summary") or ""))
     if source_hint and SequenceMatcher(None, cleaned.lower(), source_hint.lower()).ratio() >= 0.9:
         cleaned = cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned.lower()
-    if _news_summary_contains_emoji(cleaned):
-        return _take_news_sentences(cleaned)
-    return _take_news_sentences(f"{_news_summary_prefix(item, display=display, delicate=delicate)} {cleaned}")
+    cleaned = _take_news_sentences(cleaned)
+    if not cleaned:
+        cleaned = "Dettagli in aggiornamento."
+    if not _news_summary_contains_emoji(cleaned):
+        tail = "Situazione pesante, purtroppo 🫥" if delicate else "Quadro in evoluzione 👀"
+        if not re.search(r"[.!?]\s*$", cleaned):
+            cleaned = f"{cleaned}."
+        cleaned = _take_news_sentences(f"{cleaned} {tail}")
+    return cleaned
 
 
 def _truncate_news_summary(summary: str, *, max_chars: int) -> str:
@@ -413,14 +438,43 @@ def _overview_now(payload: dict[str, Any]) -> datetime:
 
 
 def _news_identity(item: dict[str, Any]) -> str:
-    link = " ".join(str(item.get("link") or "").strip().split())
-    normalized_link = link.lower().rstrip("/")
+    normalized_link = _normalize_news_url(str(item.get("link") or ""))
     if normalized_link:
         return f"url:{normalized_link}"
     title = " ".join(sanitize_plain_text(str(item.get("title") or "")).lower().split())
+    source = _normalize_news_source(str(item.get("source") or ""))
+    if title and source:
+        return f"title_source:{title}|{source}"
     if title:
         return f"title:{title}"
     return ""
+
+
+def _normalize_news_source(raw_source: str) -> str:
+    source = sanitize_public_news_text(raw_source).lower().strip()
+    if source.startswith(("http://", "https://")):
+        parsed = urlparse(source)
+        source = parsed.netloc or source
+    return source.removeprefix("www.").strip("/")
+
+
+def _normalize_news_url(raw_url: str) -> str:
+    candidate = str(raw_url or "").strip()
+    if not candidate:
+        return ""
+    parsed = urlparse(candidate)
+    if not parsed.scheme or not parsed.netloc:
+        return candidate.lower().rstrip("/")
+    filtered_query = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if not k.lower().startswith("utm_")]
+    normalized = parsed._replace(
+        scheme=parsed.scheme.lower(),
+        netloc=parsed.netloc.lower(),
+        path=parsed.path.rstrip("/"),
+        params="",
+        query=urlencode(filtered_query, doseq=True),
+        fragment="",
+    )
+    return urlunparse(normalized).rstrip("/")
 
 
 def _is_valid_news_item(item: Any) -> bool:
@@ -587,21 +641,68 @@ def _select_featured_news_item(
 def _select_editorial_category_item(
     category_items: Any,
     *,
-    top_used_ids: set[str],
-    category_used_ids: set[str],
-    allow_top_duplicates: bool = False,
+    used_ids: set[str],
 ) -> dict[str, Any] | None:
-    fallback: dict[str, Any] | None = None
     for item in _valid_news_items(category_items):
         key = _news_identity(item)
-        if not key or key in category_used_ids:
-            continue
-        if fallback is None:
-            fallback = item
-        if key in top_used_ids and not allow_top_duplicates:
+        if not key or key in used_ids:
             continue
         return item
-    return fallback if allow_top_duplicates else None
+    return None
+
+
+def select_final_news_slots(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    all_items = _collect_deduped_news_pool(payload)
+    identity_counts = _collect_news_identity_counts(payload) or _news_identity_counts(all_items)
+    discouraged_featured_ids = _first_editorial_story_ids(payload)
+    selected_slots: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+
+    latest_item = _select_breaking_news_item(all_items, identity_counts=identity_counts)
+    if latest_item is not None:
+        latest_key = _news_identity(latest_item)
+        if latest_key:
+            used_ids.add(latest_key)
+        selected_slots.append({"slot": "ultimora", "display": "ULTIM'ORA", "emoji": "⚡", "item": latest_item})
+
+    highlighted = _select_featured_news_item(
+        all_items,
+        used_ids=used_ids,
+        now_utc=_overview_now(payload),
+        identity_counts=identity_counts,
+        discouraged_ids=discouraged_featured_ids,
+    )
+    if highlighted is not None:
+        highlighted_key = _news_identity(highlighted)
+        if highlighted_key:
+            used_ids.add(highlighted_key)
+        selected_slots.append({"slot": "featured", "display": "IN EVIDENZA", "emoji": "🌟", "item": highlighted})
+
+    categories = payload.get("categories", {})
+    if isinstance(categories, dict):
+        for category in _iter_configured_editorial_categories(payload):
+            selected_item = _select_editorial_category_item(
+                categories.get(category),
+                used_ids=used_ids,
+            )
+            if selected_item is None:
+                continue
+            story_id = _news_identity(selected_item)
+            if story_id:
+                used_ids.add(story_id)
+            display = get_category_display_name(category)
+            selected_slots.append(
+                {
+                    "slot": "category",
+                    "category": category,
+                    "display": display,
+                    "emoji": get_category_emoji(category),
+                    "item": selected_item,
+                }
+            )
+            if sum(1 for slot in selected_slots if slot.get("slot") == "category") >= _NEWS_MAX_EDITORIAL_CATEGORIES:
+                break
+    return selected_slots
 
 
 def _build_news_extra_fields(config: dict[str, Any], *, base_dt: datetime) -> list[tuple[str, str]]:
@@ -631,12 +732,7 @@ def _first_editorial_story_ids(payload: dict[str, Any]) -> set[str]:
         return set()
     first_ids: set[str] = set()
     for category in _iter_configured_editorial_categories(payload):
-        first_item = _select_editorial_category_item(
-            categories.get(category),
-            top_used_ids=set(),
-            category_used_ids=set(),
-            allow_top_duplicates=True,
-        )
+        first_item = _select_editorial_category_item(categories.get(category), used_ids=set())
         if first_item is None:
             continue
         story_id = _news_identity(first_item)
@@ -720,60 +816,36 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         f"{intro}\n**Che ci racconta il mondo oggi?**",
         blank_line_before_fields=True,
     )
-    all_items = _collect_deduped_news_pool(payload)
-    identity_counts = _collect_news_identity_counts(payload) or _news_identity_counts(all_items)
-    discouraged_featured_ids = _first_editorial_story_ids(payload)
-    used_ids: set[str] = set()
-    latest_item = _select_breaking_news_item(all_items, identity_counts=identity_counts)
-    if latest_item is not None:
-        latest_key = _news_identity(latest_item)
-        if latest_key:
-            used_ids.add(latest_key)
-        overview.add_field(
-            name=format_standard_field_name("ULTIM'ORA", emoji="⚡"),
-            value=_build_single_news_field_value(latest_item, display="ULTIM'ORA"),
-            inline=False,
-        )
-    highlighted = _select_featured_news_item(
-        all_items,
-        used_ids=used_ids,
-        now_utc=now_utc,
-        identity_counts=identity_counts,
-        discouraged_ids=discouraged_featured_ids,
-    )
-    if highlighted is not None:
-        highlighted_key = _news_identity(highlighted)
-        if highlighted_key:
-            used_ids.add(highlighted_key)
-        overview.add_field(
-            name=format_standard_field_name("IN EVIDENZA", emoji="🌟"),
-            value=_build_single_news_field_value(highlighted, display="IN EVIDENZA"),
-            inline=False,
-        )
+    selected_slots = payload.get("selected_news_slots")
+    if not isinstance(selected_slots, list):
+        selected_slots = select_final_news_slots(payload)
     editorial_categories: list[tuple[str, str, str, dict[str, Any]]] = []
-    categories = payload.get("categories", {})
-    if isinstance(categories, dict):
-        configured_editorial_categories = _iter_configured_editorial_categories(payload)
-        allow_top_duplicates = True
-        top_used_ids = set(used_ids)
-        category_used_ids: set[str] = set()
-        for category in configured_editorial_categories:
-            selected_item = _select_editorial_category_item(
-                categories.get(category),
-                top_used_ids=top_used_ids,
-                category_used_ids=category_used_ids,
-                allow_top_duplicates=allow_top_duplicates,
+    latest_item: dict[str, Any] | None = None
+    for slot in selected_slots:
+        if not isinstance(slot, dict):
+            continue
+        item = slot.get("item")
+        if not isinstance(item, dict):
+            continue
+        slot_type = str(slot.get("slot") or "")
+        display = str(slot.get("display") or "")
+        emoji = str(slot.get("emoji") or "📌")
+        if slot_type == "ultimora":
+            latest_item = item
+            overview.add_field(
+                name=format_standard_field_name("ULTIM'ORA", emoji="⚡"),
+                value=_build_single_news_field_value(item, display="ULTIM'ORA"),
+                inline=False,
             )
-            if selected_item is None:
-                continue
-            story_id = _news_identity(selected_item)
-            if story_id:
-                category_used_ids.add(story_id)
-            display = get_category_display_name(category)
-            editorial_categories.append((category, display, get_category_emoji(category), selected_item))
-            if len(editorial_categories) >= _NEWS_MAX_EDITORIAL_CATEGORIES:
-                break
-    for _, display, emoji, item in editorial_categories:
+            continue
+        if slot_type == "featured":
+            overview.add_field(
+                name=format_standard_field_name("IN EVIDENZA", emoji="🌟"),
+                value=_build_single_news_field_value(item, display="IN EVIDENZA"),
+                inline=False,
+            )
+            continue
+        editorial_categories.append((str(slot.get("category") or ""), display, emoji, item))
         overview.add_field(
             name=format_standard_field_name(f"{display} IN PRIMO PIANO", emoji=emoji),
             value=_build_single_news_field_value(item, display=display),
