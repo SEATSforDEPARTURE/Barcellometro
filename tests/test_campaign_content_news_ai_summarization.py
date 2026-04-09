@@ -31,7 +31,7 @@ def test_news_ai_output_validation_rejects_meta_and_near_copy() -> None:
     assert accepted_meta is False
     assert reason_meta == "meta_output"
     accepted_copy, reason_copy, _ = service._is_acceptable_news_ai_summary(  # type: ignore[attr-defined]
-        "Evento importante con aggiornamenti.",
+        "Evento importante con aggiornamenti 👀.",
         source_title="Evento importante",
         source_summary="Evento importante con aggiornamenti.",
     )
@@ -42,7 +42,7 @@ def test_news_ai_output_validation_rejects_meta_and_near_copy() -> None:
 def test_news_ai_output_validation_accepts_good_summary() -> None:
     service = CampaignContentService(database=object(), bot=object(), ai_service=None)  # type: ignore[arg-type]
     accepted, reason, cleaned = service._is_acceptable_news_ai_summary(  # type: ignore[attr-defined]
-        "La notizia conferma nuovi sviluppi nelle prossime ore. Il quadro resta in aggiornamento.",
+        "La notizia conferma nuovi sviluppi nelle prossime ore 👀. Il quadro resta in aggiornamento.",
         source_title="Sviluppi in corso",
         source_summary="Aggiornamenti live e dettagli in evoluzione.",
     )
@@ -59,6 +59,7 @@ def test_news_summary_fallback_limits_to_two_sentences() -> None:
     )
     assert "Prima frase utile." in summary
     assert "Seconda frase utile." in summary
+    assert "👀" in summary
     assert "Terza frase da ignorare." not in summary
 
 

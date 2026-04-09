@@ -142,7 +142,10 @@ def test_news_description_uses_natural_greetings_by_daypart() -> None:
             {"generated_at": generated_at, "categories": {"cronaca": [{"title": "t", "summary": "s", "source": "ansa", "link": "https://x"}]}},
         )
         description = news[0].description or ""
+        assert not description.lstrip().startswith("🐹")
         assert expected in description
+        assert "📰" in description
+        assert "**Che ci racconta il mondo oggi?**" in description
         assert "Buona pomeriggio" not in description
 
 
@@ -152,7 +155,7 @@ def test_news_rewrite_prefers_ai_summary_over_raw_summary() -> None:
             return True
 
         async def ask_for_task(self, *_args, **_kwargs):
-            return "Mini sintesi cricetosa. Seconda frase."
+            return "Mini sintesi cricetosa 👀. Seconda frase."
 
         def get_model_config(self, _task):
             return "gpt-4.1-mini"
@@ -165,7 +168,7 @@ def test_news_rewrite_prefers_ai_summary_over_raw_summary() -> None:
         payload = {"categories": {"cronaca": [{"title": "T", "summary": "Raw summary", "source": "ansa", "category": "cronaca"}]}}
         await service._rewrite_news_payload(payload)  # type: ignore[attr-defined]
         item = payload["categories"]["cronaca"][0]
-        assert item["ai_summary"] == "Mini sintesi cricetosa. Seconda frase."
+        assert item["ai_summary"] == "Mini sintesi cricetosa 👀. Seconda frase."
         assert item["summary"] == "Raw summary"
 
     asyncio.run(_run())
@@ -186,7 +189,8 @@ def test_news_rewrite_falls_back_when_ai_fails() -> None:
         item = payload["categories"]["cronaca"][0]
         assert item["summary_fallback_used"] is True
         assert "ai_summary" in item
-        assert item["ai_summary"].startswith("Prima. Seconda.")
+        assert "👀" in item["ai_summary"]
+        assert "Terza frase da ignorare." not in item["ai_summary"]
 
     asyncio.run(_run())
 
